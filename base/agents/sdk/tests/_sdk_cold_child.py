@@ -28,7 +28,6 @@ def capture_import_failure() -> None:
     ]
     failure = error_type("invalid cold capture module")
     executed: list[str] = []
-    call_policy.policy = lambda _owner: SamplingPolicy()  # type: ignore[assignment]
     telemetry.emit = lambda *_args, **_kwargs: executed.append("emit")  # type: ignore[assignment]
 
     class BrokenCapture(importlib.abc.MetaPathFinder):
@@ -44,7 +43,9 @@ def capture_import_failure() -> None:
             (),
             {},
             identity={},
-            sampling_owner=call_policy.SamplingPolicyOwner(),
+            sampling_owner=call_policy.SamplingPolicyOwner(
+                initial=SamplingPolicy(), fetch=SamplingPolicy
+            ),
         )
     except (ImportError, RuntimeError) as actual:
         assert actual is failure

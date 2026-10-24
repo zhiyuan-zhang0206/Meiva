@@ -27,6 +27,7 @@ def configured_policy(**changes: Any) -> HostPolicy:
             clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
         ),
         harness_registration_ttl_seconds=lambda: settings.daemon.harness_registration_ttl_seconds,
+        harness_environ={"HOME": "/nonexistent/host-policy-home"},
     )
 
 

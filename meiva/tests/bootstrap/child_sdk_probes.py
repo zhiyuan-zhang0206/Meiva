@@ -71,9 +71,7 @@ def plain_import_sdk_events(target: str) -> None:
 
     import meiva
     from base import telemetry
-    from base.agents.sdk import call_policy as sdk_call_policy
 
-    sdk_call_policy.policy = lambda _owner: sdk_call_policy.SamplingPolicy()  # pyright: ignore[reportAttributeAccessIssue]
     rows: list[dict[str, object]] = []
 
     def capture(*args: object, producer: object, machine_reader: object, **kwargs: object) -> None:

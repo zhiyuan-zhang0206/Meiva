@@ -19,7 +19,7 @@ import pytest
 
 import meiva
 from agent.state import build_agent_state
-from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.log.tests.log_records import LogRecords
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
@@ -64,7 +64,7 @@ def exec_turn(unit_home: Path) -> Iterator[Path]:
     install.install(
         registry,
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
-        sampling=SamplingPolicyOwner(reader=SamplingPolicy),
+        sampling=fixed_sampling_owner(),
     )
     process_context.set_state(build_agent_state(registry)(messages=[], halted=False))
     process_context.set_state_update({})

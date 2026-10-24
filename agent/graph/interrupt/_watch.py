@@ -41,10 +41,9 @@ from collections.abc import AsyncGenerator, Coroutine
 from contextlib import asynccontextmanager
 from typing import Any
 
-from psycopg_pool import AsyncConnectionPool
-
 from agent.db import pending_interrupt_reason
 from agent.graph.node_log import awaiter_chain_lines
+from base.db.transaction import AsyncConnectionSource
 from base.log import logger
 from base.native_process.stop_timing import INTERRUPT_POLL_S
 from base.native_process.turn_identity import HostedTurnResources
@@ -71,7 +70,7 @@ from ._plan import (
 # keep polling. Exit sets `stop` before cancelling; the survivor ends at its next loop check, and
 # because it holds no shared resource even that lingering poll is harmless.
 async def watch_for_interrupt(
-    pool: AsyncConnectionPool,
+    pool: AsyncConnectionSource,
     event: InterruptEvent,
     agent_id: int,
     stop: asyncio.Event,
@@ -224,7 +223,7 @@ async def owned_watch(
 # meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
 @asynccontextmanager
 async def subscribe_interrupt(
-    pool: AsyncConnectionPool | None,
+    pool: AsyncConnectionSource | None,
     agent_id: int,
     *,
     resources: HostedTurnResources | None,
