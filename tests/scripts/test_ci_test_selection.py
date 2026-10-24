@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -19,6 +20,8 @@ from typing import Any, cast
 
 import pytest
 import yaml
+
+from scripts.ci import test_selector
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
@@ -232,19 +235,143 @@ def test_subset_job_gates_only_in_enforce() -> None:
         "${{ github.event_name == 'pull_request' && needs.classify.outputs.backend == 'true' "
         "&& needs.classify.outputs.decision == 'SELECTED' }}"
     )
-    assert subset["outputs"]["subset_status"] == "${{ steps.run-subset.outputs.subset_status }}"
+    # meiva:note
+    # A matrix job's outputs would be whichever shard finished last: the verdict is its result.
+    assert "outputs" not in subset
     run_step = _step(subset, "Run selected pytest subset")
     assert "continue-on-error" not in run_step
     assert 'exit "$status"' in run_step["run"]
     assert '-m "not flaky" -n 4' in run_step["run"]
-    assert "--junit-xml=tmp/junit-backend-selected.xml" in run_step["run"]
+    assert "--junit-xml=tmp/junit-backend-selected-${{ matrix.group }}.xml" in run_step["run"]
+
+
+# meiva:note
+# The `-o` ini overrides of the first pytest invocation in a run script.
+def _pytest_overrides(script: str) -> list[str]:
+    invocation = script[script.index("uv run pytest") :]
+    return re.findall(r"-o (\S+)", invocation.split("2>&1", maxsplit=1)[0])
+
+
+def test_subset_matrix_comes_from_classify_and_each_shard_has_the_full_shards_limit() -> None:
+    jobs = _workflow_jobs()
+    subset, full, classify = jobs["backend-selected"], jobs["backend-shard"], jobs["classify"]
+    assert subset["strategy"]["fail-fast"] is False
+    assert subset["strategy"]["matrix"]["group"] == (
+        "${{ fromJSON(needs.classify.outputs.groups || '[1]') }}"
+    )
+    assert subset["name"] == (
+        "backend selected subset (${{ matrix.group }}/${{ needs.classify.outputs.shards }})"
+    )
+    assert subset["timeout-minutes"] == full["timeout-minutes"]
+    assert classify["outputs"]["shards"] == "${{ steps.selector.outputs.shards }}"
+    assert classify["outputs"]["groups"] == "${{ steps.selector.outputs.groups }}"
+    # meiva:note
+    # One environment string at Linux's 128 KB limit held the whole list: it is an artifact now.
+    assert "tests" not in classify["outputs"]
+    assert "TESTS" not in subset.get("env", {})
+
+
+def test_the_full_fanout_width_is_the_selectors_constant() -> None:
+    full = _workflow_jobs()["backend-shard"]
+    width = test_selector.FULL_FANOUT_SHARDS
+    assert full["strategy"]["matrix"]["group"] == list(range(1, width + 1))
+    assert full["name"] == f"backend shard (${{{{ matrix.group }}}}/{width})"
+    assert f"--count {width} --plan" in _step(full, "Run pytest shard")["run"]
+
+
+def test_subset_shards_plan_and_execute_like_the_full_shards_over_the_published_list() -> None:
+    jobs = _workflow_jobs()
+    subset, full, classify = jobs["backend-selected"], jobs["backend-shard"], jobs["classify"]
+    run = _step(subset, "Run selected pytest subset")["run"]
+    full_run = _step(full, "Run pytest shard")["run"]
+    assert "--count ${{ needs.classify.outputs.shards }} --files-from tmp/selected/tests.txt" in run
+    assert "--file-shard-group=${{ matrix.group }}" in run
+    # meiva:note
+    # The plan digest compares the pytest overrides of planning and execution, so the executor
+    # must carry the full shards' overrides.
+    assert _pytest_overrides(run) == _pytest_overrides(full_run) != []
+    published = _step(classify, "Publish the selected test list")
+    downloaded = _step(subset, "Download the selected test list")
+    assert published["with"]["name"] == downloaded["with"]["name"] == "selected-tests"
+    assert downloaded["with"]["path"] == "tmp/selected"
+    assert published["with"]["path"].endswith("/selected-tests/tests.txt")
+    assert (
+        _step(subset, "Restore the test durations")["with"]["key"]
+        == _step(full, "Restore the test durations")["with"]["key"]
+    )
+
+
+def test_classify_publishes_the_shard_matrix_and_the_list() -> None:
+    script = _step(_workflow_jobs()["classify"], "Select runtime-impact test subset")["run"]
+    assert 'lines.append(f"shards={shards}")' in script
+    assert 'lines.append(f"groups={json.dumps(list(range(1, shards + 1)))}")' in script
+    assert 'shards = selection["shards"]' in script
+    assert 'Path(os.environ["RUNNER_TEMP"]) / "selected-tests" / "tests.txt"' in script
+    assert 'for test in selection["tests"]' in script
+    assert "tests={" not in script
+
+
+@pytest.mark.parametrize(
+    ("plan_status", "pytest_status", "expected", "pytest_runs"),
+    [(0, 0, 0, 1), (0, 1, 1, 1), (0, 4, 4, 1), (23, 0, 23, 0)],
+)
+# meiva:note
+# The repository's own shell over fake `uv` and `timeout` commands the test owns: no input
+# reaches a shell, and no real toolchain, service or timer runs.
+def test_subset_shard_fails_on_planning_or_pytest(
+    tmp_path: Path, plan_status: int, pytest_status: int, expected: int, pytest_runs: int
+) -> None:
+    script = _step(_workflow_jobs()["backend-selected"], "Run selected pytest subset")["run"]
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    timeout = binary / "timeout"
+    timeout.write_text('#!/bin/sh\nshift 2\nexec "$@"\n')
+    timeout.chmod(0o755)
+    uv = binary / "uv"
+    uv.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, pathlib, sys\n"
+        "path = pathlib.Path('calls.json')\n"
+        "calls = json.loads(path.read_text()) if path.exists() else []\n"
+        "calls.append(sys.argv[1:])\n"
+        "path.write_text(json.dumps(calls))\n"
+        "sys.exit(int(os.environ['PLAN_STATUS' if sys.argv[2] == 'python' else 'PYTEST_STATUS']))\n"
+    )
+    uv.chmod(0o755)
+    work = tmp_path / "work"
+    work.mkdir()
+    closed = script.replace("${{ needs.classify.outputs.shards }}", "2").replace(
+        "${{ matrix.group }}", "1"
+    )
+    assert "${{" not in closed
+    result = subprocess.run(  # noqa: S603
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", closed],
+        cwd=work,
+        env=os.environ
+        | {
+            "PATH": str(binary) + os.pathsep + os.environ["PATH"],
+            "PLAN_STATUS": str(plan_status),
+            "PYTEST_STATUS": str(pytest_status),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == expected, result.stdout + result.stderr
+    calls = cast("list[list[str]]", json.loads((work / "calls.json").read_text()))
+    assert sum(call[1] == "pytest" for call in calls) == pytest_runs
+    plan = next(call for call in calls if call[1] == "python")
+    assert "--files-from" in plan and plan[plan.index("--count") + 1] == "2"
+    assert all("--file-shard-group=1" in call for call in calls if call[1] == "pytest")
 
 
 def test_zero_execution_never_reads_green() -> None:
     guard = _step(_workflow_jobs()["backend-selected"], "Validate native test results")
     assert guard["if"] == "${{ !cancelled() }}"
     assert guard["uses"] == "./.github/actions/require-test-gate"
-    assert guard["with"]["junit-patterns"] == '["tmp/junit-backend-selected.xml"]'
+    assert guard["with"]["junit-patterns"] == (
+        '["tmp/junit-backend-selected-${{ matrix.group }}.xml"]'
+    )
 
 
 def test_subset_and_shard_native_gates_have_the_same_shape() -> None:
@@ -406,7 +533,7 @@ def test_shadow_report_stands_down_under_enforce() -> None:
     assert report_step["env"] == {
         "FULL_BACKEND_RESULT": "${{ needs.backend.result }}",
         "FULL_PYTEST_RESULT": "${{ needs.backend-shard.result }}",
-        "SUBSET_STATUS": "${{ needs.backend-selected.outputs.subset_status }}",
+        "SUBSET_RESULT": "${{ needs.backend-selected.result }}",
         "DECISION": "${{ needs.classify.outputs.decision }}",
         "REASON": "${{ needs.classify.outputs.reason }}",
         "EST_SECONDS": "${{ needs.classify.outputs.est_seconds }}",

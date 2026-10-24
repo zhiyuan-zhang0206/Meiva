@@ -101,7 +101,7 @@ matching row decides.
 | 6a | A root meizel manifest (`meizel.toml`, `meizel.policy.toml`) | MANIFEST | runtime readers, meizel's own tests, every test naming the file and the tests of each source module that names it (below) |
 | 6b | A global path (below) | GLOBAL | full suite (impact unknown: it applies to every test) |
 | 7a | `.github/`, `.agents/`, `.meiva/`, `.trunk/` | TREE_SCAN_ONLY | tree-scan tests plus every collectable test whose source names that top-level directory (below) |
-| 7b | `demos/`, `tests/e2e/`, `.pre-commit-config.yaml`, `.gitignore`, `.gitattributes`, `.gitleaks.toml`, `LICENSE`, `NOTICE` | TREE_SCAN_ONLY | tree-scan tests plus recognized runtime consumers |
+| 7b | `demos/`, `tests/e2e/`, `.pre-commit-config.yaml`, `.gitignore`, `.gitattributes`, `.gitleaks.toml`, `LICENSE`, `NOTICE`, and Markdown under a global prefix (below) | TREE_SCAN_ONLY | tree-scan tests plus recognized runtime consumers |
 | 8 | A non-Python file under `ui/` | FRONTEND | recognized backend resource consumers, when backend selection runs; the frontend job also owns it |
 | 9 | Any other file under agent/, meiva/, meiva_builtins/, base/, cli/, gateway/, ops/, schedules/, scripts/, services/, tests/ or ui/ | PACKAGE | transitive runtime consumers plus the owning package's tests |
 | 10 | Anything else | UNMAPPED | full suite (impact unknown: no rule owns the path) |
@@ -118,7 +118,22 @@ Global paths apply to every test: `pyproject.toml`, `uv.lock`, `.python-version`
 `.env.example`, the root `conftest.py`, the modules its `pytest_plugins` lists
 (plus the `__init__.py` of every package on their import path), and everything
 under tests/fixtures/, db/, migrations/, deploy/ and commands/. This list and
-the plugin set are the single "global path" concept in the selector.
+the plugin set are the single "global path" concept in the selector. Two cases that
+looked global are not, because their impact is computable rather than unknown:
+
+- Markdown under one of those prefixes (for example `deploy/lgtm/README.md`) is prose,
+  not an input a run loads. It is TREE_SCAN_ONLY: the tree-scan tests plus the tests that
+  read that file by a recognized path run, the way a documentation change selects its
+  readers. Every other file under the prefixes, including `db/schema.sql`, stays global.
+- `pyproject.toml` is global only when the tables that changed can reach a test run. The
+  selector parses the committed base and the head text and compares them table by table (the
+  top-level tables, and `tool.<name>` for each tool). When every changed table is `tool.pyright`,
+  `tool.basedpyright` or `tool.ruff` (a checker configuration no test run loads, which is where
+  each new `tests/` directory registers its execution environment) or no table changed at all,
+  the file is TREE_SCAN_ONLY too: the tests that read `pyproject.toml` by path run. Any other
+  table (`project`, `dependency-groups`, `build-system`, `tool.uv`, `tool.pytest`, the test
+  hosts, coverage, an unlisted tool) keeps it global, and so does a missing base: `--base-ref`
+  absent, or `pyproject.toml` new in the change. The listed set is closed.
 
 Tests read `.github/`, `.agents/`, `.meiva/` and `.trunk/` by path. Recognized
 resource facts reach their transitive consumers. A change there selects, besides the tree-scan tests, every
@@ -238,6 +253,24 @@ A selector `tests` list contains candidate files, not an executed test count: th
 selected native lane omits the independently executed static lane and flaky tests,
 while the serial lane owns flaky execution. JUnit records remain the execution evidence.
 
+## Subset shards
+
+A SELECTED subset runs on as many `backend selected subset` shards as its share of the suite
+needs at the size of one full shard: `ceil(est_seconds / full_est_seconds * 8)`, clamped to
+1..8 and to the number of selected files, with the share taken from file counts when no timings
+exist (`subset_shard_count`, with the width 8 owned by `FULL_FANOUT_SHARDS`; a contract test
+ties it to the full fan-out's matrix and `--count`). A subset that is the whole suite is eight
+shards and as fast as the fan-out; a few files are one short job.
+
+`classify change` publishes `shards` and `groups` (the JSON list `[1, ..., shards]` that is the
+matrix) as job outputs, and the selected file list as the `selected-tests` artifact, because the
+whole suite as one environment string already reaches Linux's 128 KB limit. Each shard
+downloads the list and splits it with the full fan-out's own planner
+(`scripts.ci.pull_requests.plan_file_shards --files-from`): a duration-balanced whole-file plan
+over the selected files only, which each shard re-collects and checks before it executes its
+group. Every shard has the full shards' 20-minute limit. The verdict is the matrix job's
+result, which is also what the shadow report reads.
+
 ## Duration estimates
 
 The timing input is the repository-root `.test_durations` file. It is not tracked: the daily
@@ -253,11 +286,7 @@ starts with each selected test file plus ::; a file with no timing entry costs
 the average present backend timing entry. A recorded zero remains zero. The
 same model estimates the complete collectable backend universe.
 
-Nothing in the selector sizes the subset against the `backend selected subset` job (four
-pytest workers and its own `timeout-minutes` in ci.yml). A subset that is most of the suite
-needs about as many worker-minutes as the whole fan-out, so that job's limit has to be sized
-for the whole suite or the job ends on its timeout instead of on a verdict. `est_seconds` in
-the `test-selection:` log line says how large the subset was.
+The estimates size the shards of a subset (above) and nothing else: no decision reads them.
 
 `scripts.ci.test_selector.load_durations` and `estimate_seconds` own this model
 for the selector and its reporting consumers. The read-only
@@ -292,9 +321,9 @@ routing expression keys off it.
 
 **enforce** (the default since 2026-09-11):
 
-- A SELECTED real PR runs `backend-selected` instead of the shard fan-out: the
-  selected subset is the backend pytest gate, and the aggregator (the
-  branch-protection check `backend (pytest + pyright)`) requires it.
+- A SELECTED real PR runs `backend-selected` (a matrix of 1 to 8 shards) instead of the
+  shard fan-out: the selected subset is the backend pytest gate, and the aggregator (the
+  branch-protection check `backend (pytest + pyright)`) requires every shard.
 - `backend-selected` uses the native pytest result and the shared JUnit
   validation gate, like the shards. Test failures remain red; no external
   quarantine service or secret determines the verdict.
@@ -365,3 +394,10 @@ large an impact is too large has no definition, and the merge queue runs the ful
 before anything reaches main. In the ten pull requests of the day before, nine ran the
 full fan-out: six on a global path, which this ruling keeps (their impact is unknown, not
 large), and three whose candidate was the whole suite, which now run as SELECTED.
+
+The same day, the three consequences of running a whole-suite subset were settled with it. The
+subset is sharded by its estimated time instead of running as one job under one timeout. Its
+list travels as an artifact instead of an environment string. And two global-path rules that
+mistook known-confined changes for unknown ones were narrowed (Markdown under a global prefix,
+and `pyproject.toml` tables that only configure a checker); the rest of the global paths are
+unchanged.

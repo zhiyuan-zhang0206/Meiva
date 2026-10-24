@@ -28,4 +28,9 @@ Those artifacts alone do not certify cross-runner equivalence. The full manual
 proof below supplies that migration evidence. Selection routing, serial/static
 lanes, native JUnit verdicts and the combined coverage gate retain their owners.
 
+The enforced selected subset plans the same way over only its selected files
+(`plan_file_shards --files-from`), once per shard job, with as many groups as the selector
+chose for its estimated time (see [[.github/test-selection.meiva.okf.md]]). Its plan,
+check and execute options match the full shards', which the plan digest enforces.
+
 Planning and migration evidence: [[file-shard-shadow.meiva.okf.md]].
