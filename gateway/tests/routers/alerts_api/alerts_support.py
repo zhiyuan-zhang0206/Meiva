@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, cast
 
 import psycopg
@@ -13,24 +15,12 @@ from pydantic import SecretStr
 from base.config import settings
 from base.events.live.bus import EventBus
 from base.telemetry.alerts.native import load_native_group, stamp_native_sent
-from gateway.alerts import router as alerts_router
-from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.auth.gateway_config import (
+    GatewayTestClient,
+    gateway_config_fields,
+    gateway_test_client,
+)
 from ops.alerts import ALERTS_CHANNEL
-
-
-def native_sender(callback: Callable[[str], bool]) -> Callable[[int], bool]:
-    # meiva:note
-    # The policy fixture reports real-send success; acceptance-only tests live with Outbox.
-
-    def send(group_id: int) -> bool:
-        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
-            source = load_native_group(conn, group_id)
-            succeeded = callback(source["text"])
-            if succeeded:
-                stamp_native_sent(conn, group_id)
-            return succeeded
-
-    return send
 
 
 def alert(
@@ -130,18 +120,61 @@ def client() -> Generator[GatewayTestClient]:
         yield c
 
 
-def install_im(monkeypatch: pytest.MonkeyPatch, callback: Callable[[str], bool]) -> None:
-    # meiva:note
-    # The IM bridge is reached by `base.telemetry.alerts.native.notify_alert_group`, which reads
-    # the bridge address and the enable switch from the ambient process settings, so the send is
-    # the one thing a test of this router cannot redirect by value; it is replaced here, once.
-    monkeypatch.setattr(alerts_router, "notify_alert_group", native_sender(callback))
+# meiva:note
+# The IM bridge's alert acceptance route, as a real HTTP listener on port 0.
+#
+# `POST /send/alert-outbound` loads the native group the gateway names, hands its text to
+# `callback`, and answers 200 when the callback accepts (stamping the group sent, which is what
+# the bridge's delivery does) or 503 when it refuses. The gateway reaches it through its own
+# `GatewayConfig.alerts.im_bridge_url`, so the request is the one a deployed bridge gets.
+class ImBridge:
+    def __init__(self) -> None:
+        self.callback: Callable[[str], bool] = lambda _text: True
+        bridge = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, format: str, *args: object) -> None:
+                pass
+
+            def do_POST(self) -> None:
+                length = int(self.headers.get("Content-Length", 0))
+                request = json.loads(self.rfile.read(length))
+                assert self.path == "/send/alert-outbound", self.path
+                group_id = int(request["group_id"])
+                with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
+                    source = load_native_group(conn, group_id)
+                    accepted = bridge.callback(source["text"])
+                    if accepted:
+                        stamp_native_sent(conn, group_id)
+                self.send_response(200 if accepted else 503)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self._server.daemon_threads = True
+        self.url = f"http://127.0.0.1:{self._server.server_port}"
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    def close(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(timeout=5)
+
+
+def install_im(bridge: ImBridge, callback: Callable[[str], bool]) -> None:
+    bridge.callback = callback
 
 
 @pytest.fixture(autouse=True)
-def alerts_im(monkeypatch: pytest.MonkeyPatch) -> None:
-    """IM fan-out accepts every group."""
-    install_im(monkeypatch, lambda _text: True)
+def alerts_im() -> Generator[ImBridge]:
+    """IM bridge that accepts every group; every gateway built in the test dials it."""
+    bridge = ImBridge()
+    try:
+        with gateway_config_fields(im_bridge_health_url=bridge.url):
+            yield bridge
+    finally:
+        bridge.close()
 
 
 def seed_alert_rows(db: psycopg.Connection, rows: list[dict[str, Any]]) -> None:
@@ -163,12 +196,12 @@ def seed_alert_rows(db: psycopg.Connection, rows: list[dict[str, Any]]) -> None:
     db.commit()
 
 
-def capture_im(monkeypatch: pytest.MonkeyPatch, *, ok: bool = True) -> list[str]:
+def capture_im(bridge: ImBridge, *, ok: bool = True) -> list[str]:
     sent: list[str] = []
 
     def _capture(text: str) -> bool:
         sent.append(text)
         return ok
 
-    install_im(monkeypatch, _capture)
+    install_im(bridge, _capture)
     return sent
