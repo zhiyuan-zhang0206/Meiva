@@ -7,8 +7,6 @@
 
 from __future__ import annotations
 
-import os
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +18,7 @@ from base.config import ConfigBoot
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
 from base.telemetry import EventPipeline
+from cli.database.runtime import UserSession
 
 ALL_ROLES: frozenset[MachineRole] = frozenset({"gateway", "agent-runner", "observability-station"})
 
@@ -27,35 +26,6 @@ ALL_ROLES: frozenset[MachineRole] = frozenset({"gateway", "agent-runner", "obser
 # whichever ones a unit carries. A frozenset has no order, and `sorted()` over
 # one widens the `MachineRole` literal back to `str`.
 CAPABILITY_ORDER: tuple[MachineRole, ...] = ("agent-runner", "gateway")
-
-
-# meiva:note
-# The invoking user's session, read once where converge is composed.
-#
-# A step that wires the user's account (the `~/.local/bin` link, the shell rc file) or
-# asks a person something reads these values, so a test hands in the session it wants.
-@dataclass(frozen=True)
-class UserSession:
-    user_home: Path
-    # meiva:note
-    # The login shell path (`$SHELL`); empty when the session names none.
-    login_shell: str
-    # meiva:note
-    # Whether a human is at the terminal: both stdin and stdout are TTYs. Watchdog respawns
-    # and rollout-driven starts have none.
-    interactive: bool
-
-    # meiva:note
-    # This process's session; the composition point calls it once per operation.
-    @classmethod
-    def current(cls) -> UserSession:
-        return cls(
-            user_home=Path.home(),
-            login_shell=os.environ.get("SHELL", ""),
-            interactive=bool(
-                sys.stdin and sys.stdout and sys.stdin.isatty() and sys.stdout.isatty()
-            ),
-        )
 
 
 @dataclass(frozen=True)

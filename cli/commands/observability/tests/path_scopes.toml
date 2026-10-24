@@ -1,22 +1,3 @@
 # Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
-"cli.database.tests.cli_tests" = [
-    "test_converge_lgtm.py",
-    "test_lgtm_station.py",
-    "test_lgtm_validation.py",
-    "test_converge_otel_collector.py",
-    "test_lgtm_native.py",
-    "test_observatory_urls.py",
-    "test_otel_port_deviation.py",
-    "test_trace_ship.py",
-]
-"meiva.tests.fixtures.sdk" = [
-    "test_atomic_writer_contracts.py",
-    "test_converge_lgtm.py",
-    "test_lgtm_station.py",
-    "test_lgtm_validation.py",
-    "test_grafana_render_cmd.py",
-    "test_lgtm_dashboard_provisioning.py",
-    "test_lgtm_native.py",
-    "test_observatory_urls.py"
-]
+"meiva.tests.fixtures.sdk" = ["test_atomic_writer_contracts.py"]

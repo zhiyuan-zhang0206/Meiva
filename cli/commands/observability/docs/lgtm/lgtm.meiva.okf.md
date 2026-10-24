@@ -12,6 +12,16 @@ the signed helper as root's ancestor; Linux has no helper. There are no per-back
 launchd jobs, systemd units, shell lifecycle commands or foreign-job retirement.
 
 `lgtm_native.py` prepares pinned, checksum-verified assets and rendered configuration.
+It is a shell over decisions that live as pure modules under `plans/`: which backends
+need an archive (`plans/lgtm/install.py`), where an archive's contents go
+(`plans/lgtm/archive.py`), what the templates become and what a render warns about
+(`plans/lgtm/render.py`), which URLs Grafana's provisioning points at
+(`plans/lgtm/urls.py`), what the dashboard fallback does (`plans/lgtm/dashboard_plan.py`)
+and how a download waits and reports (`plans/lgtm/download_retry.py`,
+`plans/lgtm/download_report.py`). Configuration is read once, at the converge step, by
+`inputs.py` into frozen values (`LgtmSettings`, `ObservabilityConfig`); nothing below the
+step reads `settings`, the environment or the clock for a decision. The shell tests run the
+real pass against a release mirror on port 0.
 `base/telemetry/lgtm_local.py` owns executable arguments, local probe addresses and the
 configuration digest bound into the root generation. Configuration or roster
 changes require a normal stop before a new generation; repeated unchanged start
@@ -34,7 +44,9 @@ Local listen ports are explicit host configuration, independent of external quer
 URLs. Co-located station homes need distinct ports, including Loki gRPC. Tempo is
 remote. `MEIVA_LGTM_STORAGE_DIR` chooses the retained observation data volume.
 Grafana provisioning resolves its database endpoint through the shared direct-DB
-mapping and never derives credentials from the cluster bearer.
+mapping and never derives credentials from the cluster bearer. The storage volume
+reaches the renderer as a value (`storage_dir`), resolved by the converge step from
+`MEIVA_LGTM_STORAGE_DIR`.
 
 ## One deadline per asset download
 
@@ -51,14 +63,15 @@ stretching the operation. The request opens with `min(socket_timeout, remaining)
 that bounds the one wait no check can interrupt, so the residual overshoot is one
 in-flight read, at most `min(socket_timeout_s, total_budget_s)`.
 
-The retry wait is this operation's own `timers.sleep`, clamped to the budget that
-remains, so a backoff never runs past the deadline. Every failure reports used
-time, remaining budget and bytes received, in the attempt line and in the final
-`RuntimeError`.
+The retry wait is decided by `retry_wait` (one backoff step per attempt, clamped to
+the budget that remains, `None` after the last attempt), so a backoff never runs past
+the deadline; the shell sleeps what it returns. Every failure reports used time,
+remaining budget and bytes received (the size of the attempt's partial file), in the
+attempt line and in the final `RuntimeError`.
 
 The numbers are the `lgtm_native_download_*` settings (observability domain,
-`MEIVA_LGTM_NATIVE_DOWNLOAD_*`) built into `lgtm_native.DownloadLimits` by
-`ensure_lgtm_native`; the download functions take them as data. The 900 s default
+`MEIVA_LGTM_NATIVE_DOWNLOAD_*`) read by `inputs.lgtm_download_limits` into
+`plans/lgtm/download_retry.DownloadLimits`; the download functions take them as data. The 900 s default
 is measured: on a 5.8-8.7 MB/s link the three archives took 8 s / 14 s / 53 s
 (2026-10-17), so 900 s covers the 461 MB Grafana tarball at >=512 KB/s.
 

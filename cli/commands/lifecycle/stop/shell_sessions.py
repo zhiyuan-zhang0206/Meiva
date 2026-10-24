@@ -23,9 +23,9 @@ from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import ledger_path
+from cli.commands.data_plane.maintenance.survivors import SurvivorInventory
 from cli.commands.data_plane.maintenance_stop_report import (
     StopIncompleteError,
-    SurvivorInventory,
     capture_survivor,
     live_identities,
 )
@@ -41,6 +41,7 @@ from cli.commands.lifecycle.stop.closure_plan import (
     FailShells,
     ReportJobLeftover,
     SurvivorFact,
+    SurvivorRole,
     WriteNotices,
     forced_failure_message,
     job_leftover_line,
@@ -101,11 +102,14 @@ def run_closure(grace_s: float, kill_s: float) -> tuple[closure.Outcome, str]:
 
 # meiva:note
 # Which of the known survivors are still their recorded process, read now.
+#
+# A role the closure's vocabulary does not name raises `ValueError` here, before any notice is
+# written or any session is judged.
 def _survivor_facts(outcome: closure.Outcome) -> tuple[SurvivorFact, ...]:
     return tuple(
         SurvivorFact(
             session=survivor.session,
-            role=survivor.role,
+            role=SurvivorRole(survivor.role),
             pid=survivor.process.pid,
             alive=bool(live_identities([survivor.process])),
         )
@@ -121,13 +125,13 @@ def _shell_sessions_incomplete(
     live = {
         s.process: s
         for s in outcome.survivors
-        if s.role == "shell" and live_identities([s.process])
+        if SurvivorRole(s.role) is SurvivorRole.SHELL and live_identities([s.process])
     }
     report = [
         capture_survivor(identity, service=found.session, role=found.role)
         for identity, found in sorted(live.items(), key=lambda item: item[0].pid)
     ]
-    inventory = SurvivorInventory(survivors=report)
+    inventory = SurvivorInventory(survivors=tuple(report))
     return StopIncompleteError(
         f"{shells_alive_header(failure)}\n{inventory.render(stage=stage, killed=True)}",
         stage=stage,

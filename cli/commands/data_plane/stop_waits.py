@@ -10,11 +10,13 @@ from __future__ import annotations
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from base import telemetry
 from base.cluster import postgres as owned_postgres
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from base.telemetry import EventPipeline
+from cli.commands.data_plane.maintenance.report_lines import escalation_note
 from cli.commands.data_plane.stop_budget import poll_delay, require_valid_timeout, time_left
 
 # meiva:note
@@ -38,6 +40,19 @@ PROCESS_KILL_WAIT_S = 3.0
 # meiva:note
 # How often a wait for processes to exit observes them again.
 _POLL_INTERVAL_S = 0.05
+
+
+# meiva:note
+# The bounds of the legs after a data-plane process' graceful stop: Postgres' immediate
+# shutdown and the SIGKILL of what outlives it. The defaults are the stop's constants above; a
+# test hands in small ones.
+@dataclass(frozen=True)
+class StopLegs:
+    cleanup_wait_s: float = PROCESS_CLEANUP_WAIT_S
+    kill_wait_s: float = PROCESS_KILL_WAIT_S
+
+
+DEFAULT_STOP_LEGS = StopLegs()
 
 
 def deadline_after(timeout: float) -> float:
@@ -77,23 +92,17 @@ def wait_for_exit(tracked: set[OwnedProcess], deadline: float) -> None:
 # Report a Postgres shutdown that had to be ended by an immediate one.
 #
 # The owner (`base.cluster.postgres`) logs the escalation; this adds the
-# operator line and the `postgres_stop_escalated` event. `notes`, when the
-# caller owns a stop journal, collects the line for it
-# (`stop.report.finish_stop`); a leg that owns no journal passes
-# nothing and still gets stderr and the event
+# operator line and the `postgres_stop_escalated` event, and returns the line
+# so a caller that owns a stop journal can carry it there
+# (`stop.report.finish_stop`); a leg that owns no journal ignores it and still
+# gets stderr and the event
 # (docs/decisions/data/database/2026-10-02-pg-stop-escalates-to-immediate.md).
 def report_postgres_stop_escalation(
     escalation: owned_postgres.Escalation,
-    notes: list[str] | None = None,
     *,
     producer: Callable[[], EventPipeline],
-) -> None:
-    killed = ", ".join(str(pid) for pid in escalation.killed) or "none"
-    note = (
-        f"postgres {escalation.detail}; ended by an immediate shutdown "
-        f"(crash recovery at the next start; unarchived WAL stays in pg_wal), "
-        f"killed leftover processes: {killed}"
-    )
+) -> str:
+    note = escalation_note(escalation.detail, escalation.killed)
     print(f"  ! {note}", file=sys.stderr, flush=True)
     telemetry.emit(
         "telemetry",
@@ -103,5 +112,4 @@ def report_postgres_stop_escalation(
         source="stop",
         attributes={"detail": escalation.detail, "killed": list(escalation.killed)},
     )
-    if notes is not None:
-        notes.append(note)
+    return note

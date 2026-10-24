@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from base.host.permissions_helper.wire import RootSeedConfig
+from cli.commands.data_plane.instance.launch_delivery import LaunchDelivery
 
 __all__ = ["RootLaunch", "RootLaunchInputs", "keeper_seed", "plan_root_launch"]
 
@@ -25,18 +26,29 @@ _ROOT_STDERR_LOG = "root.stderr.log"
 # meiva:note
 # What one root launch reads from the process.
 #
-# `service_path` is the home's declared service PATH (`settings.general.service_path`)
-# and `remote_data_plane` whether the data plane is remote-managed. The start entry
-# reads them once; nothing below it reads settings.
+# `service_path` is the home's declared service PATH (`settings.general.service_path`) and
+# `delivery` the facts the services' database and API deliveries read: the home, whether the
+# data plane is remote-managed, the launch environment and the home's `.env` values. The start
+# entry reads them once; nothing below it reads settings or the process.
 @dataclass(frozen=True)
 class RootLaunchInputs:
-    home: Path
+    delivery: LaunchDelivery
     service_path: str
-    remote_data_plane: bool
+
+    @property
+    def home(self) -> Path:
+        return self.delivery.home
+
+    @property
+    def remote_data_plane(self) -> bool:
+        return self.delivery.remote_data_plane
+
     # meiva:note
-    # The process environment the managed service environment is built from, copied once by the
-    # start entry; nothing below it reads `os.environ`.
-    environment: Mapping[str, str]
+    # The process environment the managed service environment is built from: the copy the start
+    # entry took with the launch delivery.
+    @property
+    def environment(self) -> Mapping[str, str]:
+        return self.delivery.environment
 
 
 # meiva:note

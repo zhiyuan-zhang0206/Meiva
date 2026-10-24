@@ -6,10 +6,10 @@
 # admitted. The home and checkout it acts on arrive as a `HomeSite` the entry read once
 # (`cli.main`), behind the checkout gate (`cli.preflight`).
 #
-# `admitted_start` is the settings-free half: it admits the home, holds its lifecycle lock
-# and enters this process into it. `start_once` opens the loguru sinks and runs the
-# lifecycle inside it, and `cli.startup.outcome` decides what the finished start owes the
-# boot unit and the boot scheduler.
+# `admitted_home` is the settings-free half: it admits the home, holds its lifecycle lock
+# and enters this process into it. `start_once` admits the runtime inside it, opens the
+# loguru sinks and runs the lifecycle, and `cli.startup.outcome` decides what the finished
+# start owes the boot unit and the boot scheduler.
 
 from __future__ import annotations
 
@@ -47,10 +47,12 @@ from cli.startup.outcome import (
 from cli.startup.settings_failure import settings_failure_text
 
 
+# meiva:note
+# Make this process the admitted home's: its `.env` is the only source of its identity.
+#
+# A delivered login and its generation are discarded together so Settings re-admits database
+# authority for this home.
 def _enter_home(home: Path) -> None:
-    """Make this process the admitted home's: its `.env` is the only source of its
-    identity. Discard a delivered login and its generation together so Settings
-    re-admits database authority for this home."""
     for key in derived_env_keys() | env_identity_keys() | {GENERATION_ENV}:
         os.environ.pop(key, None)
     os.environ["MEIVA_HOME"] = str(home)
@@ -59,19 +61,17 @@ def _enter_home(home: Path) -> None:
 # meiva:note
 # Admit the home, hold its lifecycle lock and enter this process into it.
 #
-# Yields the runtime the start executes. Raises why the home cannot start before
-# anything is created: a start never makes a home, so the lock below can rely on the
-# directory existing. Once entered, the process's configuration is built from the
-# home's own `.env`.
+# Raises why the home cannot start before anything is created: a start never makes a
+# home, so the lock below can rely on the directory existing. Once entered, the process's
+# configuration is built from the home's own `.env`.
 @contextmanager
-def admitted_start(site: HomeSite) -> Generator[StartRuntime]:
-    home = site.home
+def admitted_home(home: Path) -> Generator[None]:
     require_initialized(home)
     ensure_private_dir(home)
     with file_lock(home / "start-intent.lock", timeout_s=30):
         require_initialized(home)
         _enter_home(home)
-        yield StartRuntime.development(site.checkout)
+        yield
 
 
 # meiva:note
@@ -103,7 +103,12 @@ def start_once(
     boot: bool,
 ) -> int:
     try:
-        with admitted_start(site) as runtime:
+        with admitted_home(site.home):
+            # meiva:note
+            # The runtime is admitted under the home's lock, so no other lifecycle operation
+            # changes the source while it is hashed. It needs no Settings and fails before any
+            # sink opens.
+            runtime = StartRuntime.admit(site.checkout)
             # meiva:note
             # Building the sinks builds Settings, so they open only once the home is admitted.
             producer.initialize_logging(START_SINK)

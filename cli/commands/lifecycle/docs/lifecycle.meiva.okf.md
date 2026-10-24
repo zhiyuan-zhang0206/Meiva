@@ -59,8 +59,12 @@ preparation and its order (`start/cold_start_plan.py`), the schema checks, the g
 the readiness verdict are `strict` modules over values the shell read, and the shell executes
 them in order. Their tests assert the returned plans; the tests of the shell run `cmd_start_body`
 against a real home, a scripted root-control socket and the suite's Postgres
-(`tests/startup/start_harness.py`), and do not run a cold preparation, whose steps have their own
-tests.
+(`tests/startup/start_harness.py`). The cold preparation is `start/cold_start.py`: it runs the
+plan's steps in order against the values the start hands it (`ColdStart`, converge step table
+included) and its shell tests (`tests/startup/test_cold_start.py`) run a runner's preparation over
+a real home and the suite's Postgres. `meiva restart` is tested the same way
+(`tests/startup/test_restart_legs.py`): the scripted root's own record of the verbs it served is
+the evidence of what each leg did.
 
 `root_control/generation.record_running_sha` records the running source
 after a successful start. What start treats as already-up, what it waits for,
@@ -90,7 +94,9 @@ the steps `plan.plan_status` returns: static lines, or a named probe whose outpu
 owning renderer words. `roster` decides the note each service row carries and the table
 layout (a gate reason wins over the launch record; before any start nothing counts as
 launched), `render` the banner, host reading, source-drift and release lines, and
-`gateway` the gateway view. The slow or fallible sections (data plane, gateway) are
+`gateway` the gateway view, which prints the gateway's snapshot or the reason there is none: unreachable
+or not answering with JSON, no gateway URL, or no credential to present (neither a machine API token nor
+the cluster secret), each as one inline line while the other sections still print. The slow or fallible sections (data plane, gateway) are
 steps, not facts, so the operator sees the earlier sections while they run. The planning
 and rendering modules are `strict`, so their tests assert the returned lines; the
 tests of the shell run it against a scripted root-control socket, a real manifest and

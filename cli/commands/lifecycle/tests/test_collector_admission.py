@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from base.clock import Timers
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineIdentity, MachineRoles
 from base.cluster.machine.boot import machine_from_boot
@@ -15,9 +16,10 @@ from base.host.system.tests.fake_commands import fake_host
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
-from cli.commands.converge.spec import UserSession
 from cli.commands.lifecycle.tests.scripted_root import UnitRow, scripted_root
 from cli.commands.observability import otel_collector as oc
+from cli.commands.observability.inputs import CollectorSettings
+from cli.database.runtime import UserSession
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -107,8 +109,12 @@ def test_non_lgtm_gateway_with_explicit_endpoint_installs_collector(
         home: Path,
         roles: MachineRoles | None,
         *,
+        settings: CollectorSettings,
         database_factory: Callable[[], Any],
         machine: MachineIdentity,
+        timers: Timers,
+        tag: str | None,
+        platform_label: str,
     ) -> None:
         assert machine is ctx.machine
         assert database_factory is operator_database

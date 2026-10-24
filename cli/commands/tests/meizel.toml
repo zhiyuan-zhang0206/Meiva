@@ -9,7 +9,6 @@ exports = ["health_port_guard.py", "test_single_box.py"]
 "test_single_box.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_single_box.py#monkeypatch.setitem os.environ" = 1
 "test_single_box.py#monkeypatch.setitem os.environ.MEIVA_DB_URL" = 1
-"test_single_box.py#monkeypatch.setitem os.environ.MEIVA_MACHINE_SERVE_GATEWAY" = 1
 "test_single_box.py#patch.dict os.environ" = 1
 "test_unit_capability_commands.py#monkeypatch.setitem os.environ.MEIVA_MACHINE_SERVE_GATEWAY" = 1
 
@@ -38,7 +37,7 @@ exports = ["health_port_guard.py", "test_single_box.py"]
 "test_service_probe_ports.py#monkeypatch.setattr base.config.settings.services.memory_search_port" = 1
 "test_single_box.py#monkeypatch.setattr base.cluster.get_record" = 1
 "test_single_box.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_enabled" = 1
-"test_single_box.py#monkeypatch.setattr cli.commands.data_plane.bringup.prove_generation_logins" = 2
+"test_single_box.py#monkeypatch.setattr cli.commands.data_plane.completion.prove_generation_logins" = 2
 "test_unit_capability_commands.py#monkeypatch.setattr base.config.settings.general.machine_host" = 1
 
 [debt.stdlib-patch]

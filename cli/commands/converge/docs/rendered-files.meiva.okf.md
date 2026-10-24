@@ -31,6 +31,8 @@ copy is replaced and reported. The generated dashboard already follows it; its
 render fallback and sidecar reconciliation are in
 [[dashboard-provisioning.meiva.okf.md]].
 
+Every write is atomic and owner-only from creation (`write_text_atomic`): a reader such as Grafana's provisioning watcher never sees a torn render, and a config that carries a bearer is never exposed through the process umask. There is no caller-supplied writer.
+
 Both outcomes are telemetry events, never only converge output: `converge_file_preserved`
 was added after a frozen dashboard survived three consecutive rollouts (task #3689),
 and `converge_file_overwritten` after the 2026-10-17 rename left the rendered

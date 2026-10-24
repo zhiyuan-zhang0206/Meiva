@@ -12,16 +12,17 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from base.deploy.lifecycle import status_journal
 from base.host.exit_codes import RESTART_DECLINED_EXIT_CODE
 from base.host.proc import hosting_exec_domain
+from base.native_process.root_control.client import RootClient
 from base.native_process.root_control.ipc import ResponsePayload
-from base.paths import prod_service_checkout_error
+from base.paths.home import home_checkout_error
 from base.sessions.hosting import hosting_supervised_session
 from base.telemetry import EventPipeline
 from cli.commands import _repo
-from cli.commands._repo import repo_root
 from cli.commands.lifecycle import root_driver, root_readiness, start
 from cli.commands.lifecycle.root_control.snapshot import root_units
 from cli.commands.lifecycle.start import readiness_preflight
@@ -49,23 +50,20 @@ from services.supervision.roster.service_spec import ServiceSpec
 
 
 # meiva:note
-# Recheck the captured runtime before disruptive work.
-def require_restart_runtime(runtime: StartRuntime) -> None:
-    runtime.validate()
-    if problem := prod_service_checkout_error(runtime.code_root):
+# Admit the currently executing checkout for a restart of `home`, before any restart effect.
+#
+# A checkout the home's own `source` forbids is refused before its source is hashed; the
+# returned runtime is held through both legs, so a later caller or moving selector cannot
+# change what the start leg executes.
+def restart_runtime(checkout: Path, *, home: Path) -> StartRuntime:
+    if problem := home_checkout_error(checkout, home=home):
         raise ValueError(problem)
+    return StartRuntime.admit(checkout)
 
 
 # meiva:note
-# Admit the currently executing checkout before restart effects.
-def restart_runtime() -> StartRuntime:
-    runtime = StartRuntime.development(repo_root())
-    require_restart_runtime(runtime)
-    return runtime
-
-
-# meiva:note
-# What one restart's legs share: its request, its runtime and the caller's handles.
+# What one restart's legs share: its request, its runtime and the caller's handles. The caller's
+# registry of spawned processes is a mutable list, so it is passed beside this value, not in it.
 @dataclass(frozen=True)
 class _Invocation:
     request: RestartRequest
@@ -73,10 +71,9 @@ class _Invocation:
     command: CommandRuntime
     database_factory: OperatorDatabaseFactory
     producer: Callable[[], EventPipeline]
-    retained_children: list[subprocess.Popen[bytes]]
 
 
-def _run_leg(leg: Leg, run: _Invocation) -> int:
+def _run_leg(leg: Leg, run: _Invocation, retained_children: list[subprocess.Popen[bytes]]) -> int:
     request, runtime, command = run.request, run.runtime, run.command
     match leg:
         case Leg.PROBES:
@@ -94,7 +91,6 @@ def _run_leg(leg: Leg, run: _Invocation) -> int:
                 runtime.code_root,
                 home=command.home,
                 check_launcher=False,
-                runtime=runtime,
                 only_services=request.only_services,
                 disabled_services=request.disabled_services,
                 all_services=request.all_services,
@@ -105,16 +101,15 @@ def _run_leg(leg: Leg, run: _Invocation) -> int:
             # meiva:note
             # Every restart uses the shared hosted stop kernel; a timeout never silently
             # authorizes force.
-            require_restart_runtime(runtime)
             return do_stop(
                 restart_stop_request(request, roles=command.machine.role()),
                 StopEnvironment(
                     command=command,
                     database_factory=run.database_factory,
                     producer=run.producer,
-                    retained_children=run.retained_children,
                     stdin=None,
                 ),
+                retained_children,
             )
         case Leg.START:
             # meiva:note
@@ -129,7 +124,7 @@ def _run_leg(leg: Leg, run: _Invocation) -> int:
                 reconcile=launch.reconcile,
                 ready_timeout=launch.ready_timeout,
                 runtime=runtime,
-                retained_children=run.retained_children,
+                retained_children=retained_children,
                 producer=run.producer,
                 command=command,
             )
@@ -137,7 +132,7 @@ def _run_leg(leg: Leg, run: _Invocation) -> int:
 
 # meiva:note
 # Run the legs in order until one ends the restart.
-def _restart(run: _Invocation) -> int:
+def _restart(run: _Invocation, retained_children: list[subprocess.Popen[bytes]]) -> int:
     print(f"[meiva restart] cwd = {run.runtime.code_root}")
     # meiva:note
     # When an outer operation's journal is still running, this restart records phases into it
@@ -153,7 +148,7 @@ def _restart(run: _Invocation) -> int:
         if leg.heading:
             print(leg.heading)
         with status_journal.phase(leg.phase):
-            rc = _run_leg(leg, run)
+            rc = _run_leg(leg, run, retained_children)
         outcome = settle_leg(leg, rc)
         if isinstance(outcome, Finish):
             return conclude(outcome, owns_journal=owns_journal)
@@ -176,23 +171,18 @@ def conclude(outcome: Finish, *, owns_journal: bool) -> int:
 def _cmd_restart_body(
     request: RestartRequest,
     *,
+    runtime: StartRuntime,
     database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
-    retained_children: list[subprocess.Popen[bytes]] | None,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> int:
-    if retained_children is None:
-        raise ValueError("PostgreSQL launch requires its caller-owned child retention")
-    # meiva:note
-    # Admission precedes even the restart journal: an incompatible caller must leave the running
-    # generation untouched.
-    runtime = restart_runtime()
     refusal = restart_refusal(hosting_exec_domain(), hosting_supervised_session())
     if refusal is not None:
         print(refusal.message, file=sys.stderr)
         return RESTART_DECLINED_EXIT_CODE
     return _restart(
-        _Invocation(request, runtime, command, database_factory, producer, retained_children)
+        _Invocation(request, runtime, command, database_factory, producer), retained_children
     )
 
 
@@ -207,13 +197,17 @@ def cmd_restart(
     force: bool,
     timeout: float,
     start_timeout: float,
-    retained_children: list[subprocess.Popen[bytes]] | None,
+    runtime: StartRuntime,
+    retained_children: list[subprocess.Popen[bytes]],
     database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int:
     # meiva:note
     # Stop then start the service tree without a confirmation prompt.
+    #
+    # `runtime` was admitted before this call (`restart_runtime`), so an incompatible caller
+    # never reaches the journal and leaves the running generation untouched.
     request = RestartRequest(
         only_services=only_services,
         disabled_services=disabled_services,
@@ -228,6 +222,7 @@ def cmd_restart(
     with operator_lifecycle_audit(database_factory=database_factory) as audit:
         code = _cmd_restart_body(
             request,
+            runtime=runtime,
             database_factory=database_factory,
             producer=producer,
             command=command,
@@ -245,6 +240,26 @@ def _require_ok(response: ResponsePayload, what: str) -> None:
 
 
 # meiva:note
+# Admit `meiva restart --only agent-host`: the live root it goes through, or None after the
+# refusal is said.
+#
+# Nothing is built and nothing is asked of the root before this answers, so a host whose settings
+# cannot be loaded still reports the plain refusal: no live root on this unit, a root this unit
+# does not own (`require_root_owner` raises), or a root that runs no agent-host unit.
+def admit_agent_host_restart(command: CommandRuntime, *, timeout: float) -> RootClient | None:
+    client = root_driver.root_client(command.home, timeout=timeout)
+    status = root_driver.root_status(client)
+    if status is None:
+        print(NO_ROOT_REFUSAL, file=sys.stderr)
+        return None
+    root_driver.require_root_owner(status, helper=command.helper, home=command.home)
+    if (refusal := missing_unit_refusal(tuple(root_units(status)))) is not None:
+        print(refusal, file=sys.stderr)
+        return None
+    return client
+
+
+# meiva:note
 # `meiva restart --only agent-host`: stop agent-host and let its root bring it back.
 #
 # The scope is agent-host alone, so shell sessions, the browser, the extras, every other service
@@ -252,27 +267,19 @@ def _require_ok(response: ResponsePayload, what: str) -> None:
 # operator names the interruption mode and the stop budget. Agent-host settles its own in-flight
 # turns on SIGTERM; a unit that outlives the root's stop window is the root's to kill.
 #
-# Down agent-host through its live root (`force_down` only with `force`), then up.
+# Down agent-host through the admitted root `client` (`force_down` only with `force`), then up.
 #
 # `spec` is the agent-host service whose protocol readiness is waited for, up to
-# `start_timeout`. A root this unit does not own is refused.
+# `start_timeout`.
 def restart_agent_host(
     command: CommandRuntime,
+    client: RootClient,
     spec: ServiceSpec,
     *,
     force: bool,
     timeout: float,
     start_timeout: float,
 ) -> int:
-    client = root_driver.root_client(command.home, timeout=timeout)
-    status = root_driver.root_status(client)
-    if status is None:
-        print(NO_ROOT_REFUSAL, file=sys.stderr)
-        return 1
-    root_driver.require_root_owner(status, helper=command.helper, home=command.home)
-    if (refusal := missing_unit_refusal(tuple(root_units(status)))) is not None:
-        print(refusal, file=sys.stderr)
-        return 1
     record_lifecycle_request("force-down" if force else "down", [AGENT_HOST])
     _require_ok(
         client.force_down(AGENT_HOST) if force else client.down(AGENT_HOST),
@@ -306,10 +313,14 @@ def cmd_restart_agent_host(
     with operator_lifecycle_audit(database_factory=database_factory) as audit:
         try:
             refuse_hosted_stop()
-            spec = next(spec for spec in build_services() if spec.session == AGENT_HOST)
-            code = restart_agent_host(
-                command, spec, force=force, timeout=timeout, start_timeout=start_timeout
-            )
+            client = admit_agent_host_restart(command, timeout=timeout)
+            if client is None:
+                code = 1
+            else:
+                spec = next(spec for spec in build_services() if spec.session == AGENT_HOST)
+                code = restart_agent_host(
+                    command, client, spec, force=force, timeout=timeout, start_timeout=start_timeout
+                )
         except (RuntimeError, OSError) as exc:
             print(f"  ✗ restart of {AGENT_HOST} incomplete: {exc}", file=sys.stderr)
             code = 1

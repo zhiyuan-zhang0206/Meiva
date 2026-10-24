@@ -66,7 +66,11 @@ def test_start_remote_skips_local_instance_and_probes(
     assert config.is_remote, "the database URL still names another host"
 
     rc = bringup.ensure_gateway_data_plane(
-        config, database_factory=operator_database, machine=command_runtime.machine
+        config,
+        home=registered_home,
+        retained_children=None,
+        database_factory=operator_database,
+        machine=command_runtime.machine,
     )
 
     assert rc == 0
@@ -90,6 +94,8 @@ def test_start_remote_unreachable_fails_fast_with_dial_detail(
 
     rc = bringup.ensure_gateway_data_plane(
         remote_data_plane_config,
+        home=registered_home,
+        retained_children=None,
         database_factory=operator_database,
         machine=command_runtime.machine,
     )
@@ -116,7 +122,11 @@ def test_start_remote_redis_unreachable_fails_after_the_database_answers(
     config = dataclasses.replace(remote_data_plane_config, redis_url=refused_redis)
 
     rc = bringup.ensure_gateway_data_plane(
-        config, database_factory=operator_database, machine=command_runtime.machine
+        config,
+        home=registered_home,
+        retained_children=None,
+        database_factory=operator_database,
+        machine=command_runtime.machine,
     )
 
     assert rc == 1

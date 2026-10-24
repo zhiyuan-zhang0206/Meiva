@@ -1,4 +1,6 @@
-"""Synthetic cluster records and the data-plane config every data-plane test starts from."""
+# meiva:note
+# Synthetic cluster records and the data-plane config every data-plane test starts from.
+
 
 import dataclasses
 from typing import cast
@@ -63,6 +65,7 @@ def remote_data_plane_config(data_plane_config: DataPlaneConfig) -> DataPlaneCon
     return dataclasses.replace(data_plane_config, db_url=FOREIGN_DB, redis_url=FOREIGN_REDIS)
 
 
+# meiva:note
+# `config` with the Redis admin login `password` (positional, so a literal is no hard-coded secret).
 def with_redis_admin(config: DataPlaneConfig, password: str) -> DataPlaneConfig:
-    """`config` with the Redis admin login `password` (positional, so a literal is no hard-coded secret)."""
     return dataclasses.replace(config, redis_admin_password=password)

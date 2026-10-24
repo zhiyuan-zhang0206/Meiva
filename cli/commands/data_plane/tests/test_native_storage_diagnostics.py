@@ -1,4 +1,6 @@
-"""Root diagnostics use storage protocols without repairing permissions."""
+# meiva:note
+# Root diagnostics use storage protocols without repairing permissions.
+
 
 from __future__ import annotations
 
@@ -7,7 +9,6 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-import redis
 
 from base import cluster
 from base.cluster.machine import MachineIdentity
@@ -16,7 +17,8 @@ from base.config import settings
 from base.deploy.tests.containers import free_port, redis_server
 from base.host.db_authority import delivery
 from cli.commands.data_plane._pooler_stop import OwnedPooler
-from cli.commands.data_plane.tests.test_pooler_stop import native_pooler as native_pooler
+from cli.commands.data_plane.tests.native_cluster import redis_command, redis_from_url, redis_ping
+from cli.commands.data_plane.tests.native_processes import native_pooler as native_pooler
 from services.supervision.meiva_root.health import ProbeRunner
 from services.supervision.meiva_root_glue import diagnostic_probes as probes
 
@@ -25,22 +27,19 @@ async def test_native_redis_diagnostic_uses_authenticated_ping_without_acl_or_co
     monkeypatch: pytest.MonkeyPatch,
     redis_access: None,
 ) -> None:
-    with (
-        redis_server() as url,
-        redis.Redis.from_url(url, decode_responses=True) as client,  # pyright: ignore[reportUnknownMemberType] — redis client stubs
-    ):
-        client.execute_command(  # pyright: ignore[reportUnknownMemberType] — redis command stubs
-            "ACL", "SETUSER", "meiva_probe_fixture", "on", ">fixture-password", "+ping"
+    with redis_server() as url, redis_from_url(url, decode_responses=True) as client:
+        redis_command(
+            client, "ACL", "SETUSER", "meiva_probe_fixture", "on", ">fixture-password", "+ping"
         )
         runtime_url = url.replace("redis://", "redis://meiva_probe_fixture:fixture-password@")
         monkeypatch.setattr(settings.data_plane, "redis_url", runtime_url)
-        configuration = client.config_get("*")  # pyright: ignore[reportUnknownMemberType] — redis command stubs
-        acl = client.acl_list()  # pyright: ignore[reportUnknownMemberType] — redis command stubs
+        configuration = redis_command(client, "CONFIG", "GET", "*")
+        acl = redis_command(client, "ACL", "LIST")
         result = await ProbeRunner().observe(probes.redis_acl, 5)
         assert result.verdict.value == "alive", result.detail
-        assert client.ping(), "diagnostics must leave the native server running"  # pyright: ignore[reportUnknownMemberType] — redis command stubs
-        assert client.acl_list() == acl  # pyright: ignore[reportUnknownMemberType] — redis command stubs
-        assert client.config_get("*") == configuration  # pyright: ignore[reportUnknownMemberType] — redis command stubs
+        assert redis_ping(client), "diagnostics must leave the native server running"
+        assert redis_command(client, "ACL", "LIST") == acl
+        assert redis_command(client, "CONFIG", "GET", "*") == configuration
 
 
 async def test_absent_native_redis_diagnostic_is_down(
@@ -67,12 +66,13 @@ async def test_native_pooler_diagnostic_authenticates_without_config_writes(
     )
     monkeypatch.setattr(cluster, "get_record", Mock(return_value=record))
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
+    # meiva:note
     # The fixture pooler trusts its userlist; the probe authenticates as the
     # admin-console operator entry with the home's recorded credential.
     monkeypatch.setattr(
         delivery,
         "read_pooler_admin",
-        Mock(return_value=SimpleNamespace(password="fixture-admin")),  # noqa: S106 — trusted fixture pooler
+        Mock(return_value=SimpleNamespace(password="fixture-admin")),  # noqa: S106
     )
     before = custodian.config.read_bytes()
     result = await ProbeRunner().observe(partial(probes.pgbouncer, machine=machine_identity), 5)

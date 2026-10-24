@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable
-from dataclasses import dataclass
 
 import psutil
 
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
+from cli.commands.data_plane.maintenance.survivors import StopSurvivor
 
 
 # meiva:note
@@ -36,121 +36,34 @@ class StopIncompleteError(TimeoutError):
         self.survivors: list[dict[str, object]] = list(survivors or [])
 
 
-@dataclass(frozen=True)
-class StopSurvivor:
-    """One process still alive when a stop's deadline expired.
-
-    `birth`/`starttime` are the captured identity pair — the same proof the
-    stop path revalidates before signalling; the live fields are read at
-    report time and are best-effort, so an unreadable process is reported as
-    unreadable rather than dropped.
-    """
-
-    pid: int
-    role: str
-    service: str | None
-    ppid: int | None
-    pgid: int | None
-    status: str | None
-    birth: float
-    starttime: int | None
-    cmdline: str | None
-
-    def render(self) -> str:
-        parts = [f"pid={self.pid}"]
-        if self.ppid is not None:
-            parts.append(f"ppid={self.ppid}")
-        if self.pgid is not None:
-            parts.append(f"pgid={self.pgid}")
-        parts.append(f"role={self.role}")
-        parts.append(f"service={self.service!r}" if self.service else "service=<unattributed>")
-        if self.status is not None:
-            parts.append(f"status={self.status}")
-        parts.append(f"birth={self.birth:.3f}")
-        if self.starttime is not None:
-            parts.append(f"starttime={self.starttime}")
-        if self.cmdline:
-            text = self.cmdline
-            if len(text) > 300:
-                text = text[:297] + "..."
-            parts.append(f"cmdline={text!r}")
-        else:
-            parts.append("cmdline=<unreadable>")
-        return "    · " + " ".join(parts)
-
-    def payload(self) -> dict[str, object]:
-        return {
-            "pid": self.pid,
-            "role": self.role,
-            "service": self.service,
-            "ppid": self.ppid,
-            "pgid": self.pgid,
-            "status": self.status,
-            "birth": self.birth,
-            "starttime": self.starttime,
-            "cmdline": self.cmdline,
-        }
-
-
 # meiva:note
-# A held stop's deadline report: who is left.
-@dataclass(frozen=True)
-class SurvivorInventory:
-    survivors: list[StopSurvivor]
-
-    def render(self, *, stage: str, killed: bool = False) -> str:
-        """The printable inventory; `killed` when the survivors outlived a SIGKILL."""
-        outcome = "these outlived their SIGKILL" if killed else "nothing was force-killed"
-        header = f"remaining process inventory (stage={stage}; {outcome}):"
-        if not self.survivors:
-            return f"{header} no survivor readable at the deadline"
-        lines = [header, *(survivor.render() for survivor in self.survivors)]
-        if killed:
-            lines.append(
-                "  recovery: a process that outlives SIGKILL is usually another user's (a "
-                "root `sudo`) or stuck in the kernel; end it as its owner, then retry the command."
-            )
-        else:
-            lines.append(
-                "  recovery: retry the command to reconverge recorded groups, or escalate "
-                "explicitly with `meiva stop --mode force` if the listed process(es) are expendable."
-            )
-        return "\n".join(lines)
-
-    def payload(self) -> list[dict[str, object]]:
-        return [survivor.payload() for survivor in self.survivors]
-
-
+# Captured identities still present, in pid order.
+#
+# Reporting must not drop a survivor it cannot verify: an identity whose birth cannot be re-read
+# counts as present (it is then listed without live facts), while a confirmed birth mismatch
+# counts as gone, the same answer signalling gives. An unverifiable birth (the RuntimeError of
+# `OwnedProcess.live`) or an unreadable process (`psutil.AccessDenied`) keeps the survivor
+# listed rather than dropping it.
 def live_identities(identities: Iterable[OwnedProcess]) -> list[OwnedProcess]:
-    """Captured identities still present, in pid order.
-
-    Reporting must not drop a survivor it cannot verify: an identity whose
-    birth cannot be re-read counts as present (it is then listed without live
-    facts), while a confirmed birth mismatch counts as gone — the same answer
-    signalling gives.
-    """
     present: list[OwnedProcess] = []
     for identity in identities:
         try:
             alive = identity.live()
         except (RuntimeError, psutil.Error):
-            # Unverifiable birth (RuntimeError from `OwnedProcess.live`) or an
-            # unreadable process (psutil.AccessDenied): the deadline report keeps
-            # the survivor listed rather than dropping it.
             alive = True
         if alive:
             present.append(identity)
     return sorted(present, key=lambda identity: identity.pid)
 
 
+# meiva:note
+# Whether `identity` is still the process it was captured as.
+#
+# Guards the report's live reads exactly as signal delivery is guarded: a PID recycled since
+# capture must not describe itself with a stranger's cmdline. An unconfirmed birth (the platform
+# cannot re-read it) reads as not matched; the entry then keeps the captured identity and no
+# live facts.
 def identity_matches(identity: OwnedProcess) -> bool:
-    """Whether `identity` is still the process it was captured as.
-
-    Guards the report's live reads exactly as signal delivery is guarded: a
-    PID recycled since capture must not describe itself with a stranger's
-    cmdline. An unconfirmed birth (the platform cannot re-read it) reads as
-    not matched; the entry then keeps the captured identity and no live facts.
-    """
     try:
         if identity.starttime is not None:
             return pid_starttime_ticks(identity.pid) == identity.starttime
@@ -163,10 +76,11 @@ def identity_matches(identity: OwnedProcess) -> bool:
         return False
 
 
+# meiva:note
+# Read one survivor's live facts; reads only, never signals, never raises.
 def capture_survivor(
     identity: OwnedProcess, *, service: str | None, role: str, pgid_hint: int | None = None
 ) -> StopSurvivor:
-    """Read one survivor's live facts; reads only, never signals, never raises."""
     ppid: int | None = None
     pgid = pgid_hint
     status: str | None = None

@@ -36,7 +36,13 @@ subpackages hold the domains, each an independent package door:
 - `data_plane/` — per-cluster Postgres/Redis/PgBouncer bring-up, their verified
   maintenance stop (`maintenance_stop.py`), `meiva backup walg check|run|drill|restore|status` and the start-time
   WAL-archiving warning (`walg.py`); owns its converge step (`pgbouncer.py`)
-- `cluster/` — whole-cluster verbs, the health probe, cron, the registry
+- `cluster/` — whole-cluster verbs, the health probe, cron, `destroy` and a remote unit's
+  join. Each verb is a shell around a plan: the shells (`control.py`, `health.py`,
+  `home.py`, `cron.py`, `unit_join.py`) read the facts and execute, and the strict
+  modules in `cluster/plans/` decide the wording, the classification and the order from
+  values. A gateway verb takes the `GatewayAccess` its parser handler built from the
+  command's own configuration; the health probe takes a `HealthOptions` and reads the
+  cluster through `health_readings.py`.
 - `converge/` — the orchestrator (`host.py`), the step contract (`spec.py`),
   the warning-only start preflights (health, ports, ownership), the
   rendered-file guard, and host-wiring steps owned by no other domain
@@ -47,8 +53,10 @@ subpackages hold the domains, each an independent package door:
   drive: [[cli/commands/lifecycle/docs/lifecycle.meiva.okf.md|Host lifecycle]].
 
 `cli.commands.probe` owns service evidence, health-port occupancy checks and
-readiness reports, with an explicit `__all__` contract. Its declaration predicate
-stays local; tiering and source drift stay with their `base.deploy` owners.
+readiness reports, with an explicit `__all__` contract. It probes and prints; the wording of
+a service row and of the unready summaries is `probe_report.py` (strict: values in, text
+out). Its declaration predicate stays local; tiering and source drift stay with their
+`base.deploy` owners.
 
 `stop/` plans a stop (`plan.plan_stop`) and executes the plan; restart calls the same stop
 kernel with the data plane and browser kept; shell sessions are closed like in any
@@ -81,41 +89,7 @@ Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,
 
 ## Notes
 
-- Gate is an ordinary gateway service selected into the root manifest. Planned
-  root downtime includes its entry port; it has no separate OS job or detached
-  launcher. See [[services/entrypoints/gate/docs/gate.meiva.okf.md|Fleet UI Gate]].
-
-- `agents/timeline.py` exposes the existing timeline API as `meiva agents timeline`
-  and its exact `context` alias. `agents/impersonation.py` manages explicit external
-  requests, leases, inbox acknowledgments, local Python SDK attachment, and the
-  one attested send (`send` — task #4102).
-  `agents/impersonation_relay.py` forwards inbound availability to the owning external
-  model session; `--codex-remote` routes to the app server holding a Codex thread
-  without waiting for its external queue-store scan.
-  Usage: [External agent impersonation](../../../docs/conventions/agents/agent-impersonation.md).
-
-- Which cluster a command acts on comes from `cli/commands/_repo.py:repo_root` — the
-  checkout the running `meiva` belongs to — never the current directory.
-- What `meiva start` treats as already-up, what it waits for, and when an unready
-  service becomes exit code 4 are one subject, in
-  [[cli/commands/lifecycle/docs/start-readiness.meiva.okf.md]].
-- A fleet update is `python -m cli.fleet_update run` (`cli/fleet_update.py`):
-  one invocation stops, switches, starts and verifies all listed units. Separate
-  `down` and `up` commands support manual release work and recovery; see
-  [[cli/docs/fleet-update.meiva.okf.md]].
-- Host-level Application Firewall and Redis bridge wiring are one subject:
-  [[cli/commands/converge/docs/converge-host-wiring.meiva.okf.md]].
-- Converge-managed copies and their drift policy:
-  [[cli/commands/converge/docs/rendered-files.meiva.okf.md]].
-- Explicit editable-install inspection and write-window primitives are described
-  in [[editable-install-guard.meiva.okf.md]]. Ordinary start and converge never
-  repair or reinstall a separate production virtualenv.
-- `cli/init_intent.py` and `cli/start_intent.py` are routed **before** settings-gated
-  imports in `main()`: `meiva init` records complete home identity (and starts nothing),
-  and `meiva start` admits that identity, before runtime configuration loads.
-- [[cli/commands/converge/docs/ownership_preflight.meiva.okf.md]] names the
-  warning-only ownership repair guard that runs before converge writes later
-  host state.
+The cross-cutting notes live in [[commands-notes|Command package notes]].
 
 ## Key Dependencies
 

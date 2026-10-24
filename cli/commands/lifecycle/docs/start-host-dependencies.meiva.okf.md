@@ -11,7 +11,7 @@ tags:
 
 # Start host dependencies
 
-`cli/commands/data_plane/host_dependencies.py` runs one preflight as the first
+`cli/commands/data_plane/host_dependencies/` runs one preflight as the first
 cold-start converge step. It is a table (`HOST_TOOLS`), and `render_table()`
 prints that table; this document carries its output, and a test in
 `cli/commands/lifecycle/tests/start_storage/test_start_host_dependencies.py` fails when the two

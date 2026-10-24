@@ -15,7 +15,7 @@ from cli import init_intent
 from cli.database import open_operator_database, operator_database_factory, operator_event_pipeline
 from cli.database.runtime import CommandRuntime
 from cli.parsers import build_parser
-from cli.start_intent import admitted_start
+from cli.start_intent import admitted_home
 from cli.start_runtime import HomeSite
 from cli.startup.log_sinks import START_SINK
 from cli.startup.service_path import CallerHost
@@ -43,7 +43,7 @@ database_factory = operator_database_factory(
 )
 producer = operator_event_pipeline(database_factory, machine=command.machine, home=home)
 try:
-    with admitted_start(site):
+    with admitted_home(home):
         producer.initialize_logging(START_SINK)
         ensure_pgvector_extension(
             "meiva", base_admin_url="postgresql://probe@127.0.0.1:1/postgres?connect_timeout=5"

@@ -22,8 +22,8 @@ refuses everything else naming `meiva init`, a home with no intent included. The
 data-plane host live in its `record` (`base/cluster/record.py`), and no host
 file lists clusters. A new home records the fixed port table
 (`base/host/env/port_table.py`) after the entry's bind probe finds every port free
-(`CallerHost.occupied_ports`, read once by `cli/main.py`; `prepare_identity` refuses a
-table with an occupied port); a record whose slots differ from the table is refused. The intent's `checkout` is the
+(`CallerHost.occupied_ports`, read once by `cli/main.py` and carried as the required
+`IdentityInput.occupied_ports`; `prepare_identity` refuses a table with an occupied port); a record whose slots differ from the table is refused. The intent's `checkout` is the
 home's admitted runtime: the database-authority delivery admits only a process running
 from it (`base/host/db_authority/delivery.py`). An intent that still carries the
 `worktree` key an older start recorded is refused by name rather than read. An
@@ -88,11 +88,12 @@ excludes ignored build outputs.
 `cli/main.py` hands each entry its home, checkout and host facts as values; the contract of the entries and of the pure modules around the start lifecycle (`cli/startup/`) is in [[cli/docs/entry.meiva.okf.md]].
 
 `cli/start_runtime.py` (`StartRuntime`) names what one start executes: the checkout
-that loaded the code, its working directory and the interpreter that loaded it.
-It is captured once, rechecked before each lifecycle phase, and grants no
-migration, writer-closure or other operation right. Restart captures the same
-runtime before recording lifecycle progress or stopping services and passes it
-into startup. Source convergence preserves host setup and scaffold
+that loaded the code, its working directory, the interpreter that loaded it and the
+`LoadedRuntimeIdentity` verified for that checkout. `StartRuntime.admit` verifies it once,
+at the composition root; it grants no migration, writer-closure or other operation right.
+The serving root must report that same identity when the start publishes serving, so a
+source change after admission fails the start. Restart admits the runtime before
+stopping services and passes it into both legs. Source convergence preserves host setup and scaffold
 steps without automatic production editable-install repair or reinstall.
 
 On macOS only, root must descend from the signed permissions helper. Linux root

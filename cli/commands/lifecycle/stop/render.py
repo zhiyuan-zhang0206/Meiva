@@ -87,12 +87,16 @@ def phase_timing(phases: Sequence[tuple[str, float]]) -> str:
 #
 # A failed stop names each phase and how much of the shared budget it consumed, so the
 # operator sees where the budget went (services vs shell sessions vs data plane), never a
-# bare timeout. Nothing is restarted behind the operator's back.
-def incomplete_report(error: str, phases: Sequence[tuple[str, float]], journal_path: str) -> str:
+# bare timeout. Nothing is restarted behind the operator's back. `journal_path` is None when the
+# stop failed before it opened a lifecycle journal: there is no journal to point at.
+def incomplete_report(
+    error: str, phases: Sequence[tuple[str, float]], journal_path: str | None
+) -> str:
     timing = phase_timing(phases)
+    journal = "" if journal_path is None else f" Status journal: {journal_path}."
     return (
         f"Stop incomplete; services and the data plane were not force-killed: {error}. "
         f"phases: {timing or 'before the first phase'}. "
         "Retry the command, or use meiva start (with this unit's explicit service selection) "
-        f"to resume. Status journal: {journal_path}."
+        f"to resume.{journal}"
     )

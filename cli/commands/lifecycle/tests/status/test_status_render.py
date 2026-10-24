@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from cli.commands.lifecycle.status.gateway import (
+    GatewayCredentialMissing,
     GatewayReport,
     GatewayUnreachable,
     GatewayUnresolved,
@@ -156,4 +157,16 @@ def test_an_unresolvable_gateway_url_prints_inline() -> None:
     assert gateway_status_lines(GatewayUnresolved("gateway_url unset")) == (
         *_HEADING,
         "  ✗ cannot resolve gateway URL: gateway_url unset",
+    )
+
+
+def test_a_missing_gateway_credential_prints_inline_with_what_is_missing() -> None:
+    detail = (
+        "this process holds no gateway credential: no machine API token (MEIVA_API_TOKEN) and "
+        "no MEIVA_CLUSTER_SECRET"
+    )
+
+    assert gateway_status_lines(GatewayCredentialMissing(detail)) == (
+        *_HEADING,
+        f"  ✗ cannot authenticate to the gateway: {detail}",
     )

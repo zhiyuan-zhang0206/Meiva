@@ -175,13 +175,20 @@ def _inputs(args: argparse.Namespace, site: HomeSite, caller: CallerHost) -> Ide
     if "gateway" not in roles:
         if not values.get("MEIVA_GATEWAY_URL"):
             raise ValueError("a remote unit's init requires --gateway-url")
-        join_gateway(values, home, args.db_capability)
+        join_gateway(values, home, args.db_capability, caller.transport_key)
     elif args.db_capability is not None:
         raise ValueError(
             "--db-capability is for agent-runner units; a gateway unit keeps its own "
             "write-generation ledger"
         )
-    return IdentityInput(home, site.checkout, roles, values, digest, caller.occupied_ports)
+    return IdentityInput(
+        home,
+        site.checkout,
+        roles,
+        values,
+        occupied_ports=caller.occupied_ports,
+        config_digest=digest,
+    )
 
 
 # meiva:note

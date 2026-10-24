@@ -135,30 +135,6 @@ def clear(home: Path) -> bool:
     return True
 
 
-# meiva:note
-# The one question a boot job asks: is this home stopped on purpose right now?
-def blocks_boot(home: Path, *, now: datetime) -> StandDown | None:
-    stand = read(home)
-    if stand is None:
-        return None
-    return None if stand.deadline_passed(now) else stand
-
-
-# meiva:note
-# The line a start prints for this home's stand-down, or None when there is none:
-# the OS boot job leaves a stopped home alone, and an explicit start is the one
-# thing that ends a stand-down and says so.
-def gate(home: Path, *, boot_attempt: bool, now: datetime) -> str | None:
-    if boot_attempt:
-        held = blocks_boot(home, now=now)
-        if held is None:
-            return None
-        return f"stand-down ({held.describe(now)}): the boot job leaves this home stopped"
-    if clear(home):
-        return "stand-down cleared by an explicit start"
-    return None
-
-
 def window_until(seconds: int | None, *, now: datetime) -> datetime | None:
     if seconds is None:
         return None

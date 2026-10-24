@@ -47,6 +47,7 @@ def initialized_runner_home(home: Path, checkout: Path) -> Path:
                 "MEIVA_GATEWAY_URL": "http://127.0.0.1:1",
                 "MEIVA_SERVICE_PATH": str(checkout.parent / "tools"),
             },
+            occupied_ports=frozenset(),
         )
     )
     return home

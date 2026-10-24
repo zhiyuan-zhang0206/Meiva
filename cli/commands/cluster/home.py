@@ -1,203 +1,212 @@
-"""Decommission of the host's cluster; initialization belongs only to start."""
+# meiva:note
+# Decommission of the host's cluster; initialization belongs only to start.
+#
+# `meiva cluster destroy` is a shell around a plan. The shell reads what the home records and
+# what this host is, `plans.destroy_plan` decides what to ask, say and run, and the steps are
+# executed here in order, stopping at the first one that fails so a half-torn-down home stays
+# attached with its destroy intent retained.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
-import sys
-from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TextIO
 
+from base.cluster.dataplane.pg_admin import pg_socket_path
+from base.host.permissions_helper.client import PermissionsHelperClient
+from base.host.private_storage import write_private_bytes
+from base.host.system.autostart import unregister_autostart
+from base.host.system.cron import unregister_os_cron
 from base.host.system.hostport import Host
+from base.host.system.logs_job import unregister_logs_job
+from base.host.system.packages_job import unregister_packages_job
+from base.host.system.pr_flow_job import unregister_pr_flow_job
+from base.host.system.walg_job import unregister_walg_job
+from base.native_process.os_platform import file_lock
+from cli.commands.cluster.plans.destroy_plan import (
+    CONFIRMATION_PROMPT,
+    NO_TERMINAL_REFUSAL,
+    STOP_INCOMPLETE,
+    DestroyFacts,
+    DestroyStep,
+    DropData,
+    PublishIntent,
+    RetireHelper,
+    RetireJobs,
+    StopCluster,
+    answer_confirms,
+    cleanup_incomplete,
+    destroy_prompt,
+    plan_destroy,
+    scheduled_jobs_failure,
+)
+from cli.start_identity import read_intent
+from services.desktop.permissions_helper.launchd_job import unregister_helper
 
 
-def _repo_root() -> Path:
-    # cli/commands/ is two levels below repo root.
-    return Path(__file__).resolve().parents[2]
+# meiva:note
+# The three streams a person sits at. Destroy asks for a typed confirmation, so it needs
+# them as values: only a terminal on both ends can answer it.
+@dataclass(frozen=True)
+class Terminal:
+    stdin: TextIO
+    stdout: TextIO
+    stderr: TextIO
+
+    @property
+    def interactive(self) -> bool:
+        return self.stdin.isatty() and self.stdout.isatty()
 
 
-def _drop_dirs(home: Path) -> list[Path]:
-    """What `--drop-db` deletes: the cluster's own data directories and the short
-    Postgres socket directory under /tmp. One list for the prompt and the removal,
-    so the prompt names exactly what goes."""
-    from base.cluster.dataplane.pg_admin import pg_socket_path
+# meiva:note
+# What the operator asked destroy to do, with the facts of this checkout and configuration
+# that the composition root reads once: the home it acts on (this process's home, the default
+# production home included), the checkout whose `meiva` runs the stop, and the registered
+# permissions-helper port.
+@dataclass(frozen=True)
+class DestroyRequest:
+    home: Path
+    drop_db: bool
+    stop_mode: str
+    stop_timeout_s: float
+    checkout: Path
+    helper_port: int
 
-    return [home / "pg", home / "redis", pg_socket_path(home)]
+
+# meiva:note
+# What `--drop-db` deletes: the cluster's own data directories and the short Postgres socket
+# directory under /tmp. One list for the prompt and the removal, so the prompt names exactly
+# what goes.
+def _drop_dirs(home: Path) -> tuple[Path, ...]:
+    return (home / "pg", home / "redis", pg_socket_path(home))
 
 
-def interactive() -> bool:
-    return sys.stdin.isatty() and sys.stdout.isatty()
-
-
-def _confirm_destroy(home: Path, *, roles: list[str], drop_db: bool) -> bool:
-    """Ask a person at a terminal to type the home path; True only when they did.
-
-    Destroy is irreversible, so the confirmation is the point: it needs stdin and
-    stdout to be terminals and offers no flag that skips it. Anything else (no
-    terminal, end of input, a different string) does nothing.
-    """
-    if not interactive():
-        print(
-            "✗ meiva cluster destroy: refusing without an interactive terminal "
-            "(over ssh, use `ssh -t`); there is no flag that skips the confirmation",
-            file=sys.stderr,
-        )
-        return False
-    role_text = ", ".join(roles) if roles else "no roles recorded"
-    print(f"meiva cluster destroy will decommission the cluster at {home} ({role_text}):")
-    print("  - stop its services and its own Postgres and Redis")
-    print("  - retire this host's OS jobs (launchd, crontab, boot unit) and the permissions helper")
-    print(
-        "  - mark the home detached: `meiva start` refuses it until destroy-intent.json is deleted"
+# meiva:note
+# Detach the host's cluster: stop it, retire its OS jobs and helper, mark the home detached,
+# optionally remove its data dirs.
+#
+# Returns 0 on success, 1 when the home holds no start intent, the confirmation is not given,
+# or a step fails (a failed stop returns the stop's own status).
+#
+# Without `--drop-db` the home's own files stay (`.env` included): a detached home's `.env`
+# is the only copy of that cluster's secret, of any key hand-added beyond `SEED_ENV_KEYS`, and
+# of the URLs its data-plane identity is read from. The `detached` destroy intent is what
+# stops the leftover home from starting again (`cli.start_identity.prepare_identity` refuses
+# it); deleting that file by hand is the only way back.
+def cmd_cluster_destroy(request: DestroyRequest, *, host: Host, terminal: Terminal) -> int:
+    home = request.home.resolve()
+    intent = read_intent(home)
+    if intent is None:
+        print(f"✗ meiva cluster destroy: no start intent at '{home}'", file=terminal.stderr)
+        return 1
+    facts = DestroyFacts(
+        home=str(home),
+        roles=tuple(intent["roles"]),
+        stop_mode=request.stop_mode,
+        stop_timeout_s=request.stop_timeout_s,
+        meiva_executable=str(request.checkout / ".venv" / "bin" / "meiva"),
+        platform=host.platform.system,
+        helper_port=request.helper_port,
+        drop_dirs=tuple(str(directory) for directory in _drop_dirs(home))
+        if request.drop_db
+        else (),
     )
-    if "gateway" in roles:
-        print("  - this host serves the gateway: every agent-runner loses its control plane")
-    if drop_db:
-        print("  - DELETE the cluster's database and cache, which cannot be undone:")
-        for directory in _drop_dirs(home):
-            print(f"      {directory}")
-    try:
-        answer = input("Type the home path to confirm: ")
-    except EOFError:
-        answer = ""
-    if answer.strip() != str(home):
-        print("aborted: nothing was changed", file=sys.stderr)
+    if not _confirmed(facts, terminal):
+        return 1
+    plan = plan_destroy(facts)
+    # meiva:note
+    # Publish a terminal intent before stopping. Concurrent/internal starts must refuse it from
+    # the first moment of the teardown.
+    with file_lock(home / "start-intent.lock", timeout_s=30):
+        for step in plan.under_lock:
+            failed = _execute(step, request, home=home, host=host, terminal=terminal)
+            if failed is not None:
+                return failed
+    for step in plan.afterwards:
+        _execute(step, request, home=home, host=host, terminal=terminal)
+    return 0
+
+
+# meiva:note
+# Ask a person at a terminal to type the home path; True only when they did.
+#
+# Anything else (no terminal, end of input, a different string) does nothing.
+def _confirmed(facts: DestroyFacts, terminal: Terminal) -> bool:
+    if not terminal.interactive:
+        print(NO_TERMINAL_REFUSAL, file=terminal.stderr)
+        return False
+    for line in destroy_prompt(facts):
+        print(line, file=terminal.stdout)
+    terminal.stdout.write(CONFIRMATION_PROMPT)
+    terminal.stdout.flush()
+    if not answer_confirms(terminal.stdin.readline(), facts.home):
+        print("aborted: nothing was changed", file=terminal.stderr)
         return False
     return True
 
 
-def stop_command(*, roles: list[str], mode: str, timeout: float) -> list[str]:
-    # meiva:note
-    # Stop this cluster entirely: services, shell sessions, browser, extras, data plane.
-    #
-    # The child is `meiva stop`, run from this checkout with the same home. A
-    # detach leaves nothing of the cluster running, so every keep-or-stop choice
-    # is "stop" by the verb's meaning; the operator names the mode and the budget.
-    # A gateway also stops its own data plane: `--drop-db` then removes the data
-    # directories of a genuinely stopped instance, never a live one. `--yes`
-    # because the child has no terminal to confirm on (destroy confirmed already).
-    return [
-        str(_repo_root() / ".venv" / "bin" / "meiva"),
-        "stop",
-        "--yes",
-        "--close-shell-sessions",
-        "--stop-browser",
-        "--stop-extras",
-        "--keep-no-services",
-        "--mode",
-        mode,
-        "--timeout",
-        f"{timeout:g}",
-        *(["--stop-infra"] if "gateway" in roles else []),
-    ]
+# meiva:note
+# Perform one step; the exit status to stop with when it failed, else None.
+def _execute(
+    step: DestroyStep, request: DestroyRequest, *, home: Path, host: Host, terminal: Terminal
+) -> int | None:
+    match step:
+        case PublishIntent():
+            write_private_bytes(home / "destroy-intent.json", step.marker())
+            if step.announce is not None:
+                print(step.announce, file=terminal.stdout)
+        case StopCluster(argv):
+            returncode = subprocess.run(argv, cwd=request.checkout, check=False).returncode
+            if returncode != 0:
+                print(STOP_INCOMPLETE, file=terminal.stderr)
+                return returncode
+        case RetireJobs():
+            try:
+                unregister_scheduled_jobs(host=host)
+            except (OSError, RuntimeError, ValueError, TypeError) as exc:
+                print(cleanup_incomplete(str(exc)), file=terminal.stderr)
+                return 1
+        case RetireHelper(helper_port):
+            try:
+                unregister_helper(home, helper_port=helper_port, connect=PermissionsHelperClient)
+            except (OSError, RuntimeError, ValueError, TypeError) as exc:
+                print(cleanup_incomplete(str(exc)), file=terminal.stderr)
+                return 1
+        case DropData(directories, announce):
+            # meiva:note
+            # The whole Postgres+Redis instance is this cluster's own, so removing its data dirs
+            # IS the drop: there is no shared server to DROP DATABASE inside. The stop already
+            # stopped it.
+            for directory in directories:
+                shutil.rmtree(directory, ignore_errors=True)
+            print(announce, file=terminal.stdout)
+    return None
 
 
-def stop_cluster(*, roles: list[str], mode: str, timeout: float) -> int:
-    # meiva:note
-    # Run `stop_command` from this checkout with the same home.
-    cmd = stop_command(roles=roles, mode=mode, timeout=timeout)
-    return subprocess.run(cmd, cwd=_repo_root(), check=False).returncode
-
-
-def cmd_cluster_destroy(
-    *, drop_db: bool = False, stop_mode: str, stop_timeout: float, host: Host
-) -> int:
-    """Detach the host's cluster: stop it, retire its OS jobs and helper, mark the
-    home detached, optionally remove its data dirs.
-
-    Acts on this process's home (`MEIVA_HOME`, else `~/.meiva`), the default
-    production home included, after `_confirm_destroy`. Returns 0 on success, 1
-    when the home holds no start intent, the confirmation is not given, or a step
-    fails.
-
-    Without `--drop-db` the home's own files stay (`.env` included): a detached
-    home's `.env` is the only copy of that cluster's secret, of any key hand-added
-    beyond `SEED_ENV_KEYS`, and of the URLs its data-plane identity is read from.
-    The `detached` destroy intent is what stops the leftover home from starting
-    again (`cli.start_identity.prepare_identity` refuses it); deleting that file by
-    hand is the only way back.
-    """
-    from base.paths import meiva_home
-    from cli.start_identity import read_intent
-
-    home = meiva_home().resolve()
-    intent = read_intent(home)
-    if intent is None:
-        print(f"✗ meiva cluster destroy: no start intent at '{home}'", file=sys.stderr)
-        return 1
-    if not _confirm_destroy(home, roles=list(intent["roles"]), drop_db=drop_db):
-        return 1
-
-    from base.config import settings
-    from base.host.permissions_helper.client import PermissionsHelperClient
-    from base.host.private_storage import write_private_bytes
-    from base.native_process.os_platform import file_lock
-    from services.desktop.permissions_helper.launchd_job import unregister_helper
-
-    # Publish a terminal intent before stopping. Concurrent/internal starts must
-    # refuse it from the first moment of the teardown.
-    with file_lock(home / "start-intent.lock", timeout_s=30):
-        write_private_bytes(home / "destroy-intent.json", b'{"version":1,"state":"destroying"}\n')
-        rc = stop_cluster(roles=list(intent["roles"]), mode=stop_mode, timeout=stop_timeout)
-        if rc != 0:
-            print("cluster stop incomplete; destroy intent retained", file=sys.stderr)
-            return rc
-        try:
-            unregister_scheduled_jobs(host=host)
-            unregister_helper(
-                home,
-                helper_port=settings.services.permissions_helper_port,
-                connect=PermissionsHelperClient,
-            )
-        except (OSError, RuntimeError, ValueError, TypeError) as exc:
-            print(f"cluster cleanup incomplete: {exc}", file=sys.stderr)
-            return 1
-        write_private_bytes(home / "destroy-intent.json", b'{"version":1,"state":"detached"}\n')
-        print(f"detached {home} after exact cleanup")
-
-    if drop_db:
-        # The whole Postgres+Redis instance is this cluster's own, so removing its
-        # data dirs IS the drop — there is no shared server to DROP DATABASE inside.
-        # `stop_cluster` already stopped it (above).
-        import shutil
-
-        for directory in _drop_dirs(home):
-            shutil.rmtree(directory, ignore_errors=True)
-        print(f"✓ removed '{home}' per-cluster data plane (pg + redis data dirs)")
-
-    return 0
-
-
+# meiva:note
+# Remove every OS-scheduled job the host registered (health probe, boot autostart, logs
+# maintenance, packages refresh, PR flow and the WAL-G tick).
+#
+# Labels name jobs, not homes, and each `unregister_*` is a no-op outside the default home, so
+# a scratch home's destroy never touches the host's jobs. Every job must be retired before the
+# home is marked detached. An unavailable scheduler is ambiguous custody, so failures are
+# raised.
 def unregister_scheduled_jobs(*, host: Host) -> None:
-    """Remove every OS-scheduled job the host registered (health probe, boot
-    autostart, logs maintenance, packages refresh, PR flow and the WAL-G tick).
-
-    Labels name jobs, not homes, and each `unregister_*` is a no-op outside the
-    default home, so a scratch home's destroy never touches the host's jobs.
-
-    Every job must be retired before the home is marked detached. An
-    unavailable scheduler is ambiguous custody, so failures are raised.
-    """
-    from base.host.system.autostart import unregister_autostart
-    from base.host.system.cron import unregister_os_cron
-    from base.host.system.logs_job import unregister_logs_job
-    from base.host.system.packages_job import unregister_packages_job
-    from base.host.system.pr_flow_job import unregister_pr_flow_job
-    from base.host.system.walg_job import unregister_walg_job
-
-    jobs: list[tuple[str, Callable[..., None]]] = [
+    jobs = (
         ("health probe", unregister_os_cron),
         ("autostart", unregister_autostart),
         ("logs maintenance", unregister_logs_job),
         ("packages refresh", unregister_packages_job),
         ("PR flow", unregister_pr_flow_job),
         ("WAL-G tick", unregister_walg_job),
-    ]
-    failed: list[str] = []
+    )
+    failed: list[tuple[str, str]] = []
     for name, unregister in jobs:
         try:
             unregister(host=host)
         except Exception as e:
-            failed.append(f"{name} ({e})")
-
+            failed.append((name, str(e)))
     if failed:
-        raise RuntimeError("could not remove scheduled jobs: " + ", ".join(failed))
+        raise RuntimeError(scheduled_jobs_failure(failed))

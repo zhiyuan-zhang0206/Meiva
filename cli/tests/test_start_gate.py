@@ -1,4 +1,5 @@
-"""`meiva start` admits only a home `meiva init` initialized, and takes no identity input."""
+# meiva:note
+# `meiva start` admits only a home `meiva init` initialized, and takes no identity input.
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
+from base.native_process.os_platform import file_lock
 from cli import start_identity, start_intent
 from cli.database import OperatorDatabaseFactory, operator_event_pipeline
 from cli.database.runtime import CommandRuntime
@@ -33,14 +35,17 @@ def tools(tmp_path: Path) -> str:
     return str(tmp_path / "tools")
 
 
+# meiva:note
+# A home `meiva init` would have left: intent and `.env` published.
 def _home(tmp_path: Path, tools: str, roles: set[str], **extra: str) -> Path:
-    """A home `meiva init` would have left: intent and `.env` published."""
     home = tmp_path / "home"
     checkout = tmp_path / "checkout"
     checkout.mkdir(exist_ok=True)
     values = {"MEIVA_MACHINE_NAME": "gate", "MEIVA_SERVICE_PATH": tools, **extra}
     start_identity.prepare_identity(
-        start_identity.IdentityInput(home, checkout, frozenset(roles), values)
+        start_identity.IdentityInput(
+            home, checkout, frozenset(roles), values, occupied_ports=frozenset()
+        )
     )
     return home
 
@@ -99,6 +104,39 @@ def test_start_reports_a_refusal_on_stderr_opens_no_sink_and_makes_nothing(
     assert not home.exists()
 
 
+# meiva:note
+# The runtime is admitted under the home's lock and before any sink opens: a checkout that did
+# not load this code is refused by name, and the lock is free for the next lifecycle operation.
+def test_a_start_from_a_checkout_that_did_not_load_the_code_is_refused_before_any_sink(
+    tmp_path: Path,
+    tools: str,
+    capsys: pytest.CaptureFixture[str],
+    cli_log_sinks: list[str],
+    operator_database: OperatorDatabaseFactory,
+    command_runtime: CommandRuntime,
+) -> None:
+    home = _home(tmp_path, tools, _GATEWAY)
+    producer = operator_event_pipeline(
+        operator_database, machine=command_runtime.machine, home=home
+    )
+    args = build_parser().parse_args(["start", "--all-services"])
+    args.runtime = replace(command_runtime, home=home)
+
+    rc = start_intent.run_start(
+        args,
+        _site(home, tmp_path),
+        retained_children=[],
+        database_factory=operator_database,
+        producer=producer,
+    )
+
+    assert rc == 1
+    assert "differs from its loaded canonical checkout" in capsys.readouterr().err
+    assert cli_log_sinks == []
+    with file_lock(home / "start-intent.lock", timeout_s=0.05):
+        pass
+
+
 def test_resources_without_an_intent_are_refused(tmp_path: Path) -> None:
     home = tmp_path / "home"
     (home / "pg").mkdir(parents=True)
@@ -131,7 +169,7 @@ def test_an_initialized_home_is_admitted_and_left_as_it_was(
     start_identity.mark_phase(home, phase)
     before = _bytes(home)
 
-    with start_intent.admitted_start(_site(home, tmp_path)):
+    with start_intent.admitted_home(home):
         pass
 
     assert _bytes(home) == before
@@ -144,7 +182,7 @@ def test_an_initialized_home_is_admitted_and_left_as_it_was(
 def test_start_never_joins_a_gateway(tmp_path: Path, tools: str) -> None:
     home = _home(tmp_path, tools, {"agent-runner"}, MEIVA_GATEWAY_URL="http://127.0.0.1:1")
 
-    with start_intent.admitted_start(_site(home, tmp_path)):
+    with start_intent.admitted_home(home):
         pass
 
 
@@ -186,11 +224,12 @@ def test_a_remote_unit_that_records_the_human_secret_is_refused(tmp_path: Path, 
         pytest.param("MEIVA_DB_URL=postgresql://db.invalid/meiva\n", id="gateway"),
     ],
 )
+# meiva:note
+# A home with no `start-intent.json` has no admission, whatever its `.env` and capability flags
+# declare: `meiva start` takes an identity only from `meiva init`.
 def test_a_home_with_an_identity_but_no_intent_is_refused(
     tmp_path: Path, tools: str, env: str
 ) -> None:
-    """A home with no `start-intent.json` has no admission, whatever its `.env` and
-    capability flags declare: `meiva start` takes an identity only from `meiva init`."""
     home = tmp_path / "predates-the-intent"
     home.mkdir(mode=0o700)
     (home / ".env").write_text(
@@ -198,4 +237,4 @@ def test_a_home_with_an_identity_but_no_intent_is_refused(
     )
 
     assert "no recorded identity" in _refusal(home)
-    assert not (home / start_identity.INTENT_NAME).exists()  # a start never writes an identity
+    assert not (home / start_identity.INTENT_NAME).exists(), "a start never writes an identity"

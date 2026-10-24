@@ -1,8 +1,0 @@
-[debt.env-patch]
-"test_commands_cluster_status_lifecycle.py#monkeypatch.delenv os.environ.MEIVA_API_TOKEN" = 1
-
-[debt.first-party-patch]
-"test_commands_cluster_status_lifecycle.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
-
-[debt.third-party-patch]
-"test_commands_cluster_status_lifecycle.py#monkeypatch.setattr httpx.get" = 2

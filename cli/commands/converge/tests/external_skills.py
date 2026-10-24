@@ -11,7 +11,8 @@ from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
-from cli.commands.converge.spec import ConvergeCtx, UserSession
+from cli.commands.converge.spec import ConvergeCtx
+from cli.database.runtime import UserSession
 
 SKILL = "operating-meiva-cluster"
 

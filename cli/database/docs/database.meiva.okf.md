@@ -46,7 +46,7 @@ boundaries; init and start admit the home before configuration-dependent work.
 The lazy local-host reader belongs to that same command's `CommandRuntime.machine`; the factory
 binds it to each resolver without reading it. Only a direct resolution of a non-loopback URL
 needs its value.
-`operator_event_pipeline(factory, machine=command.machine, home=meiva_home())` retains one lazy pipeline for logging and
+`operator_event_pipeline(factory, machine=command.machine, home=command.home)` retains one lazy pipeline for logging and
 health initialization and cold command reporters; `OperatorEventPipeline(..., flush_interval_s=)` sets how long its writer holds a
 partial batch (0.5 seconds by default). Its database writer borrows
 this same factory. Producer ports are `Callable[[], EventPipeline]`; the
@@ -69,3 +69,16 @@ builders receive that input rather than constructing another operator. Tests
 outside the existing fixture scopes import this fixture explicitly; they do not
 extend scope declarations or inherit unrelated autouse inputs. Runtime CI
 dependency analysis follows these fixture and helper imports back to this owner.
+
+## Lifecycle audit scope
+
+`lifecycle_audit.operator_lifecycle_audit(database_factory=...)` is the audit scope of one operator
+lifecycle command ([the caller record](../../../base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md)).
+It reads the caller block and the source commit once, when the scope opens, and writes every request
+and the outcome through the command's own factory. Writing a row stays best-effort: a database that
+is down is the state `meiva start` repairs. Reading the caller is not: a caller that cannot be read
+(a working directory that no longer exists) refuses the command with a `RuntimeError` before it
+changes anything, so a command never runs unattributed. A source checkout with no readable commit is
+not a fault; the rows carry `head_sha: null`. The boot job's retried start (`enabled=False`) opens
+no audit. A test reads the rows back from Postgres with
+`cli/database/tests/lifecycle_rows.py:lifecycle_rows`, which opens that scope with the real recorders.

@@ -1,0 +1,17 @@
+exports = ["data_plane.py", "exporters.py", "install.py", "remote.py", "render.py", "text.py"]
+
+[purity]
+"__init__.py" = "strict"
+"data_plane.py" = "strict"
+"exporter_blocks.py" = "strict"
+"exporters.py" = "strict"
+"install.py" = "strict"
+"remote.py" = "strict"
+"render.py" = "strict"
+"text.py" = "strict"
+
+[uses]
+"data_plane.py" = ["text.py"]
+"exporters.py" = ["exporter_blocks.py", "text.py"]
+"remote.py" = ["text.py"]
+"render.py" = ["remote.py"]

@@ -1,0 +1,16 @@
+exports = ["archive.py", "dashboard_checks.py", "dashboard_plan.py", "download_report.py", "download_retry.py", "install.py", "render.py", "urls.py"]
+
+[purity]
+"__init__.py" = "strict"
+"archive.py" = "strict"
+"dashboard_checks.py" = "strict"
+"dashboard_plan.py" = "strict"
+"download_report.py" = "strict"
+"download_retry.py" = "strict"
+"install.py" = "strict"
+"render.py" = "strict"
+"urls.py" = "strict"
+
+[uses]
+"dashboard_checks.py" = ["dashboard_plan.py"]
+"download_report.py" = ["download_retry.py"]

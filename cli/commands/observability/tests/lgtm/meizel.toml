@@ -1,0 +1,7 @@
+[uses]
+"test_lgtm_validation.py" = ["lgtm_harness.py"]
+"test_converge_lgtm.py" = ["lgtm_harness.py"]
+"test_lgtm_download.py" = ["lgtm_harness.py"]
+"test_lgtm_endpoints.py" = ["lgtm_harness.py"]
+"test_lgtm_native.py" = ["lgtm_harness.py"]
+"test_lgtm_station.py" = ["lgtm_harness.py", "test_lgtm_native.py"]

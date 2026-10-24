@@ -44,6 +44,22 @@ def test_readiness_probes_now_instead_of_believing_the_roots_cached_health(
     assert not result.sessions_gone
 
 
+# meiva:note
+# A root whose status cannot be read is no root yet: the poll keeps going and ends unready at its
+# deadline instead of failing the whole start.
+def test_a_root_with_an_unreadable_status_leaves_the_core_unready(short_tmp: Path) -> None:
+    gateway = service(probe=up)
+
+    with scripted_root(short_tmp, [UnitRow("gateway")]) as root:
+        root.raw_unit_rows = [{"id": "gateway", "state": "running", "last_error": 5}]
+        result = readiness.wait_for_service_tree(
+            (gateway,), timeout_s=0.05, home=short_tmp, poll_interval_s=POLL_S
+        )
+
+    assert result.unready == (gateway,)
+    assert not result.sessions_gone
+
+
 def test_a_ready_core_settles_on_one_status_observation(short_tmp: Path) -> None:
     with scripted_root(short_tmp, [UnitRow("gateway")]) as root:
         result = readiness.wait_for_service_tree(
