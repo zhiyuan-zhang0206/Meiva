@@ -29,7 +29,9 @@ class TraceSettings(Protocol):
 #
 # `enabled` is `MEIVA_TRACE_ENABLED`; `strip_content` keeps LLM content out of spans;
 # `endpoint` is the local collector's OTLP/HTTP address; `retention_days`, `max_dir_mb`
-# and `disk_watermark` bound the on-disk mirror.
+# and `disk_watermark` bound the on-disk mirror. `endpoint_explicit` is whether the operator
+# named the endpoint (`MEIVA_TELEMETRY_OTLP_ENDPOINT` is set), which opens export on a home
+# that is not the observability station.
 @dataclass(frozen=True)
 class TraceConfig:
     enabled: bool
@@ -38,11 +40,12 @@ class TraceConfig:
     retention_days: int
     max_dir_mb: int
     disk_watermark: float
+    endpoint_explicit: bool
 
     # meiva:note
     # The recording config of a process's observability settings.
     @classmethod
-    def of(cls, observability: TraceSettings) -> TraceConfig:
+    def of(cls, observability: TraceSettings, *, endpoint_explicit: bool) -> TraceConfig:
         return cls(
             enabled=observability.trace_enabled,
             strip_content=observability.trace_strip_content,
@@ -50,4 +53,5 @@ class TraceConfig:
             retention_days=observability.trace_retention_days,
             max_dir_mb=observability.trace_max_dir_mb,
             disk_watermark=observability.trace_disk_watermark,
+            endpoint_explicit=endpoint_explicit,
         )

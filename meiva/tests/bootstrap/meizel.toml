@@ -34,7 +34,6 @@ exports = ["child_sdk_probes.py"]
 "test_plugin_config_meiva.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
 "test_session_venv_projection.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 1
 "test_session_venv_projection.py#monkeypatch.setattr meiva.shell.sessions.create_session" = 1
-"test_session_venv_projection.py#monkeypatch.setattr meiva.shell.sessions.forward_env_dict" = 1
 "test_session_venv_projection.py#monkeypatch.setattr meiva.shell.sessions.repo_root" = 2
 "test_session_venv_projection.py#monkeypatch.setattr meiva.shell.sessions.shell_sessions" = 1
 "test_session_venv_projection.py#monkeypatch.setattr meiva.shell.sessions.workspace_dir" = 1

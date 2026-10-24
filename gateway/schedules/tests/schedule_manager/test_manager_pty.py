@@ -21,6 +21,7 @@ from psycopg_pool import ConnectionPool
 
 from base.cluster import session_name
 from base.deploy.lifecycle.start_serving import RootBirth
+from base.host.env.registry import process_environment
 from base.sessions.backend import get_shell_backend
 from base.sessions.env_forwarding import forward_env_dict
 from base.sessions.pty import client
@@ -104,7 +105,10 @@ def _host_is_serving(serving_root: RootBirth, _pty_home: str) -> Iterator[None]:
 # A manager launching the way the daemon does: the real session backend and the forwarded env.
 def _manager(pool: ConnectionPool, *, repo_root: Path = REPO) -> sm.ScheduleManager:
     return schedule_manager(
-        pool, get_shell_backend(), repo_root=repo_root, launch_env=forward_env_dict()
+        pool,
+        get_shell_backend(),
+        repo_root=repo_root,
+        launch_env=forward_env_dict(process_environment()),
     )
 
 

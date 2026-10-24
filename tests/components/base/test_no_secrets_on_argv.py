@@ -108,11 +108,15 @@ def test_session_backend_new_session(
     secret_env: None, captured_argv: list[list[str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`meiva start` / `meiva restart` bring every daemon up through here."""
+    from base.host.env.registry import process_environment
     from base.sessions.backend import PosixProcSessionBackend
     from base.sessions.env_forwarding import forward_env_dict
 
     PosixProcSessionBackend().new_session(
-        "meiva-gateway", ".venv/bin/python -m gateway", Path("/repo"), env=forward_env_dict()
+        "meiva-gateway",
+        ".venv/bin/python -m gateway",
+        Path("/repo"),
+        env=forward_env_dict(process_environment()),
     )
     assert captured_argv, "no subprocess was launched"
     assert_clean(captured_argv[-1], label="PosixProcSessionBackend.new_session")
@@ -133,12 +137,16 @@ def test_launch_record_cannot_reach_a_live_process(
     `has_session` is the same resolve `kill_session` does, so False here means
     there is nothing for it to reach.
     """
+    from base.host.env.registry import process_environment
     from base.sessions import posixproc
     from base.sessions.backend import PosixProcSessionBackend
     from base.sessions.env_forwarding import forward_env_dict
 
     PosixProcSessionBackend().new_session(
-        "meiva-gateway", ".venv/bin/python -m gateway", Path("/repo"), env=forward_env_dict()
+        "meiva-gateway",
+        ".venv/bin/python -m gateway",
+        Path("/repo"),
+        env=forward_env_dict(process_environment()),
     )
     assert captured_argv, "no subprocess was launched"
     assert not posixproc.has_session("meiva-gateway")

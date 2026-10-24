@@ -6,9 +6,10 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from agent.process_boot import init_process_scope, land_cluster_extensions
+from agent.process_boot import init_process_scope, land_cluster_extensions, process_trace_config
 from base import db, paths
 from base.cluster.machine import MachineIdentity
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.packages.extensions import registry as reg
@@ -105,6 +106,7 @@ def test_process_scope_passes_its_machine_and_home_without_reading_identity(
         retention_days=14,
         max_dir_mb=2048,
         disk_watermark=0.9,
+        endpoint_explicit=False,
     )
     calls: list[tuple[MachineIdentity, Path, TraceConfig]] = []
 
@@ -114,3 +116,16 @@ def test_process_scope_passes_its_machine_and_home_without_reading_identity(
     monkeypatch.setattr(tracing, "initialize_tracing", initialize)
     init_process_scope(machine=machine, home=unit_home, trace=trace)
     assert calls == [(machine, unit_home, trace)]
+
+
+@pytest.mark.parametrize(
+    ("launch_environment", "explicit"),
+    [({}, False), ({"MEIVA_TELEMETRY_OTLP_ENDPOINT": "http://collector.invalid:4318"}, True)],
+)
+def test_the_process_trace_config_records_whether_the_launch_named_the_endpoint(
+    launch_environment: dict[str, str], explicit: bool
+) -> None:
+    config = snapshot_process_config()
+    config.environment = launch_environment
+
+    assert process_trace_config(config).endpoint_explicit is explicit

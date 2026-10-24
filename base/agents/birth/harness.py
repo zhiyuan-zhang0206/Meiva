@@ -353,9 +353,9 @@ CliRunner = Callable[..., "subprocess.CompletedProcess[str]"]
 
 
 def _cli_environment() -> dict[str, str]:
-    from base.host.env.registry import child_env
+    from base.host.env.registry import child_env, process_environment
 
-    environment = child_env("runner")
+    environment = child_env("runner", process_environment())
     return {**environment, "PATH": harness_child_path(path_env=environment.get("PATH"))}
 
 

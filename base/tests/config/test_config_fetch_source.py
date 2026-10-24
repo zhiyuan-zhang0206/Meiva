@@ -27,8 +27,6 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import ClassVar
 
-import pytest
-
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 
 _LITE_REDIS_URL = "redis://config-lite@127.0.0.1:1/0"
@@ -251,9 +249,7 @@ def test_pure_runner_settings_build_fetches_and_overrides(tmp_path: Path) -> Non
         server.server_close()
 
 
-def test_runner_daemon_boot_from_session_env_handoff(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_runner_daemon_boot_from_session_env_handoff(tmp_path: Path) -> None:
     """The daemon-boot chain under the 2026-08-02 session-env policy, end to end:
 
     a watchdog/start process on a pure runner forwards its env through
@@ -304,10 +300,9 @@ def test_runner_daemon_boot_from_session_env_handoff(
             "MEIVA_EVENTS_CHANNEL": "meiva:stale-events",
             "PATH": "/usr/bin:/bin",
         }
-        monkeypatch.setattr(os, "environ", dict(spawner_env))
 
         # `meiva start`'s child env: host-scope kept, cluster-scope gone.
-        child = env_forwarding.forward_env_dict()
+        child = env_forwarding.forward_env_dict(spawner_env)
         assert child["MEIVA_HOME"] == str(home)
         assert child["MEIVA_MACHINE_HOST"] == "10.0.0.9"
         assert child["MEIVA_GATEWAY_URL"] == f"http://127.0.0.1:{port}"

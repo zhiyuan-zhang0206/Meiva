@@ -46,6 +46,7 @@ def trace_config(
     retention_days: int = 3,
     max_dir_mb: int = 2048,
     disk_watermark: float = 0.9,
+    endpoint_explicit: bool = False,
 ) -> TraceConfig:
     return TraceConfig(
         enabled=enabled,
@@ -54,6 +55,7 @@ def trace_config(
         retention_days=retention_days,
         max_dir_mb=max_dir_mb,
         disk_watermark=disk_watermark,
+        endpoint_explicit=endpoint_explicit,
     )
 
 

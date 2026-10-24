@@ -12,7 +12,7 @@ import pytest
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.ownership import OwnedProcess
-from base.native_process.root_control.client import RootClient
+from base.native_process.root_control.client import RootClient, caller_identity
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.meiva_root.server import ControlServer
 from services.supervision.meiva_root.stopping import StoppingMixin, UnitStopTimeoutError
@@ -197,7 +197,8 @@ async def test_down_over_the_control_socket_succeeds_for_a_unit_closing_past_ten
         await owner.start()
         await wait_file(ready)
         response = await asyncio.to_thread(
-            RootClient(short_tmp / "meiva-root.sock", timeout=60).down, "worker"
+            RootClient(short_tmp / "meiva-root.sock", caller=caller_identity({}), timeout=60).down,
+            "worker",
         )
         assert response["ok"] is True, response
         assert await state(owner) == "stopped"

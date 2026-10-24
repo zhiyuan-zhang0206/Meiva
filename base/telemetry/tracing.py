@@ -627,9 +627,9 @@ def _serialized_initialize[**P](function: Callable[P, None]) -> Callable[P, None
 def initialize_tracing(*, machine: MachineIdentity, home: Path, config: TraceConfig) -> None:
     if state.get("closed") or state["initialized"] or state["arm_failed"]:
         return
-    if not config.enabled:
-        return
-    if not observability_export_allowed(machine, home=home):
+    if not config.enabled or not observability_export_allowed(
+        machine, home=home, endpoint_explicit=config.endpoint_explicit
+    ):
         return
 
     # Bounded disk FIRST — before the watermark guard, so the relief valves

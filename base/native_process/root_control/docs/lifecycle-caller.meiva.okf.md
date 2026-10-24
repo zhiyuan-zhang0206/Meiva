@@ -27,7 +27,7 @@ fail-fast and rejects it on every other verb:
         "operation_id": "stop@1792322999",
         "env_keys": ["DEEPSEEK_API_KEY"]}}
 
-`caller_identity()` in `base/native_process/root_control/client.py` builds it:
+`caller_identity(environ)` in `base/native_process/root_control/client.py` builds it:
 
 - `argv` is truncated (32 items, 200 characters each) and **redacted** — a
   sensitive flag (`--token`, `--password`, `-p`, …) loses its value, whether it

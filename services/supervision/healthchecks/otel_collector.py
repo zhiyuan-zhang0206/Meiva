@@ -8,8 +8,13 @@ from http.client import HTTPException
 from base.cluster.machine import MachineIdentity, MachineRoleMissing
 from base.config import settings
 from base.daemon.health import DaemonProbe
+from base.host.env.registry import process_environment
 from base.paths import meiva_home
-from base.telemetry.observability import collector_allowed_for_home, gateway_observability_home
+from base.telemetry.observability import (
+    collector_allowed_for_home,
+    endpoint_override_is_explicit,
+    gateway_observability_home,
+)
 
 _QUEUE_SAMPLE = re.compile(
     r"^otelcol_exporter_queue_(?P<kind>capacity|size)\{(?P<labels>[^}]*)\}\s+(?P<value>[0-9.eE+-]+)$"
@@ -30,7 +35,12 @@ def collector_serves_this_home(*, machine: MachineIdentity) -> bool:
         return True
     home = meiva_home()
     return collector_allowed_for_home(
-        gateway_observability_home(machine, home=home), machine=machine, unit_home=home
+        gateway_observability_home(machine, home=home),
+        machine=machine,
+        unit_home=home,
+        endpoint_explicit=endpoint_override_is_explicit(
+            "MEIVA_TELEMETRY_OTLP_ENDPOINT", process_environment()
+        ),
     )
 
 

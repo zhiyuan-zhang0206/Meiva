@@ -1,6 +1,6 @@
 """Cluster identity helpers shared by observability producers and readers."""
 
-import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
@@ -47,14 +47,16 @@ def _report_label_fallback(stage: str, exc: BaseException) -> None:
     report_sink_failure(f"cluster label {stage}", exc)
 
 
-def endpoint_override_is_explicit(variable: ObservabilityEndpointVariable) -> bool:
-    """Whether the process environment explicitly selected an endpoint.
-
-    Settings always exposes a default loopback URL, so its resolved value cannot
-    distinguish operator intent from the unsafe co-located-home default. This
-    narrow presence check is therefore the authority for the escape hatch.
-    """
-    return variable in os.environ
+# meiva:note
+# Whether `environ` explicitly selected an endpoint.
+#
+# Settings always exposes a default loopback URL, so its resolved value cannot
+# distinguish operator intent from the unsafe co-located-home default. This
+# narrow presence check is therefore the authority for the escape hatch.
+def endpoint_override_is_explicit(
+    variable: ObservabilityEndpointVariable, environ: Mapping[str, str]
+) -> bool:
+    return variable in environ
 
 
 def gateway_observability_home(machine: MachineIdentity, *, home: Path) -> Path | None:
@@ -103,7 +105,7 @@ def home_is_observability_station(home: Path, *, machine: MachineIdentity, unit_
 
 
 def collector_allowed_for_home(
-    home: Path | None, *, machine: MachineIdentity, unit_home: Path
+    home: Path | None, *, machine: MachineIdentity, unit_home: Path, endpoint_explicit: bool
 ) -> bool:
     """Whether the gateway home at ``home`` may run the local otel-collector.
 
@@ -125,6 +127,7 @@ def collector_allowed_for_home(
     """
     if home is None:
         return True
-    return home_is_observability_station(
-        home, machine=machine, unit_home=unit_home
-    ) or endpoint_override_is_explicit("MEIVA_TELEMETRY_OTLP_ENDPOINT")
+    return (
+        home_is_observability_station(home, machine=machine, unit_home=unit_home)
+        or endpoint_explicit
+    )

@@ -16,7 +16,6 @@ exports = ["fake_process_control.py", "host_pipe.py"]
 "test_os_platform.py#monkeypatch.setattr base.native_process.os_platform.os.getpid" = 1
 "test_os_platform.py#monkeypatch.setattr base.native_process.os_platform.subprocess.run" = 1
 "test_proc_tree.py#monkeypatch.setattr base.native_process.ownership.OwnedProcess.capture" = 1
-"test_proc_tree.py#monkeypatch.setattr base.native_process.ownership.pid_starttime_ticks" = 2
 "test_proc_tree.py#monkeypatch.setattr base.native_process.ownership.psutil.Process" = 1
 "test_proc_tree_identity.py#monkeypatch.setattr base.native_process.ownership.pid_starttime_ticks" = 3
 "test_proc_tree_identity.py#monkeypatch.setattr base.native_process.ownership.stable_create_time" = 1
@@ -25,7 +24,6 @@ exports = ["fake_process_control.py", "host_pipe.py"]
 "test_proc_tree_identity.py#monkeypatch.setattr base.native_process.pidfd.sys" = 1
 
 [debt.restricted-python]
-"test_proc_tree.py#python -c" = 1
 "test_proc_tree_identity.py#python -c" = 3
 
 [debt.stdlib-patch]

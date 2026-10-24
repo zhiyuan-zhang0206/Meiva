@@ -15,7 +15,6 @@ exports = ["test_start_readiness_gate.py"]
 "test_checkpoint_migration_phase.py#monkeypatch.setattr base.cluster.dataplane.pg_admin.local_owner_authority" = 3
 "test_checkpoint_migration_phase.py#monkeypatch.setattr base.cluster.dataplane.pg_admin.psycopg.connect" = 2
 "test_checkpoint_migration_phase.py#monkeypatch.setattr base.cluster.dataplane.pg_admin.require_postgres_connection" = 3
-"test_checkpoint_migration_phase.py#monkeypatch.setattr base.cluster.provision.CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS" = 4
 "test_checkpoint_migration_phase.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
 "test_checkpoint_migration_phase.py#monkeypatch.setattr base.config.settings.data_plane.redis_url" = 1
 "test_checkpoint_migration_phase.py#monkeypatch.setattr base.deploy.schema.migrations.apply_pending_migrations" = 1
@@ -100,7 +99,7 @@ exports = ["test_start_readiness_gate.py"]
 "test_commands_start.py#monkeypatch.setattr sys.stdin.isatty" = 1
 
 [debt.third-party-patch]
-"test_checkpoint_migration_phase.py#monkeypatch.setattr langgraph.checkpoint.postgres.PostgresSaver.MIGRATIONS" = 2
+"test_checkpoint_migration_phase.py#monkeypatch.setattr langgraph.checkpoint.postgres.PostgresSaver.MIGRATIONS" = 1
 
 [debt.unresolved-patch]
 "test_start_readiness_gate.py#monkeypatch.setattr command_runtime.machine.role" = 1

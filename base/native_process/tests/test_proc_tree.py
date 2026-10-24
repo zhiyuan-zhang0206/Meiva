@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 import os
-import signal
-import subprocess
-import sys
 from typing import Any
 
 import psutil
 import pytest
 
 from base.native_process import ownership as proc_tree
-from base.native_process import pid_starttime_ticks
 from base.native_process.os_platform import is_linux
 from base.native_process.ownership import OwnedProcess, stable_create_time
 
@@ -44,45 +40,23 @@ def test_birth_matches_exposes_the_same_rule() -> None:
     assert not changed.birth_matches(process)
 
 
-@pytest.mark.requires_host("linux")
-def test_live_converges_when_the_proc_entry_vanishes_mid_check(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
-    pid = child.pid
-    starttime = pid_starttime_ticks(pid)
-    assert starttime is not None
-    real_read = pid_starttime_ticks
-
-    def reaping_read(reading_pid: int) -> int | None:
-        if reading_pid == pid:
-            os.kill(pid, signal.SIGKILL)
-            child.wait()
-        return real_read(reading_pid)
-
-    monkeypatch.setattr(proc_tree, "pid_starttime_ticks", reaping_read)
-    try:
-        assert OwnedProcess(pid, 0.5, starttime).live() is False
-    finally:
-        if child.poll() is None:
-            child.kill()
-            child.wait()
+def test_a_proc_entry_that_vanished_mid_check_converges_as_gone() -> None:
+    assert OwnedProcess(4242, 0.5, 777).ticks_match(None, pid_exists=False) is False
 
 
-@pytest.mark.requires_host("linux")
-def test_live_keeps_the_error_when_a_present_process_cannot_be_read(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    process = psutil.Process()
-    identity = OwnedProcess(process.pid, process.create_time(), pid_starttime_ticks(process.pid))
-    assert identity.starttime is not None
-
-    def unreadable_read(_pid: int) -> int | None:
-        return None
-
-    monkeypatch.setattr(proc_tree, "pid_starttime_ticks", unreadable_read)
+def test_a_present_process_whose_ticks_cannot_be_read_keeps_the_error() -> None:
     with pytest.raises(RuntimeError, match="cannot verify process identity"):
-        identity.live()
+        OwnedProcess(4242, 0.5, 777).ticks_match(None, pid_exists=True)
+
+
+@pytest.mark.parametrize(("observed", "expected"), [(777, True), (778, False)])
+def test_readable_ticks_decide_by_equality(observed: int, expected: bool) -> None:
+    assert OwnedProcess(4242, 0.5, 777).ticks_match(observed, pid_exists=True) is expected
+
+
+def test_a_record_without_ticks_has_nothing_to_compare() -> None:
+    with pytest.raises(ValueError, match="no recorded start ticks"):
+        OwnedProcess(4242, 0.5, None).ticks_match(777, pid_exists=True)
 
 
 @pytest.mark.requires_host("darwin")

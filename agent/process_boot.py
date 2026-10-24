@@ -8,12 +8,14 @@ from typing import Any
 
 import meiva
 from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides, agent_setting
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.log import logger
 from base.paths import exec_run_dir, workspace_dir
+from base.telemetry.observability import endpoint_override_is_explicit
 from base.telemetry.otlp.trace_config import TraceConfig
 from meiva.sdk_surface import sdk_disable
 
@@ -65,6 +67,19 @@ def clear_exec_run_dir(home: Path) -> None:
             shutil.rmtree(entry)
         else:
             entry.unlink()
+
+
+# meiva:note
+# The trace configuration of a booted process: its observability settings, and whether its
+# launch environment names the collector endpoint (which opens export on a home that is not
+# the observability station).
+def process_trace_config(config: ConfigBoot) -> TraceConfig:
+    return TraceConfig.of(
+        config.view.observability,
+        endpoint_explicit=endpoint_override_is_explicit(
+            "MEIVA_TELEMETRY_OTLP_ENDPOINT", config.process_environment()
+        ),
+    )
 
 
 def init_process_scope(*, machine: MachineIdentity, home: Path, trace: TraceConfig) -> None:

@@ -44,4 +44,3 @@
 
 [debt.stdlib-patch]
 "test_cluster_tz.py#monkeypatch.setattr os.path.realpath" = 4
-"test_config_fetch_source.py#monkeypatch.setattr os.environ" = 1

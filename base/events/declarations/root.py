@@ -672,7 +672,7 @@ EVENTS: dict[str, EventSpec] = {
         "the boot-time meiva start failed through its whole attempt budget and is no longer retried",
         payload=BootRetriesExhausted,
         tier="anomaly",
-        site="cli/start_intent.py:_run_boot_attempt telemetry.emit",
+        site="cli/start_intent.py:run_boot_attempt telemetry.emit",
     ),
     "schedule_verify_failed": telemetry_event(
         "schedule_verify_failed",

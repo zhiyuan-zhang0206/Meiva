@@ -118,17 +118,17 @@ def root_process(*, home: Path, timeout: float = 2.0) -> OwnedProcess | None:
 # machines cannot be confused, as they were on 2026-10-15), and `env_keys` lists
 # only the *names* of credential-shaped variables that were set.
 # meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
-def caller_identity() -> CallerPayload:
+def caller_identity(environ: Mapping[str, str]) -> CallerPayload:
     return CallerPayload(
         pid=os.getpid(),
         ppid=os.getppid(),
         uid=os.getuid(),
         cwd=_bounded(str(Path.cwd())),
         argv=redacted_argv(list(sys.argv)),
-        agent_id=os.environ.get("MEIVA_AGENT_ID") or None,
+        agent_id=environ.get("MEIVA_AGENT_ID") or None,
         machine=_machine_name(),
-        operation_id=_operation_id(),
-        env_keys=sensitive_env_keys(os.environ),
+        operation_id=environ.get("MEIVA_OPERATION_ID") or None,
+        env_keys=sensitive_env_keys(environ),
     )
 
 
@@ -185,19 +185,21 @@ def _machine_name() -> str:
 
 
 # meiva:note
-# The operation an outer lifecycle verb belongs to, when the launcher exported
-# one. Reading run/lifecycle-op.json here would make native_process depend on
-# base.deploy, which already reaches this layer.
-# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
-def _operation_id() -> str | None:
-    return os.environ.get("MEIVA_OPERATION_ID") or None
-
-
+# One blocking call per method, one connection per call.
+#
+# A client that sends a state verb (`up`, `down`, `force_down`) is built with the
+# `caller` block of the process it speaks for (`caller_identity(environ)`); a
+# status client needs none, and a state verb without one is refused.
 class RootClient:
-    """One blocking call per method, one connection per call."""
-
-    def __init__(self, socket_path: Path, *, timeout: float = _DEFAULT_TIMEOUT_S) -> None:
+    def __init__(
+        self,
+        socket_path: Path,
+        *,
+        caller: CallerPayload | None = None,
+        timeout: float = _DEFAULT_TIMEOUT_S,
+    ) -> None:
         self._socket_path = socket_path
+        self._caller = caller
         self._timeout = timeout
 
     def call(self, verb: str, name: str | None = None) -> ResponsePayload:
@@ -206,7 +208,9 @@ class RootClient:
         if name is not None:
             request["name"] = name
         if verb in STATE_VERBS:
-            request["caller"] = caller_identity()
+            if self._caller is None:
+                raise RootClientError(f"lifecycle verb {verb!r} needs the client's caller identity")
+            request["caller"] = self._caller
         raw = self._roundtrip(encode(request), status=verb == "status")
         try:
             return parse_status_response(raw) if verb == "status" else parse_response(raw)

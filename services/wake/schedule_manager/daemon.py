@@ -198,7 +198,7 @@ async def run(
             repo_root=REPO_ROOT,
             home=runtime.parent,
             policy=manager_policy(process_config),
-            launch_env=forward_env_dict(),
+            launch_env=forward_env_dict(process_config.process_environment()),
         )
         await run_loops(pool, manager, liveness)
     finally:

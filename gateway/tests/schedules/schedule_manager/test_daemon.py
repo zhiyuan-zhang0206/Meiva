@@ -25,6 +25,7 @@ from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.loop_health import LivenessGroup
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.env.registry import process_environment
 from base.native_process.loaded_commit import LoadedCommit
 from base.sessions.backend import get_shell_backend
 from base.sessions.env_forwarding import forward_env_dict
@@ -74,7 +75,9 @@ async def test_both_loops_run_their_rounds(
     # a deleted schedule: the request loop reaps its (absent) session
     _queue(db_conn, 4242)
     liveness = LivenessGroup(timers=SYSTEM_TIMERS)
-    manager = schedule_manager(pool, get_shell_backend(), launch_env=forward_env_dict())
+    manager = schedule_manager(
+        pool, get_shell_backend(), launch_env=forward_env_dict(process_environment())
+    )
 
     task = asyncio.create_task(daemon.run_loops(pool, manager, liveness))
     try:
@@ -93,7 +96,9 @@ async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
     db_conn: psycopg.Connection, pool: ConnectionPool, pty_service: PtyServiceProcess
 ) -> None:
     _queue(db_conn, 4242)
-    manager = schedule_manager(pool, get_shell_backend(), launch_env=forward_env_dict())
+    manager = schedule_manager(
+        pool, get_shell_backend(), launch_env=forward_env_dict(process_environment())
+    )
 
     with (
         failing_write(db_conn, table="schedule_sync_requests", events="DELETE"),
