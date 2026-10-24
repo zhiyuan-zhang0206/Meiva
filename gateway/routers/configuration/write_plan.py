@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from base.api_contracts.config import ConfigFieldWriteResult, ConfigWriteResult
 from base.config.admin.editing import ConfigPatchPlan, split_reducer_patch
 from base.config.admin.metadata import ConfigFieldMeta
+from base.config.env_changed import EnvChangedError
 from gateway.routers.refusal import HttpFailure
 from ops.rpc_schemas import ConfigWriteOpResult
 
@@ -25,8 +26,6 @@ __all__ = [
     "stale_env_conflict",
     "write_result",
 ]
-
-STALE_ENV_MESSAGE = ".env changed before owned runtime-config write"
 
 
 # meiva:note
@@ -87,7 +86,7 @@ def candidate_rejection(errors: Sequence[str]) -> HttpFailure | None:
 # meiva:note
 # The retryable 409 for a write that found `.env` changed since validation, or None.
 def stale_env_conflict(error: RuntimeError) -> HttpFailure | None:
-    if str(error) == STALE_ENV_MESSAGE:
+    if isinstance(error, EnvChangedError):
         return HttpFailure(409, "config changed concurrently; retry the request")
     return None
 
