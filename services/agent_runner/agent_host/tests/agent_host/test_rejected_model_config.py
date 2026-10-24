@@ -14,7 +14,8 @@ from base.native_process.turn_identity import HostedServiceResources
 from base.packages.tests.model_catalog import AddModels
 from base.sessions.tests.poll_until import poll_until_async
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
-from services.agent_runner.agent_host.runtime import HostCachePolicy, config_fingerprint
+from services.agent_runner.agent_host.runtime import HostCachePolicy
+from services.agent_runner.agent_host.stored_config import config_fingerprint
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.runtime.host_support import Build, Row
 

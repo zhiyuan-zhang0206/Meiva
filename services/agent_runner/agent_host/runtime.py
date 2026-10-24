@@ -4,8 +4,6 @@ wake-time admission of an agent's stored model configuration."""
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -33,6 +31,7 @@ from base.lm.harness.wiring import bridge_for
 from base.lm.registry import resolve_available_model
 from base.log import logger
 from base.paths import workspace_dir
+from services.agent_runner.agent_host import stored_config
 
 __all__ = [
     "AgentRuntime",
@@ -40,9 +39,7 @@ __all__ = [
     "HostPolicy",
     "HostStats",
     "StallTiming",
-    "StoredConfig",
     "admit_stored_model",
-    "config_fingerprint",
 ]
 
 
@@ -107,40 +104,6 @@ class HostPolicy:
         )
 
 
-def config_fingerprint(
-    config_overlay: dict[str, object] | None, birth_config: dict[str, object] | None
-) -> str:
-    """A stable digest of the two stored config maps — the runtime cache key.
-
-    `sort_keys` makes it independent of JSONB key order, so re-reading the same
-    unchanged row never looks like a change. `default=str` keeps a value psycopg
-    decoded into something non-JSON (a Decimal, a datetime) from raising here: a
-    fingerprint that cannot be computed would be a hard failure on the turn path,
-    while a coerced one at worst compares two odd values by their repr — and
-    these maps hold validated Settings scalars.
-    """
-    blob = json.dumps(
-        {"overlay": config_overlay, "birth": birth_config}, sort_keys=True, default=str
-    )
-    return hashlib.sha256(blob.encode()).hexdigest()
-
-
-@dataclass
-class StoredConfig:
-    """One agent's row as the host needs it: where it lives, whether it may run,
-    and the two config maps that decide what running means."""
-
-    machine: str
-    status: str
-    harness: str
-    config_overlay: dict[str, object] | None
-    birth_config: dict[str, object] | None
-
-    @property
-    def fingerprint(self) -> str:
-        return config_fingerprint(self.config_overlay, self.birth_config)
-
-
 @dataclass
 class AgentRuntime:
     """The per-agent half of a turn, cached across turns.
@@ -201,7 +164,7 @@ def admit_stored_model(
     pins: dict[str, Any],
     *,
     agent_id: int,
-    stored: StoredConfig,
+    stored: stored_config.StoredConfig,
     stats: HostStats,
     rejected: dict[int, str],
     normalized: dict[int, str],
