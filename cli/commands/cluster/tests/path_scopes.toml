@@ -3,7 +3,6 @@
 "cli.database.tests.cli_tests" = [
     ".",
 ]
-"meiva.tests.fixtures.sdk" = [
-    "test_cluster_lifecycle.py",
-    "test_commands_cluster_status.py"
+"base.host.db_authority.tests.generation" = [
+    "unit_capability",
 ]

@@ -1,14 +1,12 @@
-"""`meiva lgtm render` — the meiva-ops dashboard render, from the metric registries.
-
-Task #3697 slice S1 (parent #3689): ``base.telemetry.metrics.grafana_dashboard`` renders the
-dashboard from the registered ``MetricSpec`` set and
-``base.packages.dashboard_supply`` collects the plugin side (checkout plugins
-plus enabled installed ones). This command is the operator surface for that
-render: it diffs the render against THIS host's native Grafana provisioning
-copy (the live ``meiva-ops-main.json``) or writes the render with ``--force``.
-Slice S3 reuses the same render path inside converge, where the render
-replaces the checkout copy as the provisioning source.
-"""
+# meiva:note
+# `meiva lgtm render` — the meiva-ops dashboard render, from the metric registries.
+#
+# `base.telemetry.metrics.grafana_dashboard` renders the dashboard from the registered
+# `MetricSpec` set and `base.packages.dashboard_supply` collects the plugin side (checkout plugins
+# plus enabled installed ones). This command is the operator surface for that render: it diffs the
+# render against THIS host's native Grafana provisioning copy (the live `meiva-ops-main.json`) or
+# writes the render with `--force`. Converge reuses the same render path, where the render replaces
+# the checkout copy as the provisioning source.
 
 from __future__ import annotations
 
@@ -16,20 +14,19 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import cast
 
 from base.agents.context.clients import DatabaseFactory
 from base.host.atomic_io import write_text_atomic
-from cli.commands.observability._lgtm_provisioning import (
-    RENDERED_DASHBOARD_REL,
-    record_rendered_hash,
-)
+from cli.commands.observability._lgtm_provisioning import record_rendered_hash
+from cli.commands.observability.plans.lgtm.dashboard_plan import RENDERED_DASHBOARD_REL
 
 __all__ = ["cmd_grafana_render"]
 
 
+# meiva:note
+# The native provisioning copy converge renders the dashboard into.
 def provisioning_dashboard(home: Path) -> Path:
-    """The native provisioning copy converge renders into (S3 target)."""
     return home / "lgtm" / "native" / "config" / RENDERED_DASHBOARD_REL
 
 
@@ -37,30 +34,25 @@ def _hashes_path(home: Path) -> Path:
     return home / "lgtm" / "native" / "config" / "provisioning-hashes.json"
 
 
-def atomic_write(path: Path, content: str) -> None:
-    """Write via a unique sibling temp file + replace — a reader never sees a partial
-    file, and a failed write leaves the previous file untouched."""
-    write_text_atomic(
-        path, content, encoding="utf-8", mode=0o644, sync_file=False, sync_parent=False
-    )
-
-
 def _digest(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def _panels_by_identity(content: str) -> dict[str, Any] | None:
-    """Panel id+title -> panel JSON for one dashboard file; None when the
-    content is not parseable as a dashboard (reported, not crashed on)."""
+# meiva:note
+# Panel id and title mapped to the panel JSON for one dashboard file; None when the content is not
+# parseable as a dashboard (reported by the caller, not crashed on).
+def _panels_by_identity(content: str) -> dict[str, object] | None:
     try:
         data = json.loads(content)
     except json.JSONDecodeError:
         return None
-    return {f"{panel.get('id')}:{panel.get('title')}": panel for panel in data.get("panels", [])}
+    panels = cast("list[dict[str, object]]", data.get("panels", []))
+    return {f"{panel.get('id')}:{panel.get('title')}": panel for panel in panels}
 
 
+# meiva:note
+# Print what the render would change about the current file.
 def _report_diff(target: Path, current: str, rendered: str) -> None:
-    """Print what the render would change about the current file."""
     have = _panels_by_identity(current)
     want = _panels_by_identity(rendered)
     if have is None or want is None:
@@ -83,18 +75,17 @@ def _report_diff(target: Path, current: str, rendered: str) -> None:
             print(f"  {label}: {printed}", file=sys.stderr)
 
 
-def cmd_grafana_render(*, force: bool, repo_only: bool, database_factory: DatabaseFactory) -> int:
-    """Render the meiva-ops dashboard and diff it (default) or write it (--force).
-
-    The spec set is the checkout's plugins plus, unless ``--repo_only``, the
-    enabled installed-plugin registry rows — the same dual supplier slice S3
-    uses in converge. Exit code: 0 when the provisioning copy already matches
-    (or was written), 1 when it differs (diff preview) or the render cannot
-    run on this host.
-    """
-    from base.paths import meiva_home
-
-    target = provisioning_dashboard(meiva_home())
+# meiva:note
+# Render the meiva-ops dashboard and diff it (default) or write it (`--force`).
+#
+# The spec set is the checkout's plugins plus, unless `--repo_only`, the enabled installed-plugin
+# registry rows: the same dual supplier converge uses. Exit code: 0 when the provisioning copy
+# already matches (or was written), 1 when it differs (diff preview) or the render cannot run on
+# this host.
+def cmd_grafana_render(
+    *, home: Path, force: bool, repo_only: bool, database_factory: DatabaseFactory
+) -> int:
+    target = provisioning_dashboard(home)
     if not target.parent.is_dir():
         print(
             f"no native Grafana provisioning tree at {target.parent} — this host does not "
@@ -114,7 +105,7 @@ def cmd_grafana_render(*, force: bool, repo_only: bool, database_factory: Databa
     current = target.read_text(encoding="utf-8") if target.is_file() else None
 
     if current == rendered:
-        record_rendered_hash(_hashes_path(meiva_home()), RENDERED_DASHBOARD_REL, _digest(rendered))
+        record_rendered_hash(_hashes_path(home), RENDERED_DASHBOARD_REL, _digest(rendered))
         print(
             f"{target.name}: in sync ({len(json.loads(rendered)['panels'])} entries, sha256 {_digest(rendered)[:12]})"
         )
@@ -128,8 +119,10 @@ def cmd_grafana_render(*, force: bool, repo_only: bool, database_factory: Databa
         print("run `meiva lgtm render --force` to write the render", file=sys.stderr)
         return 1
 
-    atomic_write(target, rendered)
-    record_rendered_hash(_hashes_path(meiva_home()), RENDERED_DASHBOARD_REL, _digest(rendered))
+    write_text_atomic(
+        target, rendered, encoding="utf-8", mode=0o644, sync_file=False, sync_parent=False
+    )
+    record_rendered_hash(_hashes_path(home), RENDERED_DASHBOARD_REL, _digest(rendered))
     print(
         f"{target}: written ({len(json.loads(rendered)['panels'])} entries, sha256 {_digest(rendered)[:12]})"
     )

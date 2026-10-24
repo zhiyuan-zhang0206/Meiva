@@ -1,0 +1,16 @@
+exports = ["diagnosis.py", "gate_plan.py", "install_plan.py", "readings.py", "scope.py", "table.py"]
+
+[uses]
+"__init__.py" = ["diagnosis.py", "gate_plan.py", "install_plan.py", "readings.py", "scope.py", "table.py"]
+"diagnosis.py" = ["scope.py", "table.py"]
+"gate_plan.py" = ["diagnosis.py", "table.py"]
+"install_plan.py" = ["table.py"]
+"readings.py" = ["diagnosis.py", "scope.py", "table.py"]
+"table.py" = ["scope.py"]
+
+[purity]
+"diagnosis.py" = "strict"
+"gate_plan.py" = "strict"
+"install_plan.py" = "strict"
+"scope.py" = "strict"
+"table.py" = "strict"

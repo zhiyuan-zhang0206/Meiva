@@ -41,7 +41,7 @@ def cmd_lgtm_on(
     disabled_services: tuple[str, ...],
     all_services: bool,
     runtime: StartRuntime,
-    retained_children: list[subprocess.Popen[bytes]] | None,
+    retained_children: list[subprocess.Popen[bytes]],
     database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
@@ -51,8 +51,6 @@ def cmd_lgtm_on(
     # names the start selection on the command line; nothing is derived from an earlier start.
     # The toggle refuses only a selection that contradicts it (backends disabled while turning
     # LGTM on).
-    if retained_children is None:
-        raise ValueError("PostgreSQL launch requires its caller-owned child retention")
     if problem := selection_problem(
         enabled=True, only_services=only_services, disabled_services=disabled_services
     ):
@@ -78,7 +76,7 @@ def cmd_lgtm_off(
     disabled_services: tuple[str, ...],
     all_services: bool,
     runtime: StartRuntime,
-    retained_children: list[subprocess.Popen[bytes]] | None,
+    retained_children: list[subprocess.Popen[bytes]],
     database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
@@ -86,8 +84,6 @@ def cmd_lgtm_off(
     # meiva:note
     # Retract the station marker and start the named selection, preserving observation data.
     # The toggle refuses only a selection that names a backend, which would contradict it.
-    if retained_children is None:
-        raise ValueError("PostgreSQL launch requires its caller-owned child retention")
     if problem := selection_problem(
         enabled=False, only_services=only_services, disabled_services=disabled_services
     ):

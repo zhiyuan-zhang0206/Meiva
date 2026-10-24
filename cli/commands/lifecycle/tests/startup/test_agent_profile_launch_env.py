@@ -8,6 +8,8 @@
 from pathlib import Path
 
 from base.cluster.derive import project_runner_db_url
+from base.host.env.dotenv_file import env_file_path, read_env_aliases
+from cli.commands.data_plane.instance.launch_delivery import LaunchDelivery
 from cli.commands.lifecycle import root_driver
 from services.supervision.meiva_root.manifest import load_manifests
 from services.supervision.meiva_root_glue.manifests import generate
@@ -41,9 +43,14 @@ def test_root_manifest_projects_runner_url_for_agent_profile(
         requires_db=True,
     )
     projected = project_runner_db_url(_PROVIDER_URL, _RUNNER_PASSWORD)
+    launch = LaunchDelivery(
+        home=unit_home,
+        remote_data_plane=True,
+        environment={},
+        env_file=read_env_aliases(env_file_path(unit_home)),
+    )
     environments = {
-        spec.session: root_driver.service_extra_env(spec, remote_data_plane=True)
-        for spec in (agent, ops)
+        spec.session: root_driver.service_extra_env(spec, delivery=launch) for spec in (agent, ops)
     }
     path = generate(
         tmp_path / "manifest.json",

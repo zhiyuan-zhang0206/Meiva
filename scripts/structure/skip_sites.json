@@ -27,14 +27,8 @@
     "skipif(shutil.which('node') is None)",
     "skipif(shutil.which('node') is None)"
   ],
-  "cli/commands/data_plane/tests/instance/test_host_dependencies.py": [
-    "skipif(not Path('/run/systemd/system').is_dir())"
-  ],
-  "cli/commands/data_plane/tests/test_pooler_clients.py": [
+  "cli/commands/data_plane/tests/pooler/test_pooler_clients.py": [
     "skipif(not pgbouncer_available())"
-  ],
-  "cli/commands/data_plane/tests/test_pooler_stop.py": [
-    "skip('native PgBouncer is not installed')"
   ],
   "cli/commands/extensions/tests/test_external_skills_adversarial.py": [
     "skipif(not hasattr(Path, 'chmod'))"
@@ -44,9 +38,7 @@
     "skipif(shutil.which('uv') is None)"
   ],
   "cli/commands/lifecycle/tests/stop/test_data_plane_stop.py": [
-    "skip('native pgbouncer is not installed')",
-    "skip('native pgbouncer is not installed')",
-    "skip('this host has no non-loopback address for the reachable bind')"
+    "skip('native pgbouncer is not installed')"
   ],
   "cli/commands/tests/test_single_box.py": [
     "skipif(not (Path(base_pooler.pgbouncer_bin()).exists() or shutil.which(base_pooler.pgbouncer_bin())))"

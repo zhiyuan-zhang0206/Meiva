@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from cli.commands.lifecycle import stand_down
+from cli.commands.lifecycle.start.stand_down_gate import stand_down_step
 
 NOW = datetime(2026, 10, 21, 5, 0, tzinfo=UTC)
 
@@ -65,40 +66,14 @@ class TestRecord:
 
         held = stand_down.read(home)
         assert held is not None and held.until is None and held.since is None
-        assert stand_down.blocks_boot(home, now=NOW) is not None
-
-
-class TestGate:
-    def test_the_boot_job_leaves_a_stopped_home_alone(self, tmp_path: Path) -> None:
-        home = _home(tmp_path)
-        stand_down.record(home, now=NOW, until=None, reason="night stop")
-
-        line = stand_down.gate(home, boot_attempt=True, now=NOW)
-
-        assert line is not None and line.startswith("stand-down")
-        assert "boot job leaves this home stopped" in line
-        assert stand_down.read(home) is not None, "the boot job must not clear the record"
-
-    def test_the_boot_job_resumes_once_the_declared_window_has_passed(self, tmp_path: Path) -> None:
-        home = _home(tmp_path)
-        stand_down.record(home, now=NOW, until=NOW - timedelta(seconds=1), reason=None)
-
-        assert stand_down.gate(home, boot_attempt=True, now=NOW) is None
-        assert stand_down.read(home) is not None, "an expired record still waits for a start"
-
-    def test_an_explicit_start_clears_the_record_and_says_so(self, tmp_path: Path) -> None:
-        home = _home(tmp_path)
-        stand_down.record(home, now=NOW, until=None, reason=None)
-
-        line = stand_down.gate(home, boot_attempt=False, now=NOW)
-
-        assert line == "stand-down cleared by an explicit start"
-        assert stand_down.read(home) is None
-
-    def test_an_ordinary_start_on_a_running_home_says_nothing(self, tmp_path: Path) -> None:
-        home = _home(tmp_path)
-
-        assert stand_down.gate(home, boot_attempt=False, now=NOW) is None
+        step = stand_down_step(
+            boot_attempt=True,
+            recorded=True,
+            deadline_passed=held.deadline_passed(NOW),
+            window=held.describe(NOW),
+        )
+        assert step.skip, "the boot job leaves the home down"
+        assert not step.clear
 
 
 class TestDescribe:

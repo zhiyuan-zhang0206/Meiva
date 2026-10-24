@@ -49,6 +49,7 @@ def partial_home(home: Path) -> Path:
             checkout,
             frozenset({"gateway", "agent-runner"}),
             {"MEIVA_MACHINE_NAME": "partial"},
+            occupied_ports=frozenset(),
         )
     )
     return home
@@ -103,7 +104,11 @@ def test_partial_stop_uses_native_cleanup_without_announcing_or_draining(
     request = stop_request(
         keep_infra=True, keep_browser=False, announce=True, teardown_extras=True, timeout=3
     )
-    rc = do_stop(request, stop_environment(stop_runtime, operator_database, operator_pipeline))
+    rc = do_stop(
+        request,
+        stop_environment(stop_runtime, operator_database, operator_pipeline),
+        retained_children=[],
+    )
     assert rc == 0
     assert stand_down.read(partial_home) is None, "no stop was declared"
     phases = capsys.readouterr().out
@@ -120,7 +125,11 @@ def test_a_stop_that_progressed_past_initialization_declares_its_stand_down(
     mark_phase(partial_home, "ready")
     stop_runtime.machine.set(role="gateway")
     request = stop_request(keep_infra=True, announce=True, timeout=3)
-    rc = do_stop(request, stop_environment(stop_runtime, operator_database, operator_pipeline))
+    rc = do_stop(
+        request,
+        stop_environment(stop_runtime, operator_database, operator_pipeline),
+        retained_children=[],
+    )
     assert rc == 0
     assert stand_down.read(partial_home) is not None
 
@@ -137,9 +146,13 @@ def test_contradicting_evidence_fails_the_stop_before_it_confirms_or_stops_anyth
     rc = do_stop(
         stop_request(keep_infra=True, timeout=3),
         stop_environment(stop_runtime, operator_database, operator_pipeline),
+        retained_children=[],
     )
     assert rc == 1
-    assert "initialization journal conflicts with application launch evidence" in (
-        capsys.readouterr().err
-    )
+    err = capsys.readouterr().err
+    assert "Stop incomplete" in err, "reported like any incomplete stop, not as a traceback"
+    assert "initialization journal conflicts with application launch evidence" in err
+    assert "phases: before the first phase" in err
+    assert "Status journal" not in err, "there is no journal to point at"
     assert start_serving.state_path().exists(), "nothing was revoked"
+    assert not (partial_home / "run/lifecycle-op.json").exists(), "no journal was opened"

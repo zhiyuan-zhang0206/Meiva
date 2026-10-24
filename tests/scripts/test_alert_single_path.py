@@ -49,7 +49,7 @@ def test_nothing_but_grafana_posts_to_the_ingest_endpoint() -> None:
         if rel in {
             "gateway/alerts/router.py",
             "gateway/app.py",
-            "cli/commands/observability/observatory_urls.py",
+            "cli/commands/observability/plans/lgtm/urls.py",
         }:
             continue
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):

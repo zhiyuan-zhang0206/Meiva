@@ -26,18 +26,14 @@ from base.deploy import start_trace
 from base.deploy.lifecycle import launch_failures, pause_markers, start_serving
 from base.deploy.lifecycle.service_selection import resolve_selection
 from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS, SERVICE_READY_TIMEOUT_S
-from base.host.env.registry import process_environment
 from base.host.system.hostport import Host
 from base.native_process.os_platform import raise_fd_limit
-from base.paths import skills_dir
 from base.paths.home import home_checkout_error
 from base.telemetry import EventPipeline
 from cli.commands import _repo, _setup, probe
 from cli.commands._setup import SetupValues
-from cli.commands.converge.spec import ConvergeStep
-from cli.commands.data_plane import bringup
-from cli.commands.extensions import materialize
-from cli.commands.lifecycle import converge_host, root_driver, root_readiness, stand_down
+from cli.commands.data_plane.bringup import read_launch_delivery
+from cli.commands.lifecycle import root_driver, root_readiness, stand_down
 from cli.commands.lifecycle._exclusive_resources import exclusive_resources
 from cli.commands.lifecycle.root_control.generation import record_running_sha
 from cli.commands.lifecycle.root_control.launch_plan import RootLaunchInputs
@@ -47,15 +43,10 @@ from cli.commands.lifecycle.start.admission import (
     probes_gateway,
     roles_line,
 )
-from cli.commands.lifecycle.start.cold_start_plan import (
-    ColdStep,
-    SchemaCheck,
-    plan_cold_start,
-    plan_schema_checks,
-)
+from cli.commands.lifecycle.start.cold_start import ColdStart, cold_start_steps, prepare_cold_start
+from cli.commands.lifecycle.start.cold_start_plan import SchemaCheck, plan_schema_checks
 from cli.commands.lifecycle.start.gateway_hint import gateway_hint_lines
 from cli.commands.lifecycle.start.login_link import print_login_link
-from cli.commands.lifecycle.start.migrations import cmd_migrations_apply
 from cli.commands.lifecycle.start.occupied_ports import Occupant, refusal_text
 from cli.commands.lifecycle.start.readiness_plan import (
     ReadinessFacts,
@@ -96,23 +87,6 @@ def refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
     return 1
 
 
-# meiva:note
-# The host-dependency step is deliberately first: a missing redis/pgbouncer/node
-# or crontab/systemctl/curl must refuse before any green converge step or service
-# launch, not after them (a host without crontab used to die at the WAL-G job).
-def cold_start_steps() -> tuple[ConvergeStep, ...]:
-    from cli.commands.data_plane import host_dependencies
-
-    return (
-        ConvergeStep(
-            "host dependencies",
-            host_dependencies.ensure_host_dependencies_step,
-            roles=frozenset({"gateway", "agent-runner"}),
-        ),
-        *converge_host.CONVERGE_STEPS,
-    )
-
-
 @dataclass(frozen=True)
 class _Selection:
     # meiva:note
@@ -135,7 +109,6 @@ class _Start:
     database_factory: OperatorDatabaseFactory
     producer: Callable[[], EventPipeline]
     runtime: StartRuntime
-    retained_children: list[subprocess.Popen[bytes]]
     selection: _Selection
     resolved: SetupValues
     roles: MachineRoles
@@ -175,7 +148,6 @@ def _guard(command: CommandRuntime, runtime: StartRuntime) -> int | None:
         destroy_intent=(command.home / "destroy-intent.json").exists(),
         checkout_error=home_checkout_error(runtime.code_root, home=command.home),
     )
-    runtime.validate()
     print(f"[meiva start] cwd = {runtime.code_root}")
     if refusal is None:
         return None
@@ -249,98 +221,6 @@ def _roster_for(start: _Start) -> tuple[ServiceSpec, ...]:
     )
 
 
-# meiva:note
-# Prepare storage/configuration only with no prior live application root.
-def _prepare_cold_start(start: _Start, roster: tuple[ServiceSpec, ...]) -> int:
-    for step in plan_cold_start(start.roles):
-        with start_trace.phase(step.value):
-            rc = _run_cold_step(step, start, roster)
-        if rc != 0:
-            return rc
-    return 0
-
-
-# meiva:note
-# Execute one preparation step; non-zero stops the start.
-def _run_cold_step(step: ColdStep, start: _Start, roster: tuple[ServiceSpec, ...]) -> int:
-    command = start.command
-    plane = start.config.data_plane
-    match step:
-        case ColdStep.CONVERGE:
-            # meiva:note
-            # Converge host state (symlink / PATH / $MEIVA_HOME dirs / plugin config
-            # images). Memory initialization is explicit (`meiva memory init`).
-            try:
-                converge_host.converge_host(
-                    start.repo,
-                    start.roles,
-                    services=frozenset(spec.session for spec in roster),
-                    database_factory=start.database_factory,
-                    producer=start.producer,
-                    command=command,
-                    steps=cold_start_steps(),
-                )
-            except Exception as e:
-                print(f"  \u2717 converge failed: {e}", file=sys.stderr)
-                return 1
-            return 0
-        case ColdStep.DATA_PLANE:
-            # meiva:note
-            # A gateway brings up this cluster's own pg/redis instance (under its
-            # $MEIVA_HOME, on its recorded ports). No docker on any POSIX platform.
-            return bringup.ensure_gateway_data_plane(
-                plane,
-                retained_children=start.retained_children,
-                database_factory=start.database_factory,
-                machine=command.machine,
-            )
-        case ColdStep.GATEWAY_SCHEMA:
-            bringup.prepare_gateway_schema(plane)
-            return 0
-        case ColdStep.SKIP_LOCAL_SERVICES:
-            print("\n\u2192 local services: skipped (agent-runner uses central node's DB/Redis)")
-            return 0
-        case ColdStep.MIGRATIONS:
-            return _apply_migrations(start)
-        case ColdStep.POOLER:
-            bringup.complete_gateway_data_plane(
-                plane, database_factory=start.database_factory, machine=command.machine
-            )
-            return 0
-        case ColdStep.SCHEMA_CHECK:
-            return _repo.assert_schema_current_or_die(start.database_factory.db_url())
-        case ColdStep.ADOPT_EXTENSIONS:
-            # meiva:note
-            # Adopt first: a name this machine installed before the registry existed is
-            # invisible to the materializer until it has a row.
-            materialize.adopt_local_extensions(
-                database_factory=start.database_factory,
-                machine_name=command.machine.name,
-                skills_root=skills_dir(command.home),
-            )
-            return 0
-        case ColdStep.MATERIALIZE_EXTENSIONS:
-            materialize.materialize_cluster_extensions(
-                database_factory=start.database_factory, skills_root=skills_dir(command.home)
-            )
-            return 0
-
-
-def _apply_migrations(start: _Start) -> int:
-    print("\n\u2192 apply pending migrations")
-    try:
-        cmd_migrations_apply(
-            database_factory=start.database_factory,
-            machine=start.command.machine,
-            config=start.config.data_plane,
-            home=start.command.home,
-        )
-    except Exception as e:
-        print(f"  \u2717 migrations apply failed: {e}", file=sys.stderr)
-        return 1
-    return 0
-
-
 def _check_schema(start: _Start, *, live: bool) -> int | None:
     # meiva:note
     # A live generation may only be inspected here; pending schema changes
@@ -360,7 +240,7 @@ def _check_schema(start: _Start, *, live: bool) -> int | None:
 
 # meiva:note
 # Admit the start (or prepare a cold one) and check the schema before anything launches.
-def _admit(start: _Start) -> int | None:
+def _admit(start: _Start, *, retained_children: list[subprocess.Popen[bytes]]) -> int | None:
     command = start.command
     with start_trace.phase("roster resolve"):
         roster = _roster_for(start)
@@ -375,7 +255,19 @@ def _admit(start: _Start) -> int | None:
                 inputs=start.launch_inputs,
             )
         if not live:
-            rc = _prepare_cold_start(start, roster)
+            rc = prepare_cold_start(
+                ColdStart(
+                    command=command,
+                    database_factory=start.database_factory,
+                    producer=start.producer,
+                    repo=start.repo,
+                    roles=start.roles,
+                    plane=start.config.data_plane,
+                    converge_steps=cold_start_steps(),
+                ),
+                roster,
+                retained_children=retained_children,
+            )
             if rc:
                 return rc
     except (RuntimeError, OSError, ValueError) as exc:
@@ -501,7 +393,11 @@ def _report_pause_markers(home: Path) -> None:
 
 
 def _launch(
-    start: _Start, roster: tuple[ServiceSpec, ...], *, boot_attempt: bool
+    start: _Start,
+    roster: tuple[ServiceSpec, ...],
+    *,
+    retained_children: list[subprocess.Popen[bytes]],
+    boot_attempt: bool,
 ) -> root_driver.LaunchOutcome:
     with start_trace.phase("launch service tree"):
         launch = root_driver.launch_service_tree(
@@ -509,7 +405,7 @@ def _launch(
             start.repo,
             start.roles,
             reconcile=start.selection.reconcile,
-            retained_children=start.retained_children,
+            retained_children=retained_children,
             helper=start.command.helper,
             runtime=start.runtime,
             honor_restart_budget=boot_attempt,
@@ -538,7 +434,7 @@ def _wait_ready(
 
 def _finalize(start: _Start, serving_generation: str) -> int:
     with start_trace.phase("finalize"):
-        if not start_serving.mark_serving(serving_generation, runtime=start.runtime.identity()):
+        if not start_serving.mark_serving(serving_generation, runtime=start.runtime.loaded):
             print("  \u2717 this start lost its serving generation", file=sys.stderr)
             return 1
         mark_phase(start.command.home, "ready")
@@ -584,22 +480,25 @@ def cmd_start_body(
         database_factory=database_factory,
         producer=producer,
         runtime=runtime,
-        retained_children=retained_children,
         selection=_Selection(only_services, disabled_services, all_services, reconcile),
         resolved=resolved,
         roles=roles,
         config=config,
         launch_inputs=RootLaunchInputs(
-            home=command.home,
+            delivery=read_launch_delivery(
+                home=command.home,
+                remote_data_plane=config.data_plane.is_remote,
+                config=command.config,
+            ),
             service_path=config.service_path,
-            remote_data_plane=config.data_plane.is_remote,
-            environment=dict(process_environment()),
         ),
     )
-    for phase in (_admit, _register_and_probe):
-        rc = phase(start)
-        if rc is not None:
-            return rc
+    admitted = _admit(start, retained_children=retained_children)
+    if admitted is not None:
+        return admitted
+    registered = _register_and_probe(start)
+    if registered is not None:
+        return registered
 
     # meiva:note
     # Preparation may materialize plugins on a cold start; resolve the launch roster now.
@@ -620,7 +519,7 @@ def cmd_start_body(
     with start_trace.phase("serving generation"):
         serving_generation = start_serving.begin_start()
         record_running_sha(runtime.code_root)
-    launch = _launch(start, roster, boot_attempt=boot_attempt)
+    launch = _launch(start, roster, retained_children=retained_children, boot_attempt=boot_attempt)
     wait = _wait_ready(start, launch, ready_timeout=ready_timeout)
     _report_running_tree(start, started=tuple(launch.started), wait=wait)
 

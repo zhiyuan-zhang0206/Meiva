@@ -3,6 +3,7 @@ exports = ["stop_support.py"]
 [uses]
 "stop_support.py" = ["_child.py"]
 "test_data_plane_stop.py" = ["_child.py", "stop_support.py"]
+"test_force_stop_data_plane.py" = ["stop_support.py"]
 "test_maintenance_stop_report.py" = ["stop_support.py"]
 "test_restart.py" = ["stop_support.py"]
 "test_stop.py" = ["stop_support.py"]
@@ -15,5 +16,3 @@ exports = ["stop_support.py"]
 "test_stop_shell_sessions.py" = ["_child.py", "stop_support.py"]
 
 [debt.first-party-patch]
-"test_data_plane_stop.py#monkeypatch.setattr base.native_process.ownership.pid_starttime_ticks" = 2
-"test_data_plane_stop.py#monkeypatch.setattr cli.commands.data_plane.maintenance_stop.Redis" = 1

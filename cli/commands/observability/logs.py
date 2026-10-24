@@ -13,9 +13,6 @@ from pathlib import Path
 
 import psutil
 
-from base.config import settings
-from base.paths import logs_dir
-
 MANAGED_LOG_NAME = re.compile(
     r"(?:"
     r"(?P<agent>meiva-agent-[0-9]+\.out\.log)"
@@ -266,16 +263,21 @@ def _delete_candidates(candidates: list[RetentionCandidate], scan_failed: int) -
     return failed
 
 
+# meiva:note
+# Per-family retention days: the flat default, or the family defaults with the caller's overrides.
+#
+# `default_retention_days` is the flat `MEIVA_LOG_RETENTION_DAYS` setting. It is read only when
+# neither an explicit age nor family overrides were given, so a caller that has one of them passes
+# None; a call that needs it and has none is a programming error.
 def _resolve_family_days(
-    older_than_days: int | None, family_days: Mapping[str, int] | None
+    older_than_days: int | None,
+    family_days: Mapping[str, int] | None,
+    default_retention_days: int | None,
 ) -> dict[str, int]:
-    """Per-family retention days: the flat setting, or the defaults with the caller's overrides."""
     if family_days is None:
-        retention_days = (
-            settings.observability.log_retention_days
-            if older_than_days is None
-            else older_than_days
-        )
+        retention_days = default_retention_days if older_than_days is None else older_than_days
+        if retention_days is None:
+            raise ValueError("a flat retention needs --older-than or the configured default")
         return dict.fromkeys(FAMILY_DEFAULT_DAYS, retention_days)
     overrides = dict(family_days)
     if "default" in overrides:
@@ -285,25 +287,30 @@ def _resolve_family_days(
     return FAMILY_DEFAULT_DAYS | overrides
 
 
+# meiva:note
+# Apply local log retention and return a CLI exit code.
+#
+# `logs_path` is the logs directory to maintain and `now` the instant ages are measured from; both
+# come from the command's composition point.
 def cmd_logs_retention(
     *,
     older_than_days: int | None,
     family_days: Mapping[str, int] | None = None,
+    default_retention_days: int | None,
     dry_run: bool,
-    logs_path: Path | None = None,
-    now: datetime | None = None,
+    logs_path: Path,
+    now: datetime,
 ) -> int:
-    """Apply local log retention and return a CLI exit code."""
     if older_than_days is not None and family_days is not None:
         raise ValueError("--older-than and --family-days are mutually exclusive")
 
-    target = logs_dir() if logs_path is None else logs_path
-    current = datetime.now(UTC) if now is None else now
-    resolved_family_days = _resolve_family_days(older_than_days, family_days)
+    resolved_family_days = _resolve_family_days(
+        older_than_days, family_days, default_retention_days
+    )
 
     candidates, scan_failures = _retention_scan(
-        target,
-        current,
+        logs_path,
+        now,
         resolved_family_days,
     )
     for failure in scan_failures:
@@ -384,19 +391,21 @@ def _rotate_entry(
     return False
 
 
+# meiva:note
+# Copytruncate oversized or prior-UTC-day stdout logs under `logs_path`, judging "today" from
+# `now`.
 def cmd_logs_rotate(
     *,
     dry_run: bool,
-    size_mib: int = 64,
-    logs_path: Path | None = None,
-    now: datetime | None = None,
+    size_mib: int,
+    logs_path: Path,
+    now: datetime,
 ) -> int:
-    """Copytruncate oversized or prior-UTC-day stdout logs."""
     if size_mib <= 0:
         raise ValueError("--size-mib must be a positive integer")
 
-    target = logs_dir() if logs_path is None else logs_path
-    current = datetime.now(UTC) if now is None else now
+    target = logs_path
+    current = now
     archive_suffix = current.strftime("%Y-%m-%d")
     size_threshold = size_mib * 1024 * 1024
     failed = False

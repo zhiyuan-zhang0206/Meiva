@@ -1,9 +1,13 @@
-"""`meiva cluster status` — print the full multi-machine roster (thin client).
-
-GETs `/api/cluster/roster` on the gateway, which assembles the
-roster server-side: its own row locally + each agent-runner probed in parallel via
-the status_probe op. The CLI just renders the returned table.
-"""
+# meiva:note
+# `meiva cluster` machine verbs: thin clients of the gateway's `/api/cluster/*` endpoints, and
+# the two `db-authority` verbs that seal and install a remote unit's database capability.
+#
+# Every machine verb takes the `GatewayAccess` its composition root built from the command's
+# own configuration; the wording of each reply lives in `plans.gateway_replies` and the roster
+# table in `plans.roster_table`, so this shell only dials, decodes and prints. The
+# `db-authority` verbs take the invocation's `CommandRuntime` (the gateway home, the
+# configuration and the cluster secret) or the home and transport key their root read, and
+# their wording lives in `plans.db_authority_replies`.
 
 from __future__ import annotations
 
@@ -14,457 +18,299 @@ from pathlib import Path
 import httpx
 
 from base.api_contracts.status import MachineStatus
-from base.cluster.machine import GatewayAccess, format_capabilities
+from base.cluster.machine import (
+    GatewayAccess,
+    GatewayApiBaseMissing,
+    gateway_api_base,
+    gateway_auth_headers,
+)
+from base.config.service_read import ConfigAuthority
+from base.host.db_authority.model import AuthorityRefusedError
+from base.host.db_authority.unit import UnitIdentity, issue_bundle, write_bundle
+from base.host.env.bootstrap import BootstrapFetchError, config_source_is_local
+from base.host.env.dotenv_file import env_file_path, read_env_aliases
+from base.host.net.http_dial import get as dial_get
+from base.host.net.http_dial import post as dial_post
+from cli.commands.cluster.plans.db_authority_replies import (
+    IssuedReport,
+    failure_line,
+    install_refusal,
+    issue_refusal,
+    issued_text,
+)
+from cli.commands.cluster.plans.gateway_replies import (
+    NoGatewayUrl,
+    PauseReply,
+    ReadTimedOut,
+    RefusedWithStatus,
+    Unreachable,
+    not_registered_line,
+    pause_lines,
+    resume_lines,
+    roster_failure_line,
+    staging_line,
+)
+from cli.commands.cluster.plans.roster_table import roster_lines
+from cli.commands.cluster.unit_join import join_gateway
+from cli.database.runtime import CommandRuntime
+from cli.start_identity import require_initialized, stored_values
 
-_CLUSTER_STATUS_PROBE_TIMEOUT_S = 8.0
-# `meiva cluster status` reads the *fresh* roster, whose server-side fan-out
-# probes every agent-runner in parallel, each bounded by the gateway's
-# `status_probe_timeout_seconds`. A black-holed machine rides that probe to its
-# full bound before the gateway can answer — measured 8.12s of wall against the
-# 8.0s default — so a client read budget pinned at the probe budget alone
-# collides with it exactly when a machine is down (#4900). This margin covers
-# transport/serialization overhead and load jitter; with the default budget a
-# silent gateway still reports within 12s.
-_ROSTER_READ_MARGIN_S = 4.0
+_MACHINE_VERB_TIMEOUT_S = 8.0
+_PAUSE_TIMEOUT_S = 60.0
+_STATUS_READ_TIMEOUT_S = 10.0
+
+# meiva:note
+# `meiva cluster status` reads the *fresh* roster, whose server-side fan-out probes every
+# agent-runner in parallel, each bounded by the gateway's `status_probe_timeout_seconds`. A
+# black-holed machine rides that probe to its full bound before the gateway can answer
+# (measured 8.12s of wall against the 8.0s default), so a client read budget pinned at the
+# probe budget alone collides with it exactly when a machine is down (#4900). This margin
+# covers transport/serialization overhead and load jitter; with the default budget a silent
+# gateway still reports within 12s.
+ROSTER_READ_MARGIN_S = 4.0
 
 
-def roster_read_timeout_s() -> float:
-    """Client read budget for the fresh roster: the gateway's per-machine probe
-    budget + `_ROSTER_READ_MARGIN_S`.
-
-    Derived, not fixed, and read at call time: a later change to the
-    `status_probe_timeout_seconds` pin cannot silently re-create the collision
-    (#4900).
-    """
-    from base.config import settings
-
-    return settings.gateway.status_probe_timeout_seconds + _ROSTER_READ_MARGIN_S
-
-
-# Roster `role` column width: the widest label format_capabilities emits is
-# "gateway + agent-runner + observability-station" (44 chars).
-_ROLE_COL_W = 44
-
-
-def cmd_cluster_mark_staging(name: str, *, is_staging: bool) -> int:
-    """`meiva cluster mark-staging NAME` / `meiva cluster unmark-staging NAME`.
-
-    Thin client: POSTs /api/cluster/machines/{name}/staging on the gateway,
-    which flips the operator staging flag on the machines row. A staging host
-    stays registered + roster-visible but is excluded from the agent-runner
-    target set (`list_agent_runners`: the heartbeat probe and cluster
-    fan-outs). Exit 1 when the gateway reports no such machine.
-    """
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
-    from base.host.net.http_dial import post as dial_post
-
-    access = gateway_access_from_settings()  # ambient: C
+# meiva:note
+# `meiva cluster mark-staging NAME` / `unmark-staging NAME`.
+#
+# POSTs /api/cluster/machines/{name}/staging on the gateway, which flips the operator staging
+# flag on the machines row. A staging host stays registered and roster-visible but is
+# excluded from the agent-runner target set (`list_agent_runners`: the heartbeat probe and
+# cluster fan-outs). Exit 1 when the gateway reports no such machine.
+def cmd_cluster_mark_staging(name: str, *, is_staging: bool, access: GatewayAccess) -> int:
     url = f"{gateway_api_base(access.gateway_url)}/api/cluster/machines/{name}/staging"
     resp = dial_post(
         url,
-        timeout=_CLUSTER_STATUS_PROBE_TIMEOUT_S,
+        timeout=_MACHINE_VERB_TIMEOUT_S,
         headers=gateway_auth_headers(access),
         json={"is_staging": is_staging},
     )
     if resp.status_code == 404:
-        print(f"no machine named {name!r} in the registry", file=sys.stderr)
+        print(not_registered_line(name), file=sys.stderr)
         return 1
     resp.raise_for_status()
-    action = "marked staging" if is_staging else "unmarked staging (now a fan-out target)"
-    print(f"{name}: {action}")
+    print(staging_line(name, is_staging=is_staging))
     return 0
 
 
-def cmd_cluster_pause(name: str, *, reason: str | None = None) -> int:
-    """`meiva cluster pause NAME [--reason ...]` — temporarily pull a machine
-    out of the cluster.
-
-    Thin client: POSTs /api/cluster/machines/{name}/pause on the gateway,
-    which drains (reassigns in_progress tasks of the machine's agents to
-    the drain owner #405, with a note on each), terminates every live agent on
-    the machine and sets the pause latch. From then on the machine is hidden from the roster / cluster
-    panel / `meiva.agents.list_machines()`, is not probed (no offline signal),
-    is skipped by cluster fan-outs and refuses spawns — the cluster shows only
-    its active members. The registration row (URL/role) is preserved for resume.
-    Exit 1 when the gateway reports no such machine or refuses (own gateway).
-    """
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
-    from base.host.net.http_dial import post as dial_post
-
-    access = gateway_access_from_settings()  # ambient: C
+# meiva:note
+# `meiva cluster pause NAME [--reason ...]`: temporarily pull a machine out of the cluster.
+#
+# POSTs /api/cluster/machines/{name}/pause on the gateway, which drains (reassigns
+# in_progress tasks of the machine's agents to the drain owner #405, with a note on each),
+# terminates every live agent on the machine and sets the pause latch. From then on the
+# machine is hidden from the roster / cluster panel / `meiva.agents.list_machines()`, is not
+# probed (no offline signal), is skipped by cluster fan-outs and refuses spawns, so the
+# cluster shows only its active members. The registration row (URL/role) is preserved for
+# resume. Exit 1 when the gateway reports no such machine or refuses (own gateway).
+def cmd_cluster_pause(name: str, *, reason: str | None, access: GatewayAccess) -> int:
     url = f"{gateway_api_base(access.gateway_url)}/api/cluster/machines/{name}/pause"
     resp = dial_post(
         url,
-        timeout=60.0,
+        timeout=_PAUSE_TIMEOUT_S,
         headers=gateway_auth_headers(access),
         json={"reason": reason or ""},
     )
     if resp.status_code == 404:
-        print(f"no machine named {name!r} in the registry", file=sys.stderr)
+        print(not_registered_line(name), file=sys.stderr)
         return 1
     if resp.status_code == 400:
         print(resp.json().get("detail", "pause refused"), file=sys.stderr)
         return 1
     resp.raise_for_status()
     body = resp.json()
-    print(
-        f"{name}: PAUSED (since {str(body['paused_at'])[:19]})"
-        + (f" — {body['pause_reason']}" if body.get("pause_reason") else "")
+    reply = PauseReply(
+        paused_at=str(body["paused_at"]),
+        pause_reason=str(body.get("pause_reason") or ""),
+        terminated_agents=int(body["terminated_agents"]),
+        force_marked_agents=int(body["force_marked_agents"]),
+        reassigned_tasks=int(body["reassigned_tasks"]),
     )
-    print(
-        f"  agents terminated via the machine's ops server: {body['terminated_agents']}; "
-        f"force-marked in DB (machine unreachable): {body['force_marked_agents']}; "
-        f"tasks drained to #405: {body['reassigned_tasks']}"
-    )
-    print(
-        "  hidden from roster/probe/fan-out/spawn until resumed: "
-        f"`meiva cluster resume {name}` (run on the gateway host)"
-    )
+    for line in pause_lines(name, reply):
+        print(line)
     return 0
 
 
-def cmd_cluster_resume(name: str) -> int:
-    """`meiva cluster resume NAME` — restore a paused machine as a normal
-    cluster member.
-
-    Thin client: POSTs /api/cluster/machines/{name}/resume on the gateway,
-    which clears the pause latch; probing, the roster, cluster fan-outs and
-    spawn acceptance resume immediately. Exit 1 when the gateway reports no such
-    machine. Prints the ops checklist for the machine's own side (it is away,
-    and its reachable address may have changed while it was out).
-    """
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
-    from base.host.net.http_dial import post as dial_post
-
-    access = gateway_access_from_settings()  # ambient: C
+# meiva:note
+# `meiva cluster resume NAME`: restore a paused machine as a normal cluster member.
+#
+# POSTs /api/cluster/machines/{name}/resume on the gateway, which clears the pause latch;
+# probing, the roster, cluster fan-outs and spawn acceptance resume immediately. Exit 1 when
+# the gateway reports no such machine. Prints the ops checklist for the machine's own side.
+def cmd_cluster_resume(name: str, *, access: GatewayAccess) -> int:
     url = f"{gateway_api_base(access.gateway_url)}/api/cluster/machines/{name}/resume"
     resp = dial_post(
-        url,
-        timeout=_CLUSTER_STATUS_PROBE_TIMEOUT_S,
-        headers=gateway_auth_headers(access),
-        json={},
+        url, timeout=_MACHINE_VERB_TIMEOUT_S, headers=gateway_auth_headers(access), json={}
     )
     if resp.status_code == 404:
-        print(f"no machine named {name!r} in the registry", file=sys.stderr)
+        print(not_registered_line(name), file=sys.stderr)
         return 1
     resp.raise_for_status()
-    body = resp.json()
-    if body["resumed"]:
-        print(f"{name}: resumed — probing / roster / fan-out / spawn restored")
-    else:
-        print(f"{name}: was not paused (no-op)")
-    print(
-        f"  machine-side checklist (run ON {name} when it is back online):\n"
-        "    1. `meiva start --all-services` (or the machine's own explicit service selection) "
-        "on the machine — register_self refreshes its dial URL "
-        "(the reachable address may have changed) and clears its stopped_at latch.\n"
-        "    2. If its reachable address changed, the gateway's pg_hba must cover the new IP: "
-        "add the machine's new IP/CIDR to the comma-separated MEIVA_TRUSTED_CIDRS with "
-        "`meiva config set MEIVA_TRUSTED_CIDRS=<ranges>`, then run "
-        "`meiva restart --all-services --keep-shell-sessions --keep-browser --keep-extras "
-        "--mode smooth --timeout 300` ON THE GATEWAY HOST (its own service selection in place of "
-        "--all-services) — its start leg rewrites pg_hba.conf and reloads the retained Postgres.\n"
-        "    3. Respawn the agents that lived on it (pause terminated them); "
-        "`meiva cluster status` / `meiva.agents.list_machines()` shows it again."
-    )
+    for line in resume_lines(name, resumed=bool(resp.json()["resumed"])):
+        print(line)
     return 0
 
 
-def cmd_cluster_status() -> int:
-    """`meiva cluster status` — print the full multi-machine roster.
-
-    Thin client: GET `/api/cluster/roster` on the gateway, which
-    assembles the roster server-side (its own row locally + each agent-runner
-    probed in parallel via the status_probe op) and returns
-    every machine's name / role / paused / live status. Fails fast on any HTTP
-    error rather than masking an unreachable gateway.
-
-    The transport failures get one-line stderr verdicts and a nonzero exit
-    instead of an unhandled traceback — the unreachable-machine case is the
-    exact situation an operator runs this command for.
-
-    The read budget is derived, not fixed (#4900): a black-holed machine makes
-    the gateway's fresh read ride that machine's probe up to its
-    `status_probe_timeout_seconds` bound, so the client budget is that setting
-    plus a margin (`roster_read_timeout_s`). A fixed budget set to the probe
-    budget alone collides with it exactly when a machine is down (the #219
-    incident shape).
-    """
-    from base.cluster.machine import (
-        GatewayApiBaseMissing,
-        gateway_api_base,
-        gateway_auth_headers,
-    )
-    from base.cluster.machine.ambient import gateway_access_from_settings
-    from base.host.net.http_dial import get as dial_get
-
-    access = gateway_access_from_settings()  # ambient: C
+# meiva:note
+# `meiva cluster status`: print the full multi-machine roster.
+#
+# GETs `/api/cluster/roster` on the gateway, which assembles the roster server-side (its own
+# row locally plus each agent-runner probed in parallel via the status_probe op). Fails fast
+# on any HTTP error rather than masking an unreachable gateway; the transport failures get
+# one-line stderr verdicts and a nonzero exit instead of an unhandled traceback, because the
+# unreachable-machine case is the exact situation an operator runs this command for.
+#
+# The read budget is derived, not fixed (#4900): a black-holed machine makes the gateway's
+# fresh read ride that machine's probe up to its `status_probe_timeout_seconds` bound, so the
+# client budget is that bound plus `read_margin_s`. A fixed budget set to the probe budget
+# alone collides with it exactly when a machine is down (the #219 incident shape).
+def cmd_cluster_status(
+    *,
+    access: GatewayAccess,
+    status_probe_timeout_s: float,
+    read_margin_s: float = ROSTER_READ_MARGIN_S,
+) -> int:
     try:
-        # An operator command: dial every runner now rather than render the heartbeat
-        # pass's last probe, which can be a minute old.
+        # meiva:note
+        # An operator command: dial every runner now rather than render the heartbeat pass's
+        # last probe, which can be a minute old.
         url = f"{gateway_api_base(access.gateway_url)}/api/cluster/roster?fresh=true"
     except GatewayApiBaseMissing as exc:
-        # Same diagnostic posture as `meiva status`'s gateway supplement: a host
-        # that cannot resolve the gateway URL must still say why.
-        print(f"✗ cannot resolve gateway URL: {exc}", file=sys.stderr)
+        print(roster_failure_line(NoGatewayUrl(str(exc))), file=sys.stderr)
         return 1
-    read_timeout_s = roster_read_timeout_s()
+    budget_s = status_probe_timeout_s + read_margin_s
     try:
-        resp = dial_get(url, timeout=read_timeout_s, headers=gateway_auth_headers(access))
+        resp = dial_get(url, timeout=budget_s, headers=gateway_auth_headers(access))
     except httpx.TimeoutException as exc:
-        print(
-            f"✗ gateway at {url} did not respond within {read_timeout_s:g}s — the "
-            f"fresh read waits out a black-holed machine's probe, bounded by the "
-            f"gateway's status_probe_timeout_seconds, and this budget adds "
-            f"{_ROSTER_READ_MARGIN_S:g}s of slack on top; silence past it is the "
-            f"gateway itself not answering: {exc}",
-            file=sys.stderr,
-        )
+        failure = ReadTimedOut(url, budget_s, read_margin_s, str(exc))
+        print(roster_failure_line(failure), file=sys.stderr)
         return 1
     except httpx.TransportError as exc:
-        print(f"✗ gateway unreachable at {url}: {exc}", file=sys.stderr)
+        print(roster_failure_line(Unreachable(url, str(exc))), file=sys.stderr)
         return 1
     try:
         resp.raise_for_status()
     except httpx.HTTPStatusError as exc:
         print(
-            f"✗ gateway returned HTTP {resp.status_code} for {url}: {exc}",
+            roster_failure_line(RefusedWithStatus(url, resp.status_code, str(exc))),
             file=sys.stderr,
         )
         return 1
     roster = [MachineStatus.model_validate(m) for m in resp.json()]
-
     if not roster:
         print("(machines table empty — no host has run `meiva start` yet)")
         return 0
-
-    for line in _render_roster(roster):
+    for line in roster_lines(roster):
         print(line)
     return 0
-
-
-def _render_roster(roster: list[MachineStatus]) -> list[str]:
-    """Render the decoded /api/cluster/roster payload into aligned text lines
-    (the schema banner above the table, then header + separator + one row per
-    machine).
-
-    Pure and split from the HTTP fetch so the row formatting is unit-testable
-    against the MachineStatus wire schema, which carries the three capability
-    flags (serve_gateway / serve_agent_runner / serve_observability_station)
-    and no single `role` field — the role column is derived via
-    format_capabilities.
-    Assumes a non-empty roster (the caller short-circuits the empty case).
-    """
-    name_w = max(
-        *(len(f"{m.name} (staging)") if m.is_staging else len(m.name) for m in roster),
-        len("name"),
-    )
-    lines = schema_mismatch_banner(roster)
-    lines += [
-        f"{'name'.ljust(name_w)}  {'role':<{_ROLE_COL_W}} {'paused':<7} {'status':<10} "
-        f"{'code':<10} up since",
-        "-" * (name_w + 71),
-    ]
-    for m in roster:
-        status = status_cell(m.online, m.identity_mismatch, m.stopped_at)
-        # staging hosts stay roster-visible but are not rollout targets —
-        # mark the name so the roster states the exclusion.
-        display_name = f"{m.name} (staging)" if m.is_staging else m.name
-        paused_str = "?" if m.paused is None else "yes" if m.paused else "no"
-        up_since = str(m.up_since_at)[:19] if m.online else "—"
-        role = format_capabilities(
-            m.serve_gateway, m.serve_agent_runner, m.serve_observability_station
-        )
-        code_str = code_cell(m.running_sha, m.head_sha)
-        lines.append(
-            f"{display_name.ljust(name_w)}  {role:<{_ROLE_COL_W}} {paused_str:<7} {status:<10} "
-            f"{code_str:<10} {up_since}"
-        )
-    return lines
-
-
-def schema_mismatch_banner(roster: list[MachineStatus]) -> list[str]:
-    """Show schema disagreement or unavailable evidence even while ops is online."""
-    lines: list[str] = []
-    for machine in roster:
-        mismatch = machine.schema_mismatch
-        if mismatch is None:
-            continue
-        lines.append(f"⚠ schema check on {mismatch.machine}: {mismatch.kind}; {mismatch.detail}")
-    return lines
-
-
-def status_cell(online: bool, identity_mismatch: bool, stopped_at: datetime | None) -> str:  # noqa: FBT001 — online / identity_mismatch are probe verdicts, passed positionally by the renderer
-    """The roster `status` column. `MISMATCH` is a loud third state that outranks
-    online/offline: the probe reached an ops server that answered under the WRONG
-    machine_name, so this row's gateway_url points at the wrong host — never a
-    green 'online'.
-
-    `STALE-STOP` is the fourth: the probe answered AND the row carries a stop
-    marker, i.e. the two sources of truth disagree about whether this host exists.
-    A plain 'online' here is what hid the 2026-07-28 runner exclusion — the
-    roster read healthy while the update fan-out, which filters on that same
-    marker, silently dropped the host. The marker is the wrong one (a live probe
-    outranks a latch nothing but `meiva start` clears), so the cell names the
-    contradiction rather than picking a side quietly. The next rollout reconciles
-    it (`_resolve_fanout_targets`); an `meiva start` on the host clears it outright.
-    """
-    if identity_mismatch:
-        return "MISMATCH"
-    if online:
-        return "STALE-STOP" if stopped_at else "online"
-    return "stopped" if stopped_at else "offline"
-
-
-def code_cell(running_sha: str | None, head_sha: str | None) -> str:
-    """One cell for the roster `code` column: the commit the live process is
-    actually running (`running_sha`), short. `⚠` when it differs from the node's
-    checkout HEAD (`head_sha`) — the checkout advanced but the process was not
-    restarted, so it is still running stale code (the 2026-07-18 lesson: the
-    checkout alone proved nothing; up-since exposed the old process). `—` when
-    the answering process froze no commit — it came up outside the supervised
-    start path, or its tree is not a git checkout."""
-    if running_sha is None:
-        return "—"
-    short = running_sha[:7]
-    if head_sha is not None and running_sha != head_sha:
-        return f"⚠ {short}"
-    return short
 
 
 # meiva:note
 # GET `/api/cluster/status` and return the decoded ClusterStatus body.
 #
-# Used by `meiva status`'s gateway-view supplement. Presents the credential of
-# `access` (the endpoint is authenticated, like every `/api/cluster/*`) so a
-# healthy-but-authed gateway reads as up instead of a false `401 unreachable`.
-# Fails fast (`raise_for_status()`) on any HTTP error rather than masking an
-# unreachable gateway. The status command builds `access` from its own
-# configuration (`gateway_access_from_boot`).
+# Used by `meiva status`'s gateway-view supplement. Presents the gateway credential (the
+# endpoint is authenticated, like every `/api/cluster/*`) so a healthy-but-authed gateway
+# reads as up instead of a false `401 unreachable`. Fails fast (`raise_for_status()`) on any
+# HTTP error rather than masking an unreachable gateway.
 def fetch_gateway_cluster_status(access: GatewayAccess) -> dict[str, object]:
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.host.net.http_dial import get as dial_get
-
     url = f"{gateway_api_base(access.gateway_url)}/api/cluster/status"
-    resp = dial_get(url, timeout=10.0, headers=gateway_auth_headers(access))
+    resp = dial_get(url, timeout=_STATUS_READ_TIMEOUT_S, headers=gateway_auth_headers(access))
     resp.raise_for_status()
     return resp.json()
 
 
-def _gateway_authority_home(verb: str) -> Path | None:
-    """This gateway home for a db-authority verb, or None after printing the refusal.
-
-    The verb needs a gateway home with a local data plane (a remote-managed
-    plane has no write generation).
-    """
-    import os
-
-    from base.config import settings
-    from base.host.env.bootstrap import config_source_is_local
-    from base.host.env.dotenv_file import env_file_path, read_env_aliases
-    from base.paths import meiva_home
-
-    env_file = read_env_aliases(env_file_path(meiva_home()))
-    if not config_source_is_local(os.environ, env_file=env_file) or settings.data_plane.is_remote:
-        print(
-            f"✗ meiva cluster db-authority {verb}: runs on a gateway home with a local data "
-            "plane; a remote-managed plane has no write generation to issue",
-            file=sys.stderr,
-        )
+# meiva:note
+# This gateway home when `issue-unit` may run on it, or None after printing the refusal.
+#
+# Whether the home serves the gateway comes from the environment this invocation was booted
+# with and the home's own `.env`; whether its data plane is remote comes from the invocation's
+# configuration.
+def _issuing_home(command: CommandRuntime) -> Path | None:
+    config = command.config
+    env_file = read_env_aliases(env_file_path(command.home))
+    refusal = issue_refusal(
+        serves_gateway=config_source_is_local(config.process_environment(), env_file=env_file),
+        remote_plane=config.view.data_plane.is_remote,
+    )
+    if refusal is not None:
+        print(refusal, file=sys.stderr)
         return None
-    return meiva_home().resolve()
+    return command.home.resolve()
 
 
-def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours: float) -> int:
-    """`meiva cluster db-authority issue-unit` — seal one remote unit's database capability.
-
-    Runs on the gateway home. The bundle carries the ACTIVE write generation's
-    runner login and (while the API is authenticated) its API admission — the
-    runner API token, the gateway token's digest and the telemetry token — the
-    endpoint bootstrap serves, bound to (`machine`, `home`) and expiring after
-    `ttl_hours`. It is written 0600 to `out` (never overwritten) and sealed under
-    a transport key printed once here; the unit installs it with
-    `meiva cluster db-authority install-unit <bundle>` (a first join passes it to
-    `meiva init --db-capability`) and that key in MEIVA_DB_CAPABILITY_KEY.
-    Refused on a pure agent-runner, a remote-managed plane and a home without an
-    active generation.
-    """
-    from base.config import Settings, settings
-    from base.config.service_read import ConfigAuthority
-    from base.host.db_authority.model import AuthorityRefusedError
-    from base.host.db_authority.unit import UnitIdentity, issue_bundle, write_bundle
-
+# meiva:note
+# `meiva cluster db-authority issue-unit`: seal one remote unit's database capability.
+#
+# Runs on the gateway home. The bundle carries the ACTIVE write generation's runner login and
+# (while the API is authenticated) its API admission (the runner API token, the gateway
+# token's digest and the telemetry token), the endpoint bootstrap serves, bound to
+# (`machine`, `home`) and expiring after `ttl_hours`. It is written 0600 to `out` (never
+# overwritten) and sealed under a transport key printed once here; the unit installs it with
+# `meiva cluster db-authority install-unit <bundle>` (a first join passes it to
+# `meiva init --db-capability`) and that key in MEIVA_DB_CAPABILITY_KEY. Refused on a pure
+# agent-runner, a remote-managed plane and a home without an active generation. `home` is the
+# unit's home on its own machine; the gateway home, the configuration and the cluster secret
+# are the invocation's (`command`).
+def cmd_db_authority_issue_unit(
+    *, machine: str, home: str, out: str, ttl_hours: float, command: CommandRuntime
+) -> int:
     target = Path(out).expanduser().absolute()
-    gateway_home = _gateway_authority_home("issue-unit")
+    gateway_home = _issuing_home(command)
     if gateway_home is None:
         return 1
+    config = command.config
     try:
         unit = UnitIdentity(machine=machine, home=home)
         issued = issue_bundle(
             gateway_home,
             unit=unit,
-            endpoint=ConfigAuthority(
-                runtime=settings,
-                all_domains=settings if settings.profile is None else Settings(profile=None),
+            endpoint=ConfigAuthority.deferred(
+                runtime=config.view,
+                build_all_domains=config.complete_read_model,
                 env_path=gateway_home / ".env",
             ).served_db_endpoint(),
-            cluster_secret=settings.data_plane.cluster_secret,
+            cluster_secret=config.view.data_plane.cluster_secret,
             ttl_s=ttl_hours * 3600,
         )
         write_bundle(target, issued.envelope)
     except (AuthorityRefusedError, ValueError, RuntimeError, OSError) as exc:
-        print(f"✗ meiva cluster db-authority issue-unit: {exc}", file=sys.stderr)
+        print(failure_line("issue-unit", str(exc)), file=sys.stderr)
         return 1
     expires = datetime.fromtimestamp(issued.expires_at).astimezone().isoformat(timespec="seconds")
-    print(
-        f"✓ bundle for {unit.describe()} (write generation {issued.generation}, expires "
-        f"{expires}) written to {target} (0600)\n"
-        f"  transport key (shown once, carry it separately): {issued.transport_key}\n"
-        "  on the unit: export MEIVA_DB_CAPABILITY_KEY from a non-echoing prompt, then run its\n"
-        "  checkout's `.venv/bin/meiva init --db-capability <bundle>` for a first join (init also "
-        "takes --gateway-url, --machine-name and --machine-host), or `meiva cluster db-authority "
-        "install-unit <bundle>` on an initialized unit; the unit never needs "
-        "MEIVA_CLUSTER_SECRET; a bare `meiva` exists only once the unit's first start has linked it)"
+    report = IssuedReport(
+        unit=unit.describe(),
+        generation=issued.generation,
+        expires=expires,
+        target=str(target),
+        transport_key=issued.transport_key,
     )
+    print(issued_text(report))
     return 0
 
 
-def cmd_db_authority_install_unit(*, bundle: str) -> int:
-    """`meiva cluster db-authority install-unit` — install a sealed capability on this unit.
-
-    Runs on an initialized agent-runner home, with the bundle's transport key in
-    MEIVA_DB_CAPABILITY_KEY. The bundle must name this unit (machine and home), the
-    endpoint the gateway serves now and a generation not older than the installed
-    one; the unit's gateway answers the bundle's own API token before anything is
-    written, and the bundle file is deleted once installed. After a write-generation
-    rotation: stop the unit, install the new bundle, start it. Refused on a gateway
-    home (it keeps its own ledger) and on a home `meiva init` has not initialized.
-    """
-    from base.host.db_authority.model import AuthorityRefusedError
-    from base.host.env.bootstrap import BootstrapFetchError
-    from base.paths.home import resolve_meiva_home
-    from cli.commands.cluster.unit_join import join_gateway
-    from cli.start_identity import require_initialized, stored_values
-
-    home = resolve_meiva_home().resolve()
+# meiva:note
+# `meiva cluster db-authority install-unit`: install a sealed capability on this unit.
+#
+# Runs on an initialized agent-runner home, with the bundle's transport key (the composition
+# root takes it out of MEIVA_DB_CAPABILITY_KEY). The bundle must name this unit (machine and
+# home), the endpoint the gateway serves now and a generation not older than the installed
+# one; the unit's gateway answers the bundle's own API token before anything is written, and
+# the bundle file is deleted once installed. After a write-generation rotation: stop the unit,
+# install the new bundle, start it. Refused on a gateway home (it keeps its own ledger) and on
+# a home `meiva init` has not initialized.
+def cmd_db_authority_install_unit(*, bundle: str, transport_key: str, home: Path) -> int:
     try:
         admitted = require_initialized(home)
     except (RuntimeError, ValueError, OSError) as exc:
-        print(f"✗ meiva cluster db-authority install-unit: {exc}", file=sys.stderr)
+        print(failure_line("install-unit", str(exc)), file=sys.stderr)
         return 1
-    if "gateway" in admitted.roles:
-        print(
-            "✗ meiva cluster db-authority install-unit: a gateway unit keeps its own "
-            "write-generation ledger; install-unit is for agent-runner units",
-            file=sys.stderr,
-        )
+    refusal = install_refusal(admitted.roles)
+    if refusal is not None:
+        print(refusal, file=sys.stderr)
         return 1
     try:
-        join_gateway(stored_values(home), home, bundle)
+        join_gateway(stored_values(home), home, bundle, transport_key)
     except (AuthorityRefusedError, BootstrapFetchError, ValueError, RuntimeError, OSError) as exc:
-        print(f"✗ meiva cluster db-authority install-unit: {exc}", file=sys.stderr)
+        print(failure_line("install-unit", str(exc)), file=sys.stderr)
         return 1
     return 0

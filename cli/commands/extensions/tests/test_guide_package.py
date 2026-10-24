@@ -14,10 +14,10 @@ from base.clock.tests.manual_timers import ManualTimers
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
-from cli.commands.converge.spec import ConvergeCtx, UserSession
+from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.extensions import external_skills
 from cli.commands.extensions.skills_sync import converge_skills
-from cli.database.runtime import CommandRuntime
+from cli.database.runtime import CommandRuntime, UserSession
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime

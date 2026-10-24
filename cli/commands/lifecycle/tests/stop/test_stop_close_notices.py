@@ -90,6 +90,7 @@ def test_stop_records_notice_for_verified_closed_busy_session(
     rc = do_stop(
         stop_request(timeout=15),
         stop_environment(stop_runtime, operator_database, operator_pipeline),
+        retained_children=[],
     )
     assert rc == 0
     (notice,) = written_notices(db_conn)
@@ -123,6 +124,7 @@ def test_the_stop_writes_the_owners_inbound_to_the_database(
     rc = do_stop(
         stop_request(timeout=15),
         stop_environment(stop_runtime, operator_database, operator_pipeline),
+        retained_children=[],
     )
     assert rc == 0
     with db_conn.cursor() as cur:
@@ -162,6 +164,7 @@ def test_an_unwritable_notice_is_loud_and_does_not_fail_the_stop(
     rc = do_stop(
         stop_request(timeout=15),
         stop_environment(stop_runtime, unreachable, operator_pipeline),
+        retained_children=[],
     )
     assert rc == 0
     err = capsys.readouterr().err

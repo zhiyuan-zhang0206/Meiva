@@ -121,24 +121,6 @@ def test_a_selection_that_contradicts_the_toggle_is_refused_before_any_change(
     assert not start_serving.is_serving()
 
 
-def test_a_toggle_without_the_callers_child_owner_changes_nothing(start_run: StartRun) -> None:
-    run = start_run
-
-    with pytest.raises(ValueError, match="caller-owned child retention"):
-        lgtm.cmd_lgtm_on(
-            only_services=(),
-            disabled_services=(),
-            all_services=True,
-            runtime=run.runtime,
-            retained_children=None,
-            database_factory=run.database_factory,
-            producer=run.producer,
-            command=run.command,
-        )
-
-    assert not lgtm_host_marker().exists()
-
-
 # meiva:note
 # The unit declared no capability, so the normal start refuses it; the toggle returns that
 # refusal instead of reporting the station declared.

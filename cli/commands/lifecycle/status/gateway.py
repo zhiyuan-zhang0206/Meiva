@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 __all__ = [
+    "GatewayCredentialMissing",
     "GatewayOutcome",
     "GatewayReport",
     "GatewayUnreachable",
@@ -45,7 +46,16 @@ class GatewayUnresolved:
     detail: str
 
 
-GatewayOutcome = GatewayReport | GatewayUnreachable | GatewayUnresolved
+# meiva:note
+# This process holds nothing to present to the gateway: no machine API token and no cluster
+# secret, and the cluster API always authenticates. `detail` is the credential policy's own
+# sentence, which says what is missing and where to run the command from.
+@dataclass(frozen=True)
+class GatewayCredentialMissing:
+    detail: str
+
+
+GatewayOutcome = GatewayReport | GatewayUnreachable | GatewayUnresolved | GatewayCredentialMissing
 
 
 def gateway_status_lines(outcome: GatewayOutcome) -> tuple[str, ...]:
@@ -54,6 +64,8 @@ def gateway_status_lines(outcome: GatewayOutcome) -> tuple[str, ...]:
         return (*heading, f"  ✗ gateway unreachable: {outcome.detail}")
     if isinstance(outcome, GatewayUnresolved):
         return (*heading, f"  ✗ cannot resolve gateway URL: {outcome.detail}")
+    if isinstance(outcome, GatewayCredentialMissing):
+        return (*heading, f"  ✗ cannot authenticate to the gateway: {outcome.detail}")
     paused_note = f" ({outcome.paused_reason})" if outcome.paused_reason else ""
     return (
         *heading,

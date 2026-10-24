@@ -1,137 +1,101 @@
-"""`meiva trace ship` — replay the local trace mirror (collector JSONL) to Tempo.
-
-Recording (base/telemetry/tracing.py) exports spans over OTLP/HTTP to the local OTel
-Collector sidecar, whose file exporter mirrors them to `$MEIVA_HOME/traces/`:
-the active `spans.jsonl` plus rotated `spans-<ISO-timestamp>.jsonl` backups,
-each line a standard OTLP/JSON `ExportTraceServiceRequest`. This command is
-the RECOVERY consumer: it reads the mirror and POSTs each line back over
-OTLP/HTTP (protobuf). A gateway/single-box unit sends straight to its loopback
-Tempo endpoint (`MEIVA_TELEMETRY_TEMPO_ENDPOINT`); a pure runner sends to the
-gateway collector's private-address receiver with the cluster bearer:
-
-- **why bypass the local sidecar**: live delivery is the collector's job, with a
-  persistent file-backed queue for backend outages. Ship exists for the gaps
-  the queue could not hold (backend down longer than the queue, offline
-  machines, re-import of a past window). Replaying through the sidecar would
-  write the replayed lines back into the mirror (the file exporter mirrors
-  everything it receives), looping the watermark — so ship dials Tempo
-  directly on a gateway, or the gateway's relay receiver on a pure runner.
-- **gating**: refuses while `MEIVA_TELEMETRY_OTLP_ENABLED=false` (one kill
-  switch for the whole OTLP surface — with the sidecar architecture that also
-  stops recording, so there is nothing to replay either).
-
-Two modes:
-- **incremental** (default): a per-file byte-offset watermark
-  (`traces/.ship-watermark.json`) records how far each file has been shipped, so
-  re-running ships only new lines.
-- **windowed** (`--since` / `--until`, YYYY-MM-DD): ship whole files whose day
-  stamp (name stamp, or mtime for the unstamped active file) falls in the
-  range, ignoring the watermark. Span ingestion is idempotent by span id, so
-  re-shipping an already-shipped window is safe.
-"""
+# meiva:note
+# `meiva trace ship`: replay the local trace mirror (collector JSONL) to Tempo.
+#
+# Recording (`base/telemetry/tracing.py`) exports spans over OTLP/HTTP to the local OTel Collector
+# sidecar, whose file exporter mirrors them to `$MEIVA_HOME/traces/`: the active `spans.jsonl`
+# plus rotated `spans-<ISO-timestamp>.jsonl` backups, each line a standard OTLP/JSON
+# `ExportTraceServiceRequest`. This command is the RECOVERY consumer: it reads the mirror and
+# POSTs each line back over OTLP/HTTP (protobuf). Live delivery is the collector's job, with a
+# queue for backend outages; ship exists for the gaps the queue could not hold (backend down
+# longer than the queue, offline machines, re-import of a past window). Replaying through the
+# sidecar would write the replayed lines back into the mirror and loop the watermark, so ship dials
+# Tempo directly on a gateway, or the gateway's relay receiver on a pure runner.
+#
+# The target, the file selection and the watermark decisions are in `plans/trace_ship_*.py`; this
+# module reads the settings and the mirror, POSTs and keeps the watermark.
+# meiva:link base/telemetry/otlp/docs/telemetry-otlp/trace-mirror.meiva.okf.md
 
 from __future__ import annotations
 
 import gzip
 import json
-from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
 from base.cluster.machine import MachineIdentity
-from base.config import settings
+from base.config import ConfigBoot
+from base.host.db_authority.unit import telemetry_bearer
+from base.telemetry.trace_mirror import mirror_day, mirror_sort_key
+from cli.commands.observability.inputs import observability_config
+from cli.commands.observability.plans.observability_config import ObservabilityConfig
+from cli.commands.observability.plans.trace_ship.files import (
+    ShipTotals,
+    ShipWindow,
+    file_report_line,
+    live_watermarks,
+    plan_file_cursor,
+    repaired_span_id,
+    ship_summary_lines,
+    ship_window,
+)
+from cli.commands.observability.plans.trace_ship.target import (
+    ShipTarget,
+    plan_ship_target,
+)
 
 _WATERMARK_NAME = ".ship-watermark.json"
-# The standard OTLP/HTTP trace path — what Tempo's OTLP receiver listens on.
-_OTLP_V1_PATH = "/v1/traces"
+_SPAN_ID_LENGTHS = (("trace_id", 16), ("span_id", 8), ("parent_span_id", 8))
 
 
-class TraceShipError(RuntimeError):
-    """Shipping config is incomplete — MEIVA_TELEMETRY_OTLP_ENABLED is false."""
-
-
-@dataclass(frozen=True)
-class ShipTarget:
-    endpoint: str
-    headers: dict[str, str]
-    label: str
-
-
-def _require_ship_config(*, machine: MachineIdentity) -> ShipTarget:
-    """Validate config and return the role-correct OTLP replay target.
-
-    Raises:
-        TraceShipError: MEIVA_TELEMETRY_OTLP_ENABLED=false (the whole-OTLP kill
-            switch).
-    """
-    if not settings.observability.telemetry_otlp_enabled:
-        raise TraceShipError(
-            "MEIVA_TELEMETRY_OTLP_ENABLED is false — the whole OTLP surface "
-            "(live exporter + trace ship) is off. Set it true to ship the "
-            "mirror to Tempo."
-        )
-    if machine.role() == frozenset({"agent-runner"}):
-        from base.host.net.auth import bearer_header
-        from cli.commands.observability.otel_collector import (
-            gateway_otel_ingress_endpoint,
-            telemetry_bearer,
-        )
-
-        token = telemetry_bearer()
-        if not token:
-            raise TraceShipError(
-                "a pure runner replays through the gateway's authenticated OTLP "
-                "receiver with its capability's telemetry token, and this unit's "
-                "unit holds no capability"
-            )
-        try:
-            base = gateway_otel_ingress_endpoint()
-        except RuntimeError as exc:
-            raise TraceShipError(str(exc)) from exc
-        return ShipTarget(
-            endpoint=base + _OTLP_V1_PATH,
-            headers=bearer_header(token),
-            label="gateway OTLP relay",
-        )
-    return ShipTarget(
-        endpoint=settings.observability.telemetry_tempo_endpoint.rstrip("/") + _OTLP_V1_PATH,
-        headers={},
-        label="tempo",
+# meiva:note
+# The role-correct replay target.
+#
+# A pure runner presents the telemetry token of its capability; every other role replays straight
+# to its loopback Tempo. The token is read only for a runner: a gateway derives it from the
+# secret, so the capability file is not consulted for a role that does not need it.
+def resolve_ship_target(
+    observability: ObservabilityConfig,
+    *,
+    cluster_secret: str,
+    machine: MachineIdentity,
+    home: Path,
+) -> ShipTarget:
+    roles = machine.role()
+    runner = roles == frozenset({"agent-runner"})
+    gateway = observability.gateway_otlp_endpoint.strip()
+    return plan_ship_target(
+        otlp_enabled=observability.telemetry_otlp_enabled,
+        roles=roles,
+        tempo_endpoint=observability.telemetry_tempo_endpoint,
+        gateway_endpoint=gateway,
+        gateway=urlsplit(gateway),
+        token=telemetry_bearer(home.resolve(), cluster_secret) if runner else None,
     )
 
 
+# meiva:note
+# Day stamp of a mirror file: the collector's rotated `spans-<ISO-timestamp>-(size|time).jsonl`
+# names (`.gz` suffix tolerated), else the file's mtime in UTC, the same clock the name day stamps
+# and `--since` / `--until` use. The active `spans.jsonl` carries no stamp: its content is today's.
 def _file_day(path: Path) -> date:
-    """Day stamp of a mirror file: the collector's rotated
-    `spans-<ISO-timestamp>-(size|time).jsonl` names (`.gz` suffix tolerated),
-    else the file's mtime (the active `spans.jsonl`
-    carries no stamp — its content is today's)."""
-    from base.telemetry.trace_mirror import mirror_day
-
     day = mirror_day(path)
     if day is not None:
         return day
-    # The active file carries no stamp; its day is the mtime in UTC — the same
-    # clock the name day stamps and --since/--until use.
     return datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).date()
 
 
+# meiva:note
+# The byte offsets recorded for the mirror files that still exist.
 def load_watermark(*, traces_dir: Path) -> dict[str, int]:
     path = traces_dir / _WATERMARK_NAME
     if not path.exists():
         return {}
     marks: dict[str, int] = json.loads(path.read_text(encoding="utf-8"))
-    # Drop entries for files retention-pruned out of the mirror, so the watermark
-    # does not grow unbounded as per-pid daily files cycle. A key survives when
-    # its base file OR the gzipped variant exists — the gzip pass renames a
-    # segment to `<name>.gz` and the watermark key stays the base name.
-    return {
-        name: off
-        for name, off in marks.items()
-        if (traces_dir / name).exists() or (traces_dir / f"{name}.gz").exists()
-    }
+    return live_watermarks(marks, present=frozenset(entry.name for entry in traces_dir.iterdir()))
 
 
 def _save_watermark(marks: dict[str, int], *, traces_dir: Path) -> None:
@@ -139,136 +103,142 @@ def _save_watermark(marks: dict[str, int], *, traces_dir: Path) -> None:
     path.write_text(json.dumps(marks, indent=2, sort_keys=True), encoding="utf-8")
 
 
-_SPAN_ID_LENGTHS = (("trace_id", 16), ("span_id", 8), ("parent_span_id", 8))
-
-
+# meiva:note
+# Repair ids stored as base64 of hex (the wrong length) back to their raw byte length, in place.
 def _correct_span_ids(request: Any) -> None:
-    """Repair ids stored base64-of-hex (wrong length) back to their raw byte length, in place."""
-    from base64 import b64encode
-
     for resource_spans in request.resource_spans:
         for scope_spans in resource_spans.scope_spans:
             for span in scope_spans.spans:
                 for attribute, expected_length in _SPAN_ID_LENGTHS:
-                    value = getattr(span, attribute)
-                    if not value or len(value) == expected_length:
-                        continue
-                    try:
-                        corrected = bytes.fromhex(b64encode(value).decode("ascii"))
-                    except ValueError:
-                        corrected = b""
-                    if len(corrected) == expected_length:
-                        setattr(span, attribute, corrected)
+                    repaired = repaired_span_id(getattr(span, attribute), expected_length)
+                    if repaired is not None:
+                        setattr(span, attribute, repaired)
 
 
+# meiva:note
+# POST one OTLP/JSON line as protobuf and return the span count in it.
+#
+# Reconstructs the OTLP `ExportTraceServiceRequest` from the stored JSON and re-serializes it to
+# protobuf: the exact wire shape Tempo's OTLP endpoint ingests.
+#
+# The protobuf modules are imported here: only a real ship needs them, and a dry run must not pay
+# for them.
 def post_line(client: httpx.Client, target: ShipTarget, line: str) -> int:
-    """POST one OTLP/JSON line as protobuf; return the span count in it.
-
-    Reconstructs the OTLP `ExportTraceServiceRequest` from the stored JSON and
-    re-serializes to protobuf — the exact wire shape Tempo's OTLP endpoint
-    ingests.
-    """
     from google.protobuf.json_format import Parse
     from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 
     request = Parse(line, ExportTraceServiceRequest())
     _correct_span_ids(request)
-    body = request.SerializeToString()
     headers = {"Content-Type": "application/x-protobuf", **target.headers}
-    resp = client.post(target.endpoint, content=body, headers=headers)
-    resp.raise_for_status()
+    response = client.post(target.endpoint, content=request.SerializeToString(), headers=headers)
+    response.raise_for_status()
     return sum(len(ss.spans) for rs in request.resource_spans for ss in rs.scope_spans)
 
 
-def _discard(f: Any, n: int) -> None:
-    """Read and discard `n` bytes from a non-seekable stream (gzip)."""
-    remaining = n
+# meiva:note
+# Read and discard `count` bytes from a stream that cannot seek (gzip).
+def _discard(stream: gzip.GzipFile, count: int) -> None:
+    remaining = count
     while remaining > 0:
-        chunk = f.read(min(remaining, 1024 * 1024))
+        chunk = stream.read(min(remaining, 1024 * 1024))
         if not chunk:
             break
         remaining -= len(chunk)
 
 
-def _ship_files(
+# meiva:note
+# Ship one mirror file and return its (batches, spans).
+#
+# Incremental mode starts at the watermark offset and advances the watermark per line, so a crash
+# never re-sends or skips. Windowed mode ships whole files; re-imports are idempotent, so the
+# watermark is untouched. Binary mode: seek and offset are true byte positions, so an interrupted
+# ship resumes exactly after the last POSTed line. A gzip stream cannot seek, so the shipped
+# prefix is read and discarded: the cost of a fully shipped segment is decompression only, never
+# a re-POST. A dry run counts lines and POSTs nothing.
+def _ship_file(
+    path: Path,
+    *,
+    client: httpx.Client | None,
+    target: ShipTarget | None,
+    marks: dict[str, int],
+    window: ShipWindow,
+    traces_dir: Path,
+) -> tuple[int, int] | None:
+    cursor = plan_file_cursor(
+        path.name,
+        windowed=window.windowed,
+        marks=marks,
+        size=0 if path.name.endswith(".gz") else path.stat().st_size,
+    )
+    if cursor.shipped_out:
+        return None
+    batches = 0
+    spans = 0
+    with gzip.open(path, "rb") if cursor.gzipped else path.open("rb") as stream:
+        if isinstance(stream, gzip.GzipFile):
+            _discard(stream, cursor.start)
+        else:
+            stream.seek(cursor.start)
+        offset = cursor.start
+        for raw in stream:
+            offset += len(raw)
+            line = raw.decode("utf-8").strip()
+            if not line:
+                continue
+            if client is not None and target is not None:
+                spans += post_line(client, target, line)
+            batches += 1
+            if client is not None and not window.windowed:
+                marks[cursor.key] = offset
+                _save_watermark(marks, traces_dir=traces_dir)
+    return batches, spans
+
+
+# meiva:note
+# Ship the files and return the totals.
+#
+# The client does not trust the environment: the macOS system proxy (a VPN or clash on
+# 127.0.0.1) would otherwise intercept the protobuf POSTs to a tailnet Tempo endpoint and answer
+# 502, because the proxy handles JSON but mangles binary bodies. `NO_PROXY` does not bypass the
+# macOS system-config branch httpx reads, so the cross-machine ops RPC does the same.
+def ship_files(
     files: list[Path],
     marks: dict[str, int],
     *,
     target: ShipTarget | None,
-    windowed: bool,
-    dry_run: bool,
+    window: ShipWindow,
     traces_dir: Path,
-) -> tuple[int, int, int]:
-    """Ship one file list; return (total_lines, total_spans, shipped_files).
-
-    Incremental mode starts each file at its watermark offset and advances the
-    watermark per line so a crash never re-sends or skips. Windowed mode ships
-    files whole (re-imports are idempotent, so the watermark is untouched).
-    Binary mode: seek/offset are true byte positions, so an interrupted ship
-    resumes exactly after the last POSTed line (text-mode tell() is an opaque
-    cookie and is disabled mid-iteration).
-
-    Gzipped segments (the agent-side compression pass renames a segment to
-    `.jsonl.gz`) are decompressed on read and keyed in the watermark by the
-    BASE name (the `.gz` stripped), so a gzip pass never strands unshipped
-    lines and a re-run after compression continues exactly where the plain
-    file left off. A gzip stream cannot seek, so the already-shipped prefix
-    is read-and-discarded instead — the cost of a fully-shipped segment is
-    decompression only, never a re-POST.
-    """
-    total_lines = 0
-    total_spans = 0
+) -> ShipTotals:
     shipped_files = 0
+    total_batches = 0
+    total_spans = 0
     with httpx.Client(timeout=30.0, trust_env=False) as client:
-        # trust_env=False: the macOS system proxy (127.0.0.1:7897 VPN/clash) would
-        # otherwise intercept protobuf POSTs to the tailnet Tempo endpoint and
-        # answer 502 — the proxy handles JSON but mangles binary bodies. Same
-        # fix pattern as the cross-machine ops RPC (trust_env=False), and for
-        # the same reason: NO_PROXY does not bypass the macOS system-config
-        # branch httpx reads.
         for path in files:
-            gzipped = path.name.endswith(".gz")
-            # Watermark continuity across the gzip pass: key by the base name.
-            wm_key = path.name[:-3] if gzipped else path.name
-            start = 0 if windowed else marks.get(wm_key, 0)
-            if not gzipped and start >= path.stat().st_size:
+            shipped = _ship_file(
+                path,
+                client=client if target is not None else None,
+                target=target,
+                marks=marks,
+                window=window,
+                traces_dir=traces_dir,
+            )
+            if shipped is None or not shipped[0]:
                 continue
-            with gzip.open(path, "rb") if gzipped else path.open("rb") as f:
-                if gzipped:
-                    # A gzip stream cannot seek; discard the shipped prefix.
-                    _discard(f, start)
-                else:
-                    f.seek(start)
-                offset = start
-                file_lines = 0
-                file_spans = 0
-                for raw in f:
-                    offset += len(raw)
-                    line = raw.decode("utf-8").strip()
-                    if not line:
-                        continue
-                    if dry_run:
-                        file_lines += 1
-                        continue
-                    if target is None:  # pragma: no cover — unreachable
-                        # _require_ship_config ran above when not dry_run; keep the
-                        # narrowing honest instead of casting None to str.
-                        raise TraceShipError("ship config required for a real ship")
-                    file_spans += post_line(client, target, line)
-                    file_lines += 1
-                    # Advance the watermark per line so a crash never re-sends or
-                    # skips. Windowed re-imports are idempotent, so skip the bump.
-                    if not windowed:
-                        marks[wm_key] = offset
-                        _save_watermark(marks, traces_dir=traces_dir)
-            if file_lines:
-                shipped_files += 1
-                total_lines += file_lines
-                total_spans += file_spans
-                print(f"  {path.name}: {file_lines} batches, {file_spans} spans")
-    return total_lines, total_spans, shipped_files
+            shipped_files += 1
+            total_batches += shipped[0]
+            total_spans += shipped[1]
+            print(file_report_line(path.name, batches=shipped[0], spans=shipped[1]))
+    return ShipTotals(shipped_files, total_batches, total_spans)
 
 
+# meiva:note
+# Ship the local trace mirror toward Tempo over the role-correct transport.
+#
+# With no `--since` / `--until`, ships incrementally from the per-file watermark. With a window,
+# ships the matching files whole and leaves the watermark alone. `dry_run` reads the mirror only
+# and needs no backend configuration: it is the one way to inspect what reached the mirror when
+# the backend is off. The mirror is `spans.jsonl` plus rotated `spans-<ts>-(size|time).jsonl` and
+# gzipped old segments, oldest first with the active file last.
 def cmd_trace_ship(
     *,
     since: str | None,
@@ -276,41 +246,36 @@ def cmd_trace_ship(
     dry_run: bool,
     machine: MachineIdentity,
     traces_dir: Path,
+    config: ConfigBoot,
+    home: Path,
 ) -> int:
-    """Ship the local trace mirror toward Tempo over the role-correct transport.
-
-    With no --since/--until, ships incrementally from the per-file watermark.
-    With a window, ships matching files whole (watermark untouched).
-
-    ``dry_run`` reads the mirror only and needs no backend config — it is the
-    one way to inspect what reached the mirror when the backend is off.
-    """
-    target = _require_ship_config(machine=machine) if not dry_run else None
-    windowed = since is not None or until is not None
-    lo = datetime.strptime(since, "%Y-%m-%d").date() if since else date.min  # noqa: DTZ007 — date-only
-    hi = datetime.strptime(until, "%Y-%m-%d").date() if until else date.max  # noqa: DTZ007 — date-only
-
-    from base.telemetry.trace_mirror import mirror_sort_key
-
-    # Active `spans.jsonl` + rotated `spans-<ts>-(size|time).jsonl` + gzipped
-    # old segments (`*.jsonl.gz` — the agent-side compression pass; read
-    # transparently in `_ship_files`); oldest first, the active file last.
+    target = None
+    if not dry_run:
+        view = config.view
+        target = resolve_ship_target(
+            observability_config(view.observability),
+            cluster_secret=view.data_plane.cluster_secret,
+            machine=machine,
+            home=home,
+        )
+    window = ship_window(since, until)
     files = sorted(traces_dir.glob("spans*.jsonl*"), key=mirror_sort_key)
-    if windowed:
-        files = [p for p in files if lo <= _file_day(p) <= hi]
-
-    marks = load_watermark(traces_dir=traces_dir)
-    total_lines, total_spans, shipped_files = _ship_files(
-        files, marks, target=target, windowed=windowed, dry_run=dry_run, traces_dir=traces_dir
+    if window.windowed:
+        files = [path for path in files if window.contains(_file_day(path))]
+    totals = ship_files(
+        files,
+        load_watermark(traces_dir=traces_dir),
+        target=target,
+        window=window,
+        traces_dir=traces_dir,
     )
-
-    verb = "would ship" if dry_run else "shipped"
-    scope = f"window {since or '-inf'}..{until or '+inf'}" if windowed else "incremental"
-    print(f"{verb} ({scope}): {shipped_files} files, {total_lines} batches, {total_spans} spans")
-    if dry_run:
-        print("target: (dry-run — role-correct target not resolved)")
-    else:
-        if target is None:  # pragma: no cover — non-dry-run resolves it above
-            raise RuntimeError("trace ship target was not resolved")
-        print(f"target: {target.label} -> {target.endpoint}")
+    target_line = (
+        "target: (dry-run — role-correct target not resolved)"
+        if target is None
+        else f"target: {target.label} -> {target.endpoint}"
+    )
+    for line in ship_summary_lines(
+        dry_run=dry_run, scope=window.scope, totals=totals, target_line=target_line
+    ):
+        print(line)
     return 0

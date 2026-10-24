@@ -13,38 +13,63 @@ import argparse
 from base.deploy.progress_timeout import UNIT_BUNDLE_TTL_S
 
 
-def _h_cluster_status(_args: argparse.Namespace) -> int:
+def _h_cluster_status(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.cluster.control import cmd_cluster_status
 
-    return cmd_cluster_status()
+    config = args.runtime.config
+    return cmd_cluster_status(
+        access=gateway_access_from_boot(config),
+        status_probe_timeout_s=config.view.gateway.status_probe_timeout_seconds,
+    )
 
 
 def _h_cluster_mark_staging(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.cluster.control import cmd_cluster_mark_staging
 
-    return cmd_cluster_mark_staging(name=args.name, is_staging=args.is_staging)
+    return cmd_cluster_mark_staging(
+        name=args.name,
+        is_staging=args.is_staging,
+        access=gateway_access_from_boot(args.runtime.config),
+    )
 
 
 def _h_cluster_pause(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.cluster.control import cmd_cluster_pause
 
-    return cmd_cluster_pause(name=args.name, reason=args.reason)
+    return cmd_cluster_pause(
+        name=args.name,
+        reason=args.reason,
+        access=gateway_access_from_boot(args.runtime.config),
+    )
 
 
 def _h_cluster_resume(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.cluster.control import cmd_cluster_resume
 
-    return cmd_cluster_resume(name=args.name)
+    return cmd_cluster_resume(name=args.name, access=gateway_access_from_boot(args.runtime.config))
 
 
 def _h_cluster_destroy(args: argparse.Namespace) -> int:
-    from cli.commands.cluster.home import cmd_cluster_destroy
+    import sys
 
-    return cmd_cluster_destroy(
+    from base.paths import repo_root
+    from cli.commands.cluster.home import DestroyRequest, Terminal, cmd_cluster_destroy
+
+    runtime = args.runtime
+    request = DestroyRequest(
+        home=runtime.home,
         drop_db=args.drop_db,
         stop_mode=args.stop_mode,
-        stop_timeout=args.stop_timeout,
-        host=args.runtime.host,
+        stop_timeout_s=args.stop_timeout,
+        checkout=repo_root(),
+        helper_port=runtime.config.view.services.permissions_helper_port,
+    )
+    return cmd_cluster_destroy(
+        request, host=runtime.host, terminal=Terminal(sys.stdin, sys.stdout, sys.stderr)
     )
 
 
@@ -62,7 +87,10 @@ def _h_cluster_health_probe(args: argparse.Namespace) -> int:
 def _h_cluster_health_probe_register(args: argparse.Namespace) -> int:
     from cli.commands.cluster.cron import cmd_cron_register
 
-    return cmd_cron_register(host=args.runtime.host)
+    runtime = args.runtime
+    return cmd_cron_register(
+        os_jobs_enabled=runtime.config.view.general.os_jobs_enabled, host=runtime.host
+    )
 
 
 def _h_cluster_health_probe_unregister(args: argparse.Namespace) -> int:
@@ -75,14 +103,25 @@ def _h_cluster_db_authority_issue_unit(args: argparse.Namespace) -> int:
     from cli.commands.cluster.control import cmd_db_authority_issue_unit
 
     return cmd_db_authority_issue_unit(
-        machine=args.machine, home=args.home, out=args.out, ttl_hours=args.ttl_hours
+        machine=args.machine,
+        home=args.home,
+        out=args.out,
+        ttl_hours=args.ttl_hours,
+        command=args.runtime,
     )
 
 
 def _h_cluster_db_authority_install_unit(args: argparse.Namespace) -> int:
+    import os
+
+    from base.host.db_authority.unit import CAPABILITY_KEY_ENV
     from cli.commands.cluster.control import cmd_db_authority_install_unit
 
-    return cmd_db_authority_install_unit(bundle=args.bundle)
+    return cmd_db_authority_install_unit(
+        bundle=args.bundle,
+        transport_key=os.environ.pop(CAPABILITY_KEY_ENV, ""),
+        home=args.runtime.home.resolve(),
+    )
 
 
 def _add_db_authority_parser(

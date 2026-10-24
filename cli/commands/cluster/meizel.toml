@@ -1,9 +1,13 @@
-exports = ["control.py", "cron.py", "health.py", "home.py", "tests", "unit_join.py"]
+exports = ["control.py", "cron.py", "health.py", "home.py", "plans", "tests", "unit_join.py"]
 
 [uses]
-"control.py" = ["unit_join.py"]
-"health.py" = ["_provider_guard.py"]
-"tests" = ["_provider_guard.py", "control.py", "cron.py", "health.py", "home.py"]
+"_provider_guard.py" = ["plans"]
+"control.py" = ["plans", "unit_join.py"]
+"health.py" = ["_provider_guard.py", "health_readings.py", "plans"]
+"health_readings.py" = ["_provider_guard.py", "plans"]
+"home.py" = ["plans"]
+"tests" = ["_provider_guard.py", "control.py", "cron.py", "health.py", "health_readings.py", "home.py", "plans", "unit_join.py"]
+"unit_join.py" = ["plans"]
 
 [purity]
 "__init__.py" = "strict"

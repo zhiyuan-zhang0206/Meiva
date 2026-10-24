@@ -1,149 +1,179 @@
-"""Per-cluster native Postgres+Redis bring-up.
-
-Every cluster (including `main`) runs its OWN Postgres and Redis under its
-`$MEIVA_HOME` on the fixed port table (`base.host.env.port_table`) — this is the only
-data-plane path; there is no shared host instance.
-
-Model (mirrors `base.cluster.dataplane.pg_tools.throwaway_postgres`, but persistent + authed):
-
-- Postgres `initdb`s into `$MEIVA_HOME/pg` (cold) — cached through a host-level
-  template dir so a new cluster / a test spins up by directory copy, not a fresh
-  multi-second init — and is launched directly with durable native custody on its pg port.
-  pg_hba ALWAYS authenticates, whatever the bearer: the OS-user bootstrap
-  superuser is the sole passwordless identity (`peer` on the 0700 owner-only
-  socket — the administrator authority), and every other role is SCRAM over
-  the socket and TCP. The schema owner is NOLOGIN; application processes log in
-  only as the home's write generation (`base.cluster.authority`).
-- Redis runs `redis-server` on the cluster's redis port and ALWAYS authenticates,
-  whatever the bearer: `requirepass` = the gateway-only Redis admin password, and
-  the cluster's ACL user has its own runtime password. Both are minted at first
-  start; a home without them is refused, never converted. Data dir under `$MEIVA_HOME/redis`. The
-  Redis admin password reaches redis through a 0600 `redis.conf` and reaches `redis-cli`
-  through `$REDISCLI_AUTH` — never argv, which `ps` shows to any local user
-  (issue #974).
-
-The Postgres db/role and Redis ACL identifiers are independent URL data: callers
-read each from its supplied URL (`db_identity(db_url)` / `redis_identity(redis_url)`) and pass
-`identity` / `redis_user` explicitly. First-start identity supplies the fixed
-`DATA_PLANE_IDENTITY` for both; later starts preserve different existing names.
-
-Bind posture — authenticated Postgres, PgBouncer and Linux Redis bind loopback
-and this host's declared reachable address (`MEIVA_MACHINE_HOST`), never all
-interfaces; a host that declares none (`localhost`) binds loopback only. macOS Redis
-retains its loopback-only workaround and the root-supervised `redis-bridge` relay
-(task #1469).
-
-POSIX only (macOS brew / Linux postgres + redis-server).
-"""
+# meiva:note
+# Per-cluster native Postgres+Redis bring-up.
+#
+# Every cluster (including `main`) runs its OWN Postgres and Redis under its `$MEIVA_HOME` on the
+# fixed port table (`base.host.env.port_table`) — this is the only data-plane path; there is no
+# shared host instance.
+#
+# The shell of `instance/pg_plan.py` and `instance/redis_plan.py`: those modules decide the
+# authentication files, the command lines and the ordered steps of a start; this module reads the
+# OS user, the platform, the machine's addresses and the binaries, executes each step and stops at
+# the first one that fails. Every path is derived from the `home` the caller hands in.
+#
+# - Postgres `initdb`s into `$MEIVA_HOME/pg` (cold) — cached through a home-level template dir so
+#   a new cluster / a test spins up by directory copy, not a fresh multi-second init — and is
+#   launched directly with durable native custody on its pg port. pg_hba ALWAYS authenticates,
+#   whatever the bearer: the OS-user bootstrap superuser is the sole passwordless identity (`peer`
+#   on the 0700 owner-only socket — the administrator authority), and every other role is SCRAM
+#   over the socket and TCP. The schema owner is NOLOGIN; application processes log in only as the
+#   home's write generation (`base.cluster.authority`).
+# - Redis runs `redis-server` on the cluster's redis port and ALWAYS authenticates, whatever the
+#   bearer: `requirepass` = the gateway-only Redis admin password, and the cluster's ACL user has
+#   its own runtime password. Both are minted at first start; a home without them is refused,
+#   never converted. The admin password reaches redis through a 0600 `redis.conf` and reaches
+#   `redis-cli` through `$REDISCLI_AUTH` — never argv, which `ps` shows to any local user
+#   (issue #974).
+#
+# The Postgres db/role and Redis ACL identifiers are independent URL data: callers read each from
+# its supplied URL (`db_identity(db_url)` / `redis_identity(redis_url)`) and pass `identity` /
+# `redis_user` explicitly. First-start identity supplies the fixed `DATA_PLANE_IDENTITY` for both;
+# later starts preserve different existing names.
+#
+# Bind posture — authenticated Postgres, PgBouncer and Linux Redis bind loopback and this host's
+# declared reachable address (`MEIVA_MACHINE_HOST`), never all interfaces; a host that declares
+# none (`localhost`) binds loopback only. macOS Redis retains its loopback-only workaround and
+# the root-supervised `redis-bridge` relay (task #1469).
+#
+# POSIX only (macOS brew / Linux postgres + redis-server).
 
 from __future__ import annotations
 
 import getpass
 import os
+import secrets
 import shlex
 import shutil
 import socket
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
+
+import psycopg
 
 from base.cluster import ensure_cluster_redis_acl, ownership, port_preflight
 from base.cluster import postgres as owned_postgres
 from base.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
-from base.cluster.dataplane.pg_admin import pg_admin_url as _base_pg_admin_url
 from base.cluster.dataplane.pg_admin import pg_socket_dir as _base_pg_socket_dir
 from base.cluster.dataplane.pg_tools import pg_shm_args, pg_start_env, pg_tool, pg_tz_args
 from base.cluster.machine import MachineIdentity
-from base.config import ConfigBoot
 from base.host.brew_pin import brew_prefix
 from base.host.net.url_secret import url_host
 from base.host.private_storage import write_private_bytes
+from base.host.proc import run_bounded
 from base.native_process.child_env import daemon_process_env, inherited_process_env
 from base.native_process.os_platform import is_macos
-from base.paths import meiva_home
+from base.native_process.ownership import OwnedProcess
 from cli.commands.data_plane.config import DataPlaneConfig
-from cli.commands.data_plane.walg import warn_archive_inactive
+from cli.commands.data_plane.instance import pg_plan, redis_plan
+from cli.commands.data_plane.instance.bounded_wait import Wait, wait_verdict
+from cli.commands.data_plane.instance.redis_binaries import (
+    BrewFormula,
+    OnPath,
+    OverrideDir,
+    redis_binary_source,
+)
+from cli.commands.data_plane.instance.storage_plan import require_storage_credentials
+from cli.commands.data_plane.walg import path_reader_for, warn_archive_inactive
 from services.backup.walg.archive import archive_pg_args
 
-
-def pg_dial_host(config: DataPlaneConfig) -> str:
-    """The host this cluster's own Postgres is dialed at — read from this
-    cluster's MEIVA_DB_URL (the URL is the one dial source every consumer uses;
-    DataPlaneSettings rewrites a self-host URL to loopback before anything
-    dials). The home identity and its URLs exist before native bring-up.
-    External data-plane reachability is handled separately by `bringup`.
-    """
-    return url_host(config.db_url)
-
-
-def redis_dial_host(config: DataPlaneConfig) -> str:
-    """The host this cluster's own Redis is dialed at — read from this
-    cluster's MEIVA_REDIS_URL (see `pg_dial_host`)."""
-    return url_host(config.redis_url)
-
-
-# A single cluster's own pg needs far less than a per-host shared budget. `main`
-# on its own instance carries the whole prod fleet, so keep enough headroom (the
-# gateway + long-running services alone hold ~25, then ~3-4 per agent).
+# meiva:note
+# A single cluster's own pg needs far less than a per-host shared budget. `main` on its own
+# instance carries the whole prod fleet, so keep enough headroom (the gateway + long-running
+# services alone hold ~25, then ~3-4 per agent).
 _PG_MAX_CONNECTIONS = 500
 _PG_START_TIMEOUT_S = 60.0
 _PG_PROBE_TIMEOUT_S = 3.0
+_INITDB_TIMEOUT_S = 300.0
+_REDIS_PROBE_TIMEOUT_S = 5.0
+_REDIS_LAUNCH_TIMEOUT_S = 30.0
+_REDIS_READY_TIMEOUT_S = 6.0
+_REDIS_READY_INTERVAL_S = 0.1
 
-# Bounded wait for this host's non-loopback bind address (MEIVA_MACHINE_HOST) to
-# appear on a local interface before the Postgres data plane binds to it. On
-# reboot brew / launchd can start `meiva` before the private network has assigned
-# the address, so binding it fails and the whole autostart dies.
+# meiva:note
+# Bounded wait for this host's non-loopback bind address (MEIVA_MACHINE_HOST) to appear on a local
+# interface before the Postgres data plane binds to it. On reboot brew / launchd can start `meiva`
+# before the private network has assigned the address, so binding it fails and the whole
+# autostart dies.
 BIND_WAIT_TIMEOUT_S = 60.0
 _BIND_WAIT_INTERVAL_S = 2.0
 
-
-def pg_data_dir() -> Path:
-    return meiva_home() / "pg"
-
-
-def pg_template_dir() -> Path:
-    """Cached `initdb` output, copied so a new instance is a directory copy rather
-    than a multi-second init. Kept in the home, beside the data directory it seeds."""
-    return meiva_home() / "pg-template-17"
-
-
-def _redis_bin(config: DataPlaneConfig, name: str) -> str:
-    """One home-owned pair; an incomplete override never falls back to PATH."""
-    directory = config.redis_bin_dir
-    if directory:
-        root = Path(directory)
-        for tool in ("redis-server", "redis-cli"):
-            path = root / tool
-            if not path.is_file() or not os.access(path, os.X_OK):
-                raise RuntimeError(f"MEIVA_REDIS_BIN_DIR requires an executable file: {path}")
-        return str(root / name)
-    return str(brew_prefix("redis@8.2") / "bin" / name) if is_macos() else name
-
-
-def redis_server_bin(config: DataPlaneConfig) -> str:
-    return _redis_bin(config, "redis-server")
-
-
-def redis_cli_bin(config: DataPlaneConfig) -> str:
-    return _redis_bin(config, "redis-cli")
+_HBA_PROOF_TIMEOUT_S = 10.0
+_HBA_PROOF_INTERVAL_S = 0.1
 
 
 # meiva:note
-# Resolve through the shared resolver: the vendored tree first (it carries
-# initdb/pg_ctl/postgres), then the host install for the client tools it does
-# not ship. The hardcoded Linux apt layout failed a clean host on initdb even
-# after converge had downloaded the vendored tree.
-def pg_bin(name: str, *, tool: Callable[[str], Path] = pg_tool) -> str:
-    return str(tool(name))
+# The bounds of one start, each defaulting to its production constant: how long the reachable bind
+# address may take to appear, how long a postmaster may take to answer, how long one readiness
+# probe may take. A test passes small ones; nothing else sets them.
+@dataclass(frozen=True)
+class StartTuning:
+    bind_wait_s: float = BIND_WAIT_TIMEOUT_S
+    pg_start_s: float = _PG_START_TIMEOUT_S
+    pg_probe_s: float = _PG_PROBE_TIMEOUT_S
 
 
+PRODUCTION_TUNING = StartTuning()
+
+
+def pg_data_dir(home: Path) -> Path:
+    return home / "pg"
+
+
+# meiva:note
+# Cached `initdb` output, copied so a new instance is a directory copy rather than a
+# multi-second init. Kept in the home, beside the data directory it seeds.
+def pg_template_dir(home: Path) -> Path:
+    return home / "pg-template-17"
+
+
+# meiva:note
+# This home's native Redis data directory.
+def redis_data_dir(home: Path) -> Path:
+    return home / "redis"
+
+
+# meiva:note
+# The canonical owner-only socket directory of `home`'s Postgres, created at 0700 on first use.
+def pg_socket_dir(home: Path, socket_root: Path | None = None) -> Path:
+    return _base_pg_socket_dir(socket_root, home=home)
+
+
+# meiva:note
+# One home-owned pair; an incomplete override never falls back to PATH.
+def _redis_bin(redis_bin_dir: str, name: str, *, macos: bool) -> str:
+    source = redis_binary_source(redis_bin_dir=redis_bin_dir, macos=macos)
+    match source:
+        case OverrideDir(path=root):
+            for tool in ("redis-server", "redis-cli"):
+                candidate = root / tool
+                if not (candidate.is_file() and os.access(candidate, os.X_OK)):
+                    raise RuntimeError(
+                        f"MEIVA_REDIS_BIN_DIR requires an executable file: {candidate}"
+                    )
+            return str(root / name)
+        case BrewFormula(formula=formula):
+            return str(brew_prefix(formula) / "bin" / name)
+        case OnPath():
+            return name
+
+
+def redis_server_bin(redis_bin_dir: str, *, macos: bool) -> str:
+    return _redis_bin(redis_bin_dir, "redis-server", macos=macos)
+
+
+def redis_cli_bin(redis_bin_dir: str, *, macos: bool) -> str:
+    return _redis_bin(redis_bin_dir, "redis-cli", macos=macos)
+
+
+# meiva:note
+# True if `addr` is currently assigned to a local interface (bindable).
+#
+# A Postgres or PgBouncer listener can only bind an address the kernel has on an interface;
+# before the private-network interface comes up, binding its address fails with EADDRNOTAVAIL.
+# Probing with a throwaway bind is the portable check.
 def addr_assigned(addr: str) -> bool:
-    """True if `addr` is currently assigned to a local interface (bindable). A
-    Postgres or PgBouncer listener can only bind an address the kernel has on an
-    interface; before the private-network interface comes up, binding its address
-    fails with EADDRNOTAVAIL. Probing with a throwaway bind is the portable check."""
     family = socket.AF_INET6 if ":" in addr else socket.AF_INET
     try:
         with socket.socket(family, socket.SOCK_STREAM) as s:
@@ -153,87 +183,68 @@ def addr_assigned(addr: str) -> bool:
         return False
 
 
-def wait_for_reachable_bind(*, machine: MachineIdentity) -> bool:
-    """Block (bounded) until this host's non-loopback bind address is assigned to a
-    local interface. Returns True immediately on a loopback-only (single-box) host —
-    loopback is always present. Returns False on timeout so the caller fails fast
-    with a clear message instead of pg_ctl dying on an un-bindable address."""
-    host = machine.host()
+# meiva:note
+# Block (bounded by `timeout_s`) until the host's non-loopback bind address is assigned to a
+# local interface.
+#
+# Returns True immediately on a loopback-only (single-box) host — loopback is always present.
+# Returns False on timeout so the caller fails fast with a clear message instead of the
+# daemon dying on an un-bindable address.
+def wait_for_reachable_bind(*, host: str, timeout_s: float) -> bool:
     if host in port_preflight.LOOPBACK_ALIASES:
         return True
-    deadline = time.monotonic() + BIND_WAIT_TIMEOUT_S
+    started = time.monotonic()
     while True:
-        if addr_assigned(host):
+        verdict = wait_verdict(
+            satisfied=addr_assigned(host),
+            elapsed_s=time.monotonic() - started,
+            timeout_s=timeout_s,
+        )
+        if verdict is Wait.DONE:
             return True
-        if time.monotonic() >= deadline:
+        if verdict is Wait.EXPIRED:
             return False
         time.sleep(_BIND_WAIT_INTERVAL_S)
 
 
-def pg_hba_body(config: DataPlaneConfig, *, machine: MachineIdentity) -> str:
-    """Always-authenticated pg_hba.
+# meiva:note
+# Wait for `host` to be assigned to an interface; print why and say no when it never appears.
+def _await_bind(service: str, host: str, tuning: StartTuning) -> bool:
+    if wait_for_reachable_bind(host=host, timeout_s=tuning.bind_wait_s):
+        return True
+    print(pg_plan.bind_refusal(service, host, int(tuning.bind_wait_s)), file=sys.stderr)
+    return False
 
-    The OS user (the initdb bootstrap superuser) reaches Postgres only through
-    `peer` on the owner-only socket — the administrator authority provisioning,
-    migrations and the authority invariant use. The same OS user reaches the
-    password-less monitoring login (the collector's statistics reader) through
-    `peer` with the `pg_ident` map `pg_ident_body` writes. Every other role
-    authenticates with SCRAM over the socket and loopback TCP; `NOLOGIN` roles
-    (the schema owner and the capability groups) never log in
-    under any method.
 
-    The declared reach adds SCRAM host lines, matching the bind posture
-    (`port_preflight.bind_addrs`): the reachable address when it is not a loopback
-    alias, and each `trusted_cidrs` range. A single box (reachable address
-    `localhost`, no CIDRs) has loopback lines only. Both are cluster-scope fields
-    the env-authority pass drops when undeclared, so neither has an ambient-leak
-    vector."""
-    lines = [
-        f"local all {getpass.getuser()} peer",
-        f"local all {MONITOR_ROLE} peer map={MONITOR_MAP}",
-        "local all all scram-sha-256",
-        "host all all 127.0.0.1/32 scram-sha-256",
-        "host all all ::1/128 scram-sha-256",
-    ]
+# meiva:note
+# The machine's declared reachable address, or None on a single box that binds loopback alone.
+def _off_box_host(machine: MachineIdentity) -> str | None:
     host = machine.host()
-    if host not in port_preflight.LOOPBACK_ALIASES:
-        lines.append(f"host all all {host}/32 scram-sha-256")
-    for cidr in (c.strip() for c in config.trusted_cidrs.split(",") if c.strip()):
-        lines.append(f"host all all {cidr} scram-sha-256")
-    return "\n".join(lines) + "\n"
+    return None if host in port_preflight.LOOPBACK_ALIASES else host
 
 
-def pg_ident_body() -> str:
-    """The only ident mapping: this OS user may log in as the monitoring role."""
-    return f"{MONITOR_MAP} {getpass.getuser()} {MONITOR_ROLE}\n"
+def _identity() -> pg_plan.PgIdentity:
+    return pg_plan.PgIdentity(
+        os_user=getpass.getuser(), monitor_role=MONITOR_ROLE, monitor_map=MONITOR_MAP
+    )
 
 
-# The server asks a password-less client for one; libpq reports either wording.
-_PASSWORD_DEMANDED = ("no password supplied", "password authentication failed")
-_HBA_PROOF_TIMEOUT_S = 10.0
-
-
-def require_authenticated_hba(pg_port: int, dial_host: str) -> None:
-    """Prove the RUNNING postmaster enforces password authentication.
-
-    `pg_hba_file_rules` shows the file, not what the postmaster loaded, and a
-    retained postmaster reloads asynchronously after SIGHUP. So the proof is
-    behavioral: a password-less dial as a role name that cannot exist must be
-    asked for a password over loopback TCP and over the socket. A trust line
-    would instead answer that the role does not exist. Bounded; raises
-    RuntimeError naming each path that did not demand a password.
-    """
-    import secrets
-
-    import psycopg
-
+# meiva:note
+# Prove the RUNNING postmaster enforces password authentication.
+#
+# A password-less dial as a role name that cannot exist must be asked for a password over
+# loopback TCP and over the owner-only socket (`pg_plan.hba_dial_verdict`). Bounded; raises
+# RuntimeError naming each path that did not demand a password.
+def require_authenticated_hba(pg_port: int, dial_host: str, *, socket_dir: Path) -> None:
     probe = f"meiva_hba_probe_{secrets.token_hex(4)}"
+    # meiva:note
     # A path that never exists: no ~/.pgpass entry can answer the challenge.
-    passfile = str(pg_socket_dir() / "no-passfile")
-    deadline = time.monotonic() + _HBA_PROOF_TIMEOUT_S
+    passfile = str(socket_dir / "no-passfile")
+    started = time.monotonic()
     while True:
         unproven: list[str] = []
-        for host in (dial_host, str(pg_socket_dir())):
+        for host in (dial_host, str(socket_dir)):
+            error: str | None = None
             try:
                 psycopg.connect(
                     host=host,
@@ -244,286 +255,386 @@ def require_authenticated_hba(pg_port: int, dial_host: str) -> None:
                     dbname="postgres",
                     connect_timeout=3,
                 ).close()
-                unproven.append(f"{host}: admitted without a password")
             except psycopg.OperationalError as exc:
-                if not any(marker in str(exc) for marker in _PASSWORD_DEMANDED):
-                    unproven.append(f"{host}: {str(exc).strip().splitlines()[-1]}")
-        if not unproven:
+                error = str(exc)
+            reason = pg_plan.hba_dial_verdict(host, error)
+            if reason is not None:
+                unproven.append(reason)
+        verdict = wait_verdict(
+            satisfied=not unproven,
+            elapsed_s=time.monotonic() - started,
+            timeout_s=_HBA_PROOF_TIMEOUT_S,
+        )
+        if verdict is Wait.DONE:
             return
-        if time.monotonic() >= deadline:
+        if verdict is Wait.EXPIRED:
             raise RuntimeError(
                 "postgres does not enforce password authentication after its pg_hba "
                 "rewrite: " + "; ".join(unproven)
             )
-        time.sleep(0.1)
+        time.sleep(_HBA_PROOF_INTERVAL_S)
 
 
-def initdb(target: Path) -> None:
-    """Fresh initdb at `target` with the OS user as the bootstrap superuser
-    (mirrors throwaway_postgres / the brew install convention). The `trust`
-    default is never served: `start_pg` writes the always-auth hba first."""
+# meiva:note
+# Fresh initdb at `target` with `os_user` as the bootstrap superuser (mirrors
+# throwaway_postgres / the brew install convention).
+#
+# The `trust` default is never served: `start_pg` writes the always-auth hba first.
+def initdb(target: Path, *, os_user: str) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
+    result = run_bounded(
         [
-            pg_bin("initdb"),
+            str(pg_tool("initdb")),
             "-D",
             str(target),
             "-U",
-            getpass.getuser(),
+            os_user,
             "-A",
             "trust",
             "--encoding=UTF8",
             "--locale=C",
         ],
-        check=True,
         capture_output=True,
+        text=True,
+        timeout=_INITDB_TIMEOUT_S,
     )
+    if result.returncode != 0:
+        raise RuntimeError(f"initdb failed (rc={result.returncode}): {result.stderr.strip()}")
 
 
-def ensure_pg_data() -> Path:
-    """Ensure this cluster's pg data dir exists and is initialized, via the cached
-    template (initdb once host-wide, then copy). Returns the data dir."""
-    data = pg_data_dir()
+# meiva:note
+# Ensure this cluster's pg data dir exists and is initialized, via the cached template (initdb
+# once per home, then copy). Returns the data dir.
+def ensure_pg_data(home: Path, *, os_user: str) -> Path:
+    data = pg_data_dir(home)
     if (data / "PG_VERSION").exists():
         return data
-    template = pg_template_dir()
+    template = pg_template_dir(home)
     if not (template / "PG_VERSION").exists():
-        initdb(template)
+        initdb(template, os_user=os_user)
     shutil.copytree(template, data)
     return data
 
 
-# Thin shells over the shared admin-plane dial (moved to base.cluster.dataplane.pg_admin,
-# 2026-08-31 — services layer reaches it without importing up into cli). The
-# names stay for existing cli callers and their monkeypatches.
-def pg_socket_dir(socket_root: Path | None = None) -> Path:
-    """Thin shell over base.cluster.dataplane.pg_admin.pg_socket_dir — the home resolution stays
-    in the cli namespace so tests steering `meiva_home` keep steering this probe."""
-    return _base_pg_socket_dir(socket_root, home=meiva_home())
-
-
-def pg_admin_url(pg_port: int) -> str:
-    """Thin shell — the admin URL lives in base.cluster.dataplane.pg_admin (services import it
-    from there); this keeps the cli-side monkeypatch surface stable."""
-    return _base_pg_admin_url(pg_port)
-
-
-def pg_running(pg_port: int, host: str = "127.0.0.1") -> bool:
+def pg_running(
+    pg_isready: str, pg_port: int, host: str, *, timeout_s: float = _PG_PROBE_TIMEOUT_S
+) -> bool:
     try:
-        out = subprocess.run(
-            [pg_bin("pg_isready"), "-h", host, "-p", str(pg_port)],
+        out = run_bounded(
+            [pg_isready, "-h", host, "-p", str(pg_port)],
             capture_output=True,
-            check=False,
-            timeout=_PG_PROBE_TIMEOUT_S,
+            timeout=timeout_s,
         )
     except subprocess.TimeoutExpired:
         return False
     return out.returncode == 0
 
 
+# meiva:note
+# Execute the launch step of a Postgres start: hand the postmaster command line, built from the
+# resolved binary and the declared addresses, to the native custody launcher.
+def _launch_postmaster(
+    config: DataPlaneConfig,
+    pg_port: int,
+    *,
+    home: Path,
+    dial_host: str,
+    machine: MachineIdentity,
+    retained_children: list[subprocess.Popen[bytes]],
+    owner: OwnedProcess | None,
+    tuning: StartTuning,
+) -> None:
+    data = pg_data_dir(home)
+    pg_isready = str(pg_tool("pg_isready"))
+    argv = pg_plan.pg_launch_argv(
+        pg_plan.PgLaunch(
+            postgres_bin=str(pg_tool("postgres")),
+            data=data,
+            port=pg_port,
+            listen_addrs=tuple(port_preflight.bind_addrs(machine=machine)),
+            socket_dir=pg_socket_dir(home),
+            max_connections=_PG_MAX_CONNECTIONS,
+            tz_args=tuple(shlex.split(pg_tz_args())),
+            shm_args=tuple(shlex.split(pg_shm_args())),
+            archive_args=tuple(
+                archive_pg_args(path_reader=path_reader_for(config.walg_config_file))
+            ),
+        )
+    )
+    owned_postgres.start(
+        data,
+        pg_port,
+        argv,
+        pg_start_env(),
+        ready=lambda: pg_running(pg_isready, pg_port, dial_host, timeout_s=tuning.pg_probe_s),
+        timeout=tuning.pg_start_s,
+        expected=owner,
+        retained_children=retained_children,
+    )
+
+
+# meiva:note
+# Start (or re-affirm) this cluster's own Postgres.
+#
+# A foreign listener on the port refuses before anything is written or initialized; the steps
+# then follow `pg_plan.plan_pg_start`. Returns 1 when the declared reachable address never
+# appeared, so the caller fails fast instead of the postmaster dying on an un-bindable address.
 def start_pg(
     config: DataPlaneConfig,
     pg_port: int,
     *,
-    retained_children: list[subprocess.Popen[bytes]] | None = None,
+    home: Path,
+    retained_children: list[subprocess.Popen[bytes]],
     machine: MachineIdentity,
+    tuning: StartTuning = PRODUCTION_TUNING,
 ) -> int:
-    if retained_children is None:
-        raise ValueError("PostgreSQL launch requires its caller-owned child retention")
-    walg_boot = ConfigBoot()
-
-    def path_reader() -> Path | None:
-        if not walg_boot.prepared:
-            walg_boot.read_process_environment()
-        return walg_boot.view.walg.walg_config_file
-
-    owner = ownership.require_postgres(pg_data_dir(), pg_port, required=False)
-    data = ensure_pg_data()
-    (data / "pg_ident.conf").write_text(pg_ident_body())
-    (data / "pg_hba.conf").write_text(pg_hba_body(config, machine=machine))
-    dial_host = pg_dial_host(config)
-    # The wait applies only when this cluster binds a non-loopback reachable address
-    # (`port_preflight.bind_addrs`); a loopback host returns immediately.
-    if owner is None and not wait_for_reachable_bind(machine=machine):
-        print(
-            f"  ✗ reachable bind address {machine.host()!r} is not assigned to any "
-            f"local interface after {int(BIND_WAIT_TIMEOUT_S)}s — postgres cannot bind "
-            f"it. On reboot this means the private network has not come "
-            f"up yet; retry `meiva start --all-services` (or this unit's own service selection) once it is.",
-            file=sys.stderr,
-        )
-        return 1
-    listen = ",".join(port_preflight.bind_addrs(machine=machine))
-    owned_postgres.start(
-        data,
-        pg_port,
-        [
-            pg_bin("postgres"),
-            "-D",
-            str(data),
-            "-p",
-            str(pg_port),
-            "-c",
-            f"listen_addresses={listen}",
-            "-c",
-            f"unix_socket_directories={pg_socket_dir()}",
-            "-c",
-            "unix_socket_permissions=0700",
-            "-c",
-            f"max_connections={_PG_MAX_CONNECTIONS}",
-            *shlex.split(pg_tz_args()),
-            *shlex.split(pg_shm_args()),
-            *archive_pg_args(path_reader=path_reader),
-        ],
-        pg_start_env(),
-        ready=lambda: pg_running(pg_port, dial_host),
-        timeout=_PG_START_TIMEOUT_S,
-        expected=owner,
-        retained_children=retained_children,
-    )
-    ownership.require_postgres(data, pg_port)
-    require_authenticated_hba(pg_port, dial_host)
-    print(f"  ✓ postgres ready ({dial_host}:{pg_port}, password authentication enforced)")
-    warn_archive_inactive(path_reader=path_reader)
+    data = pg_data_dir(home)
+    owner = ownership.require_postgres(data, pg_port, required=False)
+    identity = _identity()
+    dial_host = url_host(config.db_url)
+    off_box = _off_box_host(machine)
+    for step in pg_plan.plan_pg_start(owner_retained=owner is not None, off_box_host=off_box):
+        match step:
+            case pg_plan.EnsureData():
+                ensure_pg_data(home, os_user=identity.os_user)
+            case pg_plan.WriteAuthentication():
+                (data / "pg_ident.conf").write_text(pg_plan.pg_ident_body(identity))
+                hba = pg_plan.pg_hba_body(
+                    identity, reachable_host=off_box, trusted_cidrs=config.trusted_cidrs
+                )
+                (data / "pg_hba.conf").write_text(hba)
+            case pg_plan.AwaitReachableBind(host=host):
+                if not _await_bind("postgres", host, tuning):
+                    return 1
+            case pg_plan.LaunchPostmaster():
+                _launch_postmaster(
+                    config,
+                    pg_port,
+                    home=home,
+                    dial_host=dial_host,
+                    machine=machine,
+                    retained_children=retained_children,
+                    owner=owner,
+                    tuning=tuning,
+                )
+            case pg_plan.ProveAuthentication():
+                ownership.require_postgres(data, pg_port)
+                require_authenticated_hba(pg_port, dial_host, socket_dir=pg_socket_dir(home))
+                print(
+                    f"  ✓ postgres ready ({dial_host}:{pg_port}, password authentication enforced)"
+                )
+            case pg_plan.CheckArchive():
+                warn_archive_inactive(config.walg_config_file)
     return 0
 
 
+# meiva:note
+# The child env that authenticates `redis-cli` without a secret on its command line.
+#
+# Raises ValueError when the admin password is empty: the owned Redis always requires it.
 def redis_cli_env(redis_admin_password: str) -> dict[str, str]:
-    """Child env that authenticates `redis-cli` without putting the secret on its
-    command line — `-a <secret>` is argv, which `ps` shows to any local user
-    (issue #974). `$REDISCLI_AUTH` is redis-cli's own answer to exactly this
-    (it is also why the tool prints no auth warning for it). The owned Redis
-    always requires its admin password, so an empty one is refused.
-
-    Raises:
-        ValueError: `redis_admin_password` is empty."""
-    if not redis_admin_password:
-        raise ValueError("the owned Redis always requires its admin password")
-    return inherited_process_env({"REDISCLI_AUTH": redis_admin_password})
+    return inherited_process_env(redis_plan.redis_auth_env(redis_admin_password))
 
 
-def redis_running(config: DataPlaneConfig, redis_port: int, host: str = "127.0.0.1") -> bool:
-    out = subprocess.run(
-        [redis_cli_bin(config), "-h", host, "-p", str(redis_port), "ping"],
-        env=redis_cli_env(config.redis_admin_password),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+def redis_running(redis_cli: str, redis_admin_password: str, redis_port: int, host: str) -> bool:
+    try:
+        out = run_bounded(
+            [redis_cli, "-h", host, "-p", str(redis_port), "ping"],
+            env=redis_cli_env(redis_admin_password),
+            capture_output=True,
+            text=True,
+            timeout=_REDIS_PROBE_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return False
     return "PONG" in (out.stdout or "")
 
 
-# Redis default persistence schedule (900s/1 change, 300s/10, 60s/10000).
-_REDIS_SAVE_SCHEDULE = ("900 1", "300 10", "60 10000")
-
-
+# meiva:note
+# Write the cluster's RDB save schedule and `requirepass` into a 0600 `redis.conf` and return it.
+#
+# `redis-server --requirepass <password>` would carry the Redis admin password on argv. redis
+# overwrites its own process title moments later, so `ps` only sees it during startup — but a
+# startup window is still a window, and the conf file is the mechanism redis itself documents.
+# Every render carries `requirepass`: Redis always authenticates.
 def write_redis_conf(data: Path, redis_admin_password: str) -> Path:
-    """Write the cluster's RDB save schedule and `requirepass` into a 0600
-    `redis.conf` and return it.
-
-    `redis-server --requirepass <password>` would carry the Redis admin password on argv.
-    redis overwrites its own process title moments later, so `ps` only sees it
-    during startup — but a startup window is still a window, and the conf file is
-    the mechanism redis itself documents. The save schedule lives here too: a
-    restart without persistence wipes the frozen caches and re-causes the
-    all-at-once rebuild stampede (2026-08-29 #2004 amplifier, task #2027), so it
-    must survive every render, not ride a runtime CONFIG SET. Everything else
-    stays a flag: redis applies flags after the config file, so the per-cluster
-    port/bind/dir still win (and a stale conf from an older start cannot pin them).
-
-    Every render carries `requirepass`: Redis always authenticates.
-
-    Raises:
-        ValueError: `redis_admin_password` is empty."""
-    if not redis_admin_password:
-        raise ValueError("redis.conf requires the Redis admin password (requirepass)")
+    content = redis_plan.redis_conf_text(redis_admin_password)
     conf = data / "redis.conf"
-    content = b"".join(f"save {spec}\n".encode() for spec in _REDIS_SAVE_SCHEDULE)
-    escaped = redis_admin_password.replace("\\", "\\\\").replace('"', '\\"')
-    content += f'requirepass "{escaped}"\n'.encode()
-    write_private_bytes(conf, content)
+    write_private_bytes(conf, content.encode())
     return conf
 
 
+# meiva:note
+# One Redis start in progress: what its steps read, and the executor of each step.
+#
+# A step returns 0 or the exit code the start stops with.
+@dataclass(frozen=True)
+class _RedisStart:
+    config: DataPlaneConfig
+    redis_port: int
+    runtime_password: str
+    identity: str
+    home: Path
+    machine: MachineIdentity
+    tuning: StartTuning
+    macos: bool
+    redis_cli: str
+    dial_host: str
+
+    @property
+    def data(self) -> Path:
+        return redis_data_dir(self.home)
+
+    def execute(self, step: redis_plan.RedisStep) -> int:
+        match step:
+            case redis_plan.AffirmAcl():
+                return ensure_redis_acl(
+                    self.config,
+                    self.redis_port,
+                    self.runtime_password,
+                    self.identity,
+                    self.dial_host,
+                    redis_data=self.data,
+                )
+            case redis_plan.WriteConf():
+                write_redis_conf(self.data, self.config.redis_admin_password)
+            case redis_plan.RequireFreePort():
+                port_preflight.require_listener(None, self.redis_port, required=False)
+            case redis_plan.AwaitReachableBind(host=host):
+                return 0 if _await_bind("redis", host, self.tuning) else 1
+            case redis_plan.PrepareDataDir():
+                self.data.mkdir(parents=True, exist_ok=True)
+            case redis_plan.LaunchServer():
+                launched = _launch_redis(
+                    self.config, self.redis_port, self.data, self.machine, macos=self.macos
+                )
+                return 0 if launched else 1
+            case redis_plan.AwaitServerReady():
+                return self._await_ready()
+            case redis_plan.ReportReady(already_running=already):
+                state = "already running" if already else "started"
+                print(f"  ✓ redis {state} ({self.dial_host}:{self.redis_port})")
+        return 0
+
+    def _await_ready(self) -> int:
+        admin = self.config.redis_admin_password
+        if _await_redis(self.redis_cli, admin, self.redis_port, self.dial_host):
+            return 0
+        print(f"  ✗ redis did not become ready on :{self.redis_port}", file=sys.stderr)
+        return 1
+
+
+# meiva:note
+# Start (or re-affirm) this cluster's own Redis, always authenticated.
+#
+# Raises ValueError, before any effect, when the admin or runtime password is missing. The
+# steps follow `redis_plan.plan_redis_start`; a foreign listener on the port refuses the start.
 def start_redis(
     config: DataPlaneConfig,
     redis_port: int,
     runtime_password: str,
     identity: str,
     *,
+    home: Path,
     machine: MachineIdentity,
+    tuning: StartTuning = PRODUCTION_TUNING,
 ) -> int:
-    if not (config.redis_admin_password and runtime_password):
-        raise ValueError("Redis always authenticates: its admin and runtime passwords are required")
-    dial_host = redis_dial_host(config)
-    if redis_running(config, redis_port, dial_host):
-        # Re-affirm the ACL user on every start (survives a restart that drops
-        # the in-memory ACL).
-        result = ensure_redis_acl(config, redis_port, runtime_password, identity, dial_host)
-        if result == 0:
-            write_redis_conf(ownership.redis_data_dir(), config.redis_admin_password)
-            print(f"  ✓ redis already running ({dial_host}:{redis_port})")
-        return result
-    port_preflight.require_listener(None, redis_port, required=False)
-    bind_addrs = ["127.0.0.1"] if is_macos() else port_preflight.bind_addrs(machine=machine)
-    if not is_macos() and not wait_for_reachable_bind(machine=machine):
-        return 1
-    data = ownership.redis_data_dir()
-    data.mkdir(parents=True, exist_ok=True)
-    args = [
-        redis_server_bin(config),
-        str(write_redis_conf(data, config.redis_admin_password)),  # requirepass — see the helper
-        "--daemonize",
-        "yes",
-        "--port",
-        str(redis_port),
-        "--bind",
-        *bind_addrs,
-        "--protected-mode",
-        "no",
-        "--dir",
-        str(data),
-        "--logfile",
-        str(data / "redis.log"),
-    ]
-    result = subprocess.run(
-        args, check=False, capture_output=True, text=True, env=daemon_process_env()
+    redis_plan.require_redis_credentials(config.redis_admin_password, runtime_password)
+    macos = is_macos()
+    redis_cli = redis_cli_bin(config.redis_bin_dir, macos=macos)
+    dial_host = url_host(config.redis_url)
+    admin = config.redis_admin_password
+    start = _RedisStart(
+        config=config,
+        redis_port=redis_port,
+        runtime_password=runtime_password,
+        identity=identity,
+        home=home,
+        machine=machine,
+        tuning=tuning,
+        macos=macos,
+        redis_cli=redis_cli,
+        dial_host=dial_host,
+    )
+    running = redis_running(redis_cli, admin, redis_port, dial_host)
+    steps = redis_plan.plan_redis_start(
+        running=running, macos=macos, off_box_host=_off_box_host(machine)
+    )
+    for step in steps:
+        if (rc := start.execute(step)) != 0:
+            return rc
+    return 0
+
+
+# meiva:note
+# Run `redis-server --daemonize yes` on the planned command line; print why and say no when it
+# exits non-zero.
+def _launch_redis(
+    config: DataPlaneConfig, redis_port: int, data: Path, machine: MachineIdentity, *, macos: bool
+) -> bool:
+    bind = redis_plan.redis_bind_addrs(
+        macos=macos, declared=tuple(port_preflight.bind_addrs(machine=machine))
+    )
+    argv = redis_plan.redis_server_argv(
+        redis_plan.RedisLaunch(
+            server_bin=redis_server_bin(config.redis_bin_dir, macos=macos),
+            conf=data / "redis.conf",
+            port=redis_port,
+            bind_addrs=bind,
+            data=data,
+        )
+    )
+    result = run_bounded(
+        argv,
+        capture_output=True,
+        text=True,
+        env=daemon_process_env(),
+        timeout=_REDIS_LAUNCH_TIMEOUT_S,
     )
     if result.returncode != 0:
         print(
             f"  ✗ redis-server failed (rc={result.returncode}): {result.stderr.strip()}",
             file=sys.stderr,
         )
-        return 1
-    # redis-server --daemonize returns immediately; wait for the port to answer.
-    for _ in range(60):
-        if redis_running(config, redis_port, dial_host):
-            break
-        time.sleep(0.1)
-    else:
-        print(f"  ✗ redis did not become ready on :{redis_port}", file=sys.stderr)
-        return 1
-    # The runtime URLs carry the identity as username, and redis-py AUTHes as
-    # that user, so a missing user would WRONGPASS forever and the redis wake
-    # bus would never deliver to agents.
-    result = ensure_redis_acl(config, redis_port, runtime_password, identity, dial_host)
-    if result == 0:
-        print(f"  ✓ redis started ({dial_host}:{redis_port})")
-    return result
+        return False
+    return True
 
 
+# meiva:note
+# `redis-server --daemonize` returns at once; poll until the port answers PING.
+def _await_redis(redis_cli: str, admin: str, redis_port: int, dial_host: str) -> bool:
+    started = time.monotonic()
+    while True:
+        verdict = wait_verdict(
+            satisfied=redis_running(redis_cli, admin, redis_port, dial_host),
+            elapsed_s=time.monotonic() - started,
+            timeout_s=_REDIS_READY_TIMEOUT_S,
+        )
+        if verdict is Wait.DONE:
+            return True
+        if verdict is Wait.EXPIRED:
+            return False
+        time.sleep(_REDIS_READY_INTERVAL_S)
+
+
+# meiva:note
+# Add the cluster's ACL user (the runtime identity, names-as-data — passed in by the caller,
+# never derived from a name) on top of `requirepass`.
+#
+# requirepass authenticates the `default` admin user, which provisions the ACL user. Re-affirmed
+# every start (survives a restart that drops the in-memory ACL). Both passwords are always
+# present: Redis never runs without auth. The runtime URLs carry the identity as username, and
+# redis-py AUTHes as that user, so a missing user would WRONGPASS forever and the redis wake bus
+# would never deliver to agents. Returns 1, after printing why, when the provisioning refuses.
 def ensure_redis_acl(
     config: DataPlaneConfig,
     redis_port: int,
     runtime_password: str,
     identity: str,
     redis_host: str,
+    *,
+    redis_data: Path,
 ) -> int:
-    """Add the cluster's ACL user (the runtime identity, names-as-data — passed in
-    by the caller, never derived from a name) on top of `requirepass`. requirepass
-    authenticates the `default` admin user, which provisions the ACL user.
-    Re-affirmed every start (survives a restart that drops the in-memory ACL).
-    Both passwords are always present: Redis never runs without auth."""
     admin = f"redis://default:{config.redis_admin_password}@{redis_host}:{redis_port}"
     try:
         ensure_cluster_redis_acl(
@@ -531,7 +642,7 @@ def ensure_redis_acl(
             redis_admin_url=admin,
             runtime_password=runtime_password,
             channel_prefix=config.events_channel.removesuffix(":events"),
-            expected_data_dir=ownership.redis_data_dir(),
+            expected_data_dir=redis_data,
         )
     except Exception as exc:
         print(f"  ✗ ensuring cluster redis user failed: {exc}", file=sys.stderr)
@@ -539,58 +650,44 @@ def ensure_redis_acl(
     return 0
 
 
+# meiva:note
+# Ensure owned Postgres and Redis; schema, authority and pooler follow in start order
+# (`cli.commands.data_plane.bringup`).
+#
+# Raises ValueError, before any native effect, when a required credential is missing: Redis
+# always needs its admin and runtime passwords. Postgres needs none: its administrator is the
+# OS user over the owner-only socket.
 def ensure_cluster_storage(
     config: DataPlaneConfig,
     *,
+    home: Path,
     pg_port: int,
     redis_port: int,
     redis_password: str,
     redis_user: str,
-    retained_children: list[subprocess.Popen[bytes]] | None = None,
+    retained_children: list[subprocess.Popen[bytes]],
     machine: MachineIdentity,
 ) -> int:
-    """Ensure owned Postgres and Redis; schema, authority and pooler follow in
-    start order (`cli.commands.data_plane.bringup`).
-
-    Raises:
-        ValueError: a required credential is missing, before any native effect.
-            Redis always needs its admin and runtime passwords. Postgres needs
-            none: its administrator is the OS user over the owner-only socket."""
-    if not (config.redis_admin_password and redis_password):
-        raise ValueError(
-            "Redis always authenticates, but this home has no generated Redis credentials "
-            "(MEIVA_REDIS_ADMIN_PASSWORD / MEIVA_REDIS_PASSWORD): it was born before Redis "
-            "always authenticated and no conversion exists; re-birth it as a new home."
-        )
+    require_storage_credentials(config.redis_admin_password, redis_password)
     print(f"\n→ per-cluster data plane (pg :{pg_port}, redis :{redis_port})")
-    if (rc := start_pg(config, pg_port, retained_children=retained_children, machine=machine)) != 0:
+    rc = start_pg(config, pg_port, home=home, retained_children=retained_children, machine=machine)
+    if rc != 0:
         return rc
-    if (
-        rc := start_redis(
-            config,
-            redis_port,
-            redis_password,
-            redis_user,
-            machine=machine,
-        )
-    ) != 0:
-        return rc
-    return 0
+    return start_redis(config, redis_port, redis_password, redis_user, home=home, machine=machine)
 
 
-def redis_reachable(
-    config: DataPlaneConfig, redis_port: int, redis_host: str = "127.0.0.1"
-) -> bool:
-    """True if this cluster's Redis answers PING as its `default` user (using
-    the gateway-only Redis admin password). Used by `meiva status`; degrades to
-    False on any error, including a home without its admin password."""
+# meiva:note
+# True if this cluster's Redis answers PING as its `default` user (using the gateway-only Redis
+# admin password). Used by `meiva status`; degrades to False on any error, including a home
+# without its admin password.
+def redis_reachable(redis_admin_password: str, redis_port: int, redis_host: str) -> bool:
     import redis as _redis
     from redis.exceptions import RedisError
 
     client = _redis.Redis(
         host=redis_host,
         port=redis_port,
-        password=config.redis_admin_password,
+        password=redis_admin_password,
         socket_connect_timeout=3,
     )
     try:

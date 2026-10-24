@@ -423,6 +423,8 @@ def test_profile_consumption_distinguishes_runtime_facts_from_domains(tmp_path: 
 
 def test_agent_host_launches_under_the_agent_profile(unit_home: Path) -> None:
     from base.config import PROCESS_PROFILES
+    from base.host.env.dotenv_file import env_file_path, read_env_aliases
+    from cli.commands.data_plane.instance.launch_delivery import LaunchDelivery
     from cli.commands.lifecycle import root_driver
     from services.supervision.roster import build_services
 
@@ -434,9 +436,13 @@ def test_agent_host_launches_under_the_agent_profile(unit_home: Path) -> None:
         "MEIVA_RUNNER_DB_PASSWORD=fixture\n"
     )
     agent_host = next(spec for spec in build_services() if spec.session == "agent-host")
-    profile = root_driver.service_extra_env(agent_host, remote_data_plane=True)[
-        "MEIVA_PROCESS_PROFILE"
-    ]
+    launch = LaunchDelivery(
+        home=unit_home,
+        remote_data_plane=True,
+        environment={},
+        env_file=read_env_aliases(env_file_path(unit_home)),
+    )
+    profile = root_driver.service_extra_env(agent_host, delivery=launch)["MEIVA_PROCESS_PROFILE"]
     assert profile in PROCESS_PROFILES, f"{profile} is not a process profile"
     assert profile == "agent"
 

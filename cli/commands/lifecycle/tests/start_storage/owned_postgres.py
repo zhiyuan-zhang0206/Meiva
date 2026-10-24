@@ -16,6 +16,8 @@ from pathlib import Path
 import pytest
 from psycopg.conninfo import make_conninfo
 
+from base.cluster.dataplane.pg_admin import pg_admin_url
+from base.cluster.dataplane.pg_tools import pg_tool
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.lifecycle.start.migrations import cmd_migrations_apply
@@ -55,6 +57,7 @@ def owned_pg(
             ci.start_pg(
                 data_plane_config,
                 pg_port,
+                home=unit_home,
                 retained_children=children,
                 machine=command_runtime.machine,
             )
@@ -63,7 +66,7 @@ def owned_pg(
         yield pg_port
     finally:
         subprocess.run(
-            [ci.pg_bin("pg_ctl"), "-D", str(unit_home / "pg"), "-m", "immediate", "stop"],
+            [str(pg_tool("pg_ctl")), "-D", str(unit_home / "pg"), "-m", "immediate", "stop"],
             check=False,
             capture_output=True,
         )
@@ -96,7 +99,7 @@ class Plane:
         )
 
     def admin_on(self, database: str) -> str:
-        return make_conninfo(ci.pg_admin_url(self.port), dbname=database)
+        return make_conninfo(pg_admin_url(self.port), dbname=database)
 
     def migrate(self, identity: str) -> list[str]:
         return cmd_migrations_apply(

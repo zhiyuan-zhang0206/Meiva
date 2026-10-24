@@ -1,5 +1,5 @@
-[debt.first-party-patch]
-"test_session_filelog_receivers_are_disjoint_and_bound.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
-"test_session_filelog_receivers_are_disjoint_and_bound.py#monkeypatch.setattr base.config.settings.observability.gateway_otlp_endpoint" = 1
-"test_session_filelog_receivers_are_disjoint_and_bound.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_port" = 2
-"test_session_filelog_receivers_are_disjoint_and_bound.py#monkeypatch.setattr base.deploy.release.collector_artifact.download_and_verify" = 1
+[uses]
+"test_collector_topologies.py" = ["collector_harness.py"]
+"test_converge_otel_collector.py" = ["collector_harness.py"]
+"test_otel_port_deviation.py" = ["collector_harness.py"]
+"test_session_filelog_receivers_are_disjoint_and_bound.py" = ["collector_harness.py"]

@@ -74,6 +74,21 @@ _LITE_VERBS = frozenset(
 
 
 # meiva:note
+# The one operator-readable line of a lifecycle command that refused to run, and its exit status:
+# another local operation holds the lifecycle lock, or the command's audit scope cannot be opened
+# because its caller cannot be named.
+def _report_refusal(exc: Exception) -> int:
+    if isinstance(exc, LockTimeoutError):
+        print(
+            f"meiva: another local lifecycle operation is active; retry after it finishes: {exc}",
+            file=sys.stderr,
+        )
+    else:
+        print(f"meiva: {exc}; the command was not started", file=sys.stderr)
+    return 1
+
+
+# meiva:note
 # Print the env template an unconfigured home's Settings failure needs; the exit status.
 def print_settings_load_failure(e: ValidationError) -> int:
     print(settings_failure_text(e), file=sys.stderr)
@@ -122,11 +137,13 @@ def _opt_into_lite_config(args_in: list[str]) -> None:
 # meiva:note
 # Hand `meiva init` the host facts of its caller, the process facts beyond its site.
 #
-# Init reads none of them itself: the caller's tool directories and which ports of the
-# fixed table something already holds. A `--ssl-cert-file` is pinned into the process
-# before dispatch because the gateway join that follows dials with it.
+# Init reads none of them itself: the caller's tool directories, which ports of the
+# fixed table something already holds and the transport key of a database-capability bundle,
+# which leaves the environment here so no child process inherits it. A `--ssl-cert-file` is
+# pinned into the process before dispatch because the gateway join that follows dials with it.
 def bind_init_inputs(args: argparse.Namespace) -> None:
     from base import cluster
+    from base.host.db_authority.unit import CAPABILITY_KEY_ENV
     from cli.startup.service_path import CallerHost
 
     table = cast("dict[str, int]", cluster.new_home_ports())
@@ -136,6 +153,7 @@ def bind_init_inputs(args: argparse.Namespace) -> None:
         virtual_env=os.environ.get("VIRTUAL_ENV"),
         prefix_venv=sys.prefix if sys.prefix != sys.base_prefix else None,
         occupied_ports=frozenset(port for port in table.values() if not cluster.port_free(port)),
+        transport_key=os.environ.pop(CAPABILITY_KEY_ENV, ""),
     )
     if args.ssl_cert_file is not None:
         os.environ["SSL_CERT_FILE"] = args.ssl_cert_file
@@ -194,6 +212,15 @@ def _operator_producer(database_factory: Any, *, machine: Any, home: Path) -> An
     return operator_event_pipeline(database_factory, machine=machine, home=home)
 
 
+# meiva:note
+# The one place the operator's home is created (owner-only, a symlinked home refused): the runtime
+# built next only reads the path, and everything it hands down names the same resolved home.
+def _create_home() -> None:
+    from base.paths import meiva_home
+
+    meiva_home()
+
+
 def run_command(
     argv: list[str] | None,
     *,
@@ -240,10 +267,11 @@ def run_command(
         except (ValueError, TypeError, RuntimeError, OSError) as exc:
             print(f"meiva start: {exc}", file=sys.stderr)
             return 1
-    from base.paths import meiva_home
     from cli.database import operator_database_factory
+    from cli.database.lifecycle_audit import AuditUnavailableError
     from cli.database.runtime import CommandRuntime
 
+    _create_home()
     command = CommandRuntime.create()
     args.runtime = command
     database_factory = operator_database_factory(
@@ -252,7 +280,7 @@ def run_command(
     )
     args.database_factory = database_factory
     args.database_for_url = database_factory.for_url
-    producer = producer_factory(database_factory, machine=command.machine, home=meiva_home())
+    producer = producer_factory(database_factory, machine=command.machine, home=command.home)
     args.producer = producer
     try:
         if args_in[:1] not in (["init"], ["start"]):  # these two open their own, after admission
@@ -260,12 +288,8 @@ def run_command(
             if sink is not None:
                 producer.initialize_logging(sink)
         return args.func(args)
-    except LockTimeoutError as exc:
-        print(
-            f"meiva: another local lifecycle operation is active; retry after it finishes: {exc}",
-            file=sys.stderr,
-        )
-        return 1
+    except (LockTimeoutError, AuditUnavailableError) as exc:
+        return _report_refusal(exc)
     except ValidationError as exc:
         return print_settings_load_failure(exc)
     except BootstrapFetchError as exc:

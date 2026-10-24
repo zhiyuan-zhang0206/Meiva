@@ -34,7 +34,11 @@ closes the shell sessions with no grace and no notices; it reads no service rost
 derive from the settings) and so stays usable when those cannot be loaded. `execute` performs the steps one at a
 time, timing each phase of a normal stop into the lifecycle journal; `render` words the scope,
 the skipped data plane and the failure report; `admission.confirmed` is the y/N gate over the
-`stdin` stream the command entry hands in.
+`stdin` stream the command entry hands in. The caller's `retained_children` list travels as an
+argument beside the frozen `StopEnvironment`; `execute_plan` returns the `StopOutcome` (escalation
+notes, pooler clients) that `report.finish_stop` journals, built from the `MaintenanceStop` value
+`maintenance_stop.stop` returns. Evidence that cannot be read fails before the journal opens and is
+reported like any incomplete stop (exit 1, no journal row).
 
 Restart over the service tree runs four legs (`restart_plan.Leg`): the preflight probes and
 `start/readiness_preflight` (both refuse before anything stops, with the decline exit code
@@ -42,8 +46,11 @@ Restart over the service tree runs four legs (`restart_plan.Leg`): the preflight
 `restart_plan.settle_leg` says what each result means; `restart_stop_request` is the stop leg
 (the data plane kept on a gateway, no announcement, no prompt, the operator's other choices) and
 `restart_start_leg` its start leg (the operator's explicit service selection, not reconciled to
-the units the stop kept). `meiva restart --only agent-host` (`restart.restart_agent_host`)
-downs agent-host through the live root and brings it back, touching nothing else.
+the units the stop kept). `restart.restart_runtime` admits the checkout once, before the
+journal opens, and the `StartRuntime` it returns (the loaded identity included) is held through
+both legs. `meiva restart --only agent-host` first admits the live root
+(`restart.admit_agent_host_restart`, before the roster is built), then downs agent-host through
+it and brings it back (`restart.restart_agent_host`), touching nothing else.
 
 The stop does not drain agents itself: root stops agent-host first and waits for it,
 and its own SIGTERM exit settles the running turns
@@ -51,22 +58,27 @@ and its own SIGTERM exit settles the running turns
 `stop/shell_sessions` and `data_plane/maintenance_stop` verify
 resource exits (`data_plane/maintenance_stop_report` names survivors). What the shell-session
 closure's outcome means (owner notices first, then the leftover jobs, then a failing shell or the
-wait for an empty service table) is `closure_plan`'s; the deadline arithmetic is
+wait for an empty service table) is `closure_plan`'s; a survivor role other than the closure's two
+(`closure_plan.SurvivorRole`) is a `ValueError`, never a job; the deadline arithmetic is
 `data_plane/stop_budget`'s. The shell reads the clock and sleeps.
 `data_plane/_pooler_stop.OwnedPooler` owns ordinary pooler stop
 admission for maintenance and startup recovery: exact native birth and listener
 proof precede a durable stop intent and the first SIGINT (`WAIT_FOR_SERVERS`).
 Retries and already-closed listeners only wait; PgBouncer would interpret
-another shutdown signal as immediate termination. A birth that finishes its
-drain and exits while its listeners are being scanned is stopped, not a foreign
-listener. An explicit force request alone permits a kill, with a separate
+another shutdown signal as immediate termination. A birth that exits while its
+listeners are scanned is stopped, not foreign. An explicit force request alone permits a kill, with a separate
 bounded settle wait when the graceful deadline is spent. The data-plane stop
 requests [owned PostgreSQL](../../../../base/cluster/docs/postgres.meiva.okf.md) fast
 shutdown (SIGINT), so neither waits on idle client connections a drained state
 cannot protect (issue #2307). When the data-plane phase fails after the
 services phase stopped, `stop` reports the failure with its phase accounting
 (`report.report_incomplete`) and exits non-zero; it does not restart anything, and the operator
-decides whether to retry the stop or run `meiva start`.
+decides whether to retry the stop or run `meiva start`. A force stop ends the same way: the
+cluster instance stop reports a Redis that still answers through its return code, which is
+a failed step (`force_outcome.data_plane_failure`), and the stop prints
+`force_outcome.force_incomplete_report` and exits non-zero rather than reporting success. Any
+other failure of a force step (a root it cannot reach) stays the command's own: a force stop has
+no journal to report into.
 
 `stop/extras` uses the same exact-home helper retirement as destroy: native
 job, executable, socket and direct root-child ownership are checked before native
@@ -81,22 +93,16 @@ serving after readiness, and `run/lifecycle-op.json` records how a stop or resta
 ended for the fleet update and the operator.
 See [the coordinated operator procedure](../../../../docs/conventions/operations/graceful-maintenance.md).
 
-The native stop tests create fresh PTY sessions and wait for their requested
-job's bare readiness output before treating a shell session as busy. A login-profile
-child can exist before the initial command runs; child presence alone is not
-job readiness. `cli/commands/lifecycle/tests/stop/stop_support.py:busy_session` keeps cleanup custody of the
-shell before waiting, then records the running job. Regular jobs print
-`job-ready`; stubborn jobs print `stubborn-ready` after installing their signal
-handlers. Fresh-session creation refuses reuse; the public capture wait requires
-bare output rather than shell echo. The plan tests assert the order of the steps and the
-real-shell tests assert the closure, and the notices a stop wrote are read back from the
-suite's Postgres.
+The native stop tests create fresh PTY sessions and wait for the requested job's bare readiness
+output (`job-ready`, or `stubborn-ready` once a stubborn job has installed its handlers) before
+treating a shell session as busy: a login-profile child can exist before the initial command runs,
+so child presence is not readiness. `cli/commands/lifecycle/tests/stop/stop_support.py:busy_session` keeps cleanup custody. The plan tests assert the order of the steps, the real-shell tests assert
+the closure, and the notices a stop wrote are read back from the suite's Postgres, as are audit
+rows (`cli/database/tests/lifecycle_rows.py`). A gateway's cold preparation runs in a fresh
+interpreter (`tests/start_storage/test_gateway_cold_start.py`), because its birth adopts a database
+login into the process environment.
 
-The stop tests' private non-PTY sessions run the literal entry `tests/stop/_child.py`.
-The launcher accepts only SIGTERM behavior (`default`, `exit`, or
-`ignore`), an optional ignored SIGHUP, and an optional child armed-marker path.
-These values travel as argv data; callers cannot supply executable source.
-The ready marker follows signal setup, the child arms after its own handler,
-and the fixture records native session identity before returning. Its context
-retains each original process and closes that exact private group and pipes
-when the test exits, including an assertion failure.
+The stop tests' private non-PTY sessions run `tests/stop/_child.py`, which takes only SIGTERM
+behavior, an optional ignored SIGHUP and an optional armed-marker path, as argv data. The ready marker follows signal setup, and the fixture records the native session
+identity before returning and closes that exact private group and pipes when the test exits,
+assertion failure included.

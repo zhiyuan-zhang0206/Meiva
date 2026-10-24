@@ -1,16 +1,26 @@
+# meiva:note
+# What the writers under the observability commands promise on disk: `meiva lgtm render` publishes a
+# world-readable UTF-8 file without leaving temporaries, and a rendered file is published owner-only
+# with its hash recorded only after the write succeeded.
+#
+# The two marker cases exercise the `base/deploy/lifecycle` writers, not code under this package.
+
 from __future__ import annotations
 
 import json
 import os
 import stat
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
+from base.agents.context.clients import DatabaseFactory
 from base.deploy.lifecycle import home_lifecycle_locks, start_serving
-from cli.commands.observability import grafana_render, observatory_urls, otel_collector
+from cli.commands.converge.rendered_file import write_rendered_guarded
+from cli.commands.observability import grafana_render
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 _START_GENERATION = "00000000-0000-4000-8000-000000000001"
 
@@ -63,15 +73,6 @@ def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
     assert path.stat().st_mode & 0o777 == 0o600
 
 
-@pytest.mark.parametrize("writer", [observatory_urls.atomic_write, otel_collector.atomic_write])
-def test_cli_writer_commits_utf8(writer: Callable[[Path, str], None], tmp_path: Path) -> None:
-    path = tmp_path / "config.yml"
-    path.write_bytes(b"old")
-    writer(path, "café")
-    assert path.read_bytes() == "café".encode()
-    assert sorted(tmp_path.iterdir()) == [path]
-
-
 def test_concurrent_marker_writers_publish_complete_snapshots(tmp_path: Path) -> None:
     path = tmp_path / "state.json"
 
@@ -85,20 +86,52 @@ def test_concurrent_marker_writers_publish_complete_snapshots(tmp_path: Path) ->
     assert sorted(tmp_path.iterdir()) == [path]
 
 
-@pytest.mark.parametrize("writer", [grafana_render.atomic_write])
-def test_visible_text_writers_set_public_mode_without_sync(
-    writer: Callable[[Path, str], None], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_lgtm_render_publishes_a_public_utf8_file_without_leaving_temporaries(
+    tmp_path: Path, operator_database: DatabaseFactory
 ) -> None:
-    path = tmp_path / "config.txt"
-
-    def unexpected_sync(_fd: int) -> None:
-        pytest.fail("visible writer must not fsync")
-
-    monkeypatch.setattr(os, "fsync", unexpected_sync)
+    target = tmp_path / "lgtm/native/config/dashboards/meiva-ops-main.json"
+    target.parent.mkdir(parents=True)
     old_umask = os.umask(0o077)
     try:
-        writer(path, "café")
+        rc = grafana_render.cmd_grafana_render(
+            home=tmp_path, force=True, repo_only=True, database_factory=operator_database
+        )
     finally:
         os.umask(old_umask)
-    assert path.read_bytes() == "café".encode()
-    assert stat.S_IMODE(path.stat().st_mode) == 0o644
+
+    assert rc == 0
+    assert json.loads(target.read_bytes().decode("utf-8"))["uid"] == "meiva-ops-main"
+    assert stat.S_IMODE(target.stat().st_mode) == 0o644
+    assert sorted(path.name for path in target.parent.iterdir()) == [target.name]
+
+
+def test_rendered_file_is_published_owner_only_with_its_hash_recorded(tmp_path: Path) -> None:
+    target = tmp_path / "config" / "collector.yml"
+    hashes = tmp_path / "hashes.json"
+    target.parent.mkdir()
+
+    warning = write_rendered_guarded(target, "café", hashes, "collector.yml", surface="test")
+
+    assert warning is None
+    assert target.read_bytes() == "café".encode()
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    assert sorted(path.name for path in target.parent.iterdir()) == [target.name]
+    assert list(json.loads(hashes.read_text(encoding="utf-8"))) == ["collector.yml"]
+
+
+# meiva:note
+# The hash record says what converge last wrote, so it moves only after the file is in place: a
+# destination that cannot be replaced (here a directory) fails the write and leaves the record as
+# it was, rather than claiming a render that never landed.
+def test_a_failed_write_does_not_advance_the_hash_record(tmp_path: Path) -> None:
+    target = tmp_path / "config" / "collector.yml"
+    target.mkdir(parents=True)
+    hashes = tmp_path / "hashes.json"
+    hashes.write_text(json.dumps({"other.yml": "recorded"}), encoding="utf-8")
+
+    with pytest.raises(OSError, match="Is a directory"):
+        write_rendered_guarded(target, "rendered", hashes, "collector.yml", surface="test")
+
+    assert json.loads(hashes.read_text(encoding="utf-8")) == {"other.yml": "recorded"}
+    assert sorted(path.name for path in target.parent.iterdir()) == [target.name]
+    assert target.is_dir()

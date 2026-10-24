@@ -1,7 +1,10 @@
+from pathlib import Path
+
 import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
+from base.paths.tests.homes import point_home
 from base.sessions.helperproc import helper_for
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_machine as command_machine
@@ -44,3 +47,27 @@ def test_the_runtime_runs_with_the_helper_its_hosts_platform_has() -> None:
     runtime = CommandRuntime.create()
     assert runtime.helper is helper_for(runtime.host.platform)
     assert (runtime.helper is None) == (runtime.host.platform.system == "linux")
+
+
+# meiva:note
+# The runtime names the operator's home in the one spelling `meiva init` and `meiva start`
+# record (resolved through any symlink on the way), and only reads it: creating the private
+# directory is the entry's business (`cli.main`), so building a runtime makes nothing.
+def test_the_runtime_names_the_resolved_home_and_creates_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = tmp_path.resolve() / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    point_home(monkeypatch, link / "home")
+
+    runtime = CommandRuntime.create()
+
+    assert runtime.home == real / "home"
+    assert not runtime.home.exists()
+
+
+def test_the_runtime_holds_the_session_of_the_user_who_ran_it() -> None:
+    session = CommandRuntime.create().session
+    assert session.user_home == Path.home()

@@ -16,10 +16,12 @@ import time
 from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
 import psutil
 
+from base.deploy.lifecycle import start_serving
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import (
     ErrorCode,
@@ -55,6 +57,10 @@ class UnitRow:
     # meiva:note
     # The root accepts `up`, but the unit exits again at once: it stays stopped.
     stays_down: bool = False
+    # meiva:note
+    # Another `meiva start` begins at the moment the root receives this unit's `up`: the race a
+    # start that is still launching loses its serving generation to.
+    begins_rival_start: bool = False
 
     def wire(self) -> dict[str, object]:
         row: dict[str, object] = {
@@ -76,8 +82,15 @@ class ScriptedRoot:
     launch_digest: str | None = None
     calls: list[tuple[str, str | None]] = field(default_factory=list[tuple[str, str | None]])
     # meiva:note
+    # The wall-clock time each entry of `calls` was received, at the same index.
+    asked_at: list[datetime] = field(default_factory=list[datetime])
+    # meiva:note
     # Every `<verb> <unit>` request and `exited <unit>` completion, with the root's clock.
     events: list[tuple[str, float]] = field(default_factory=list[tuple[str, float]])
+    # meiva:note
+    # Raw wire rows answered in place of the unit table: a root whose status passes the client's
+    # check but not the lifecycle commands' own reading of it.
+    raw_unit_rows: list[dict[str, object]] | None = None
 
     def status(self) -> dict[str, object]:
         me = OwnedProcess.capture(psutil.Process())
@@ -90,7 +103,11 @@ class ScriptedRoot:
             root["launch_digest"] = self.launch_digest
         return {
             "root": root,
-            "units": [row.wire() for row in self.units.values()],
+            "units": (
+                [row.wire() for row in self.units.values()]
+                if self.raw_unit_rows is None
+                else self.raw_unit_rows
+            ),
             "health": {
                 row.unit_id: {"restart_limit_reached": row.restart_limit_reached}
                 for row in self.units.values()
@@ -99,6 +116,7 @@ class ScriptedRoot:
 
     def serve(self, verb: str, name: str | None) -> dict[str, object]:
         self.calls.append((verb, name))
+        self.asked_at.append(datetime.now(UTC))
         if verb == "status":
             return dict(ok_response(self.status()))
         row = self.units.get(name or "")
@@ -106,6 +124,8 @@ class ScriptedRoot:
             return dict(error_response(ErrorCode.UNKNOWN_UNIT, f"unknown unit {name!r}"))
         self.events.append((f"{verb} {row.unit_id}", time.monotonic()))
         if verb == "up":
+            if row.begins_rival_start:
+                start_serving.begin_start()
             if row.refuse_up:
                 return dict(error_response(ErrorCode.INTERNAL, f"refused to bring up {name!r}"))
             row.intent = "running"

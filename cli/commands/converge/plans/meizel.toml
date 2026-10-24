@@ -1,7 +1,9 @@
-exports = ["browser_plan.py", "checkout_warnings.py", "firewall_report.py", "helper_plan.py", "ownership_plan.py", "shell_rc.py", "split_host_checks.py", "step_selection.py", "walg_plan.py"]
+exports = ["bridge_retirement.py", "bridge_status.py", "browser_plan.py", "checkout_warnings.py", "firewall_report.py", "helper_plan.py", "ownership_plan.py", "shell_rc.py", "split_host_checks.py", "step_selection.py", "walg_plan.py"]
 
 [purity]
 "__init__.py" = "strict"
+"bridge_retirement.py" = "strict"
+"bridge_status.py" = "strict"
 "browser_plan.py" = "strict"
 "checkout_warnings.py" = "strict"
 "firewall_report.py" = "strict"

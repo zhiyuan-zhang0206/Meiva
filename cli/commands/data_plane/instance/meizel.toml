@@ -1,0 +1,13 @@
+exports = ["bounded_wait.py", "bringup_lines.py", "launch_delivery.py", "pg_plan.py", "redis_binaries.py", "redis_plan.py", "status_lines.py", "stop_plan.py", "storage_plan.py"]
+
+[purity]
+"__init__.py" = "strict"
+"bounded_wait.py" = "strict"
+"bringup_lines.py" = "strict"
+"launch_delivery.py" = "strict"
+"pg_plan.py" = "strict"
+"redis_binaries.py" = "strict"
+"redis_plan.py" = "strict"
+"status_lines.py" = "strict"
+"stop_plan.py" = "strict"
+"storage_plan.py" = "strict"

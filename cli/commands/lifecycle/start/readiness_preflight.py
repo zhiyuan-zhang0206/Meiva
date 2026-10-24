@@ -52,7 +52,6 @@ from cli.commands.lifecycle.start.preflight_findings import (
     TreeFacts,
     preflight_report,
 )
-from cli.start_runtime import StartRuntime
 
 _TREE_ROOTS = ("logs", "workspaces", "memory")
 _LOOSE_DIRECTORIES = ("configs", "secrets")
@@ -72,7 +71,6 @@ def preflight_start_readiness(
     *,
     home: Path,
     check_launcher: bool,
-    runtime: StartRuntime,
     only_services: tuple[str, ...],
     disabled_services: tuple[str, ...],
     all_services: bool,
@@ -80,7 +78,6 @@ def preflight_start_readiness(
     host: Host,
     migrations_dir: Path = MIGRATIONS_DIR,
 ) -> int:
-    runtime.validate()
     migration_error, unreadable = _migration_facts(migrations_dir)
     facts = PreflightFacts(
         checkout_problem=home_checkout_error(repo, home=home),

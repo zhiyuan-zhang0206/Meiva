@@ -17,8 +17,8 @@ import pytest
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.telemetry import EventPipeline
-from cli.commands.converge.spec import ConvergeCtx, UserSession
-from cli.database.runtime import CommandRuntime
+from cli.commands.converge.spec import ConvergeCtx
+from cli.database.runtime import CommandRuntime, UserSession
 
 __all__ = ["capable_mac", "converge_context", "ctx", "user_home"]
 

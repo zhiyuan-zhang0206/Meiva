@@ -14,7 +14,7 @@ from base.host.db_authority import delivery, unit
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
 from base.paths.tests.homes import point_home
-from cli.commands.data_plane import bringup
+from cli.commands.data_plane import completion
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
@@ -71,7 +71,7 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
     with pytest.raises(unit.UnitCapabilityError, match="refuses generation 0"):
         unit.install_bundle(runner, _open(bundle), machine=MACHINE, served_endpoint=endpoint)
     assert unit.load_unit_capability(runner) is None
-    bringup.ensure_pooler(
+    completion.ensure_pooler(
         data_plane_config,
         born.record,
         "meiva",

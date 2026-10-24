@@ -51,22 +51,35 @@ def _family_days(value: str) -> dict[str, int]:
 
 
 def _h_logs_retention(args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from base.paths import logs_dir
     from cli.commands.observability.logs import cmd_logs_retention
 
+    explicit = args.older_than is not None or args.family_days is not None
     return cmd_logs_retention(
         older_than_days=args.older_than,
         family_days=args.family_days,
+        default_retention_days=(
+            None if explicit else args.runtime.config.view.observability.log_retention_days
+        ),
         dry_run=args.dry_run,
+        logs_path=logs_dir(),
+        now=datetime.now(UTC),
     )
 
 
 def _h_logs_rotate(args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from base.paths import logs_dir
     from cli.commands.observability.logs import cmd_logs_rotate
 
     return cmd_logs_rotate(
         dry_run=args.dry_run,
         size_mib=args.size_mib,
-        logs_path=args.logs_path,
+        logs_path=logs_dir() if args.logs_path is None else args.logs_path,
+        now=datetime.now(UTC),
     )
 
 

@@ -89,7 +89,7 @@ def test_explicit_directory_requires_both_tools(
     data_plane_config = dataclasses.replace(data_plane_config, redis_bin_dir=str(selected))
     for resolver in (instance.redis_server_bin, instance.redis_cli_bin):
         with pytest.raises(RuntimeError, match=missing):
-            resolver(data_plane_config)
+            resolver(data_plane_config.redis_bin_dir, macos=False)
 
 
 def test_explicit_nonexecutable_tool_never_falls_back(
@@ -99,7 +99,7 @@ def test_explicit_nonexecutable_tool_never_falls_back(
     (selected / "redis-cli").chmod(0o600)
     data_plane_config = dataclasses.replace(data_plane_config, redis_bin_dir=str(selected))
     with pytest.raises(RuntimeError, match="redis-cli"):
-        instance.redis_server_bin(data_plane_config)
+        instance.redis_server_bin(data_plane_config.redis_bin_dir, macos=False)
 
 
 @pytest.mark.parametrize("value", ["relative/bin", "~/redis/bin", "/redis\n/bin"])

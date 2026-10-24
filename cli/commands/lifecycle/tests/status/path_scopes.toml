@@ -1,7 +1,4 @@
 # Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
 "cli.database.tests.cli_tests" = ["test_commands_status.py"]
-"meiva.tests.fixtures.sdk" = [
-    "test_commands_cluster_status_lifecycle.py",
-    "test_commands_status.py",
-]
+"meiva.tests.fixtures.sdk" = ["test_commands_status.py"]

@@ -1,9 +1,9 @@
-exports = ["cli_tests.py", "command_fakes.py", "command_inputs.py"]
+exports = ["cli_tests.py", "command_fakes.py", "command_inputs.py", "lifecycle_rows.py"]
 
 [uses]
 "cli_tests.py" = ["command_inputs.py"]
 "command_fakes.py" = ["command_inputs.py"]
-"test_lifecycle_audit.py" = ["cli_tests.py", "command_inputs.py"]
+"test_lifecycle_audit.py" = ["cli_tests.py", "command_inputs.py", "lifecycle_rows.py"]
 
 [debt.first-party-patch]
 "cli_tests.py#monkeypatch.setattr base.telemetry.process_logging.init_cli_process" = 1

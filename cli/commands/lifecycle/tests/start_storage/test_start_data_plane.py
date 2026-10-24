@@ -37,6 +37,7 @@ def _born(home: Path) -> cluster.ClusterRecord:
             home,
             frozenset({"gateway"}),
             {"MEIVA_MACHINE_NAME": "gw", "MEIVA_GATEWAY_URL": "http://127.0.0.1:1"},
+            occupied_ports=frozenset(),
         )
     )
     start_identity.mark_phase(home, "provisioned")
@@ -85,6 +86,7 @@ def test_gateway_data_plane_brings_up_own_instance(
     assert (
         bringup.ensure_gateway_data_plane(
             config,
+            home=unit_home,
             retained_children=[],
             database_factory=operator_database,
             machine=command_runtime.machine,
@@ -98,6 +100,7 @@ def test_gateway_data_plane_brings_up_own_instance(
     # The ports come from the home's record, the identity from the URLs, never a name derivation.
     assert own_calls == [
         {
+            "home": unit_home.resolve(),
             "pg_port": record.ports["postgres"],
             "redis_port": record.ports["redis"],
             "redis_password": "redis-runtime",
@@ -128,6 +131,7 @@ def test_gateway_data_plane_refuses_a_home_without_a_ledger_before_any_effect(
     assert (
         bringup.ensure_gateway_data_plane(
             data_plane_config,
+            home=unit_home,
             retained_children=[],
             database_factory=operator_database,
             machine=command_runtime.machine,
@@ -152,6 +156,7 @@ def test_gateway_data_plane_no_record_is_error(
     assert (
         bringup.ensure_gateway_data_plane(
             data_plane_config,
+            home=unit_home,
             retained_children=[],
             database_factory=operator_database,
             machine=command_runtime.machine,
@@ -172,7 +177,11 @@ def test_local_launch_without_owner_cannot_publish_authority(
 
     with pytest.raises(ValueError, match="caller-owned child retention"):
         bringup.ensure_gateway_data_plane(
-            data_plane_config, database_factory=operator_database, machine=command_runtime.machine
+            data_plane_config,
+            home=unit_home,
+            retained_children=None,
+            database_factory=operator_database,
+            machine=command_runtime.machine,
         )
 
     assert not telemetry_token_path(unit_home.resolve()).exists()

@@ -1,0 +1,4 @@
+[uses]
+"test_install_unit.py" = ["capability_harness.py"]
+"test_issue_unit.py" = ["capability_harness.py"]
+"test_join_gateway.py" = ["capability_harness.py"]

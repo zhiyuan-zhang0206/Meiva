@@ -1,4 +1,6 @@
-"""`meiva logs retention` local-file safety and reporting contract."""
+# meiva:note
+# `meiva logs retention` local-file safety and reporting contract, against real files; failures are
+# real permission errors (a read-only or unlistable directory), not injected ones.
 
 from __future__ import annotations
 
@@ -83,6 +85,7 @@ def test_family_days_apply_tier_defaults_and_report_each_candidate_family(
         older_than_days=None,
         family_days={},
         dry_run=True,
+        default_retention_days=None,
         logs_path=tmp_path,
         now=_NOW,
     )
@@ -117,6 +120,7 @@ def test_family_days_override_a_specific_family(
         older_than_days=None,
         family_days={"gateway": 15},
         dry_run=True,
+        default_retention_days=None,
         logs_path=tmp_path,
         now=_NOW,
     )
@@ -138,6 +142,7 @@ def test_family_days_dry_run_reports_empty_policy_families(
         older_than_days=None,
         family_days={},
         dry_run=True,
+        default_retention_days=None,
         logs_path=tmp_path,
         now=_NOW,
     )
@@ -164,6 +169,7 @@ def test_older_than_and_family_days_cannot_be_combined(tmp_path: Path) -> None:
             older_than_days=14,
             family_days={"agent": 15},
             dry_run=True,
+            default_retention_days=None,
             logs_path=tmp_path,
             now=_NOW,
         )
@@ -188,6 +194,7 @@ def test_dry_run_reports_all_managed_families_without_deleting(
     rc = cmd_logs_retention(
         older_than_days=14,
         dry_run=True,
+        default_retention_days=None,
         logs_path=tmp_path,
         now=_NOW,
     )
@@ -215,6 +222,7 @@ def test_active_open_file_is_excluded_from_retention(
             older_than_days=None,
             family_days={},
             dry_run=False,
+            default_retention_days=None,
             logs_path=tmp_path,
             now=_NOW,
         )
@@ -236,6 +244,7 @@ def test_delete_reports_reclaimed_bytes_and_is_idempotent(
     first_rc = cmd_logs_retention(
         older_than_days=14,
         dry_run=False,
+        default_retention_days=None,
         logs_path=tmp_path,
         now=_NOW,
     )
@@ -247,6 +256,7 @@ def test_delete_reports_reclaimed_bytes_and_is_idempotent(
     second_rc = cmd_logs_retention(
         older_than_days=14,
         dry_run=False,
+        default_retention_days=None,
         logs_path=tmp_path,
         now=_NOW,
     )
@@ -255,82 +265,93 @@ def test_delete_reports_reclaimed_bytes_and_is_idempotent(
     assert "retention_summary\tmode=delete\tdeleted=0\tbytes=0\tfailed=0" in capsys.readouterr().out
 
 
+# meiva:note
+# A candidate that cannot be unlinked (its directory is read-only) is reported and counted as a
+# failure, and the candidates after it are still deleted. The computer-use snapshot directory is
+# scanned in its own right, so it can be made read-only while the top-level logs stay writable.
 def test_delete_failure_is_reported_and_other_candidates_continue(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from cli.commands.observability.logs import cmd_logs_retention
 
-    failed = _stale_file(tmp_path, "meiva-agent-12.out.log", b"bad")
-    deleted = _stale_file(tmp_path, "meiva-agent-13.out.log", b"good")
-    real_unlink = Path.unlink
-
-    def refuse_one(path: Path, *args: object, **kwargs: object) -> None:
-        if path == failed:
-            raise PermissionError("denied by test")
-        real_unlink(path, *args, **kwargs)  # pyright: ignore[reportArgumentType]
-
-    monkeypatch.setattr(Path, "unlink", refuse_one)
-
-    rc = cmd_logs_retention(
-        older_than_days=14,
-        dry_run=False,
-        logs_path=tmp_path,
-        now=_NOW,
-    )
+    logs = tmp_path / "logs"
+    snapshots = logs / "computer" / "snapshots"
+    snapshots.mkdir(parents=True)
+    failed = _stale_file(snapshots, "agent-42-20260816T120000000000.png", b"bad")
+    deleted = _stale_file(logs, "meiva-agent-13.out.log", b"good")
+    snapshots.chmod(0o555)
+    try:
+        rc = cmd_logs_retention(
+            older_than_days=14,
+            default_retention_days=None,
+            dry_run=False,
+            logs_path=logs,
+            now=_NOW,
+        )
+    finally:
+        snapshots.chmod(0o755)
 
     captured = capsys.readouterr()
     assert rc == 1
     assert failed.exists()
     assert not deleted.exists()
-    assert f"retention_error\tpath={failed}\terror=denied by test" in captured.err
+    assert f"retention_error\tpath={failed}\terror=[Errno 13] Permission denied" in captured.err
     assert "retention_summary\tmode=delete\tdeleted=1\tbytes=4\tfailed=1" in captured.out
 
 
+# meiva:note
+# A matching entry whose metadata cannot be read (its directory lists but cannot be searched) is
+# reported as a failure of that path rather than skipped silently. The directory is not named
+# `logs`, so no sibling or nested root is scanned and the failure count is exactly the one path.
 def test_unreadable_matching_path_is_reported(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.observability import logs
+    from cli.commands.observability.logs import cmd_logs_retention
 
-    unreadable = tmp_path / "meiva-agent-12.out.log"
-
-    class UnreadableEntry:
-        name = unreadable.name
-        path = str(unreadable)
-
-        def is_file(self, *, follow_symlinks: bool) -> bool:
-            assert follow_symlinks is False
-            return True
-
-        def stat(self, *, follow_symlinks: bool) -> os.stat_result:
-            assert follow_symlinks is False
-            raise PermissionError("cannot stat")
-
-    class EntryScan:
-        def __enter__(self) -> list[UnreadableEntry]:
-            return [UnreadableEntry()]
-
-        def __exit__(self, *_args: object) -> None:
-            return None
-
-    def fake_scandir(_path: Path) -> EntryScan:
-        return EntryScan()
-
-    monkeypatch.setattr(logs.os, "scandir", fake_scandir)
-
-    rc = logs.cmd_logs_retention(
-        older_than_days=14,
-        dry_run=False,
-        logs_path=tmp_path,
-        now=_NOW,
-    )
+    logs = tmp_path / "service-logs"
+    logs.mkdir()
+    unreadable = _stale_file(logs, "meiva-agent-12.out.log", b"bad")
+    logs.chmod(0o444)
+    try:
+        rc = cmd_logs_retention(
+            older_than_days=14,
+            default_retention_days=None,
+            dry_run=False,
+            logs_path=logs,
+            now=_NOW,
+        )
+    finally:
+        logs.chmod(0o755)
 
     captured = capsys.readouterr()
     assert rc == 1
-    assert f"retention_error\tpath={unreadable}\terror=cannot stat" in captured.err
+    assert unreadable.exists()
+    assert f"retention_error\tpath={unreadable}\terror=[Errno 13] Permission denied" in captured.err
+    assert "retention_summary\tmode=delete\tdeleted=0\tbytes=0\tfailed=1" in captured.out
+
+
+def test_a_logs_directory_that_cannot_be_listed_is_reported(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from cli.commands.observability.logs import cmd_logs_retention
+
+    logs = tmp_path / "service-logs"
+    logs.mkdir()
+    logs.chmod(0o000)
+    try:
+        rc = cmd_logs_retention(
+            older_than_days=14,
+            default_retention_days=None,
+            dry_run=False,
+            logs_path=logs,
+            now=_NOW,
+        )
+    finally:
+        logs.chmod(0o755)
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert f"retention_error\tpath={logs}\terror=[Errno 13] Permission denied" in captured.err
     assert "retention_summary\tmode=delete\tdeleted=0\tbytes=0\tfailed=1" in captured.out
 
 
@@ -373,6 +394,7 @@ def test_retention_preserves_every_path_outside_the_exact_boundary(
     rc = cmd_logs_retention(
         older_than_days=14,
         dry_run=False,
+        default_retention_days=None,
         logs_path=logs,
         now=_NOW,
     )
@@ -387,19 +409,16 @@ def test_retention_preserves_every_path_outside_the_exact_boundary(
 
 
 def test_configured_days_apply_when_the_flag_is_omitted(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from base.config import settings
     from cli.commands.observability.logs import cmd_logs_retention
 
     managed = _stale_file(tmp_path, "meiva-agent-12.out.log", b"keep")
-    monkeypatch.setattr(settings.observability, "log_retention_days", 16)
 
     rc = cmd_logs_retention(
         older_than_days=None,
         family_days=None,
+        default_retention_days=16,
         dry_run=False,
         logs_path=tmp_path,
         now=_NOW,
@@ -408,6 +427,35 @@ def test_configured_days_apply_when_the_flag_is_omitted(
     assert rc == 0
     assert managed.exists()
     assert "retention_summary\tmode=delete\tdeleted=0\tbytes=0\tfailed=0" in capsys.readouterr().out
+
+    rc = cmd_logs_retention(
+        older_than_days=None,
+        family_days=None,
+        default_retention_days=14,
+        dry_run=False,
+        logs_path=tmp_path,
+        now=_NOW,
+    )
+
+    assert rc == 0
+    assert not managed.exists()
+    assert "retention_summary\tmode=delete\tdeleted=1\tbytes=4\tfailed=0" in capsys.readouterr().out
+
+
+def test_a_flat_retention_with_no_age_and_no_configured_default_is_refused(
+    tmp_path: Path,
+) -> None:
+    from cli.commands.observability.logs import cmd_logs_retention
+
+    with pytest.raises(ValueError, match="needs --older-than or the configured default"):
+        cmd_logs_retention(
+            older_than_days=None,
+            family_days=None,
+            default_retention_days=None,
+            dry_run=True,
+            logs_path=tmp_path,
+            now=_NOW,
+        )
 
 
 @pytest.mark.parametrize(
@@ -474,6 +522,7 @@ def test_active_service_stdout_is_excluded_via_open_path_snapshot(
             older_than_days=None,
             family_days={},
             dry_run=False,
+            default_retention_days=None,
             logs_path=tmp_path,
             now=_NOW,
         )
@@ -501,6 +550,7 @@ def test_retention_deletes_expired_service_stdout_and_native_archive(
         older_than_days=None,
         family_days={},
         dry_run=False,
+        default_retention_days=None,
         logs_path=logs_path,
         now=_NOW,
     )
@@ -538,6 +588,7 @@ def test_snapshot_retention_scans_the_nested_computer_dir(
         older_than_days=None,
         family_days={},
         dry_run=True,
+        default_retention_days=None,
         logs_path=logs,
         now=_NOW,
     )
@@ -555,6 +606,7 @@ def test_snapshot_retention_scans_the_nested_computer_dir(
         older_than_days=None,
         family_days={},
         dry_run=False,
+        default_retention_days=None,
         logs_path=logs,
         now=_NOW,
     )

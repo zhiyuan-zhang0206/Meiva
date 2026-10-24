@@ -156,6 +156,7 @@ def test_capabilities_that_differ_from_the_ones_init_recorded_refuse_before_any_
             run.runtime.code_root,
             frozenset({"agent-runner"}),
             {"MEIVA_MACHINE_NAME": "t", "MEIVA_GATEWAY_URL": "http://127.0.0.1:1"},
+            occupied_ports=frozenset(),
         )
     )
     run.declare(gateway=True, agent_runner=False)
@@ -183,6 +184,7 @@ def test_a_start_refreshes_only_its_invocations_machine(start_run: StartRun) -> 
             run.runtime.code_root,
             frozenset({"agent-runner"}),
             {"MEIVA_MACHINE_NAME": "t", "MEIVA_GATEWAY_URL": "http://127.0.0.1:1"},
+            occupied_ports=frozenset(),
         )
     )
     run.declare(gateway=True, agent_runner=False)

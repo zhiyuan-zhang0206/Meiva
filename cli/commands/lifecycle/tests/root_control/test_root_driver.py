@@ -35,12 +35,13 @@ from cli.commands.lifecycle.tests.root_control.support import (
     custody_helper,
     fake_interpreter,
     git_repo,
+    launch_delivery,
     launch_inputs,
     service,
     this_process,
 )
+from cli.commands.lifecycle.tests.runtime_at import runtime_at
 from cli.commands.lifecycle.tests.scripted_root import UnitRow, scripted_root
-from cli.start_runtime import StartRuntime
 from services.supervision.meiva_root.manifest import UnitManifest
 from services.supervision.roster.service_spec import ServiceSpec
 
@@ -318,7 +319,7 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
             reconcile=True,
             retained_children=[],
             helper=serve(helper),
-            runtime=StartRuntime.development(repo),
+            runtime=runtime_at(repo),
             honor_restart_budget=False,
             inputs=launch_inputs(short_tmp),
         )
@@ -343,7 +344,7 @@ def test_an_identical_generation_is_reused_and_only_its_stopped_units_are_brough
             reconcile=True,
             retained_children=[],
             helper=None,
-            runtime=StartRuntime.development(repo),
+            runtime=runtime_at(repo),
             honor_restart_budget=False,
             inputs=launch_inputs(short_tmp),
         )
@@ -367,13 +368,42 @@ def test_a_core_unit_the_root_refuses_fails_the_whole_launch(
             reconcile=True,
             retained_children=[],
             helper=None,
-            runtime=StartRuntime.development(repo),
+            runtime=runtime_at(repo),
             honor_restart_budget=False,
             inputs=launch_inputs(short_tmp),
         )
 
     assert result == driver.LaunchOutcome(roster, ("meiva-gateway",))
     assert "meiva-root tree bring-up failed: up gateway failed" in capsys.readouterr().err
+
+
+# meiva:note
+# A root that answers with a status the commands cannot read fails the launch the way an
+# unreachable one does: reported on stderr as a failed bring-up, never a traceback.
+def test_a_root_with_an_unreadable_status_fails_the_launch_without_raising(
+    short_tmp: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = git_repo(tmp_path / "repo")
+    roster, manifest, _digests = requested_launch(short_tmp, repo)
+
+    with scripted_root(
+        short_tmp, [UnitRow("gateway")], launch_digest=str(manifest["launch_digest"])
+    ) as root:
+        root.raw_unit_rows = [{"id": "gateway", "state": "running", "last_error": 5}]
+        result = driver.launch_service_tree(
+            roster,
+            repo,
+            ROLES,
+            reconcile=True,
+            retained_children=[],
+            helper=None,
+            runtime=runtime_at(repo),
+            honor_restart_budget=False,
+            inputs=launch_inputs(short_tmp),
+        )
+
+    assert result == driver.LaunchOutcome(roster, ("meiva-gateway",))
+    assert "meiva-root answered with an unreadable status" in capsys.readouterr().err
 
 
 def test_a_unit_that_exits_again_after_up_is_reported_with_the_roots_last_error(
@@ -397,7 +427,7 @@ def test_a_unit_that_exits_again_after_up_is_reported_with_the_roots_last_error(
             reconcile=True,
             retained_children=[],
             helper=None,
-            runtime=StartRuntime.development(repo),
+            runtime=runtime_at(repo),
             honor_restart_budget=False,
             inputs=launch_inputs(short_tmp),
         )
@@ -439,14 +469,20 @@ def test_collector_config_bytes_change_the_live_unit_generation(
     collector = next(s for s in roster.build_services() if s.session == "otel-collector")
 
     before = driver.unit_digests(
-        driver.tree_manifest((collector,), tmp_path, roles=ROLES, remote_data_plane=False)
+        driver.tree_manifest(
+            (collector,), tmp_path, roles=ROLES, delivery=launch_delivery(tmp_path)
+        )
     )
     unchanged = driver.unit_digests(
-        driver.tree_manifest((collector,), tmp_path, roles=ROLES, remote_data_plane=False)
+        driver.tree_manifest(
+            (collector,), tmp_path, roles=ROLES, delivery=launch_delivery(tmp_path)
+        )
     )
     config.write_text("receivers: {otlp: {protocols: {http: {}}}}\n")
     after = driver.unit_digests(
-        driver.tree_manifest((collector,), tmp_path, roles=ROLES, remote_data_plane=False)
+        driver.tree_manifest(
+            (collector,), tmp_path, roles=ROLES, delivery=launch_delivery(tmp_path)
+        )
     )
 
     assert before == unchanged
@@ -465,7 +501,9 @@ def test_plugin_birth_config_is_part_of_the_existing_unit_generation(tmp_path: P
         interval: float = 300
 
     def unit_of(spec: ServiceSpec) -> UnitManifest:
-        manifest = driver.tree_manifest((spec,), tmp_path, roles=ROLES, remote_data_plane=False)
+        manifest = driver.tree_manifest(
+            (spec,), tmp_path, roles=ROLES, delivery=launch_delivery(tmp_path)
+        )
         rows = cast("list[dict[str, object]]", manifest["units"])
         return UnitManifest.from_mapping(rows[0], origin="test")
 

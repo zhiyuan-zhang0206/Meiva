@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import secrets
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -52,10 +52,11 @@ class IdentityInput:
     checkout: Path
     roles: frozenset[str]
     values: dict[str, str]
-    config_digest: str | None = None
     # meiva:note
-    # Ports of the fixed table that something already holds: the entry probes them once.
-    occupied_ports: frozenset[int] = frozenset()
+    # Ports of the fixed table that something already holds: the entry probes them once. Required,
+    # so a caller that forgets to probe cannot silently skip the "ports occupied" refusal.
+    occupied_ports: frozenset[int]
+    config_digest: str | None = None
 
 
 def _write(path: Path, data: dict[str, Any]) -> None:
@@ -299,9 +300,7 @@ def _create_claim(inputs: IdentityInput) -> None:
         ).lower()
     rec = _new_record(inputs) if "gateway" in inputs.roles else None
     if rec is not None:
-        values = gateway_values(
-            rec, IdentityInput(inputs.home, inputs.checkout, inputs.roles, values)
-        )
+        values = gateway_values(rec, replace(inputs, values=values))
     data = {
         "version": 1,
         "home": str(inputs.home),

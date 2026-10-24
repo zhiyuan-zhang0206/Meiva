@@ -1,187 +1,184 @@
-"""Explicit operator and captured telemetry inputs for health observations."""
+# meiva:note
+# Real inputs for the cluster health probe's tests.
+#
+# A probe round is run against what it would observe in production, at test scale: a scripted
+# gateway on a loopback port, the throwaway Postgres and Redis the suite provisions, a home
+# under `tmp_path` whose root manifest says what the last start launched, and the capture
+# pipeline that records the events the round emits. Nothing the probe calls is replaced; a
+# fault is made the way it happens (a port nobody listens on, a row that is missing).
 
 from __future__ import annotations
 
-import os
-import sys
-from collections.abc import Callable, Generator
-from functools import partial
+import dataclasses
+import subprocess
+from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
+import psycopg
 import pytest
 
-from base.agents.context.clients import DatabaseFactory
-from base.cluster.machine import MachineIdentity
-from base.config import ConfigBoot
-from base.host.system.hostport import Host
+from base.db import Database, create_agent
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_settings
+from base.host.net.tests.local_http import closed_port_url
+from base.paths import root_manifests_path
 from base.telemetry.tests.capture.event_capture import EmittedEvents, FollowedAttributes
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
-from cli.commands.cluster import health as cluster_health
-from cli.commands.converge.redis_bridge import RedisBridgeStatus
+from cli.commands.cluster._provider_guard import ProviderGuardConfig
+from cli.commands.cluster.health_readings import HealthOptions
+from cli.commands.cluster.plans.health_verdicts import HealthRules
+from cli.commands.cluster.tests.gateway_server import Reply, ScriptedGateway, serving
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+from services.supervision.meiva_root_glue import manifests
+from services.supervision.roster import build_services
 
-Probe = Callable[..., int]
-
-
-def healthy(*_args: object, database_factory: DatabaseFactory) -> bool:
-    assert callable(database_factory)
-    return True
-
-
-def unhealthy(*_args: object, database_factory: DatabaseFactory) -> bool:
-    assert callable(database_factory)
-    return False
-
-
-def service_probe_verdict(
-    *, machine: MachineIdentity, host: Host, failures: list[str]
-) -> list[str]:
-    assert isinstance(machine, MachineIdentity)
-    assert isinstance(host, Host)
-    return failures
-
-
-def bridge_status(
-    *,
-    required: bool = True,
-    endpoint: str = "10.64.0.7:6380",
-    serving: bool = True,
-    detail: str = "Redis PING succeeded",
-) -> RedisBridgeStatus:
-    return RedisBridgeStatus(required, endpoint, serving, detail)
-
-
-def redis_bridge_verdict(
-    *, machine: MachineIdentity, config: ConfigBoot, result: str | None
-) -> str | None:
-    assert isinstance(machine, MachineIdentity)
-    assert isinstance(config, ConfigBoot)
-    return result
+__all__ = [
+    "emitted_events",
+    "entry_command",
+    "gateway",
+    "git_checkout",
+    "healthy_options",
+    "launch_record",
+    "live_agent",
+    "operator_database",
+    "probe_command",
+    "provider_off",
+    "ran",
+    "signals",
+    "unreachable_database",
+]
 
 
 @pytest.fixture
-def schema_verdicts() -> list[bool]:
-    """Schema verdicts the patched check returns, oldest first; empty = pass.
-
-    A test appends False to fail one round's schema check while every other
-    check of `all_checks_pass` stays healthy."""
-    return []
+def gateway() -> Iterator[ScriptedGateway]:
+    """A gateway whose `/api/health` answers 200; a test scripts other answers with `serving`."""
+    with serving({("GET", "/api/health"): Reply(body={"status": "ok"})}) as scripted:
+        yield scripted
 
 
-@pytest.fixture
-def quiet_schema_health(monkeypatch: pytest.MonkeyPatch, schema_verdicts: list[bool]) -> None:
-    """The schema check passes without a real skew, per `schema_verdicts`."""
-
-    def schema_verdict(*_args: object, database_factory: DatabaseFactory) -> bool:
-        assert callable(database_factory)
-        return schema_verdicts.pop(0) if schema_verdicts else True
-
-    monkeypatch.setattr(cluster_health, "schema_health", schema_verdict)
-
-
-@pytest.fixture
-def quiet_service_health(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The service probes and the Redis bridge pass without dialing anything."""
-    monkeypatch.setattr(
-        cluster_health, "service_probes", partial(service_probe_verdict, failures=[])
-    )
-    monkeypatch.setattr(
-        cluster_health, "redis_bridge_probe", partial(redis_bridge_verdict, result=None)
+# meiva:note
+# Both provider checks off, so a round never dials the provider or reads the agent table for
+# them; the provider tests turn them on one at a time.
+def provider_off() -> ProviderGuardConfig:
+    return ProviderGuardConfig(
+        balance_enabled=False,
+        deepseek_api_key=None,
+        balance_url="http://127.0.0.1:1/balance",
+        balance_timeout_s=2.0,
+        balance_min_cny=500.0,
+        blocked_agents_enabled=False,
+        blocked_agents_window_hours=24.0,
+        blocked_agents_min=3,
     )
 
 
+# meiva:note
+# A round that holds a healthy cluster to its rules: the gateway of the test, one live agent
+# required, no prod checkout to guard, WAL-G off, the volume of `tmp_path`, no retry wait.
 @pytest.fixture
-def quiet_host_health(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The host-level checks (disk, editable records, source tree) pass."""
-    monkeypatch.setattr(cluster_health, "disk_usage_failure", lambda: None)
-    monkeypatch.setattr(cluster_health, "editable_install_failure", lambda: None)
-    # Source-tree cases below supply their own checkout outcomes.
-    monkeypatch.setattr(cluster_health, "source_tree_failure", lambda: None)  # pyright: ignore[reportUnknownArgumentType]
-
-
-@pytest.fixture
-def all_checks_pass(
-    monkeypatch: pytest.MonkeyPatch,
-    quiet_schema_health: None,
-    quiet_service_health: None,
-    quiet_host_health: None,
-) -> None:
-    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: True)
-    monkeypatch.setattr(cluster_health, "agent_population", healthy)  # pyright: ignore[reportUnknownArgumentType]
-
-
-@pytest.fixture
-def probe(operator_database: Callable[[], Any], command_runtime: CommandRuntime) -> Probe:
-    # This file replaces telemetry initialization; supply its retained input without workers.
-    pipeline = object()
-    return partial(
-        cluster_health.run_health_probe,
-        database_factory=operator_database,
-        producer=lambda: pipeline,
-        command=command_runtime,
+def healthy_options(gateway: ScriptedGateway, tmp_path: Path) -> HealthOptions:
+    return HealthOptions(
+        gateway_url=gateway.url,
+        rules=HealthRules(agent_min=1, check_schema=True, disk_watermark=0.90),
+        provider=provider_off(),
+        source_root=None,
+        editable_allowed_roots=(),
+        walg_config_file=None,
+        data_volume=tmp_path,
+        checkout_refusal=None,
+        liveness_attempts=3,
+        liveness_retry_interval_s=0.0,
     )
 
 
-@pytest.fixture(autouse=True)
-def config_boot_environment() -> Generator[None]:
-    """Restore process delivery from the health operation's boot."""
-    with patch.dict(os.environ):
-        yield
+# meiva:note
+# Write the root manifest a `meiva start` of just these services would have left in `home`.
+def launch_record(home: Path, *sessions: str) -> None:
+    chosen = [spec for spec in build_services() if spec.session in sessions]
+    manifest = manifests.build_manifest(
+        capabilities=("gateway", "agent-runner"),
+        specs=chosen,
+        environments={spec.session: {} for spec in chosen},
+    )
+    manifests.write_manifest(root_manifests_path(home), manifest)
 
 
-def _no_init(**_kwargs: object) -> None:
-    return None
+# meiva:note
+# A gateway host whose home is `home`, with an inert program finder: a probe round reaches
+# only the real resources of the test.
+@pytest.fixture
+def probe_command(command_runtime: CommandRuntime, tmp_path: Path) -> CommandRuntime:
+    command_runtime.machine.set(role="gateway")
+    return dataclasses.replace(command_runtime, home=tmp_path)
+
+
+# meiva:note
+# A real git checkout with one committed file at `path`, standing in for the prod source.
+def git_checkout(path: Path) -> Path:
+    path.mkdir()
+    for args in (
+        ("init", "-b", "main"),
+        ("config", "user.email", "t@t"),
+        ("config", "user.name", "t"),
+    ):
+        subprocess.run(["git", "-C", str(path), *args], check=True, capture_output=True)
+    (path / "tracked.py").write_text("x = 1\n")
+    for args in (("add", "."), ("commit", "-m", "init")):
+        subprocess.run(["git", "-C", str(path), *args], check=True, capture_output=True)
+    return path
+
+
+def live_agent(conn: psycopg.Connection[Any], *, status: str = "idling") -> int:
+    agent_id = create_agent(conn)
+    conn.execute(
+        "INSERT INTO agents_meta (id, status, machine) VALUES (%s, %s, 'probe-test')",
+        (agent_id, status),
+    )
+    conn.commit()
+    return agent_id
+
+
+# meiva:note
+# A database handle whose cluster does not answer: the access URL names a loopback port nobody
+# listens on, so every dial is refused, as when the data plane is down. It asks for the suite's
+# Postgres only so the suite's guard admits a test that dials Postgres at all.
+@pytest.fixture
+def unreachable_database(db_url: str, database_gate: ProcessDbGate) -> Callable[[], Database]:
+    closed = closed_port_url().replace("http://", "postgresql://meiva@")
+    dead = Database(
+        dataclasses.replace(db_config_from_settings(), db_url=f"{closed}/meiva"),
+        gate=database_gate,
+    )
+    return lambda: dead
 
 
 @pytest.fixture
-def provider_guard_reports() -> list[tuple[str, str]]:
-    """Provider-guard failures the stubbed guard reports this round, in order.
-
-    Empty (the default) = the guard passes. A test appends the failures it
-    wants reported, e.g. the balance-low signal with the real guard's message
-    shape."""
-    return []
-
-
-@pytest.fixture(autouse=True)
-def provider_guard_healthy(
-    monkeypatch: pytest.MonkeyPatch, provider_guard_reports: list[tuple[str, str]]
-) -> None:
-    """Checks 9-10 read a live provider API and the real agent table; stub the
-    guard so this file's tests stay hermetic. The stub reports the failures in
-    `provider_guard_reports` and returns their count, exactly as the real guard
-    reports and counts (the real module's own tests exercise its readings)."""
-
-    def _guard(*, report: Callable[[str, str], None], database_factory: DatabaseFactory) -> int:
-        assert callable(database_factory)
-        for check, message in provider_guard_reports:
-            print(message, file=sys.stderr)
-            report(check, message)
-        return len(provider_guard_reports)
-
-    monkeypatch.setattr(cluster_health, "run_provider_guard", _guard)
-
-
-@pytest.fixture(autouse=True)
 def ran(emitted_events: EmittedEvents) -> FollowedAttributes:
     """The attributes of every `health_probe_ran` heartbeat the probe emits."""
     return emitted_events.following("health_probe_ran")
 
 
-@pytest.fixture(autouse=True)
-def signals(
-    monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
-) -> Generator[FollowedAttributes]:
-    """The attributes of every `health_probe_failing` event the probe emits (heartbeats are `ran`).
+@pytest.fixture
+def signals(emitted_events: EmittedEvents) -> FollowedAttributes:
+    """The attributes of every `health_probe_failing` event the probe emits."""
+    return emitted_events.following("health_probe_failing")
 
-    Autouse so no test reaches the real event pipeline. After the test, every event that was
-    emitted must be one of the two the probe declares, with the declared category and level."""
-    monkeypatch.setattr(cluster_health.telemetry, "init_telemetry", _no_init)
-    yield emitted_events.following("health_probe_failing")
-    for event in emitted_events:
-        assert event.category == "telemetry"
-        assert event.event_name in {"health_probe_ran", "health_probe_failing"}
-        assert event.level == ("info" if event.event_name == "health_probe_ran" else "warning")
+
+@pytest.fixture
+def entry_command(
+    db_url: str,
+    redis_url: str,
+    db_conn: psycopg.Connection[Any],
+    probe_command: CommandRuntime,
+    gateway: ScriptedGateway,
+) -> CommandRuntime:
+    """A gateway host whose own configuration names the test's gateway and a floor of zero
+    agents, with a prod checkout and an empty launch record under its home."""
+    probe_command.config.set_field("gateway_url", gateway.url)
+    probe_command.config.set_field("health_probe_agent_min", 0)
+    git_checkout(probe_command.home / "source")
+    launch_record(probe_command.home)
+    return probe_command

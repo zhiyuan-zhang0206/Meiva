@@ -366,14 +366,14 @@ os.environ["MEIVA_OBSERVABILITY_OTLP_PORT"] = "4318"
 os.environ.pop("MEIVA_TELEMETRY_OTLP_ENDPOINT", None)
 os.environ["MEIVA_MACHINE_HOST"] = "localhost"
 
-# ── Grafana admin credential: the suite never carries a live one ──
+# meiva:note
+# Grafana admin credential: the suite never carries a live one.
 #
-# Same leak class: the login shell exports the real GRAFANA_ADMIN_PASSWORD,
-# and the native LGTM render writes `settings.alerts.grafana_admin_password`
-# into the rendered native dir — a production credential flowing through test
-# output. Pinned empty like the telegram token; a test that needs a credential
-# monkeypatches `settings.alerts.grafana_admin_password`
-# (cli/commands/observability/tests/test_converge_lgtm.py does).
+# Same leak class: the login shell exports the real GRAFANA_ADMIN_PASSWORD, and the native LGTM
+# render writes `settings.alerts.grafana_admin_password` into the rendered native dir, a
+# production credential flowing through test output. Pinned empty like the telegram token; a test
+# that needs a credential hands the renderer a value (`render_grafana_admin_password`, as
+# cli/commands/observability/tests/lgtm/test_converge_lgtm.py does).
 os.environ["GRAFANA_ADMIN_PASSWORD"] = ""
 
 # The gateway address every client-side caller resolves (`gateway_api_base()` ->

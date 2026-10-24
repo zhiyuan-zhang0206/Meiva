@@ -5,64 +5,96 @@ import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import httpx
 
 from base import telemetry
 from base.agents.context.clients import DatabaseFactory
+from base.host.atomic_io import write_text_atomic
 from base.log import logger
 from base.telemetry import EventPipeline
 from cli.commands.converge.rendered_file import write_rendered_guarded
+from cli.commands.observability.plans.lgtm.dashboard_checks import (
+    GrafanaReply,
+    file_problems,
+    grafana_problems,
+    sidecar_problems,
+)
+from cli.commands.observability.plans.lgtm.dashboard_plan import (
+    DASHBOARD_UID,
+    RENDERED_DASHBOARD_REL,
+    DashboardFacts,
+    DashboardOutcome,
+    FailedDashboardRender,
+    InstallReference,
+    KeepInstalled,
+    KeepRendered,
+    RenderedDashboard,
+    ghost_hash_keys,
+    hash_record_update,
+    orphan_removable,
+    plan_dashboard_fallback,
+    plan_rendered_dashboard,
+)
 
-from .observatory_urls import atomic_write
 
-# The one provisioning file converge generates instead of copying verbatim
-# (task #3697 S3): rendered from the metric registries, so plugin
-# installs/uninstalls move its panels without hand edits.
-_DASHBOARD_UID = "meiva-ops-main"
-RENDERED_DASHBOARD_REL = f"dashboards/{_DASHBOARD_UID}.json"
-_DASHBOARD_SOURCE_KEY = "$dashboard-source"
-DASHBOARD_FOLDER = "Meiva"
-
-
-# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
-def _render_meiva_ops_dashboard(
-    dest: Path,
-    hashes_path: Path,
-    key: str,
-    reference: Path,
-    *,
-    database_factory: DatabaseFactory,
-    producer: Callable[[], EventPipeline],
-) -> None:
+# meiva:note
+# Render the `meiva-ops` dashboard from the metric registries and the enabled plugins, or report
+# why it could not.
+#
+# The plugin machinery is imported here, not at module level: the converge step table imports
+# this module on every CLI start, and the render is needed only when a station converges. A
+# render that raises is an outcome, not an error: converge installs a fallback instead.
+def render_dashboard(database_factory: DatabaseFactory) -> DashboardOutcome:
     from base.packages.dashboard_supply import render_dashboard_json
 
     try:
         rendered, failed = render_dashboard_json(database_factory())
     except Exception as exc:
+        return FailedDashboardRender(str(exc))
+    return RenderedDashboard(rendered, tuple(failed))
+
+
+def _digest(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
+def _provision_dashboard(
+    dest: Path,
+    hashes_path: Path,
+    key: str,
+    reference: Path,
+    *,
+    outcome: DashboardOutcome,
+    producer: Callable[[], EventPipeline],
+) -> None:
+    if isinstance(outcome, FailedDashboardRender):
         print(
-            f"  ! lgtm native: meiva-ops dashboard render failed ({exc})",
+            f"  ! lgtm native: meiva-ops dashboard render failed ({outcome.error})",
             file=sys.stderr,
         )
         _install_dashboard_fallback(
-            dest, hashes_path, key, reference, error=str(exc)[:300], producer=producer
+            dest, hashes_path, key, reference, error=outcome.error[:300], producer=producer
         )
         return
-    if failed:
+    if outcome.failed_plugins:
         print(
             f"  ! lgtm native: plugin load failures (skipped, panels missing from this render): "
-            f"{', '.join(failed)}",
+            f"{', '.join(outcome.failed_plugins)}",
             file=sys.stderr,
         )
-    digest = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
-    if dest.exists() and dest.read_text(encoding="utf-8") == rendered:
-        record_rendered_hash(hashes_path, key, digest)
-        return
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write(dest, rendered)
-    record_rendered_hash(hashes_path, key, digest)
-    print(f"  lgtm native: meiva-ops dashboard re-rendered (sha256 {digest[:12]})")
+    digest = _digest(outcome.content)
+    current = dest.read_text(encoding="utf-8") if dest.exists() else None
+    match plan_rendered_dashboard(current=current, rendered=outcome.content, digest=digest):
+        case KeepRendered():
+            record_rendered_hash(hashes_path, key, digest)
+        case _:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            write_text_atomic(dest, outcome.content, encoding="utf-8", suffix="")
+            record_rendered_hash(hashes_path, key, digest)
+            print(f"  lgtm native: meiva-ops dashboard re-rendered (sha256 {digest[:12]})")
 
 
 # meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
@@ -75,28 +107,43 @@ def _install_dashboard_fallback(
     error: str,
     producer: Callable[[], EventPipeline],
 ) -> None:
-    outcome = "kept"
-    if dashboard_uid(dest) == _DASHBOARD_UID and dashboard_panels(dest):
-        print(
-            f"  ! lgtm native: keeping the installed dashboard at {dest}",
-            file=sys.stderr,
-        )
-    else:
-        content = _usable_reference(reference, error=error, producer=producer)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(dest, content)
-        record_rendered_hash(
-            hashes_path,
-            key,
-            hashlib.sha256(content.encode("utf-8")).hexdigest(),
-            source="reference",
-        )
-        outcome = "reference"
-        print(
-            f"  ! lgtm native: no usable installed dashboard; "
-            f"installed the checkout reference {reference}",
-            file=sys.stderr,
-        )
+    reference_text = reference.read_text(encoding="utf-8") if reference.is_file() else ""
+    plan = plan_dashboard_fallback(
+        installed=dashboard_facts(dest),
+        reference_text=reference_text,
+        reference=dashboard_facts(reference)
+        if reference_text
+        else DashboardFacts(uid="", has_panels=False),
+        digest=_digest(reference_text),
+    )
+    match plan:
+        case KeepInstalled():
+            outcome = "kept"
+            print(f"  ! lgtm native: keeping the installed dashboard at {dest}", file=sys.stderr)
+        case InstallReference(digest=digest):
+            outcome = "reference"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            write_text_atomic(dest, reference_text, encoding="utf-8", suffix="")
+            record_rendered_hash(hashes_path, key, digest, source="reference")
+            print(
+                f"  ! lgtm native: no usable installed dashboard; "
+                f"installed the checkout reference {reference}",
+                file=sys.stderr,
+            )
+        case _:
+            telemetry.emit(
+                "telemetry",
+                "lgtm_dashboard_render_failed",
+                producer=producer,
+                level="error",
+                source="converge",
+                attributes={"error": error, "outcome": "failed"},
+            )
+            raise RuntimeError(
+                "meiva-ops dashboard render failed, the installed file is not this dashboard, and "
+                f"the checkout reference {reference} is missing or unusable: refusing to converge "
+                "with no dashboards"
+            )
     telemetry.emit(
         "telemetry",
         "lgtm_dashboard_render_failed",
@@ -107,26 +154,11 @@ def _install_dashboard_fallback(
     )
 
 
-def _usable_reference(reference: Path, *, error: str, producer: Callable[[], EventPipeline]) -> str:
-    content = reference.read_text(encoding="utf-8") if reference.is_file() else ""
-    if content and dashboard_uid(reference) == _DASHBOARD_UID and dashboard_panels(reference):
-        return content
-    telemetry.emit(
-        "telemetry",
-        "lgtm_dashboard_render_failed",
-        producer=producer,
-        level="error",
-        source="converge",
-        attributes={"error": error, "outcome": "failed"},
-    )
-    raise RuntimeError(
-        "meiva-ops dashboard render failed, the installed file is not this dashboard, and "
-        f"the checkout reference {reference} is missing or unusable: refusing to converge "
-        "with no dashboards"
-    )
-
-
-def dashboard_document(path: Path) -> dict[str, Any]:
+# meiva:note
+# The parsed JSON object at `path`, or an empty mapping when it is missing, unreadable or not an
+# object. The reason is logged: a dashboard that is not provisioned this pass must not vanish
+# silently.
+def dashboard_document(path: Path) -> dict[str, object]:
     try:
         document: object = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -144,32 +176,32 @@ def dashboard_document(path: Path) -> dict[str, Any]:
             event="lgtm_dashboard",
         )
         return {}
-    return cast("dict[str, Any]", document)
+    return cast("dict[str, object]", document)
 
 
-def dashboard_uid(path: Path) -> str:
-    uid = dashboard_document(path).get("uid")
-    return uid if isinstance(uid, str) else ""
-
-
-def dashboard_panels(path: Path) -> list[Any]:
-    panels = dashboard_document(path).get("panels")
-    return cast("list[Any]", panels) if isinstance(panels, list) else []
+# meiva:note
+# The uid and panel presence of the dashboard file at `path`.
+def dashboard_facts(path: Path) -> DashboardFacts:
+    document = dashboard_document(path)
+    uid = document.get("uid")
+    panels = document.get("panels")
+    return DashboardFacts(
+        uid=uid if isinstance(uid, str) else "",
+        has_panels=isinstance(panels, list) and len(cast("list[object]", panels)) > 0,
+    )
 
 
 # meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
 def record_rendered_hash(
     hashes_path: Path, key: str, digest: str, *, source: str = "render"
 ) -> None:
-    recorded: dict[str, Any] = {}
-    if hashes_path.exists():
-        recorded = json.loads(hashes_path.read_text(encoding="utf-8"))
-    if recorded.get(key) == digest and recorded.get(_DASHBOARD_SOURCE_KEY) == source:
+    update = hash_record_update(
+        _recorded_hashes(hashes_path), key=key, digest=digest, source=source
+    )
+    if update is None:
         return
-    recorded[key] = digest
-    recorded[_DASHBOARD_SOURCE_KEY] = source
     hashes_path.parent.mkdir(parents=True, exist_ok=True)
-    hashes_path.write_text(json.dumps(recorded, indent=2) + "\n", encoding="utf-8")
+    hashes_path.write_text(json.dumps(update, indent=2) + "\n", encoding="utf-8")
 
 
 # meiva:note
@@ -179,12 +211,17 @@ def record_rendered_hash(
 # URLs stay Grafana-native $__env{} references resolved from runtime.env, and
 # Grafana reads the rendered tree through MEIVA_PROVISIONING_PATH, so a rollout
 # that swaps the checkout cannot feed the running instance a half-rendered tree.
+#
+# The generated dashboard is skipped while the verbatim files are copied and rendered right
+# after: the checkout copy is its reference output, not its source. It is never orphan-cleanup
+# material, since it has no source template to vanish, so it stays in the rendered set even when
+# generation fails and the previous file must survive.
 # meiva:link cli/commands/converge/docs/rendered-files.meiva.okf.md
 def render_provisioning(
     repo: Path,
     native_dir: Path,
     *,
-    database_factory: DatabaseFactory,
+    dashboard: DashboardOutcome,
     producer: Callable[[], EventPipeline],
 ) -> None:
     source_dir = repo / "deploy/lgtm/config/grafana/provisioning"
@@ -198,49 +235,46 @@ def render_provisioning(
             continue
         rel = source.relative_to(source_dir)
         if rel.as_posix() == RENDERED_DASHBOARD_REL:
-            # Generated from the metric registries right below (S3); the
-            # checkout copy is the render's reference output, not the
-            # provisioning source.
             continue
         rendered_relative.add(rel.as_posix())
-        content = source.read_text(encoding="utf-8")
         warning = write_rendered_guarded(
             dest_dir / rel,
-            content,
+            source.read_text(encoding="utf-8"),
             hashes_path,
             rel.as_posix(),
             surface="lgtm-provisioning",
-            writer=atomic_write,
             on_local_edit="overwrite",
         )
         if warning is not None:
             print(f"  ! lgtm native: {warning}", file=sys.stderr)
-    # The generated dashboard is never orphan-cleanup material: it has no
-    # source template to vanish, so it stays in the rendered set even when
-    # generation fails (the previous file must survive).
     rendered_relative.add(RENDERED_DASHBOARD_REL)
-    _render_meiva_ops_dashboard(
+    _provision_dashboard(
         dest_dir / RENDERED_DASHBOARD_REL,
         hashes_path,
         RENDERED_DASHBOARD_REL,
         source_dir / RENDERED_DASHBOARD_REL,
-        database_factory=database_factory,
+        outcome=dashboard,
         producer=producer,
     )
-    # Remove rendered files whose source template vanished (web-sources
-    # _cleanup_gone_sources): untouched copies are pure derived state; a copy
-    # the user edited is kept, loudly.
+    _remove_orphans(dest_dir, hashes_path, rendered_relative)
+    _prune_ghost_hashes(dest_dir, hashes_path)
+
+
+# meiva:note
+# Remove rendered files whose source template vanished: an untouched copy is pure derived state,
+# a copy the user edited is kept, loudly.
+def _remove_orphans(dest_dir: Path, hashes_path: Path, rendered_relative: set[str]) -> None:
     for dest in sorted(dest_dir.rglob("*")):
         if not dest.is_file():
             continue
         rel = dest.relative_to(dest_dir).as_posix()
         if rel in rendered_relative:
             continue
-        hashes: dict[str, str] = {}
-        if hashes_path.exists():
-            hashes = json.loads(hashes_path.read_text(encoding="utf-8"))
-        recorded = hashes.get(rel)
-        if recorded is not None and hashlib.sha256(dest.read_bytes()).hexdigest() == recorded:
+        recorded = _recorded_hashes(hashes_path).get(rel)
+        if orphan_removable(
+            recorded=recorded if isinstance(recorded, str) else None,
+            actual=hashlib.sha256(dest.read_bytes()).hexdigest(),
+        ):
             dest.unlink()
             continue
         print(
@@ -248,15 +282,15 @@ def render_provisioning(
             "template anymore but was modified locally; kept",
             file=sys.stderr,
         )
-    _prune_ghost_hashes(dest_dir, hashes_path)
 
 
 # meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
 def _prune_ghost_hashes(dest_dir: Path, hashes_path: Path) -> None:
     recorded = _recorded_hashes(hashes_path)
-    ghosts = sorted(
-        key for key in recorded if not key.startswith("$") and not (dest_dir / key).is_file()
+    present = frozenset(
+        path.relative_to(dest_dir).as_posix() for path in dest_dir.rglob("*") if path.is_file()
     )
+    ghosts = ghost_hash_keys(recorded, present=present)
     if not ghosts:
         return
     for key in ghosts:
@@ -265,99 +299,37 @@ def _prune_ghost_hashes(dest_dir: Path, hashes_path: Path) -> None:
     print(f"  lgtm native: dropped hash entries with no rendered file: {', '.join(ghosts)}")
 
 
-def _recorded_hashes(hashes_path: Path) -> dict[str, Any]:
+def _recorded_hashes(hashes_path: Path) -> dict[str, object]:
     try:
         recorded: object = json.loads(hashes_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    return cast("dict[str, Any]", recorded) if isinstance(recorded, dict) else {}
+    return cast("dict[str, object]", recorded) if isinstance(recorded, dict) else {}
 
 
-def _object(value: Any) -> dict[str, Any]:
-    return cast("dict[str, Any]", value) if isinstance(value, dict) else {}
-
-
-def _objects(value: Any) -> list[dict[str, Any]]:
-    items = cast("list[Any]", value) if isinstance(value, list) else []
-    return [cast("dict[str, Any]", item) for item in items if isinstance(item, dict)]
-
-
-def _pre_rename_folder(folder: dict[str, Any]) -> bool:
-    return any(str(folder.get(field) or "").lower().startswith("ava") for field in ("uid", "title"))
-
-
-def _grafana_get(url: str) -> tuple[int, Any]:
+def _grafana_get(url: str) -> GrafanaReply:
     try:
         with httpx.Client(trust_env=False, timeout=httpx.Timeout(2.0)) as client:
             response = client.get(url)
     except httpx.HTTPError as exc:
-        return 0, f"{type(exc).__name__}: {exc}"
+        return GrafanaReply(0, f"{type(exc).__name__}: {exc}")
     try:
-        return response.status_code, response.json()
+        return GrafanaReply(response.status_code, response.json())
     except ValueError:
-        return response.status_code, None
-
-
-def _dashboard_file_problems(dashboard_path: Path) -> list[str]:
-    if not dashboard_document(dashboard_path):
-        return [f"dashboard file is missing or not a JSON object: {dashboard_path}"]
-    problems: list[str] = []
-    uid = dashboard_uid(dashboard_path)
-    if uid != _DASHBOARD_UID:
-        problems.append(f"dashboard uid is {uid!r}, expected {_DASHBOARD_UID!r}")
-    if not dashboard_panels(dashboard_path):
-        problems.append("dashboard carries no panels")
-    return problems
-
-
-def _sidecar_problems(hashes_path: Path) -> list[str]:
-    recorded = _recorded_hashes(hashes_path)
-    problems: list[str] = []
-    if RENDERED_DASHBOARD_REL not in recorded:
-        problems.append(f"{hashes_path.name} does not record {RENDERED_DASHBOARD_REL}")
-    if recorded.get(_DASHBOARD_SOURCE_KEY) == "reference":
-        problems.append("the installed dashboard is the checkout reference, not a render")
-    problems.extend(
-        f"{hashes_path.name} still records the pre-rename {key}"
-        for key in sorted(recorded)
-        if key.startswith("dashboards/ava-")
-    )
-    return problems
-
-
-def _grafana_problems(fetch: Callable[[str], tuple[int, Any]], grafana_url: str) -> list[str]:
-    status, payload = fetch(f"{grafana_url}/api/dashboards/uid/{_DASHBOARD_UID}")
-    if status == 0:
-        return [f"Grafana is unreachable at {grafana_url}: {payload}"]
-    problems: list[str] = []
-    if status != 200:
-        problems.append(f"Grafana answered {status} for dashboard uid {_DASHBOARD_UID!r}")
-    else:
-        folder = _object(_object(payload).get("meta")).get("folderTitle")
-        if folder != DASHBOARD_FOLDER:
-            problems.append(f"dashboard sits in folder {folder!r}, expected {DASHBOARD_FOLDER!r}")
-    status, payload = fetch(f"{grafana_url}/api/folders")
-    if status != 200:
-        problems.append(f"Grafana answered {status} for /api/folders")
-        return problems
-    problems.extend(
-        f"pre-rename folder still present: {folder.get('title')!r} ({folder.get('uid')})"
-        for folder in _objects(payload)
-        if _pre_rename_folder(folder)
-    )
-    return problems
+        return GrafanaReply(response.status_code, None)
 
 
 # meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
-def verify_dashboard_provisioning(
-    native_dir: Path,
-    *,
-    grafana_url: str,
-    get: Callable[[str], tuple[int, Any]] | None = None,
-) -> list[str]:
+def verify_dashboard_provisioning(native_dir: Path, *, grafana_url: str) -> list[str]:
     config_dir = native_dir / "config"
+    dashboard_path = config_dir / "provisioning" / RENDERED_DASHBOARD_REL
+    hashes_path = config_dir / "provisioning-hashes.json"
     return [
-        *_dashboard_file_problems(config_dir / "provisioning" / RENDERED_DASHBOARD_REL),
-        *_sidecar_problems(config_dir / "provisioning-hashes.json"),
-        *_grafana_problems(get or _grafana_get, grafana_url),
+        *file_problems(str(dashboard_path), dashboard_document(dashboard_path)),
+        *sidecar_problems(hashes_path.name, _recorded_hashes(hashes_path)),
+        *grafana_problems(
+            grafana_url,
+            _grafana_get(f"{grafana_url}/api/dashboards/uid/{DASHBOARD_UID}"),
+            _grafana_get(f"{grafana_url}/api/folders"),
+        ),
     ]

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 __all__ = [
     "AwaitNoSessions",
@@ -17,6 +18,7 @@ __all__ = [
     "FailShells",
     "ReportJobLeftover",
     "SurvivorFact",
+    "SurvivorRole",
     "WriteNotices",
     "forced_failure_message",
     "job_leftover_line",
@@ -26,13 +28,23 @@ __all__ = [
 
 
 # meiva:note
-# One known process the closure reported, and whether it is still its recorded process.
+# What a known process the closure reported is to its session: the shell itself or any other
+# recorded member.
 #
-# `role` is "shell" (the shell itself) or "job" (any other recorded member).
+# These are the two strings `base/sessions/pty/closure.Survivor.role` carries on the wire. Any
+# other string is a contract break between the service and this stop, so `SurvivorRole(raw)`
+# refuses it with a `ValueError` where the shell reads the outcome; it is never taken for a job.
+class SurvivorRole(Enum):
+    SHELL = "shell"
+    JOB = "job"
+
+
+# meiva:note
+# One known process the closure reported, and whether it is still its recorded process.
 @dataclass(frozen=True)
 class SurvivorFact:
     session: str
-    role: str
+    role: SurvivorRole
     pid: int
     alive: bool
 
@@ -80,10 +92,10 @@ def plan_after_closure(
     steps.extend(
         ReportJobLeftover(fact.session, fact.pid)
         for fact in survivors
-        if fact.role != "shell" and fact.alive
+        if fact.role is SurvivorRole.JOB and fact.alive
     )
     shells = sorted(
-        (fact for fact in survivors if fact.role == "shell" and fact.alive),
+        (fact for fact in survivors if fact.role is SurvivorRole.SHELL and fact.alive),
         key=lambda fact: fact.pid,
     )
     if shells:

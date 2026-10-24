@@ -23,6 +23,7 @@ from base.sessions.record import SessionRecord
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle.stop.restart import cmd_restart, cmd_restart_agent_host, conclude
 from cli.commands.lifecycle.stop.restart_plan import Finish
+from cli.commands.lifecycle.tests.runtime_at import runtime_at
 from cli.commands.lifecycle.tests.stop.stop_support import home as home
 from cli.commands.lifecycle.tests.stop.stop_support import stop_runtime as stop_runtime
 from cli.database import OperatorDatabaseFactory
@@ -37,7 +38,7 @@ def restart(
     database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     *,
-    retained_children: list[subprocess.Popen[bytes]] | None,
+    retained_children: list[subprocess.Popen[bytes]],
 ) -> int:
     return cmd_restart(
         only_services=(),
@@ -49,6 +50,7 @@ def restart(
         force=False,
         timeout=30.0,
         start_timeout=30.0,
+        runtime=runtime_at(runtime.home),
         retained_children=retained_children,
         database_factory=database_factory,
         producer=producer,
@@ -68,15 +70,6 @@ def host_this_process_in_a_supervised_session(home: Path) -> None:
         time.time(),
         pid_starttime_ticks(me.pid),
     ).write(home / "run/sessions/hosting-the-test.json")
-
-
-def test_a_restart_without_its_child_registry_is_refused_before_it_does_anything(
-    stop_runtime: CommandRuntime,
-    operator_database: OperatorDatabaseFactory,
-    operator_pipeline: Callable[[], EventPipeline],
-) -> None:
-    with pytest.raises(ValueError, match="caller-owned child retention"):
-        restart(stop_runtime, operator_database, operator_pipeline, retained_children=None)
 
 
 # meiva:note

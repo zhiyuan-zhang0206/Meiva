@@ -119,6 +119,7 @@ def test_stop_closes_busy_shell_session_job_with_real_signals(
     rc = do_stop(
         stop_request(timeout=15),
         stop_environment(stop_runtime, operator_database, operator_pipeline),
+        retained_children=[],
     )
     assert rc == 0
     assert not client.has_session(name)
@@ -151,6 +152,7 @@ def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
         stop_environment(
             stop_runtime, operator_database, operator_pipeline, shell_cleanup_wait_s=1.0
         ),
+        retained_children=[],
     )
     assert rc == 0
     assert time.monotonic() - started < 8, "the grace bounds the wait, not the stop deadline"
@@ -188,6 +190,7 @@ def test_stop_records_nothing_for_idle_shell(
     rc = do_stop(
         stop_request(timeout=15),
         stop_environment(stop_runtime, operator_database, operator_pipeline),
+        retained_children=[],
     )
     assert rc == 0
     assert not client.has_session(name)
@@ -213,6 +216,7 @@ def test_stop_tolerates_naturally_exited_session(
     rc = do_stop(
         stop_request(timeout=10),
         stop_environment(stop_runtime, operator_database, operator_pipeline),
+        retained_children=[],
     )
     assert rc == 0
 
@@ -471,6 +475,33 @@ def test_force_close_reports_known_job_without_failing(
         closure.Outcome(survivors=(closure.Survivor(name, identity_of(job), "job"),))
     )
     assert name in capsys.readouterr().err
+
+
+# meiva:note
+# A survivor whose role the closure's vocabulary does not name is not a job to report and move on
+# from: the outcome is refused before any survivor is judged, on a forced and a normal closure.
+@pytest.mark.parametrize("forced", [False, True])
+def test_a_closure_outcome_with_an_unknown_survivor_role_is_refused(
+    forced: bool,
+    launch: Launcher,
+    operator_database: OperatorDatabaseFactory,
+    stop_runtime: CommandRuntime,
+) -> None:
+    name = "meiva-agent-987-shell-2055-odd"
+    survivor = launch("private-odd", term="ignore", ignore_hangup=True)
+    outcome = closure.Outcome(survivors=(closure.Survivor(name, identity_of(survivor), "helper"),))
+    with pytest.raises(ValueError, match="'helper' is not a valid SurvivorRole"):
+        if forced:
+            shells.settle_forced_closure(outcome)
+        else:
+            shells.settle_closure(
+                outcome,
+                "stop",
+                deadline=time.monotonic() + 1,
+                direct_db=False,
+                database_factory=operator_database,
+                command=stop_runtime,
+            )
 
 
 def test_force_close_still_fails_when_known_shell_survives(launch: Launcher) -> None:

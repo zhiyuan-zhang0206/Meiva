@@ -13,6 +13,7 @@ passwordless door for anything but the OS user over the owner-only socket.
 
 from __future__ import annotations
 
+import contextlib
 import getpass
 import json
 import os
@@ -27,19 +28,24 @@ from unittest.mock import patch
 
 import psycopg
 import pytest
+from redis.exceptions import RedisError
 
 from base import cluster
 from base.cluster import authority, ownership
 from base.cluster.dataplane import pooler as base_pooler
+from base.cluster.dataplane.pg_tools import pg_tool
 from base.config import settings
 from base.host.db_authority import delivery, ledger, model
 from base.host.db_authority.api import API_TOKEN_ENV
 from base.host.env.registry import process_environment
 from base.host.net.url_secret import url_with_userinfo
-from cli.commands.data_plane import bringup
+from base.native_process.child_env import daemon_process_env
+from cli.commands.data_plane import bringup, completion
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_settings
+from cli.commands.data_plane.instance.launch_delivery import LaunchDelivery
+from cli.commands.data_plane.tests.native_cluster import shutdown_redis
 from cli.commands.lifecycle.start.migrations import cmd_migrations_apply
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
@@ -85,7 +91,10 @@ class Born:
 
     def admin(self) -> psycopg.Connection[Any]:
         return psycopg.connect(
-            host=str(ci.pg_socket_dir()), port=self.pg_port, dbname="meiva", autocommit=True
+            host=str(ci.pg_socket_dir(self.home)),
+            port=self.pg_port,
+            dbname="meiva",
+            autocommit=True,
         )
 
 
@@ -110,24 +119,16 @@ def _teardown(born: Born) -> None:
         pooler.stop_pgbouncer(force=True)
     finally:
         subprocess.run(
-            [ci.pg_bin("pg_ctl"), "-D", str(born.home / "pg"), "-m", "immediate", "stop"],
+            [str(pg_tool("pg_ctl")), "-D", str(born.home / "pg"), "-m", "immediate", "stop"],
             check=False,
             capture_output=True,
         )
         for child in born.retained_children:
             child.wait(timeout=1)
-        subprocess.run(
-            [
-                ci.redis_cli_bin(born.plane),
-                "-p",
-                str(born.record.ports["redis"]),
-                "shutdown",
-                "nosave",
-            ],
-            env=ci.redis_cli_env(born.values["MEIVA_REDIS_ADMIN_PASSWORD"]),
-            check=False,
-            capture_output=True,
-        )
+        with contextlib.suppress(RedisError):
+            shutdown_redis(
+                born.record.ports["redis"], born.values["MEIVA_REDIS_ADMIN_PASSWORD"], save=False
+            )
 
 
 def _configure(
@@ -154,6 +155,7 @@ def _configure(
             _REPO,
             frozenset({"gateway", "agent-runner"}),
             {},
+            occupied_ports=frozenset(),
         ),
     )
     assert values["MEIVA_CLUSTER_SECRET"]
@@ -226,21 +228,26 @@ def _birth(
     assert (
         bringup.ensure_gateway_data_plane(
             born.plane,
+            home=born.home,
             retained_children=born.retained_children,
             database_factory=operator_database,
             machine=command_runtime.machine,
         )
         == 0
     )
-    bringup.prepare_gateway_schema(born.plane)
+    bringup.prepare_gateway_schema(born.plane, home=born.home)
     cmd_migrations_apply(
         database_factory=operator_database,
         machine=command_runtime.machine,
         config=born.plane,
         home=born.home,
     )
-    bringup.complete_gateway_data_plane(
-        born.plane, database_factory=operator_database, machine=command_runtime.machine
+    completion.complete_gateway_data_plane(
+        born.plane,
+        home=born.home,
+        environment=os.environ,
+        database_factory=operator_database,
+        machine=command_runtime.machine,
     )
 
 
@@ -305,7 +312,7 @@ def test_fresh_birth_mints_generation_zero_behind_nologin_owner(
         ).fetchall()
         assert groups == [("meiva_gateway",), ("meiva_runner",)]
         authority.check_invariant(
-            conn, born.home, database="meiva", readonly_grantees=bringup.READONLY_GRANTEES
+            conn, born.home, database="meiva", readonly_grantees=completion.READONLY_GRANTEES
         )
     # The start process adopted the delivered gateway login for its own dials.
     assert operator_database.db_url() == born.dsn("gateway")
@@ -314,7 +321,7 @@ def test_fresh_birth_mints_generation_zero_behind_nologin_owner(
 
 
 def test_birth_refuses_unauthenticated_and_owner_logins(born: Born) -> None:
-    socket_dir = str(ci.pg_socket_dir())
+    socket_dir = str(ci.pg_socket_dir(born.home))
     for host in ("127.0.0.1", socket_dir):
         # The owner exists but can never log in, with or without a password.
         for password in ("", "anything"):
@@ -395,15 +402,22 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(
         for line in userlist.splitlines(keepends=True)
         if not line.startswith(f'"{name}"'.encode())
     )
-    rc = pooler.ensure_pgbouncer(
-        pg_port=born.pg_port,
-        listen_port=born.pooler_port,
-        db_name="meiva",
+    spec = pooler.PoolerSpec(
+        shape=pooler.PoolerShape(
+            pg_port=born.pg_port,
+            listen_port=born.pooler_port,
+            db_name="meiva",
+            machine=command_runtime.machine,
+            max_client_conn=2000,
+            socket_dir=ci.pg_socket_dir(born.home),
+        ),
         userlist=without_gateway,
         admin_password=admin.password,
-        machine=command_runtime.machine,
-        max_client_conn=2000,
+        binary=base_pooler.pgbouncer_bin(),
+        daemon_env=daemon_process_env(),
+        bind_wait_s=ci.BIND_WAIT_TIMEOUT_S,
     )
+    rc = pooler.ensure_pgbouncer(spec)
     assert rc == 0
     owner_after = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
     assert owner_after is not None and owner_after.pid != owner_before.pid
@@ -419,8 +433,12 @@ def test_unchanged_userlist_reloads_without_restart(
     command_runtime: CommandRuntime,
 ) -> None:
     before = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
-    bringup.complete_gateway_data_plane(
-        born.plane, database_factory=operator_database, machine=command_runtime.machine
+    completion.complete_gateway_data_plane(
+        born.plane,
+        home=born.home,
+        environment=os.environ,
+        database_factory=operator_database,
+        machine=command_runtime.machine,
     )
     after = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
     assert before is not None and after is not None and before.pid == after.pid
@@ -437,8 +455,12 @@ def test_ordinary_start_refuses_a_stray_group_member_and_leaves_it_untouched(
             "CREATE ROLE meiva_g7_runner LOGIN PASSWORD 'stale-password-xyz' IN ROLE meiva_runner"
         )
     with pytest.raises(model.CatalogRefusedError, match="meiva_g7_runner"):
-        bringup.complete_gateway_data_plane(
-            born.plane, database_factory=operator_database, machine=command_runtime.machine
+        completion.complete_gateway_data_plane(
+            born.plane,
+            home=born.home,
+            environment=os.environ,
+            database_factory=operator_database,
+            machine=command_runtime.machine,
         )
     with born.admin() as conn:
         assert conn.execute(
@@ -457,8 +479,12 @@ def test_ordinary_start_holds_on_an_invariant_violation(
         conn.execute("CREATE ROLE foreign_writer LOGIN PASSWORD 'foreign-password'")
         conn.execute("GRANT INSERT ON agents TO foreign_writer")
     with pytest.raises(model.CatalogRefusedError, match="foreign_writer"):
-        bringup.complete_gateway_data_plane(
-            born.plane, database_factory=operator_database, machine=command_runtime.machine
+        completion.complete_gateway_data_plane(
+            born.plane,
+            home=born.home,
+            environment=os.environ,
+            database_factory=operator_database,
+            machine=command_runtime.machine,
         )
 
 
@@ -475,6 +501,7 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
     assert (
         bringup.ensure_gateway_data_plane(
             configured.plane,
+            home=configured.home,
             retained_children=configured.retained_children,
             database_factory=operator_database,
             machine=command_runtime.machine,
@@ -484,8 +511,12 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
     assert "no conversion exists" in capsys.readouterr().err
     assert not (configured.home / "pg").exists()
     with pytest.raises(RuntimeError, match="no database authority ledger"):
-        bringup.complete_gateway_data_plane(
-            configured.plane, database_factory=operator_database, machine=command_runtime.machine
+        completion.complete_gateway_data_plane(
+            configured.plane,
+            home=configured.home,
+            environment=os.environ,
+            database_factory=operator_database,
+            machine=command_runtime.machine,
         )
 
 
@@ -497,34 +528,41 @@ def test_interrupted_birth_retries_to_the_same_generation(
     command_runtime: CommandRuntime,
 ) -> None:
     calls: list[int] = []
-    real = bringup.prove_generation_logins
+    real = completion.prove_generation_logins
 
     def failing(home: Path, generation: model.Generation, endpoint: str) -> None:
         calls.append(generation.number)
         raise RuntimeError("injected crash before activation")
 
-    monkeypatch.setattr(bringup, "prove_generation_logins", failing)
+    monkeypatch.setattr(completion, "prove_generation_logins", failing)
     with pytest.raises(RuntimeError, match="injected crash"):
         _birth(configured, operator_database=operator_database, command_runtime=command_runtime)
     current = ledger.require_ledger(configured.home)
     assert current.active is None and current.pending is not None and current.pending.number == 0
-    monkeypatch.setattr(bringup, "prove_generation_logins", real)
-    bringup.complete_gateway_data_plane(
-        configured.plane, database_factory=operator_database, machine=command_runtime.machine
+    monkeypatch.setattr(completion, "prove_generation_logins", real)
+    completion.complete_gateway_data_plane(
+        configured.plane,
+        home=configured.home,
+        environment=os.environ,
+        database_factory=operator_database,
+        machine=command_runtime.machine,
     )
     current = ledger.require_ledger(configured.home)
     assert calls == [0] and current.active is not None and current.active.number == 0
 
 
-def test_launched_services_receive_their_class_login_only(
-    born: Born, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_launched_services_receive_their_class_login_only(born: Born) -> None:
     from base.sessions.env_forwarding import managed_service_env
     from cli.commands.lifecycle.root_driver import service_extra_env
     from services.supervision.roster.service_spec import ServiceSpec
 
     # The launcher's settings-free serve-gateway read (a born single box).
-    monkeypatch.setitem(os.environ, "MEIVA_MACHINE_SERVE_GATEWAY", "true")
+    launch = LaunchDelivery(
+        home=born.home,
+        remote_data_plane=False,
+        environment={"MEIVA_MACHINE_SERVE_GATEWAY": "true"},
+        env_file={},
+    )
 
     gateway = ServiceSpec(
         session="gateway", cmd="x", capabilities=frozenset({"gateway"}), requires_db=True
@@ -535,18 +573,16 @@ def test_launched_services_receive_their_class_login_only(
     frontend = ServiceSpec(
         session="frontend", cmd="x", capabilities=frozenset({"gateway"}), requires_db=False
     )
-    assert service_extra_env(gateway, remote_data_plane=False)["MEIVA_DB_URL"] == born.dsn(
-        "gateway"
-    )
-    assert service_extra_env(runner, remote_data_plane=False)["MEIVA_DB_URL"] == born.dsn("runner")
-    assert service_extra_env(runner, remote_data_plane=False)[delivery.GENERATION_ENV] == "0"
-    assert "MEIVA_DB_URL" not in service_extra_env(frontend, remote_data_plane=False)
+    assert service_extra_env(gateway, delivery=launch)["MEIVA_DB_URL"] == born.dsn("gateway")
+    assert service_extra_env(runner, delivery=launch)["MEIVA_DB_URL"] == born.dsn("runner")
+    assert service_extra_env(runner, delivery=launch)[delivery.GENERATION_ENV] == "0"
+    assert "MEIVA_DB_URL" not in service_extra_env(frontend, delivery=launch)
     # The born single box authenticates its API: each service is delivered its class
     # token, the database-free frontend included, and never the root itself.
     tokens = ledger.read_secret(born.home, delivery.active_generation(born.home)).api
-    assert service_extra_env(gateway, remote_data_plane=False)[API_TOKEN_ENV] == tokens.gateway
-    assert service_extra_env(runner, remote_data_plane=False)[API_TOKEN_ENV] == tokens.runner
-    assert service_extra_env(frontend, remote_data_plane=False)[API_TOKEN_ENV] == tokens.gateway
+    assert service_extra_env(gateway, delivery=launch)[API_TOKEN_ENV] == tokens.gateway
+    assert service_extra_env(runner, delivery=launch)[API_TOKEN_ENV] == tokens.runner
+    assert service_extra_env(frontend, delivery=launch)[API_TOKEN_ENV] == tokens.gateway
     root = managed_service_env(settings.general.service_path, environ=process_environment())
     assert "MEIVA_DB_URL" not in root and delivery.GENERATION_ENV not in root
     assert API_TOKEN_ENV not in root
@@ -567,6 +603,7 @@ def _collector_postgres_receiver(
     import yaml
 
     from cli.commands.observability import otel_collector as oc
+    from cli.commands.observability.inputs import collector_settings
 
     monkeypatch.setattr(settings.observability, "telemetry_otlp_enabled", True)
     command_runtime.machine.set(name="test-machine")
@@ -574,6 +611,9 @@ def _collector_postgres_receiver(
         _REPO,
         born.home,
         _ROLES,
+        settings=collector_settings(
+            observability=settings.observability, data_plane=settings.data_plane
+        ),
         database_factory=operator_database,
         machine=command_runtime.machine,
     )
@@ -668,7 +708,7 @@ def test_collector_postgres_receiver_keeps_no_credential(
 
     with born.admin() as conn:
         authority.check_invariant(
-            conn, born.home, database="meiva", readonly_grantees=bringup.READONLY_GRANTEES
+            conn, born.home, database="meiva", readonly_grantees=completion.READONLY_GRANTEES
         )
     # The unchanged config keeps scraping.
     assert (

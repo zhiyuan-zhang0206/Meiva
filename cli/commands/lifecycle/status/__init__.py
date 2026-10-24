@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -24,14 +25,15 @@ import httpx
 from base.agents.context.clients import DatabaseFactory
 from base.cluster import session_name
 from base.cluster.machine import (
-    GatewayAccess,
     GatewayApiBaseMissing,
+    GatewayApiTokenMissing,
     MachineRoleInvalid,
     MachineRoleMissing,
     MachineRoles,
     format_capabilities,
 )
 from base.cluster.machine.boot import gateway_access_from_boot
+from base.config import ConfigBoot
 from base.deploy.git import cluster_drift
 from base.host.resource_sample import resource_sample
 from base.paths import root_manifests_path
@@ -44,6 +46,7 @@ from cli.commands.data_plane.config import data_plane_config_from_boot
 from cli.commands.lifecycle import root_driver
 from cli.commands.lifecycle.root_control.snapshot import root_units
 from cli.commands.lifecycle.status.gateway import (
+    GatewayCredentialMissing,
     GatewayOutcome,
     GatewayReport,
     GatewayUnreachable,
@@ -131,7 +134,9 @@ def _execute(
             _print_service_rows(table, specs, root_tree_units(command.home))
         case ProbeDataPlane():
             print_data_plane_status(
-                data_plane_config_from_boot(command.config), database_factory=database_factory
+                data_plane_config_from_boot(command.config),
+                home=command.home,
+                database_factory=database_factory,
             )
         case ReadHostResources():
             _emit(host_resource_lines(_read_host_resources()))
@@ -144,9 +149,7 @@ def _execute(
         case ReadRelease(repo):
             _emit((release_line(repo, cluster_drift.checkout_head_sha(Path(repo))),))
         case ReadGateway():
-            _emit(
-                gateway_status_lines(read_gateway_outcome(gateway_access_from_boot(command.config)))
-            )
+            _emit(gateway_status_lines(read_gateway_outcome(command.config)))
 
 
 def _emit(lines: tuple[str, ...]) -> None:
@@ -160,11 +163,17 @@ def print_converge_section(home: Path) -> None:
 
 
 # meiva:note
-# Read one root snapshot; an unreachable root claims no running services.
+# Read one root snapshot; an unreachable or unreadable root claims no running services.
 #
-# The root is the only service owner. Liveness is never inferred from old records.
+# The root is the only service owner. Liveness is never inferred from old records. A root
+# that answers with a status the commands cannot read is named on stderr and the table still
+# prints: `meiva status` is the command to run on a host whose root is misbehaving.
 def root_tree_units(home: Path) -> dict[str, dict[str, Any]]:
-    snapshot = root_driver.root_status(root_driver.root_client(home))
+    try:
+        snapshot = root_driver.root_status(root_driver.root_client(home))
+    except root_driver.RootDriverError as exc:
+        print(f"  ! {exc}", file=sys.stderr)
+        return {}
     if snapshot is None:
         return {}
     return {unit_id: dict(row) for unit_id, row in root_units(snapshot).items()}
@@ -208,16 +217,21 @@ def _read_host_resources() -> HostReading | HostReadingFailed:
 # A gateway that is down or unreachable is itself a status signal here, so the failure
 # is a value that prints inline instead of aborting `meiva status` — the local probes
 # above already ran and are the bootstrap-exemption supplement.
-def read_gateway_outcome(access: GatewayAccess) -> GatewayOutcome:
+def read_gateway_outcome(config: ConfigBoot) -> GatewayOutcome:
     try:
-        body = fetch_gateway_cluster_status(access)
+        body = fetch_gateway_cluster_status(gateway_access_from_boot(config))
     except httpx.HTTPError as exc:
         return GatewayUnreachable(str(exc))
     except json.JSONDecodeError as exc:
         # meiva:note
-        # Something answered the status request with a body that is not JSON (a proxy's page, a
-        # gateway of another version): the gateway did not answer with a status body.
+        # Something answered the status request with a body that is not JSON (a proxy's page,
+        # a gateway of another version): the gateway did not answer with a status body.
         return GatewayUnreachable(f"the answer is not JSON ({exc})")
+    except GatewayApiTokenMissing as exc:
+        # meiva:note
+        # The credential policy refuses to present a blank bearer. The command stays a
+        # diagnostic: it says what is missing and the sections around it still print.
+        return GatewayCredentialMissing(str(exc))
     except (GatewayApiBaseMissing, MachineRoleMissing, MachineRoleInvalid) as exc:
         # meiva:note
         # Can't even form the gateway URL (unset gateway URL / role): status is a diagnostic

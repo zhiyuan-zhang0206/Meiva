@@ -1,0 +1,10 @@
+# Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
+# directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
+"cli.database.tests.cli_tests" = [
+    "test_pgbouncer_ensure.py",
+    "test_pgbouncer_stop_isolation.py",
+    "test_pooler_stop.py",
+]
+"meiva.tests.fixtures.sdk" = [
+    "test_pooler_clients.py",
+]

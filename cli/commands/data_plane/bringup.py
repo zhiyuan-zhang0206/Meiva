@@ -1,143 +1,171 @@
-"""Gateway data-plane bring-up and remote reachability probes.
-
-The gateway's `meiva start` data-plane step lives here rather than in
-`cli/commands/lifecycle/start.py`: bring-up chooses between a LOCAL instance
-(`ensure_cluster_storage` — initdb / pg / redis / ACL under
-`$MEIVA_HOME`) and a REMOTE-managed plane (Task #1752) whose URLs name another
-host, where startup degrades to a reachability probe of the URLs themselves
-and fail-fasts with the dial detail. The probes are also used by `meiva status`
-and `meiva stop` — both must never touch a foreign service.
-"""
+# meiva:note
+# Gateway data-plane bring-up and remote reachability probes.
+#
+# The gateway's `meiva start` data-plane step lives here rather than in the start package:
+# bring-up chooses between a LOCAL instance (`ensure_cluster_storage` — initdb / pg / redis / ACL
+# under the home) and a REMOTE-managed plane (Task #1752) whose URLs name another host, where
+# startup degrades to a reachability probe of the URLs themselves and fail-fasts with the dial
+# detail. The probes are also used by `meiva status` and `meiva stop` — both must never touch a
+# foreign service.
+#
+# This module is the shell of `instance/storage_plan.py` (what the entry and the completion do and
+# in which order), `instance/status_lines.py` and `instance/stop_plan.py` (what status and stop
+# print and do) and `instance/launch_delivery.py` (what a launch is delivered). Every function
+# takes the home it works in; nothing here resolves it from the process.
 
 from __future__ import annotations
 
 import socket
 import subprocess
 import sys
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 from urllib.parse import urlsplit
 
-import psycopg
-
+from base import cluster
 from base.agents.context.clients import DatabaseFactory
 from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
 from base.cluster.checkpoint_schema import PostgresCheckpointSchema
-from base.cluster.dataplane import pooler
+from base.cluster.dataplane import pg_admin, pooler
+from base.cluster.dataplane.pg_tools import pg_tool
+from base.cluster.derive import runner_db_url_projection
 from base.cluster.machine import MachineIdentity
-from base.cluster.record import ClusterRecord
-from base.host.db_authority.model import Generation
+from base.config import ConfigBoot
+from base.host.db_authority import delivery as db_delivery_files
+from base.host.db_authority import ledger, model
+from base.host.db_authority.api import API_TOKEN_ENV, api_token, publish_telemetry_token
+from base.host.db_authority.unit import unit_api_delivery, unit_delivery
+from base.host.env.bootstrap import config_source_is_local
+from base.host.env.dotenv_file import env_file_path, read_env_aliases
 from base.host.net.url_secret import url_host
+from base.host.proc import run_bounded
 from base.log import logger
-from base.paths import meiva_home
+from base.native_process.os_platform import is_macos
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer
 from cli.commands.data_plane.config import DataPlaneConfig
-from cli.database import OperatorDatabaseFactory
+from cli.commands.data_plane.instance import stop_plan
+from cli.commands.data_plane.instance.bringup_lines import (
+    remote_announce,
+    remote_pg_failure,
+    remote_ready,
+    remote_redis_failure,
+)
+from cli.commands.data_plane.instance.launch_delivery import (
+    Delivery,
+    LaunchDelivery,
+    api_delivery_kind,
+    db_delivery_kind,
+)
+from cli.commands.data_plane.instance.status_lines import (
+    failure_detail,
+    local_pg_line,
+    local_redis_line,
+    pooler_line,
+    probe_line,
+    remote_status_header,
+)
+from cli.commands.data_plane.instance.storage_plan import (
+    ProbeRemotePlane,
+    Refuse,
+    StartLocalStorage,
+    admit_gateway_storage,
+)
+from cli.commands.data_plane.stop_waits import (
+    PROCESS_CLEANUP_WAIT_S,
+    PROCESS_KILL_WAIT_S,
+    report_postgres_stop_escalation,
+)
+from cli.start_identity import needs_provision
 from services.supervision.roster.service_spec import DbAccess
 
+_REDIS_SHUTDOWN_TIMEOUT_S = 30.0
 
+
+# meiva:note
+# Bring up owned storage, or probe an explicitly remote-managed plane.
+#
+# Pooler startup belongs to `complete_gateway_data_plane`, after schema and runner grants.
+# Storage ports always come from this home's reservation. The home must carry the registry record
+# of its ports; a home born before the data plane always authenticated is refused before any
+# native effect, never converted here.
 def ensure_gateway_data_plane(
     config: DataPlaneConfig,
     *,
-    retained_children: list[subprocess.Popen[bytes]] | None = None,
+    home: Path,
+    retained_children: list[subprocess.Popen[bytes]] | None,
     database_factory: DatabaseFactory,
     machine: MachineIdentity,
 ) -> int:
-    """Bring up owned storage, or probe an explicitly remote-managed plane.
-
-    Pooler startup belongs to ``complete_gateway_data_plane``, after schema and
-    runner grants. Storage ports always come from this home's reservation.
-    """
     if retained_children is None and not config.is_remote:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
-    from base.cluster import (
-        get_record,
-        redis_identity,
-        redis_password_from_env,
+    rec = cluster.get_record(home)
+    admission = admit_gateway_storage(
+        home=home,
+        has_record=rec is not None,
+        remote=config.is_remote,
+        legacy_home=not config.is_remote and _legacy_home(home),
     )
-    from base.host.db_authority.api import publish_telemetry_token
-
-    rec = get_record(meiva_home())
-    if rec is None:
-        print(
-            f"  ✗ no registry record for home {meiva_home()} — cannot bring up its "
-            "data plane. Run `meiva init` for this home first.",
-            file=sys.stderr,
-        )
-        return 1
-
-    # The root holding the human secret derives the telemetry token and keeps it where the
-    # gateway-side services that probe the observability station can read it.
-    publish_telemetry_token(meiva_home().resolve(), config.cluster_secret)
-
-    if config.is_remote:
-        # Remote-managed data plane (Task #1752): the URLs name another host,
-        # so there is no local instance to bring up — no initdb, no PgBouncer,
-        # no role/ACL provisioning. Startup degrades to a reachability probe of
-        # the URLs themselves: unreachable means the gateway cannot serve at
-        # all, so fail fast with the dial detail instead of a bare psycopg
-        # traceback from the first migration.
-        host = url_host(config.db_url)
-        print(f"\n→ data plane remote-managed ({host}) — skipping local instance bring-up")
-        pg_ok, pg_line = remote_pg_reachable(config, database_factory=database_factory)
-        if not pg_ok:
-            print(
-                f"  ✗ remote data plane unreachable: {pg_line}\n"
-                "    Check MEIVA_DB_URL / MEIVA_REDIS_URL and their credentials, and the "
-                "network path to the provider. A local cluster switching to a remote "
-                "plane must first migrate its data (pg_dump / restore) and apply "
-                "pending migrations here.",
-                file=sys.stderr,
+    match admission:
+        case Refuse(message=message):
+            print(message, file=sys.stderr)
+            return 1
+        case ProbeRemotePlane():
+            publish_telemetry_token(home.resolve(), config.cluster_secret)
+            return _verify_remote_plane(config, database_factory=database_factory)
+        case StartLocalStorage():
+            if rec is None or retained_children is None:
+                raise RuntimeError("the admitted local storage lost its record or its children")
+            publish_telemetry_token(home.resolve(), config.cluster_secret)
+            return instance.ensure_cluster_storage(
+                config,
+                home=home,
+                pg_port=rec.ports["postgres"],
+                redis_port=rec.ports["redis"],
+                redis_password=cluster.redis_password_from_env(),
+                redis_user=cluster.redis_identity(config.redis_url),
+                retained_children=retained_children,
+                machine=machine,
             )
-            return 1
-        redis_ok, redis_line = remote_redis_reachable(config)
-        if not redis_ok:
-            print(f"  ✗ remote data plane unreachable: {redis_line}", file=sys.stderr)
-            return 1
-        print(f"  ✓ remote data plane reachable ({pg_line}; {redis_line})")
-        return 0
 
-    from base.host.db_authority.ledger import load_ledger
-    from cli.start_identity import needs_provision
 
-    if not needs_provision(meiva_home()) and load_ledger(meiva_home().resolve()) is None:
-        # A home born before the data plane always authenticated: refuse before
-        # any native effect (hba rewrite, migrations). Never converted here.
-        print(f"  ✗ {legacy_home_refusal(meiva_home().resolve())}", file=sys.stderr)
+# meiva:note
+# Whether the home was born before the data plane always authenticated.
+def _legacy_home(home: Path) -> bool:
+    return not needs_provision(home) and ledger.load_ledger(home.resolve()) is None
+
+
+# meiva:note
+# Remote-managed data plane (Task #1752): the URLs name another host, so there is no local
+# instance to bring up — no initdb, no PgBouncer, no role/ACL provisioning. Unreachable means
+# the gateway cannot serve at all, so fail fast with the dial detail instead of a bare psycopg
+# traceback from the first migration.
+def _verify_remote_plane(config: DataPlaneConfig, *, database_factory: DatabaseFactory) -> int:
+    print(remote_announce(url_host(config.db_url)))
+    pg_ok, pg_line = remote_pg_reachable(config, database_factory=database_factory)
+    if not pg_ok:
+        print(remote_pg_failure(pg_line), file=sys.stderr)
         return 1
-    return instance.ensure_cluster_storage(
-        config,
-        pg_port=rec.ports["postgres"],
-        redis_port=rec.ports["redis"],
-        redis_password=redis_password_from_env(),
-        redis_user=redis_identity(config.redis_url),
-        retained_children=retained_children,
-        machine=machine,
-    )
+    redis_ok, redis_line = remote_redis_reachable(config)
+    if not redis_ok:
+        print(remote_redis_failure(redis_line), file=sys.stderr)
+        return 1
+    print(remote_ready(pg_line, redis_line))
+    return 0
 
 
-def remote_plane_host(config: DataPlaneConfig) -> str:
-    """The dial host of the remote data plane's db URL — for operator messages."""
-    return url_host(config.db_url)
-
-
+# meiva:note
+# Probe a remote-managed Postgres through its own MEIVA_DB_URL.
+#
+# The two-stage shape of the local probe, minus the local machinery: `base.db.connect()` dials the
+# URL as every consumer does (auth included), so an unreachable host and a wrong credential both
+# report a real detail line. Bounded by the connect keepalives (5s connect timeout). Returns
+# (ok, detail) and never raises.
 def remote_pg_reachable(
     config: DataPlaneConfig, *, database_factory: DatabaseFactory
 ) -> tuple[bool, str]:
-    """Probe a remote-managed Postgres through its own MEIVA_DB_URL.
-
-    The two-stage shape of the local probe, minus the local machinery:
-    `base.db.connect()` dials the URL as every consumer does (auth included),
-    so an unreachable host and a wrong credential both report a real detail
-    line. Bounded by the connect keepalives (5s connect timeout). Returns
-    (ok, detail) and never raises.
-    """
-
     host = url_host(config.db_url)
     port = urlsplit(config.db_url).port or 5432
     try:
@@ -145,18 +173,16 @@ def remote_pg_reachable(
             conn.execute("select 1")
         return True, f"postgres ({host}:{port})"
     except Exception as exc:
-        lines = [ln.strip() for ln in str(exc).splitlines() if ln.strip()]
-        detail = lines[-1] if lines else "connection failed"
-        return False, f"postgres ({host}:{port}) connect failed: {detail}"
+        return False, f"postgres ({host}:{port}) connect failed: {failure_detail(str(exc))}"
 
 
+# meiva:note
+# Probe a remote-managed Redis through its own MEIVA_REDIS_URL.
+#
+# PINGs with the URL's own credentials (redis-py `from_url`), unlike the local probe's
+# admin-password dial — on a remote/SaaS plane the URL userinfo is the only credential that
+# exists. Returns (ok, detail) and never raises.
 def remote_redis_reachable(config: DataPlaneConfig) -> tuple[bool, str]:
-    """Probe a remote-managed Redis through its own MEIVA_REDIS_URL.
-
-    PINGs with the URL's own credentials (redis-py `from_url`), unlike the
-    local probe's admin-password dial — on a remote/SaaS plane the URL userinfo
-    is the only credential that exists. Returns (ok, detail) and never raises.
-    """
     import redis as _redis
 
     host = url_host(config.redis_url)
@@ -172,13 +198,12 @@ def remote_redis_reachable(config: DataPlaneConfig) -> tuple[bool, str]:
             client.close()
         return True, f"redis ({host}:{port})"
     except Exception as exc:
-        lines = [ln.strip() for ln in str(exc).splitlines() if ln.strip()]
-        detail = lines[-1] if lines else "connection failed"
-        return False, f"redis ({host}:{port}) connect failed: {detail}"
+        return False, f"redis ({host}:{port}) connect failed: {failure_detail(str(exc))}"
 
 
+# meiva:note
+# Whether anything accepts TCP connections on loopback `port`.
 def local_listener(port: int) -> bool:
-    """Whether anything accepts TCP connections on loopback `port`."""
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=1):
             return True
@@ -186,89 +211,73 @@ def local_listener(port: int) -> bool:
         return False
 
 
-def warn_orphaned_local_instance() -> None:
-    """Best-effort warning when a local instance still runs under this home.
-
-    After a local→remote data-plane switch (Task #1752), the old local pg/redis
-    are no longer managed by this cluster — `meiva stop` skips them, so if they are still running they keep consuming the home's
-    ports and data dir. Print a manual-teardown hint instead of silently
-    leaving them. Never raises: this is a hint on an already-successful path.
-    """
+# meiva:note
+# Best-effort warning when a local instance still runs under this home.
+#
+# After a local→remote data-plane switch (Task #1752), the old local pg/redis are no longer
+# managed by this cluster — `meiva stop` skips them, so if they are still running they keep
+# consuming the home's ports and data dir. Print a manual-teardown hint instead of silently
+# leaving them. Never raises: this is a hint on an already-successful path.
+def warn_orphaned_local_instance(home: Path) -> None:
     try:
-        from base.cluster import get_record
-
-        rec = get_record(meiva_home())
+        rec = cluster.get_record(home)
         if rec is None:
             return
-        leftovers: list[str] = []
-        # The signal is a live process answering on this cluster's own instance
-        # ports — whatever it is, it is not the remote-managed plane and not
-        # something this cluster will ever manage again.
-        if instance.pg_running(rec.ports["postgres"], "127.0.0.1"):
-            leftovers.append("postgres")
-        # A plain listener check: the left-behind Redis always requires its admin
-        # password, which a remote-managed home no longer carries.
-        if local_listener(rec.ports["redis"]):
-            leftovers.append("redis")
-        if leftovers:
-            print(
-                "  ⚠ local " + " + ".join(leftovers) + " from before the switch is still "
-                "running on this home's data dir and is no longer managed (the data "
-                "plane is remote). Tear it down by hand — `pg_ctl -D $MEIVA_HOME/pg "
-                "-m fast stop` and `redis-cli -p <port> shutdown nosave` — or switch "
-                "the URLs back to local and stop it with `meiva stop` (see `meiva stop --help`).",
-                file=sys.stderr,
-            )
+        warning = stop_plan.orphan_warning(
+            postgres_running=instance.pg_running(
+                str(pg_tool("pg_isready")), rec.ports["postgres"], "127.0.0.1"
+            ),
+            # meiva:note
+            # A plain listener check: the left-behind Redis always requires its admin password,
+            # which a remote-managed home no longer carries.
+            redis_listening=local_listener(rec.ports["redis"]),
+        )
+        if warning is not None:
+            print(warning, file=sys.stderr)
     except Exception:
         logger.opt(exception=True).warning(
             "orphaned-local-instance probe failed; no teardown hint was printed"
         )
 
 
-def prepare_gateway_schema(config: DataPlaneConfig) -> None:
-    """Initialize only a journal-owned fresh database, before any pooled login."""
-    from base import cluster
-    from cli.start_identity import needs_provision
-
-    if config.is_remote or not needs_provision(meiva_home()):
+# meiva:note
+# Initialize only a journal-owned fresh database, before any pooled login.
+def prepare_gateway_schema(config: DataPlaneConfig, *, home: Path) -> None:
+    if config.is_remote or not needs_provision(home):
         return
-    rec = cluster.get_record(meiva_home())
+    rec = cluster.get_record(home)
     if rec is None:
         raise RuntimeError("initialization lost its port reservation")
-    admin_url = instance.pg_admin_url(rec.ports["postgres"])
+    admin_url = pg_admin.pg_admin_url(rec.ports["postgres"])
     identity = cluster.db_identity(config.db_url)
+    data = instance.pg_data_dir(home)
     created = cluster.provision_database(
         identity,
         base_admin_url=admin_url,
         resume_initialization=True,
-        expected_data_dir=meiva_home() / "pg",
+        expected_data_dir=data,
     )
-    cluster.ensure_pgvector_extension(
-        identity, base_admin_url=admin_url, expected_data_dir=meiva_home() / "pg"
-    )
-
+    cluster.ensure_pgvector_extension(identity, base_admin_url=admin_url, expected_data_dir=data)
     cluster.ensure_checkpoint_schema(
         identity,
         base_admin_url=admin_url,
         database_created=created,
         resume_partial=True,
-        expected_data_dir=meiva_home() / "pg",
+        expected_data_dir=data,
         schema=PostgresCheckpointSchema(),
     )
 
 
+# meiva:note
+# Create or rebuild the pgvector memory table when that backend is selected.
+#
+# The table is a derived cache keyed to the embedding provider's dimension. Runtime connections
+# only validate it; this start step is its one writer. A local plane writes it acting as the
+# schema owner, before the runner grants refresh; a remote-managed plane uses its provider URL,
+# like its migrations.
 def prepare_memory_vectors(config: DataPlaneConfig, *, database_factory: DatabaseFactory) -> None:
-    """Create or rebuild the pgvector memory table when that backend is selected.
-
-    The table is a derived cache keyed to the embedding provider's dimension.
-    Runtime connections only validate it; this start step is its one writer.
-    A local plane writes it acting as the schema owner, before the runner grants
-    refresh; a remote-managed plane uses its provider URL, like its migrations.
-    """
-
     if config.memory_search_backend != "pgvector":
         return
-    from base.cluster.dataplane.pg_admin import local_owner_authority
     from services.derived.memory_indexer.backends.pgvector import prepare_table
     from services.derived.memory_indexer.embeddings.factory import get_descriptor
 
@@ -277,432 +286,236 @@ def prepare_memory_vectors(config: DataPlaneConfig, *, database_factory: Databas
         with database_factory().connect(direct=True) as conn:
             prepare_table(conn, dim)
         return
-    with local_owner_authority(config.db_url, remote_plane=config.is_remote).session() as conn:
+    owner = pg_admin.local_owner_authority(config.db_url, remote_plane=config.is_remote)
+    with owner.session() as conn:
         prepare_table(conn, dim)
 
 
-# Operator read-only roles the authority invariant admits as grantees
-# (SELECT/USAGE/CONNECT only; never group members). Names are data: a home
-# without such a role is unaffected.
-READONLY_GRANTEES = ("grafana_ro",)
-
-
-def legacy_home_refusal(home: Path) -> str:
-    """Why an ordinary start refuses a home born before the data plane always
-    authenticated: nothing converts it."""
-    return (
-        f"home {home} has no database authority ledger (born before the data plane "
-        "always authenticated) and no conversion exists; re-birth it as a new home"
-    )
-
-
-@contextmanager
-def admin_session(rec: ClusterRecord, database: str) -> Generator[psycopg.Connection[Any]]:
-    """The OS-user administrator on this home's owner-only socket (`peer`),
-    autocommit, custody-checked against the home's own postmaster."""
-    from psycopg.conninfo import make_conninfo
-
-    from base.cluster.dataplane import pg_admin
-
-    url = make_conninfo(instance.pg_admin_url(rec.ports["postgres"]), dbname=database)
-    with pg_admin.connect(url, expected_data_dir=meiva_home() / "pg", autocommit=True) as conn:
-        yield conn
-
-
-def db_endpoint() -> str:
-    """The home's credential-free database endpoint, as its `.env` records it."""
-    from dotenv import dotenv_values
-
-    endpoint = dotenv_values(meiva_home() / ".env").get("MEIVA_DB_URL")
+# meiva:note
+# The home's credential-free database endpoint, as its `.env` records it.
+def db_endpoint(home: Path) -> str:
+    endpoint = read_env_aliases(env_file_path(home)).get("MEIVA_DB_URL")
     if not endpoint:
         raise RuntimeError("MEIVA_DB_URL is missing from the gateway configuration")
     return endpoint
 
 
 # meiva:note
-# Whether this unit's config source is its own `.env` (a gateway home), read from the
-# process environment and the home's `.env` at this CLI door.
-def _config_source_is_local() -> bool:
-    from base.host.env.bootstrap import config_source_is_local, process_environment
-    from base.host.env.dotenv_file import process_env_file, read_env_aliases
-
-    return config_source_is_local(
-        process_environment(), env_file=read_env_aliases(process_env_file())
+# The facts one service launch reads, taken from the invocation's configuration owner.
+#
+# Reads the launch environment and the home's `.env` once; `db_delivery`, `api_delivery` and
+# `runner_db_url` decide from the result.
+def read_launch_delivery(
+    *, home: Path, remote_data_plane: bool, config: ConfigBoot
+) -> LaunchDelivery:
+    return LaunchDelivery(
+        home=home,
+        remote_data_plane=remote_data_plane,
+        environment=dict(config.process_environment()),
+        env_file=read_env_aliases(env_file_path(home)),
     )
+
+
+def _source_is_local(delivery: LaunchDelivery) -> bool:
+    return config_source_is_local(delivery.environment, env_file=delivery.env_file)
 
 
 # meiva:note
-# The provider runner login that agents on a remote-managed plane dial: the projection
-# of this process's environment and its gateway home's `.env`.
-def runner_db_url() -> str:
-    from base.cluster.derive import runner_db_url_projection
-    from base.host.env.bootstrap import process_environment
-    from base.host.env.dotenv_file import process_env_file, read_env_aliases
+# The provider runner login that agents on a remote-managed plane dial: the projection of the
+# launch environment and its gateway home's `.env`.
+def runner_db_url(delivery: LaunchDelivery) -> str:
+    return runner_db_url_projection(delivery.environment, env_file=delivery.env_file)
 
-    return runner_db_url_projection(
-        process_environment(), env_file=read_env_aliases(process_env_file())
+
+# meiva:note
+# The launch-environment database delivery for one service of class `cls`.
+#
+# A local plane delivers the active write generation's `cls` login on the home's credential-free
+# endpoint plus its non-secret generation number; a missing ledger or active generation fails the
+# launch (no fallback). A pure agent-runner delivers its installed unit capability (runner class
+# only); without one the launch fails with the issue-unit instruction. A remote-managed gateway
+# plane delivers nothing here: its agents keep the provider projection.
+def db_delivery(cls: DbAccess, *, delivery: LaunchDelivery) -> dict[str, str]:
+    kind = db_delivery_kind(
+        cls,
+        config_source_is_local=_source_is_local(delivery),
+        remote_plane=delivery.remote_data_plane,
     )
+    home = delivery.home.resolve()
+    match kind:
+        case Delivery.UNIT_CAPABILITY:
+            return unit_delivery(home)
+        case Delivery.NONE:
+            return {}
+        case Delivery.GENERATION:
+            grant = db_delivery_files.write_grant(home, cls)
+            return {
+                "MEIVA_DB_URL": grant.dsn(db_endpoint(delivery.home)),
+                db_delivery_files.GENERATION_ENV: str(grant.number),
+            }
 
 
-def db_delivery(cls: DbAccess, *, remote_data_plane: bool) -> dict[str, str]:
-    """The launch-environment database delivery for one service of class `cls`.
-
-    A local plane delivers the active write generation's `cls` login on the
-    home's credential-free endpoint plus its non-secret generation number; a
-    missing ledger or active generation fails the launch (no fallback). A pure
-    agent-runner delivers its installed unit capability (runner class only);
-    without one the launch fails with the issue-unit instruction. A
-    remote-managed gateway plane delivers nothing here: its agents keep the
-    provider projection.
-    """
-    from base.host.db_authority.delivery import GENERATION_ENV, write_grant
-
-    if not _config_source_is_local():
-        from base.host.db_authority.unit import unit_delivery
-
-        if cls != "runner":
-            raise RuntimeError(f"a pure agent-runner cannot launch a {cls}-class database service")
-        return unit_delivery(meiva_home().resolve())
-    if remote_data_plane:
-        return {}
-    grant = write_grant(meiva_home().resolve(), cls)
-    return {"MEIVA_DB_URL": grant.dsn(db_endpoint()), GENERATION_ENV: str(grant.number)}
-
-
-def api_delivery(cls: DbAccess, *, remote_data_plane: bool) -> dict[str, str]:
-    """The launch-environment machine API token for one service of class `cls`.
-
-    The cluster's API always authenticates, so every service is delivered a
-    token to present as its bearer: a pure agent-runner delivers its
-    capability's runner token; the gateway home delivers the active generation's
-    `cls` token. A remote-managed plane keeps no write generations and delivers
-    nothing; its gateway-local services present the human secret.
-    """
-    from base.host.db_authority.api import API_TOKEN_ENV, api_token
-
-    if not _config_source_is_local():
-        from base.host.db_authority.unit import unit_api_delivery
-
-        if cls != "runner":
-            raise RuntimeError(f"a pure agent-runner cannot launch a {cls}-class service")
-        return unit_api_delivery(meiva_home().resolve())
-    if remote_data_plane:
-        return {}
-    return {API_TOKEN_ENV: api_token(meiva_home().resolve(), cls)}
-
-
-def ensure_pooler(
-    config: DataPlaneConfig,
-    rec: ClusterRecord,
-    database: str,
-    home: Path,
-    generation: Generation,
-    *,
-    machine: MachineIdentity,
-) -> None:
-    """Serve exactly `generation` through the owned pooler (restart on change)."""
-    if not config.pgbouncer_enabled:
-        return
-    from base.host.db_authority.delivery import read_pooler_admin, render_userlist
-
-    rc = pgbouncer.ensure_pgbouncer(
-        pg_port=rec.ports["postgres"],
-        listen_port=rec.ports["pgbouncer"],
-        db_name=database,
-        userlist=render_userlist(home, generation),
-        admin_password=read_pooler_admin(home).password,
-        machine=machine,
-        max_client_conn=config.pooler_max_client_conn,
+# meiva:note
+# The launch-environment machine API token for one service of class `cls`.
+#
+# The cluster's API always authenticates, so every service is delivered a token to present as its
+# bearer: a pure agent-runner delivers its capability's runner token; the gateway home delivers
+# the active generation's `cls` token. A remote-managed plane keeps no write generations and
+# delivers nothing; its gateway-local services present the human secret.
+def api_delivery(cls: DbAccess, *, delivery: LaunchDelivery) -> dict[str, str]:
+    kind = api_delivery_kind(
+        cls,
+        config_source_is_local=_source_is_local(delivery),
+        remote_plane=delivery.remote_data_plane,
     )
-    if rc:
-        raise RuntimeError("pooler did not become ready")
+    home = delivery.home.resolve()
+    match kind:
+        case Delivery.UNIT_CAPABILITY:
+            return unit_api_delivery(home)
+        case Delivery.NONE:
+            return {}
+        case Delivery.GENERATION:
+            return {API_TOKEN_ENV: api_token(home, cls)}
 
 
-def prove_generation_logins(home: Path, generation: Generation, endpoint: str) -> None:
-    """Both logins of `generation` answer `SELECT 1` through the consumer endpoint
-    (the pooler when enabled: SCRAM client auth plus the pass-through hop)."""
-    from base.host.db_authority.ledger import read_secret
-    from base.host.net.url_secret import url_with_userinfo
-    from cli.commands.converge.health_preflight import probe_postgres
-
-    secret = read_secret(home, generation)
-    for role in (secret.roles.gateway, secret.roles.runner):
-        if error := probe_postgres(url_with_userinfo(endpoint, role.name, role.password)):
-            raise RuntimeError(f"write generation {generation.number} login {role.name}: {error}")
-
-
-def adopt_gateway_login(
-    home: Path, endpoint: str, *, database_factory: OperatorDatabaseFactory
+# meiva:note
+# Print this cluster's own pg/redis reachability for `meiva status`.
+#
+# Postgres is probed in two stages: `pg_isready` (the server accepts connections) then an
+# authenticated `SELECT 1` over the cluster's POOLED front door (`connect()` — PgBouncer when
+# enabled, the direct URL when not; the same swap every consumer dials) as this process's
+# delivered gateway login. A server that is up but refuses that login reports `✗ ... connect
+# failed` rather than a false `✓`: `pg_isready` alone answers without authenticating. Redis pings
+# with its admin password. Both ports come from this cluster's own db_url / redis_url (its
+# per-cluster instance). The pooler line authenticates to its admin console with the operator
+# entry from the home's database authority store.
+#
+# The probe goes POOLED, never `direct=True` (user ruling 2026-08: every consumer sits behind
+# PgBouncer): the pooled `SELECT 1` proves the path consumers actually use — client SCRAM against
+# the userlist plus the SCRAM pass-through backend hop. With PgBouncer disabled `pooled_db_url ==
+# db_url` and the probe is direct anyway.
+def print_data_plane_status(
+    config: DataPlaneConfig, *, home: Path, database_factory: DatabaseFactory
 ) -> None:
-    """Point this operator process at the home's active gateway login.
-
-    A start that births (or first admits) the generation has no delivery from
-    its own boot, which ran before the ledger existed. The login reaches the
-    process through the environment (children inherit it) and through the
-    operator's database factory, which every later handle and the command's
-    event writer dial through."""
-    import os
-
-    from base.host.db_authority.delivery import GENERATION_ENV, write_grant
-
-    grant = write_grant(home, "gateway")
-    os.environ["MEIVA_DB_URL"] = grant.dsn(endpoint)
-    os.environ[GENERATION_ENV] = str(grant.number)
-    database_factory.adopt_login(os.environ["MEIVA_DB_URL"])
-
-
-def _birth_generation(conn: psycopg.Connection[Any], home: Path, database: str) -> Generation:
-    """Birth: groups, monitor, ledger, generation 0."""
-    from functools import partial
-
-    from base.cluster import authority
-    from base.host.db_authority import delivery, ledger, model
-
-    owner = database  # the database and its schema owner share one identifier
-    groups = model.Groups(gateway=model.GATEWAY_GROUP, runner=model.RUNNER_GROUP)
-    authority.ensure_groups(conn, owner=owner, database=database, groups=groups)
-    authority.ensure_monitor(conn, database=database)
-    ledger.create_ledger(home, owner=owner, groups=groups)
-    delivery.ensure_pooler_admin(home, encrypt=partial(authority.scram_verifier, conn))
-    authority.mint_generation(conn, home)
-    generation = ledger.require_ledger(home).generation
-    if generation is None:
-        raise RuntimeError("birth minted no write generation")
-    return generation
-
-
-def _admitted_generation(
-    conn: psycopg.Connection[Any], home: Path, database: str, *, refresh: bool
-) -> Generation:
-    """Ordinary start: re-grant after migrations, converge the monitor, then the
-    invariant holds."""
-    from base.cluster import authority
-    from base.host.db_authority import ledger
-
-    ledger = ledger.load_ledger(home)
-    if ledger is None:
-        raise RuntimeError(legacy_home_refusal(home))
-    if ledger.owner != database:
-        raise RuntimeError(
-            f"the database authority ledger records owner {ledger.owner!r}, but MEIVA_DB_URL "
-            f"names database {database!r}"
-        )
-    if ledger.active is None:
-        raise RuntimeError(
-            "the database authority has no active generation; the interrupted birth must "
-            "finish before an ordinary start"
-        )
-    if refresh:
-        authority.ensure_groups(conn, owner=ledger.owner, database=database, groups=ledger.groups)
-        authority.ensure_monitor(conn, database=database)
-    authority.check_invariant(conn, home, database=database, readonly_grantees=READONLY_GRANTEES)
-    return ledger.active
-
-
-def complete_gateway_data_plane(
-    config: DataPlaneConfig,
-    *,
-    refresh_schema: bool = True,
-    database_factory: OperatorDatabaseFactory,
-    machine: MachineIdentity,
-) -> None:
-    """Grant the final schema, establish the write generation, start the pooler,
-    then verify consumer credentials.
-
-    Local plane, first start (birth, `needs_provision`):
-    groups -> retire legacy logins -> ledger -> mint generation 0 -> pooler
-    serving exactly that pair, proven by a pooled login of each -> activate.
-    Every step is idempotent, so an interrupted birth retries to the same
-    generation. Ordinary start: groups re-granted after migrations, then the
-    fail-closed catalog invariant; the pooler serves the active
-    pair (restarted only when its bytes change). A home without a ledger is a
-    legacy home and refuses (`legacy_home_refusal`) — never converted here.
-    """
-    from base import cluster
-    from cli.commands.converge.health_preflight import probe_postgres, probe_redis
-    from cli.start_identity import mark_phase, needs_provision
-
     if config.is_remote:
-        if refresh_schema:
-            prepare_memory_vectors(config, database_factory=database_factory)
-        urls = [config.db_url, runner_db_url()]
-        for url in urls:
-            if error := probe_postgres(url):
-                raise RuntimeError(f"consumer database readiness failed: {error}")
-    else:
-        from base.cluster import authority
-        from base.host.db_authority import ledger
-
-        home = meiva_home().resolve()
-        rec = cluster.get_record(meiva_home())
-        if rec is None:
-            raise RuntimeError("start lost its port reservation")
-        database = cluster.db_identity(config.db_url)
-        endpoint = db_endpoint()
-        if refresh_schema:
-            cluster.ensure_pgvector_extension(
-                database,
-                base_admin_url=instance.pg_admin_url(rec.ports["postgres"]),
-                expected_data_dir=meiva_home() / "pg",
-            )
-            prepare_memory_vectors(config, database_factory=database_factory)
-        birth = needs_provision(meiva_home())
-        if not birth and ledger.load_ledger(home) is None:
-            raise RuntimeError(legacy_home_refusal(home))
-        with admin_session(rec, database) as conn:
-            if birth:
-                generation = _birth_generation(conn, home, database)
-            else:
-                generation = _admitted_generation(conn, home, database, refresh=refresh_schema)
-            ensure_pooler(config, rec, database, home, generation, machine=machine)
-            prove_generation_logins(home, generation, endpoint)
-            if ledger.require_ledger(home).active is None:
-                verified = authority.verify_generation(conn, home)
-                ledger.activate(home, verified)
-        adopt_gateway_login(home, endpoint, database_factory=database_factory)
-        print(f"  ✓ database write generation {generation.number} admitted")
-    if error := probe_redis(config.redis_url):
-        raise RuntimeError(f"consumer Redis readiness failed: {error}")
-    mark_phase(meiva_home(), "provisioned")
-
-
-def print_data_plane_status(config: DataPlaneConfig, *, database_factory: DatabaseFactory) -> None:
-    """Print this cluster's own pg/redis reachability for `meiva status`.
-
-    Postgres is probed in two stages: `pg_isready` (the server accepts connections)
-    then an authenticated `SELECT 1` over the cluster's POOLED front door
-    (`connect()` — PgBouncer when enabled, the direct URL when not; the same swap
-    every consumer dials) as this process's delivered gateway login. A server that
-    is up but refuses that login reports `✗ ... connect failed` rather than a
-    false `✓`: `pg_isready` alone answers without authenticating. Redis pings with
-    its admin password. Both ports come from this cluster's own db_url / redis_url
-    (its per-cluster instance). The pooler line authenticates to its admin console
-    with the operator entry from the home's database authority store.
-
-    The probe goes POOLED, never `direct=True` (user ruling 2026-08: every consumer
-    sits behind PgBouncer): the pooled `SELECT 1` proves the path consumers
-    actually use — client SCRAM against the userlist plus the SCRAM pass-through
-    backend hop. With PgBouncer disabled `pooled_db_url == db_url` and the probe
-    is direct anyway."""
-
-    if config.is_remote:
-        # A remote-managed plane has no local instance to manage — probe the
-        # URLs themselves (the switch) and skip the local pooler line.
-        print("  · data plane remote-managed — probing the URLs (no local instance)")
+        print(remote_status_header())
         pg_ok, pg_line = remote_pg_reachable(config, database_factory=database_factory)
-        print(f"  {'✓' if pg_ok else '✗'} {pg_line}")
+        print(probe_line(ok=pg_ok, detail=pg_line))
         redis_ok, redis_line = remote_redis_reachable(config)
-        print(f"  {'✓' if redis_ok else '✗'} {redis_line}")
+        print(probe_line(ok=redis_ok, detail=redis_line))
         return
-
-    # Both probes dial the host their own URL names (self-host URLs are
-    # loopback-rewritten by DataPlaneSettings). The remote branch above returns
-    # before this local probe runs.
-    pg_host = instance.pg_dial_host(config)
-    redis_host = instance.redis_dial_host(config)
+    pg_host, redis_host = url_host(config.db_url), url_host(config.redis_url)
     pg_port = urlsplit(config.db_url).port or 5432
     redis_port = urlsplit(config.redis_url).port or 6379
-    if not instance.pg_running(pg_port, pg_host):
-        print(f"  ✗ postgres ({pg_host}:{pg_port}) unreachable")
-    else:
+    running = instance.pg_running(str(pg_tool("pg_isready")), pg_port, pg_host)
+    connect_error: str | None = None
+    if running:
         try:
-            with database_factory().connect() as conn:  # pooled front door (PgBouncer when enabled)
+            # meiva:note
+            # pooled front door (PgBouncer when enabled)
+            with database_factory().connect() as conn:
                 conn.execute("select 1")
-            print(f"  ✓ postgres ({pg_host}:{pg_port})")
         except Exception as exc:
-            lines = [ln.strip() for ln in str(exc).splitlines() if ln.strip()]
-            detail = lines[-1] if lines else "connection failed"
-            print(f"  ✗ postgres ({pg_host}:{pg_port}) reachable but connect failed: {detail}")
-    print(
-        f"  {'✓' if instance.redis_reachable(config, redis_port, redis_host) else '✗'} "
-        f"redis ({redis_host}:{redis_port})"
-    )
+            connect_error = failure_detail(str(exc))
+    print(local_pg_line(host=pg_host, port=pg_port, running=running, connect_error=connect_error))
+    redis_ok = instance.redis_reachable(config.redis_admin_password, redis_port, redis_host)
+    print(local_redis_line(host=redis_host, port=redis_port, ok=redis_ok))
     if config.pgbouncer_enabled:
-        _print_pooler_status()
+        _print_pooler_status(home)
 
 
-def _print_pooler_status() -> None:
-    """The pooler line: its registry-derived listen port, probed through the
-    admin console as the operator entry from the home's authority store. No
-    registry record means the port is unknowable — say so instead of a false `:0`."""
-    from base.cluster import get_record
-    from base.host.db_authority.delivery import read_pooler_admin
-    from base.host.db_authority.model import AuthorityRefusedError
-
-    rec = get_record(meiva_home())
+# meiva:note
+# The pooler line: its registry-derived listen port, probed through the admin console as the
+# operator entry from the home's authority store.
+def _print_pooler_status(home: Path) -> None:
+    rec = cluster.get_record(home)
     if rec is None:
-        print("  - pgbouncer: no registry record — cannot resolve its port")
+        print(pooler_line(port=None, ok=False, refusal=None))
         return
     port = rec.ports["pgbouncer"]
     try:
-        ok = pooler.pgbouncer_listener_reachable(port, read_pooler_admin(meiva_home()).password)
-    except AuthorityRefusedError as exc:
-        print(f"  ✗ pgbouncer (127.0.0.1:{port}): {exc}")
+        admin = db_delivery_files.read_pooler_admin(home)
+        ok = pooler.pgbouncer_listener_reachable(port, admin.password)
+    except model.AuthorityRefusedError as exc:
+        print(pooler_line(port=port, ok=False, refusal=str(exc)))
         return
-    print(f"  {'✓' if ok else '✗'} pgbouncer (127.0.0.1:{port}, transaction pooling)")
+    print(pooler_line(port=port, ok=ok, refusal=None))
 
 
-def redis_stop_failure(port: int, *, still_answers: bool) -> str | None:
-    if not still_answers:
-        return None
-    return f"redis still answers on 127.0.0.1:{port} after shutdown"
-
-
+# meiva:note
+# Stop this cluster's own Postgres + Redis (data preserved on disk). The counterpart of
+# ensure_cluster_storage for `meiva stop` of a cluster running its own instance.
+#
+# Best-effort: a not-running instance is a no-op success only after native custody closes.
+# Returns 0 when everything stopped, 1 after printing why Redis still answers. A remote-managed
+# plane has no local instance to stop — the provider owns the service lifecycle — but a cluster
+# that switched local to remote may still have its old local instance running, so a hint says so.
 def stop_cluster_instance(
     config: DataPlaneConfig,
     *,
+    home: Path,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     producer: Callable[[], EventPipeline],
 ) -> int:
-    """Stop this cluster's own Postgres + Redis (data preserved on disk). The
-    counterpart of ensure_cluster_storage for `meiva stop` of a cluster running its
-    own instance. Best-effort: a not-running instance is a
-    no-op success only after native custody closes."""
     if config.is_remote:
-        # A remote-managed plane has no local instance to stop — nothing on this
-        # box to tear down, and the provider owns the service lifecycle. But a
-        # cluster that SWITCHED local→remote may still have its old local
-        # instance running; warn so it is torn down deliberately.
-        print(
-            f"\n→ data plane remote-managed ({remote_plane_host(config)}) — nothing to stop locally"
-        )
-        warn_orphaned_local_instance()
+        print(stop_plan.remote_stop_notice(url_host(config.db_url)))
+        warn_orphaned_local_instance(home)
         return 0
-    data = instance.pg_data_dir()
     port = ownership.redis_port_of(config.redis_url)
-    # Resolve the admin credential before any stop effect: the runtime URL's
-    # ACL user can neither AUTH as `default` nor SHUTDOWN (`-@dangerous`).
+    # meiva:note
+    # Resolve the admin credential before any stop effect: the runtime URL's ACL user can
+    # neither AUTH as `default` nor SHUTDOWN (`-@dangerous`).
     redis_env = None if port is None else instance.redis_cli_env(config.redis_admin_password)
     print("\n→ stopping per-cluster data plane")
-    # Stop the pooler first (best-effort, no-op if it was never enabled) so clients
-    # are disconnected before Postgres goes down.
-    pgbouncer.stop_pgbouncer()
-    from cli.commands.data_plane.stop_waits import (
-        PROCESS_CLEANUP_WAIT_S,
-        PROCESS_KILL_WAIT_S,
-        report_postgres_stop_escalation,
-    )
-
-    escalation = owned_postgres.stop(
-        data,
-        immediate_wait=PROCESS_CLEANUP_WAIT_S,
-        kill_wait=PROCESS_KILL_WAIT_S,
-        retained_children=retained_children,
-    )
-    if escalation is not None:
-        report_postgres_stop_escalation(escalation, producer=producer)
-    print("  ✓ postgres stopped")
-    if port is not None:
-        shutdown = subprocess.run(
-            [instance.redis_cli_bin(config), "-p", str(port), "shutdown", "nosave"],
-            env=redis_env,
-            check=False,
-            capture_output=True,
-        )
-        failure = redis_stop_failure(port, still_answers=instance.redis_reachable(config, port))
-        if failure is not None:
-            detail = (shutdown.stderr or b"").decode(errors="replace").strip()[:400]
-            print(f"  ✗ {failure} (rc={shutdown.returncode}): {detail}", file=sys.stderr)
-            return 1
-        print("  ✓ redis stopped")
+    for step in stop_plan.plan_stop(redis_port=port):
+        match step:
+            case stop_plan.StopPooler():
+                # meiva:note
+                # Stop the pooler first (best-effort, no-op if it was never enabled) so clients
+                # are disconnected before Postgres goes down.
+                pgbouncer.stop_pgbouncer()
+            case stop_plan.StopPostgres():
+                escalation = owned_postgres.stop(
+                    instance.pg_data_dir(home),
+                    immediate_wait=PROCESS_CLEANUP_WAIT_S,
+                    kill_wait=PROCESS_KILL_WAIT_S,
+                    retained_children=retained_children,
+                )
+                if escalation is not None:
+                    report_postgres_stop_escalation(escalation, producer=producer)
+                print("  ✓ postgres stopped")
+            case stop_plan.StopRedis(port=redis_port):
+                if not _stop_redis(config, redis_port, redis_env):
+                    return 1
     return 0
+
+
+# meiva:note
+# Shut Redis down as its admin user and verify its port no longer accepts connections: the exit
+# status of `shutdown` proves nothing, and neither does an authenticated PING that fails for want
+# of the right password, so the check is the listener itself.
+def _stop_redis(config: DataPlaneConfig, port: int, env: dict[str, str] | None) -> bool:
+    returncode, detail = 0, ""
+    try:
+        shutdown = run_bounded(
+            [
+                instance.redis_cli_bin(config.redis_bin_dir, macos=is_macos()),
+                "-p",
+                str(port),
+                "shutdown",
+                "nosave",
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=_REDIS_SHUTDOWN_TIMEOUT_S,
+        )
+        returncode, detail = shutdown.returncode, (shutdown.stderr or "").strip()[:400]
+    except subprocess.TimeoutExpired:
+        returncode, detail = -1, "redis-cli shutdown timed out"
+    failure = stop_plan.redis_stop_failure(port, still_answers=local_listener(port))
+    if failure is not None:
+        print(f"  ✗ {failure} (rc={returncode}): {detail}", file=sys.stderr)
+        return False
+    print("  ✓ redis stopped")
+    return True
