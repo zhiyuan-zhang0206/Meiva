@@ -87,7 +87,7 @@ def install_fixture(repo: Path, interpreter: Path | None = None) -> Path:
 
 def test_stage_contract() -> None:
     config = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text())
-    assert config["default_install_hook_types"] == ["pre-commit", "pre-push"]
+    assert config["default_install_hook_types"] == ["pre-commit", "pre-push", "commit-msg"]
     hooks = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
     for name in ("frontend-tsc", "frontend-eslint-full", "frontend-vitest"):
         hook = hooks[name]

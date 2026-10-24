@@ -47,6 +47,23 @@ has Python, frontend and e2e commands, environment details and cleanup guidance.
 Full suites run in CI. The [migration guide](../db/docs/migrations.md) covers
 schema changes, immutable migration history and baseline verification.
 
+### Diff hints and `Hint-Ack`
+
+The commit-msg and pre-push hooks ask about the shapes that reviews keep finding on the
+lines a commit adds: an unmediated clock or environment read, a callable with a default,
+a test that subclasses production code, a deleted test and the others in the
+[catalog](../scripts/lint/docs/diff-hints/catalog.meiva.okf.md). Each hint says why the shape is a
+problem and gives the recipe in order of preference. Change the code, or answer in the
+commit message with one line per site:
+
+```text
+Hint-Ack: ambient-read cli/commands/x/runtime.py:42 -- composition root of the daemon
+```
+
+A path without a line answers every site of that id in the file, and a directory with a
+trailing slash every site below it. Answer with the reason the site is right, not with the
+rule's name; an unanswered hint also stops the push, whichever commit carries the answer.
+
 ### Locality gate (meizel)
 
 `python -m meizel check` judges every first-party dependency against the
