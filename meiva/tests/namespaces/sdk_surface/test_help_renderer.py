@@ -16,6 +16,7 @@ import io
 import sys
 import textwrap
 import types
+from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
 
@@ -59,6 +60,18 @@ def _fake_module(source: str, name: str = "fakemod") -> types.ModuleType:
     return mod
 
 
+# meiva:note
+# The loader registers the package it loads a plugin under in `sys.modules` and leaves it there;
+# a test that loads one names the package and the fixture removes everything under it afterwards.
+@pytest.fixture
+def plugin_packages() -> Iterator[list[str]]:
+    packages: list[str] = []
+    yield packages
+    for package in packages:
+        for name in [n for n in sys.modules if n == package or n.startswith(f"{package}.")]:
+            del sys.modules[name]
+
+
 def _render(target: object, *, compact_classes: bool = False) -> str:
     targets = cast("list[object]", target) if isinstance(target, list) else [target]
     buf = io.StringIO()
@@ -77,11 +90,10 @@ def test_public_help_takes_only_targets() -> None:
 
 
 def test_help_reads_updated_source_after_reload_in_place(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, plugin_packages: list[str]
 ) -> None:
     plugin_py = tmp_path / "plugin.py"
-    module_name = "help_reload_fixture.sample.plugin"
-    monkeypatch.setitem(sys.modules, module_name, types.ModuleType(module_name))
+    plugin_packages.append("help_reload_fixture")
     plugin_py.write_text(
         '__all_for_meiva__ = ["VALUE"]\nVALUE: str = "old"\n"""Original value documentation."""\n'
     )
@@ -104,11 +116,10 @@ def test_help_reads_updated_source_after_reload_in_place(
 
 
 def test_help_recovers_after_source_becomes_available(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, plugin_packages: list[str]
 ) -> None:
     plugin_py = tmp_path / "plugin.py"
-    module_name = "help_source_fixture.sample.plugin"
-    monkeypatch.setitem(sys.modules, module_name, types.ModuleType(module_name))
+    plugin_packages.append("help_source_fixture")
     source = (
         '__all_for_meiva__ = ["VALUE"]\nVALUE: str | None = "ready"\n'
         '"""Recovered source documentation."""\n'
