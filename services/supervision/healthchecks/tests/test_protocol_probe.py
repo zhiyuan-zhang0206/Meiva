@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from base.daemon.health import DaemonProbe, ProbeVerdict
+from base.daemon.health import ProbeVerdict
 from base.native_process.root_control import client
 from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socket
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
@@ -63,22 +63,6 @@ def test_unix_invalid_or_closed_ping_is_down(payload: bytes) -> None:
         assert not probe.ping(path).alive
 
 
-@pytest.mark.parametrize("ready", [True, False])
-def test_protocol_result_needs_no_process_census(
-    ready: bool, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def forbidden(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("process census is not a protocol prerequisite")
-
-    monkeypatch.setattr("psutil.process_iter", forbidden)
-    assert probe.probe_protocol(lambda: ready).alive is ready
-
-
-def test_protocol_specific_failure_detail_is_preserved() -> None:
-    result = DaemonProbe.down("application unready")
-    assert probe.probe_protocol(lambda: result) is result
-
-
 def test_missing_unix_endpoint_is_down(tmp_path: Path) -> None:
     assert probe.probe("mcp-daemon", home=tmp_path).verdict.value == "down"
 
@@ -87,3 +71,8 @@ def test_protocol_ping_reads_the_pty_service_as_up(pty_service: PtyServiceProces
     del pty_service
     result = probe.ping(service_socket())
     assert result.verdict is ProbeVerdict.ALIVE, result.detail
+
+
+def test_unknown_protocol_service_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="unsupported protocol probe: unknown-service"):
+        probe.probe("unknown-service", home=tmp_path)

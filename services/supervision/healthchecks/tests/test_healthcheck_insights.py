@@ -16,7 +16,7 @@ from fastapi import FastAPI
 
 from base.paths import insights_pidfile, insights_socket
 from services.derived.insights.daemon import bind_socket
-from services.supervision.healthchecks import insights
+from services.supervision.healthchecks import insights, protocol_probe
 
 
 def _app(
@@ -91,3 +91,14 @@ def test_not_alive_for_an_answer_that_is_not_ours(served: Path, answer: dict[str
 
 def test_not_alive_without_a_listener(served: Path) -> None:
     assert not insights.insights_probe(served).alive
+
+
+def test_protocol_router_preserves_the_insights_identity_refusal(served: Path) -> None:
+    server, thread = _serve(served, _app(served, reported_home="/elsewhere"))
+    _record_pid(served)
+    try:
+        result = protocol_probe.probe("insights", home=served)
+        assert not result.alive
+        assert result.detail == "the insights socket belongs to home '/elsewhere'"
+    finally:
+        _stop(server, thread)

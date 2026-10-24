@@ -19,7 +19,7 @@
 #
 # 2. the healthcheck roster (`services/supervision/healthchecks/docs/check-roster/check-roster.meiva.okf.md`)
 #    against the healthcheck module directory plus the ServiceSpec
-#    `healthcheck_module` fields and root diagnostic adapter imports — the
+#    `healthcheck_module` fields and imports in service composition and root diagnostic adapters — the
 #    2026-08-21 audit (issue #192) found the table documenting a phantom module
 #    (`task_maintenance.py`) and missing seven real ones. See
 #    `check_healthcheck_roster()` for the exact sources of truth.
@@ -152,13 +152,11 @@ def check(
     return 0
 
 
-# ── healthcheck roster (issue #192) ─────────────────────────────────────────
-# The same failure class as the service roster, found in the 2026-08-21
-# healthcheck audit: `check-roster.meiva.okf.md` documented a phantom module
-# (`task_maintenance.py`) and missed seven real ones. The three sources of
-# truth are all structured data — the module directory, the ServiceSpec
-# roster, and root diagnostic adapter imports — so set equality pins all
-# three to the doc table.
+# meiva:note
+# A module's file, documented row and source ownership must agree. The 2026-08-21
+# audit found both a phantom module and seven missing real modules; comparing the
+# directory, ServiceSpec metadata and composition/diagnostic imports catches both
+# forms of drift without treating the table as a registration source.
 
 _HEALTHCHECK_SENTINEL = "<!-- lint:healthcheck-roster-table -->"
 
@@ -171,23 +169,24 @@ HEALTHCHECK_ROSTER = _HEALTHCHECK_DIR / "docs" / "check-roster" / "check-roster.
 DIAGNOSTIC_PROBES = (
     _REPO_ROOT / "services" / "supervision" / "meiva_root_glue" / "diagnostic_probes.py"
 )
+SERVICE_COMPOSITION = _REPO_ROOT / "services" / "supervision" / "roster" / "composition.py"
 
 
-def diagnostic_healthchecks(*, probes_path: Path = DIAGNOSTIC_PROBES) -> set[str]:
-    """Protocol modules imported by the explicit root diagnostic adapters.
-
-    Inspect source instead of constructing a host-dependent diagnostic roster;
-    checking documentation must not probe a host or load gateway-only clients.
-    """
+# meiva:note
+# Read the healthcheck imports in the supplied composition/diagnostic sources,
+# including nested and aliased imports, without executing their host-dependent
+# registration code. These static import facts are not proof of runtime scheduling.
+def imported_healthchecks(*, source_paths: Sequence[Path]) -> set[str]:
     names: set[str] = set()
-    tree = ast.parse(probes_path.read_text(encoding="utf-8"))
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ImportFrom) or node.module is None:
-            continue
-        if node.module == "services.supervision.healthchecks":
-            names.update(alias.name for alias in node.names)
-        elif node.module.startswith("services.supervision.healthchecks."):
-            names.add(node.module.split(".")[3])
+    for source_path in source_paths:
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom) or node.module is None:
+                continue
+            if node.module == "services.supervision.healthchecks":
+                names.update(alias.name for alias in node.names)
+            elif node.module.startswith("services.supervision.healthchecks."):
+                names.add(node.module.split(".")[3])
     return names
 
 
@@ -235,6 +234,10 @@ def parse_healthcheck_roster(text: str) -> set[str]:
     return names
 
 
+# meiva:note
+# Match the table and module directory against ServiceSpec metadata plus the
+# imports in the two actual composition sources. Explicit `hand_added` facts
+# replace those source imports for synthetic checks; they do not augment them.
 def check_healthcheck_roster(
     *,
     roster_path: Path = HEALTHCHECK_ROSTER,
@@ -242,8 +245,6 @@ def check_healthcheck_roster(
     directory: set[str] | None = None,
     hand_added: set[str] | None = None,
 ) -> int:
-    """Assert set equality between the roster table, the module directory, and
-    the ServiceSpec + diagnostic registrations; return 0/1 exit code."""
     try:
         text = roster_path.read_text(encoding="utf-8")
         parsed = parse_healthcheck_roster(text)
@@ -257,8 +258,12 @@ def check_healthcheck_roster(
         return 1
 
     dir_set = directory_healthchecks() if directory is None else directory
-    diag_set = diagnostic_healthchecks() if hand_added is None else hand_added
-    registered = spec_healthchecks(services=services) | diag_set
+    imports = (
+        imported_healthchecks(source_paths=(SERVICE_COMPOSITION, DIAGNOSTIC_PROBES))
+        if hand_added is None
+        else hand_added
+    )
+    registered = spec_healthchecks(services=services) | imports
 
     if parsed != dir_set:
         print(
@@ -281,19 +286,19 @@ def check_healthcheck_roster(
     if registered != dir_set:
         print(
             "healthcheck roster lint failed: module directory does not match the "
-            "ServiceSpec + diagnostic registrations.",
+            "ServiceSpec metadata + composition/diagnostic imports.",
             file=sys.stderr,
         )
         extra = registered - dir_set
         missing = dir_set - registered
         if extra:
             print(
-                f"  ServiceSpec/diagnostic healthchecks with no module file: {sorted(extra)}",
+                f"  ServiceSpec/composition/diagnostic healthchecks with no module file: {sorted(extra)}",
                 file=sys.stderr,
             )
         if missing:
             print(
-                f"  healthcheck modules not registered (ServiceSpec nor diagnostic): "
+                f"  healthcheck modules not registered (ServiceSpec, composition or diagnostic): "
                 f"{sorted(missing)}",
                 file=sys.stderr,
             )
