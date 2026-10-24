@@ -94,7 +94,7 @@ def handoff_clients(machine_identity: MachineIdentity) -> Iterator[ClientSet]:
 
 def handoff_notes() -> TimestampPolicy:
     clock = Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS)
-    return TimestampPolicy(clock=clock, timestamps_enabled=False)
+    return TimestampPolicy.from_clock(clock, timestamps_enabled=False)
 
 
 def takeover_host(tmp_path: Path, machine: MachineIdentity) -> TakeoverHost:

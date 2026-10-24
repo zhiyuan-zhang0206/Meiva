@@ -15,7 +15,7 @@ from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from base.agents.history.checkpoint import FullHistory
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.db import Database
 from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.projection.derive import project_segment, segment_view
@@ -66,12 +66,12 @@ class TimelineReader:
         db: Database,
         pool: ConnectionPool[Any],
         *,
-        inputs: TimestampPolicy,
+        timestamps: TimestampSource,
         jobs: IndexJobs,
         read_segment: Callable[[Database, int, str], FullHistory],
         timer: Callable[[], float] = time.monotonic,
     ) -> None:
-        self.db, self.pool, self.inputs, self.jobs = db, pool, inputs, jobs
+        self.db, self.pool, self.timestamps, self.jobs = db, pool, timestamps, jobs
         self.read_segment, self.timer = read_segment, timer
         self.read_source: Callable[[Connection[Any], int], Source] = capture_source
         self._lock = threading.Lock()
@@ -146,7 +146,7 @@ class TimelineReader:
                 source.head,
                 self.read_segment(self.db, agent_id, source.head),
                 source.previous,
-                inputs=self.inputs,
+                inputs=self.timestamps.policy(),
             )
         extents: list[tuple[datetime, datetime]] = []
         if extent and extent[0] is not None and extent[1] is not None:
@@ -215,7 +215,7 @@ class TimelineReader:
                 segment_view(
                     self.read_segment(self.db, snapshot.agent_id, segment.checkpoint_id),
                     segment.read_before,
-                    inputs=self.inputs,
+                    inputs=self.timestamps.policy(),
                 ),
             )
             for segment in segments

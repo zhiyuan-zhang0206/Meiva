@@ -35,7 +35,7 @@ from base.packages.composer_commands import CommandCatalog
 from gateway.tests.agents.gateway_auth import without_credentials
 from gateway.tests.auth.gateway_config import gateway_test_client
 
-_ENVELOPE_INPUTS = TimestampPolicy(clock=Clock.from_settings(), timestamps_enabled=False)
+_ENVELOPE_INPUTS = TimestampPolicy.from_clock(Clock.from_settings(), timestamps_enabled=False)
 _SECRET = "external-agent-source-secret"  # noqa: S105 -- isolated test credential
 _EXTERNAL = "external_agent:claude_code:run-7"
 

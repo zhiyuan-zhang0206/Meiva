@@ -223,7 +223,7 @@ class Harness:
         self.gate = gate
         self.chat = chat
         self.service = ReplySuggestionService(llm_override="", transport=gate.transport)
-        self.rendering = TimestampPolicy(clock=Clock.from_settings(), timestamps_enabled=False)
+        self.rendering = TimestampPolicy.from_clock(Clock.from_settings(), timestamps_enabled=False)
         self.agent_id = self._create_idle_agent()
         self._versions = 0
         self.store(conversation())

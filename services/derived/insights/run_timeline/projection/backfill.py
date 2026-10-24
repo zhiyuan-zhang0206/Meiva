@@ -35,8 +35,8 @@ def main() -> None:
             process="timeline-projection-backfill",
         ),
     )
-    inputs = TimestampPolicy(
-        clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+    inputs = TimestampPolicy.from_clock(
+        Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         timestamps_enabled=config.view.general.message_timestamps,
     )
     pending = list(dict.fromkeys(args.agent_ids))

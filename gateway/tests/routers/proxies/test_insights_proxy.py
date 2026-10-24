@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config import ConfigBoot
 from base.db import Database
@@ -157,7 +157,7 @@ def test_the_gateway_declares_exactly_what_the_service_serves(
         home=tmp_path,
         catalog=model_catalog,
         boot=boot,
-        timeline_inputs=TimestampPolicy(
+        timestamps=TimestampSource(
             clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
             timestamps_enabled=False,
         ),

@@ -18,5 +18,7 @@ def test_a_render_failure_propagates() -> None:
                     additional_kwargs={"meiva_msg_type": MeivaMsgType.COMPACT_SUMMARY},
                 )
             ],
-            inputs=TimestampPolicy(clock=clock_with_unknown_timezone(), timestamps_enabled=True),
+            inputs=TimestampPolicy.from_clock(
+                clock_with_unknown_timezone(), timestamps_enabled=True
+            ),
         )

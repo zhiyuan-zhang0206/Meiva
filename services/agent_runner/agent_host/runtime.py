@@ -18,7 +18,7 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
 from agent.process_boot import boot_agent_scope
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.host.env.agent_slices import AgentBrain, AgentSlices
@@ -83,7 +83,7 @@ class HostPolicy:
     llm_override: str
     default_reader: Callable[[str, str], Any]
     clock_factory: Callable[[], Clock]
-    handoff_notes: TimestampPolicy
+    handoff_stamping: TimestampSource
     harness_registration_ttl_seconds: float
     stall: StallTiming
     # meiva:note

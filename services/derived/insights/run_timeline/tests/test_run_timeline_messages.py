@@ -12,7 +12,7 @@ from base.agents.history.checkpoint import single_segment_history
 from base.agents.history.hierarchy.units import display_blocks, divide_units, read_times
 from base.agents.history.hierarchy.usage import MessageUsage
 from base.agents.history.message_tokens import MessageTokens
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
@@ -20,9 +20,10 @@ from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline import messages as route
 from services.derived.insights.run_timeline.history import HistoryView
 
-_TIMELINE_INPUTS = TimestampPolicy(
+_TIMELINE_SOURCE = TimestampSource(
     clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
+_TIMELINE_INPUTS = _TIMELINE_SOURCE.policy()
 
 STAMP = "2026-10-04T12:00:00+00:00"
 
@@ -67,7 +68,7 @@ def request(messages: list[BaseMessage]) -> Request:
     state = SimpleNamespace(
         db=cast(Database, object()),
         run_timeline_reader=Views(messages),
-        timeline_inputs=_TIMELINE_INPUTS,
+        timeline_timestamps=_TIMELINE_SOURCE,
         config=InsightsConfig(run_timeline_message_text_max=20),
     )
     return cast(Request, SimpleNamespace(app=SimpleNamespace(state=state)))

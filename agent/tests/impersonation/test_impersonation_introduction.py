@@ -31,7 +31,7 @@ MOMENT = datetime(2026, 10, 6, 13, 39, 25, tzinfo=UTC)
 
 def _notes(*, timestamps: bool = False) -> TimestampPolicy:
     clock = fixed_clock()
-    return TimestampPolicy(clock=clock, timestamps_enabled=timestamps)
+    return TimestampPolicy.from_clock(clock, timestamps_enabled=timestamps)
 
 
 def _session(number: int = 0) -> dict[str, Any]:
@@ -116,7 +116,7 @@ async def test_all_takeover_notes_stamp_their_real_creation_time(
         now=lambda: MOMENT,
         timers=SYSTEM_TIMERS,
     )
-    notes = TimestampPolicy(clock=clock, timestamps_enabled=timestamps)
+    notes = TimestampPolicy.from_clock(clock, timestamps_enabled=timestamps)
     owner = cluster.native_agent()
     cluster.lease(owner, provider="claude", phase="released")
     lease = cluster.status(owner)
@@ -168,8 +168,8 @@ async def test_an_existing_handoff_receipt_keeps_its_original_note(
 
 def test_a_note_stamp_follows_the_policy_it_is_given() -> None:
     clock = Clock(ClockConfig("UTC", "UTC", False), now=lambda: MOMENT, timers=SYSTEM_TIMERS)
-    stamped = TimestampPolicy(clock=clock, timestamps_enabled=True)
-    bare = TimestampPolicy(clock=clock, timestamps_enabled=False)
+    stamped = TimestampPolicy.from_clock(clock, timestamps_enabled=True)
+    bare = TimestampPolicy.from_clock(clock, timestamps_enabled=False)
     assert note_stamp_of(stamped).prefix == "[2026-10-06 13:39:25] "
     assert note_stamp_of(bare).prefix == ""
     assert note_stamp_of(bare).created_at == MOMENT

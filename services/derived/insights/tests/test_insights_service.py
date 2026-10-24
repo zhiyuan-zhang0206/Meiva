@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage
 from psycopg_pool import ConnectionPool
 
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampPolicy, TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
@@ -41,7 +41,7 @@ from services.derived.insights.run_timeline.tests.test_projection import World
 from services.derived.insights.run_timeline.tests.test_projection import world as world
 
 _CONFIG = InsightsConfig(run_timeline_message_text_max=20)
-_TIMELINE_INPUTS = TimestampPolicy(
+_TIMELINE_SOURCE = TimestampSource(
     clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS), timestamps_enabled=False
 )
 
@@ -50,7 +50,7 @@ def _app(
     *,
     home: Path,
     model_catalog: ModelCatalog,
-    timeline_inputs: TimestampPolicy = _TIMELINE_INPUTS,
+    timestamps: TimestampSource = _TIMELINE_SOURCE,
     world: World | None = None,
 ) -> Any:
     boot = ConfigBoot()
@@ -62,7 +62,7 @@ def _app(
         home=home,
         catalog=model_catalog,
         boot=boot,
-        timeline_inputs=timeline_inputs,
+        timestamps=timestamps,
     )
     if world:
         app.state.run_timeline_reader.read_segment = world.read_segment
@@ -155,8 +155,8 @@ def test_the_app_answers_over_the_bound_socket(
     assert not thread.is_alive()
 
 
-def _policy(*, enabled: bool) -> TimestampPolicy:
-    return TimestampPolicy(
+def _source(*, enabled: bool) -> TimestampSource:
+    return TimestampSource(
         clock=Clock(
             ClockConfig("UTC", "UTC", False),
             now=lambda: datetime(2026, 10, 10, 12, tzinfo=UTC),
@@ -187,11 +187,11 @@ def test_apps_keep_their_rendering_policy_and_cache_separate(
     world: World, tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
     loads = _compact_history(world)
-    hidden, shown = _policy(enabled=False), _policy(enabled=True)
-    first = _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=hidden, world=world)
-    second = _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=shown, world=world)
-    assert first.state.timeline_inputs is hidden
-    assert second.state.timeline_inputs is shown
+    hidden, shown = _source(enabled=False), _source(enabled=True)
+    first = _app(home=tmp_path, model_catalog=model_catalog, timestamps=hidden, world=world)
+    second = _app(home=tmp_path, model_catalog=model_catalog, timestamps=shown, world=world)
+    assert first.state.timeline_timestamps is hidden
+    assert second.state.timeline_timestamps is shown
     path = "/api/agents/9/run-timeline/messages?start=0&end=0&full=true"
 
     assert TestClient(first).get(path).json()["messages"][0]["parts"][0]["text"] == (
@@ -259,11 +259,9 @@ async def test_daemon_binds_live_rendering_to_its_configuration_owner(
     assert apps[0].state.boot.view.lm.llm_model == "first-process-model"
     boot.set_field("llm_model", "updated-process-model")
     assert apps[0].state.boot.view.lm.llm_model == "updated-process-model"
-    inputs: TimestampPolicy = apps[0].state.timeline_inputs
+    inputs: TimestampPolicy = apps[0].state.timeline_timestamps.policy()
     assert inputs.timestamps_enabled is False
-    assert inputs.clock.format_timestamp(datetime(2026, 10, 10, 12, tzinfo=UTC)) == (
-        "[2026-10-10 21:00:00]"
-    )
+    assert inputs.format(datetime(2026, 10, 10, 12, tzinfo=UTC)) == "[2026-10-10 21:00:00]"
     assert closed == [True]
     assert not insights_pidfile(short_dir).exists()
     assert not insights_socket(short_dir).exists()

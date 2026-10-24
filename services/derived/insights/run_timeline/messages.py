@@ -98,7 +98,7 @@ def get_run_timeline_messages(
         local_stop = min(stop + 1, segment.message_end) - segment.offset
         items, _ = build_timeline_items(
             view.history.messages[local_start:local_stop],
-            inputs=state.timeline_inputs,
+            inputs=state.timeline_timestamps.policy(),
         )
         by_message: dict[int, list[TimelineItem]] = {}
         for item in items:

@@ -322,7 +322,7 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
         owner.agent_id,
         runtime.context.relays,
         incarnation=successor,
-        notes=TimestampPolicy(clock=Clock.from_settings(), timestamps_enabled=False),
+        notes=TimestampPolicy.from_clock(Clock.from_settings(), timestamps_enabled=False),
         host=process_host(machine_identity.name()),
     )
     resumed = await claim_node(

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import uvicorn
 
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -83,7 +83,7 @@ async def run(*, home: Path, config: ConfigBoot, database: Callable[[], Database
                     home=home,
                     catalog=build_model_catalog(),
                     boot=config,
-                    timeline_inputs=TimestampPolicy(
+                    timestamps=TimestampSource(
                         clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
                         timestamps_enabled=config.view.general.message_timestamps,
                     ),

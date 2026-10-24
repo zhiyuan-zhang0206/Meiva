@@ -90,7 +90,7 @@ def test_head_check_cannot_restore_bookkeeping_for_an_evicted_snapshot(
     reader = TimelineReader(
         world.db,
         world.pool,
-        inputs=world.inputs,
+        timestamps=world.timestamps,
         jobs=world.jobs,
         read_segment=world.read_segment,
         timer=lambda: world.clock,

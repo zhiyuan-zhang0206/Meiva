@@ -25,8 +25,8 @@ from base.config import settings
 from base.lm.catalog import ModelCatalog
 from base.lm.pricing import quote
 
-_TIMELINE_INPUTS = TimestampPolicy(
-    clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
+_TIMELINE_INPUTS = TimestampPolicy.from_clock(
+    Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
 
 _T0 = datetime(2026, 10, 5, tzinfo=UTC)

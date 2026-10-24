@@ -58,7 +58,8 @@ def note_stamp(clock: Clock, *, timestamps: bool) -> NoteStamp:
 
 
 def note_stamp_of(notes: TimestampPolicy) -> NoteStamp:
-    return note_stamp(notes.clock, timestamps=notes.timestamps_enabled)
+    created_at = notes.require_now()
+    return NoteStamp(created_at, f"{notes.format(created_at)} " if notes.timestamps_enabled else "")
 
 
 def _render(draft: NoteDraft, session: dict[str, Any] | None = None) -> HumanMessage:

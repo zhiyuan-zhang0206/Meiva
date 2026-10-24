@@ -395,7 +395,7 @@ class AgentHost:
                 self.relays,
                 activate_accepted=False,
                 incarnation=incarnation,
-                notes=self._policy.handoff_notes,
+                notes=self._policy.handoff_stamping.policy(),
                 host=process_host(self._machine),
             )
         batch = await claim_inbound_batch(
@@ -647,7 +647,7 @@ class AgentHost:
                                 self._db,
                                 self._bus,
                                 self.relays,
-                                self._policy.handoff_notes,
+                                self._policy.handoff_stamping.policy(),
                                 self._machine,
                                 self._home,
                             ),
@@ -692,7 +692,7 @@ class AgentHost:
                 self._db,
                 self._bus,
                 self.relays,
-                self._policy.handoff_notes,
+                self._policy.handoff_stamping.policy(),
                 self._machine,
                 self._home,
             ),

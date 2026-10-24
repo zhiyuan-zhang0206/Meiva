@@ -21,7 +21,7 @@ from base.agents.history.checkpoint import (
 from base.agents.history.checkpoint_segment import read_checkpoint_segment
 from base.agents.history.hierarchy.serve import serve_nodes
 from base.agents.history.hierarchy.store import load_nodes
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db import Database
 from services.derived.insights.run_timeline.projection.derive import segment_view
@@ -63,7 +63,7 @@ class World:
         self.loads: list[str] = []
         self.clock = 0.0
         self.version = 0
-        self.inputs = TimestampPolicy(
+        self.timestamps = TimestampSource(
             clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
             timestamps_enabled=False,
         )
@@ -74,7 +74,7 @@ class World:
         return TimelineReader(
             self.db,
             self.pool,
-            inputs=self.inputs,
+            timestamps=self.timestamps,
             jobs=self.jobs,
             read_segment=self.read_segment,
             timer=lambda: self.clock,
@@ -109,7 +109,9 @@ class World:
         return saved.get("configurable", {})["checkpoint_id"]
 
     def step(self, agent: int = AGENT) -> bool:
-        return index_next(self.db, agent, inputs=self.inputs, read_segment=self.read_segment)
+        return index_next(
+            self.db, agent, timestamps=self.timestamps, read_segment=self.read_segment
+        )
 
     def prepare(self) -> None:
         while self.step():
@@ -185,7 +187,7 @@ def test_cross_segment_nodes_equal_full_history_including_cost_and_zero_tokens(
     node(db_conn, (5, 6))
     node(db_conn, (1, 6), level=2)
     reference = segment_view(
-        load_checkpoint_history_full(world.db, AGENT), None, inputs=world.inputs
+        load_checkpoint_history_full(world.db, AGENT), None, inputs=world.timestamps.policy()
     )
     expected = serve_nodes(
         load_nodes(world.db, AGENT), reference.usage, {}, {}, reference.read, reference.units
@@ -262,7 +264,7 @@ def test_compact_replacement_closes_work_before_the_next_segment(
     world.put(replacement, sealed=False)
     world.prepare()
     reference = segment_view(
-        load_checkpoint_history_full(world.db, AGENT), None, inputs=world.inputs
+        load_checkpoint_history_full(world.db, AGENT), None, inputs=world.timestamps.policy()
     )
     cut = world.reader.get(AGENT)
     _, blocks, omitted = world.reader.window(cut, T0, T0 + timedelta(days=2), 5000)
@@ -348,7 +350,7 @@ def test_failed_segment_keeps_the_committed_prefix_and_retries(world: World) -> 
         raise CheckpointReadError("missing ancestry")
 
     with pytest.raises(CheckpointReadError, match="missing ancestry"):
-        index_next(world.db, AGENT, inputs=world.inputs, read_segment=unavailable)
+        index_next(world.db, AGENT, timestamps=world.timestamps, read_segment=unavailable)
     with world.pool.connection() as conn:
         rows = conn.execute(
             "SELECT session, message_end FROM run_timeline_segments WHERE agent_id = %s",

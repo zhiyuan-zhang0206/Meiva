@@ -10,7 +10,7 @@ from typing import Literal
 
 from base.agents.history.checkpoint import FullHistory
 from base.agents.history.checkpoint_segment import read_checkpoint_segment
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.db import Database
 from base.db.transaction import write_transaction
 from services.derived.insights.run_timeline.projection.derive import project_segment
@@ -24,7 +24,7 @@ def index_next(
     db: Database,
     agent_id: int,
     *,
-    inputs: TimestampPolicy,
+    timestamps: TimestampSource,
     read_segment: Callable[[Database, int, str], FullHistory] = read_checkpoint_segment,
 ) -> bool:
     pool = db.pool(min_size=1, max_size=1)
@@ -38,7 +38,9 @@ def index_next(
             if checkpoint_id is None:
                 return False
             history = read_segment(db, agent_id, checkpoint_id)
-            projection = project_segment(checkpoint_id, history, previous, inputs=inputs)
+            projection = project_segment(
+                checkpoint_id, history, previous, inputs=timestamps.policy()
+            )
             publish(conn, agent_id, projection)
         return True
     finally:

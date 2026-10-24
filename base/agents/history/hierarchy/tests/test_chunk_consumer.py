@@ -50,8 +50,8 @@ def _result(
     inputs = read_inputs()
     units = divide_units(
         list(located.messages),
-        timeline_inputs=TimestampPolicy(
-            clock=inputs.clock_factory(), timestamps_enabled=inputs.timestamps_enabled()
+        timeline_inputs=TimestampPolicy.from_clock(
+            inputs.clock_factory(), timestamps_enabled=inputs.timestamps_enabled()
         ),
     )
     return ChunkResult(units, list(groups) or [UnitGroup(0, len(units) - 1, summary)])

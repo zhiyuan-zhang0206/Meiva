@@ -8,7 +8,7 @@ from pathlib import Path
 from base import paths
 from base.agents.context.clients import ClientSet
 from base.agents.history.hierarchy.group_consumer import UnderstandingReadInputs
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
@@ -57,7 +57,7 @@ def host_policy(config: ConfigBoot, *, keys: ProviderKeys) -> HostPolicy:
         llm_override=config.view.lm.llm_override,
         default_reader=lambda domain, field: getattr(getattr(config.view, domain), field),
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
-        handoff_notes=TimestampPolicy(
+        handoff_stamping=TimestampSource(
             clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
             timestamps_enabled=config.view.general.message_timestamps,
         ),

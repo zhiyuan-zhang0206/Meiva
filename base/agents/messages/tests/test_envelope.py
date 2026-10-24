@@ -58,8 +58,8 @@ def _make_clock(*, weekday: bool = False, now: Callable[[], datetime] = _fixed_n
     )
 
 
-_ENVELOPE_INPUTS = TimestampPolicy(clock=_make_clock(), timestamps_enabled=True)
-_NO_TIMESTAMPS_INPUTS = TimestampPolicy(clock=_make_clock(), timestamps_enabled=False)
+_ENVELOPE_INPUTS = TimestampPolicy.from_clock(_make_clock(), timestamps_enabled=True)
+_NO_TIMESTAMPS_INPUTS = TimestampPolicy.from_clock(_make_clock(), timestamps_enabled=False)
 
 
 def _note(body: str) -> str:
@@ -391,7 +391,7 @@ class TestWeekdayFlag:
         # within +-11h of UTC, so this exercises the %a slot regardless of
         # the configured timezone.
         created = datetime(2026, 6, 21, 10, 30, 0, tzinfo=UTC)
-        inputs = TimestampPolicy(clock=_make_clock(weekday=weekday), timestamps_enabled=True)
+        inputs = TimestampPolicy.from_clock(_make_clock(weekday=weekday), timestamps_enabled=True)
         return wrap_inbound("hi", "user", created_at=created, inputs=inputs)
 
     def test_weekday_on(self) -> None:
@@ -427,9 +427,8 @@ class TestWeekdayFlag:
         from datetime import datetime
 
         for weekday in (True, False):
-            inputs = TimestampPolicy(
-                clock=_make_clock(weekday=weekday, now=lambda: datetime.now(UTC)),
-                timestamps_enabled=True,
+            inputs = TimestampPolicy.from_clock(
+                _make_clock(weekday=weekday, now=lambda: datetime.now(UTC)), timestamps_enabled=True
             )
             day = r"[A-Z][a-z]{2} " if weekday else ""
             shape = rf"^\[\d{{4}}-\d{{2}}-\d{{2}} {day}\d{{2}}:\d{{2}}:\d{{2}}\]$"

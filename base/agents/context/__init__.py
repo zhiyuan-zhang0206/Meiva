@@ -150,10 +150,10 @@ class MeivaContext:
     # The message-timestamp policy of the unit of work that asks: this owner's clock and the
     # agent's `general.message_timestamps`, read once.
     def timestamp_policy(self) -> TimestampPolicy:
-        return TimestampPolicy(
-            clock=self.require_clock(),
-            timestamps_enabled=self.require_agent().read("general", "message_timestamps"),
-        )
+        enabled = self.require_agent().read("general", "message_timestamps")
+        if not enabled and self.clock_factory is None:
+            return TimestampPolicy.off()
+        return TimestampPolicy.from_clock(self.require_clock(), timestamps_enabled=enabled)
 
     bus: EventBus | None = None
     """The cluster Redis / live-events handle, for the same."""
