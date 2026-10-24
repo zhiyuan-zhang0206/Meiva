@@ -51,6 +51,9 @@ PID publication: an open port does not prove the PID file is complete. Their
 bounded fixture wait accepts missing or empty publication while startup proceeds;
 nonempty corrupt content fails immediately. The real exit and idle-client stop
 contracts exercise a pending PID read and retain verified native cleanup custody.
+The fixture captures the daemon's native birth before waiting for its listener;
+cleanup signals and waits for that retained identity even when a refusal test
+removes the pidfile. Deleting that publication never discards test cleanup custody.
 
 Redis and the pooler are spawned with `base.native_process.child_env.daemon_process_env`
 (the pooler's is the one its spec carries),
