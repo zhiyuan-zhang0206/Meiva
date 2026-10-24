@@ -140,8 +140,10 @@ def test_two_attempts_keep_lease_active_and_late_receipt_possible(
 def _published(
     redis_url: str, channels: list[str], act: Callable[[], object]
 ) -> list[tuple[str, str]]:
-    client = redis.Redis.from_url(redis_url, decode_responses=True)
-    pubsub = client.pubsub()
+    # meiva:note
+    # redis-py leaves these factories' **kwargs untyped; every supplied argument is explicit.
+    client = redis.Redis.from_url(redis_url, decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
+    pubsub = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
     pubsub.subscribe(*channels)
     try:
         for _ in channels:
@@ -150,7 +152,9 @@ def _published(
         frames: list[tuple[str, str]] = []
         while (message := pubsub.get_message(timeout=0.5)) is not None:
             if message["type"] == "message":
-                frames.append((message["channel"], message["data"]))
+                channel, data = message["channel"], message["data"]
+                assert isinstance(channel, str) and isinstance(data, str)
+                frames.append((channel, data))
         return frames
     finally:
         pubsub.close()

@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 import pytest
+from pydantic import JsonValue
 
 from cli.commands.agents.notices import cmd_notices_clear, cmd_notices_list, cmd_notices_resolve
 from cli.commands.cluster.tests.gateway_server import Reply, access_to, serving
@@ -19,7 +20,9 @@ OPEN_TARGET = "/api/notices/open?include_awaiting=true"
 NO_STDIN = io.StringIO()
 
 
-def _notice(nid: int, agent: int, *, title: str = "T", require_response: bool = False) -> dict:
+def _notice(
+    nid: int, agent: int, *, title: str = "T", require_response: bool = False
+) -> dict[str, JsonValue]:
     return {
         "id": nid,
         "agent_id": agent,

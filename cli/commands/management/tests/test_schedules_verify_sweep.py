@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -44,7 +44,7 @@ _NOW = datetime(2026, 10, 24, 12, 0, 0, tzinfo=UTC)
 _STAMP = "2026-10-24T12:00:00+00:00"
 
 
-def _gateway_rows(rows: list[tuple[int, str, str | None]]) -> dict[tuple[str, str], Reply]:
+def _gateway_rows(rows: Sequence[tuple[int, str, str | None]]) -> dict[tuple[str, str], Reply]:
     routes = {("GET", "/api/schedules"): Reply(body=[{"id": i, "name": n} for i, n, _ in rows])}
     for schedule_id, name, script in rows:
         detail = {"id": schedule_id, "name": name, "script": script}

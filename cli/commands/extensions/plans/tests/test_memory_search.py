@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import JsonValue
 
 from cli.commands.extensions.plans.memory_search import render_results, search_body
 
@@ -19,7 +20,7 @@ def test_the_request_body_names_the_query_the_limit_and_a_human_purpose() -> Non
 
 
 def test_the_table_aligns_path_and_tags_to_the_widest_cell() -> None:
-    results = [
+    results: list[JsonValue] = [
         {
             "path": "projects/alpha.md",
             "tags": ["project", "active"],
@@ -38,7 +39,7 @@ def test_the_table_aligns_path_and_tags_to_the_widest_cell() -> None:
 
 
 def test_the_table_renders_null_metadata_as_empty_text() -> None:
-    results = [
+    results: list[JsonValue] = [
         {"path": "relative/note.md", "tags": None, "description": None, "score": 0.25, "chunk": "x"}
     ]
 
@@ -53,7 +54,7 @@ def test_an_answer_with_no_results_renders_the_header_alone() -> None:
 
 
 def test_json_output_is_the_results_list_untouched_nulls_included() -> None:
-    results = [
+    results: list[JsonValue] = [
         {"path": "relative/note.md", "tags": None, "description": None, "score": 0.8, "chunk": "x"},
         {"path": "relative/empty.md", "tags": [], "description": "", "score": 0.1, "chunk": "y"},
     ]
