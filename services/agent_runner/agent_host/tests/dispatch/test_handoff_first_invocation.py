@@ -27,6 +27,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.composer_commands import CommandCatalog
+from base.paths import meiva_home
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
@@ -88,6 +89,7 @@ async def test_first_hosted_invocation_only_resumes_unhalted_pending_handoff(
     policy = configured_policy()
     machine = configured_machine(name="claim-test")
     host = AgentHost(
+        home=meiva_home(),
         policy=policy,
         pool=aops_pool,
         checkpointer=saver,

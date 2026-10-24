@@ -3,26 +3,29 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock
+from uuid import uuid4
 
-import pytest
+import psycopg
+from psycopg import errors, sql
 from psycopg_pool import AsyncConnectionPool
 
-from agent import db
 from agent.graph.llm_errors import FatalProviderError
+from agent.ownership.hosted import admit_hosted_runtime
 from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import MeivaContext
-from base.agents.recovery import breaker
 from base.agents.tests.units import spawn_agent
+from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.table_faults import refused_write
 
 
 def _permanent_rejection() -> FatalProviderError:
@@ -39,11 +42,11 @@ def _context(pool: AsyncConnectionPool, *, database_gate: ProcessDbGate) -> Meiv
         ops_pool=pool,
         llm=MagicMock(),
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
+        agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
-        clock_factory=configured_policy().clock_factory,
+        clock_factory=Clock.from_settings,
     )
 
 
@@ -68,113 +71,104 @@ def _sole_record(loguru_records: list[dict[str, Any]], fragment: str) -> dict[st
 async def test_streak_write_failure_keeps_its_traceback(
     redis_url: str,
     aops_pool: AsyncConnectionPool,
+    db_conn: psycopg.Connection,
     loguru_records: list[dict[str, Any]],
-    monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    async def _boom(*_args: object, **_kwargs: object) -> int:
-        raise RuntimeError("recovery breaker store down")
-
-    monkeypatch.setattr(breaker, "record_permanent_reject_turn", _boom)
-
-    await _reject(
-        aops_pool,
-        spawn_agent(
-            spawner="user",
-            catalog=model_catalog,
-            authority=config_authority,
-            database_gate=database_gate,
-            machine=machine_identity,
-        ),
+    agent_id = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
         database_gate=database_gate,
+        machine=machine_identity,
     )
+    with refused_write(
+        db_conn,
+        table="agents_meta",
+        event="UPDATE OF permanent_reject_streak",
+        when=sql.SQL("NEW.permanent_reject_streak > OLD.permanent_reject_streak"),
+    ):
+        await _reject(aops_pool, agent_id, database_gate=database_gate)
 
     record = _sole_record(loguru_records, "failed to record a permanent-rejection streak")
     assert record["exception"] is not None
-    assert record["exception"].type is RuntimeError
+    assert record["exception"].type is errors.RaiseException
 
 
 async def test_halt_suppression_failure_keeps_its_traceback(
     redis_url: str,
     aops_pool: AsyncConnectionPool,
+    db_conn: psycopg.Connection,
     loguru_records: list[dict[str, Any]],
-    monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    async def _streak(*_args: object, **_kwargs: object) -> int:
-        return 99
-
-    async def _boom(*_args: object, **_kwargs: object) -> bool:
-        raise RuntimeError("suppression write down")
-
-    async def _noop(*_args: object, **_kwargs: object) -> None:
-        return None
-
-    monkeypatch.setattr(breaker, "record_permanent_reject_turn", _streak)
-    monkeypatch.setattr(breaker, "halt_automatic_recovery", _boom)
-    monkeypatch.setattr(db, "enqueue_fatal_provider_report_to_nearest_alive_ancestor", _noop)
-
-    await _reject(
-        aops_pool,
-        spawn_agent(
-            spawner="user",
-            catalog=model_catalog,
-            authority=config_authority,
-            database_gate=database_gate,
-            machine=machine_identity,
-        ),
+    agent_id = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
         database_gate=database_gate,
+        machine=machine_identity,
     )
+    with refused_write(
+        db_conn,
+        table="agents_meta",
+        event="UPDATE OF wake_suppressed_until",
+        when=sql.SQL("NEW.wake_suppressed_until IS NOT NULL"),
+    ):
+        await _reject(aops_pool, agent_id, database_gate=database_gate)
 
     record = _sole_record(loguru_records, "failed to suppress automatic wakes")
     assert record["exception"] is not None
-    assert record["exception"].type is RuntimeError
+    assert record["exception"].type is errors.RaiseException
 
 
 async def test_ancestor_report_failure_keeps_its_traceback(
     redis_url: str,
     aops_pool: AsyncConnectionPool,
+    db_conn: psycopg.Connection,
+    database: Database,
     loguru_records: list[dict[str, Any]],
-    monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> None:
-    async def _streak(*_args: object, **_kwargs: object) -> int:
-        return 99
-
-    async def _halt(*_args: object, **_kwargs: object) -> bool:
-        return True
-
-    async def _boom(*_args: object, **_kwargs: object) -> None:
-        raise RuntimeError("enqueue down")
-
-    monkeypatch.setattr(breaker, "record_permanent_reject_turn", _streak)
-    monkeypatch.setattr(breaker, "halt_automatic_recovery", _halt)
-    monkeypatch.setattr(db, "enqueue_fatal_provider_report_to_nearest_alive_ancestor", _boom)
-
-    await _reject(
-        aops_pool,
-        spawn_agent(
-            spawner="user",
-            catalog=model_catalog,
-            authority=config_authority,
-            database_gate=database_gate,
-            machine=machine_identity,
-        ),
+    parent = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
         database_gate=database_gate,
+        machine=machine_identity,
     )
+    assert await admit_hosted_runtime(
+        aops_pool, parent, machine_identity.name(), uuid4(), db=database
+    )
+    child = spawn_agent(
+        spawner=f"agent:{parent}",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    with refused_write(
+        db_conn,
+        table="inbound_messages",
+        event="INSERT",
+        when=sql.SQL("NEW.agent_id = {parent} AND NEW.content LIKE 'Descendant agent%'").format(
+            parent=sql.Literal(parent)
+        ),
+    ):
+        await _reject(aops_pool, child, database_gate=database_gate)
 
     record = _sole_record(loguru_records, "failed to enqueue the recovery-halt report")
     assert record["exception"] is not None
-    assert record["exception"].type is RuntimeError
+    assert record["exception"].type is errors.RaiseException

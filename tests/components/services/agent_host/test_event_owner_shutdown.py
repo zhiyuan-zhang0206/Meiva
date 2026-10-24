@@ -17,6 +17,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog
+from base.paths import meiva_home
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import Event
 from base.telemetry.otlp.trace_config import TraceConfig
@@ -60,6 +61,7 @@ async def test_host_release_runs_and_first_original_failure_remains_primary(
     pipe = EventPipeline(writer=writer, batch_size=1)
     clients = ClientSet(pipeline_factory=lambda: pipe)
     host = AgentHost(
+        home=meiva_home(),
         policy=configured_policy(),
         pool=cast(Any, MagicMock()),
         checkpointer=cast(Any, object()),

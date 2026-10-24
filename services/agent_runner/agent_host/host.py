@@ -13,6 +13,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from functools import partial
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import psycopg
@@ -77,6 +78,7 @@ from services.agent_runner.agent_host.invocation import (
 )
 from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
 from services.agent_runner.agent_host.invocation.driver import drive_context
+from services.agent_runner.agent_host.lifecycle.lease_controls import require_lifecycle_claim
 from services.agent_runner.agent_host.lifecycle.shells import (
     apply_lifecycle_command,
     reap_and_announce_corpses,
@@ -135,7 +137,9 @@ class AgentHost:
         extensions: ExtensionRegistry = EMPTY,
         commands: CommandCatalog | None = None,
         plugin_configs: Mapping[str, BaseModel] | None = None,
+        home: Path,
     ) -> None:
+        self._home = home
         self._bus = bus
         self._db = db
         self._catalog = catalog
@@ -199,7 +203,7 @@ class AgentHost:
                 except asyncio.CancelledError:
                     cancelled = True
                     work.cancel()
-                    await wait_shielded_task(work)
+                    await wait_shielded_task(work, timeout_s=self._policy.stall.unwind_timeout_s)
                 work.result()
             finally:
                 if not work.done():
@@ -247,7 +251,7 @@ class AgentHost:
                 normalized=self._normalized_configs,
                 catalog=self._catalog,
                 keys=self._policy.provider_keys,
-                llm_override=self._policy.llm_override(),
+                llm_override=self._policy.llm_override,
                 default_model=self._policy.default_model,
             ):
                 return
@@ -400,13 +404,12 @@ class AgentHost:
             lifecycle_only=True,
             incarnation=incarnation,
         )
-        if len(batch) > 1 or any(not item.durable_lifecycle for item in batch):
-            raise RuntimeError("lease control claim returned an unaccepted command")
+        require_lifecycle_claim([item.durable_lifecycle for item in batch])
         # meiva:note
         # No graph ran here, so nothing says whether the agent's last turn was finished;
         # a restart applied under a lease never queues a continuation.
         kind = await apply_lifecycle_command(
-            self._control_pool, incarnation, bus=self._bus, resume_turn=False
+            self._control_pool, incarnation, bus=self._bus, resume_turn=False, home=self._home
         )
         if kind is None:
             await settle_hosted_runtime(
@@ -471,11 +474,11 @@ class AgentHost:
             slices,
             catalog=self._catalog,
             keys=self._policy.provider_keys,
-            llm_override=self._policy.llm_override(),
+            llm_override=self._policy.llm_override,
             harness=harness,
             registry=self._harness_registry,
             registrations=self._registrations,
-            registration_ttl_seconds=self._policy.harness_registration_ttl_seconds(),
+            registration_ttl_seconds=self._policy.harness_registration_ttl_seconds,
             machine=self._machine,
             contributions=tuple(hc for _, hc in self._extensions.harness_contributions(harness)),
         )
@@ -483,7 +486,7 @@ class AgentHost:
     def _evict(self) -> None:
         """Evict settled runtimes by idle age and least-recent use."""
         for agent_id, runtime in evict_runtimes(
-            self._runtimes, self._in_flight, policy=self._policy.cache(), now=time.monotonic()
+            self._runtimes, self._in_flight, policy=self._policy.cache, now=time.monotonic()
         ):
             self._sessions.retire(agent_id, runtime)
 
@@ -594,7 +597,12 @@ class AgentHost:
     ) -> dict[str, object] | PendingTurnFailure:
         try:
             return await run_invocation_with_stall_guard(
-                graph if graph is not None else self._graph, agent_id, ctx, config, initial
+                graph if graph is not None else self._graph,
+                agent_id,
+                ctx,
+                config,
+                initial,
+                timing=self._policy.stall,
             )
         except (FatalLLMStreamError, FatalProviderError, CompactionFailedError) as exc:
             return PendingTurnFailure(exc)
@@ -640,6 +648,7 @@ class AgentHost:
                                 self.relays,
                                 self._policy.handoff_notes,
                                 self._machine,
+                                self._home,
                             ),
                             self.drop_agent,
                             self._wake_resumed,
@@ -679,7 +688,12 @@ class AgentHost:
             agent_id,
             fresh_input=fresh_input,
             settlement=HandoffSettlement(
-                self._db, self._bus, self.relays, self._policy.handoff_notes, self._machine
+                self._db,
+                self._bus,
+                self.relays,
+                self._policy.handoff_notes,
+                self._machine,
+                self._home,
             ),
         )
         return await self._invoke_native_graph(
@@ -717,7 +731,9 @@ class AgentHost:
     # Terminate this machine's crash corpses whose grace window has elapsed.
     async def reap_corpses(self) -> None:
         try:
-            await reap_and_announce_corpses(self._control_pool, self._machine, bus=self._bus)
+            await reap_and_announce_corpses(
+                self._control_pool, self._machine, bus=self._bus, home=self._home
+            )
         except (psycopg.OperationalError, PoolTimeout):
             # meiva:note
             # The beat counts a database that stays unreachable and exits the host.

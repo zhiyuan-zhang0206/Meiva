@@ -7,7 +7,7 @@ import pytest
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import Checkpoint, empty_checkpoint
 from langgraph.constants import PUSH
-from psycopg import AsyncConnection, Capabilities, errors
+from psycopg import AsyncConnection, errors
 from psycopg.pq import PipelineStatus, TransactionStatus
 from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
@@ -31,6 +31,17 @@ async def _pool(size: int) -> AsyncGenerator[AsyncConnectionPool[AsyncConnection
     ) as pool:
         await pool.wait()
         yield pool
+
+
+# meiva:note
+# A saver whose read of agent 101's thread takes a transaction-scoped advisory lock inside the
+# query, so a test holding that lock leaves exactly that read blocked on the server.
+class _ReadGatedSaver(PooledPostgresSaver):
+    SELECT_SQL = PooledPostgresSaver.SELECT_SQL.replace(
+        "select",
+        f"select CASE WHEN thread_id = '101' THEN pg_advisory_xact_lock({_LOCK_KEY}) END AS test_gate,",
+        1,
+    )
 
 
 def _config(thread_id: str) -> RunnableConfig:
@@ -61,14 +72,10 @@ async def _wait_for_blocked_query(conn: AsyncConnection) -> None:
 @pytest.mark.parametrize("operation", ["read", "write"])
 async def test_blocked_agent_checkpoint_does_not_block_another_agent(
     adb_conn: AsyncConnection,
-    monkeypatch: pytest.MonkeyPatch,
     operation: Literal["read", "write"],
 ) -> None:
     async with _pool(2) as pool:
-        saver = await build_checkpointer(
-            cast(AsyncConnectionPool[AsyncConnection], pool),
-            read_checkpoint_interval=lambda: settings.agent.checkpoint_interval,
-        )
+        saver = (_ReadGatedSaver if operation == "read" else PooledPostgresSaver)(pool)
         checkpoint = _checkpoint()
         blocked_config = await saver.aput(
             _config("101"), checkpoint, {"source": "input", "step": -1}, {"value": "1"}
@@ -78,16 +85,6 @@ async def test_blocked_agent_checkpoint_does_not_block_another_agent(
         )
 
         if operation == "read":
-            monkeypatch.setattr(
-                saver,
-                "SELECT_SQL",
-                saver.SELECT_SQL.replace(
-                    "select",
-                    f"select CASE WHEN thread_id = '101' "
-                    f"THEN pg_advisory_xact_lock({_LOCK_KEY}) END AS test_gate,",
-                    1,
-                ),
-            )
             await adb_conn.execute("SELECT pg_advisory_xact_lock(%s)", (_LOCK_KEY,))
         else:
             await adb_conn.execute(
@@ -127,14 +124,10 @@ async def test_blocked_agent_checkpoint_does_not_block_another_agent(
             await asyncio.wait_for(blocked, timeout=5)
 
 
-async def test_same_agent_flush_serializes_with_newer_checkpoint(
-    adb_conn: AsyncConnection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(settings.agent, "checkpoint_interval", 4)
+async def test_same_agent_flush_serializes_with_newer_checkpoint(adb_conn: AsyncConnection) -> None:
     async with _pool(2) as pool:
         saver = await build_checkpointer(
-            cast(AsyncConnectionPool[AsyncConnection], pool),
-            read_checkpoint_interval=lambda: settings.agent.checkpoint_interval,
+            cast(AsyncConnectionPool[AsyncConnection], pool), checkpoint_interval=4
         )
         initial = await saver.aput(
             _config("101"), _checkpoint(), {"source": "input", "step": -1}, {"value": "1"}
@@ -182,24 +175,16 @@ async def test_same_agent_flush_serializes_with_newer_checkpoint(
 @pytest.mark.parametrize("failure", ["error", "cancel"])
 async def test_failed_cursor_returns_a_clean_reusable_pool_connection(
     adb_conn: AsyncConnection,
-    monkeypatch: pytest.MonkeyPatch,
     supports_pipeline: bool,
     failure: Literal["error", "cancel"],
 ) -> None:
-    if not supports_pipeline:
-
-        def unavailable(_self: Capabilities) -> bool:
-            return False
-
-        monkeypatch.setattr(Capabilities, "has_pipeline", unavailable)
-
     async with _pool(1) as pool:
         saver = PooledPostgresSaver(pool)
         async with pool.connection() as conn:
             original_backend = conn.info.backend_pid
 
         async def fail() -> None:
-            async with saver._cursor(pipeline=True) as cur:
+            async with saver._cursor(pipeline=supports_pipeline) as cur:
                 if failure == "error":
                     await cur.execute("SELECT 1 / 0")
                 else:

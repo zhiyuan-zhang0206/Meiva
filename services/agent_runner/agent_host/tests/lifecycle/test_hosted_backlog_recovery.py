@@ -18,6 +18,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog
+from base.paths import meiva_home
 from base.sessions.tests.poll_until import poll_until_async
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
@@ -50,6 +51,7 @@ async def test_pending_scan_classifies_lifecycle_work_and_impersonation(
     lifecycle = insert_inbound(db_conn, agent, "", "system:test", kind="restart")
     db_conn.commit()
     host = AgentHost(
+        home=meiva_home(),
         policy=configured_policy(),
         pool=aops_pool,
         checkpointer=AsyncMock(),
@@ -120,6 +122,7 @@ async def test_old_pending_scan_never_cancels_a_running_turn(
 
     graph, saver = await _graph(aops_pool, agent, work)
     host = AgentHost(
+        home=meiva_home(),
         policy=configured_policy(),
         pool=aops_pool,
         graph=graph,
@@ -179,6 +182,7 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
     )
     agent = incarnation.agent_id
     host = AgentHost(
+        home=meiva_home(),
         policy=configured_policy(),
         pool=aops_pool,
         checkpointer=AsyncMock(),

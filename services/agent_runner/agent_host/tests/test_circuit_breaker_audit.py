@@ -3,7 +3,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import psycopg
-import pytest
+from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.llm_errors import FatalProviderError
@@ -11,19 +11,20 @@ from agent.state import CircuitState
 from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
+from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
-from base.telemetry import audit_events
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.table_faults import refused_write
 
 
 def _overflow() -> FatalProviderError:
@@ -60,11 +61,11 @@ async def test_the_breaker_open_event_is_recorded_in_audit_events(
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
+            agent=AgentSlices.resolve(default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
-            clock_factory=configured_policy().clock_factory,
+            clock_factory=Clock.from_settings,
         ),
         agent_id=agent_id,
         circuit=None,
@@ -85,7 +86,6 @@ async def test_a_failed_audit_write_is_reported_and_does_not_undo_the_open_break
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     emitted_events: EmittedEvents,
     *,
     model_catalog: ModelCatalog,
@@ -101,28 +101,29 @@ async def test_a_failed_audit_write_is_reported_and_does_not_undo_the_open_break
         machine=machine_identity,
     )
 
-    async def refuse(_pool: object, _event: object) -> None:
-        raise RuntimeError("audit write failed")
-
-    monkeypatch.setattr(audit_events, "record_audit_standalone_async", refuse)
-
     emitted_events.clear()
 
-    update = await _handle_fatal_llm_error(
-        _overflow(),
-        MeivaContext(
-            ops_pool=aops_pool,
-            llm=MagicMock(),
-            event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-            db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(),
-            catalog=build_model_catalog(),
-            clock_factory=configured_policy().clock_factory,
-        ),
-        agent_id=agent_id,
-        circuit=None,
-    )
+    with refused_write(
+        db_conn,
+        table="audit_events",
+        event="INSERT",
+        when=sql.SQL("NEW.event_name = 'circuit_breaker'"),
+    ):
+        update = await _handle_fatal_llm_error(
+            _overflow(),
+            MeivaContext(
+                ops_pool=aops_pool,
+                llm=MagicMock(),
+                event_publisher=MagicMock(),
+                agent=AgentSlices.resolve(default_reader=defaults()),
+                db=Database.from_settings(gate=database_gate),
+                bus=EventBus.from_settings(),
+                catalog=build_model_catalog(),
+                clock_factory=Clock.from_settings,
+            ),
+            agent_id=agent_id,
+            circuit=None,
+        )
 
     circuit = update["circuit"]
     assert isinstance(circuit, CircuitState)

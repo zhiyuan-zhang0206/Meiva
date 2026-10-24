@@ -8,12 +8,6 @@ exports = ["recovery_admission.py", "resurrection", "test_hosted_lifecycle.py"]
 
 [debt.first-party-patch]
 "test_hosted_lifecycle.py#monkeypatch.setattr ops.cluster_status.kill_agent_shells" = 1
-"test_hosted_ownership_agent_host.py#monkeypatch.setattr agent.ownership.hosted.publish_agent_updated" = 1
-"test_hosted_ownership_agent_host.py#monkeypatch.setattr services.agent_runner.agent_host.host.publish_agent_updated" = 1
-"test_hosted_ownership_agent_host.py#monkeypatch.setattr services.agent_runner.agent_host.runtime.validate_model_launch" = 1
 
 [debt.third-party-patch]
 "test_hosted_dispatcher_cancellation.py#monkeypatch.setattr psycopg_pool.AsyncConnectionPool._check_connection" = 1
-
-[debt.unresolved-patch]
-"test_hosted_ownership_agent_host.py#monkeypatch.setattr host._runtime_for" = 1

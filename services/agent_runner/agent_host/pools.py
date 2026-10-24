@@ -2,15 +2,28 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import LoggingConnectionPool
-from base.config import settings
 from base.db import Database
 
 
-def build_shared_pool(db: Database) -> AsyncConnectionPool[psycopg.AsyncConnection]:
+# meiva:note
+# The sizes and waits of the host's two client pools, read once by the root.
+@dataclass(frozen=True)
+class PoolBounds:
+    workload_max_size: int
+    control_max_size: int
+    acquire_timeout_s: float
+    slow_acquire_warn_s: float
+
+
+def build_shared_pool(
+    db: Database, bounds: PoolBounds
+) -> AsyncConnectionPool[psycopg.AsyncConnection]:
     """The host's turn/checkpoint pool, independent of active agent count.
 
     Agents waiting on models or tools need no dedicated connection. The client
@@ -23,14 +36,16 @@ def build_shared_pool(db: Database) -> AsyncConnectionPool[psycopg.AsyncConnecti
     return db.async_pool(
         LoggingConnectionPool[psycopg.AsyncConnection],
         pool_name="agent-host",
-        slow_acquire_warn_seconds=settings.agent.db_pool_slow_acquire_warn_seconds,
+        slow_acquire_warn_seconds=bounds.slow_acquire_warn_s,
         min_size=0,
-        max_size=settings.daemon.host_db_pool_max_size,
-        timeout=settings.agent.db_pool_acquire_timeout_seconds,
+        max_size=bounds.workload_max_size,
+        timeout=bounds.acquire_timeout_s,
     )
 
 
-def build_control_pool(db: Database) -> AsyncConnectionPool[psycopg.AsyncConnection]:
+def build_control_pool(
+    db: Database, bounds: PoolBounds
+) -> AsyncConnectionPool[psycopg.AsyncConnection]:
     """Reserved capacity for host ownership, recovery, and durable scans.
 
     PgBouncer remains the downstream server-connection multiplexer. This
@@ -43,10 +58,10 @@ def build_control_pool(db: Database) -> AsyncConnectionPool[psycopg.AsyncConnect
     return db.async_pool(
         LoggingConnectionPool[psycopg.AsyncConnection],
         pool_name="agent-host-control",
-        slow_acquire_warn_seconds=settings.agent.db_pool_slow_acquire_warn_seconds,
+        slow_acquire_warn_seconds=bounds.slow_acquire_warn_s,
         min_size=0,
-        max_size=settings.daemon.host_control_pool_max_size,
-        timeout=settings.agent.db_pool_acquire_timeout_seconds,
+        max_size=bounds.control_max_size,
+        timeout=bounds.acquire_timeout_s,
     )
 
 

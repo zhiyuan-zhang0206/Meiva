@@ -3,6 +3,7 @@
 # the browser release and the requested shell cleanup, which only this layer can reach.
 
 import asyncio
+from pathlib import Path
 
 from psycopg_pool import AsyncConnectionPool
 
@@ -13,7 +14,11 @@ from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.paths import meiva_home
+from services.agent_runner.agent_host.lifecycle.cleanup_failures import (
+    CleanupFailure,
+    note_for,
+    summarize,
+)
 
 
 # meiva:note
@@ -46,10 +51,44 @@ def kill_terminating_agent_shells(agent_id: int, cutoff: int) -> None:
 
 
 # meiva:note
+# Attempt every effect a committed termination owes, whatever an earlier one did: the change
+# hint, the browser release and, when it asked, the shell cleanup below its cutoff. The first
+# failure (a cancellation included) is raised after all attempts; each later one is attached to
+# it as a note and logged at ERROR.
+async def finish_termination(
+    bus: EventBus, agent_id: int, shell_cutoff: int | None, *, home: Path
+) -> None:
+    failures: list[CleanupFailure] = []
+    try:
+        await publish_agent_updated(bus, agent_id)
+    except BaseException as error:
+        failures.append(CleanupFailure("publication", error))
+    try:
+        await release_browser_pages(agent_id, home=home)
+    except BaseException as error:
+        failures.append(CleanupFailure("browser", error))
+    if shell_cutoff is not None:
+        try:
+            await asyncio.to_thread(kill_terminating_agent_shells, agent_id, shell_cutoff)
+        except BaseException as error:
+            failures.append(CleanupFailure("shell", error))
+    summary = summarize(failures)
+    if summary.primary is None:
+        return
+    for failure in summary.also_failed:
+        summary.primary.add_note(note_for(failure))
+        logger.opt(exception=failure.error).error(
+            "termination committed but {step} cleanup also failed after an earlier failure",
+            step=failure.step,
+            agent_id=agent_id,
+            cutoff=shell_cutoff,
+        )
+    raise summary.primary
+
+
+# meiva:note
 # Apply the claimed restart/terminate command and run what its commit owes. A restart owes
-# nothing. A terminate owes the change hint, the browser release and, when it asked, the shell
-# cleanup below its cutoff. Each is attempted even when an earlier one fails or is cancelled,
-# and the failure is raised after the attempts. Returns the applied kind, or None when the
+# nothing; a terminate owes `finish_termination`. Returns the applied kind, or None when the
 # incarnation no longer owns the row or no command was claimed.
 async def apply_lifecycle_command(
     pool: AsyncConnectionPool,
@@ -57,21 +96,13 @@ async def apply_lifecycle_command(
     *,
     bus: EventBus,
     resume_turn: bool,
+    home: Path,
 ) -> LifecycleKind | None:
     applied = await apply_hosted_lifecycle(pool, incarnation, resume_turn=resume_turn)
     if applied is None:
         return None
     if applied.kind == "terminate":
-        try:
-            await publish_agent_updated(bus, applied.agent_id)
-        finally:
-            try:
-                await release_browser_pages(applied.agent_id, home=meiva_home())
-            finally:
-                if applied.shell_cutoff is not None:
-                    await asyncio.to_thread(
-                        kill_terminating_agent_shells, applied.agent_id, applied.shell_cutoff
-                    )
+        await finish_termination(bus, applied.agent_id, applied.shell_cutoff, home=home)
     return applied.kind
 
 
@@ -80,7 +111,7 @@ async def apply_lifecycle_command(
 # release each one's browser pages. The durable flip already committed, so a failed hint is logged and
 # the next corpse still gets its pages released.
 async def reap_and_announce_corpses(
-    pool: AsyncConnectionPool, machine: str, *, bus: EventBus
+    pool: AsyncConnectionPool, machine: str, *, bus: EventBus, home: Path
 ) -> list[ReapedCorpse]:
     reaped = await reap_crash_corpses(pool, machine)
     for corpse in reaped:
@@ -92,5 +123,5 @@ async def reap_and_announce_corpses(
                 event="corpse_reaper_publish_failed",
                 agent_id=corpse.agent_id,
             )
-        await release_browser_pages(corpse.agent_id, home=meiva_home())
+        await release_browser_pages(corpse.agent_id, home=home)
     return reaped

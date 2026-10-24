@@ -11,7 +11,7 @@ async def test_repeated_cancellation_cannot_release_owned_settlement() -> None:
         await release.wait()
 
     owned = asyncio.create_task(settle())
-    custody = asyncio.create_task(wait_shielded_task(owned))
+    custody = asyncio.create_task(wait_shielded_task(owned, timeout_s=10.0))
     await entered.wait()
     custody.cancel()
     await asyncio.sleep(0)

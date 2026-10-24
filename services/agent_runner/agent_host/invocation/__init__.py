@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
@@ -47,6 +48,7 @@ class HandoffSettlement:
     relays: RelaySupervision
     notes: TimestampPolicy
     local_machine: str
+    home: Path
 
 
 @dataclass(frozen=True)
@@ -135,7 +137,11 @@ async def finish_completed_invocation(
         resume_turn = bool(pending.result["restart_requested"]) and not pending.result["halted"]
         async with database_phase():
             kind = await apply_lifecycle_command(
-                pool, incarnation, bus=hooks.settlement.bus, resume_turn=resume_turn
+                pool,
+                incarnation,
+                bus=hooks.settlement.bus,
+                resume_turn=resume_turn,
+                home=hooks.settlement.home,
             )
         logger.info(
             "hosted lifecycle return settled",
