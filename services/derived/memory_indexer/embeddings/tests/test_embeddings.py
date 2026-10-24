@@ -17,19 +17,21 @@ from __future__ import annotations
 import asyncio
 import gzip
 import json
+import sys
 import threading
 import time
 from collections.abc import AsyncGenerator, Generator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 import httpx
 import numpy as np
 import pytest
 
-from base import config
+from base.host.proc import run_bounded
 from base.lm import usage
 from base.packages.plugin_providers import build_model_catalog
 from services.derived.memory_indexer.embeddings import gemini
@@ -129,85 +131,6 @@ def patch_client(monkeypatch: pytest.MonkeyPatch, fake: AsyncClient) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", fake)
 
 
-class _RecordedSpan:
-    def __init__(self, name: str, start_time: int | None) -> None:
-        self.name = name
-        self.start_time = start_time
-        self.attributes: dict[str, Any] = {}
-        self.ended = False
-
-    def set_attribute(self, key: str, value: Any) -> None:
-        self.attributes[key] = value
-
-    def end(self) -> None:
-        self.ended = True
-
-
-class _RecordingTracer:
-    def __init__(self) -> None:
-        self.spans: list[_RecordedSpan] = []
-
-    def start_span(self, name: str, *, start_time: int | None = None) -> _RecordedSpan:
-        span = _RecordedSpan(name, start_time)
-        self.spans.append(span)
-        return span
-
-
-def _enable_tracing(monkeypatch: pytest.MonkeyPatch) -> _RecordingTracer:
-    from base.telemetry import tracing as tracing_mod
-
-    tracer = _RecordingTracer()
-    monkeypatch.setattr(config.settings.observability, "trace_enabled", True)
-    monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
-    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
-    return tracer
-
-
-def _embedding_cost(tok_in: int) -> float:
-    """Cost of an embedding call under the catalog's gemini-embedding-2 entry.
-
-    Text input $0.20/1M tokens; embeddings have no output and no cache, so
-    the billed cost is tok_in × 0.20 / 1M, rounded the way emit_billing_event
-    rounds it (6 decimals)."""
-    from base.lm.pricing import quote
-
-    priced = quote(MODEL_ID, tok_in, 0, 0, prices=build_model_catalog().prices)
-    assert priced is not None  # gemini-embedding-2 is registered in the catalog
-    return priced.cost_usd
-
-
-def _assert_priced_embedding_span(tracer: _RecordingTracer, *, tok_in: int) -> None:
-    assert len(tracer.spans) == 1
-    span = tracer.spans[0]
-    assert span.name == "meiva.billing.call"
-    assert span.ended is True
-    assert span.attributes["meiva.billing.vendor"] == "google"
-    assert span.attributes["meiva.billing.model"] == MODEL_ID
-    assert span.attributes["meiva.billing.tokens_in"] == tok_in
-    assert span.attributes["meiva.billing.tokens_out"] == 0
-    assert span.attributes["meiva.billing.usage_kind"] == "embedding"
-    assert span.attributes["meiva.billing.cost"] == round(_embedding_cost(tok_in), 6)
-    assert "meiva.billing.unpriced" not in span.attributes
-
-
-def _assert_unpriced_embedding_span(tracer: _RecordingTracer, *, tok_in: int) -> None:
-    """Pins the unpriced fallback path for a model absent from the catalog."""
-    # Read the module attribute, not the test file's import snapshot, so a
-    # monkeypatched MODEL_ID (the unknown-model case) is what we assert on.
-    from services.derived.memory_indexer.embeddings import gemini
-
-    assert len(tracer.spans) == 1
-    span = tracer.spans[0]
-    assert span.name == "meiva.billing.call"
-    assert span.ended is True
-    assert span.attributes["meiva.billing.vendor"] == "google"
-    assert span.attributes["meiva.billing.model"] == gemini.MODEL_ID
-    assert span.attributes["meiva.billing.tokens_in"] == tok_in
-    assert span.attributes["meiva.billing.usage_kind"] == "embedding"
-    assert span.attributes["meiva.billing.cost"] == 0.0
-    assert span.attributes["meiva.billing.unpriced"] is True
-
-
 # ── provider surface (the contract) ───────────────────────────────────────
 
 
@@ -240,61 +163,73 @@ def test_embed_query_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["requests"][0]["taskType"] == "RETRIEVAL_QUERY"
 
 
-def test_embed_batch_emits_priced_billing_span(
-    monkeypatch: pytest.MonkeyPatch,
-    loguru_records: list[dict[str, Any]],
-) -> None:
-    fake = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
-    patch_client(monkeypatch, fake)
-    tracer = _enable_tracing(monkeypatch)
-
-    _provider().embed_batch(["hello"])
-
-    _assert_priced_embedding_span(tracer, tok_in=123)
-    [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
-    assert record["extra"]["usage_kind"] == "embedding"
-    assert "unpriced" not in record["extra"]
-    assert record["extra"]["cost_usd"] == _embedding_cost(123)
-
-
-def test_embed_batch_unknown_model_emits_unpriced_billing_span(
-    monkeypatch: pytest.MonkeyPatch,
-    loguru_records: list[dict[str, Any]],
-) -> None:
-    """Pins the unpriced fallback: a model absent from the pricing catalog
-    still emits a billing span, flagged unpriced with cost 0 (task #2493 —
-    gemini-embedding-2 entering the catalog flipped the other tests from this
-    path to the priced one; keep one case proving the fallback survives)."""
-    from services.derived.memory_indexer.embeddings import gemini
-
-    monkeypatch.setattr(gemini, "MODEL_ID", "gemini-unknown-embedding-model")
-    fake = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
-    patch_client(monkeypatch, fake)
-    tracer = _enable_tracing(monkeypatch)
-
-    _provider().embed_batch(["hello"])
-
-    _assert_unpriced_embedding_span(tracer, tok_in=123)
-    [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
-    assert record["extra"]["usage_kind"] == "embedding"
-    assert record["extra"]["unpriced"] == 1
+def test_embed_batch_emits_priced_billing_span(tmp_path: Path) -> None:
+    result = run_bounded(
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("billing_child.py")),
+            "priced",
+            str(tmp_path / "requests"),
+        ],
+        env={
+            "HOME": str(tmp_path),
+            "MEIVA_HOME": str(tmp_path),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_CONFIG_BOOT": "eager",
+            "MEIVA_PROCESS_PROFILE": "agent",
+        },
+        timeout=90,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_embed_batch_emits_priced_accounting_without_usage_metadata(
-    monkeypatch: pytest.MonkeyPatch,
-    loguru_records: list[dict[str, Any]],
-) -> None:
-    fake = AsyncClient(vectors=[[1.0] * DIM])
-    patch_client(monkeypatch, fake)
-    tracer = _enable_tracing(monkeypatch)
+def test_embed_batch_unpriced_catalog_emits_unpriced_billing_span(tmp_path: Path) -> None:
+    result = run_bounded(
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("billing_child.py")),
+            "unpriced",
+            str(tmp_path / "requests"),
+        ],
+        env={
+            "HOME": str(tmp_path),
+            "MEIVA_HOME": str(tmp_path),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_CONFIG_BOOT": "eager",
+            "MEIVA_PROCESS_PROFILE": "agent",
+        },
+        timeout=90,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
-    _provider().embed_batch(["hello"])
 
-    _assert_priced_embedding_span(tracer, tok_in=0)
-    [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
-    assert record["extra"]["usage_kind"] == "embedding"
-    assert "unpriced" not in record["extra"]
-    assert record["extra"]["cost_usd"] == 0.0
+def test_embed_batch_emits_priced_accounting_without_usage_metadata(tmp_path: Path) -> None:
+    result = run_bounded(
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("billing_child.py")),
+            "missing",
+            str(tmp_path / "requests"),
+        ],
+        env={
+            "HOME": str(tmp_path),
+            "MEIVA_HOME": str(tmp_path),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_CONFIG_BOOT": "eager",
+            "MEIVA_PROCESS_PROFILE": "agent",
+        },
+        timeout=90,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_embed_query_async_shape(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -311,17 +246,27 @@ def test_embed_query_async_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["requests"][0]["outputDimensionality"] == DIM
 
 
-def test_embed_query_async_emits_priced_billing_span(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fake = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
-    patch_client(monkeypatch, fake)
-    tracer = _enable_tracing(monkeypatch)
-
-    result = asyncio.run(_provider().embed_query_async("hello"))
-
-    assert result.shape == (DIM,)
-    _assert_priced_embedding_span(tracer, tok_in=123)
+def test_embed_query_async_emits_priced_billing_span(tmp_path: Path) -> None:
+    result = run_bounded(
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("billing_child.py")),
+            "async",
+            str(tmp_path / "requests"),
+        ],
+        env={
+            "HOME": str(tmp_path),
+            "MEIVA_HOME": str(tmp_path),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_CONFIG_BOOT": "eager",
+            "MEIVA_PROCESS_PROFILE": "agent",
+        },
+        timeout=90,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_embed_request_payload_and_auth(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -338,40 +283,73 @@ def test_embed_request_payload_and_auth(monkeypatch: pytest.MonkeyPatch) -> None
     assert req["content"]["parts"][0]["text"] == "hello world"
 
 
-def test_embed_batch_empty_short_circuit(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = AsyncClient(vectors=[])
-    patch_client(monkeypatch, fake)
-    tracer = _enable_tracing(monkeypatch)
-    result = _provider().embed_batch([])
-    assert result.shape == (0, DIM)
-    assert fake.call_count == 0
-    assert tracer.spans == []
+def test_embed_batch_empty_short_circuit(tmp_path: Path) -> None:
+    result = run_bounded(
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("billing_child.py")),
+            "empty",
+            str(tmp_path / "requests"),
+        ],
+        env={
+            "HOME": str(tmp_path),
+            "MEIVA_HOME": str(tmp_path),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_CONFIG_BOOT": "eager",
+            "MEIVA_PROCESS_PROFILE": "agent",
+        },
+        timeout=90,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_embed_retries_then_succeeds(
-    monkeypatch: pytest.MonkeyPatch,
-    loguru_records: list[dict[str, Any]],
-) -> None:
-    fake = AsyncClient(vectors=[[1.0] * DIM], raises_times=2)
-    patch_client(monkeypatch, fake)
-    tracer = _enable_tracing(monkeypatch)
-    result = _provider().embed_batch(["hello"])
-    assert result.shape == (1, DIM)
-    assert fake.call_count == 3
-    _assert_priced_embedding_span(tracer, tok_in=0)
-    [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
-    assert record["extra"]["usage_kind"] == "embedding"
-    assert "unpriced" not in record["extra"]
-    assert record["extra"]["cost_usd"] == 0.0
+def test_embed_retries_then_succeeds(tmp_path: Path) -> None:
+    result = run_bounded(
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("billing_child.py")),
+            "retry",
+            str(tmp_path / "requests"),
+        ],
+        env={
+            "HOME": str(tmp_path),
+            "MEIVA_HOME": str(tmp_path),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_CONFIG_BOOT": "eager",
+            "MEIVA_PROCESS_PROFILE": "agent",
+        },
+        timeout=90,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_embed_raises_after_max_retries(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = AsyncClient(vectors=[[1.0] * DIM], raises_times=100)
-    patch_client(monkeypatch, fake)
-    tracer = _enable_tracing(monkeypatch)
-    with pytest.raises(EmbeddingAPIError, match="failed after"):
-        _provider().embed_batch(["hello"])
-    assert tracer.spans == []  # a failed call emits no billing span
+def test_embed_raises_after_max_retries(tmp_path: Path) -> None:
+    result = run_bounded(
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("billing_child.py")),
+            "failed",
+            str(tmp_path / "requests"),
+        ],
+        env={
+            "HOME": str(tmp_path),
+            "MEIVA_HOME": str(tmp_path),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_CONFIG_BOOT": "eager",
+            "MEIVA_PROCESS_PROFILE": "agent",
+        },
+        timeout=90,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("mode", ["batch", "query", "async_query"])

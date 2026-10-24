@@ -1,58 +1,6 @@
-"""Trace recording — OTLP/HTTP export to the local OTel Collector sidecar.
-
-**Record** (this module): called once per process during `agent/process_boot.py:init_process_scope`.
-When `trace_enabled` (default on), OpenLLMetry (traceloop-sdk) auto-instruments
-the Anthropic/OpenAI/Google SDKs + LangChain/LangGraph, and every span is
-exported over OTLP/HTTP (protobuf wire format) to the local OTel Collector
-sidecar (`MEIVA_TELEMETRY_OTLP_ENDPOINT`, default 127.0.0.1:4318) by
-`OtlpJsonHttpSpanExporter`; the slow import+init runs on a daemon thread off
-the boot path (use sites wait via ensure_init_resolved()). The sidecar (one
-per machine, supervised like every other Meiva service) writes the local JSONL
-mirror under `$MEIVA_HOME/traces/` via its file exporter. A gateway sidecar fans out to loopback Tempo; a pure runner
-sidecar relays to the gateway collector's authenticated private receiver. Each
-line is one standard OTLP/JSON `ExportTraceServiceRequest` (the same wire shape
-any OTLP backend ingests), giving accepted batches a vendor-neutral, grep-able
-local recovery copy. A gap present in the mirror can be replayed with
-`meiva trace ship`.
-
-  **Metadata-only by default (trace v2, 2026-08-05)**: spans record chain
-  metadata (span names, langgraph paths, checkpoint refs, agent_id, durations,
-  status, trace_id) but NOT LLM content. Content stripping happens at two
-  layers: `TRACELOOP_TRACE_CONTENT=false` stops the instrumentors from
-  attaching prompt/completion attributes at the source (2026-08-05 incident:
-  31 GB/h of mirror, 99.89% of it `gen_ai.task.input/output`-style content),
-  and `OtlpJsonHttpSpanExporter` re-strips defensively before anything leaves
-  the process (a future instrumentor that ignores the env var cannot leak
-  content back in). Turn content is fetched on demand from the checkpoints
-  table by trace id — see `base/agents/history/checkpoint.py` / the gateway trace endpoint.
-
-- **Ship** (`cli/commands/observability/trace.py`, `meiva trace ship`): replays a time window of
-  the sidecar's JSONL mirror to Tempo directly on a gateway, or through the
-  gateway collector's authenticated receiver on a pure runner. This is the
-  recovery path (backend down longer than the collector queue held, offline
-  machines) — the live fan-out is the collector's job. It is resumable via a
-  watermark, and it gates on `telemetry_otlp_enabled` — one kill switch for
-  the whole OTLP surface (with the sidecar architecture this also stops
-  recording, since recording IS the OTLP export).
-
-turn_span() in agent/turn/runloop.py wraps each graph.ainvoke — one invocation =
-one agent TURN — in a native OTel root span so every LLM/tool child span of
-that turn nests under it. The root is a PLACEHOLDER: ended (and thus
-exported) at turn START, so a trace always has its root even when the process
-is killed mid-turn (#1964); children export as they end and parent under the
-already-ended root via the kept OTel context. The
-root carries the vendor-neutral `session.id` (Tempo/Grafana group one agent's
-turns into a session by it) plus `meiva.turn` (the per-process turn counter).
-
-claim_idle_wait_span() (used by the agent claim node) ends the open LangChain
-node span (`execute_task claim`) before the node parks in
-`agent/graph/claim/_batch._wait_for_batch` and records the idle park as an
-explicit `claim idle-wait` span, so an idle wait shows as a labeled span
-instead of a giant opaque node span in the trace.
-
-One arm attempt per process; collector misses retry every five minutes.
-
-"""
+# meiva:note
+# The process root owns one admitted SDK arm; billing and public spans observe its shared readiness.
+# meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
 
 from __future__ import annotations
 
@@ -84,6 +32,7 @@ from base.telemetry.otlp.telemetry_otlp import (
     observability_export_allowed,
 )
 from base.telemetry.otlp.trace_config import TraceConfig
+from base.telemetry.otlp.trace_readiness import PROCESS_RECORDING, TRACE_INIT_WAIT_S, TraceReadiness
 from base.telemetry.otlp.trace_workers import CollectorRetry, TraceArm
 from base.telemetry.trace_mirror import (
     disk_usage,
@@ -101,7 +50,6 @@ __all__ = [
     "disk_usage",
     "disk_watermark_exceeded",
     "enforce_dir_cap",
-    "ensure_init_resolved",
     "gzip_old_mirror",
     "initialize_tracing",
     "mirror_size",
@@ -238,13 +186,7 @@ state: dict[str, Any] = {
     "closed": False,
     "arm_owner": None,
     "retry_owner": None,
-    "initialized": False,
     "collector_offline_reported": False,
-    "retry_thread": None,
-    "arm_thread": None,
-    "init_resolved": threading.Event(),
-    "arm_failed": False,
-    "timeout_reported": False,
 }
 _init_lock = threading.Lock()
 _lifecycle_lock = threading.Lock()
@@ -377,35 +319,45 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
         return None
 
 
-def start_collector_retry(machine: MachineIdentityReader, home: Path, config: TraceConfig) -> None:
+def start_collector_retry(
+    machine: MachineIdentityReader, home: Path, config: TraceConfig, *, readiness: TraceReadiness
+) -> None:
     with _lifecycle_lock:
         if state.get("closed") or state.get("retry_owner") is not None:
             return
         owner = CollectorRetry(
-            initialize=lambda: initialize_tracing(machine=machine, home=home, config=config),
-            resolved=lambda: bool(state["initialized"] or state["arm_failed"]),
+            initialize=lambda: initialize_tracing(
+                machine=machine, home=home, config=config, readiness=readiness
+            ),
+            resolved=lambda: readiness.resolved,
             interval=lambda: COLLECTOR_RETRY_INTERVAL_S,
         )
         state["retry_owner"] = owner
-        state["retry_thread"] = owner._thread
 
 
 # meiva:note
 # Import traceloop and run Traceloop.init on one daemon thread off the boot
 # path (~2.5-3 s for traceloop.sdk + google.genai). Consumers wait on
-# ensure_init_resolved() before first use; a failure logs and resolves the
+# the shared recording readiness before first use; a failure logs and resolves the
 # wait so recording stays off instead of killing boot.
-def arm_tracing(
+def _arm_tracing(
     endpoint: str,
     stop_requested: threading.Event | None = None,
     *,
     production: bool,
     home: Path,
     strip_content: bool,
+    readiness: TraceReadiness,
 ) -> None:
     if stop_requested is not None and stop_requested.is_set():
+        readiness.close()
         return
+    if not readiness.begin():
+        return
+    recording = False
     try:
+        if stop_requested is not None and stop_requested.is_set():
+            return
         # meiva:note
         # Content stripping, layer 1 (the source): false-before-init keeps
         # LLM content out of span attributes. Unconditional when
@@ -438,38 +390,30 @@ def arm_tracing(
         # Recheck after slow import: a concurrent caller or real shutdown may
         # have resolved admission while this arm waited for the import lock.
         with _init_lock:
-            if (
-                state["initialized"]
-                or state["arm_failed"]
-                or (stop_requested is not None and stop_requested.is_set())
-            ):
+            if readiness.resolved or (stop_requested is not None and stop_requested.is_set()):
                 return
-            try:
-                Traceloop.init(  # pyright: ignore[reportUnknownMemberType]
-                    app_name="meiva",
-                    exporter=OtlpJsonHttpSpanExporter(endpoint, strip_content=strip_content),
-                    instruments=instruments,
-                    disable_batch=False,
-                    telemetry_enabled=False,
-                    resource_attributes={
-                        "cluster": cluster_label(home),
-                        "service.line": "meiva",
-                        "environment": "prod" if production else "dev",
-                    },
-                )
-                if stop_requested is not None and stop_requested.is_set():
-                    return
-                logger.info(
-                    "trace recording enabled",
-                    event="trace",
-                    endpoint=endpoint,
-                    mirror_dir=str(traces_dir(home)),
-                )
-                state["collector_offline_reported"] = False
-                state["initialized"] = True
-            except Exception:
-                state["arm_failed"] = True
-                raise
+            Traceloop.init(  # pyright: ignore[reportUnknownMemberType]
+                app_name="meiva",
+                exporter=OtlpJsonHttpSpanExporter(endpoint, strip_content=strip_content),
+                instruments=instruments,
+                disable_batch=False,
+                telemetry_enabled=False,
+                resource_attributes={
+                    "cluster": cluster_label(home),
+                    "service.line": "meiva",
+                    "environment": "prod" if production else "dev",
+                },
+            )
+            if stop_requested is not None and stop_requested.is_set():
+                return
+            logger.info(
+                "trace recording enabled",
+                event="trace",
+                endpoint=endpoint,
+                mirror_dir=str(traces_dir(home)),
+            )
+            state["collector_offline_reported"] = False
+            recording = True
     except BaseException as exc:
         # meiva:note
         # One attempt per process: the retry loop only bridges
@@ -478,7 +422,6 @@ def arm_tracing(
         # so a second init() adds no instrumentors yet reports success.
         #
         # SDK failures consume the single arm attempt, including BaseException.
-        state["arm_failed"] = True
         logger.warning(
             "trace recording failed to initialize — spans disabled this process",
             event="trace",
@@ -486,39 +429,74 @@ def arm_tracing(
             error=repr(exc),
         )
     finally:
-        state["init_resolved"].set()
+        readiness.complete(recording=recording)
 
 
-def start_arm_thread(config: TraceConfig, machine: MachineIdentityReader, home: Path) -> None:
-    """Admit one arm; stop never acquires the slow SDK init lock."""
+def arm_tracing(
+    endpoint: str,
+    stop_requested: threading.Event | None = None,
+    *,
+    production: bool,
+    home: Path,
+    strip_content: bool,
+    readiness: TraceReadiness,
+) -> None:
+    if not readiness.reserve():
+        return
+    _arm_tracing(
+        endpoint,
+        stop_requested,
+        production=production,
+        home=home,
+        strip_content=strip_content,
+        readiness=readiness,
+    )
+
+
+def start_arm_thread(
+    config: TraceConfig, machine: MachineIdentityReader, home: Path, *, readiness: TraceReadiness
+) -> None:
     with _lifecycle_lock:
         if state.get("closed") or state.get("arm_owner") is not None:
             return
         from base.cluster.derive import production_identity
 
         production = production_identity(machine, home=home)
-        owner = TraceArm(
-            config.endpoint,
-            lambda endpoint, stop: arm_tracing(
-                endpoint,
-                stop,
-                production=production,
-                home=home,
-                strip_content=config.strip_content,
-            ),
-        )
-        state["arm_owner"] = owner
-        state["arm_thread"] = owner._thread
-        state["init_resolved"] = owner.finished
+        if not readiness.reserve():
+            return
+        try:
+            owner = TraceArm(
+                config.endpoint,
+                lambda endpoint, stop: _arm_tracing(
+                    endpoint,
+                    stop,
+                    production=production,
+                    home=home,
+                    strip_content=config.strip_content,
+                    readiness=readiness,
+                ),
+            )
+            state["arm_owner"] = owner
+        except BaseException:
+            readiness.close()
+            raise
+    try:
+        owner.start()
+    except BaseException:
+        readiness.close()
+        owner.request_stop()
+        raise
 
 
-def shutdown(timeout: float = 2.0) -> tuple[str, ...]:
-    """Stop trace admission and report residual workers within one caller budget."""
+def shutdown(timeout: float = 2.0, *, readiness: TraceReadiness) -> tuple[str, ...]:
+    # meiva:note
+    # Close admission and report owners whose completion is unconfirmed within one budget.
     if not math.isfinite(timeout) or timeout < 0:
         raise ValueError("trace stop timeout must be finite and non-negative")
     deadline = time.monotonic() + timeout
     with _lifecycle_lock:
         state["closed"] = True
+        readiness.close()
         owners = [owner for key in ("retry_owner", "arm_owner") if (owner := state.get(key))]
     for owner in owners:
         owner.request_stop()
@@ -533,49 +511,23 @@ def shutdown(timeout: float = 2.0) -> tuple[str, ...]:
                 primary = exc
     if unfinished:
         report_no_pipeline(
-            "trace shutdown degraded; unfinished workers: {workers}", workers=unfinished
+            "trace shutdown degraded; completion unconfirmed for: {workers}", workers=unfinished
         )
     if primary is not None:
         raise primary
     return tuple(unfinished)
 
 
-INIT_RESOLVED_TIMEOUT_S = 30.0
-
-
-def ensure_init_resolved() -> None:
-    """Block until the boot-time trace decision is final; no-op when none is pending.
-
-    turn_span() calls this before opening the first turn root span: a span
-    opened against the unset proxy tracer is silently lost, and LangChain
-    callback managers configured before the wrap lands never carry the
-    traceloop handler. Only waits when this process armed background tracing
-    — declined or never-requested init returns immediately.
-
-    The wait is bounded (INIT_RESOLVED_TIMEOUT_S): a hung arm (cross-thread
-    import deadlock, SDK network stall) must not hang the first turn forever.
-    A timeout logs once, proceeds without recording, and later turns skip the
-    wait entirely — if the arm eventually completes, recording comes up
-    mid-life (the first turn's spans stay lost, the price of a hung init).
-    """
-    if state["arm_thread"] is None or state["timeout_reported"]:
-        return
-    if state["init_resolved"].wait(INIT_RESOLVED_TIMEOUT_S):
-        return
-    state["timeout_reported"] = True
-    logger.warning(
-        "trace init not resolved within timeout — proceeding without recording",
-        event="trace",
-        action="init_resolved_timeout",
-        timeout_s=INIT_RESOLVED_TIMEOUT_S,
-    )
-
-
-def is_initialized() -> bool:
-    """Whether span recording is armed in this process. Callers outside this
-    package (`base.lm.usage`) await a pending init with ensure_init_resolved()
-    first and record nothing while this is False."""
-    return bool(state["initialized"])
+def _recording_ready(readiness: TraceReadiness, *, timeout: float) -> bool:
+    reading = readiness.read(timeout=timeout)
+    if reading.first_timeout:
+        logger.warning(
+            "trace init not resolved within timeout — proceeding without recording",
+            event="trace",
+            action="init_resolved_timeout",
+            timeout_s=timeout,
+        )
+    return reading.ready
 
 
 def _serialized_initialize[**P](function: Callable[P, None]) -> Callable[P, None]:
@@ -597,7 +549,7 @@ def _serialized_initialize[**P](function: Callable[P, None]) -> Callable[P, None
 # hands the heavy part (traceloop import + Traceloop.init, ~2.5-3 s) to one
 # daemon thread (_arm_tracing), one attempt per process. The boot path is
 # therefore sub-second; the ordering contract "instrumentors installed
-# before the first turn" is enforced by ensure_init_resolved() inside
+# before the first turn" is enforced by the shared recording readiness inside
 # turn_span (the callback-manager wrap and the SDK instrumentors are
 # call-time, so a model built during boot still produces spans). Spans:
 # OtlpJsonHttpSpanExporter pointed at the LOCAL sidecar, traceloop
@@ -624,8 +576,10 @@ def _serialized_initialize[**P](function: Callable[P, None]) -> Callable[P, None
 # - content stripping (`trace_strip_content`): TRACELOOP_TRACE_CONTENT=false
 #   + exporter-side re-strip, so the mirror holds metadata only.
 @_serialized_initialize
-def initialize_tracing(*, machine: MachineIdentityReader, home: Path, config: TraceConfig) -> None:
-    if state.get("closed") or state["initialized"] or state["arm_failed"]:
+def initialize_tracing(
+    *, machine: MachineIdentityReader, home: Path, config: TraceConfig, readiness: TraceReadiness
+) -> None:
+    if state.get("closed") or readiness.resolved:
         return
     if not config.enabled or not observability_export_allowed(
         machine, home=home, endpoint_explicit=config.endpoint_explicit
@@ -680,50 +634,50 @@ def initialize_tracing(*, machine: MachineIdentityReader, home: Path, config: Tr
                 endpoint=endpoint,
             )
             state["collector_offline_reported"] = True
-        start_collector_retry(machine, home, config)
+        start_collector_retry(machine, home, config, readiness=readiness)
         return
 
-    start_arm_thread(config, machine, home)
+    start_arm_thread(config, machine, home, readiness=readiness)
 
 
 @contextlib.contextmanager
 def turn_span(*, name: str, session_id: str, turn: int) -> Generator[None, None, None]:
-    """Wrap ONE graph invocation (= one agent turn) in an OTel root span.
-
-    The trace boundary is the turn: the runloop invokes the graph once per
-    turn, so this span opens when the invocation starts — including claim's
-    long wait for the turn's inbound (recorded separately, see
-    claim_idle_wait_span). All child spans (LangGraph nodes, Anthropic calls,
-    etc.) inherit the OTel context and become children of this root, so the
-    recorded mirror shows a proper span tree per turn. The session_id
-    attribute groups one agent's turns into a session on the viewer; the turn
-    attribute orders them within a process lifetime.
-
-    **Placeholder root — exported at turn START, not at turn end (#1964).**
-    The root span is ended immediately after creation, so the batch processor
-    exports it within one flush (5 s in production, immediately under a
-    SimpleSpanProcessor in tests) while the turn is still running. Residual
-    window: a turn shorter than the flush cadence whose process then dies
-    hard loses the whole unflushed batch (root and children together) — a
-    missing trace, never a rootless one. A trace
-    therefore ALWAYS has its root, even when the process is killed mid-turn
-    (SIGKILL / OOM / crash): the previous behaviour ended the root only when
-    the turn's work finished, so a process that died with the root still open
-    left a rootless trace in Tempo (children export as they end, the root
-    never does). The trade-off: the root's duration reads 0 and its end time
-    is the turn start — the turn's real duration is carried by the child
-    spans (the batch/LLM spans' min start .. max end), which is how
-    Grafana/Tempo compute the trace span anyway. The ended root stays the
-    current span in the OTel context for the whole turn (use_span,
-    end_on_exit=False), so children still parent under it; the context
-    detaches on exit without a second end call.
-
-    No-op when trace_enabled=False or initialize_tracing hasn't run yet; a
-    pending background init is awaited first (ensure_init_resolved) so the
-    root span never opens against the unset proxy tracer.
-    """
-    ensure_init_resolved()
-    if not state["initialized"]:
+    # meiva:note
+    # Wrap ONE graph invocation (= one agent turn) in an OTel root span.
+    #
+    # The trace boundary is the turn: the runloop invokes the graph once per
+    # turn, so this span opens when the invocation starts — including claim's
+    # long wait for the turn's inbound (recorded separately, see
+    # claim_idle_wait_span). All child spans (LangGraph nodes, Anthropic calls,
+    # etc.) inherit the OTel context and become children of this root, so the
+    # recorded mirror shows a proper span tree per turn. The session_id
+    # attribute groups one agent's turns into a session on the viewer; the turn
+    # attribute orders them within a process lifetime.
+    #
+    # **Placeholder root — exported at turn START, not at turn end (#1964).**
+    # The root span is ended immediately after creation, so the batch processor
+    # exports it within one flush (5 s in production, immediately under a
+    # SimpleSpanProcessor in tests) while the turn is still running. Residual
+    # window: a turn shorter than the flush cadence whose process then dies
+    # hard loses the whole unflushed batch (root and children together) — a
+    # missing trace, never a rootless one. A trace
+    # therefore ALWAYS has its root, even when the process is killed mid-turn
+    # (SIGKILL / OOM / crash): the previous behaviour ended the root only when
+    # the turn's work finished, so a process that died with the root still open
+    # left a rootless trace in Tempo (children export as they end, the root
+    # never does). The trade-off: the root's duration reads 0 and its end time
+    # is the turn start — the turn's real duration is carried by the child
+    # spans (the batch/LLM spans' min start .. max end), which is how
+    # Grafana/Tempo compute the trace span anyway. The ended root stays the
+    # current span in the OTel context for the whole turn (use_span,
+    # end_on_exit=False), so children still parent under it; the context
+    # detaches on exit without a second end call.
+    #
+    # No-op when trace_enabled=False or initialize_tracing hasn't run yet; a
+    # pending background init is awaited through shared recording readiness so the
+    # root span never opens against the unset proxy tracer.
+    #
+    if not _recording_ready(PROCESS_RECORDING, timeout=TRACE_INIT_WAIT_S):
         yield
         return
     from opentelemetry import trace as otel_trace
@@ -773,8 +727,7 @@ def claim_idle_wait_span() -> Generator[None, None, None]:
     own span; with the instrumentor absent the wait simply stays inside
     whatever span is current (the pre-fix behavior).
     """
-    ensure_init_resolved()
-    if not state["initialized"]:
+    if not _recording_ready(PROCESS_RECORDING, timeout=TRACE_INIT_WAIT_S):
         yield
         return
     from opentelemetry import trace as otel_trace
@@ -796,4 +749,4 @@ def claim_idle_wait_span() -> Generator[None, None, None]:
         yield
 
 
-atexit.register(shutdown)
+atexit.register(shutdown, readiness=PROCESS_RECORDING)

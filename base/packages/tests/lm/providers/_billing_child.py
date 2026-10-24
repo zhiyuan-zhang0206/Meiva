@@ -17,6 +17,7 @@ from opentelemetry.util.types import AttributeValue
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.lm.providers.billing_sensors import disabled, failing
+from base.packages.tests.lm.providers.invoke_billing import invoke
 from base.telemetry.tests.capture.armed_tracing import BillingRuntime, armed_billing
 
 
@@ -181,6 +182,8 @@ def main(scenario: str, path: Literal["message", "durable"], cached: int | None)
         return
     with armed_billing() as tracer:
         match scenario:
+            case "invoke":
+                invoke(tracer, catalog)
             case "schema":
                 schema(tracer)
             case "cache_write_ttls":

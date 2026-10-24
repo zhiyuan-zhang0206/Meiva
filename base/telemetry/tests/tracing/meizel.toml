@@ -1,7 +1,4 @@
 [debt.first-party-patch]
-"test_arm_thread_base_exception_marks_attempt_spent.py#monkeypatch.setattr base.telemetry.tracing.INIT_RESOLVED_TIMEOUT_S" = 1
-"test_arm_thread_base_exception_marks_attempt_spent.py#monkeypatch.setattr base.telemetry.tracing.endpoint_reachable" = 1
-"test_arm_thread_base_exception_marks_attempt_spent.py#monkeypatch.setattr base.telemetry.tracing.start_collector_retry" = 1
 "test_arm_thread_base_exception_marks_attempt_spent.py#monkeypatch.setattr base.telemetry.tracing.time.monotonic" = 1
 "test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_endpoint" = 1
 "test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr base.telemetry.trace_mirror.shutil.disk_usage" = 1
@@ -16,8 +13,6 @@
 
 [debt.third-party-patch]
 "test_arm_thread_base_exception_marks_attempt_spent.py#monkeypatch.setattr httpx.post" = 2
-"test_arm_thread_base_exception_marks_attempt_spent.py#monkeypatch.setattr opentelemetry.trace.get_current_span" = 5
-"test_arm_thread_base_exception_marks_attempt_spent.py#monkeypatch.setattr opentelemetry.trace.get_tracer" = 8
-"test_arm_thread_base_exception_marks_attempt_spent.py#monkeypatch.setattr traceloop.sdk.Traceloop.init" = 2
+"test_arm_thread_base_exception_marks_attempt_spent.py#monkeypatch.setattr traceloop.sdk.Traceloop.init" = 1
 "test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr httpx.post" = 2
 "test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr traceloop.sdk.Traceloop.init" = 4

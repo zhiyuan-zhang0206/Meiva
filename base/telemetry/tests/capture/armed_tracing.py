@@ -16,6 +16,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 from base.paths import meiva_home
 from base.telemetry import tracing
+from base.telemetry.otlp.trace_readiness import PROCESS_RECORDING
 
 
 class CollectorHandler(BaseHTTPRequestHandler):
@@ -61,21 +62,32 @@ def stop_provider(provider: TracerProvider | None) -> None:
 
 
 @contextmanager
-def armed_billing() -> Generator[BillingRuntime]:
+def collector_endpoint() -> Generator[str]:
     with (
         CollectorServer(("127.0.0.1", 0), CollectorHandler) as collector,
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="billing-collector") as pool,
     ):
         serving = pool.submit(collector.serve_forever, poll_interval=0.01)
+        try:
+            yield f"http://127.0.0.1:{collector.server_port}"
+        finally:
+            collector.shutdown()
+            serving.result(timeout=5)
+
+
+@contextmanager
+def armed_billing() -> Generator[BillingRuntime]:
+    with collector_endpoint() as endpoint:
         provider: TracerProvider | None = None
         try:
             tracing.arm_tracing(
-                f"http://127.0.0.1:{collector.server_port}",
+                endpoint,
                 production=False,
                 home=meiva_home(),
                 strip_content=False,
+                readiness=PROCESS_RECORDING,
             )
-            assert tracing.is_initialized(), "the real tracing arm must succeed"
+            assert PROCESS_RECORDING.ready, "the real tracing arm must succeed"
             active_provider = trace.get_tracer_provider()
             assert isinstance(active_provider, TracerProvider)
             provider = active_provider
@@ -84,10 +96,6 @@ def armed_billing() -> Generator[BillingRuntime]:
             yield BillingRuntime(provider, exporter)
         finally:
             try:
-                try:
-                    assert tracing.shutdown() == ()
-                finally:
-                    stop_provider(provider)
+                assert tracing.shutdown(readiness=PROCESS_RECORDING) == ()
             finally:
-                collector.shutdown()
-                serving.result(timeout=5)
+                stop_provider(provider)

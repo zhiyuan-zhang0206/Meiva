@@ -66,9 +66,10 @@ def process_trace_config(config: ConfigBoot) -> TraceConfig:
 
 
 def init_process_scope(*, machine: MachineIdentityReader, home: Path, trace: TraceConfig) -> None:
+    from base.telemetry.otlp.trace_readiness import PROCESS_RECORDING
     from base.telemetry.tracing import initialize_tracing
 
-    initialize_tracing(machine=machine, home=home, config=trace)
+    initialize_tracing(machine=machine, home=home, config=trace, readiness=PROCESS_RECORDING)
 
 
 def land_cluster_extensions(db: Database) -> None:

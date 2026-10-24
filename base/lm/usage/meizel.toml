@@ -18,7 +18,7 @@ exports = ["__init__.py", "metering.py"]
 "__init__.py#base/lm/reasoning.py" = 1
 "__init__.py#base/log/__init__.py" = 1
 "__init__.py#base/telemetry/__init__.py" = 1
-"__init__.py#base/telemetry/tracing.py" = 3
+"__init__.py#base/telemetry/otlp/trace_readiness.py" = 1
 "metering.py#base/log/__init__.py" = 1
 "metering.py#base/telemetry/__init__.py" = 1
 

@@ -232,7 +232,8 @@ config-readers = [
 "base/telemetry/metrics/observed_metrics.py" = "the observed-metrics writer: its pool handle and failure counter are written by emitters and read only by the writer itself"
 "base/telemetry/pipeline_build.py" = "the exit hook that stops the bound pipeline and closes its sinks; registered once at import because it must run for every process that built a pipeline"
 "base/telemetry/process_logging.py" = "the loguru event-sink adapter: its sample counter and registered sink handle are read only by sink registration and the record filter"
-"base/telemetry/tracing.py" = "the tracer facade: the OTel trace API used through the global tracer provider, plus the arm state it keeps; write-only for callers"
+"base/telemetry/tracing.py" = "the tracer facade: the global OTel provider and owned exporter/retry workers, used only to write spans"
+"base/telemetry/otlp/trace_readiness.py" = "the same process tracer facade initialization result formerly held in tracing.py: one admitted SDK attempt, observed only to admit span writes; no application policy"
 "gateway/http/middleware/latency.py" = "latency aggregation buffer flushed to the event pipeline; written by requests, read only by the flush"
 "gateway/http/middleware/runtime_metrics.py" = "active-SSE-connection gauge state, incremented and decremented by the stream handler and read only by the metrics exporter"
 

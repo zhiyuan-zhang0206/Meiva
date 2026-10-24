@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import threading
 from collections.abc import Callable
-from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -19,6 +18,7 @@ from base.log.tests.log_records import loguru_records as loguru_records
 from base.telemetry import tracing as tracing_mod
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.otlp.trace_config import TraceConfig
+from base.telemetry.otlp.trace_readiness import TraceReadiness
 from base.telemetry.tests.otlp.identity_inputs import (
     allow_identity,
     deny_identity,
@@ -27,7 +27,6 @@ from base.telemetry.tests.otlp.identity_inputs import (
 from base.telemetry.tracing import (
     OtlpJsonHttpSpanExporter,
     initialize_tracing,
-    turn_span,
 )
 
 
@@ -76,76 +75,41 @@ def _assert_no_background_trace_threads() -> None:
 _THREAD_DRAIN_TIMEOUT_S = 5.0
 
 
-def _drain_background_trace_threads() -> None:
-    """Join the module's background threads to death BEFORE the next test runs.
+def _drain_background_trace_threads(*, trace_readiness: TraceReadiness) -> None:
+    assert tracing_mod.shutdown(timeout=_THREAD_DRAIN_TIMEOUT_S, readiness=trace_readiness) == ()
+    for key in ("retry_owner", "arm_owner"):
+        owner = tracing_mod.state.get(key)
+        if owner is not None:
+            assert owner.finished.is_set(), "the trace owner escaped its finite drain"
+    _assert_no_background_trace_threads()
 
-    The arm thread runs the ~3s traceloop import + Traceloop.init on a daemon
-    thread; a test body that returns while it is still in flight used to leave
-    a zombie that completed inside the NEXT test and called whatever
-    Traceloop.init that test had installed — counted as a second init call
-    (the #1065 delta attempt 1 flake). The arm sets init_resolved in its
-    finally, so wait on that event first (deterministic - the event is set
-    when the arm actually finishes), then join the thread itself. Bounded:
-    a hung arm is caught by the next test's _assert_no_background_trace_threads
-    with a loud failure instead of a silent cross-test contamination.
-    """
-    tracing_mod.shutdown(timeout=_THREAD_DRAIN_TIMEOUT_S)
-    retry_thread = tracing_mod.state["retry_thread"]
-    if isinstance(retry_thread, threading.Thread):
-        retry_thread.join(timeout=_THREAD_DRAIN_TIMEOUT_S)
-    arm_thread = tracing_mod.state["arm_thread"]
-    if isinstance(arm_thread, threading.Thread) and arm_thread.is_alive():
-        init_resolved = tracing_mod.state["init_resolved"]
-        if isinstance(init_resolved, threading.Event):
-            init_resolved.wait(timeout=_THREAD_DRAIN_TIMEOUT_S)
-        arm_thread.join(timeout=_THREAD_DRAIN_TIMEOUT_S)
-        assert not arm_thread.is_alive(), (
-            "trace arm thread still alive after the teardown drain — "
-            "a slow import/init escaped the bounds and leaked into the next "
-            "test (the guard in arm_tracing keeps the survivor inert, but the "
-            "leak itself must be diagnosed here, not in a later assertion)"
-        )
+
+@pytest.fixture
+def trace_readiness() -> TraceReadiness:
+    return TraceReadiness()
 
 
 @pytest.fixture(autouse=True)
-def reset_tracing_init_flag(monkeypatch: pytest.MonkeyPatch):
-    """Reset trace-init and retry-loop state (and the key arming writes) between tests."""
-    monkeypatch.setenv("TRACELOOP_TRACE_CONTENT", "")  # arming sets it; teardown deletes it
+def reset_trace_workers(monkeypatch: pytest.MonkeyPatch, trace_readiness: TraceReadiness):
+    monkeypatch.setenv("TRACELOOP_TRACE_CONTENT", "")
     _assert_no_background_trace_threads()
-
     tracing_mod.state.clear()
     tracing_mod.state.update(
-        initialized=False,
-        collector_offline_reported=False,
-        retry_thread=None,
-        arm_thread=None,
-        init_resolved=threading.Event(),
-        arm_failed=False,
-        timeout_reported=False,
+        closed=False, collector_offline_reported=False, retry_owner=None, arm_owner=None
     )
-
     yield
-    tracing_mod.state["initialized"] = True
-    _drain_background_trace_threads()
+    _drain_background_trace_threads(trace_readiness=trace_readiness)
     tracing_mod.state.clear()
     tracing_mod.state.update(
-        initialized=False,
-        collector_offline_reported=False,
-        retry_thread=None,
-        arm_thread=None,
-        init_resolved=threading.Event(),
-        arm_failed=False,
-        timeout_reported=False,
+        closed=False, collector_offline_reported=False, retry_owner=None, arm_owner=None
     )
 
 
-def wait_init_resolved(timeout: float = 5.0) -> None:
-    """Join the background arming pass: the armed-path tests assert on state
-    the arm thread writes, so they must wait for it (deterministic, not a
-    sleep — the event is set in the thread's finally)."""
-    resolved = tracing_mod.state.get("init_resolved")
-    assert isinstance(resolved, threading.Event)
-    assert resolved.wait(timeout=timeout), "background trace arming did not resolve"
+def wait_init_resolved(timeout: float = 5.0, *, trace_readiness: TraceReadiness) -> None:
+    owner = tracing_mod.state.get("arm_owner")
+    if owner is not None:
+        assert owner.finished.wait(timeout=timeout), "background trace arm did not finish"
+    assert trace_readiness.resolved, "background trace attempt did not resolve"
 
 
 @pytest.fixture(autouse=True)
@@ -160,15 +124,20 @@ def collector_up(monkeypatch: pytest.MonkeyPatch):
     )
 
 
-def test_disabled_returns_early(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_disabled_returns_early(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
+):
     """When trace_enabled=False, initialize_tracing returns None and does not init the SDK."""
     assert (
         initialize_tracing(
-            machine=machine_identity(), home=tmp_path, config=trace_config(enabled=False)
+            machine=machine_identity(),
+            home=tmp_path,
+            config=trace_config(enabled=False),
+            readiness=trace_readiness,
         )
         is None
     )
-    assert tracing_mod.state["initialized"] is False
+    assert trace_readiness.ready is False
 
 
 def fixed_disk_usage(fraction: float, free: int) -> Callable[..., tuple[float, int]]:
@@ -195,7 +164,7 @@ def under_watermark(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_enabled_inits_traceloop_with_otlp_exporter(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
 ):
     """trace_enabled=True: Traceloop.init is handed an OtlpJsonHttpSpanExporter
     pointed at the LOCAL collector as the sole exporter (no api_endpoint/api_key
@@ -217,8 +186,13 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
-    initialize_tracing(machine=machine_identity(), home=tmp_path, config=trace_config(enabled=True))
-    wait_init_resolved()
+    initialize_tracing(
+        machine=machine_identity(),
+        home=tmp_path,
+        config=trace_config(enabled=True),
+        readiness=trace_readiness,
+    )
+    wait_init_resolved(trace_readiness=trace_readiness)
 
     assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
     kw = calls[0]
@@ -243,11 +217,11 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
     assert Instruments.LANGCHAIN in instruments
     assert Instruments.GOOGLE_GENERATIVEAI in instruments
 
-    assert tracing_mod.state["initialized"] is True
+    assert trace_readiness.ready is True
 
 
 def test_gateway_trace_recording_skips_without_lgtm_marker(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
 ) -> None:
     home = tmp_path / ".meiva-preview"
     home.mkdir()
@@ -262,14 +236,16 @@ def test_gateway_trace_recording_skips_without_lgtm_marker(
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", record_init)
 
     machine = machine_identity(name="test-gateway", roles=frozenset({"gateway"}))
-    initialize_tracing(machine=machine, home=home, config=trace_config(enabled=True))
+    initialize_tracing(
+        machine=machine, home=home, config=trace_config(enabled=True), readiness=trace_readiness
+    )
 
     assert calls == []
-    assert tracing_mod.state["initialized"] is False
+    assert trace_readiness.ready is False
 
 
 def test_gateway_trace_recording_arms_with_lgtm_marker(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
 ) -> None:
     home = tmp_path / ".meiva"
     home.mkdir()
@@ -287,8 +263,10 @@ def test_gateway_trace_recording_arms_with_lgtm_marker(
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", record_init)
 
     machine = machine_identity(name="test-gateway", roles=frozenset({"gateway"}))
-    initialize_tracing(machine=machine, home=home, config=trace_config(enabled=True))
-    wait_init_resolved()
+    initialize_tracing(
+        machine=machine, home=home, config=trace_config(enabled=True), readiness=trace_readiness
+    )
+    wait_init_resolved(trace_readiness=trace_readiness)
 
     assert len(calls) == 1
     assert calls[0]["resource_attributes"] == {
@@ -299,11 +277,16 @@ def test_gateway_trace_recording_arms_with_lgtm_marker(
 
 
 def test_sdk_initialize_failure_logs_and_state_unchanged(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: LogRecords
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    loguru_records: LogRecords,
+    *,
+    trace_readiness: TraceReadiness,
 ):
-    """If Traceloop.init() itself raises on the arm thread, the failure is
-    logged (not propagated — tracing is observability, not a boot blocker),
-    _initialized stays False, and the wait resolves so turns still run."""
+    # meiva:note
+    # If Traceloop.init() itself raises on the arm thread, the failure is
+    # logged (not propagated — tracing is observability, not a boot blocker),
+    # readiness remains false, and the wait resolves so turns still run.
     under_watermark(monkeypatch)
 
     def _raise(**_kw):
@@ -311,18 +294,23 @@ def test_sdk_initialize_failure_logs_and_state_unchanged(
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _raise)  # pyright: ignore[reportUnknownArgumentType]
     initialize_tracing(
-        machine=machine_identity(), home=tmp_path, config=trace_config(enabled=True)
+        machine=machine_identity(),
+        home=tmp_path,
+        config=trace_config(enabled=True),
+        readiness=trace_readiness,
     )  # must not raise: the failure is the arm thread's
-    wait_init_resolved()
+    wait_init_resolved(trace_readiness=trace_readiness)
 
-    assert tracing_mod.state["initialized"] is False
-    assert tracing_mod.state["arm_failed"] is True
+    assert trace_readiness.ready is False
+    assert trace_readiness.resolved and not trace_readiness.ready
     warned = warned_fields(loguru_records)
     assert warned
     assert warned[0].get("action") == "recording_init_failed"
 
 
-def test_arm_failure_blocks_rearming(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_arm_failure_blocks_rearming(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
+):
     """One arm attempt per process: after a failed init, a later call (e.g. a
     collector-retry re-entry) must NOT run Traceloop.init again — the
     TracerWrapper singleton would fake-succeed without the instrumentors."""
@@ -336,32 +324,56 @@ def test_arm_failure_blocks_rearming(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _fail_then_record)
 
-    initialize_tracing(machine=machine_identity(), home=tmp_path, config=trace_config(enabled=True))
-    wait_init_resolved()
-    assert tracing_mod.state["arm_failed"] is True
+    initialize_tracing(
+        machine=machine_identity(),
+        home=tmp_path,
+        config=trace_config(enabled=True),
+        readiness=trace_readiness,
+    )
+    wait_init_resolved(trace_readiness=trace_readiness)
+    assert trace_readiness.resolved and not trace_readiness.ready
 
     initialize_tracing(
-        machine=machine_identity(), home=tmp_path, config=trace_config(enabled=True)
+        machine=machine_identity(),
+        home=tmp_path,
+        config=trace_config(enabled=True),
+        readiness=trace_readiness,
     )  # must be a no-op, not a second arming attempt
     assert calls == [1]
-    assert tracing_mod.state["initialized"] is False
+    assert trace_readiness.ready is False
 
 
-def test_idempotent_second_call_is_noop(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_idempotent_second_call_is_noop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
+):
     """Second call within the same process does not re-initialize."""
     under_watermark(monkeypatch)
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
-    initialize_tracing(machine=machine_identity(), home=tmp_path, config=trace_config(enabled=True))
-    initialize_tracing(machine=machine_identity(), home=tmp_path, config=trace_config(enabled=True))
-    wait_init_resolved()
+    initialize_tracing(
+        machine=machine_identity(),
+        home=tmp_path,
+        config=trace_config(enabled=True),
+        readiness=trace_readiness,
+    )
+    initialize_tracing(
+        machine=machine_identity(),
+        home=tmp_path,
+        config=trace_config(enabled=True),
+        readiness=trace_readiness,
+    )
+    wait_init_resolved(trace_readiness=trace_readiness)
 
     assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_collector_unreachable_retries_once_until_init_succeeds(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: LogRecords
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    loguru_records: LogRecords,
+    *,
+    trace_readiness: TraceReadiness,
 ) -> None:
     """One daemon loop retries a collector-unreachable preflight, logs the
     episode once, and exits after tracing initializes."""
@@ -384,29 +396,42 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", init_traceloop)
 
-    initialize_tracing(machine=machine_identity(), home=tmp_path, config=trace_config(enabled=True))
-    retry_thread = tracing_mod.state["retry_thread"]
+    initialize_tracing(
+        machine=machine_identity(),
+        home=tmp_path,
+        config=trace_config(enabled=True),
+        readiness=trace_readiness,
+    )
+    retry_thread = tracing_mod.state["retry_owner"]._thread
     assert isinstance(retry_thread, threading.Thread)
 
-    initialize_tracing(machine=machine_identity(), home=tmp_path, config=trace_config(enabled=True))
-    assert tracing_mod.state["retry_thread"] is retry_thread
+    initialize_tracing(
+        machine=machine_identity(),
+        home=tmp_path,
+        config=trace_config(enabled=True),
+        readiness=trace_readiness,
+    )
+    assert tracing_mod.state["retry_owner"]._thread is retry_thread
     assert initialized.wait(timeout=1.0)
     retry_thread.join(timeout=0.5)
-    wait_init_resolved()
+    wait_init_resolved(trace_readiness=trace_readiness)
 
     assert attempts == [False, False, True]
     assert loguru_records.messages("WARNING") == [
         "trace recording disabled — local OTel collector not answering"
     ]
-    assert tracing_mod.state["initialized"] is True
+    assert trace_readiness.ready is True
     assert tracing_mod.state["collector_offline_reported"] is False
     assert not retry_thread.is_alive()
 
 
-def test_arming_runs_off_the_caller_thread(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """The heavy part never blocks the boot path: initialize_tracing returns
-    while Traceloop.init is still pending (the mock blocks until released),
-    and ensure_init_resolved() is what the use sites wait on."""
+def test_arming_runs_off_the_caller_thread(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
+):
+    # meiva:note
+    # The heavy part never blocks the boot path: initialize_tracing returns
+    # while Traceloop.init is still pending (the mock blocks until released),
+    # and shared recording readiness is what use sites wait on.
     under_watermark(monkeypatch)
 
     entered = threading.Event()
@@ -419,17 +444,22 @@ def test_arming_runs_off_the_caller_thread(monkeypatch: pytest.MonkeyPatch, tmp_
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _slow_init)
 
     initialize_tracing(
-        machine=machine_identity(), home=tmp_path, config=trace_config(enabled=True)
+        machine=machine_identity(),
+        home=tmp_path,
+        config=trace_config(enabled=True),
+        readiness=trace_readiness,
     )  # returns immediately — the mock is still blocked
     assert entered.wait(timeout=5.0), "arm thread must have started"
-    assert tracing_mod.state["initialized"] is False  # boot already returned; init pending
+    assert trace_readiness.ready is False  # boot already returned; init pending
 
     release.set()
-    wait_init_resolved()
-    assert tracing_mod.state["initialized"] is True
+    wait_init_resolved(trace_readiness=trace_readiness)
+    assert trace_readiness.ready is True
 
 
-def test_teardown_drains_pending_arm_thread(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_teardown_drains_pending_arm_thread(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
+):
     """A test body that returns while the arm thread is still in flight must
     not leave a zombie behind: its delayed Traceloop.init would then land in
     the NEXT test's monkeypatched lambda (counted as a second init — the
@@ -445,153 +475,43 @@ def test_teardown_drains_pending_arm_thread(monkeypatch: pytest.MonkeyPatch, tmp
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _slow_init)
 
-    initialize_tracing(machine=machine_identity(), home=tmp_path, config=trace_config(enabled=True))
-    arm_thread = tracing_mod.state["arm_thread"]
+    initialize_tracing(
+        machine=machine_identity(),
+        home=tmp_path,
+        config=trace_config(enabled=True),
+        readiness=trace_readiness,
+    )
+    arm_thread = tracing_mod.state["arm_owner"]._thread
     assert isinstance(arm_thread, threading.Thread)
     assert arm_thread.is_alive()
     # Intentionally no wait_init_resolved(): the fixture teardown must drain.
 
 
-def testarm_tracing_skips_init_when_already_resolved(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    # meiva:note
-    # Traceloop.init runs at most once per process: arm_tracing is a no-op
-    # when a previous arm already succeeded (initialized) or failed
-    # (arm_failed). A second arm thread is only reachable when test state was
-    # reset while the first was in flight, but without this guard its init
-    # would fake-succeed (the SDK's TracerWrapper singleton keeps the first
-    # init's instrumentor set and reports success) AND land in whichever test
-    # installed the current monkeypatch — the #1065 / post-#1068 2-call flake.
-    from base.telemetry.tracing import arm_tracing
+def test_arm_tracing_skips_init_when_already_resolved(tmp_path: Path) -> None:
+    from base.telemetry.tests.capture.trace_process import run_trace_scenario
 
-    under_watermark(monkeypatch)
-    calls: list[dict] = []
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-
-    tracing_mod.state["initialized"] = True
-    tracing_mod.state["arm_failed"] = False
-    arm_tracing("http://127.0.0.1:4318", production=False, home=Path(".meiva"), strip_content=True)
-    assert calls == []
-
-    tracing_mod.state["initialized"] = False
-    tracing_mod.state["arm_failed"] = True
-    arm_tracing("http://127.0.0.1:4318", production=False, home=Path(".meiva"), strip_content=True)
-    assert calls == []
+    run_trace_scenario(tmp_path, "resolved")
 
 
-def test_concurrent_arm_threads_init_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """Two arm threads racing — a zombie escaped a test's teardown plus the
-    next test's own arm, both completing inside one test — run
-    Traceloop.init exactly once: the second thread reads the first's outcome
-    (under the init lock, after the import) before calling init. Without the
-    guard the SDK's TracerWrapper singleton would let both init calls run
-    (the second fake-succeeds), which is the #1065 / post-#1068 2-call flake.
-    """
-    from base.telemetry.tracing import arm_tracing
+def test_concurrent_arm_threads_init_once(tmp_path: Path) -> None:
+    from base.telemetry.tests.capture.trace_process import run_trace_scenario
 
-    under_watermark(monkeypatch)
-
-    entered = threading.Event()
-    release = threading.Event()
-    calls: list[dict] = []
-
-    def _slow_init(**_kw: object) -> None:
-        entered.set()
-        assert release.wait(timeout=5.0), "test released the first arm's init"
-        calls.append(_kw)  # pyright: ignore[reportUnknownMemberType]
-
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", _slow_init)
-
-    first = threading.Thread(
-        target=arm_tracing,
-        args=("http://127.0.0.1:4318",),
-        kwargs={"production": False, "home": Path(".meiva"), "strip_content": True},
-        daemon=True,
-    )
-    first.start()
-    assert entered.wait(timeout=5.0), "first arm thread must reach Traceloop.init"
-
-    # State reset while the first arm is in flight — exactly what the fixture
-    # teardown does when a slow CI import outlives the drain.
-    tracing_mod.state.clear()
-    tracing_mod.state.update(
-        initialized=False,
-        collector_offline_reported=False,
-        retry_thread=None,
-        arm_thread=None,
-        init_resolved=threading.Event(),
-        arm_failed=False,
-        timeout_reported=False,
-    )
-
-    second = threading.Thread(
-        target=arm_tracing,
-        args=("http://127.0.0.1:4318",),
-        kwargs={"production": False, "home": Path(".meiva"), "strip_content": True},
-        daemon=True,
-    )
-    second.start()
-    release.set()
-    first.join(timeout=5.0)
-    second.join(timeout=5.0)
-
-    assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
+    run_trace_scenario(tmp_path, "concurrent", lifecycle=True)
 
 
-def test_turn_span_waits_for_pending_arm(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The first-turn contract: turn_span blocks while the arm thread is
-    pending and opens the root span only after the arm resolves — a span
-    opened against the unset proxy tracer would be silently lost."""
-    tracing_mod.state["initialized"] = False
-    release = threading.Event()
-    arm = threading.Thread(target=release.wait, daemon=True, name="fake-arm")
-    tracing_mod.state["arm_thread"] = arm
-    arm.start()
+def test_turn_span_waits_for_pending_arm(tmp_path: Path) -> None:
+    from base.telemetry.tests.capture.trace_process import run_trace_scenario
 
-    entered: list[str] = []
-    before_wait = threading.Event()
-
-    def _enter_span() -> None:
-        before_wait.set()
-        with turn_span(name="t", session_id="s", turn=1):
-            entered.append("open")
-
-    t = threading.Thread(target=_enter_span)
-    t.start()
-    assert before_wait.wait(timeout=5)
-    assert entered == []  # blocked in ensure_init_resolved, span NOT opened yet
-
-    tracing_mod.state["initialized"] = True
-    tracing_mod.state["init_resolved"].set()
-    t.join(timeout=5)
-    assert entered == ["open"]  # opened only after the arm resolved
-    assert not t.is_alive()
-    release.set()
-    arm.join(timeout=5)
+    run_trace_scenario(tmp_path, "first-turn", lifecycle=True)
 
 
-def test_ensure_init_resolved_bounded_wait(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
-) -> None:
-    """A hung arm must not hang the first turn forever: the wait is bounded,
-    logs once, and later calls skip the wait entirely."""
-    from base.telemetry.tracing import ensure_init_resolved
-
-    release = threading.Event()
-    arm = threading.Thread(target=release.wait, daemon=True, name="fake-arm")
-    tracing_mod.state["arm_thread"] = arm
-    arm.start()
-    monkeypatch.setattr(tracing_mod, "INIT_RESOLVED_TIMEOUT_S", 0.05)
-    ensure_init_resolved()  # times out -> one warning
-    ensure_init_resolved()  # remembered -> instant return, no second warning
-
-    warned = warned_fields(loguru_records)
-    assert len(warned) == 1
-    assert warned[0]["action"] == "init_resolved_timeout"
-    assert tracing_mod.state["timeout_reported"] is True
-    release.set()
-    arm.join(timeout=5)
+def test_shared_recording_read_has_a_bounded_wait(trace_readiness: TraceReadiness) -> None:
+    assert trace_readiness.reserve()
+    first = trace_readiness.read(timeout=0.01)
+    assert not first.ready and first.first_timeout
+    assert not trace_readiness.read(timeout=0).first_timeout
+    assert not trace_readiness.resolved
+    trace_readiness.close()
 
 
 # --- OtlpJsonHttpSpanExporter ---------------------------------------------------
@@ -654,52 +574,7 @@ def assert_root_once_with_child_parented_under_it(spans: list[Any], root: Any) -
 # --- turn_span -----------------------------------------------------------
 
 
-class FakeSpan:
-    def __init__(self):
-        self.attributes: dict[str, object] = {}
-        self.ended = False
-
-    def set_attribute(self, key: str, value: object) -> None:
-        self.attributes[key] = value
-
-    def end(self) -> None:
-        self.ended = True
-
-
-class FakeTracer:
-    def __init__(self, span: FakeSpan):
-        self._span = span
-        self.opened: list[str] = []
-
-    def start_span(self, name: str):
-        """turn_span uses start_span + use_span(end_on_exit=False) since the
-        placeholder-root change (#1964)."""
-        self.opened.append(name)
-        return self._span
-
-    @contextmanager
-    def start_as_current_span(self, name: str):
-        self.opened.append(name)
-        yield self._span
-
-
 # --- claim idle-wait span -------------------------------------------------
-
-
-class NodeFakeSpan:
-    """Fake of a LangChain node span (the SDK surface claim_idle_wait_span
-    touches: name, is_recording, end)."""
-
-    def __init__(self, name: str, recording: bool = True):
-        self.name = name
-        self._recording = recording
-        self.ended = False
-
-    def is_recording(self) -> bool:
-        return self._recording
-
-    def end(self) -> None:
-        self.ended = True
 
 
 # --- trace v2: content stripping --------------------------------------------
@@ -730,6 +605,3 @@ def otlp_with_attrs(attrs: dict[str, str]) -> dict:
 
 
 # --- trace v2: file governance -----------------------------------------------
-
-
-__all__ = ["FakeTracer", "NodeFakeSpan"]

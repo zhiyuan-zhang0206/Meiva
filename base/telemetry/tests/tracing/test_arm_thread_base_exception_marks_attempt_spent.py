@@ -2,28 +2,21 @@
 
 from __future__ import annotations
 
-import threading
 from pathlib import Path
 
 import httpx
 import pytest
 
-from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.telemetry import tracing as tracing_mod
-from base.telemetry.tests.otlp.identity_inputs import ignore_arguments, machine_identity
+from base.telemetry.otlp.trace_readiness import TraceReadiness
+from base.telemetry.tests.capture.trace_process import run_trace_scenario
+from base.telemetry.tests.otlp.identity_inputs import machine_identity
 from base.telemetry.tests.test_tracing import (
-    FakeSpan,
-    FakeTracer,
-    NodeFakeSpan,
-    assert_root_once_with_child_parented_under_it,
-    assert_turn_root_exported_at_start,
     capture_otlp_json_posts,
-    spans_received,
     trace_config,
     under_watermark,
     wait_init_resolved,
-    warned_fields,
 )
 from base.telemetry.tests.test_tracing import (
     collector_up as collector_up,
@@ -32,26 +25,26 @@ from base.telemetry.tests.test_tracing import (
     production_process_by_default as production_process_by_default,
 )
 from base.telemetry.tests.test_tracing import (
-    reset_tracing_init_flag as reset_tracing_init_flag,
+    reset_trace_workers as reset_trace_workers,
 )
+from base.telemetry.tests.test_tracing import trace_readiness as trace_readiness
 from base.telemetry.tracing import (
     OtlpJsonHttpSpanExporter,
-    claim_idle_wait_span,
     initialize_tracing,
-    turn_span,
 )
 
 
 def test_arm_thread_base_exception_marks_attempt_spent(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
 ) -> None:
-    """The one-attempt contract holds for ANY arm-thread death: a
-    BaseException escape (SystemExit/GeneratorExit from inside the SDK — not
-    expected, but not impossible) must still set arm_failed, so a later
-    initialize_tracing(machine=machine_identity(), home=Path(".meiva")) cannot re-spawn the arm thread past the dead
-    is_alive() guard (the QA #1060 corner: with `except Exception` only, a
-    dead arm thread carrying no flag left one-attempt-per-process bypassable).
-    """
+    # meiva:note
+    # The one-attempt contract holds for ANY arm-thread death: a
+    # BaseException escape (SystemExit/GeneratorExit from inside the SDK — not
+    # expected, but not impossible) must still resolve readiness as false, so a later
+    # initialize_tracing(machine=machine_identity(), home=Path(".meiva")) cannot re-spawn the arm thread past the dead
+    # is_alive() guard (the QA #1060 corner: with `except Exception` only, a
+    # dead arm thread carrying no flag left one-attempt-per-process bypassable).
+    #
     under_watermark(monkeypatch)
     calls: list[int] = []
 
@@ -61,91 +54,32 @@ def test_arm_thread_base_exception_marks_attempt_spent(
 
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", _exit_sdk)
 
-    initialize_tracing(machine=machine_identity(), home=tmp_path, config=trace_config(enabled=True))
-    wait_init_resolved()
+    initialize_tracing(
+        machine=machine_identity(),
+        home=tmp_path,
+        config=trace_config(enabled=True),
+        readiness=trace_readiness,
+    )
+    wait_init_resolved(trace_readiness=trace_readiness)
 
-    assert tracing_mod.state["arm_failed"] is True
-    assert tracing_mod.state["initialized"] is False
+    assert trace_readiness.resolved and not trace_readiness.ready
+    assert trace_readiness.ready is False
 
     initialize_tracing(
-        machine=machine_identity(), home=tmp_path, config=trace_config(enabled=True)
+        machine=machine_identity(),
+        home=tmp_path,
+        config=trace_config(enabled=True),
+        readiness=trace_readiness,
     )  # must be a no-op: the attempt was spent
     assert calls == [1]
 
 
-def test_timeout_then_late_arm_recording_comes_up_midlife(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: LogRecords
-) -> None:
-    """Timeout -> late-completion contract: the bounded wait gives up and the
-    first turn proceeds WITHOUT recording, but a slow (not hung) arm that
-    finishes afterwards still brings recording up mid-life — later turns get
-    spans; only the first turn's spans are lost (the documented price).
-    Also: a later ensure call skips the wait (already remembered), so the
-    timeout does not block the late-armed turn from opening its span."""
-    under_watermark(monkeypatch)
-    monkeypatch.setattr(tracing_mod, "INIT_RESOLVED_TIMEOUT_S", 0.05)
-
-    entered = threading.Event()
-    release = threading.Event()
-
-    def _slow_init(**_kw: object) -> None:
-        entered.set()
-        release.wait(timeout=10.0)
-
-    from base.telemetry.tracing import ensure_init_resolved
-
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", _slow_init)
-
-    initialize_tracing(machine=machine_identity(), home=tmp_path, config=trace_config(enabled=True))
-    assert entered.wait(timeout=5.0), "arm thread must reach Traceloop.init"
-
-    # The arm is still in flight: the bounded wait gives up (one warning),
-    # recording stays off for now...
-    ensure_init_resolved()
-    warned = warned_fields(loguru_records)
-    assert len(warned) == 1
-    assert warned[0]["action"] == "init_resolved_timeout"
-    assert tracing_mod.state["timeout_reported"] is True
-    assert tracing_mod.state["initialized"] is False
-
-    # ...the arm completes late: recording comes up mid-life...
-    release.set()
-    wait_init_resolved()
-    assert tracing_mod.state["initialized"] is True
-
-    # ...and later calls skip the wait entirely, so the span opens for real.
-    ensure_init_resolved()
-    assert len(warned_fields(loguru_records)) == 1
-    entered_spans: list[str] = []
-    with turn_span(name="t", session_id="s", turn=1):
-        entered_spans.append("open")
-    assert entered_spans == ["open"]
+def test_timeout_then_late_arm_recording_comes_up_midlife(tmp_path: Path) -> None:
+    run_trace_scenario(tmp_path, "late-success", lifecycle=True)
 
 
-def test_ensure_init_resolved_instant_without_arming(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
-    """No wait when tracing was declined or never requested — the event is
-    only consulted after an arm thread was actually spawned."""
-    from base.telemetry.tracing import ensure_init_resolved
-
-    under_watermark(monkeypatch)
-    monkeypatch.setattr(
-        tracing_mod,
-        "endpoint_reachable",
-        lambda _e: False,  # pyright: ignore[reportUnknownArgumentType]
-    )
-    # Skip the daemon collector retry loop: this test asserts the instant
-    # no-wait contract, not the loop (that is the retry-loop test above).
-    monkeypatch.setattr(tracing_mod, "start_collector_retry", ignore_arguments)
-
-    initialize_tracing(
-        machine=machine_identity(), home=tmp_path, config=trace_config(enabled=True)
-    )  # declined: collector unreachable, no arm thread
-    ensure_init_resolved()  # must return at once, not hang on an unset event
-
-    assert tracing_mod.state["arm_thread"] is None
-    assert tracing_mod.state["initialized"] is False
+def test_readiness_returns_without_waiting_when_no_arm_was_admitted(tmp_path: Path) -> None:
+    run_trace_scenario(tmp_path, "no-admission", lifecycle=True)
 
 
 def test_otlp_exporter_posts_protobuf(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -245,45 +179,8 @@ def test_otlp_exporter_circuit_drops_during_cooldown_then_recovers(
     assert posts == tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD + 2
 
 
-def test_turn_span_exports_root_at_start_not_at_end(monkeypatch: pytest.MonkeyPatch):
-    """The turn root is a PLACEHOLDER: ended (and exported) at turn START, so a
-    trace always has its root even when the process dies mid-turn.
-
-    Two export-timing assertions:
-    1. while the turn is still running (inside `turn_span`), the exporter has
-       ALREADY received the root span (carrying session.id + meiva.turn);
-    2. exiting the turn does NOT export the root again — the span is ended
-       once, at turn start (use_span(end_on_exit=False) detaches the context
-       without a second end).
-
-    Plus the structural contract: a child span created inside the turn parents
-    under the already-ended root (same trace_id, parent_span_id == root id).
-    """
-    from opentelemetry import trace as otel_trace
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-
-    tracing_mod.state["initialized"] = True
-    posts = capture_otlp_json_posts(monkeypatch)
-    exporter = OtlpJsonHttpSpanExporter("http://127.0.0.1:4318", strip_content=True)
-    provider = TracerProvider()
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
-    previous = otel_trace.get_tracer_provider()
-    otel_trace.set_tracer_provider(provider)
-    try:
-        with turn_span(name="meiva-agent-7", session_id="7", turn=3):
-            # Assertion 1: the root is exported BEFORE the turn ends.
-            root = assert_turn_root_exported_at_start(spans_received(posts))
-
-            # A child created inside the turn must parent under the ended root.
-            with otel_trace.get_tracer("meiva.session").start_as_current_span("child"):
-                pass
-
-        # Assertion 2: exiting the turn does not re-export the root (and the
-        # child arrived, parented under the root).
-        assert_root_once_with_child_parented_under_it(spans_received(posts), root)
-    finally:
-        otel_trace.set_tracer_provider(previous)
+def test_turn_span_exports_root_at_start_not_at_end(tmp_path: Path) -> None:
+    run_trace_scenario(tmp_path, "root")
 
 
 def test_prune_old_mirror_removes_stale_keeps_recent(
@@ -474,145 +371,36 @@ def test_prune_old_mirror_disabled_when_nonpositive(
     assert old.exists()
 
 
-def test_turn_span_noop_when_disabled(monkeypatch: pytest.MonkeyPatch):
-    """When trace_enabled=False, turn_span is a pass-through — does not open a span."""
-
-    def _explode(*_a, **_kw):
-        raise AssertionError("get_tracer should not be called when disabled")
-
-    monkeypatch.setattr("opentelemetry.trace.get_tracer", _explode)  # pyright: ignore[reportUnknownArgumentType]
-
-    with turn_span(name="root", session_id="agent-42", turn=1):
-        pass
+def test_turn_span_noop_when_disabled(tmp_path: Path) -> None:
+    run_trace_scenario(tmp_path, "turn-disabled")
 
 
-def test_turn_span_noop_when_initialize_skipped(monkeypatch: pytest.MonkeyPatch):
-    """Even with trace_enabled=True, if initialize_tracing hasn't run yet,
-    turn_span stays no-op — otherwise it opens a span against an
-    uninitialized provider."""
-    assert tracing_mod.state["initialized"] is False
-
-    def _explode(*_a, **_kw):
-        raise AssertionError("must not open a span when uninitialized")
-
-    monkeypatch.setattr("opentelemetry.trace.get_tracer", _explode)  # pyright: ignore[reportUnknownArgumentType]
-
-    with turn_span(name="root", session_id="agent-42", turn=1):
-        pass
+def test_turn_span_noop_when_initialize_skipped(tmp_path: Path) -> None:
+    run_trace_scenario(tmp_path, "turn-uninitialized")
 
 
-def test_turn_span_opens_root_with_session_id(monkeypatch: pytest.MonkeyPatch):
-    """When enabled and initialized, turn_span opens an OTel root span with
-    the given name and stamps the session and turn attributes."""
-    tracing_mod.state["initialized"] = True
-
-    span = FakeSpan()
-    tracer = FakeTracer(span)
-    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
-
-    with turn_span(name="meiva-agent-42", session_id="42", turn=3):
-        # The placeholder root is ended (exported) at turn START, while the
-        # turn is still running (#1964) — the trace has its root even when
-        # the process dies mid-turn.
-        assert span.ended is True
-
-    assert tracer.opened == ["meiva-agent-42"]
-    assert span.attributes == {
-        "session.id": "42",
-        "meiva.turn": 3,
-    }
+def test_turn_span_opens_root_with_session_id(tmp_path: Path) -> None:
+    run_trace_scenario(tmp_path, "root")
 
 
-def test_claim_idle_wait_span_noop_when_disabled(monkeypatch: pytest.MonkeyPatch):
-    """trace_enabled=False: pass-through — no OTel call at all."""
-
-    def _explode(*_a, **_kw):
-        raise AssertionError("OTel must not be touched when tracing is disabled")
-
-    monkeypatch.setattr("opentelemetry.trace.get_current_span", _explode)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("opentelemetry.trace.get_tracer", _explode)  # pyright: ignore[reportUnknownArgumentType]
-
-    with claim_idle_wait_span():
-        pass
+def test_claim_idle_wait_span_noop_when_disabled(tmp_path: Path) -> None:
+    run_trace_scenario(tmp_path, "idle-disabled")
 
 
-def test_claim_idle_wait_span_noop_when_initialize_skipped(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """trace_enabled=True but initialize_tracing never ran: no-op, same as
-    turn_span — a span opened against the unset proxy tracer is silently lost."""
-    assert tracing_mod.state["initialized"] is False
-
-    def _explode(*_a, **_kw):
-        raise AssertionError("must not open a span when uninitialized")
-
-    monkeypatch.setattr("opentelemetry.trace.get_tracer", _explode)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("opentelemetry.trace.get_current_span", _explode)  # pyright: ignore[reportUnknownArgumentType]
-
-    with claim_idle_wait_span():
-        pass
+def test_claim_idle_wait_span_noop_when_initialize_skipped(tmp_path: Path) -> None:
+    run_trace_scenario(tmp_path, "idle-uninitialized")
 
 
-def test_claim_idle_wait_span_ends_node_span_and_opens_idle_wait(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """Enabled + initialized + a recording `execute_task claim` span current:
-    the node span is ended at the park boundary (so the claim span shows only
-    the real dispatch) and an explicit `claim idle-wait` span is opened for
-    the wait."""
-    tracing_mod.state["initialized"] = True
-
-    node_span = NodeFakeSpan("execute_task claim")
-    monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: node_span)
-    tracer = FakeTracer(FakeSpan())
-    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
-
-    with claim_idle_wait_span():
-        pass
-
-    assert node_span.ended is True
-    assert tracer.opened == ["claim idle-wait"]
+def test_claim_idle_wait_span_ends_node_span_and_opens_idle_wait(tmp_path: Path) -> None:
+    run_trace_scenario(tmp_path, "node")
 
 
-def test_claim_idle_wait_span_never_ends_non_node_span(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """Fail-safe: a current span that is NOT a LangChain node span (the
-    enclosing turn root — the instrumentor not attached) is never ended:
-    ending it would truncate the whole turn trace. The wait then stays inside
-    the current span (pre-fix behavior)."""
-    tracing_mod.state["initialized"] = True
-
-    root_span = NodeFakeSpan("meiva-agent-42")
-    monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: root_span)
-    tracer = FakeTracer(FakeSpan())
-    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
-
-    with claim_idle_wait_span():
-        pass
-
-    assert root_span.ended is False
-    assert tracer.opened == []
+def test_claim_idle_wait_span_never_ends_non_node_span(tmp_path: Path) -> None:
+    run_trace_scenario(tmp_path, "nonnode")
 
 
-def test_claim_idle_wait_span_skips_non_recording_span(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """A non-recording current span (sampler dropped it / no real span open)
-    is not ended and no idle-wait span is opened — the helper only acts on a
-    real recording node span."""
-    tracing_mod.state["initialized"] = True
-
-    node_span = NodeFakeSpan("execute_task claim", recording=False)
-    monkeypatch.setattr("opentelemetry.trace.get_current_span", lambda: node_span)
-    tracer = FakeTracer(FakeSpan())
-    monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
-
-    with claim_idle_wait_span():
-        pass
-
-    assert node_span.ended is False
-    assert tracer.opened == []
+def test_claim_idle_wait_span_skips_non_recording_span(tmp_path: Path) -> None:
+    run_trace_scenario(tmp_path, "nonrecording")
 
 
 def test_gzip_old_mirror_failure_is_reported_not_swallowed(
