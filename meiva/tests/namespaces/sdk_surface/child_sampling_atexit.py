@@ -1,7 +1,6 @@
 """Child process for the sampling-owner atexit test: a refresh defect surfaces at shutdown."""
 
 import meiva  # noqa: F401  # pyright: ignore[reportUnusedImport] (importing the SDK is under test)
-from base.agents.sdk import call_policy
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths.home import resolve_meiva_home
@@ -16,10 +15,10 @@ def read() -> object:
     raise original
 
 
-call_policy.read_policy = read  # pyright: ignore[reportAttributeAccessIssue]
 installation = installed()
 assert installation is not None
-owner = installation.sampling
+owner = installation.require_sampling()
+owner.fetch = read  # pyright: ignore[reportAttributeAccessIssue]
 try:
     owner.read()
 except ValueError as observed:

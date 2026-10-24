@@ -6,7 +6,7 @@ import pytest
 
 from agent.graph.prompt.live import read_live_sdk
 from agent.graph.prompt.system_prompt import sdk_expand_section
-from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.config import FIELD_INFOS
 from base.config.service_read import ConfigAuthority
 from base.config.tests.config_authority import config_authority as config_authority
@@ -54,7 +54,7 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
         catalog=model_catalog,
         authority=config_authority,
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
-        sampling=SamplingPolicyOwner(reader=SamplingPolicy),
+        sampling=fixed_sampling_owner(),
     )
 
     slices = AgentSlices.resolve(

@@ -5,6 +5,7 @@ import subprocess
 import sys
 import threading
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -14,33 +15,51 @@ from pydantic import ValidationError
 
 from base.agents.sdk import call_policy
 from base.agents.sdk.call_policy import SamplingPolicy
-from base.host.env.boot_policy import BootstrapFetch
-from base.host.env.tests.env_files import constant, env_path_of
+from base.host.net.tests.local_http import serve_json
 
 
-@pytest.mark.parametrize("gateway", [True, False])
-def test_local_policy_reads_live_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, gateway: bool
-) -> None:
-    from base.host.env import bootstrap, dotenv_file
+# meiva:note
+# A fetch that answers with one scripted outcome, replaceable between refreshes: a policy to
+# return or an exception to raise.
+class ScriptedFetch:
+    def __init__(self, outcome: SamplingPolicy | BaseException) -> None:
+        self.outcome = outcome
 
+    def __call__(self) -> SamplingPolicy:
+        if isinstance(self.outcome, BaseException):
+            raise self.outcome
+        return self.outcome
+
+
+def _owner(
+    fetch: Callable[[], SamplingPolicy], initial: SamplingPolicy | None = None
+) -> call_policy.SamplingPolicyOwner:
+    return call_policy.SamplingPolicyOwner(
+        initial=SamplingPolicy() if initial is None else initial, fetch=fetch
+    )
+
+
+@pytest.mark.parametrize("serves_gateway", [True, False])
+def test_local_policy_reads_live_file(tmp_path: Path, serves_gateway: bool) -> None:
     env_file = tmp_path / ".env"
-    monkeypatch.setattr(bootstrap, "config_source_is_local", constant(gateway))
-    monkeypatch.setattr(bootstrap, "should_fetch_from_gateway", constant(False))
-    monkeypatch.setattr(dotenv_file, "env_file_path", env_path_of(env_file))
+    env = {"MEIVA_MACHINE_SERVE_GATEWAY": "true"} if serves_gateway else {}
+
+    def read() -> SamplingPolicy:
+        return call_policy.read_policy(
+            env=env, env_path=env_file, gateway_url="http://gateway.invalid"
+        )
+
     env_file.write_text("MEIVA_SDK_CALL_SAMPLING_ENABLED=true\nMEIVA_SDK_CALL_SAMPLE_EVERY=4\n")
-    assert call_policy.read_policy() == SamplingPolicy(sampling_enabled=True, sample_every=4)
+    assert read() == SamplingPolicy(sampling_enabled=True, sample_every=4)
     env_file.write_text("MEIVA_SDK_CALL_SAMPLING_ENABLED=false\nMEIVA_SDK_CALL_SAMPLE_EVERY=7\n")
-    assert call_policy.read_policy() == SamplingPolicy(sampling_enabled=False, sample_every=7)
+    assert read() == SamplingPolicy(sampling_enabled=False, sample_every=7)
     env_file.write_text("")
-    assert call_policy.read_policy() == SamplingPolicy()
+    assert read() == SamplingPolicy()
 
 
 def test_remote_policy_refreshes_without_waiting_for_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cache = call_policy.SamplingPolicyOwner()
-    cache.value = SamplingPolicy()
     started, release, finished = threading.Event(), threading.Event(), threading.Event()
 
     def read() -> SamplingPolicy:
@@ -48,7 +67,7 @@ def test_remote_policy_refreshes_without_waiting_for_network(
         assert release.wait(5)
         return SamplingPolicy(sampling_enabled=True, sample_every=3)
 
-    monkeypatch.setattr(call_policy, "read_policy", read)
+    cache = _owner(read)
     original = cache.refresh
 
     def refresh() -> None:
@@ -69,14 +88,11 @@ def test_remote_policy_refreshes_without_waiting_for_network(
 
 
 def test_failed_refresh_preserves_policy_and_warns(monkeypatch: pytest.MonkeyPatch) -> None:
-    cache = call_policy.SamplingPolicyOwner()
-    cache.value = SamplingPolicy(sampling_enabled=True, sample_every=5)
-
-    def read() -> SamplingPolicy:
-        raise httpx.ConnectError("gateway unavailable")
-
+    cache = _owner(
+        ScriptedFetch(httpx.ConnectError("gateway unavailable")),
+        initial=SamplingPolicy(sampling_enabled=True, sample_every=5),
+    )
     reports: list[Any] = []
-    monkeypatch.setattr(call_policy, "read_policy", read)
     from loguru import logger
 
     sink = logger.add(lambda message: reports.append(message.record))
@@ -105,20 +121,20 @@ def test_ratio_rejects_invalid_values(value: Any) -> None:
         SamplingPolicy(sample_every=value)
 
 
-def test_enrolled_process_reads_gateway_policy(monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.host.env import bootstrap
-
-    monkeypatch.setattr(bootstrap, "config_source_is_local", constant(False))
-    monkeypatch.setattr(bootstrap, "should_fetch_from_gateway", constant(True))
-    requests: list[dict[str, Any]] = []
-
-    def fetch(_url: str, **kwargs: Any) -> dict[str, str]:
-        requests.append(kwargs)
-        return {"MEIVA_SDK_CALL_SAMPLING_ENABLED": "true", "MEIVA_SDK_CALL_SAMPLE_EVERY": "2"}
-
-    monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", fetch)
-    assert call_policy.read_policy() == SamplingPolicy(sampling_enabled=True, sample_every=2)
-    assert requests == [{"bearer": None, "tuning": BootstrapFetch(timeout_s=2.0, attempts=1)}]
+def test_enrolled_process_reads_gateway_policy(tmp_path: Path) -> None:
+    served = {"MEIVA_SDK_CALL_SAMPLING_ENABLED": "true", "MEIVA_SDK_CALL_SAMPLE_EVERY": "2"}
+    with serve_json(served) as gateway:
+        env = {
+            "MEIVA_MACHINE_SERVE_AGENT_RUNNER": "true",
+            "MEIVA_GATEWAY_URL": gateway.url,
+            "MEIVA_API_TOKEN": "machine-token",
+        }
+        policy = call_policy.read_policy(
+            env=env, env_path=tmp_path / ".env", gateway_url=gateway.url
+        )
+    assert policy == SamplingPolicy(sampling_enabled=True, sample_every=2)
+    assert [r.headers["authorization"] for r in gateway.requests] == ["Bearer machine-token"]
+    assert [r.path for r in gateway.requests] == ["/api/bootstrap"]
 
 
 def _http_failure(status: int) -> httpx.HTTPStatusError:
@@ -146,14 +162,8 @@ def test_expected_fetch_failure_retains_the_valid_snapshot(
         pytest.fail("a sampling fetch failure must not initialize an event pipeline")
 
     monkeypatch.setattr(emitter, "init_telemetry", initialize)
-    cache = call_policy.SamplingPolicyOwner()
     snapshot = SamplingPolicy(sampling_enabled=True, sample_every=5)
-    cache.value = snapshot
-
-    def read() -> SamplingPolicy:
-        raise error
-
-    monkeypatch.setattr(call_policy, "read_policy", read)
+    cache = _owner(ScriptedFetch(error), initial=snapshot)
     cache.refresh()
     assert cache.read() is snapshot
 
@@ -173,13 +183,8 @@ def test_expected_fetch_failure_retains_the_valid_snapshot(
 def test_unexpected_refresh_error_persists_until_a_valid_snapshot(
     monkeypatch: pytest.MonkeyPatch, error: Exception
 ) -> None:
-    cache = call_policy.SamplingPolicyOwner()
-    cache.value = SamplingPolicy(sample_every=5)
-
-    def read() -> SamplingPolicy:
-        raise error
-
-    monkeypatch.setattr(call_policy, "read_policy", read)
+    fetch = ScriptedFetch(error)
+    cache = _owner(fetch, initial=SamplingPolicy(sample_every=5))
     cache.refresh()
     depths: list[int] = []
     for _ in range(2):
@@ -189,15 +194,12 @@ def test_unexpected_refresh_error_persists_until_a_valid_snapshot(
         depths.append(sum(1 for _ in traceback.walk_tb(caught.value.__traceback__)))
     assert depths[0] == depths[1]  # Repeated callers do not accumulate each other's stacks.
 
-    def unavailable() -> SamplingPolicy:
-        raise httpx.ConnectError("still offline")
-
-    monkeypatch.setattr(call_policy, "read_policy", unavailable)
+    fetch.outcome = httpx.ConnectError("still offline")
     cache.refresh()
     with pytest.raises(type(error)):
         cache.read()  # An outage must not clear an already-invalid configuration.
     recovered = SamplingPolicy(sampling_enabled=True, sample_every=7)
-    monkeypatch.setattr(call_policy, "read_policy", lambda: recovered)
+    fetch.outcome = recovered
     cache.refresh()
     assert cache.read() is recovered
 
@@ -205,9 +207,7 @@ def test_unexpected_refresh_error_persists_until_a_valid_snapshot(
 def test_invalid_schema_is_not_reported_as_a_retained_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cache = call_policy.SamplingPolicyOwner()
-    cache.value = SamplingPolicy()
-    monkeypatch.setattr(call_policy, "read_policy", lambda: SamplingPolicy(sample_every=0))
+    cache = _owner(lambda: SamplingPolicy(sample_every=0))
     cache.refresh()
     with pytest.raises(ValidationError):
         cache.read()
@@ -216,30 +216,26 @@ def test_invalid_schema_is_not_reported_as_a_retained_policy(
 def test_failed_policy_read_still_starts_one_refresh_when_due(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cache = call_policy.SamplingPolicyOwner()
-    cache.value = SamplingPolicy()
     error = TypeError("invalid policy")
-
-    def fail() -> SamplingPolicy:
-        raise error
-
-    clock = [10.0]
-    monkeypatch.setattr(call_policy.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(call_policy, "read_policy", fail)
-    cache.refresh()
-    assert cache.next_refresh == 15.0
     started, release, finished = threading.Event(), threading.Event(), threading.Event()
     snapshot = SamplingPolicy(sample_every=9)
-
     fetches: list[str] = []
+    failing = True
 
-    def recover() -> SamplingPolicy:
+    def fetch() -> SamplingPolicy:
+        if failing:
+            raise error
         fetches.append("fetch")
         started.set()
         assert release.wait(5)
         return snapshot
 
-    monkeypatch.setattr(call_policy, "read_policy", recover)
+    cache = _owner(fetch)
+    clock = [10.0]
+    monkeypatch.setattr(call_policy.time, "monotonic", lambda: clock[0])
+    cache.refresh()
+    assert cache.next_refresh == 15.0
+    failing = False
     original = cache.refresh
 
     def refresh() -> None:
@@ -284,8 +280,7 @@ def test_sdk_telemetry_cold_import_does_not_load_httpx(tmp_path: Path) -> None:
 def test_refresh_dependency_import_failure_reaches_the_caller(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cache = call_policy.SamplingPolicyOwner()
-    cache.value = SamplingPolicy()
+    cache = _owner(ScriptedFetch(SamplingPolicy()))
     monkeypatch.setitem(sys.modules, "httpx", None)
     cache.refresh()
     with pytest.raises(ImportError, match="httpx"):
@@ -295,8 +290,7 @@ def test_refresh_dependency_import_failure_reaches_the_caller(
 def test_invalid_refresh_dependency_classification_reaches_the_caller(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cache = call_policy.SamplingPolicyOwner()
-    cache.value = SamplingPolicy()
+    cache = _owner(ScriptedFetch(SamplingPolicy()))
     monkeypatch.delattr(httpx, "HTTPStatusError")
     cache.refresh()
     with pytest.raises(AttributeError, match="HTTPStatusError"):

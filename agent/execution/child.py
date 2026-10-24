@@ -301,7 +301,9 @@ def run_code(code: str, payload: Any) -> None:
     execution_context = process_context.current_context()
     installation = installed()
     sampling = (
-        contextlib.nullcontext() if installation is None else installation.sampling.execution()
+        contextlib.nullcontext()
+        if installation is None or installation.sampling is None
+        else installation.sampling.execution()
     )
     process_context.bind_context(replace(execution_context, sdk_calls=tally))
     try:

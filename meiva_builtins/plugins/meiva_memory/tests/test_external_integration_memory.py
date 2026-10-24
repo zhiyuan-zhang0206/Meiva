@@ -13,7 +13,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 import meiva
 from base.agents import impersonation as leases
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
-from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
@@ -62,7 +62,7 @@ def native_checkpoint(
         config_images=model_installation.config_images,
         catalog=model_installation.catalog,
         authority=model_installation.authority,
-        sampling=SamplingPolicyOwner(reader=SamplingPolicy),
+        sampling=fixed_sampling_owner(),
     )
     install.mark_faces_loaded()
     request.addfinalizer(install.uninstall)

@@ -20,8 +20,8 @@ from base.agents.impersonation.manifest import (
     close_local_participant_admission,
     seal_local_participant,
 )
-from base.agents.sdk import call_policy
 from base.agents.sdk.tally import SdkCallTally
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.agents.tests.capture_inputs import capture_rows, capture_state, open_capture, sdk_event
 from base.agents.tests.capture_inputs import lease as lease
 from base.agents.tests.capture_inputs import owner as owner
@@ -80,12 +80,6 @@ async def test_concurrent_calls_capture_the_original_gate_after_context_rebind(
     monkeypatch.setattr(meiva, "receipt_probe", namespace, raising=False)
     monkeypatch.setattr(meiva, "__all_for_meiva__", [*meiva.__all_for_meiva__, "receipt_probe"])
 
-    def _policy_for_test(
-        create_capture_owner: call_policy.SamplingPolicyOwner,
-    ) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     prior = getattr(meiva, "context", None)
     tally = SdkCallTally()
     context = MeivaContext(
@@ -94,7 +88,7 @@ async def test_concurrent_calls_capture_the_original_gate_after_context_rebind(
         sdk_capture=_CaptureOwner(previous_gate),
     )
     process_context.bind_context(context)
-    ledger = metering.install(call_policy.SamplingPolicyOwner())
+    ledger = metering.install(fixed_sampling_owner())
     calls = [asyncio.create_task(namespace.held()) for _ in range(2)]
     try:
         await asyncio.wait_for(entered.wait(), timeout=2)
