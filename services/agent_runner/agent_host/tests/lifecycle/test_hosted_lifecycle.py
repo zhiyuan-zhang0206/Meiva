@@ -28,7 +28,11 @@ from base.paths import meiva_home
 from ops import cluster_status
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.lifecycle.shells import apply_lifecycle_command
-from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
+from services.agent_runner.agent_host.tests.host_policy import (
+    configured_machine,
+    configured_policy,
+    handoff_timestamps,
+)
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 
 
@@ -101,6 +105,7 @@ async def test_hosted_applies_only_after_continuation_returns(
         inbound = insert_lifecycle_command(db_conn, agent_id, kind)
         entered, release = asyncio.Event(), asyncio.Event()
         host = AgentHost(
+            handoff_stamping=handoff_timestamps(),
             home=meiva_home(),
             policy=configured_policy(),
             pool=aops_pool,
@@ -180,6 +185,7 @@ async def test_hosted_terminate_crash_leaves_no_half_applied_command(
             }
         )
         host = AgentHost(
+            handoff_stamping=handoff_timestamps(),
             home=meiva_home(),
             policy=configured_policy(),
             pool=aops_pool,
@@ -293,6 +299,7 @@ async def test_pending_wake_scan_finds_a_claimed_command_without_pending_rows(
         bus=event_bus,
     )
     host = AgentHost(
+        handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
         pool=aops_pool,
@@ -360,6 +367,7 @@ async def _run_terminating_turn(
             }
         )
         host = AgentHost(
+            handoff_stamping=handoff_timestamps(),
             home=meiva_home(),
             policy=configured_policy(),
             pool=aops_pool,

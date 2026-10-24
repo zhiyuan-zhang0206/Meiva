@@ -1,7 +1,7 @@
 from dataclasses import replace
 from typing import Any
 
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
@@ -30,9 +30,6 @@ def configured_policy(**changes: Any) -> HostPolicy:
             llm_override=settings.lm.llm_override,
             default_reader=defaults(),
             clock_factory=Clock.from_settings,
-            handoff_notes=TimestampPolicy(
-                clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
-            ),
             harness_registration_ttl_seconds=daemon.harness_registration_ttl_seconds,
             harness_environ={"HOME": "/nonexistent/host-policy-home"},
             stall=StallTiming(
@@ -57,3 +54,11 @@ def assert_sdk_context(expected: object | None, *, bound: bool) -> None:
 
     assert getattr(meiva, "context", None) is expected
     assert hasattr(meiva, "context") is bound
+
+
+# meiva:note
+# The test composition root supplies the host's independent clock resource explicitly.
+def handoff_timestamps() -> TimestampSource:
+    return TimestampSource(
+        clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
+    )

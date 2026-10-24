@@ -54,8 +54,8 @@ How much runs at once, and how rate limits are met:
 
 ## Rendering policy ownership
 
-Timeline rendering requires a `TimestampPolicy` from the producer: the clock and the
-timestamp switch as values, built by the producer for the unit of work. Compact items
+Timeline rendering requires a `TimestampPolicy` from the producer: the timestamp switch, the
+timezone, the weekday flag and one instant as a frozen value, minted by the producer for the unit of work. Compact items
 follow the switch; other items carry no stamp. The tail-window limit has its own required
 live reader and is evaluated only at the existing window-selection points.
 

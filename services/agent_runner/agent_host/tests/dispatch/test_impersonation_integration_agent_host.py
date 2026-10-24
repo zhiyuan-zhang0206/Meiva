@@ -21,7 +21,11 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog
 from base.paths import meiva_home
-from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
+from services.agent_runner.agent_host.tests.host_policy import (
+    configured_machine,
+    configured_policy,
+    handoff_timestamps,
+)
 
 
 async def test_replacement_host_admission_ends_the_takeover_without_respawning_its_relay(
@@ -70,6 +74,7 @@ async def test_replacement_host_admission_ends_the_takeover_without_respawning_i
     leases.activate(database, event_bus, lease["id"], owner)
     graph = _HandoffGraph()
     host = AgentHost(
+        handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
         pool=aops_pool,
@@ -163,6 +168,7 @@ async def test_restarted_host_settles_the_ended_takeover_without_an_external_mes
     leases.activate(database, event_bus, lease["id"], predecessor)
     graph = _HandoffGraph()
     host = AgentHost(
+        handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
         pool=aops_pool,
@@ -237,6 +243,7 @@ async def test_lease_controls_settle_the_handoff_of_a_dead_relays_lease(
     db_conn.commit()
     graph = _HandoffGraph()
     host = AgentHost(
+        handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
         pool=aops_pool,
@@ -351,6 +358,7 @@ def _handoff_host(
     from services.agent_runner.agent_host.host import AgentHost
 
     return AgentHost(
+        handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
         pool=aops_pool,

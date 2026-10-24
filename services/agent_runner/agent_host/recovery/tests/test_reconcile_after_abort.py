@@ -22,7 +22,11 @@ from base.packages.composer_commands import CommandCatalog
 from base.paths import meiva_home
 from services.agent_runner.agent_host import settlement as settlement_mod
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
+from services.agent_runner.agent_host.tests.host_policy import (
+    configured_machine,
+    configured_policy,
+    handoff_timestamps,
+)
 from services.agent_runner.agent_host.tests.lifecycle.recovery_admission import admit as _admit
 
 
@@ -185,6 +189,7 @@ async def test_cold_build_consumes_claims_without_reading_checkpoint_history(
     claimed = claimed_row(db_conn, agent, "claimed")
     unusable_saver: Any = object()
     host = AgentHost(
+        handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
         pool=aops_pool,

@@ -9,16 +9,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from base.agents.messages.timestamp_policy import TimestampPolicy
-
 
 # meiva:note
 # `run_timeline_message_text_max`: characters of one raw message part served before it is clipped
 # (`display.run_timeline_message_text_max`). `default_model`: the model a context breakdown
-# resolves when the agent names none (`lm.llm_model`). `timeline_inputs`: the clock and the
-# timestamp switch every rendered timeline stamps messages with.
+# resolves when the agent names none (`lm.llm_model`). Timestamp resources are supplied
+# separately by the root.
 @dataclass(frozen=True)
 class InsightsConfig:
     run_timeline_message_text_max: int
     default_model: str
-    timeline_inputs: TimestampPolicy

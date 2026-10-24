@@ -18,7 +18,7 @@ from agent.tests.impersonation.handoff_inputs import (
     controller_relay_alive,
     deliver_peers_and_ack_first,
     end_external_session,
-    handoff_notes,
+    handoff_timestamps,
     inbound_wakes,
     local_exec_process,
     prepare_graph,
@@ -78,7 +78,7 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     assert not model_calls
@@ -152,7 +152,7 @@ async def test_successor_ends_the_takeover_and_resumes_preserved_pending_input(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     pending = deliver_peers_and_ack_first(
@@ -191,7 +191,7 @@ async def test_successor_ends_the_takeover_and_resumes_preserved_pending_input(
         owner.agent_id,
         replacement_ctx.relays,
         incarnation=successor,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     resumed = await graph.ainvoke(
@@ -244,7 +244,7 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     pending = deliver_peers_and_ack_first(
@@ -357,7 +357,7 @@ async def test_end_note_resumes_an_empty_queue(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     leases.release(
@@ -375,7 +375,7 @@ async def test_end_note_resumes_an_empty_queue(
             owner.agent_id,
             ctx.relays,
             incarnation=owner,
-            notes=handoff_notes(),
+            timestamps=handoff_timestamps(),
             host=host,
         )
         assert wakes.drain() == ["impersonation"]
@@ -437,7 +437,7 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     inbound_id = insert_inbound_message(
@@ -477,7 +477,7 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     await graph.ainvoke(

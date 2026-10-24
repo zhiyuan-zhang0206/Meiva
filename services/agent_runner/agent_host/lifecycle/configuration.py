@@ -8,7 +8,7 @@ from pathlib import Path
 from base import paths
 from base.agents.context.clients import ClientSet
 from base.agents.history.hierarchy.group_consumer import UnderstandingReadInputs
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
@@ -27,6 +27,7 @@ from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy
 
 __all__ = [
     "boot_process",
+    "handoff_source",
     "host_machine",
     "host_policy",
     "initialize_logging",
@@ -57,16 +58,21 @@ def host_policy(config: ConfigBoot, *, keys: ProviderKeys) -> HostPolicy:
         llm_override=config.view.lm.llm_override,
         default_reader=lambda domain, field: getattr(getattr(config.view, domain), field),
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
-        handoff_notes=TimestampPolicy(
-            clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
-            timestamps_enabled=config.view.general.message_timestamps,
-        ),
         harness_registration_ttl_seconds=daemon.harness_registration_ttl_seconds,
         stall=StallTiming(
             scan_interval_s=daemon.host_turn_progress_scan_interval_seconds,
             no_progress_timeout_s=daemon.host_turn_no_progress_timeout_seconds,
             unwind_timeout_s=CANCEL_UNWIND_TIMEOUT_S,
         ),
+    )
+
+
+# meiva:note
+# The process root keeps stamping as an independent resource, outside the host's policy values.
+def handoff_source(config: ConfigBoot) -> TimestampSource:
+    return TimestampSource(
+        clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+        timestamps_enabled=config.view.general.message_timestamps,
     )
 
 

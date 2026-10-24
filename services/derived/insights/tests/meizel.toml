@@ -1,2 +1,0 @@
-[debt.env-patch]
-"test_insights_service.py#patch.dict os.environ" = 1

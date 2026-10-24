@@ -53,6 +53,16 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+# meiva:note
+# The bracketed message timestamp of `moment` in the IANA zone `timezone`, with the weekday when
+# `weekday`. A zone name that names no zone raises `ZoneInfoNotFoundError`.
+def format_message_timestamp(moment: datetime, *, timezone: str, weekday: bool) -> str:
+    local = moment.astimezone(ZoneInfo(timezone))
+    if weekday:
+        return local.strftime("[%Y-%m-%d %a %H:%M:%S]")
+    return local.strftime("[%Y-%m-%d %H:%M:%S]")
+
+
 class Clock:
     def __init__(
         self,
@@ -92,11 +102,14 @@ class Clock:
     def explicit_zone(self) -> ZoneInfo:
         return ZoneInfo(self._config.timezone)
 
+    @property
+    def message_timestamp_weekday(self) -> bool:
+        return self._config.message_timestamp_weekday
+
     def format_timestamp(self, dt: datetime) -> str:
-        local = dt.astimezone(self.explicit_zone())
-        if self._config.message_timestamp_weekday:
-            return local.strftime("[%Y-%m-%d %a %H:%M:%S]")
-        return local.strftime("[%Y-%m-%d %H:%M:%S]")
+        return format_message_timestamp(
+            dt, timezone=self._config.timezone, weekday=self._config.message_timestamp_weekday
+        )
 
     def now_timestamp(self) -> str:
         return self.format_timestamp(self.now())

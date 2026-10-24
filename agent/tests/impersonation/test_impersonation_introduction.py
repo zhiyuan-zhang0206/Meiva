@@ -25,15 +25,16 @@ from agent.tests.impersonation.lease_support import (
     throttled_saver,
 )
 from agent.tests.impersonation.lease_support import cluster as cluster
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampPolicy, TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock.tests.fakes import clock_rejecting_now
 
 MOMENT = datetime(2026, 10, 6, 13, 39, 25, tzinfo=UTC)
 
 
 def _notes(*, timestamps: bool = False) -> TimestampPolicy:
     clock = fixed_clock()
-    return TimestampPolicy(clock=clock, timestamps_enabled=timestamps)
+    return TimestampPolicy.from_clock(clock, timestamps_enabled=timestamps)
 
 
 def _session(number: int = 0) -> dict[str, Any]:
@@ -118,7 +119,7 @@ async def test_all_takeover_notes_stamp_their_real_creation_time(
         now=lambda: MOMENT,
         timers=SYSTEM_TIMERS,
     )
-    notes = TimestampPolicy(clock=clock, timestamps_enabled=timestamps)
+    notes = TimestampPolicy.from_clock(clock, timestamps_enabled=timestamps)
     owner = cluster.native_agent()
     cluster.lease(owner, provider="claude", phase="released")
     lease = cluster.status(owner)
@@ -126,7 +127,13 @@ async def test_all_takeover_notes_stamp_their_real_creation_time(
     graph, config = await idle_graph(owner.agent_id, MemorySaver())
     await ensure_start_marker(graph, lease, notes=notes)
     await deliver_handoff(
-        graph, cluster.database, cluster.event_bus, lease, owner, notes=notes, workspace=tmp_path
+        graph,
+        cluster.database,
+        cluster.event_bus,
+        lease,
+        owner,
+        timestamps=TimestampSource(clock=clock, timestamps_enabled=timestamps),
+        workspace=tmp_path,
     )
     notes_written = (await graph.aget_state(config)).values["messages"][1:]
     assert [note.id for note in notes_written] == [
@@ -143,7 +150,7 @@ async def test_all_takeover_notes_stamp_their_real_creation_time(
         assert note.additional_kwargs["meiva_note_tag"] == "impersonation"
 
 
-async def test_an_existing_handoff_receipt_keeps_its_original_note(
+async def test_a_handoff_receipt_replay_keeps_the_note_without_observing_time(
     cluster: Cluster, tmp_path: Path
 ) -> None:
     owner = cluster.native_agent()
@@ -151,27 +158,77 @@ async def test_an_existing_handoff_receipt_keeps_its_original_note(
     lease = cluster.status(owner)
     assert lease is not None
     graph, config = await idle_graph(owner.agent_id, MemorySaver())
-    for _ in range(2):
+    await deliver_handoff(
+        graph,
+        cluster.database,
+        cluster.event_bus,
+        lease,
+        owner,
+        timestamps=TimestampSource(clock=fixed_clock(), timestamps_enabled=True),
+        workspace=tmp_path,
+    )
+    original = [
+        message.model_dump() for message in (await graph.aget_state(config)).values["messages"]
+    ]
+    # meiva:note
+    # The checkpoint landed but the database receipt was lost at the crash boundary.
+    cluster.db_conn.execute(
+        "UPDATE agent_impersonations SET handoff_applied_at=NULL WHERE id=%s", (lease["id"],)
+    )
+    cluster.db_conn.commit()
+    await deliver_handoff(
+        graph,
+        cluster.database,
+        cluster.event_bus,
+        lease,
+        owner,
+        timestamps=TimestampSource(clock=clock_rejecting_now(), timestamps_enabled=True),
+        workspace=tmp_path,
+    )
+    assert [
+        message.model_dump() for message in (await graph.aget_state(config)).values["messages"]
+    ] == original
+    assert [message["id"] for message in original] == [
+        "initial-request",
+        f"impersonation-handoff:{owner.agent_id}:0",
+    ]
+    receipt = cluster.db_conn.execute(
+        "SELECT handoff_applied_at FROM agent_impersonations WHERE id=%s", (lease["id"],)
+    ).fetchone()
+    assert receipt is not None and receipt[0] is not None
+
+
+async def test_a_new_handoff_observes_time_before_it_writes_the_note_or_receipt(
+    cluster: Cluster, tmp_path: Path
+) -> None:
+    owner = cluster.native_agent()
+    cluster.lease(owner, provider="claude", phase="released")
+    lease = cluster.status(owner)
+    assert lease is not None
+    graph, config = await idle_graph(owner.agent_id, MemorySaver())
+    with pytest.raises(AssertionError, match="must not observe wall time"):
         await deliver_handoff(
             graph,
             cluster.database,
             cluster.event_bus,
             lease,
             owner,
-            notes=_notes(),
+            timestamps=TimestampSource(clock=clock_rejecting_now(), timestamps_enabled=True),
             workspace=tmp_path,
         )
-    messages = (await graph.aget_state(config)).values["messages"]
-    assert [m.id for m in messages] == [
-        "initial-request",
-        f"impersonation-handoff:{owner.agent_id}:0",
+    assert [message.id for message in (await graph.aget_state(config)).values["messages"]] == [
+        "initial-request"
     ]
+    receipt = cluster.db_conn.execute(
+        "SELECT handoff_applied_at FROM agent_impersonations WHERE id=%s", (lease["id"],)
+    ).fetchone()
+    assert receipt is not None and receipt[0] is None
 
 
 def test_a_note_stamp_follows_the_policy_it_is_given() -> None:
     clock = Clock(ClockConfig("UTC", "UTC", False), now=lambda: MOMENT, timers=SYSTEM_TIMERS)
-    stamped = TimestampPolicy(clock=clock, timestamps_enabled=True)
-    bare = TimestampPolicy(clock=clock, timestamps_enabled=False)
+    stamped = TimestampPolicy.from_clock(clock, timestamps_enabled=True)
+    bare = TimestampPolicy.from_clock(clock, timestamps_enabled=False)
     assert note_stamp_of(stamped).prefix == "[2026-10-06 13:39:25] "
     assert note_stamp_of(bare).prefix == ""
     assert note_stamp_of(bare).created_at == MOMENT

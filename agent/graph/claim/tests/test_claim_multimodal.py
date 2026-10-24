@@ -28,8 +28,8 @@ from base.clock import Clock
 from base.config import settings
 from base.packages.composer_commands import CommandCatalog
 
-_ENVELOPE_INPUTS = TimestampPolicy(
-    clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
+_ENVELOPE_INPUTS = TimestampPolicy.from_clock(
+    Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
 
 

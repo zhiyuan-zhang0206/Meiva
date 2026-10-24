@@ -37,8 +37,8 @@ from services.derived.insights.run_timeline.projection.derive import segment_vie
 from services.derived.insights.run_timeline.schemas import RunTimelineContext
 from services.derived.insights.run_timeline.tokens import BlockContext, BlockContexts
 
-_TIMELINE_INPUTS = TimestampPolicy(
-    clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
+_TIMELINE_INPUTS = TimestampPolicy.from_clock(
+    Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
 
 T0 = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)

@@ -28,7 +28,7 @@ from base.agents.impersonation import OPEN, lock_lease, require_native
 from base.agents.impersonation.history import export_handoff, metadata
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.messages.kwargs import NoteTag
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampPolicy, TimestampSource
 from base.clock import Clock
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -58,7 +58,8 @@ def note_stamp(clock: Clock, *, timestamps: bool) -> NoteStamp:
 
 
 def note_stamp_of(notes: TimestampPolicy) -> NoteStamp:
-    return note_stamp(notes.clock, timestamps=notes.timestamps_enabled)
+    created_at = notes.require_now()
+    return NoteStamp(created_at, f"{notes.format(created_at)} " if notes.timestamps_enabled else "")
 
 
 def _render(draft: NoteDraft, session: dict[str, Any] | None = None) -> HumanMessage:
@@ -175,7 +176,7 @@ async def deliver_handoff(
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,
     *,
-    notes: TimestampPolicy,
+    timestamps: TimestampSource,
     workspace: Path,
     reason: str | None = None,
 ) -> None:
@@ -204,7 +205,9 @@ async def deliver_handoff(
     ref = SessionRef.of(session)
     receipt = handoff_receipt(ref)
     if snapshot.values.get("impersonation_handoff_id") != receipt:
-        draft = handoff_draft(ref, note_stamp_of(notes), summary=summary, path=path, reason=reason)
+        draft = handoff_draft(
+            ref, note_stamp_of(timestamps.policy()), summary=summary, path=path, reason=reason
+        )
         await graph.aupdate_state(
             config,
             {

@@ -24,8 +24,8 @@ from ops.lifecycle.tests.resurrection_setup import (
     inbound_rows,
 )
 
-_ENVELOPE_INPUTS = TimestampPolicy(
-    clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
+_ENVELOPE_INPUTS = TimestampPolicy.from_clock(
+    Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
 
 

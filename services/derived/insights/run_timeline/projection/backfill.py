@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 
 from base.agents.history.checkpoint_segment import read_checkpoint_segment
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.config import ConfigBoot
@@ -35,7 +35,7 @@ def main() -> None:
             process="timeline-projection-backfill",
         ),
     )
-    inputs = TimestampPolicy(
+    timestamps = TimestampSource(
         clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         timestamps_enabled=config.view.general.message_timestamps,
     )
@@ -43,7 +43,9 @@ def main() -> None:
     counts = dict.fromkeys(pending, 0)
     while pending:
         for agent_id in list(pending):
-            if index_next(db, agent_id, inputs=inputs, read_segment=read_checkpoint_segment):
+            if index_next(
+                db, agent_id, timestamps=timestamps, read_segment=read_checkpoint_segment
+            ):
                 counts[agent_id] += 1
             else:
                 pending.remove(agent_id)

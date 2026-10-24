@@ -17,7 +17,7 @@ from agent.nodes import END
 from agent.state import BaseAgentState
 from agent.takeover.gate import LeasePhase
 from agent.takeover.relay import RelayWait
-from agent.tests.impersonation.handoff_inputs import handoff_notes, takeover_host
+from agent.tests.impersonation.handoff_inputs import handoff_timestamps, takeover_host
 from agent.tests.impersonation.lease_support import Cluster, idle_graph, native_context
 from agent.tests.impersonation.lease_support import cluster as cluster
 from base.agents.impersonation.status import ImpersonationStatus
@@ -177,7 +177,7 @@ async def test_settlement_rolls_the_lease_back_when_the_controller_relay_is_not_
         owner.agent_id,
         RelaySupervision(),
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=quick,
     )
     ended = cluster.get(accepted["id"])
@@ -201,7 +201,7 @@ async def test_settlement_activates_only_after_the_relay_is_ready(
         owner.agent_id,
         RelaySupervision(),
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=takeover_host(tmp_path, cluster.machine),
     )
     assert cluster.get(accepted["id"])["status"] == "active"
@@ -227,7 +227,7 @@ async def test_settlement_without_activation_leaves_an_accepted_lease_alone(
         RelaySupervision(),
         activate_accepted=False,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=takeover_host(tmp_path, cluster.machine),
     )
     assert cluster.get(accepted["id"])["status"] == "accepted"
@@ -250,7 +250,7 @@ async def test_settlement_does_nothing_for_an_agent_without_a_lease_or_with_only
             owner.agent_id,
             RelaySupervision(),
             incarnation=owner,
-            notes=handoff_notes(),
+            timestamps=handoff_timestamps(),
             host=takeover_host(tmp_path, cluster.machine),
         )
 

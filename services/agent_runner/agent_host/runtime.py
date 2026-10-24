@@ -18,7 +18,6 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
 from agent.process_boot import boot_agent_scope
-from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.host.env.agent_slices import AgentBrain, AgentSlices
@@ -70,7 +69,9 @@ class HostCachePolicy:
 # What one host is configured with, read once by the composition root. Capacity, the cache
 # limits, the model defaults, the registration lifetime and the stall bounds are values; a
 # change to the cluster configuration reaches the host with its next start. `default_reader`
-# and `clock_factory` are the two readers the base context and slice APIs still take.
+# and `clock_factory` are the two legacy readers the base context and slice APIs still take.
+# Handoff stamping is a separate AgentHost resource and mints a pure policy for each use;
+# this remaining reader-based host policy is not a pure configuration value.
 #
 # `provider_keys` is built by the daemon at boot, after the bootstrap delivered the keys to its
 # environment.
@@ -83,7 +84,6 @@ class HostPolicy:
     llm_override: str
     default_reader: Callable[[str, str], Any]
     clock_factory: Callable[[], Clock]
-    handoff_notes: TimestampPolicy
     harness_registration_ttl_seconds: float
     stall: StallTiming
     # meiva:note

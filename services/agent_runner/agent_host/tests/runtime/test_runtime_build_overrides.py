@@ -29,7 +29,11 @@ from services.agent_runner.agent_host.runtime import (
     evict_runtimes,
     harness_bridge_for,
 )
-from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
+from services.agent_runner.agent_host.tests.host_policy import (
+    configured_machine,
+    configured_policy,
+    handoff_timestamps,
+)
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     BuildWith,
     Graph,
@@ -228,6 +232,7 @@ def test_eviction_keeps_an_in_flight_runtime() -> None:
 
 async def test_dropping_an_agent_closes_its_session() -> None:
     host = AgentHost(
+        handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
         pool=Mock(),
@@ -258,6 +263,7 @@ async def test_dropping_an_agent_closes_its_session() -> None:
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 async def test_the_next_turn_waits_for_the_retired_session_to_close() -> None:
     host = AgentHost(
+        handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
         pool=Mock(),

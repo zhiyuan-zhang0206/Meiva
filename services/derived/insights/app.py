@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from psycopg_pool import ConnectionPool
 
 from base.agents.history.checkpoint_segment import read_checkpoint_segment
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS
 from base.db import Database
 from base.lm.catalog import ModelCatalog
@@ -28,9 +29,10 @@ def build_app(
     *,
     home: Path,
     catalog: ModelCatalog,
+    timestamps: TimestampSource,
 ) -> FastAPI:
     jobs = IndexJobs(
-        partial(index_next, db, inputs=config.timeline_inputs, read_segment=read_checkpoint_segment)
+        partial(index_next, db, timestamps=timestamps, read_segment=read_checkpoint_segment)
     )
 
     @asynccontextmanager
@@ -47,10 +49,11 @@ def build_app(
     app.state.db_pool = pool
     app.state.insights_config = config
     app.state.catalog = catalog
+    app.state.timeline_timestamps = timestamps
     app.state.run_timeline_reader = TimelineReader(
         db,
         pool,
-        inputs=config.timeline_inputs,
+        timestamps=timestamps,
         jobs=jobs,
         read_segment=read_checkpoint_segment,
         timers=SYSTEM_TIMERS,

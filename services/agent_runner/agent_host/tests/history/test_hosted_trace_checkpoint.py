@@ -31,7 +31,7 @@ from base.packages.composer_commands import CommandCatalog
 from base.paths import meiva_home
 from base.telemetry.tests.capture.armed_tracing import armed_billing
 from services.agent_runner.agent_host import host as host_module
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_policy, handoff_timestamps
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 
 
@@ -71,6 +71,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
                 )
                 await flush_checkpoint(saver, agent_id)
                 host = host_module.AgentHost(
+                    handoff_stamping=handoff_timestamps(),
                     home=meiva_home(),
                     policy=configured_policy(),
                     pool=aops_pool,
