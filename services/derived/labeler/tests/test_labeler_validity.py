@@ -32,29 +32,18 @@ from typing import Any
 
 import psycopg
 import pytest
-import redis.asyncio as aredis
-from langchain_core.messages import AIMessage
 
-import services.derived.labeler.labeler as labeler_module
-from base.config.service_read import ConfigAuthority
 from base.db import create_agent
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus
-from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
-from base.packages.tests.model_catalog import inert_keys
-from services.derived.labeler.labeler import generate_label_async
-from services.derived.labeler.labeler import rejection_reason as _reason_for
-from services.derived.labeler.labeler import system_prompt as _prompt_for
-from services.derived.labeler.tests.slices import labeler_config, labeler_db
+from services.derived.labeler import label_rules
+from services.derived.labeler.tests.slices import RecordingBus, generate
+
+_MAX_CHARS = 64
 
 
-def _rejection_reason(label: str, **config: Any) -> str | None:
-    return _reason_for(label, labeler_config(**config).labeler_max_chars)
-
-
-def _system_prompt(**config: Any) -> str:
-    return _prompt_for(labeler_config(**config).labeler_max_chars)
+def _rejection_reason(label: str, max_chars: int = _MAX_CHARS) -> str | None:
+    return label_rules.rejection_reason(label, max_chars)
 
 
 # The nine outputs #178 recorded from real runs: three observed landing in
@@ -165,44 +154,6 @@ _FIRST_PERSON_PROMPT_LABELS = [
 ]
 
 
-class _FakeLLM:
-    def __init__(self, content: str) -> None:
-        self.content = content
-
-    async def ainvoke(self, _messages: list[Any]) -> AIMessage:
-        return AIMessage(content=self.content)
-
-
-def _fake_builder(content: str) -> Any:
-    def _build(_model: str, **_kwargs: object) -> _FakeLLM:
-        return _FakeLLM(content)
-
-    return _build
-
-
-@pytest.fixture
-def _no_publish(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Capture (and suppress) the redis publish so a label write is observable
-    without a live events channel."""
-    published: list[str] = []
-
-    async def _capture(_self: Any, _channel: str, payload: str, *, auth_retry: bool) -> int:
-        assert auth_retry is False
-        published.append(payload)
-        return 1
-
-    monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
-    return published
-
-
-def _label_of(conn: psycopg.Connection, agent_id: int) -> str | None:
-    with conn.cursor() as cur:
-        cur.execute("SELECT label FROM agents WHERE id = %s", (agent_id,))
-        row = cur.fetchone()
-        assert row is not None
-        return row[0]
-
-
 class TestRejectionReason:
     """The classifier pinned directly, from both sides."""
 
@@ -235,14 +186,14 @@ class TestRejectionReason:
         failure. 16 of the 287 real production labels are exactly that long —
         the rule was measured and dropped, and this pins that it stays dropped."""
         exactly_max = "DRIVE_PROBE_RESULT mounted=<yes|no> writable=<yes|no> path=<abso"
-        assert len(exactly_max) == labeler_config().labeler_max_chars
+        assert len(exactly_max) == _MAX_CHARS
         assert _rejection_reason(exactly_max) is None
 
     def test_character_limit_follows_config(self) -> None:
         """The ceiling is cluster config: a shortened limit reaches both the
         truncation and the prompt handed to the model."""
-        assert labeler_module.normalize("x" * 50, 10) == "x" * 10
-        assert "at most 10 characters" in _system_prompt(labeler_max_chars=10)
+        assert label_rules.normalize("x" * 50, 10) == "x" * 10
+        assert "at most 10 characters" in label_rules.system_prompt(10)
 
     def test_rejects_a_fenced_code_block_opener(self) -> None:
         """Replaying the three real preview prompts through the old default
@@ -260,7 +211,7 @@ class TestRejectionReason:
         """Observed while measuring model candidates: the model repeated its own
         instruction instead of applying it, and `normalize` truncated that to
         64 characters like any other output."""
-        echoed = _system_prompt()[: labeler_config().labeler_max_chars]
+        echoed = label_rules.system_prompt(_MAX_CHARS)[:_MAX_CHARS]
         assert _rejection_reason(echoed) == "instruction_echo"
 
     def test_a_short_label_sharing_an_opening_word_survives(self) -> None:
@@ -283,91 +234,97 @@ class TestRejectionReason:
         assert _rejection_reason("okay") is None
 
 
-class TestGenerateLabelRejectsNonLabels:
-    """The behaviour that matters: a failed generation must not reach the
-    database, and must take the daemon's existing failure path (return False ->
-    `_dispatch_loop` records exponential backoff and retries) rather than
-    landing as a label."""
+def _label_of(conn: psycopg.Connection, agent_id: int) -> str | None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT label FROM agents WHERE id = %s", (agent_id,))
+        row = cur.fetchone()
+        assert row is not None
+        return row[0]
 
+
+# meiva:note
+# The behaviour that matters: a failed generation must not reach the
+# database, and must take the daemon's existing failure path (return False ->
+# the row is left unset and not attempted again by this process) rather than
+# landing as a label.
+class TestGenerateLabelRejectsNonLabels:
     @pytest.mark.parametrize("raw", _ISSUE_178_OUTPUTS)
     @pytest.mark.asyncio
     async def test_issue_178_output_leaves_label_null(
         self,
         raw: str,
         db_conn: psycopg.Connection,
-        _no_publish: list[str],
-        event_bus: EventBus,
-        *,
-        config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        *,
         database_gate: ProcessDbGate,
     ) -> None:
         tid = create_agent(db_conn)
+        bus = RecordingBus()
 
-        result = await generate_label_async(
+        result = await generate(
             tid,
-            "a long agent brief",
-            labeler_config(labeler_model="deepseek-v4-flash"),
-            labeler_db(database_gate=database_gate),
-            event_bus,
-            build_chat_model=_fake_builder(raw),
+            f"say:{raw}",
+            bus=bus,
             catalog=model_catalog,
-            keys=inert_keys(model_catalog),
-            llm_override=config_authority.runtime.lm.llm_override,
-            overrides=ModelOverrides.from_pins({}),
+            database_gate=database_gate,
+            prompt="a long agent brief",
         )
 
         assert result is False, f"expected a generation failure for {raw!r}"
         assert _label_of(db_conn, tid) is None
-        assert _no_publish == []
+        assert bus.payloads == []
 
     @pytest.mark.asyncio
     async def test_good_label_still_written(
         self,
         db_conn: psycopg.Connection,
-        _no_publish: list[str],
-        event_bus: EventBus,
-        *,
-        config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
+        *,
         database_gate: ProcessDbGate,
     ) -> None:
         """The other half of the contract: the classifier must not fire on a
         real label."""
         tid = create_agent(db_conn)
+        bus = RecordingBus()
+        good = "\u9a8c\u8bc1\u9884\u89c8\u96c6\u7fa4\u65f6\u533a\u7edf\u4e00\u5e76\u6d4b\u8bd5SDK"
 
-        result = await generate_label_async(
+        result = await generate(
             tid,
-            "a long agent brief",
-            labeler_config(labeler_model="deepseek-v4-flash"),
-            labeler_db(database_gate=database_gate),
-            event_bus,
-            build_chat_model=_fake_builder(
-                "\u9a8c\u8bc1\u9884\u89c8\u96c6\u7fa4\u65f6\u533a\u7edf\u4e00\u5e76\u6d4b\u8bd5SDK"
-            ),
+            f"say:{good}",
+            bus=bus,
             catalog=model_catalog,
-            keys=inert_keys(model_catalog),
-            llm_override=config_authority.runtime.lm.llm_override,
-            overrides=ModelOverrides.from_pins({}),
+            database_gate=database_gate,
+            prompt="a long agent brief",
         )
 
         assert result is True
-        assert (
-            _label_of(db_conn, tid)
-            == "\u9a8c\u8bc1\u9884\u89c8\u96c6\u7fa4\u65f6\u533a\u7edf\u4e00\u5e76\u6d4b\u8bd5SDK"
-        )
-        assert len(_no_publish) == 1
+        assert _label_of(db_conn, tid) == good
+        assert len(bus.payloads) == 1
+
+
+# meiva:note
+# A thinking block carries a signature (PR #69): only the text blocks make a label.
+@pytest.mark.asyncio
+async def test_a_thinking_block_never_reaches_the_label(
+    db_conn: psycopg.Connection, model_catalog: ModelCatalog, *, database_gate: ProcessDbGate
+) -> None:
+    tid = create_agent(db_conn)
+
+    result = await generate(
+        tid,
+        "blocks:Fix label generation",
+        bus=RecordingBus(),
+        catalog=model_catalog,
+        database_gate=database_gate,
+    )
+
+    assert result is True
+    assert _label_of(db_conn, tid) == "Fix label generation"
 
 
 @pytest.mark.asyncio
 async def test_generated_label_overwrites_stray_empty_string(
-    db_conn: psycopg.Connection,
-    _no_publish: list[str],
-    event_bus: EventBus,
-    *,
-    config_authority: ConfigAuthority,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
+    db_conn: psycopg.Connection, model_catalog: ModelCatalog, *, database_gate: ProcessDbGate
 ) -> None:
     """Regression: a stray label='' row was invisible to the CAS's `label IS
     NULL` predicate, so it could never be auto-labeled — empty string must be
@@ -376,34 +333,25 @@ async def test_generated_label_overwrites_stray_empty_string(
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents SET label = '' WHERE id = %s", (tid,))
     db_conn.commit()
+    bus = RecordingBus()
 
-    result = await generate_label_async(
+    result = await generate(
         tid,
-        "a long agent brief",
-        labeler_config(labeler_model="deepseek-v4-flash"),
-        labeler_db(database_gate=database_gate),
-        event_bus,
-        build_chat_model=_fake_builder("ui docs fix"),
+        "say:ui docs fix",
+        bus=bus,
         catalog=model_catalog,
-        keys=inert_keys(model_catalog),
-        llm_override=config_authority.runtime.lm.llm_override,
-        overrides=ModelOverrides.from_pins({}),
+        database_gate=database_gate,
+        prompt="a long agent brief",
     )
 
     assert result is True
     assert _label_of(db_conn, tid) == "ui docs fix"
-    assert len(_no_publish) == 1
+    assert len(bus.payloads) == 1
 
 
 @pytest.mark.asyncio
 async def test_empty_string_label_with_user_sticky_bit_is_never_overwritten(
-    db_conn: psycopg.Connection,
-    _no_publish: list[str],
-    event_bus: EventBus,
-    *,
-    config_authority: ConfigAuthority,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
+    db_conn: psycopg.Connection, model_catalog: ModelCatalog, *, database_gate: ProcessDbGate
 ) -> None:
     """The sticky bit still wins: label='' with label_user_set=TRUE means the
     user owns the (unset) label — the CAS must skip it just like it skips a
@@ -412,69 +360,43 @@ async def test_empty_string_label_with_user_sticky_bit_is_never_overwritten(
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents SET label = '', label_user_set = TRUE WHERE id = %s", (tid,))
     db_conn.commit()
+    bus = RecordingBus()
 
-    result = await generate_label_async(
+    result = await generate(
         tid,
-        "a long agent brief",
-        labeler_config(labeler_model="deepseek-v4-flash"),
-        labeler_db(database_gate=database_gate),
-        event_bus,
-        build_chat_model=_fake_builder("ui docs fix"),
+        "say:ui docs fix",
+        bus=bus,
         catalog=model_catalog,
-        keys=inert_keys(model_catalog),
-        llm_override=config_authority.runtime.lm.llm_override,
-        overrides=ModelOverrides.from_pins({}),
+        database_gate=database_gate,
+        prompt="a long agent brief",
     )
 
     assert result is None
     assert _label_of(db_conn, tid) == ""
-    assert _no_publish == []
+    assert bus.payloads == []
 
 
 @pytest.mark.asyncio
 async def test_label_generation_logs_batch_usage_for_the_target_agent(
     db_conn: psycopg.Connection,
-    _no_publish: list[str],
     loguru_records: list[dict[str, Any]],
-    event_bus: EventBus,
-    *,
-    config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    *,
     database_gate: ProcessDbGate,
 ) -> None:
     """A labeler's daemon record must charge the label's agent, not the daemon."""
     agent_id = create_agent(db_conn)
 
-    class _UsageLLM:
-        async def ainvoke(self, _messages: list[Any]) -> AIMessage:
-            return AIMessage(
-                content="Review deployment readiness",
-                usage_metadata={
-                    "input_tokens": 50,
-                    "output_tokens": 8,
-                    "total_tokens": 58,
-                },
-            )
-
-    def _build_usage_llm(_model: str, **_kwargs: object) -> _UsageLLM:
-        return _UsageLLM()
-
-    assert (
-        await generate_label_async(
-            agent_id,
-            "a long agent brief",
-            labeler_config(labeler_model="deepseek-v4-flash"),
-            labeler_db(database_gate=database_gate),
-            event_bus,
-            build_chat_model=_build_usage_llm,
-            catalog=model_catalog,
-            keys=inert_keys(model_catalog),
-            llm_override=config_authority.runtime.lm.llm_override,
-            overrides=ModelOverrides.from_pins({}),
-        )
-        is True
+    result = await generate(
+        agent_id,
+        "usage:Review deployment readiness",
+        bus=RecordingBus(),
+        catalog=model_catalog,
+        database_gate=database_gate,
+        prompt="a long agent brief",
     )
 
+    assert result is True
     [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
     assert record["extra"]["agent_id"] == agent_id
     assert record["extra"]["usage_kind"] == "batch"

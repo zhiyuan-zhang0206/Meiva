@@ -50,9 +50,7 @@ def emit(
     key — the registry declares it (``contract.SdkCall``), so a reader may reference
     ``attributes->>'duration'``. Policy errors propagate before emission; metered
     calls supply their entry snapshot so a refresh cannot mask the SDK outcome."""
-    from base.agents.sdk.call_policy import policy
-
-    current = policy(sampling_owner) if sampling_policy is None else sampling_policy
+    current = sampling_owner.read() if sampling_policy is None else sampling_policy
     every = current.sample_every if current.sampling_enabled else 1
     if every > 1:
         import random
@@ -101,9 +99,7 @@ def _measure(
     producer: Callable[[], Any] | None,
     machine_reader: Callable[[], str] | None,
 ) -> Generator[None, None, None]:
-    from base.agents.sdk.call_policy import policy
-
-    snapshot = policy(sampling_owner)
+    snapshot = sampling_owner.read()
     caller_identity = dict(identity)
     # Retain this call's original gate until its event is captured. Attachment
     # close can reject new entries but cannot seal this receipt before drain.

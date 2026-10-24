@@ -76,15 +76,10 @@ def attached_runtime(
     process_context.unbind_exec_turn()
     request.addfinalizer(process_context.unbind_exec_turn)
 
-    from base.agents.sdk import call_policy
+    from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
     from meiva.sdk_surface import metering
 
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
-
-    sampling = call_policy.SamplingPolicyOwner()
+    sampling = fixed_sampling_owner()
     installation = Installation(
         registry=EMPTY,
         config_images=UnboundPluginConfigImages(),

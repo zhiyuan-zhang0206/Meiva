@@ -1,11 +1,15 @@
 exports = ["daemon.py", "shells.py"]
 
 [uses]
-"daemon.py" = ["remote.py", "shells.py", "sweep.py"]
-"remote.py" = ["shells.py"]
-"shells.py" = ["owner_notice.py"]
-"sweep.py" = ["cadence.py", "owner_notice.py"]
-"tests" = ["cadence.py", "daemon.py", "remote.py", "shells.py", "sweep.py"]
+"daemon.py" = ["config.py", "remote.py", "shells.py", "sweep.py"]
+"remote.py" = ["config.py", "shells.py"]
+"shell_plan.py" = ["owner_text.py"]
+"shells.py" = ["config.py", "owner_notice.py", "shell_plan.py"]
+"sweep.py" = ["cadence.py", "config.py", "owner_notice.py", "owner_text.py"]
+"tests" = ["cadence.py", "config.py", "daemon.py", "owner_text.py", "shell_plan.py", "shells.py", "sweep.py"]
 
 [purity]
 "__init__.py" = "strict"
+"config.py" = "strict"
+"owner_text.py" = "strict"
+"shell_plan.py" = "strict"

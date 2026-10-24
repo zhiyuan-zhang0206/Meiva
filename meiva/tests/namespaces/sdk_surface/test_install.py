@@ -24,7 +24,6 @@ from pydantic import BaseModel
 
 import meiva
 from base.agents.context.clients import ClientSet
-from base.agents.sdk import call_policy
 from base.packages.plugin_config_images import (
     DiskPluginConfigImages,
     PluginConfigChangedError,
@@ -58,10 +57,6 @@ def _surface(monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents) -> 
     """Start from no installation and bare callables, and leave no installation behind."""
     assert installed() is None
 
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     prior = meiva.context
     clients = ClientSet(pipeline_factory=emitted_events.producer)
     with patch.dict(os.environ):

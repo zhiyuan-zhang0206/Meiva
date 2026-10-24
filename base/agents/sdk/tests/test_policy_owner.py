@@ -6,7 +6,7 @@ import pytest
 from base.agents.sdk import call_policy
 
 
-def test_stop_retains_late_failure_and_actual_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stop_retains_late_failure_and_actual_worker() -> None:
     entered, release = threading.Event(), threading.Event()
     original = RuntimeError("late policy bug")
 
@@ -15,8 +15,7 @@ def test_stop_retains_late_failure_and_actual_worker(monkeypatch: pytest.MonkeyP
         assert release.wait(5)
         raise original
 
-    monkeypatch.setattr(call_policy, "read_policy", read)
-    owner = call_policy.SamplingPolicyOwner()
+    owner = call_policy.SamplingPolicyOwner(initial=call_policy.SamplingPolicy(), fetch=read)
     owner.read()
     assert entered.wait(2)
     worker = owner.worker
@@ -35,7 +34,7 @@ def test_stop_retains_late_failure_and_actual_worker(monkeypatch: pytest.MonkeyP
     assert not worker.thread.is_alive()
 
 
-def test_stop_precedes_success_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stop_precedes_success_receipt() -> None:
     entered, release = threading.Event(), threading.Event()
     original = ValueError("invalid refresh")
 
@@ -44,8 +43,7 @@ def test_stop_precedes_success_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
         assert release.wait(5)
         raise original
 
-    monkeypatch.setattr(call_policy, "read_policy", read)
-    owner = call_policy.SamplingPolicyOwner()
+    owner = call_policy.SamplingPolicyOwner(initial=call_policy.SamplingPolicy(), fetch=read)
     owner.read()
     assert entered.wait(2)
     worker = owner.worker
@@ -61,7 +59,9 @@ def test_stop_precedes_success_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_stop_collects_refresh_boundary_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    owner = call_policy.SamplingPolicyOwner()
+    owner = call_policy.SamplingPolicyOwner(
+        initial=call_policy.SamplingPolicy(), fetch=call_policy.SamplingPolicy
+    )
     original = KeyboardInterrupt("refresh interrupted")
 
     def refresh() -> None:

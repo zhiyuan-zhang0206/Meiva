@@ -108,7 +108,7 @@ def test_snapshot_lists_awaiting_oldest_first(
         db_conn,
         a,
         catalog=model_catalog,
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert snap is not None
     assert [n.id for n in snap.notices_awaiting_response] == [n1, n2]
@@ -130,7 +130,7 @@ def test_snapshot_awaiting_empty_when_none(
         db_conn,
         a,
         catalog=model_catalog,
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert snap is not None
     assert snap.notices_awaiting_response == []
@@ -150,7 +150,7 @@ def test_snapshot_scoped_by_agent(
         db_conn,
         a,
         catalog=model_catalog,
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert snap_a is not None
     assert [n.id for n in snap_a.notices_awaiting_response] == [na]
@@ -168,7 +168,7 @@ def test_snapshot_counts_unread_fyi(
         db_conn,
         a,
         catalog=model_catalog,
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert snap is not None
     assert snap.unread_notice_count == 2
@@ -341,7 +341,7 @@ def test_task_id_flows_to_snapshot_and_feed(
         db_conn,
         a,
         catalog=model_catalog,
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert snap is not None
     assert [n.task_id for n in snap.notices_awaiting_response] == [tid]
@@ -408,7 +408,7 @@ def test_snapshot_unread_count_excludes_expired_fyi(
         db_conn,
         a,
         catalog=model_catalog,
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert snap is not None
     assert snap.unread_notice_count == 1
@@ -498,7 +498,7 @@ def test_answer_marks_and_delivers_inbound(
         db_conn,
         a,
         catalog=model_catalog,
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert snap is not None
     assert snap.notices_awaiting_response == []
@@ -520,7 +520,7 @@ def test_answer_without_reply_422(
         db_conn,
         a,
         catalog=model_catalog,
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert snap is not None
     assert [n.id for n in snap.notices_awaiting_response] == [nid]
@@ -543,7 +543,7 @@ def test_answer_empty_reply_422(
         db_conn,
         a,
         catalog=model_catalog,
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert snap is not None
     assert [n.id for n in snap.notices_awaiting_response] == [nid]

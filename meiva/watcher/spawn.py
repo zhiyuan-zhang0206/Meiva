@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from base.daemon.schedules.watcher import session_deadline
+from base.host.env.agent_env import AGENT_ID_ENV
 from meiva.shell import SessionHandle
 from meiva.watcher import files
 
@@ -191,7 +192,7 @@ def build_boot(script_path: Path, watchdog_secs: float | None, agent_id: int) ->
         # establishes the WRONG identity at import time, and the assignment
         # below would then be too late to move it (2026-08-09: every watcher
         # child on the shared server woke agent 2959 instead of its owner).
-        f'os.environ["MEIVA_AGENT_ID"] = "{agent_id}"\n'
+        f'os.environ["{AGENT_ID_ENV}"] = "{agent_id}"\n'
         # Same session-env leak as MEIVA_AGENT_ID: the child inherits
         # MEIVA_PROCESS_PROFILE from the creating process's env,
         # but the watcher is an agent subprocess and needs the agent profile

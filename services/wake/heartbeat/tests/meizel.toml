@@ -13,7 +13,6 @@
 "test_heartbeat_loops.py#monkeypatch.setattr services.wake.heartbeat.daemon.start_health_server" = 1
 "test_heartbeat_loops.py#monkeypatch.setattr services.wake.heartbeat.daemon.stop_health_server" = 1
 "test_impersonation_heartbeat.py#monkeypatch.setattr base.agents.context.external_attachment.plugin_state_codec.load_snapshot" = 1
-"test_impersonation_heartbeat.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
 "test_impersonation_heartbeat.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
 "test_station_healthcheck.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
 "test_station_healthcheck.py#monkeypatch.setattr base.native_process.loaded_commit.LoadedCommit.capture" = 1

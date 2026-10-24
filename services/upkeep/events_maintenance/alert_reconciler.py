@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -39,8 +38,6 @@ _GRAFANA_ALERTS_PATH = "/api/alertmanager/grafana/api/v2/alerts"
 RECONCILE_INTERVAL_S = 300.0
 _RECONCILIATION_NOTE = "reconciled: no longer firing"
 _GRAFANA_API_TIMEOUT = httpx.Timeout(10.0)
-
-PublishRows = Callable[[list[dict[str, Any]]], None]
 
 
 class GrafanaSnapshotError(ValueError):
@@ -152,7 +149,7 @@ def _reconcile_from_pool(
 async def reconcile_once(
     db_pool: ConnectionPool,
     grafana_client: httpx.AsyncClient,
-    publish_rows: PublishRows,
+    bus: EventBus,
     config: EventsMaintenanceConfig,
 ) -> int:
     """Fetch one complete Grafana snapshot, resolve omissions, publish rows."""
@@ -183,14 +180,14 @@ async def reconcile_once(
         resolved_at,
     )
     if rows:
-        await asyncio.to_thread(publish_rows, rows)
+        await asyncio.to_thread(publish_alert_rows, bus, rows)
     return len(rows)
 
 
 async def reconciliation_round(
     db_pool: ConnectionPool,
     grafana_client: httpx.AsyncClient,
-    publish_rows: PublishRows,
+    bus: EventBus,
     progress: LoopProgress,
     config: EventsMaintenanceConfig,
 ) -> None:
@@ -198,7 +195,7 @@ async def reconciliation_round(
     complete snapshot (fail closed), otherwise resolve the omissions."""
 
     try:
-        resolved = await reconcile_once(db_pool, grafana_client, publish_rows, config)
+        resolved = await reconcile_once(db_pool, grafana_client, bus, config)
     except (httpx.HTTPError, GrafanaSnapshotError) as exc:
         progress.mark_error(str(exc))
         _log.warning("alerts: Grafana reconciliation failed: %r", exc)
@@ -217,9 +214,7 @@ async def reconciliation_loop(
     async with httpx.AsyncClient(trust_env=False, timeout=_GRAFANA_API_TIMEOUT) as client:
 
         async def one_round() -> None:
-            await reconciliation_round(
-                db_pool, client, lambda rows: publish_alert_rows(bus, rows), progress, config
-            )
+            await reconciliation_round(db_pool, client, bus, progress, config)
 
         await round_loop.run_rounds(
             "alert-reconciliation", progress, RECONCILE_INTERVAL_S, one_round

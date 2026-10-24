@@ -13,12 +13,10 @@ import json
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
-from unittest.mock import Mock
 
 import psycopg
 import pytest
 
-from base.native_process.loaded_commit import LoadedCommit
 from services.upkeep.events_maintenance import rollup
 
 _DAY = date(2026, 6, 9)
@@ -216,17 +214,18 @@ def test_compute_rollup_recomputes_the_last_closed_days_but_not_today(
     assert result.tokens_rows == 3
 
 
-def test_operator_rejects_an_inverted_range_before_capture_or_database(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from services.upkeep.events_maintenance import rollup
+def test_the_operator_range_is_inclusive_and_ordered() -> None:
+    assert rollup.parse_range(["--from", "20261001", "--to", "20261002"]) == (
+        date(2026, 10, 1),
+        date(2026, 10, 2),
+    )
+    assert rollup.parse_range(["--from", "20261001", "--to", "20261001"]) == (
+        date(2026, 10, 1),
+        date(2026, 10, 1),
+    )
 
-    capture = Mock()
-    database = Mock()
-    monkeypatch.setattr(LoadedCommit, "capture", capture)
-    monkeypatch.setattr(rollup, "events_maintenance_db", database)
+
+def test_the_operator_rejects_an_inverted_range() -> None:
     with pytest.raises(SystemExit) as caught:
-        rollup.main(["--from", "20261002", "--to", "20261001"])
+        rollup.parse_range(["--from", "20261002", "--to", "20261001"])
     assert caught.value.code == 2
-    capture.assert_not_called()
-    database.assert_not_called()

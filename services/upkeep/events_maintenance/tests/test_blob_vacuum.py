@@ -15,8 +15,8 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime
-from types import SimpleNamespace
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
@@ -25,10 +25,15 @@ import pytest
 from psycopg import sql
 from psycopg_pool import ConnectionPool
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot, settings
-from base.db.tests.fakes import fake_database
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_settings
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.upkeep.events_maintenance import blob_vacuum
 from services.upkeep.events_maintenance.blob_vacuum import (
     in_low_traffic_window,
@@ -95,21 +100,41 @@ def _throwaway_db(db_conn: psycopg.Connection) -> Iterator[str]:
 
 
 @pytest.fixture
-def pool(db_conn: psycopg.Connection) -> Iterator[ConnectionPool[Any]]:
-    """A pool to a throwaway DB carrying the checkpoint tables."""
+def vacuum_url(db_conn: psycopg.Connection) -> Iterator[str]:
+    """The URL of a throwaway DB carrying the checkpoint tables."""
     gen = cast(Any, _throwaway_db(db_conn))
-    url = next(gen)  # keep the generator alive — GC would run its finally (DROP DATABASE)
+    # meiva:note
+    # keep the generator alive — GC would run its finally (DROP DATABASE)
+    url = next(gen)
     try:
         with psycopg.connect(url, autocommit=True) as setup:
-            setup.execute(_SCHEMA)  # type: ignore[argtype]  # trusted multi-statement setup
-        # autocommit: VACUUM cannot run inside a transaction block, and the
-        # daemon's maintenance pool is autocommit by construction.
-        with ConnectionPool(
-            url, min_size=1, max_size=2, open=True, kwargs={"autocommit": True}
-        ) as p:
-            yield p
+            # meiva:note
+            # trusted multi-statement setup
+            setup.execute(cast(Any, _SCHEMA))
+        yield url
     finally:
         gen.close()
+
+
+@pytest.fixture
+def pool(vacuum_url: str) -> Iterator[ConnectionPool[Any]]:
+    # meiva:note
+    # autocommit: VACUUM cannot run inside a transaction block, and the
+    # daemon's maintenance pool is autocommit by construction.
+    with ConnectionPool(
+        vacuum_url, min_size=1, max_size=2, open=True, kwargs={"autocommit": True}
+    ) as p:
+        yield p
+
+
+@pytest.fixture
+def vacuum_db(vacuum_url: str, database_gate: ProcessDbGate) -> Database:
+    """The product's database handle, dialing the throwaway DB."""
+    return Database(
+        replace(db_config_from_settings(), db_url=vacuum_url),
+        gate=database_gate,
+        direct_url=ClusterDirectUrl(lambda: "127.0.0.1"),
+    )
 
 
 @pytest.fixture
@@ -150,32 +175,19 @@ def test_window_follows_cluster_timezone() -> None:
     assert in_low_traffic_window("Asia/Shanghai", datetime(2026, 8, 9, 22, 0, tzinfo=UTC))
 
 
+# meiva:note
+# Outside the window the daemon entry point no-ops without dialing.
+#
+# The instant is 03:00 America/Los_Angeles (10:00 UTC): the clock is an argument, so the suite
+# gives the same answer at every hour (CI used to hit the 05:00-08:00 PDT window daily and dial the
+# DB). The gate itself is locked by test_window_boundaries.
 def test_run_skips_outside_window(
-    process_config: ConfigBoot,
-    monkeypatch: pytest.MonkeyPatch,
-    cluster_tz: str,
-    *,
-    machine_identity: MachineIdentity,
+    process_config: ConfigBoot, cluster_tz: str, *, machine_identity: MachineIdentity
 ) -> None:
-    """Outside the window the daemon entry point no-ops without dialing.
-
-    The clock is frozen to 03:00 America/Los_Angeles (10:00 UTC): the suite
-    runs at all hours (CI hits the 05:00-08:00 PDT vacuum window daily), and
-    the real clock made this test flaky — inside the window it dialed the DB
-    and vacuumed, failing the ran=False assertion (observed 2026-08-11
-    merge-queue CI at 12:13Z). The gate itself is locked by
-    test_window_boundaries.
-    """
-    _ = cluster_tz
-
-    class _Frozen(datetime):
-        @classmethod
-        def now(cls, tz=None):  # noqa: ARG003 — the frozen instant carries its own tz
-            return datetime(2026, 8, 10, 10, 0, tzinfo=UTC)  # 03:00 PDT — outside window
-
-    monkeypatch.setattr(blob_vacuum, "datetime", _Frozen)
     result = run_blob_vacuum(
-        events_maintenance_db(process_config, local_machine=machine_identity), timezone=cluster_tz
+        events_maintenance_db(process_config, local_machine=machine_identity),
+        timezone=cluster_tz,
+        now=datetime(2026, 8, 10, 10, 0, tzinfo=UTC),
     )
     assert result.ran is False
     assert result.total_bytes == 0
@@ -225,24 +237,17 @@ def test_vacuum_without_maintain_is_a_failure_not_a_silent_skip(
 
 
 def test_vacuum_emits_checkpoint_table_physical_sizes(
-    monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool[Any]
+    pool: ConnectionPool[Any], emitted_events: EmittedEvents
 ) -> None:
     """A completed pass reports absolute sizes AND live row counts for all
     checkpoint tables — the live counts let the growth curve separate live
     growth from dead-tuple bloat."""
-    emitted: list[tuple[str, str, dict[str, int]]] = []
-
-    def _capture(category: str, event_name: str, *, attributes: dict[str, int]) -> None:
-        emitted.append((category, event_name, attributes))
-
-    monkeypatch.setattr(blob_vacuum, "telemetry", SimpleNamespace(emit=_capture), raising=False)
-
     with pool.connection() as conn:
         blob_vacuum.vacuum_checkpoint_tables(conn)
 
-    assert len(emitted) == 1
-    category, event_name, attributes = emitted[0]
-    assert (category, event_name) == ("telemetry", "checkpoint_table_sizes")
+    [sample] = emitted_events.named("checkpoint_table_sizes")
+    assert sample.category == "telemetry"
+    attributes = sample.attributes
     assert set(attributes) == {
         "blobs_bytes",
         "checkpoints_bytes",
@@ -255,18 +260,11 @@ def test_vacuum_emits_checkpoint_table_physical_sizes(
 
 
 def test_emit_checkpoint_table_sizes_samples_without_vacuuming(
-    monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool[Any]
+    pool: ConnectionPool[Any], emitted_events: EmittedEvents
 ) -> None:
     """The hourly emit (daemon `run_maintenance`) samples sizes + live rows
     and emits the gauge WITHOUT vacuuming — it must be callable from the
     pooled connection on every pass, not only inside the vacuum window."""
-    emitted: list[tuple[str, str, dict[str, int]]] = []
-
-    def _capture(category: str, event_name: str, *, attributes: dict[str, int]) -> None:
-        emitted.append((category, event_name, attributes))
-
-    monkeypatch.setattr(blob_vacuum, "telemetry", SimpleNamespace(emit=_capture), raising=False)
-
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -282,53 +280,53 @@ def test_emit_checkpoint_table_sizes_samples_without_vacuuming(
     assert sizes is not None  # the fixture's tables exist, so the emit ran
     assert sizes.blobs_live == 0  # nothing inserted into blobs
     assert sizes.checkpoints_live == 1  # the row just inserted
-    assert len(emitted) == 1
-    category, event_name, attributes = emitted[0]
-    assert (category, event_name) == ("telemetry", "checkpoint_table_sizes")
+    [sample] = emitted_events.named("checkpoint_table_sizes")
+    assert sample.category == "telemetry"
+    attributes = sample.attributes
     assert attributes["checkpoints_live"] == 1
     assert attributes["blobs_bytes"] >= 0
 
 
 def test_emit_skips_missing_tables_fresh_cluster(
-    monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool[Any]
+    pool: ConnectionPool[Any], emitted_events: EmittedEvents
 ) -> None:
     """The hourly emit must read as a no-op on a greenfield cluster (no
     checkpoint tables yet): the maintenance daemon exits on ProgrammingError,
     so an unguarded UndefinedTable here would crash-loop the hourly pass —
     same defensive posture as the vacuum's `test_run_skips_missing_tables_fresh_cluster`."""
-    emitted: list[tuple[str, str, dict[str, int]]] = []
-
-    def _capture(category: str, event_name: str, *, attributes: dict[str, int]) -> None:
-        emitted.append((category, event_name, attributes))
-
-    monkeypatch.setattr(blob_vacuum, "telemetry", SimpleNamespace(emit=_capture), raising=False)
-
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("DROP TABLE checkpoint_blobs, checkpoints, checkpoint_writes")
         sizes = blob_vacuum.emit_checkpoint_table_sizes(cur)
 
     assert sizes is None  # skipped, nothing emitted
-    assert emitted == []
+    assert len(emitted_events) == 0
 
 
 def test_run_skips_missing_tables_fresh_cluster(
-    monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool[Any]
+    pool: ConnectionPool[Any], vacuum_db: Database
 ) -> None:
     """A fresh cluster without checkpoint tables must read as a no-op, not a
     ProgrammingError crash — the maintenance daemon exits on ProgrammingError,
     so an unguarded UndefinedTable would crash-loop the daily window
     (adversarial review of #2226)."""
-
-    def _fake_connect(*_a: object, **_k: object) -> object:
-        return pool.connection()  # PoolConnection — usable as a `with` target
-
     # Drop the tables the fixture created, simulating a greenfield cluster.
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("DROP TABLE checkpoint_blobs, checkpoints, checkpoint_writes")
 
-    result = run_blob_vacuum(fake_database(_fake_connect), timezone="UTC", force=True)
+    result = run_blob_vacuum(
+        vacuum_db, timezone="UTC", now=datetime(2026, 8, 10, 10, 0, tzinfo=UTC), force=True
+    )
     assert result.ran is False
     assert result.total_bytes == 0
+
+
+def test_run_vacuums_through_the_database_handle_inside_the_window(vacuum_db: Database) -> None:
+    result = run_blob_vacuum(
+        vacuum_db,
+        timezone="America/Los_Angeles",
+        now=datetime(2026, 8, 10, 13, 0, tzinfo=UTC),
+    )
+    assert result.ran is True
 
 
 def test_run_ok_with_same_named_table_in_other_schema(

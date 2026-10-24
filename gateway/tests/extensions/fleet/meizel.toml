@@ -1,5 +1,2 @@
 [uses]
 "test_dismissing_response_notice_refreshes_inspector_snapshot.py" = ["test_fleet_notices_via_gateway.py"]
-
-[debt.first-party-patch]
-"test_fleet_notices_via_gateway.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
