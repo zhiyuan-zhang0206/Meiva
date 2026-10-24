@@ -3,6 +3,7 @@
 "test_multiple_tool_calls_meiva_syntax_fix.py" = ["hook_support.py"]
 "test_syntax_fix.py" = ["child_ruff_without_path.py"]
 "test_syntax_fix_helpers.py" = ["legacy_fixers_support.py"]
+"test_syntax_fix_billing.py" = ["hook_support.py"]
 "test_syntax_fix_part2.py" = ["hook_support.py"]
 
 [external]

@@ -1,4 +1,0 @@
-[debt.first-party-patch]
-"test_agents_scan.py#monkeypatch.setattr meiva.sdk_surface.agent_identity.require_actor" = 2
-"test_agents_scan.py#monkeypatch.setattr meiva.security.record_finding" = 2
-"test_validation_agents.py#monkeypatch.setattr meiva.gateway_client.send_message" = 1

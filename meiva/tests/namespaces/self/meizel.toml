@@ -1,5 +1,10 @@
 exports = []
 
 [uses]
-"test_attach_import.py" = ["attach_probes.py"]
 "attach_probes.py" = []
+"machine_probe.py" = []
+"redis_view.py" = []
+"test_attach_import.py" = ["attach_probes.py"]
+"test_machine_spec_fresh_process.py" = ["machine_probe.py"]
+"test_self_lifecycle.py" = ["redis_view.py"]
+"test_self_wake.py" = ["redis_view.py"]

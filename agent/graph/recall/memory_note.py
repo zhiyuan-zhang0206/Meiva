@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Sequence
-from typing import Protocol
+from dataclasses import dataclass
 
 _FRAMING = (
     "Memory notes related to the current conversation, retrieved "
@@ -20,24 +20,21 @@ _FRAMING = (
 )
 
 
-class SearchHit(Protocol):
-    @property
-    def path(self) -> str: ...
-
-    @property
-    def description(self) -> str: ...
-
-    @property
-    def score(self) -> float: ...
-
-    @property
-    def chunk(self) -> str: ...
+# meiva:note
+# One search hit as the injection decision reads it: the four fields it uses, copied by the
+# caller from the gateway's search result so this module needs nothing from the gateway client.
+@dataclass(frozen=True)
+class SearchHit:
+    path: str
+    description: str
+    score: float
+    chunk: str
 
 
-def qualifying[H: SearchHit](
-    results: Sequence[H], *, threshold: float, limit: int, present: Collection[str]
-) -> list[H]:
-    picked: list[H] = []
+def qualifying(
+    results: Sequence[SearchHit], *, threshold: float, limit: int, present: Collection[str]
+) -> list[SearchHit]:
+    picked: list[SearchHit] = []
     for item in sorted(results, key=lambda r: r.score, reverse=True):
         if item.score < threshold or len(picked) >= limit:
             break

@@ -26,8 +26,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
-from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Self, cast
 
 import psutil
@@ -35,70 +34,38 @@ import psutil
 from base.agents.context import MeivaContext
 from base.agents.context.external_attachment import ExternalAttachment
 from base.agents.context.identity import AgentIdentity, ExternalLease
+from base.clock import Clock
 from base.cluster.machine import MachineIdentity
+from base.config import ConfigBoot
 from base.config.agent_pins import resolve_agent_config_pins
 from base.host.env.agent_slices import PluginConfigView
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from meiva.boot import (
     bind_launched_context,
-    boot_external_process,
+    borrow_external_process,
     initialize_context,
+    own_external_process,
     plugin_state_codec,
 )
 from meiva.sdk_surface import process_context
+from meiva.sdk_surface.pure.caller.attachability import (
+    BoundIdentity,
+    ProcessFacts,
+    refuse_unless_attachable,
+)
+from meiva.self.harness.admission import (
+    ProcessLineage,
+    require_claimed,
+    require_live_registration,
+)
 from meiva.self.harness.registration import (
     HarnessRegistration,
     RegistrationError,
     RegistrationStore,
-    default_store,
-    handle_digest,
 )
+from meiva.self.harness.store import default_store
 
 __all_for_meiva__ = []
-HANDLE_ENV = "MEIVA_HARNESS_HANDLE"
-
-
-# meiva:note
-# Admission is three questions about one row, asked again on every SDK call: is the
-# session still attached, has it expired, and does this process run where and under
-# the controller the row names. They are a pure function of the row, the machine and
-# the ancestry answer, so the decision is testable without booting a process, and a
-# row that stops qualifying stops the caller at its next action.
-# meiva:link meiva/self/harness/docs/harness-attach.meiva.okf.md
-def require_live_registration(
-    registration: HarnessRegistration,
-    *,
-    machine: str,
-    descends: Callable[[int], bool],
-    now: datetime | None = None,
-) -> HarnessRegistration:
-    if not registration.attached:
-        raise RegistrationError(
-            f"harness session {registration.external_session_id} is {registration.status}"
-        )
-    if registration.expired(now):
-        raise RegistrationError(
-            f"harness session {registration.external_session_id} expired at "
-            f"{registration.expires_at}"
-        )
-    if registration.machine != machine:
-        raise RegistrationError(
-            f"the harness session belongs to machine {registration.machine!r}; "
-            f"this process runs on {machine!r}"
-        )
-    if not descends(registration.controller_pid):
-        raise RegistrationError(
-            "this process does not descend from the controller that started the "
-            f"harness session (pid {registration.controller_pid})"
-        )
-    return registration
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class ProcessProbe:
-    is_host: Callable[[], bool]
-    ambient: Callable[[], MeivaContext | None]
-    in_exec_turn: Callable[[], bool]
 
 
 def _prior_process_context() -> MeivaContext | None:
@@ -108,38 +75,36 @@ def _prior_process_context() -> MeivaContext | None:
     return bind_launched_context()
 
 
-PROCESS_PROBE = ProcessProbe(
-    is_host=process_context.is_host_process,
-    ambient=_prior_process_context,
-    in_exec_turn=process_context.in_exec_turn,
-)
-
-
-def refuse_unless_attachable(probe: ProcessProbe = PROCESS_PROBE) -> MeivaContext | None:
-    if probe.is_host():
-        raise RuntimeError("a native agent runtime cannot attach a harness identity")
-    bound = probe.ambient()
+def _bound_identity(bound: MeivaContext | None) -> BoundIdentity | None:
     identity = None if bound is None else bound.identity
-    if identity is not None and identity.lease is not None:
-        raise RuntimeError("this process already has an external attachment")
-    if identity is not None and identity.agent_id is not None and identity.owns_loop:
-        raise RuntimeError("a native agent runtime cannot attach a harness identity")
-    if probe.in_exec_turn():
-        raise RuntimeError("an exec turn cannot attach a harness identity")
+    if identity is None:
+        return None
+    return BoundIdentity(
+        has_lease=identity.lease is not None,
+        agent_id=identity.agent_id,
+        owns_loop=identity.owns_loop,
+    )
+
+
+def attachable_context() -> MeivaContext | None:
+    bound = _prior_process_context()
+    refuse_unless_attachable(
+        ProcessFacts(
+            is_host=process_context.is_host_process(),
+            in_exec_turn=process_context.in_exec_turn(),
+            bound=_bound_identity(bound),
+        ),
+        subject="a harness identity",
+    )
     return bound
 
 
-def descends_from(controller_pid: int, *, pid: int | None = None) -> bool:
-    if controller_pid <= 0:
-        return False
-    current = os.getpid() if pid is None else pid
-    if current == controller_pid:
-        return True
+def process_lineage(pid: int) -> ProcessLineage:
     try:
-        process = psutil.Process(current)
-        return any(parent.pid == controller_pid for parent in process.parents())
+        ancestors = frozenset(parent.pid for parent in psutil.Process(pid).parents())
     except psutil.Error:
-        return False
+        ancestors = frozenset[int]()
+    return ProcessLineage(pid=pid, ancestors=ancestors)
 
 
 class HarnessAttachment(ExternalAttachment):
@@ -150,24 +115,25 @@ class HarnessAttachment(ExternalAttachment):
         agent_id: int,
         session_id: str,
         registration: HarnessRegistration,
-        ancestor_check: Callable[[int], bool],
     ) -> None:
         self.handle = handle
         self.session_id = session_id
         self._registration = registration
-        self._ancestor_check = ancestor_check
         self.agent_id = agent_id
         self.config: tuple[Any, PluginConfigView] | None = None
         self._machine: MachineIdentity
         self._database: Any = None
-        self._clock_factory: Any = None
-        bound = refuse_unless_attachable()
+        self._clock: Clock | None = None
+        bound = attachable_context()
         super().__init__(identity=_RegistrationIdentity(self), codec=_RegistrationCodec(self))
         self.open(bound)
 
     def _prepare(self) -> None:
-        boot = boot_external_process(self._prior_context)
-        self._clock_factory = boot.clock_factory
+        bound = self._prior_context
+        boot = (
+            own_external_process(ConfigBoot()) if bound is None else borrow_external_process(bound)
+        )
+        self._clock = boot.clock
         self._machine = boot.machine
         self._database = boot.database
         self._own_clients = boot.clients
@@ -177,7 +143,7 @@ class HarnessAttachment(ExternalAttachment):
             process_context.current_context(),
             surface=False,
             config=boot.config,
-            clock_factory=self._clock_factory,
+            clients=boot.clients,
             validate_state=_codec_module().plugin_state_schema,
         )
 
@@ -185,7 +151,8 @@ class HarnessAttachment(ExternalAttachment):
         return require_live_registration(
             self._registration,
             machine=self._machine.name(),
-            descends=self._ancestor_check,
+            lineage=process_lineage(os.getpid()),
+            now=datetime.now(UTC),
         )
 
     def _validate(self) -> int:
@@ -212,10 +179,11 @@ class HarnessAttachment(ExternalAttachment):
         self._bound = True
 
     def _new_context(self) -> MeivaContext:
-        if self._own_clients is None:
+        clock = self._clock
+        if self._own_clients is None or clock is None:
             raise RuntimeError("an unbound attachment has no owned clients")
         return MeivaContext(
-            clients=self._own_clients, clock_factory=self._clock_factory, machine=self._machine
+            clients=self._own_clients, clock_factory=lambda: clock, machine=self._machine
         )
 
     def _resolve_config(self, overlay: Any, birth: Any) -> None:
@@ -314,19 +282,9 @@ def resolve_registration(
     *,
     agent_id: int | None = None,
     session_id: str | None = None,
-    store: RegistrationStore | None = None,
+    store: RegistrationStore,
 ) -> HarnessRegistration:
-    resolved_store = store if store is not None else default_store()
-    registration = resolved_store.find_by_handle(handle)
-    if registration is None:
-        raise RegistrationError("no harness session matches this handle")
-    if agent_id is not None and registration.agent_id != agent_id:
-        raise RegistrationError(
-            f"this handle belongs to agent {registration.agent_id}, not {agent_id}"
-        )
-    if session_id is not None and registration.external_session_id != session_id:
-        raise RegistrationError("this handle belongs to another external session")
-    return registration
+    return require_claimed(store.find_by_handle(handle), agent_id=agent_id, session_id=session_id)
 
 
 def open_attachment(
@@ -334,20 +292,14 @@ def open_attachment(
     *,
     agent_id: int | None = None,
     session_id: str | None = None,
-    store: RegistrationStore | None = None,
 ) -> HarnessAttachment:
     """Build the attachment for one registration handle; the caller owns its lifetime."""
     registration = resolve_registration(
-        handle, agent_id=agent_id, session_id=session_id, store=store
+        handle, agent_id=agent_id, session_id=session_id, store=default_store()
     )
     return HarnessAttachment(
         handle,
         agent_id=registration.agent_id,
         session_id=registration.external_session_id,
         registration=registration,
-        ancestor_check=descends_from,
     )
-
-
-def registration_digest(handle: str) -> str:
-    return handle_digest(handle)

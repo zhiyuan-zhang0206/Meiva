@@ -3,10 +3,18 @@ normalization, and watcher script generation (pure string builders)."""
 
 import ast
 import datetime as dt
-from collections.abc import Callable
+import json
+from collections.abc import Generator
+from contextlib import contextmanager
+from typing import ClassVar
 
+import httpx
 import pytest
 
+from base.agents.context import MeivaContext
+from base.agents.context.clients import ClientSet
+from base.agents.context.gateway_client.transport import GatewayTransportInputs
+from base.agents.context.identity import AgentIdentity
 from base.daemon.schedules.watcher import (
     CronExprError,
     build_at_script,
@@ -16,6 +24,7 @@ from base.daemon.schedules.watcher import (
     previous_fire,
     validate_cron,
 )
+from meiva.sdk_surface import process_context
 
 
 def test_validate_cron_accepts_valid() -> None:
@@ -293,45 +302,86 @@ class _FakeDT:
     datetime = _FakeDateTime
 
 
-def _exec_watcher(
-    script: str,
-    wall: _FakeWall,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    send: Callable[..., None] | None = None,
-) -> list[tuple[object, object]]:
-    """Execute a generated watcher script against the fake wall clock; return
-    the (args, kwargs) of every `_wake` call.
+# meiva:note
+# The `os` surface the generated scripts use: only the session-id variable the run command sets,
+# so the test hands the value in instead of editing the process environment.
+class _FakeOs:
+    environ: ClassVar[dict[str, str]] = {"MEIVA_WATCHER_SESSION_ID": "77"}
 
-    The generated scripts import `datetime` / `time` at the top; `datetime.datetime`
-    is an immutable C type, so instead of patching it we substitute the two imports
-    with fakes before exec — the template itself stays untouched. `_wake`'s delivery
-    is stubbed through meiva.gateway_client; pass `send` to script a failing stub
-    (the wake-retry tests, task #3525)."""
-    from meiva import gateway_client
-    from meiva.sdk_surface import agent_identity
 
-    script = script.replace("import datetime as _dt\n", "_dt = _FakeDT\n").replace(
-        "import time as _time\n", "_time = _fake_time\n"
+_ALWAYS_DOWN = -1
+
+
+# meiva:note
+# A gateway behind the SDK's own transport that records every request it is sent and refuses the
+# first `down_for` of them (`_ALWAYS_DOWN`: all), as a restarting gateway does.
+@contextmanager
+def _wake_gateway(*, down_for: int = 0) -> Generator[list[httpx.Request]]:
+    received: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        received.append(request)
+        if down_for == _ALWAYS_DOWN or len(received) <= down_for:
+            raise httpx.ConnectError("gateway down", request=request)
+        return httpx.Response(201, json={})
+
+    context = MeivaContext(
+        identity=AgentIdentity(agent_id=3115, owns_loop=True),
+        clients=ClientSet(
+            gateway_url="http://gateway",
+            gateway=lambda url: httpx.Client(base_url=url, transport=httpx.MockTransport(handle)),
+            factories={
+                GatewayTransportInputs: lambda: GatewayTransportInputs(
+                    max_retries_reader=lambda: 1,
+                    retry_delay_reader=lambda: 0.0,
+                    memory_deadline_reader=lambda: 1.0,
+                )
+            },
+        ),
+    )
+    previous = process_context.bound_context()
+    process_context.bind_context(context)
+    try:
+        yield received
+    finally:
+        try:
+            context.clients.close()
+        finally:
+            if previous is None:
+                process_context.unbind_context()
+            else:
+                process_context.bind_context(previous)
+
+
+# meiva:note
+# Execute a generated watcher script against the fake wall clock; return every request its `_wake`
+# sent to the gateway. The generated scripts import `datetime` / `time` / `os` at the top;
+# `datetime.datetime` is an immutable C type, so instead of patching it we substitute the imports
+# with fakes before exec — the template itself stays untouched. `_wake` delivers through the real
+# `meiva.gateway_client`, over a gateway that refuses the first `down_for` requests (the wake-retry
+# tests, task #3525).
+def _exec_watcher(script: str, wall: _FakeWall, *, down_for: int = 0) -> list[httpx.Request]:
+    script = (
+        script.replace("import datetime as _dt\n", "_dt = _FakeDT\n")
+        .replace("import time as _time\n", "_time = _fake_time\n")
+        .replace("import os as _os\n", "_os = _FakeOs\n")
     )
     fake_time = type("_FakeTime", (), {"sleep": staticmethod(wall.sleep)})()
     _FakeDateTime._wall = wall
+    with _wake_gateway(down_for=down_for) as received:
+        exec(
+            script,
+            {
+                "__name__": "__watcher__",
+                "_FakeDT": _FakeDT,
+                "_fake_time": fake_time,
+                "_FakeOs": _FakeOs,
+            },
+        )
+    return received
 
-    sent: list[tuple[object, object]] = []
 
-    def _record(*a: object, **k: object) -> None:
-        sent.append((a, k))
-
-    monkeypatch.setattr(agent_identity, "agent_id", lambda: 3115)
-    monkeypatch.setattr(gateway_client, "send_message", send if send is not None else _record)
-    monkeypatch.setenv("MEIVA_WATCHER_SESSION_ID", "77")
-    exec(script, {"__name__": "__watcher__", "_FakeDT": _FakeDT, "_fake_time": fake_time})
-    return sent
-
-
-def test_cron_clock_step_backwards_never_fires_a_boundary_twice(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_cron_clock_step_backwards_never_fires_a_boundary_twice() -> None:
     """The issue #182 scenario: every sleep lands the wall clock BACK before the
     boundary (accumulated ~1.5-3s corrections), and after a fire the clock steps
     back across the fired boundary. The watcher must fire each boundary exactly
@@ -347,7 +397,7 @@ def test_cron_clock_step_backwards_never_fires_a_boundary_twice(
         timezone="UTC",
         end_time_iso="2026-08-20T16:02:00-08:00",  # 00:02:00 UTC
     )
-    sent = _exec_watcher(script, wall, monkeypatch)
+    sent = _exec_watcher(script, wall)
 
     assert len(sent) == 3, f"expected exactly 3 boundary fires, got {len(sent)}"
     # Fires happened at the boundary instants — never before them.
@@ -356,13 +406,11 @@ def test_cron_clock_step_backwards_never_fires_a_boundary_twice(
         dt.datetime(2026, 8, 21, 0, 0, 0, tzinfo=dt.UTC),
         dt.datetime(2026, 8, 21, 0, 2, 0, tzinfo=dt.UTC),
     ]
-    for (_args, _kwargs), boundary in zip(sent, boundary_times, strict=True):
+    for _request, boundary in zip(sent, boundary_times, strict=True):
         assert wall.t >= boundary, f"fired before the boundary ({wall.t} < {boundary})"
 
 
-def test_at_clock_step_backwards_does_not_fire_early(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_at_clock_step_backwards_does_not_fire_early() -> None:
     """An `at` watcher whose sleep lands the clock back before `when` (the 2.9s-early
     fire from the issue) must keep waiting and fire at/after `when`, exactly once."""
     when = dt.datetime(2026, 8, 20, 16, 0, 12, 330000, tzinfo=dt.UTC)
@@ -371,15 +419,13 @@ def test_at_clock_step_backwards_does_not_fire_early(
         corrections=[-4.0],
     )
     script = build_at_script(when_iso=when.isoformat(), message="wake", timezone="UTC")
-    sent = _exec_watcher(script, wall, monkeypatch)
+    sent = _exec_watcher(script, wall)
 
     assert len(sent) == 1
     assert wall.t >= when, f"fired before `when` ({wall.t} < {when})"
 
 
-def test_cron_clock_step_forward_still_fires_each_boundary_once(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_cron_clock_step_forward_still_fires_each_boundary_once() -> None:
     """Clock stepping FORWARD (waking past the boundary) must not add or drop
     fires: each boundary fires once, late by the step but never twice."""
     wall = _FakeWall(
@@ -392,7 +438,7 @@ def test_cron_clock_step_forward_still_fires_each_boundary_once(
         timezone="UTC",
         end_time_iso="2026-08-20T16:02:00-08:00",  # 00:02:00 UTC
     )
-    sent = _exec_watcher(script, wall, monkeypatch)
+    sent = _exec_watcher(script, wall)
 
     assert len(sent) == 3, f"expected exactly 3 boundary fires, got {len(sent)}"
 
@@ -400,9 +446,7 @@ def test_cron_clock_step_forward_still_fires_each_boundary_once(
 # -- schedule-state announcement (v3, task #1620) -----------------------------
 
 
-def test_cron_script_announces_schedule_state(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_cron_script_announces_schedule_state(capsys: pytest.CaptureFixture[str]) -> None:
     """A running cron watcher must say on stdout what it is doing: its next
     fire at startup and, after each fire, the fired instant plus the next fire.
     A healthy watcher sleeping toward a far boundary (a weekly cron a few
@@ -419,7 +463,7 @@ def test_cron_script_announces_schedule_state(
         timezone="UTC",
         end_time_iso="2026-08-20T16:02:00-08:00",  # 00:02:00 UTC
     )
-    sent = _exec_watcher(script, wall, monkeypatch)
+    sent = _exec_watcher(script, wall)
     out = capsys.readouterr().out
 
     assert len(sent) == 3  # fire semantics unchanged by the prints
@@ -435,15 +479,13 @@ def test_cron_script_announces_schedule_state(
     assert "fired 2026-08-21T00:00:00+00:00 -> next fire at 2026-08-21T00:02:00+00:00" in lines[2]
 
 
-def test_at_script_announces_when(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_at_script_announces_when(capsys: pytest.CaptureFixture[str]) -> None:
     """A one-shot watcher announces its target time at startup, so a session
     capture shows at a glance when it will fire."""
     when = dt.datetime(2026, 8, 20, 16, 0, 0, tzinfo=dt.UTC)
     wall = _FakeWall(dt.datetime(2026, 8, 20, 15, 59, 30, tzinfo=dt.UTC), corrections=[])
     script = build_at_script(when_iso=when.isoformat(), message="wake", timezone="UTC")
-    sent = _exec_watcher(script, wall, monkeypatch)
+    sent = _exec_watcher(script, wall)
     out = capsys.readouterr().out
 
     assert len(sent) == 1  # fire semantics unchanged
@@ -472,45 +514,31 @@ def test_build_scripts_carry_wake_retry() -> None:
         ast.parse(script, filename="<script>")
 
 
-def test_wake_retries_transient_failure_then_delivers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_wake_retries_transient_failure_then_delivers() -> None:
     """Two failing attempts must not lose the wake — the third delivers."""
     when = dt.datetime(2026, 8, 20, 16, 0, 0, tzinfo=dt.UTC)
     wall = _FakeWall(dt.datetime(2026, 8, 20, 15, 59, 30, tzinfo=dt.UTC), corrections=[])
     script = build_at_script(when_iso=when.isoformat(), message="wake", timezone="UTC")
-    attempts: list[int] = []
 
-    def flaky(*_args: object, **_kwargs: object) -> None:
-        attempts.append(1)
-        if len(attempts) < 3:
-            raise ConnectionError("gateway restarting")
+    attempts = _exec_watcher(script, wall, down_for=2)
 
-    _exec_watcher(script, wall, monkeypatch, send=flaky)
     assert len(attempts) == 3  # two failures, then delivery
     assert 10.0 in wall.sleeps and 40.0 in wall.sleeps  # bounded backoff between attempts
 
 
-def test_wake_final_failure_is_logged_not_raised(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_wake_final_failure_is_logged_not_raised(capsys: pytest.CaptureFixture[str]) -> None:
     """A sustained outage must not crash the watcher: three failed attempts,
     the failure lands on stderr, and the script exits without raising."""
     when = dt.datetime(2026, 8, 20, 16, 0, 0, tzinfo=dt.UTC)
     wall = _FakeWall(dt.datetime(2026, 8, 20, 15, 59, 30, tzinfo=dt.UTC), corrections=[])
     script = build_at_script(when_iso=when.isoformat(), message="wake", timezone="UTC")
 
-    def boom(*_args: object, **_kwargs: object) -> None:
-        raise ConnectionError("connection refused")
-
-    _exec_watcher(script, wall, monkeypatch, send=boom)  # must not raise
+    _exec_watcher(script, wall, down_for=_ALWAYS_DOWN)  # must not raise
     err = capsys.readouterr().err
     assert "wake delivery failed after 3 attempts" in err
 
 
-def test_cron_wake_failure_keeps_the_schedule(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_cron_wake_failure_keeps_the_schedule(capsys: pytest.CaptureFixture[str]) -> None:
     """When one fire's wake cannot be delivered, the cron loop survives and
     the next fire's wake is delivered (2026-09-15: the bare call killed it)."""
     wall = _FakeWall(dt.datetime(2026, 8, 20, 23, 57, 58, tzinfo=dt.UTC), corrections=[])
@@ -520,13 +548,22 @@ def test_cron_wake_failure_keeps_the_schedule(
         timezone="UTC",
         end_time_iso="2026-08-20T16:01:00-08:00",  # 00:01 UTC -> fires 23:58, 00:00
     )
-    attempts: list[int] = []
 
-    def first_fire_down(*_args: object, **_kwargs: object) -> None:
-        attempts.append(1)
-        if len(attempts) <= 3:  # fire 1: all three attempts fail
-            raise ConnectionError("gateway down")
+    attempts = _exec_watcher(script, wall, down_for=3)
 
-    _exec_watcher(script, wall, monkeypatch, send=first_fire_down)
     assert len(attempts) == 4  # fire 2 delivered on its first attempt
     assert "wake delivery failed after 3 attempts" in capsys.readouterr().err
+
+
+# meiva:note
+# The wake is a real `send_message` to the launching agent, tagged with the session id the run
+# command exported.
+def test_a_fire_wakes_the_launching_agent_as_the_watcher_session() -> None:
+    when = dt.datetime(2026, 8, 20, 16, 0, 0, tzinfo=dt.UTC)
+    wall = _FakeWall(dt.datetime(2026, 8, 20, 15, 59, 30, tzinfo=dt.UTC), corrections=[])
+    script = build_at_script(when_iso=when.isoformat(), message="wake up", timezone="UTC")
+
+    [request] = _exec_watcher(script, wall)
+
+    assert (request.method, request.url.path) == ("POST", "/api/agents/3115/messages")
+    assert json.loads(request.content) == {"content": "wake up", "source": "watcher:77"}

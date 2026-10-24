@@ -1,12 +1,17 @@
 import asyncio
+import os
+import sys
 from collections.abc import Awaitable
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 from agent.execution.protocol import ResultPayload
 from base.agents.context import MeivaContext
+from base.deploy.release import editable_install
 from base.paths import exec_run_dir, meiva_home
 
-from ._child_boundary import ParentFacts, read_parent_facts
+from ._child_boundary import ParentFacts
 from ._result import ExecResult
 from ._stream import ExecOutputChunkPublisher
 from ._subprocess import run_in_subprocess
@@ -25,9 +30,27 @@ class ExecProcess(Protocol):
     ) -> Awaitable[tuple[ExecResult, ResultPayload | None]]: ...
 
 
+# meiva:note
+# What this process looks like at the moment it spawns a child: the environment the child
+# inherits, its working directory, the interpreter it re-executes, the checkout that
+# interpreter belongs to and the one extra checkout its editable install may name. The
+# composition root reads it once and hands it to `SubprocessExecProcess`.
+def read_parent_facts() -> ParentFacts:
+    return ParentFacts(
+        environ=dict(os.environ),
+        cwd=Path.cwd().resolve(),
+        executable=sys.executable,
+        source_root=editable_install.current_interpreter_source_root(),
+        editable_roots=(Path.home() / "Meiva",),
+    )
+
+
+# meiva:note
+# The production exec process: one disposable child per call, launched from the parent facts it
+# was constructed with.
+@dataclass(frozen=True)
 class SubprocessExecProcess:
-    def parent_facts(self) -> ParentFacts:
-        return read_parent_facts()
+    parent: ParentFacts
 
     # meiva:note
     # Capture inner limits before the caller's shield reads its outer timeout.
@@ -52,7 +75,7 @@ class SubprocessExecProcess:
             accumulation_max_chars=context.require_agent().read(
                 "sandbox", "exec_output_accumulation_max_chars"
             ),
-            parent=self.parent_facts(),
+            parent=self.parent,
             exec_dir=exec_run_dir(meiva_home()),
             state=state,
             config_overlay=config_overlay,

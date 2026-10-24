@@ -2,14 +2,11 @@
 # What passive memory recall injects and how the note reads, decided from search hits.
 from __future__ import annotations
 
-from agent.graph.recall.memory_note import qualifying, render_note_text
-from base.agents.context.gateway_client.memory_search import MemorySearchResult
+from agent.graph.recall.memory_note import SearchHit, qualifying, render_note_text
 
 
-def _hit(
-    path: str, *, score: float = 0.9, description: str = "", chunk: str = ""
-) -> MemorySearchResult:
-    return MemorySearchResult(path, description, ("type/user",), score, chunk)
+def _hit(path: str, *, score: float = 0.9, description: str = "", chunk: str = "") -> SearchHit:
+    return SearchHit(path, description, score, chunk)
 
 
 def test_best_scores_first_at_or_above_the_threshold() -> None:
@@ -56,10 +53,6 @@ def test_note_lists_path_score_description_and_matched_passage() -> None:
     assert "- a.md (score 0.83): deploy runbook\n  > restart the gateway" in text
     assert "- sub/b.md (score 0.81): gateway ports\n  > line one\n  >\n  > line three" in text
     assert text.index("a.md") < text.index("sub/b.md")
-
-
-def test_tags_are_not_rendered() -> None:
-    assert "type/user" not in render_note_text([_hit("a.md", description="d", chunk="c")])
 
 
 def test_an_empty_description_is_not_synthesized() -> None:

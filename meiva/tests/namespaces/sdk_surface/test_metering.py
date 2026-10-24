@@ -1,23 +1,29 @@
-"""Unit tests for meiva/sdk_surface/metering.py — the per-call SDK usage recorder.
+# meiva:note
+# Unit tests for meiva/sdk_surface/metering.py — the per-call SDK usage recorder.
+#
+# The recorder wraps every public `meiva.*` callable to emit one `sdk_call` event per public
+# entry (summed by the Grafana call-frequency ranking). These tests pin the two things that make
+# it safe to bolt onto the whole SDK surface: it is byte-for-byte transparent to `meiva.help` /
+# signatures, and records each entry independently. Emitter failures preserve an already-raised
+# body exception as the primary outcome.
+#
+# Events are read from the real emitter's capture (`emitted_events`); the recorder takes the
+# client set it meters through, and a sampling owner whose reader returns a valid policy.
 
-The recorder wraps every public `meiva.*` callable to emit one `sdk_call` event per
-public entry (summed by the Grafana call-frequency ranking). These tests pin the two
-things that make it safe to bolt onto the whole SDK surface: it is byte-for-byte
-transparent to `meiva.help` / signatures, and records each entry independently.
-Emitter failures preserve an already-raised body exception as the primary outcome.
-"""
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import inspect
 import io
-import os
-from collections.abc import Callable, Generator, Iterator, Mapping
+import json
+import sys
+from collections.abc import Callable, Generator, Iterator
 from dataclasses import replace
-from types import SimpleNamespace
-from typing import Any, cast
-from unittest.mock import patch
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -26,9 +32,9 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import ExternalLease
 from base.agents.sdk import call_policy
-from base.agents.sdk import telemetry as sdk_usage_telemetry
 from base.agents.sdk.tally import SdkCallTally
 from base.cluster.machine import MachineIdentity
+from base.host.proc import run_bounded
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
@@ -39,67 +45,60 @@ from base.packages.plugins.extensions import (
 from base.paths.home import resolve_meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
-from meiva.sdk_surface import install, metering, process_context
-from meiva.sdk_surface.installation import Installation
+from meiva.sdk_surface import install, meiva_module, metering, process_context
 from meiva.tests.fixtures.pin_agent import pin_agent
+
+_CHILD = Path(__file__).with_name("child_metering_identity.py")
+
+
+@pytest.fixture
+def sampling_owner() -> Iterator[call_policy.SamplingPolicyOwner]:
+    owner = call_policy.SamplingPolicyOwner(reader=call_policy.SamplingPolicy)
+    yield owner
+    owner.close()
+
+
+@pytest.fixture
+def capture(emitted_events: EmittedEvents) -> Iterator[ClientSet]:
+    """Bind a context whose clients' event pipeline is the capture, and put the previous one back."""
+    clients = ClientSet(pipeline_factory=emitted_events.producer)
+    previous = process_context.unbind_context()
+    process_context.bind_context(MeivaContext(clients=clients))
+    try:
+        yield clients
+    finally:
+        process_context.unbind_context()
+        if previous is not None:
+            process_context.bind_context(previous)
 
 
 @contextlib.contextmanager
 def _execution_tally() -> Generator[SdkCallTally, None, None]:
     """A test execution explicitly owns its SDK tally through the local context."""
-    previous = getattr(meiva, "context", None)
+    previous = meiva.context
     tally = SdkCallTally()
-    process_context.bind_context(replace(previous or MeivaContext(), sdk_calls=tally))
+    process_context.bind_context(replace(previous, sdk_calls=tally))
     try:
         yield tally
     finally:
-        if previous is None:
-            process_context.unbind_context()
-        else:
-            process_context.bind_context(previous)
+        process_context.bind_context(previous)
 
 
-def _capturing_clients(events: EmittedEvents) -> ClientSet:
-    """Clients whose event pipeline is the capture: a recorder that reads the bound context's
-    pipeline (not the process one) emits into `events`."""
-    return ClientSet(pipeline_factory=events.producer)
+# meiva:note
+# (fn, duration) of every `sdk_call` event emitted so far, in emit order.
+def _calls(events: EmittedEvents) -> list[tuple[str, float | None]]:
+    return [
+        (row["fn"], row.get("duration"))
+        for row in events.attributes("sdk_call")
+        if isinstance(row.get("fn"), str)
+    ]
 
 
-def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, object], float | None]]:
-    """Capture (fn, detail, duration) for each emitted sdk_call event."""
-    calls: list[tuple[str, dict[str, object], float | None]] = []
-
-    def emit(
-        fn: str,
-        detail: Mapping[str, object] | None = None,
-        duration: float | None = None,
-        *,
-        identity: Mapping[str, Any],
-        sampling_owner: call_policy.SamplingPolicyOwner,
-        sampling_policy: call_policy.SamplingPolicy | None = None,
-        producer: Callable[[], Any] | None = None,
-        machine_reader: Callable[[], str] | None = None,
-    ) -> None:
-        assert sampling_policy is not None
-        calls.append((fn, dict(detail or {}), duration))
-
-    monkeypatch.setattr(sdk_usage_telemetry, "emit", emit)
-    return calls
-
-
-@pytest.fixture
-def sampling_owner() -> Iterator[call_policy.SamplingPolicyOwner]:
-    owner = call_policy.SamplingPolicyOwner()
-    yield owner
-    owner.close()
-
-
-@pytest.fixture(autouse=True)
-def _valid_policy(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
+def _install_recorders(
+    sampling: call_policy.SamplingPolicyOwner, root: ModuleType | None = None
+) -> tuple[tuple[object, str], ...]:
+    surface = metering.read_surface(root if root is not None else meiva_module())
+    return metering.install(sampling, clients=None, surface=surface)
 
 
 def _help(*targets: object) -> str:
@@ -113,30 +112,27 @@ def _help(*targets: object) -> str:
 def _installed(sampling_owner: call_policy.SamplingPolicyOwner) -> Iterator[None]:
     """Install the recorders over the real `meiva` singleton, then restore — so a
     wrapped function never leaks into the rest of the suite."""
-    with patch.dict(os.environ):
-        ledger = metering.install(sampling_owner)
-        try:
-            yield
-        finally:
-            metering.uninstall(ledger)
+    ledger = _install_recorders(sampling_owner)
+    try:
+        yield
+    finally:
+        metering.uninstall(ledger)
 
 
 # ── transparency ──────────────────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("sdk_model_owner")
 def test_help_is_byte_identical_across_install(
-    monkeypatch: pytest.MonkeyPatch,
-    model_installation: Installation,
     sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
     """Acceptance for the transparency contract: metering must not change a single
     byte of what the agent sees via `meiva.help`."""
-    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
     before_root = _help(meiva)
     before_ns = _help(meiva.files)
     before_fn = _help(meiva.files.read)
 
-    ledger = metering.install(sampling_owner)
+    ledger = _install_recorders(sampling_owner)
     try:
         assert _help(meiva) == before_root
         assert _help(meiva.files) == before_ns
@@ -150,7 +146,7 @@ def test_signature_and_identity_metadata_preserved(
 ) -> None:
     before_sig = inspect.signature(meiva.files.read)
     before_doc = meiva.files.read.__doc__
-    ledger = metering.install(sampling_owner)
+    ledger = _install_recorders(sampling_owner)
     try:
         read = meiva.files.read
         assert read.__name__ == "read"
@@ -171,23 +167,26 @@ def test_install_is_idempotent(
     _installed: None, sampling_owner: call_policy.SamplingPolicyOwner
 ) -> None:
     once = meiva.files.read
-    metering.install(sampling_owner)  # second install must not double-wrap
+    _install_recorders(sampling_owner)  # second install must not double-wrap
     assert meiva.files.read is once
 
 
 def test_install_rejects_a_different_owner_before_wrapping(_installed: None) -> None:
     once = meiva.files.read
-    with pytest.raises(ValueError, match="another sampling owner"):
-        metering.install(call_policy.SamplingPolicyOwner())
+    other = call_policy.SamplingPolicyOwner(reader=call_policy.SamplingPolicy)
+    try:
+        with pytest.raises(ValueError, match="another sampling owner"):
+            _install_recorders(other)
+    finally:
+        other.close()
     assert meiva.files.read is once
 
 
 # ── enumeration ───────────────────────────────────────────────────────────────
 
 
-@patch.dict(os.environ)
 def test_instrument_targets_selects_routines_not_classes_or_constants() -> None:
-    fqs = {fq for _parent, _attr, fq in metering.instrument_targets()}
+    fqs = {fq for _parent, _attr, fq in metering.read_surface(meiva_module()).routines}
     # plain functions, nested-namespace functions, and top-level functions
     assert {"files.read", "shell.run", "shell.sessions.new", "self.compact", "understand"} <= fqs
     # meiva.mcps declares its helpers (and the configured servers) in __all_for_meiva__; the
@@ -205,10 +204,7 @@ def test_instrument_targets_selects_routines_not_classes_or_constants() -> None:
     assert not any(fq.startswith("mcps.") and fq.count(".") > 1 for fq in fqs)
 
 
-@patch.dict(os.environ)
-def test_instrument_targets_does_not_evaluate_raising_dynamic_member(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_instrument_targets_does_not_evaluate_raising_dynamic_member() -> None:
     """Regression: meiva.self.MACHINE_SPEC is served via module
     __getattr__ that computes machine identity and raises MachineNameMissing when unset
     (CI / isolated $MEIVA_HOME / schedule runner). The walk resolves members statically, so
@@ -225,31 +221,51 @@ def test_instrument_targets_does_not_evaluate_raising_dynamic_member(
     prior = process_context.unbind_context()
     process_context.bind_context(MeivaContext(machine=machine))
     try:
-        # Cold SDK installation owns delivery environment changes in this test scope.
-        with patch.dict(os.environ):
-            # sanity: normal attribute access really does raise under this condition
-            with pytest.raises(base.cluster.machine.MachineNameMissing):
-                _ = meiva.self.MACHINE_SPEC
+        # sanity: normal attribute access really does raise under this condition
+        with pytest.raises(base.cluster.machine.MachineNameMissing):
+            _ = meiva.self.MACHINE_SPEC
 
-            fqs = {fq for _parent, _attr, fq in metering.instrument_targets()}
-            assert "self.compact" in fqs  # real functions still enumerated
-            assert "self.MACHINE_SPEC" not in fqs  # dynamic constant skipped, not evaluated
+        fqs = {fq for _parent, _attr, fq in metering.read_surface(meiva_module()).routines}
+        assert "self.compact" in fqs  # real functions still enumerated
+        assert "self.MACHINE_SPEC" not in fqs  # dynamic constant skipped, not evaluated
     finally:
         process_context.unbind_context()
         if prior is not None:
             process_context.bind_context(prior)
 
 
+def test_instrument_targets_does_not_evaluate_a_dynamic_namespace_directory() -> None:
+    class Dynamic(ModuleType):
+        def __dir__(self) -> list[str]:
+            pytest.fail("instrumentation must not load skills or discover remote MCP servers")
+
+    def inner() -> str:
+        return "inner"
+
+    def top() -> str:
+        return "top"
+
+    dynamic = Dynamic("probe_root.dynamic")
+    dynamic.__dict__.update(inner=inner, __all_for_meiva__=["inner"])
+    root = ModuleType("probe_root")
+    root.__dict__.update(top=top, dynamic=dynamic, __all_for_meiva__=["top", "dynamic"])
+
+    assert {fq for _parent, _attr, fq in metering.read_surface(root).routines} == {
+        "top",
+        "dynamic.inner",
+    }
+
+
 # ── recorder wrapping (agent side; call / emit logic is in test_sdk_telemetry) ───
 
 
-@patch.dict(os.environ)
 def test_plugin_wrapped_signature_survives_and_counts_once(
-    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+    sampling_owner: call_policy.SamplingPolicyOwner,
+    capture: ClientSet,
+    emitted_events: EmittedEvents,
 ) -> None:
     """A member already wrapped by a plugin (extra kwarg, custom __signature__) stays
     transparent under the recorder and still emits exactly one event."""
-    calls = _spy_emit(monkeypatch)
 
     def core(a: int, b: int) -> tuple[int, int]:
         return (a, b)
@@ -263,24 +279,23 @@ def test_plugin_wrapped_signature_survives_and_counts_once(
     plugin_wrapped.__module__ = "meiva.agents"
     plugin_wrapped.__signature__ = inspect.signature(plugin_wrapped)  # type: ignore[attr-defined]
 
-    rec = metering.make_recorder(plugin_wrapped, "agents.spawn", sampling_owner)
+    rec = metering.make_recorder(plugin_wrapped, "agents.spawn", sampling_owner, capture)
     assert rec.__name__ == "spawn"
     assert rec.__module__ == "meiva.agents"
     assert "label" in inspect.signature(rec).parameters
     with _execution_tally():
         assert rec(1, 2, label="x") == (1, 2)
-    assert len(calls) == 1
-    assert calls[0][:2] == ("agents.spawn", {})
-    assert calls[0][2] is not None and calls[0][2] >= 0
+    [(fn, duration)] = _calls(emitted_events)
+    assert fn == "agents.spawn"
+    assert duration is not None and duration >= 0
 
 
 def test_recorder_feeds_the_execution_tally(
-    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+    sampling_owner: call_policy.SamplingPolicyOwner, capture: ClientSet
 ) -> None:
     """The wrapped surface bumps the execution's full tally (two calls count two),
     independent of the emit sampler."""
-    _spy_emit(monkeypatch)
-    rec = metering.make_recorder(lambda: "ok", "ns.fn", sampling_owner)
+    rec = metering.make_recorder(lambda: "ok", "ns.fn", sampling_owner, capture)
     with _execution_tally() as tally:
         assert rec() == "ok"
         assert rec() == "ok"
@@ -294,7 +309,7 @@ def test_recorder_recognized_by_identity_not_copied_dict(
     wrapper, so a plugin wrapper built over a recorder inherits the recorder's dict.
     is_recorder() must key off object identity (the marker points at the recorder itself), not the attribute's presence, or
     it would skip re-wrapping such a wrapper and leave the recorder buried inside."""
-    rec = metering.make_recorder(lambda: None, "ns.fn", sampling_owner)
+    rec = metering.make_recorder(lambda: None, "ns.fn", sampling_owner, None)
     assert metering.is_recorder(rec)
 
     def plugin_wrapper() -> None:
@@ -307,117 +322,93 @@ def test_recorder_recognized_by_identity_not_copied_dict(
 
 
 def test_mcp_recorder_derives_fq_from_runtime_args(
-    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+    sampling_owner: call_policy.SamplingPolicyOwner,
+    capture: ClientSet,
+    emitted_events: EmittedEvents,
 ) -> None:
     """MCP tools are dynamic, so the funnel recorder builds the fq from server/tool at
     call time, both inside and outside an execution tally."""
-    calls = _spy_emit(monkeypatch)
 
     def _fake_call(source: object, server: str, tool: str, **_kw: object) -> dict[str, str]:
         return {"server": server, "tool": tool}
 
-    rec = metering.make_mcp_recorder(_fake_call, sampling_owner)
+    rec = metering.make_mcp_recorder(_fake_call, sampling_owner, capture)
     with _execution_tally():
         assert rec(None, "chrome", "navigate", url="x") == {"server": "chrome", "tool": "navigate"}
-    assert len(calls) == 1
-    assert calls[0][:2] == ("mcps.chrome.navigate", {})
-    assert calls[0][2] is not None and calls[0][2] >= 0
+    [(fn, duration)] = _calls(emitted_events)
+    assert fn == "mcps.chrome.navigate"
+    assert duration is not None and duration >= 0
 
-    calls.clear()
+    emitted_events.clear()
     rec(None, "chrome", "navigate")  # without an execution tally
-    assert calls[0][0] == "mcps.chrome.navigate"
+    assert [fn for fn, _duration in _calls(emitted_events)] == ["mcps.chrome.navigate"]
 
 
+# meiva:note
+# Task #3426: teardown restores from the install() ledger, not a fresh namespace walk — the walk
+# re-resolves dynamic member surfaces (the `meiva.skills` index scans the skills tree and reads
+# the install registry), which state a passing test arranged can poison after the test itself
+# went green. The surface is a value `install` takes, and `uninstall` receives only the ledger
+# it returned.
 def test_uninstall_restores_from_the_install_record_without_a_namespace_walk(
-    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+    sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
-    """Task #3426: teardown restores from the install() ledger, not a fresh
-    namespace walk — the walk re-resolves dynamic member surfaces (the `meiva.skills`
-    index scans the skills tree and reads the install registry), which state a
-    passing test arranged can poison after the test itself went green."""
-    target = SimpleNamespace()
 
     def demo() -> str:
         return "ok"
 
-    target.demo = demo
-
-    def _stub_targets() -> list[tuple[object, str, str]]:
-        return [(target, "demo", "demo")]
-
-    monkeypatch.setattr(metering, "instrument_targets", _stub_targets)
-    ledger = metering.install(sampling_owner)
+    target = SimpleNamespace(demo=demo)
+    surface = metering.MeterSurface(routines=((target, "demo", "demo"),), funnel_module=None)
+    ledger = metering.install(sampling_owner, clients=None, surface=surface)
     try:
-        wrapped = target.demo
-        assert wrapped is not demo
-        assert metering.is_recorder(wrapped)
-
-        def _no_walk() -> list[tuple[object, str, str]]:
-            pytest.fail("uninstall() must not re-walk the namespace (task #3426)")
-
-        monkeypatch.setattr(metering, "instrument_targets", _no_walk)
+        assert target.demo is not demo
+        assert metering.is_recorder(target.demo)
     finally:
         metering.uninstall(ledger)
     assert target.demo is demo
 
 
-def test_teardown_survives_a_poisoned_dynamic_surface(
-    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+def test_install_meters_the_funnel_module_it_is_given(
+    sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
-    """Task #3426 acceptance shape: arm metering first, then poison the skills
-    surface (simulating the broken-registry state a test deliberately leaves
-    behind); uninstall() must complete without touching the surface and restore
-    every recorded pair."""
-    ledger = metering.install(sampling_owner)
+    def call_raw(source: object, server: str, tool: str) -> str:
+        return f"{server}.{tool}"
+
+    funnel = SimpleNamespace(call_raw=call_raw)
+    surface = metering.MeterSurface(routines=(), funnel_module=funnel)
+    ledger = metering.install(sampling_owner, clients=None, surface=surface)
     try:
-        assert ledger
-        recorded = list(ledger)
-
-        def _poisoned(_self: object) -> list[str]:
-            raise RuntimeError("simulated corrupt install registry")
-
-        monkeypatch.setattr(type(meiva.skills), "__all_for_meiva__", property(_poisoned))  # pyright: ignore[reportUnknownArgumentType]
-        with pytest.raises(RuntimeError):
-            metering.instrument_targets()  # the old teardown path explodes here
+        assert ledger == ((funnel, "call_raw"),)
+        assert metering.is_recorder(funnel.call_raw)
     finally:
         metering.uninstall(ledger)
-    # Completeness on the precise unit of the guarantee: no recorded pair still
-    # holds a recorder.
-    for parent, attr in recorded:
-        assert not metering.is_recorder(getattr(parent, attr, None))
-    assert not metering.is_recorder(meiva.files.read)
-    assert not metering.is_recorder(meiva.mcps.call_funnel.call_raw)
+    assert funnel.call_raw is call_raw
 
 
 @pytest.mark.asyncio
 async def test_async_calls_measure_each_concurrent_entry(
-    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+    sampling_owner: call_policy.SamplingPolicyOwner,
+    capture: ClientSet,
+    emitted_events: EmittedEvents,
 ) -> None:
-    import asyncio
-
-    calls = _spy_emit(monkeypatch)
-
     async def body(label: str) -> str:
         await asyncio.sleep(0)
         return label
 
-    wrapped = metering.make_recorder(body, "plugin.async_call", sampling_owner)
+    wrapped = metering.make_recorder(body, "plugin.async_call", sampling_owner, capture)
     assert inspect.iscoroutinefunction(wrapped)
     a, b = wrapped("a"), wrapped("b")
-    assert calls == []
+    assert _calls(emitted_events) == []
     assert await asyncio.gather(a, b) == ["a", "b"]
-    assert [row[0] for row in calls] == ["plugin.async_call", "plugin.async_call"]
-    assert all(row[2] is not None for row in calls)
+    calls = _calls(emitted_events)
+    assert [fn for fn, _duration in calls] == ["plugin.async_call", "plugin.async_call"]
+    assert all(duration is not None for _fn, duration in calls)
 
 
 @pytest.mark.parametrize("async_call", [False, True])
 async def test_recorder_rejects_invalid_sampling_before_the_original_call(
-    monkeypatch: pytest.MonkeyPatch,
     async_call: bool,
-    sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
-    from base.agents.sdk import call_policy
-
     calls: list[str] = []
 
     def invalid() -> call_policy.SamplingPolicy:
@@ -430,41 +421,36 @@ async def test_recorder_rejects_invalid_sampling_before_the_original_call(
     async def async_body() -> str:
         return body()
 
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return invalid()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
+    owner = call_policy.SamplingPolicyOwner(reader=invalid)
+    # meiva:note
+    # the first read starts the refresh; the invalid answer lands on its worker
+    owner.read()
+    assert owner.worker is not None and owner.worker.completed.wait(5)
     original = async_body if async_call else body
-    wrapped = metering.make_recorder(original, "plugin.write", sampling_owner)
+    wrapped = metering.make_recorder(original, "plugin.write", owner, None)
     assert inspect.signature(wrapped) == inspect.signature(original)
     with pytest.raises(TypeError, match="invalid sampling configuration"):
         res = wrapped()
         if inspect.isawaitable(res):
             await res
     assert calls == []
+    with pytest.raises(TypeError, match="invalid sampling configuration"):
+        owner.close()
 
 
 def test_borrowed_identity_is_stamped_on_external_sdk_events(
-    monkeypatch: pytest.MonkeyPatch,
     sampling_owner: call_policy.SamplingPolicyOwner,
     emitted_events: EmittedEvents,
 ) -> None:
-    from base.agents.sdk import call_policy
-
     def validate() -> int:
         pytest.fail("observational telemetry must not validate the lease")
 
     pin_agent(
         42,
         lease=ExternalLease(agent_id=99, validate=validate, config=lambda: None),
-        clients=_capturing_clients(emitted_events),
+        clients=ClientSet(pipeline_factory=emitted_events.producer),
     )
-
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
-    wrapped = metering.make_recorder(lambda: "ok", "files.read", sampling_owner)
+    wrapped = metering.make_recorder(lambda: "ok", "files.read", sampling_owner, None)
     assert wrapped() == "ok"
     [event] = emitted_events
     assert event.agent_id == 99
@@ -474,18 +460,15 @@ def test_borrowed_identity_is_stamped_on_external_sdk_events(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("async_wrapper", [False, True])
 async def test_plugin_wrap_preserves_awaited_single_event(
-    monkeypatch: pytest.MonkeyPatch, async_wrapper: bool
+    async_wrapper: bool,
+    sampling_owner: call_policy.SamplingPolicyOwner,
+    capture: ClientSet,
+    emitted_events: EmittedEvents,
 ) -> None:
-    import asyncio
     from collections.abc import Awaitable
 
-    calls = _spy_emit(monkeypatch)
-    clock = [0.0]
-    monkeypatch.setattr(sdk_usage_telemetry.time, "monotonic", lambda: clock[0])
-
     async def body() -> str:
-        await asyncio.sleep(0)
-        clock[0] += 2.0
+        await asyncio.sleep(0.05)
         return "ok"
 
     def passthrough(inner: Callable[[], Awaitable[str]]) -> Awaitable[str]:
@@ -511,84 +494,55 @@ async def test_plugin_wrap_preserves_awaited_single_event(
     )
     try:
         install.install(
-            registry, config_images=DiskPluginConfigImages(resolve_meiva_home())
+            registry,
+            config_images=DiskPluginConfigImages(resolve_meiva_home()),
+            sampling=sampling_owner,
         )  # the recorder goes on last, over the plugin's wrap
         call = meiva.self.review_async_test
         assert inspect.iscoroutinefunction(call)
-        calls.clear()
+        emitted_events.clear()
         pending = call()
-        assert calls == []
+        assert _calls(emitted_events) == []
         assert await pending == "ok"
-        assert calls == [("self.review_async_test", {}, 2.0)]
+        [(fn, duration)] = _calls(emitted_events)
+        assert fn == "self.review_async_test"
+        assert duration is not None and duration >= 0.04
     finally:
         install.uninstall()
 
 
-def test_install_does_not_evaluate_dynamic_namespace_directory(
-    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
-) -> None:
-    def dynamic_names() -> list[str]:
-        pytest.fail("instrumentation must not load skills or discover remote MCP servers")
-
-    monkeypatch.setattr(meiva.skills, "__dir__", dynamic_names)
-    monkeypatch.setattr(meiva.mcps, "__dir__", dynamic_names)
-    ledger = metering.install(sampling_owner)
-    try:
-        assert ledger
-    finally:
-        metering.uninstall(ledger)
-
-
+# meiva:note
+# A caller-profile environment the SDK cannot parse is a fault in who is calling, so the
+# recorder rejects the call at admission and the body never runs. The profile is read from
+# the environment of the process the call runs in, so the scenario runs in a real child whose
+# environment the parent sets.
 @pytest.mark.parametrize("wrapper", ["sync", "async", "mcp"])
-async def test_invalid_identity_snapshot_prevents_sdk_body(
-    monkeypatch: pytest.MonkeyPatch, wrapper: str, sampling_owner: call_policy.SamplingPolicyOwner
-) -> None:
-    """Unknown provenance errors fail at admission instead of performing an unattributed action."""
-    from base.agents.messages import external_caller
+def test_invalid_identity_snapshot_prevents_sdk_body(wrapper: str) -> None:
+    import os
 
-    failure = RuntimeError("identity unreadable")
-    executed: list[str] = []
-
-    def _boom() -> None:
-        raise failure
-
-    monkeypatch.setattr(external_caller, "external_caller", _boom)
-
-    async def body() -> None:
-        executed.append("async")
-
-    with pytest.raises(RuntimeError) as caught:
-        if wrapper == "async":
-            await metering.make_recorder(body, "probe.async", sampling_owner)()
-        elif wrapper == "mcp":
-
-            def _mcp_body(*_args: object) -> None:
-                executed.append("mcp")
-
-            metering.make_mcp_recorder(_mcp_body, sampling_owner)(None, "probe", "tool")
-        else:
-            metering.make_recorder(lambda: executed.append("sync"), "probe.sync", sampling_owner)()
-    assert caught.value is failure
-    assert executed == []
+    env = {key: value for key, value in os.environ.items() if key != "MEIVA_AGENT_ID"}
+    env["MEIVA_CALLER_IDENTITY"] = "{not json"
+    proc = run_bounded(
+        [sys.executable, "-I", str(_CHILD), wrapper],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout.strip().splitlines()[-1]) == {
+        "rejected": True,
+        "executed": [],
+    }
 
 
 async def test_awaited_calls_retain_their_entry_identity(
-    monkeypatch: pytest.MonkeyPatch,
     sampling_owner: call_policy.SamplingPolicyOwner,
     emitted_events: EmittedEvents,
 ) -> None:
     """A later attachment cannot relabel an already-admitted async SDK call."""
-    import asyncio
-
-    from base.agents.sdk import call_policy
-
     entered = asyncio.Event()
     release = asyncio.Event()
-
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
 
     async def held() -> None:
         entered.set()
@@ -600,16 +554,19 @@ async def test_awaited_calls_retain_their_entry_identity(
     second_machine = MachineIdentity(
         name=lambda: "second", role=frozenset, host=lambda: "", description=lambda: None
     )
-    pin_agent(41, machine=first_machine, clients=_capturing_clients(emitted_events))
+    clients = ClientSet(pipeline_factory=emitted_events.producer)
+    pin_agent(41, machine=first_machine, clients=clients)
     first_tally = SdkCallTally()
     process_context.bind_context(replace(meiva.context, sdk_calls=first_tally))
-    first = asyncio.create_task(metering.make_recorder(held, "probe.held", sampling_owner)())
+    first = asyncio.create_task(
+        metering.make_recorder(held, "probe.held", sampling_owner, clients)()
+    )
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
-        pin_agent(42, machine=second_machine, clients=_capturing_clients(emitted_events))
+        pin_agent(42, machine=second_machine, clients=clients)
         second_tally = SdkCallTally()
         process_context.bind_context(replace(meiva.context, sdk_calls=second_tally))
-        metering.make_recorder(lambda: None, "probe.next", sampling_owner)()
+        metering.make_recorder(lambda: None, "probe.next", sampling_owner, clients)()
         release.set()
         await first
     finally:
@@ -625,36 +582,38 @@ async def test_awaited_calls_retain_their_entry_identity(
 
 
 def test_public_fanout_counts_each_entry(
-    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+    sampling_owner: call_policy.SamplingPolicyOwner,
+    capture: ClientSet,
+    emitted_events: EmittedEvents,
 ) -> None:
-    calls = _spy_emit(monkeypatch)
-    inner = metering.make_recorder(lambda: "done", "probe.inner", sampling_owner)
-    outer = metering.make_recorder(inner, "probe.outer", sampling_owner)
+    inner = metering.make_recorder(lambda: "done", "probe.inner", sampling_owner, capture)
+    outer = metering.make_recorder(inner, "probe.outer", sampling_owner, capture)
     with _execution_tally() as tally:
         assert outer() == "done"
     assert tally.snapshot() == {"probe.inner": 1, "probe.outer": 1}
-    assert [row[0] for row in calls] == ["probe.inner", "probe.outer"]
+    assert [fn for fn, _duration in _calls(emitted_events)] == ["probe.inner", "probe.outer"]
 
 
 def test_recursive_public_entry_counts_each_invocation(
-    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+    sampling_owner: call_policy.SamplingPolicyOwner,
+    capture: ClientSet,
+    emitted_events: EmittedEvents,
 ) -> None:
-    calls = _spy_emit(monkeypatch)
-
     def body(depth: int) -> int:
         return recursive(depth - 1) + 1 if depth else 0
 
-    recursive = metering.make_recorder(body, "probe.recursive", sampling_owner)
+    recursive = metering.make_recorder(body, "probe.recursive", sampling_owner, capture)
     with _execution_tally() as tally:
         assert recursive(2) == 2
     assert tally.snapshot() == {"probe.recursive": 3}
-    assert len(calls) == 3
+    assert len(_calls(emitted_events)) == 3
 
 
 def test_plugin_reload_and_multi_call_wrap_have_one_final_recorder(
-    monkeypatch: pytest.MonkeyPatch,
+    sampling_owner: call_policy.SamplingPolicyOwner,
+    capture: ClientSet,
+    emitted_events: EmittedEvents,
 ) -> None:
-    calls = _spy_emit(monkeypatch)
     bodies: list[str] = []
 
     def body() -> int:
@@ -679,10 +638,14 @@ def test_plugin_reload_and_multi_call_wrap_have_one_final_recorder(
         )
     )
     for _ in range(2):
-        install.install(registry, config_images=DiskPluginConfigImages(resolve_meiva_home()))
+        install.install(
+            registry,
+            config_images=DiskPluginConfigImages(resolve_meiva_home()),
+            sampling=sampling_owner,
+        )
         with _execution_tally() as tally:
             assert cast(Callable[[], int], meiva.self.multi_probe_test)() == 4
         assert tally.snapshot() == {"self.multi_probe_test": 1}
         install.uninstall()
     assert bodies == ["body"] * 8
-    assert [row[0] for row in calls] == ["self.multi_probe_test"] * 2
+    assert [fn for fn, _duration in _calls(emitted_events)] == ["self.multi_probe_test"] * 2

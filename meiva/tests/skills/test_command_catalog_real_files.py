@@ -5,7 +5,6 @@ import pytest
 from base.packages.composer_commands import CommandCatalog
 from meiva import skills
 from meiva.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
-from meiva.tests.skills._skills_helpers import overlay_all_enabled as overlay_all_enabled
 from meiva.tests.skills._skills_helpers import write_skill
 
 pytestmark = pytest.mark.usefixtures("unit_home")

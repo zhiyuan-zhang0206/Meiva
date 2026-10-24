@@ -99,3 +99,23 @@ Event-source close reads its wait bound from that attachment's live configuratio
 owner, or the existing installation authority for a borrowed context. It reads
 only when a participant actually closes; quiet attachment close performs no
 policy read or worker construction.
+
+## Facade and implementation
+
+`meiva.impersonation.attach` is the facade. It reads the process once: the ambient context, the host
+and exec-turn facts, the process environment for an independent attachment. It refuses what
+`meiva/sdk_surface/pure/caller/attachability.py` refuses, then builds `AttachInputs`: the
+`LeaseTarget`, the borrowed context (or none) and the `ExternalBoot` that `borrow_external_process`
+or `own_external_process` made. `Attachment(inputs)` is the implementation the kernel drives; it
+reads no environment and builds no clients. `meiva/impersonation/admission.py` (strict) holds the
+decisions over values: which lease an attach call names, whether the held plugin-state version
+still fits the lease row, how far the native graph already applied the journal, and the key of the
+event receipt a log-native lease opens. The shell reads the lease again on every SDK call and calls
+them with what it read. Placement is `base.agents.impersonation.require_active`'s check; the
+attachment does not repeat it.
+
+Tests (`agent/tests/impersonation/external/`) drive the implementation with real resources: the
+throwaway Postgres holds the agent, its checkpoint and the lease; a sample plugin directory is
+discovered by the framework loader; the gateway is a listener that holds its reply until released;
+telemetry lands in a real pipeline whose writer collects. A test expires the lease row, journals as
+another controller or rewrites the checkpoint instead of replacing a function.

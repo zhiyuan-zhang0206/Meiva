@@ -41,6 +41,8 @@ context for typed operations, `get` and `use_client`; an explicit context takes
 precedence for `get`, and a shared host must supply one. Borrowed identity
 jitter revalidates its lease before using the agent ID.
 
+The decisions of the surface are strict modules under `meiva/sdk_surface/pure/`: the plugin-load plan, the caller identity and actor rules, who may attach, the media-registration refusals and the fetched-page injection plan. The modules that read the process (`meiva/sdk_surface/agent_identity.py`, `meiva/sdk_surface/attachment_transport.py`, `meiva/sdk_surface/injection_check.py`, `meiva/sdk_surface/metering.py`) build facts from it and execute the answer, and every dependency of their implementations is a parameter or a frozen value.
+
 ### Files & Shell
 - [[files.meiva.okf.md]] — File read/write: read / write / edit / delete / glob / append
 - [[shell.meiva.okf.md]] — Shell commands: run() / run_background() (auto-report on completion) + sessions (new / send / capture / kill)
@@ -61,7 +63,7 @@ jitter revalidates its lease before using the agent ID.
 Execution bootstrap binds request identity, machine, clients and the
 configuration owner's clock before loading plugin surfaces. External attachment
 bootstrap supplies its own or borrowed machine, while the installation's
-fallback event producer owns separate cold clients until process exit; detaching
+fallback event clients are separate cold clients that live until process exit; detaching
 closes only the attachment's clients. Surface loading and runtime faces upgrade
 each happen once. Agent-launched bare scripts complete context and plugin
 composition before the first parent import returns, so core and plugin
@@ -76,7 +78,7 @@ validation, and hosts keep explicit caller contexts.
 - [[meiva_builtins/plugins/meiva_memory/docs/memory-api.meiva.okf.md]] — Long-term memory pool: semantic search
 - [[meiva/skills/docs/skills.meiva.okf.md]] — Skill registry: meiva.help(meiva.skills.<name>)
 
-Installation lifetime — the retained clock factory, event producer and the
+Installation lifetime — the retained clock, event clients and the
 atexit owner that `uninstall()` removes — is in [[install-lifetime.meiva.okf.md]].
 
 The Fleet launched-boot probe uses a fresh interpreter with environment and

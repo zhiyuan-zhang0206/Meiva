@@ -84,8 +84,6 @@ def completion_during_stall(schedule_id: int) -> None:
     from functools import partial
 
     from base.agents.context.clients import ClientSet
-    from base.clock import SYSTEM_TIMERS, Clock
-    from base.clock.configuration import clock_config_from_boot
     from base.cluster.machine.boot import machine_from_boot
     from base.config import ConfigBoot
     from base.daemon.schedules.inputs import ScheduleInputs
@@ -106,15 +104,10 @@ def completion_during_stall(schedule_id: int) -> None:
         ),
     )
 
-    def clock_factory() -> Clock:
-        return Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
-
     root = engine.RunnerRoot(
         database=database,
         inputs=ScheduleInputs(lambda: database, clients.event_pipeline, image, machine=machine),
-        plugins=engine.PluginInputs(
-            config=config, clock_factory=clock_factory, producer=clients.event_pipeline
-        ),
+        plugins=engine.PluginInputs(config=config, machine=machine, clients=clients),
         policy=StallPolicy(timeout_s=_BUDGET_S, record_deadline_s=_RECORD_DEADLINE_S),
         home=meiva_home(),
     )

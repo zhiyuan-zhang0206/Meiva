@@ -9,7 +9,6 @@ from psycopg_pool import AsyncConnectionPool
 from agent.impersonation import settle_checkpoint
 from agent.impersonation_handoff import deliver_handoff, flush_checkpoint
 from agent.tests.impersonation.handoff_inputs import (
-    RunnerExecProcess,
     assert_end_note_and_handoff_document,
     assert_handoff_precedes_queued_input,
     assert_resumed_transcript,
@@ -17,9 +16,10 @@ from agent.tests.impersonation.handoff_inputs import (
     deliver_peers_and_ack_first,
     end_external_session,
     executor_acks_says_and_releases,
-    failing_flush,
     handoff_notes,
+    local_exec_process,
     prepare_graph,
+    runner_exec_process,
     takeover_host,
 )
 from agent.tests.impersonation.handoff_inputs import handoff_clients as handoff_clients
@@ -60,7 +60,7 @@ async def test_takeover_inbox_release_and_resume(
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
         aops_pool,
-        exec_process=RunnerExecProcess(runner_db_url),
+        exec_process=runner_exec_process(runner_db_url),
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
@@ -186,6 +186,7 @@ async def test_a_lost_database_receipt_does_not_apply_the_plugin_delta_twice(
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
         aops_pool,
+        exec_process=local_exec_process(),
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
@@ -269,6 +270,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
         aops_pool,
+        exec_process=local_exec_process(),
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
@@ -376,6 +378,7 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
     graph, saver, ctx, config, _reset, owner, requested, calls = await prepare_graph(
         db_conn,
         aops_pool,
+        exec_process=local_exec_process(),
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
@@ -436,6 +439,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
     graph, saver, ctx, config, reset, owner, requested, calls = await prepare_graph(
         db_conn,
         aops_pool,
+        exec_process=local_exec_process(),
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,
@@ -469,7 +473,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
     lease = history.resolve(database, owner.agent_id, 0, local_machine=machine_identity.name())
     workspace = host.workspace(owner.agent_id)
     with (
-        failing_flush(saver, OSError("checkpoint temporarily unavailable")),
+        saver.failing_writes(OSError("checkpoint temporarily unavailable")),
         pytest.raises(OSError, match="checkpoint temporarily"),
     ):
         await deliver_handoff(
@@ -525,6 +529,7 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
     graph, saver, ctx, config, reset, owner, requested, _calls = await prepare_graph(
         db_conn,
         aops_pool,
+        exec_process=local_exec_process(),
         config_authority=config_authority,
         clients=handoff_clients,
         database_gate=database_gate,

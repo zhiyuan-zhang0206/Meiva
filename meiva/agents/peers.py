@@ -8,14 +8,13 @@ it wants instead of replacing the gateway client or the injection scan.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 
 from base.agents.messages.kwargs import NoteTag
 from base.api_contracts.idempotency import validate_idempotency_key
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 
-__all__ = ["SystemNote", "scanned_last_message", "validate_system_note"]
+__all__ = ["MessageScan", "SystemNote", "last_message_scan", "validate_system_note"]
 
 
 @dataclass(frozen=True)
@@ -69,14 +68,19 @@ def validate_system_note(
     )
 
 
-def scanned_last_message(
-    message: str | None, agent_id: int, *, scan: Callable[..., object]
-) -> str | None:
-    """Pass a peer's latest turn text through the injection scan, content unchanged.
+# meiva:note
+# What to hand the injection scan for a peer's latest turn text.
+@dataclass(frozen=True)
+class MessageScan:
+    text: str
+    source: str
 
-    `scan` is `meiva.security.scan_content`; it records a finding for suspicious text and returns
-    nothing the caller needs. A missing message is not scanned.
-    """
-    if message is not None:
-        scan(message, source=f"peer.last_message:{agent_id}")
-    return message
+
+# meiva:note
+# The scan a peer's latest turn text is owed, or None when there is no text. The facade runs it
+# through `meiva.security.scan_content`, which records a finding for suspicious text and leaves the
+# content unchanged. A missing message is not scanned.
+def last_message_scan(message: str | None, agent_id: int) -> MessageScan | None:
+    if message is None:
+        return None
+    return MessageScan(text=message, source=f"peer.last_message:{agent_id}")

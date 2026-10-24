@@ -15,10 +15,9 @@ from base.packages.extensions import install_registry
 from base.packages.skills.tree import identifier, target
 from base.paths import meiva_home, skills_dir
 from meiva.sdk_surface import skill_sources
-from meiva.skills.skill_proxies import Namespace, SkillProxy
+from meiva.skills.skill_proxies import Namespace, SkillProxy, consumed_text
 from meiva.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
-from meiva.tests.skills._skills_helpers import overlay_all_enabled as overlay_all_enabled
-from meiva.tests.skills._skills_helpers import write_skill
+from meiva.tests.skills._skills_helpers import track, track_present, write_skill
 
 # Every test runs in a per-test unit home whose `skills/` does not exist by
 # default, so the real ~/.agents/skills/ never leaks into a scan; the
@@ -113,6 +112,7 @@ def test_names_skips_broken_skill(fake_skills_dir: Path) -> None:
     bad.mkdir()
     (bad / "SKILL.md").write_text("no frontmatter here", encoding="utf-8")
     write_skill(fake_skills_dir, "good", "name: good\ndescription: g")
+    track_present()
     out = skills_mod.names()
     assert [s["name"] for s in out] == ["good"]
 
@@ -126,6 +126,7 @@ def test_names_skips_skill_with_unquoted_colon(fake_skills_dir: Path) -> None:
         "---\nname: fleet\ndescription: Mechanisms only: spawn/fork\n---\n", encoding="utf-8"
     )
     write_skill(fake_skills_dir, "good", "name: good\ndescription: g")
+    track_present()
     out = skills_mod.names()
     assert [s["name"] for s in out] == ["good"]
 
@@ -264,45 +265,34 @@ def test_standard_layout_dirs_are_not_subskills(fake_skills_dir: Path) -> None:
 # ─── install-registry gating of the ~/.agents/skills/ load dir ────────────────
 
 
-def test_untracked_skill_not_surfaced(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_untracked_skill_not_surfaced(fake_skills_dir: Path) -> None:
     """A skill dir in the load dir that the registry doesn't track is skipped."""
-    write_skill(fake_skills_dir, "ext", "name: ext\ndescription: external")
-    monkeypatch.setattr(install_registry, "loadable_skill_names", set)
+    write_skill(fake_skills_dir, "ext", "name: ext\ndescription: external", tracked=False)
     assert skills_mod.names() == []
 
 
-def test_disabled_skill_not_surfaced(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_disabled_skill_not_surfaced(fake_skills_dir: Path) -> None:
     """A tracked-but-disabled skill (not in the enabled set) is skipped."""
-    write_skill(fake_skills_dir, "ext", "name: ext\ndescription: external")
-    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"other"})
+    write_skill(fake_skills_dir, "ext", "name: ext\ndescription: external", tracked=False)
+    track("ext", enabled=False)
     assert skills_mod.names() == []
 
 
-def test_tracked_enabled_skill_surfaced(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_tracked_enabled_skill_surfaced(fake_skills_dir: Path) -> None:
     """A tracked+enabled skill is surfaced."""
     write_skill(fake_skills_dir, "ext", "name: ext\ndescription: external")
-    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"ext"})
     assert [s["name"] for s in skills_mod.names()] == ["ext"]
 
 
-def test_gate_applies_to_namespace_top_level(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_gate_applies_to_namespace_top_level(fake_skills_dir: Path) -> None:
     """Nested skills gate on their top-level dir name (the registry entry for
     a converged plugin namespace), not per leaf."""
     (fake_skills_dir / "superpowers").mkdir()
     write_skill(
         fake_skills_dir / "superpowers", "brainstorming", "name: brainstorming\ndescription: bs"
     )
-    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"superpowers"})
     assert [s["name"] for s in skills_mod.names()] == ["brainstorming"]
-    monkeypatch.setattr(install_registry, "loadable_skill_names", set)
+    install_registry.deregister("superpowers")
     assert skills_mod.names() == []
 
 
@@ -468,6 +458,7 @@ def _root_skill_repo(root: Path) -> None:
     (root / "sources" / "bilibili" / "SKILL.md").write_text(
         "---\nname: bilibili\ndescription: bili\n---\n", encoding="utf-8"
     )
+    track_present()
 
 
 def test_root_skill_is_both_skill_and_namespace(db_url: str, fake_skills_dir: Path) -> None:
@@ -529,3 +520,13 @@ def test_namespace_without_index_synthesizes_contains(fake_skills_dir: Path) -> 
     write_skill(fake_skills_dir / "feeds", "rss", "name: rss\ndescription: r")
 
     assert skills_mod.feeds.__doc__ == "Contains: rss"
+
+
+def test_a_consumed_body_shortens_the_home_prefix_to_a_tilde() -> None:
+    assert consumed_text("/home/u/.meiva/skills/alpha", "/home/u", "# A\n") == (
+        "~/.meiva/skills/alpha\n\n# A\n"
+    )
+    assert consumed_text("/opt/skills/alpha", "/home/u", "# A\n") == "/opt/skills/alpha\n\n# A\n"
+    assert consumed_text("/home/user2/skills/alpha", "/home/u", "# A\n") == (
+        "/home/user2/skills/alpha\n\n# A\n"
+    )

@@ -15,7 +15,7 @@
 #
 # `meiva.sdk_surface.install` applies it through `apply_wrap(target, wrapper, plugin, layers)`, which
 # installs `wrapper` around the callable at the dotted `meiva` path `target` (`"files.read"`,
-# `"shell.run"`, `"agents.spawn"`, `"understand"`) and returns the undo. `layers` is the
+# `"shell.run"`, `"agents.spawn"`, `"understand"`) and returns the `WrapAdded` record. `layers` is the
 # install's build ledger (`{target: [WrapLayer, ...]}`, registration order); it is frozen
 # into the `Installation` at the end of the build, and `stack` / `wrappers` read it back. The curated
 # `meiva.extend` surface keeps the introspection (`stack`, `wrappers`). The wrapper's first parameter receives the current callable
@@ -31,7 +31,7 @@
 # wrapper" assert on every target. The layer table here makes the wrap stack
 # enumerable (`meiva.extend.stack(target)` / `meiva.extend.wrappers()`), deterministic
 # (declaration order = plugin load order, and plugins load in sorted name order),
-# and reversible (each `apply_wrap` returns its undo, run in reverse by
+# and reversible (each `apply_wrap` returns a `WrapAdded` record, reversed newest-first by
 # `meiva.sdk_surface.install.uninstall`), so the assert is gone and layering is allowed.
 #
 # **Lawfulness contract (enforced at review, not by types).** A wrapper is
@@ -63,13 +63,13 @@ from __future__ import annotations
 
 import functools
 import inspect
-import sys
 from collections.abc import Awaitable, Callable, Generator, Mapping
 from contextlib import contextmanager
+from types import ModuleType
 from typing import Any, cast
 
 from . import meiva_module
-from .installation import SLOT, Loading, WrapLayer, installed, slot
+from .installation import SLOT, Loading, WrapAdded, WrapLayer, installed, slot
 
 
 def load_attempted() -> bool:
@@ -118,20 +118,20 @@ def _record_activation(target: str, plugin: str, inner_calls: int) -> None:
     activation.record(plugin, "sdkWraps", target, detail=f"inner_calls={inner_calls}", model=model)
 
 
-def _locate(target: str) -> tuple[Any, str]:
-    """Resolve a dotted `meiva` path to `(parent_object, attr_name)`.
-
-    `"files.read"` -> `(meiva.files, "read")`; `"understand"` -> `(meiva, "understand")`.
-    Missing declared attributes are WrapTargetError. Errors raised by a real
-    attribute descriptor propagate unchanged.
-    """
+# meiva:note
+# Resolve a dotted path under `root` (the `meiva` module) to `(parent_object, attr_name)`.
+#
+# `"files.read"` -> `(meiva.files, "read")`; `"understand"` -> `(meiva, "understand")`. Missing
+# declared attributes are WrapTargetError. Errors raised by a real attribute descriptor
+# propagate unchanged.
+def _locate(target: str, root: ModuleType) -> tuple[Any, str]:
     segments = target.split(".")
     if not target or not all(s.isidentifier() and not s.startswith("_") for s in segments):
         raise WrapTargetError(
             f"wrap target {target!r} must be a dotted path of identifiers under `meiva` "
             f"(no leading underscore), e.g. 'files.read' or 'agents.spawn'."
         )
-    obj: Any = sys.modules["meiva"]
+    obj: Any = root
     for seg in segments[:-1]:
         obj = _target_member(obj, seg, target)
     return obj, segments[-1]
@@ -198,34 +198,33 @@ def _base_callable(current: Callable[..., Any]) -> Callable[..., Any]:
     return current
 
 
+# meiva:note
+# Install `wrapper` around the `meiva` callable at dotted `target`; returns the `WrapAdded`
+# record, which names the parent and attribute it replaced so `install` can put the original back.
+#
+# `layers` is the caller's ledger (`{target: [WrapLayer, ...]}`, registration order):
+# `meiva.sdk_surface.install` passes its build ledger, which the installation then carries.
+# `target` is a path under `meiva` ("files.read", "shell.run", "agents.spawn", "understand").
+# `wrapper(inner, *args, **kwargs)` is called in place of the target; `inner` is the current
+# callable (the original, or the previous layer when plugins stack) and the wrapper decides
+# whether / when / how often to call it. Layers compose in declaration order, with plugins
+# installed in sorted name order, so later plugins wrap outermost; the order is inspectable via
+# `stack` / `wrappers`.
+#
+# See the head of this module for the three-rule lawfulness contract (preserve the inner
+# signature, never swallow exceptions, document short-circuits / multi-calls).
+#
+# Raises WrapTargetError when `target` is not a dotted identifier path under `meiva` or does not
+# resolve to a callable.
 def apply_wrap(
     target: str,
     wrapper: Callable[..., object],
     plugin: str,
     layers: dict[str, list[WrapLayer]],
-) -> Callable[[], None]:
-    """Install `wrapper` around the `meiva` callable at dotted `target`; returns the undo.
-
-    `layers` is the caller's ledger (`{target: [WrapLayer, ...]}`, registration order):
-    `meiva.sdk_surface.install` passes its build ledger, which the installation then
-    carries; the undo removes the layer from the same ledger and restores the
-    callable. `target` is a path under `meiva` — `"files.read"`, `"shell.run"`,
-    `"agents.spawn"`, `"understand"`. `wrapper(inner, *args, **kwargs)` is called
-    in place of the target; `inner` is the current callable (the original, or the
-    previous layer when plugins stack) and the wrapper decides whether / when /
-    how often to call it. Layers compose in declaration order — with plugins
-    installed in sorted name order, later plugins wrap outermost — and the order is
-    inspectable via `stack` / `wrappers`.
-
-    See this module's docstring for the three-rule lawfulness contract (preserve
-    the inner signature, never swallow exceptions, document short-circuits /
-    multi-calls).
-
-    Raises:
-        WrapTargetError: `target` is not a dotted identifier path under `meiva` or
-            does not resolve to a callable.
-    """
-    parent, attr = _locate(target)
+    *,
+    root: ModuleType,
+) -> WrapAdded:
+    parent, attr = _locate(target, root)
     current = _target_member(parent, attr, target)
     if not callable(current):
         raise WrapTargetError(
@@ -263,24 +262,9 @@ def apply_wrap(
     _install_metadata(chained, wrapper, current)
     setattr(parent, attr, chained)
 
-    layer = WrapLayer(target=target, plugin=plugin, wrapper=wrapper, chained=chained)
-    target_layers = layers.setdefault(target, [])
-    target_layers.append(layer)
-
-    def undo() -> None:
-        target_layers.remove(layer)
-        if not target_layers:
-            del layers[target]
-        try:
-            parent_now, attr_now = _locate(target)
-        except AttributeError:
-            # The wrap's parent namespace is already gone — a plugin namespace undone earlier takes
-            # its wraps with it; nothing to restore.
-            return
-        if getattr(parent_now, attr_now, None) is chained:
-            setattr(parent_now, attr_now, current)
-
-    return undo
+    layer = WrapLayer(target=target, plugin=plugin, wrapper=wrapper)
+    layers.setdefault(target, []).append(layer)
+    return WrapAdded(layer=layer, parent=parent, attr=attr, chained=chained, original=current)
 
 
 def _installed_layers() -> Mapping[str, tuple[WrapLayer, ...]]:
