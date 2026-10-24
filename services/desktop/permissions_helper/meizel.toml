@@ -9,3 +9,6 @@ exports = ["launchd_job.py", "lifecycle.py", "onboarding.py", "signing_identity.
 [purity]
 "activation_plan.py" = "strict"
 "hardened_runtime.py" = "strict"
+
+[debt.ambient-read]
+"lifecycle.py#settings base.config.settings" = 1

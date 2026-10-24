@@ -7,3 +7,7 @@ exports = ["document.py", "models.py", "resources.py"]
 
 [purity]
 "models.py" = "strict"
+
+[debt.ambient-read]
+"document.py#settings base.config.settings" = 1
+"resources.py#settings base.config.settings" = 1

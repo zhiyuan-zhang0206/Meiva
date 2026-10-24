@@ -6,3 +6,9 @@ exports = ["daemon.py", "tests"]
 
 [purity]
 "__init__.py" = "strict"
+
+[roots]
+"daemon.py" = ["endpoints", "bus"]
+
+[debt.ambient-read]
+"daemon.py#settings base.config.ConfigBoot" = 1

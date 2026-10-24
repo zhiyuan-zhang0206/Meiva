@@ -301,7 +301,8 @@ postgres-dial-owners = [
 "cli/commands/data_plane/cluster_instance.py" = "proves the running postmaster demands a password by dialing a role that cannot exist, with no credential"
 
 # no-os-environ (meizel/state/no_os_environ): environment variables that tests may set live, and
-# the files that read the environment because they cannot go through Settings.
+# the test files that exercise the settings-free boundary. Production files that read the
+# environment are declared under [roots] in their directory's meizel.toml.
 [no-os-environ]
 test-only-dirs = [
     "meiva_builtins",
@@ -329,58 +330,7 @@ rule-inputs = [
 "MEIVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S" = "read live by base/telemetry/otlp/telemetry_otlp_defer.py"
 
 [no-os-environ.files]
-"agent/execution/child.py" = "the exec child reads its per-launch protocol env (MEIVA_EXEC_REQUEST_FILE / MEIVA_EXEC_RESULT_FILE, one-shot spawn handoff) and pops the re-emitted per-agent overlay maps before child spawn — the same child-env handoff class as agent/loop.py's pop"
-"agent/graph/exec/process.py" = "read_parent_facts copies the LIVE parent env, which plan_child_launch (in _child_boundary.py) layers the exec protocol vars on top of — a whole-environment child handoff (same class as base/sessions/env_forwarding.py / ops/agent_launch.py); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env"
-"agent/loop.py" = "run() pops the per-agent config-overlay / birth-config env vars ($MEIVA_AGENT_CONFIG_OVERLAY / $MEIVA_AGENT_BIRTH_CONFIG) before spawning children; argv is world-readable via ps (issue #974) and the payloads are per-agent launch secrets, not Settings fields"
-"agent/process_boot.py" = "boot sets os.environ[\"MEIVA_AGENT_ID\"] so child processes inherit the agent identity; the env forward must run before child spawn and cannot route through Settings (the same forward agent/loop.py previously owned)"
-"meiva/boot.py" = "launched_context() / has_launched_identity() read os.environ[\"MEIVA_AGENT_ID\"]; the env key is the only channel for child processes (shell sessions, watchers) to discover their parent agent"
-"meiva/self/harness/attachment.py" = "the bridge hands the one-shot harness handle (MEIVA_HARNESS_HANDLE) to the child it just started; a per-launch IPC handoff, not cluster configuration, and the child must read the live value the bridge wrote"
-"meiva/self/harness/__init__.py" = "the same one-shot MEIVA_HARNESS_HANDLE handoff read by the public entry, before any Settings exists: `meiva.attach()` is what a bare harness child calls first, and the handle is per-launch IPC, not cluster configuration"
-"meiva/watcher/launch_plan.py" = "build_boot() bootstrap code uses os.environ.get in a string literal for the child process bootstrap"
-"meiva_builtins/skills/integrations/telegram-send-file/scripts/send_file.py" = "the telegram config domain is EXCLUDED from the agent process profile (Task #856 consumption matrix), so Settings cannot construct it in the skill's runtime context — the env aliases (the same values Settings itself reads from) are the only access path; same class as the child-env handoff entries"
-"base/agents/impersonation/host_transport.py" = "CODEX_HOME is provider routing context, not cluster configuration; the shared transport preserves the CLI socket resolution contract"
-"base/agents/messages/external_caller.py" = "per-invocation external child profile, consumed by SDK identity bootstrap before Settings; caller provenance is not cluster config and must not enter its persisted Settings projection"
-"base/config/__init__.py" = "Settings aggregate; role-derives the gateway-config fetch before sub-models construct"
-"scripts/host_ops/onboarding/hostfs.py" = "carried to the target machine and executed there before any Meiva settings exist; it expands the path variables ($DSH_HOME) the way that machine's shell would, which the operator's Settings cannot know"
-"base/native_process/root_control/client.py" = "caller_identity() describes the process that is calling, not this cluster`s configuration: it must read the live environment of any caller (a CLI before Settings loads, an SDK exec child) and enumerate the credential-shaped names actually present, which Settings cannot — it models known keys only. A Settings snapshot would attribute the request to a stale projection instead of to the caller"
-"base/config/_full.py" = "the eager builder reads MEIVA_PROCESS_PROFILE at construction time, before the singleton exists — the same bootstrap-ordering class as base/config/domains/storage/data_plane.py"
-"base/config/_lite.py" = "the boot-lite resolution layer IS the Settings bootstrap: it reads raw env aliases and plants the placeholder data-plane URLs before any sub-model exists — the same \"cannot depend on Settings by construction\" class as base/config/__init__.py"
-"base/config/domains/storage/data_plane.py" = "self_machine_host reads MEIVA_MACHINE_HOST at sub-model construction time — the settings singleton does not exist yet, sibling sub-models are unreachable, and base.cluster.machine imports settings (circular)"
-"base/host/env/bootstrap.py" = "fetches config from the gateway and os.environ.update()s it BEFORE Settings is built; importing base.config here is the import cycle this module exists to break"
-"base/host/env/dotenv_boot.py" = "load_dotenv ~/.meiva/.env, must run before Settings import"
-"base/host/env/registry.py" = "child_env builds the parent->child forwarding dict from the LIVE env (the registry's allowlist keys + passthrough rows); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env, not its own snapshot — same child-env handoff as base.sessions.env_forwarding"
-"base/host/git/gitenv.py" = "git_env copies the live env for a git subprocess (which needs PATH/HOME/SSH_AUTH_SOCK) and layers GIT_TERMINAL_PROMPT/GIT_SSH_COMMAND on top; git plumbing + a whole-environment child handoff, not Meiva runtime config"
-"base/host/net/auth.py" = "delivered_token reads the per-launch MEIVA_API_TOKEN the root launcher (or the boot pass) sets for this process — a write generation's machine credential handoff, never persisted config; it is read during the Settings import (bootstrap fetch), same class as PAGE_SERVER_TOKEN"
-"base/host/system/probes.py" = "display_available reads DISPLAY/WAYLAND_DISPLAY to detect X11/Wayland; these are OS display-server vars, not meiva runtime config; no Settings field models them. Single source of truth shared by the browser daemon / MCP loader / host-config validators"
-"base/lm/provider_api.py" = "plugin keys are not Settings fields; require_key reads the live process env for the bootstrap plugin-secrets channel on split runners, the same class as child-env handoff entries"
-"base/native_process/child_env.py" = "centralized process-protocol seam: copies the complete live env, consumes one-shot markers, and adopts a child's committed handoff; Settings cannot model dynamic per-process state"
-"base/native_process/os_platform.py" = "launchd_job_label reads the per-process XPC_SERVICE_NAME scheduler identity"
-"base/native_process/ownership.py" = "process_metadata records CODEX_HOME, the provider routing context the impersonation relay spec needs — a child-env handoff read, not persisted cluster config"
-"base/paths/home.py" = "resolve_meiva_home reads MEIVA_HOME: the home is the input that locates the .env Settings is built from, so it is read before (and below) Settings; moved here from dotenv_boot unchanged"
-"base/sessions/env_forwarding.py" = "forward_env_dict builds the child env from the LIVE env (incl. MEIVA_* vars Settings does not model); that is exactly what must be forwarded"
-"base/telemetry/observability.py" = "endpoint_override_is_explicit must distinguish operator-set observability URLs from Settings' identical loopback defaults; Settings preserves the value but not whether it was explicit"
-"base/telemetry/otlp/telemetry_otlp_defer.py" = "the exec-child OTLP deferral knobs (MEIVA_TELEMETRY_OTLP_CHILD_DEFER[_MAX_AGE_S]) are read from the raw env on the child arm path — reading them through Settings would import the settings singleton + full config chain the deferral exists to keep out of the child's life (task #3816 M4b); same presence-style class as base/telemetry/observability.py"
-"base/telemetry/tracing.py" = "sets TRACELOOP_TRACE_CONTENT=false for the traceloop-sdk instrumentors — the SDK's ONLY content-tracing switch (no Python API equivalent); Meiva's own config surface is the MEIVA_TRACE_STRIP_CONTENT settings field, which drives this env translation"
-"cli/commands/agents/impersonation.py" = "MEIVA_IMPERSONATION_RELAY_TOKEN is the relay's scoped credential handoff (stdin for codex, env for claude); it is neither persisted cluster config nor inherited native agent identity"
-"cli/commands/cluster/home.py" = "Cross-home child environment projection removes caller credentials before the target's Settings loads."
-"cli/commands/management/config.py" = "the settings-free repair path (meiva config --local) reads MEIVA_GATEWAY_URL / MEIVA_CLUSTER_SECRET from the raw env/.env WITHOUT constructing Settings — a broken .env is exactly the scenario it repairs, and constructing Settings would fail first"
-"cli/main.py" = "CLI bootstrap sets config/profile/log routing before importing Settings or command modules."
-"cli/start_intent.py" = "Identity bootstrap precedes Settings: read the birth inputs and pin the resolved home before config imports."
 "cli/tests/bootstrap/test_start_identity.py" = "Exercises the settings-free birth boundary; environment is the actual input before Settings exists."
-"meizel/state/ambient_state/scan.py" = "same reason: it MATCHES the strings \"os.environ\" / \"os.getenv\" against a module's AST to find an import-time read; it never reads the environment"
-"meizel/state/no_os_environ.py" = "this script itself has \"os.environ\" in strings"
-"scripts/ci/coverage_gates.py" = "BACKEND_COVERAGE_THRESHOLD is a ci.yml workflow knob for the pre-merge gate, not runtime config — Settings models the deployed runtime, and importing base.config would drag the settings singleton into a pure CI report parser"
-"scripts/ci/migration_smoke.py" = "builds a psql subprocess env (PGHOST/PGPORT/... from a throwaway native Postgres); PG* are libpq plumbing, not Meiva runtime config"
-"scripts/ci/pull_requests/commands.py" = "TRUNK_API_TOKEN optionally adds read-only queue evidence to diagnosis; it is not deployment configuration"
-"scripts/ci/pull_requests/owner_operations.py" = "TRUNK_API_TOKEN and CI_QUEUE are explicit owner-operation inputs, separate from deployment Settings"
-"scripts/codegen/gen_config_lite_table.py" = "regeneration must run in exactly the states that need it (broken .env, unreachable gateway): it forces MEIVA_CONFIG_FETCH=skip in the process env BEFORE importing the registry, which Settings cannot mediate by construction"
-"scripts/host_ops/guard_editable_venv.py" = "dependency-free pre-uv preflight must inspect inherited VIRTUAL_ENV before a project environment can be trusted or Settings can import"
-"scripts/lint/code_structure.py" = "LINT_STRUCTURE_BASELINE_BASE is a live per-invocation CI input; standalone lint must not load deployed Settings."
-"scripts/lint/fixture_scope.py" = "same reason: it MATCHES the string \"os.environ\" against a test module's AST to find env mutation in a fixture body"
-"scripts/model_registry/check_model_updates.py" = "tracker selects provider API-key aliases dynamically and must prefer the live process env before its `.env` fallback"
-"services/agent_runner/page_server/daemon.py" = "spawns the page-server child with a per-launch PAGE_SERVER_TOKEN overlaid on the inherited env — the token is a fresh secrets.token_hex(16) per spawn, a dynamic child-env handoff Settings (boot-time static) cannot model, same class as base/sessions/env_forwarding"
-"services/agent_runner/page_server/server.py" = "reads the per-launch PAGE_SERVER_TOKEN its daemon parent set in the child env — the token is minted per spawn by the daemon, Settings (boot-time static) cannot model it"
-"services/desktop/computer/mcp_wrapper.py" = "_agent_id() reads the ambient MEIVA_AGENT_ID to stamp computer-mcp requests; same identity channel, not Settings-managed"
 "tests/components/cli/test_start_repo_guard.py" = "Verifies checkout/home routing before Settings can be constructed."
 
 # turn-scoped-config (meizel/state/turn_scoped_config): files that read per-agent fields off the

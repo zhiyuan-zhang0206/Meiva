@@ -10,3 +10,9 @@ exports = ["telemetry_otlp.py", "telemetry_otlp_defer.py", "telemetry_otlp_expor
 "__init__.py" = "strict"
 "telemetry_otlp_barrier.py" = "strict"
 "trace_config.py" = "strict"
+
+[roots]
+"telemetry_otlp_defer.py" = { kinds = ["environ"], why = "the exec-child OTLP deferral knobs (MEIVA_TELEMETRY_OTLP_CHILD_DEFER[_MAX_AGE_S]) are read from the raw env on the child arm path — reading them through Settings would import the settings singleton + full config chain the deferral exists to keep out of the child's life (task #3816 M4b); same presence-style class as base/telemetry/observability.py" }
+
+[debt.ambient-read]
+"telemetry_otlp.py#settings base.config.settings" = 2

@@ -24,6 +24,9 @@ exports = ["activation.py", "config_face.py", "config_registration.py", "config_
 "contributions.py" = "strict"
 "plugin_errors.py" = "strict"
 
+[debt.ambient-read]
+"flags.py#settings base.config.settings" = 1
+
 [debt.impure-edge]
 "config_registration.py#base/config/__init__.py" = 2
 "config_registration.py#base/config/service_read.py" = 1

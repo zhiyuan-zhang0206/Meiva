@@ -13,3 +13,6 @@ exports = ["daemon.py", "shells.py"]
 "config.py" = "strict"
 "owner_text.py" = "strict"
 "shell_plan.py" = "strict"
+
+[debt.ambient-read]
+"daemon.py#settings base.config.ConfigBoot" = 1

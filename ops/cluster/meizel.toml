@@ -6,3 +6,6 @@ exports = ["operations.py", "rpc.py", "rpc_plans.py"]
 [purity]
 "__init__.py" = "strict"
 "rpc_plans.py" = "strict"
+
+[debt.ambient-read]
+"rpc.py#settings base.config.settings" = 1

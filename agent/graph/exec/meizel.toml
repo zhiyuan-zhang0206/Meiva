@@ -20,3 +20,6 @@ exports = ["node.py", "output.py", "process.py", "tests"]
 "_notes.py" = "strict"
 "_poll.py" = "strict"
 "_result.py" = "strict"
+
+[roots]
+"process.py" = { kinds = ["environ"], why = "read_parent_facts copies the LIVE parent env, which plan_child_launch (in _child_boundary.py) layers the exec protocol vars on top of — a whole-environment child handoff (same class as base/sessions/env_forwarding.py / ops/agent_launch.py); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env" }

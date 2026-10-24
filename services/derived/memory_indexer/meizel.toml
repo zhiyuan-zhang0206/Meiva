@@ -13,3 +13,8 @@ exports = ["backends", "chunking.py", "config.py", "daemon.py", "embeddings", "m
 "patrol_plan.py" = "strict"
 "reconcile_plan.py" = "strict"
 "rerank_plan.py" = "strict"
+
+[debt.ambient-read]
+"daemon.py#settings base.config.ConfigBoot" = 1
+"memory_search_reconcile.py#settings base.config.ConfigBoot" = 1
+"recall_regression.py#settings base.config.settings" = 1

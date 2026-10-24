@@ -13,3 +13,10 @@ exports = ["__main__.py", "healthz.py", "plugin_services.py", "service_spec.py",
 
 [purity]
 "gate_plan.py" = "strict"
+
+[roots]
+"healthz.py" = ["endpoints"]
+
+[debt.ambient-read]
+"__init__.py#settings base.config.settings" = 1
+"spec.py#settings base.config.settings" = 1

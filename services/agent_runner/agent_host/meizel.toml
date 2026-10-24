@@ -15,3 +15,9 @@ exports = ["daemon.py", "host.py", "invocation", "lifecycle", "runtime.py", "set
 
 [purity]
 "__init__.py" = "strict"
+
+[roots]
+"daemon.py" = ["endpoints"]
+
+[debt.ambient-read]
+"dispatcher.py#settings base.config.settings" = 1

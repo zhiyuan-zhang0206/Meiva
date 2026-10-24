@@ -18,3 +18,6 @@ exports = ["delivery", "envelope.py", "external_caller.py", "guard.py", "identit
 "lifecycle_text.py" = "strict"
 "security_finding.py" = "strict"
 "timestamp_policy.py" = "strict"
+
+[roots]
+"external_caller.py" = { kinds = ["environ"], why = "per-invocation external child profile, consumed by SDK identity bootstrap before Settings; caller provenance is not cluster config and must not enter its persisted Settings projection" }

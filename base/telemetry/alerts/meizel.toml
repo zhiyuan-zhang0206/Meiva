@@ -7,3 +7,7 @@ exports = ["copy.py", "native.py", "shadow.py"]
 
 [purity]
 "copy.py" = "strict"
+
+[debt.ambient-read]
+"__init__.py#settings base.config.settings" = 1
+"native.py#settings base.config.settings" = 1

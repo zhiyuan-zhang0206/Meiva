@@ -7,3 +7,6 @@ exports = ["check_git_hooks.py", "cluster_drift.py", "github_pr.py", "memory_rep
 [purity]
 "__init__.py" = "strict"
 "repo_change.py" = "strict"
+
+[debt.ambient-read]
+"memory_repo.py#settings base.config.settings" = 2

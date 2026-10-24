@@ -1,2 +1,5 @@
 [purity]
 "plugin.py" = "strict"
+
+[debt.ambient-read]
+"provider.py#settings base.config.settings" = 1

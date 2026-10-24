@@ -7,3 +7,6 @@ exports = ["cleanup_failures.py", "configuration.py", "graceful_exit.py", "insta
 "__init__.py" = "strict"
 "cleanup_failures.py" = "strict"
 "lease_controls.py" = "strict"
+
+[debt.ambient-read]
+"configuration.py#settings base.config.ConfigBoot" = 1

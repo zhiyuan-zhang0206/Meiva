@@ -3,3 +3,6 @@ exports = ["cluster.py", "harness.py", "host.py", "logs.py", "permissions.py", "
 [uses]
 "__init__.py" = ["backup.py", "cluster.py", "computer.py", "harness.py", "host.py", "logs.py", "management.py", "permissions.py", "pty.py"]
 "tests" = ["__init__.py", "logs.py"]
+
+[debt.ambient-read]
+"cluster.py#environ os.environ" = 1

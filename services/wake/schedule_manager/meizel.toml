@@ -23,6 +23,10 @@ exports = ["blocked_streak.py", "daemon.py", "engine.py", "host_restart.py", "la
 "script_outcome.py" = "strict"
 "stall_policy.py" = "strict"
 
+[debt.ambient-read]
+"daemon.py#settings base.config.ConfigBoot" = 1
+"runner.py#settings base.config.ConfigBoot" = 1
+
 [debt.stdlib-patch]
 "engine.py#assignment sys.argv" = 2
 "engine.py#assignment time.sleep" = 2

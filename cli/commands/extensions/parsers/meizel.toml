@@ -2,3 +2,7 @@ exports = ["mcp.py", "packages.py", "plugins.py"]
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.ambient-read]
+"packages.py#settings base.config.ConfigBoot" = 3
+"plugins.py#settings base.config.ConfigBoot" = 1

@@ -3,3 +3,6 @@ exports = ["catalog.py", "harness_onboarding.py", "hostfs.py", "transport.py"]
 [uses]
 "harness_onboarding.py" = ["catalog.py", "hostfs.py", "transport.py"]
 "tests" = ["catalog.py", "harness_onboarding.py", "transport.py"]
+
+[roots]
+"hostfs.py" = { kinds = ["environ"], why = "carried to the target machine and executed there before any Meiva settings exist; it expands the path variables ($DSH_HOME) the way that machine's shell would, which the operator's Settings cannot know" }

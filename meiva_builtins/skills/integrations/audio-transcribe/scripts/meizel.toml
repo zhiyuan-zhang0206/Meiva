@@ -2,3 +2,6 @@ exports = ["transcribe.py"]
 
 [purity]
 "transcribe_plan.py" = "strict"
+
+[debt.ambient-read]
+"transcribe.py#settings base.config.settings" = 1

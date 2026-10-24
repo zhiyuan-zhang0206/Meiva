@@ -14,6 +14,15 @@
 [purity]
 "agent_status_guard.py" = "strict"
 
+[debt.ambient-read]
+"catchup.py#environ os.environ" = 1
+"daily_host.py#environ os.environ" = 1
+"debt-sweep-daily-schedule.py#environ os.environ" = 2
+"entry.py#settings base.config.ConfigBoot" = 1
+"model-update-tracker-schedule.py#environ os.environ" = 2
+"self-evolution-daily-schedule.py#environ os.environ" = 2
+"self-evolution-weekly-schedule.py#environ os.environ" = 2
+
 [debt.restricted-python]
 "model-update-tracker-schedule.py#python subprocess that runs something other than a literal repository file" = 1
 "self-evolution-daily-schedule.py#python subprocess that runs something other than a literal repository file" = 1

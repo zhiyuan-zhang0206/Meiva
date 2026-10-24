@@ -10,3 +10,10 @@ exports = ["code_version_gate.py", "config.py", "connections.py", "test_db_guard
 "__init__.py" = ["db"]
 "connections.py" = ["db"]
 "handle.py" = ["db"]
+
+[debt.ambient-read]
+"config.py#settings base.config.settings" = 1
+"connections.py#settings base.config.settings" = 2
+"handle.py#db base.db.connections.async_pool" = 1
+"handle.py#db base.db.connections.connect" = 1
+"handle.py#db base.db.connections.pool" = 1
