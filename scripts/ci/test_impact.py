@@ -114,7 +114,13 @@ def _fixture_edges(
         edges[test].update(module_files(test.removesuffix(".py").replace("/", "."), index))
         for parent in (Path(test).parent, *Path(test).parent.parents):
             rel = (parent / "conftest.py").as_posix()
-            if (root / rel).is_file():
+            # meiva:note
+            # The root conftest is not a per-test input. The selector already treats it, its
+            # `pytest_plugins` modules and tests/fixtures as global, so a change to them runs the
+            # full suite, and counting their production closure against every test as well
+            # charged each import twice and made 327 inputs reach all tests.
+            # meiva:link docs/conventions/engineering/test-selection.md
+            if parent != Path() and (root / rel).is_file():
                 edges[test].add(rel)
     for declaration in declarations(root):
         files = module_files(declaration.module, index) | {declaration.source}
