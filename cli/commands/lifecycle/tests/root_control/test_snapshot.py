@@ -25,7 +25,17 @@ def reply(**overrides: Any) -> dict[str, Any]:
             },
             {"id": "frontend", "state": "stopped"},
         ],
-        "health": {"gateway": {"restart_limit_reached": True, "breaker_open": True}},
+        "health": {
+            "gateway": {"restart_limit_reached": True, "breaker_open": True},
+            "diagnostic:venv": {
+                "expected": True,
+                "sampled_at": 100.0,
+                "last_verdict": "alive",
+                "last_detail": "ok",
+                "consecutive_failures": 0,
+            },
+            "observer:root-health": {"expected_since": 90.0, "last_completed_at": 100.0},
+        },
     }
     body.update(overrides)
     return body
