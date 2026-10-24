@@ -13,6 +13,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
+from pydantic import SecretStr
 
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.api_contracts.agent_contract import AgentStatus
@@ -44,7 +45,7 @@ def with_provider_wire(catalog: ModelCatalog, wire: ProviderWire) -> ModelCatalo
     def build(context: BuildContext) -> BaseChatModel:
         return ChatOpenAI(
             model=context.model,
-            api_key=context.keys.require(binding.key_env),
+            api_key=SecretStr(context.keys.require(binding.key_env)),
             base_url=wire.url,
             use_responses_api=True,
             reasoning_effort="none",

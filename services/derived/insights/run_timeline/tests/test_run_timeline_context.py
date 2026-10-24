@@ -288,7 +288,6 @@ def call(
         insights_config=InsightsConfig(
             run_timeline_message_text_max=20,
             default_model=default_model,
-            timeline_inputs=_TIMELINE_INPUTS,
         ),
     )
     request = cast(Request, SimpleNamespace(app=SimpleNamespace(state=app_state)))
