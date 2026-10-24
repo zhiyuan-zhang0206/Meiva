@@ -98,7 +98,7 @@ def plan_cron(
     name = coerce_str(name, "name")
     policy = notify_policy(coerce_str(notify, "notify", allow_none=True))
     validate_message(message)
-    validate_cron(expr)
+    validate_cron(expr, now=now)
     tz = timezone if timezone is not None else default_timezone
     validate_timezone(tz)
     if end_time is None:
@@ -111,7 +111,7 @@ def plan_cron(
     else:
         # normalize_when (not normalize_end_time): this branch excludes None,
         # so the result is a non-optional datetime for the type checker.
-        et = normalize_when(end_time)
+        et = normalize_when(end_time, now=now)
         # Align with at(): a past end must not register.
         if et < now:
             raise ValueError(
@@ -159,7 +159,7 @@ def plan_at(
     name = coerce_str(name, "name")
     policy = notify_policy(coerce_str(notify, "notify", allow_none=True))
     validate_message(message)
-    due_at = normalize_when(when)
+    due_at = normalize_when(when, now=now)
     if due_at < now:
         raise ValueError(
             f"when is in the past: {due_at.isoformat()}. "

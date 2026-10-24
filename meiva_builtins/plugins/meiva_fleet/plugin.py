@@ -188,8 +188,9 @@ def notify(
     if expire_at is not None:
         from base.daemon.schedules.watcher import normalize_when
 
-        due_at = normalize_when(expire_at)
-        if due_at < datetime.now(UTC):
+        now = datetime.now(UTC)
+        due_at = normalize_when(expire_at, now=now)
+        if due_at < now:
             raise ValueError(
                 f"expire_at is in the past: {due_at.isoformat()}. "
                 "Provide a future time, or use a positive timedelta."
