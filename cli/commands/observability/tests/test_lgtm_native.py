@@ -26,6 +26,7 @@ from base.telemetry.lgtm_local import BACKENDS, backend_urls, service_argv
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
+from cli.commands.converge.spec import UserSession
 from cli.commands.observability import lgtm_native
 from cli.commands.observability.tests.lgtm_inputs import darwin_host as darwin_host
 from cli.commands.observability.tests.lgtm_inputs import verifying_host
@@ -439,6 +440,7 @@ def test_native_step_does_not_touch_an_unmarked_home(
         machine=machine_from_boot(machine_config_484),
         helper=refuse_helper,
         host=fake_host(),
+        session=UserSession(user_home=tmp_path / "home", login_shell="/bin/zsh", interactive=False),
         timers=ManualTimers(),
     )
 

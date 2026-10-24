@@ -1,0 +1,227 @@
+# meiva:note
+# The audit rows of an operator lifecycle command, written to the real database.
+
+from __future__ import annotations
+
+import os
+import uuid
+from collections.abc import Callable, Sequence
+from typing import Any
+
+import psycopg
+import pytest
+
+from base.agents.context.clients import DatabaseFactory
+from base.events.contract import EVENTS
+from base.native_process.root_control.ipc import CallerPayload
+from cli.database import OperatorDatabaseFactory
+from cli.database.lifecycle_audit import (
+    lifecycle_audit,
+    operator_lifecycle_audit,
+    operator_request_recorder,
+    operator_result_recorder,
+    record_lifecycle_request,
+)
+from cli.database.tests.cli_tests import operator_database as operator_database
+from cli.database.tests.command_inputs import command_runtime as command_runtime
+
+
+def caller(operation: str, *, agent_id: str | None = "1818") -> CallerPayload:
+    return {
+        "pid": 4821,
+        "ppid": 4800,
+        "uid": 501,
+        "cwd": "/src",
+        "argv": ["meiva", "stop", "-y", "--token", "<redacted>"],
+        "agent_id": agent_id,
+        "machine": "macmini",
+        "operation_id": operation,
+        "env_keys": ["MEIVA_API_TOKEN"],
+    }
+
+
+# meiva:note
+# The lifecycle rows one operation wrote, by event name.
+def audit_rows(db_conn: psycopg.Connection, operation: str) -> dict[str, dict[str, Any]]:
+    rows = db_conn.execute(
+        "SELECT event_name, agent_id, source, attributes FROM audit_events "
+        "WHERE attributes->>'operation_id' = %s",
+        (operation,),
+    ).fetchall()
+    return {
+        name: {"agent_id": agent_id, "source": source, "attributes": attributes}
+        for name, agent_id, source, attributes in rows
+    }
+
+
+def refuse_database() -> Any:
+    raise AssertionError("this command must not reach the database")
+
+
+def recorders(
+    database: DatabaseFactory, caller_block: CallerPayload, head_sha: str | None
+) -> tuple[Callable[[str, Sequence[str]], None], Any]:
+    return (
+        operator_request_recorder(
+            database_factory=database, caller=caller_block, head_sha=head_sha
+        ),
+        operator_result_recorder(database_factory=database, caller=caller_block, head_sha=head_sha),
+    )
+
+
+def test_the_events_are_registered_as_audit() -> None:
+    assert EVENTS["lifecycle_request"].category == "audit"
+    assert EVENTS["lifecycle_result"].category == "audit"
+
+
+def test_the_request_and_the_result_name_the_same_version(
+    operator_database: OperatorDatabaseFactory, db_conn: psycopg.Connection
+) -> None:
+    operation = f"stop@{uuid.uuid4().hex}"
+    request, result = recorders(operator_database, caller(operation), "39d4614c1")
+
+    with lifecycle_audit(request, result) as command:
+        record_lifecycle_request("down", ["gateway", "agent-host"])
+        command.exited(0)
+
+    rows = audit_rows(db_conn, operation)
+    assert rows["lifecycle_request"]["attributes"]["head_sha"] == "39d4614c1"
+    outcome = rows["lifecycle_result"]["attributes"]
+    assert outcome["verb"] == "down"
+    assert outcome["units"] == ["gateway", "agent-host"]
+    assert outcome["outcome"] == "ok"
+    assert outcome["head_sha"] == "39d4614c1"
+    assert outcome["seconds"] >= 0
+
+
+def test_the_record_carries_the_wire_caller_block(
+    operator_database: OperatorDatabaseFactory, db_conn: psycopg.Connection
+) -> None:
+    operation = f"stop@{uuid.uuid4().hex}"
+    request, _ = recorders(operator_database, caller(operation), None)
+
+    request("down", ["gateway", "frontend"])
+
+    row = audit_rows(db_conn, operation)["lifecycle_request"]
+    assert row["source"] == "agent:1818"
+    assert row["agent_id"] == 1818
+    attributes = row["attributes"]
+    assert attributes["verb"] == "down"
+    assert attributes["units"] == ["gateway", "frontend"]
+    assert attributes["operation_id"] == operation
+    assert attributes["head_sha"] is None
+    assert attributes["caller"]["machine"] == "macmini"
+    assert attributes["caller"]["argv"][-1] == "<redacted>"
+
+
+def test_a_human_operator_is_recorded_without_an_agent_id(
+    operator_database: OperatorDatabaseFactory, db_conn: psycopg.Connection
+) -> None:
+    operation = f"start@{uuid.uuid4().hex}"
+    request, _ = recorders(operator_database, caller(operation, agent_id=None), "sha")
+
+    request("up", ["gateway"])
+
+    row = audit_rows(db_conn, operation)["lifecycle_request"]
+    assert row["source"] == "user"
+    assert row["agent_id"] is None
+
+
+def test_a_failed_command_records_a_failed_outcome(
+    operator_database: OperatorDatabaseFactory, db_conn: psycopg.Connection
+) -> None:
+    operation = f"start@{uuid.uuid4().hex}"
+    request, result = recorders(operator_database, caller(operation), "sha")
+
+    with lifecycle_audit(request, result) as command:
+        record_lifecycle_request("up", ["gateway"])
+        command.exited(1)
+
+    assert audit_rows(db_conn, operation)["lifecycle_result"]["attributes"]["outcome"] == "failed"
+
+
+def test_a_command_without_a_request_records_no_result(
+    operator_database: OperatorDatabaseFactory, db_conn: psycopg.Connection
+) -> None:
+    operation = f"start@{uuid.uuid4().hex}"
+    _, result = recorders(operator_database, caller(operation), "sha")
+
+    with lifecycle_audit(None, result) as command:
+        command.exited(0)
+
+    assert audit_rows(db_conn, operation) == {}
+
+
+def test_an_unreachable_database_never_fails_the_command() -> None:
+    def refuse() -> Any:
+        raise RuntimeError("settings unavailable")
+
+    request, result = recorders(refuse, caller("stop@refused"), "sha")
+
+    with lifecycle_audit(request, result) as command:
+        record_lifecycle_request("down", ["gateway"])
+        command.exited(0)
+
+
+def test_a_boot_start_is_not_attributed_to_an_operator() -> None:
+    with operator_lifecycle_audit(database_factory=refuse_database, enabled=False) as command:
+        record_lifecycle_request("up", ["gateway"])
+        command.exited(0)
+
+
+def test_an_operator_command_audits_itself_as_the_process_that_runs_it(
+    operator_database: OperatorDatabaseFactory, db_conn: psycopg.Connection
+) -> None:
+    with operator_lifecycle_audit(database_factory=operator_database) as command:
+        record_lifecycle_request("down", ["gateway"])
+        command.exited(0)
+
+    rows = db_conn.execute(
+        "SELECT event_name, attributes->'caller'->>'pid', attributes->>'verb' FROM audit_events "
+        "WHERE event_name IN ('lifecycle_request', 'lifecycle_result') ORDER BY event_name"
+    ).fetchall()
+    assert [(name, verb) for name, _pid, verb in rows] == [
+        ("lifecycle_request", "down"),
+        ("lifecycle_result", "down"),
+    ]
+    assert rows[0][1] == str(os.getpid())
+
+
+def test_the_outcome_is_recorded_once() -> None:
+    with lifecycle_audit(None) as command:
+        command.exited(0)
+        with pytest.raises(RuntimeError, match="recorded twice"):
+            command.exited(0)
+
+
+# meiva:note
+# A command scope's recorder: the batches it was handed.
+class Requests:
+    def __init__(self) -> None:
+        self.batches: list[tuple[str, list[str]]] = []
+
+    def __call__(self, verb: str, units: Sequence[str]) -> None:
+        self.batches.append((verb, list(units)))
+
+
+def test_a_command_scope_records_and_restores_the_previous_recorder() -> None:
+    outer, inner = Requests(), Requests()
+
+    with lifecycle_audit(outer):
+        with lifecycle_audit(inner):
+            record_lifecycle_request("down", ["gateway"])
+        record_lifecycle_request("up", ["gateway"])
+    record_lifecycle_request("down", ["gateway"])
+
+    assert inner.batches == [("down", ["gateway"])]
+    assert outer.batches == [("up", ["gateway"])]
+
+
+def test_outside_a_command_no_request_is_recorded() -> None:
+    requests = Requests()
+
+    with lifecycle_audit(requests):
+        pass
+    record_lifecycle_request("down", ["gateway"])
+
+    assert requests.batches == []

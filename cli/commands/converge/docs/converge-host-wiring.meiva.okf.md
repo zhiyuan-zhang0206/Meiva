@@ -12,6 +12,17 @@ Cold start passes its admitted service roster into preparation before publishing
 the desired service file. Service-specific steps require a selected consumer;
 host wiring and private data-plane preparation remain shared dependencies.
 Standalone `meiva converge` takes the same explicit service selection as `meiva start` (`--all-services`, `--only-service` or `--disable-service`), applies the capability gates to it, and passes it to every step; the boot job registers exactly those services and an empty selection is refused.
+`converge_host` is the composition point of one operation: it builds the context the
+steps share from the invocation's `CommandRuntime` (its `home` is the home converged),
+reads the invoking user's session once into `ConvergeCtx.session` (`UserSession`: the user's
+home directory, the login shell, whether a person is at the terminal), decides whether the
+home is the host's prod install, and hands both to `run_converge`. Steps read the session and
+the host rather than `Path.home()`, `$SHELL`, `os.getuid()` or the TTY, so a test hands in the
+values it wants.
+`step_selection.py` (`strict`) holds the pure decision of which steps run and why each other
+step is skipped (consumer service not selected, host-global wiring off the prod install,
+capability roles, unit not configured yet); `run_converge` prints the decisions and runs the
+steps, records the first failure for the prod install and re-raises.
 Each converge operation creates one lazy `ConfigBoot` and passes it through the
 required `ConvergeCtx.config` field. Its required `producer` borrows the entry's
 same lazy event-pipeline owner; LGTM render failures use that writer without
@@ -56,10 +67,19 @@ Remote-managed data planes skip local server and extension preparation entirely.
   `sudo -n` and then an exact manual command without blocking `meiva start`.
   See
   [[base/docs/base.meiva.okf.md|Base Library]].
-- `_steps.ensure_local_git_hooks` warns when any conventional local
+- `steps.ensure_local_git_hooks` warns when any conventional local
   checkout's Git hook installation is missing or drifted (via
-  `provision/check_git_hooks.py --scan-machine`); warn-only, it never blocks a
-  start or update. See the runbook's Git hooks section.
+  `base/deploy/git/check_git_hooks.py --scan-machine`, run through `ctx.host` from
+  `ctx.repo`); warn-only, it never blocks a start or update. `checkout_warnings.py`
+  decides the argv and which output lines are warnings. See the runbook's Git hooks
+  section.
+- The rest of the decisions live in `strict` pure modules beside their steps and the shells
+  only execute them: `shell_rc.py` (the `~/.local/bin` PATH block of the user's rc file),
+  `browser_plan.py` and `helper_plan.py` (what the browser and permissions-helper steps do
+  for the host's incapability reason), `split_host_checks.py` (the transfer and GitHub PR
+  checks apply only to a runner split from its gateway), `walg_plan.py` (the WAL-G steps, in
+  order, or a refusal), `ownership_plan.py` and `firewall_report.py` (what the ownership
+  preflight and the firewall step and verbs tell the operator).
 - `redis_bridge.py` retires the standalone launchd job and installed relay copy an
   earlier layout left (the relay now runs as the root-supervised `redis-bridge` unit)
   and exposes the authenticated Redis PING used by `meiva status` and the alert-only

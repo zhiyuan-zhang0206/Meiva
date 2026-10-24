@@ -4,35 +4,21 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
 from unittest.mock import patch
 
 import pytest
 
-import cli.commands.lifecycle.start as lifecycle_start
-from base import cluster
-from base.host.permissions_helper.client import HelperFactory
-from base.host.system.hostport import Host
-from base.paths.home import resolve_meiva_home
-from cli import start_identity, start_intent, startup_support
-from cli.commands.cluster import unit_join
-from cli.commands.lifecycle import root_driver
+from cli import start_identity, start_intent
 from cli.database import OperatorDatabaseFactory, operator_event_pipeline
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
+from cli.start_runtime import HomeSite
 
 _GATEWAY = {"gateway", "agent-runner"}
-
-
-def _every_port_free(_port: int) -> bool:
-    return True
-
-
-def _no_logging(_argv: list[str], *, initialize: Callable[[str], None]) -> None:
-    return None
 
 
 @pytest.fixture(autouse=True)
@@ -47,62 +33,28 @@ def tools(tmp_path: Path) -> str:
     return str(tmp_path / "tools")
 
 
-@pytest.fixture
-def start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    """The runtime half of `meiva start` replaced by a recorder: the gate is under test."""
-    calls: list[dict[str, Any]] = []
-
-    def runtime(**kwargs: Any) -> int:
-        calls.append(kwargs)
-        return 0
-
-    checkout = tmp_path / "checkout"
-    checkout.mkdir()
-    monkeypatch.setattr(start_intent, "checkout", lambda: checkout)
-    monkeypatch.setattr(cluster, "port_free", _every_port_free)
-    monkeypatch.setattr(startup_support, "init_cli_logging", _no_logging)
-    monkeypatch.setattr(lifecycle_start, "cmd_start", runtime)
-
-    def boot_handoff(*, helper: HelperFactory, host: Host) -> None:
-        del helper
-
-    monkeypatch.setattr(root_driver, "complete_boot_start", boot_handoff)
-    return calls
-
-
-def _home(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    tools: str,
-    roles: set[str],
-    **extra: str,
-) -> Path:
+def _home(tmp_path: Path, tools: str, roles: set[str], **extra: str) -> Path:
     """A home `meiva init` would have left: intent and `.env` published."""
     home = tmp_path / "home"
+    checkout = tmp_path / "checkout"
+    checkout.mkdir(exist_ok=True)
     values = {"MEIVA_MACHINE_NAME": "gate", "MEIVA_SERVICE_PATH": tools, **extra}
     start_identity.prepare_identity(
-        start_identity.IdentityInput(home, tmp_path / "checkout", frozenset(roles), values)
+        start_identity.IdentityInput(home, checkout, frozenset(roles), values)
     )
-    monkeypatch.setenv("MEIVA_HOME", str(home))
     return home
 
 
-def _start(
-    *flags: str, operator_database: OperatorDatabaseFactory, command_runtime: CommandRuntime
-) -> int:
-    producer = operator_event_pipeline(
-        operator_database, machine=command_runtime.machine, home=resolve_meiva_home()
-    )
-    # meiva:note
-    # Every start names its selection; these gate tests are indifferent to which.
-    args = build_parser().parse_args(["start", *(flags or ("--all-services",))])
-    args.runtime = command_runtime
-    return start_intent.run_start(
-        args,
-        retained_children=[],
-        database_factory=operator_database,
-        producer=producer,
-    )
+def _site(home: Path, tmp_path: Path) -> HomeSite:
+    return HomeSite(home, tmp_path / "checkout")
+
+
+# meiva:note
+# Why `meiva start` refuses `home`: the admission is the gate every start passes first.
+def _refusal(home: Path) -> str:
+    with pytest.raises((RuntimeError, ValueError)) as refused:
+        start_identity.require_initialized(home)
+    return str(refused.value)
 
 
 def _bytes(home: Path) -> list[tuple[bytes, int]]:
@@ -112,132 +64,88 @@ def _bytes(home: Path) -> list[tuple[bytes, int]]:
     ]
 
 
-def test_a_missing_home_is_refused_and_nothing_is_made(
+def test_a_missing_home_is_refused_and_nothing_is_made(tmp_path: Path) -> None:
+    home = tmp_path / "never-initialized"
+
+    assert "not initialized: run `meiva init` first" in _refusal(home)
+    assert not home.exists()
+
+
+def test_start_reports_a_refusal_on_stderr_opens_no_sink_and_makes_nothing(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    start: list[dict[str, Any]],
     capsys: pytest.CaptureFixture[str],
+    cli_log_sinks: list[str],
     operator_database: OperatorDatabaseFactory,
     command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "never-initialized"
-    monkeypatch.setenv("MEIVA_HOME", str(home))
+    producer = operator_event_pipeline(
+        operator_database, machine=command_runtime.machine, home=home
+    )
+    args = build_parser().parse_args(["start", "--all-services"])
+    args.runtime = replace(command_runtime, home=home)
 
-    assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
+    rc = start_intent.run_start(
+        args,
+        _site(home, tmp_path),
+        retained_children=[],
+        database_factory=operator_database,
+        producer=producer,
+    )
 
-    assert "not initialized: run `meiva init` first" in capsys.readouterr().err
-    assert not home.exists() and start == []
+    assert rc == 1
+    assert "meiva start: " in capsys.readouterr().err
+    assert cli_log_sinks == [], "sinks build Settings: a refused home never gets them"
+    assert not home.exists()
 
 
-def test_resources_without_an_intent_are_refused(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    start: list[dict[str, Any]],
-    capsys: pytest.CaptureFixture[str],
-    operator_database: OperatorDatabaseFactory,
-    command_runtime: CommandRuntime,
-) -> None:
+def test_resources_without_an_intent_are_refused(tmp_path: Path) -> None:
     home = tmp_path / "home"
     (home / "pg").mkdir(parents=True)
-    monkeypatch.setenv("MEIVA_HOME", str(home))
 
-    assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
-
-    assert "no initialization authority" in capsys.readouterr().err
-    assert start == []
+    assert "no initialization authority" in _refusal(home)
 
 
-def test_a_claim_in_progress_sends_the_operator_back_to_init(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    tools: str,
-    start: list[dict[str, Any]],
-    capsys: pytest.CaptureFixture[str],
-    operator_database: OperatorDatabaseFactory,
-    command_runtime: CommandRuntime,
-) -> None:
-    home = _home(tmp_path, monkeypatch, tools, _GATEWAY)
+def test_a_claim_in_progress_sends_the_operator_back_to_init(tmp_path: Path, tools: str) -> None:
+    home = _home(tmp_path, tools, _GATEWAY)
     path = home / start_identity.INTENT_NAME
     path.write_text(path.read_text().replace('"phase": "configured"', '"phase": "claiming"'))
 
-    assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
+    refusal = _refusal(home)
 
-    err = capsys.readouterr().err
-    assert "partly initialized" in err and "Re-run `meiva init`" in err
-    assert start == []
+    assert "partly initialized" in refusal and "Re-run `meiva init`" in refusal
 
 
-def test_a_detached_home_is_refused(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    tools: str,
-    start: list[dict[str, Any]],
-    capsys: pytest.CaptureFixture[str],
-    operator_database: OperatorDatabaseFactory,
-    command_runtime: CommandRuntime,
-) -> None:
-    home = _home(tmp_path, monkeypatch, tools, _GATEWAY)
+def test_a_detached_home_is_refused(tmp_path: Path, tools: str) -> None:
+    home = _home(tmp_path, tools, _GATEWAY)
     (home / "destroy-intent.json").write_text('{"version":1,"state":"detached"}\n')
 
-    assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
-
-    assert "destroyed or detached" in capsys.readouterr().err
-    assert start == []
+    assert "destroyed or detached" in _refusal(home)
 
 
 @pytest.mark.parametrize("phase", ["configured", "provisioned", "ready"])
-def test_an_initialized_home_starts_with_its_service_selection_and_is_left_as_it_was(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    tools: str,
-    start: list[dict[str, Any]],
-    phase: str,
-    operator_database: OperatorDatabaseFactory,
-    command_runtime: CommandRuntime,
+def test_an_initialized_home_is_admitted_and_left_as_it_was(
+    tmp_path: Path, tools: str, phase: str
 ) -> None:
-    home = _home(tmp_path, monkeypatch, tools, _GATEWAY)
+    home = _home(tmp_path, tools, _GATEWAY)
     start_identity.mark_phase(home, phase)
     before = _bytes(home)
 
-    assert (
-        _start(
-            "--only-service",
-            "gateway",
-            operator_database=operator_database,
-            command_runtime=command_runtime,
-        )
-        == 0
-    )
+    with start_intent.admitted_start(_site(home, tmp_path)):
+        pass
 
-    assert [c["only_services"] for c in start] == [("gateway",)]
     assert _bytes(home) == before
 
 
-def test_start_never_joins_a_gateway(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    tools: str,
-    start: list[dict[str, Any]],
-    operator_database: OperatorDatabaseFactory,
-    command_runtime: CommandRuntime,
-) -> None:
-    """The join (bundle, bootstrap fetch) belongs to init and install-unit: a started
-    runner fetches its configuration through Settings and probes its gateway itself."""
+# meiva:note
+# The join (bundle, bootstrap fetch) belongs to init and install-unit: a started
+# runner fetches its configuration through Settings and probes its gateway itself.
+# Nothing listens at the gateway named here, so a start that dialed it would fail.
+def test_start_never_joins_a_gateway(tmp_path: Path, tools: str) -> None:
+    home = _home(tmp_path, tools, {"agent-runner"}, MEIVA_GATEWAY_URL="http://127.0.0.1:1")
 
-    def refused(*_a: object, **_k: object) -> None:
-        raise AssertionError("start must not join the gateway")
-
-    monkeypatch.setattr(unit_join, "join_gateway", refused)
-    _home(
-        tmp_path,
-        monkeypatch,
-        tools,
-        {"agent-runner"},
-        MEIVA_GATEWAY_URL="http://10.0.0.7:8000",
-    )
-
-    assert _start(operator_database=operator_database, command_runtime=command_runtime) == 0
-    assert len(start) == 1
+    with start_intent.admitted_start(_site(home, tmp_path)):
+        pass
 
 
 def _rewrite_env(home: Path, edit: Callable[[list[str]], list[str]]) -> None:
@@ -255,45 +163,20 @@ def _rewrite_env(home: Path, edit: Callable[[list[str]], list[str]]) -> None:
     ],
 )
 def test_an_incomplete_home_is_refused_before_any_effect(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    tools: str,
-    start: list[dict[str, Any]],
-    capsys: pytest.CaptureFixture[str],
-    roles: set[str],
-    drop: str,
-    message: str,
-    operator_database: OperatorDatabaseFactory,
-    command_runtime: CommandRuntime,
+    tmp_path: Path, tools: str, roles: set[str], drop: str, message: str
 ) -> None:
     extra = {} if "gateway" in roles else {"MEIVA_GATEWAY_URL": "http://10.0.0.7:8000"}
-    home = _home(tmp_path, monkeypatch, tools, roles, **extra)
+    home = _home(tmp_path, tools, roles, **extra)
     _rewrite_env(home, lambda lines: [ln for ln in lines if not ln.startswith(drop)])
 
-    assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
-
-    assert message in capsys.readouterr().err
-    assert start == []
+    assert message in _refusal(home)
 
 
-def test_a_remote_unit_that_records_the_human_secret_is_refused(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    tools: str,
-    start: list[dict[str, Any]],
-    capsys: pytest.CaptureFixture[str],
-    operator_database: OperatorDatabaseFactory,
-    command_runtime: CommandRuntime,
-) -> None:
-    home = _home(
-        tmp_path, monkeypatch, tools, {"agent-runner"}, MEIVA_GATEWAY_URL="http://10.0.0.7:8000"
-    )
+def test_a_remote_unit_that_records_the_human_secret_is_refused(tmp_path: Path, tools: str) -> None:
+    home = _home(tmp_path, tools, {"agent-runner"}, MEIVA_GATEWAY_URL="http://10.0.0.7:8000")
     _rewrite_env(home, lambda lines: [*lines, "MEIVA_CLUSTER_SECRET=leaked"])
 
-    assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
-
-    assert "records the human cluster secret" in capsys.readouterr().err
-    assert start == []
+    assert "records the human cluster secret" in _refusal(home)
 
 
 @pytest.mark.parametrize(
@@ -304,14 +187,7 @@ def test_a_remote_unit_that_records_the_human_secret_is_refused(
     ],
 )
 def test_a_home_with_an_identity_but_no_intent_is_refused(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    tools: str,
-    start: list[dict[str, Any]],
-    capsys: pytest.CaptureFixture[str],
-    env: str,
-    operator_database: OperatorDatabaseFactory,
-    command_runtime: CommandRuntime,
+    tmp_path: Path, tools: str, env: str
 ) -> None:
     """A home with no `start-intent.json` has no admission, whatever its `.env` and
     capability flags declare: `meiva start` takes an identity only from `meiva init`."""
@@ -320,10 +196,6 @@ def test_a_home_with_an_identity_but_no_intent_is_refused(
     (home / ".env").write_text(
         f"{env}MEIVA_SERVICE_PATH={tools}\nMEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
     )
-    monkeypatch.setenv("MEIVA_HOME", str(home))
 
-    assert _start(operator_database=operator_database, command_runtime=command_runtime) == 1
-
-    assert "no recorded identity" in capsys.readouterr().err
-    assert start == []
+    assert "no recorded identity" in _refusal(home)
     assert not (home / start_identity.INTENT_NAME).exists()  # a start never writes an identity

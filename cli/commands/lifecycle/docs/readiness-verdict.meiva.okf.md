@@ -15,8 +15,8 @@ table and calls the selected services' protocol probes. A running process alone
 is insufficient; the probe must respond. There is no native listener census or
 before/after process-generation proof around read-only health checks.
 
-Only selected core services in `CRITICAL_SERVICE_SESSIONS` gate serving. They
-share `SERVICE_READY_TIMEOUT_S`, measured by the command's injected `Timers`. Optional services are sampled when the core is
+Only selected core services in `CRITICAL_SERVICE_SESSIONS` gate serving. The verdict is a value: `start/readiness_plan.py` returns the failure line, the critical launch failures the rollout records, which reports to print and the exit code, and the shell executes it. They
+share `SERVICE_READY_TIMEOUT_S`, measured by the wait's own monotonic clock. Optional services are sampled when the core is
 ready; their failures are reported and emitted as `service_start_unready`, without
 another waiting budget or a global startup failure. Optional launch failures also
 do not enter the rollout's fatal launch-failure record.

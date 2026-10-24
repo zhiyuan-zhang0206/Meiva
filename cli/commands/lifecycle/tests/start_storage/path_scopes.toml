@@ -1,0 +1,9 @@
+"cli.database.tests.cli_tests" = [
+    "test_remote_data_plane.py",
+    "test_start_data_plane.py",
+    "test_start_migrations.py",
+]
+"meiva.tests.fixtures.sdk" = [
+    "test_remote_data_plane.py",
+    "test_start_data_plane.py",
+]

@@ -9,8 +9,11 @@ tags:
 
 # Pre-Stop Start-Readiness Preflight
 
-`cli/commands/lifecycle/_start_readiness_preflight.py` is the local-state half of
-"validate before kill" for `meiva restart` (`cli/commands/lifecycle/stop.py`).
+`cli/commands/lifecycle/start/readiness_preflight.py` is the local-state half of
+"validate before kill" for `meiva restart` (`cli/commands/lifecycle/stop`). It reads the
+facts (the private trees, the venv entry points, the tracked migrations, the health-port
+verdicts of the coming roster); `start/preflight_findings.py` (`strict`) decides which are
+fatal and which are observations, words them and renders the report.
 `meiva start` is the only step that brings a stopped host back, so a start check
 that fails AFTER the stop fails on a host whose services are already down
 (macmini 2026-09-12: a stray workspace socket aborted converge after the stop
@@ -30,7 +33,7 @@ Checked, all read-only:
 - **migration readability** — tracked migrations the applier cannot open; their
   names are already vetted at the target ref by `validate_migrations_at_ref`.
 - **prod-checkout anchor and the venv entry points** — `meiva start`'s first
-  refusal (`prod_service_checkout_error`), the interpreter every service
+  refusal (`base.paths.home.home_checkout_error`, against the home it is handed), the interpreter every service
   session launches through (`.venv/bin/python`, checked before restart), and
   — only when the caller's start execs it (`check_launcher`, a caller executing the launcher) —
   the `.venv/bin/meiva` launcher step 5 runs (its presence is step 3.5's report;
@@ -46,8 +49,9 @@ an already-down host it protects nothing, but a bounce could not have made it
 past the same condition either). The mirror checks inside start stay where they
 are — this gate narrows the window, it does not replace them.
 
-Tests: `cli/commands/lifecycle/tests/startup/test_start_readiness_preflight.py` pins each check family's
-disposition and the `check_launcher` toggle; the caller-level refusal contracts
+Tests: `cli/commands/lifecycle/tests/start_plans/test_preflight_findings.py` pins each check family's
+disposition over facts, and `tests/startup/test_start_readiness_preflight.py` shows the shell reads
+those facts from a real home and the `check_launcher` toggle; the caller-level refusal contracts
 live in
 `cli/commands/lifecycle/tests/identity/test_commands_restart_stop.py::test_cmd_restart_aborts_when_start_readiness_fails`.
 

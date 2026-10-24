@@ -1,0 +1,13 @@
+exports = ["browser_plan.py", "checkout_warnings.py", "firewall_report.py", "helper_plan.py", "ownership_plan.py", "shell_rc.py", "split_host_checks.py", "step_selection.py", "walg_plan.py"]
+
+[purity]
+"__init__.py" = "strict"
+"browser_plan.py" = "strict"
+"checkout_warnings.py" = "strict"
+"firewall_report.py" = "strict"
+"helper_plan.py" = "strict"
+"ownership_plan.py" = "strict"
+"shell_rc.py" = "strict"
+"split_host_checks.py" = "strict"
+"step_selection.py" = "strict"
+"walg_plan.py" = "strict"

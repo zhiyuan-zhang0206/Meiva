@@ -11,7 +11,7 @@ from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
-from cli.commands.converge.spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx, UserSession
 
 SKILL = "operating-meiva-cluster"
 
@@ -45,6 +45,7 @@ def skill_ctx(
         producer=producer,
         helper=refuse_helper,
         host=fake_host(),
+        session=UserSession(user_home=meiva_home, login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
         timers=ManualTimers(),
     )
