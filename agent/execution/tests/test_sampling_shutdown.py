@@ -48,7 +48,7 @@ def test_run_code_collects_sampling_at_its_result_boundary(outcome: str) -> None
             raise refresh_error
         return call_policy.SamplingPolicy()
 
-    sampling = call_policy.SamplingPolicyOwner(reader=read)
+    sampling = call_policy.SamplingPolicyOwner(initial=call_policy.SamplingPolicy(), fetch=read)
 
     def body() -> None:
         assert entered.wait(2)

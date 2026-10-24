@@ -26,8 +26,8 @@ from base.agents.impersonation.manifest import (
 from base.agents.impersonation.status import pending_reason
 from base.agents.impersonation.tests import test_history as history_cases
 from base.agents.impersonation.tests.impersonation_support import legacy_session
-from base.agents.sdk import call_policy
 from base.agents.sdk.tally import SdkCallTally
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.agents.tests.capture_inputs import (
     capture_rows,
     capture_state,
@@ -488,7 +488,6 @@ async def test_sdk_emit_failure_marks_original_receipt_after_rebind(
     async_call: bool,
     database_gate: ProcessDbGate,
 ) -> None:
-    from base.agents.sdk import call_policy
     from base.agents.sdk import telemetry as sdk_usage
 
     previous = open_capture(
@@ -499,10 +498,7 @@ async def test_sdk_emit_failure_marks_original_receipt_after_rebind(
     cause = LookupError("body cause")
     tally = SdkCallTally()
 
-    def local_policy() -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    sampling_owner = call_policy.SamplingPolicyOwner(reader=local_policy)
+    sampling_owner = fixed_sampling_owner()
     db_conn.execute("CREATE TEMP TABLE sdk_committed_effects(marker TEXT)")
     db_conn.commit()
     previous_gate = capture.LocalCaptureGate(previous)

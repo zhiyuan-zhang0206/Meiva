@@ -16,7 +16,7 @@ from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.messages.inbound import InterruptReason
 from base.api_contracts.agent_contract import AgentStatus
 from base.db import Database
-from base.db.transaction import async_write_transaction
+from base.db.transaction import AsyncConnectionSource, async_write_transaction
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -416,7 +416,7 @@ async def has_pending_inbound_after(
         return await cur.fetchone() is not None
 
 
-async def has_pending_interrupt(pool: AsyncConnectionPool, agent_id: int) -> bool:
+async def has_pending_interrupt(pool: AsyncConnectionSource, agent_id: int) -> bool:
     """Whether a durable external abort is present, without claiming it."""
     return await pending_interrupt_reason(pool, agent_id) is not None
 
@@ -444,7 +444,7 @@ async def has_pending_interrupt(pool: AsyncConnectionPool, agent_id: int) -> boo
 #     external interrupts (user / admin / peer) need the in-flight abort; the
 #     self row is still dispatched normally at claim.
 async def pending_interrupt_reason(
-    pool: AsyncConnectionPool, agent_id: int
+    pool: AsyncConnectionSource, agent_id: int
 ) -> InterruptReason | None:
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(

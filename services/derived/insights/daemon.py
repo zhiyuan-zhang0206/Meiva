@@ -82,7 +82,7 @@ async def run(*, home: Path, config: ConfigBoot, database: Callable[[], Database
                     insights_config(config=config),
                     home=home,
                     catalog=build_model_catalog(),
-                    default_model_reader=lambda: config.view.lm.llm_model,
+                    boot=config,
                     timeline_inputs=TimestampPolicy(
                         clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
                         timestamps_enabled=config.view.general.message_timestamps,

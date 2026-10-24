@@ -282,6 +282,7 @@ def test_the_built_in_loop_has_no_bridge() -> None:
             workspace=Path("/agents/6984"),
             registry=FileSessionRegistry(Path("/registry")),
             registration_ttl_seconds=3600.0,
+            environ={},
         )
         is None
     )
@@ -295,6 +296,7 @@ def test_an_external_harness_builds_its_handoff() -> None:
         workspace=Path("/agents/6984"),
         registry=FileSessionRegistry(Path("/registry")),
         registration_ttl_seconds=3600.0,
+        environ={},
     )
     assert bridge is not None
     assert bridge.harness is Harness.CLAUDE_CODE
@@ -314,6 +316,7 @@ def test_the_antigravity_wake_document_carries_its_shell_semantics() -> None:
         workspace=Path("/agents/6984"),
         registry=FileSessionRegistry(Path("/registry")),
         registration_ttl_seconds=3600.0,
+        environ={},
     )
     assert bridge is not None
     assert bridge.handoff is not None
@@ -329,6 +332,7 @@ def test_an_antigravity_session_is_built_with_the_skip_flag_it_was_given() -> No
         cwd=Path("/agents/6984"),
         registry=FileSessionRegistry(Path("/registry")),
         skip_permissions=True,
+        environ={},
     )
     assert isinstance(session, AgySession)
     assert session.config.skip_permissions is True
@@ -339,6 +343,7 @@ def test_an_antigravity_session_is_built_with_the_skip_flag_it_was_given() -> No
         cwd=Path("/agents/6984"),
         registry=FileSessionRegistry(Path("/registry")),
         skip_permissions=False,
+        environ={},
     )
     assert isinstance(plain, AgySession)
     assert plain.config.skip_permissions is False
