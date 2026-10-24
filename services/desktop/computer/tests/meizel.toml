@@ -5,7 +5,7 @@ exports = ["slices.py"]
 "test_computer_ax_act.py" = ["slices.py"]
 "test_computer_ax_gap.py" = ["slices.py"]
 "test_computer_ax_tools.py" = ["slices.py"]
-"test_computer_loop_liveness.py" = ["loop_watchdog_child.py", "slices.py", "test_computer_mcp_daemon.py"]
+"test_computer_loop_liveness.py" = ["loop_watchdog_child.py", "slices.py"]
 "test_computer_mcp_daemon.py" = ["slices.py"]
 
 [debt.first-party-patch]
