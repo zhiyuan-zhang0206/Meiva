@@ -75,22 +75,20 @@ from smtp import draft, draft_delete, forward, reply, send
 # meiva:note
 # Everything the CLI reads from its process, read once by the entry point: where the
 # credentials come from, the raw mirror root (`~/Downloads/gmail`), the clock reading that
-# `--since` windows count back from, and the stream a body is read from when `--body` is
-# omitted.
+# `--since` windows count back from. The input stream stays with the main shell.
 @dataclass(frozen=True)
 class Process:
     auth: AuthSources
     mirror_root: Path
     now_ts: int
-    stdin: TextIO
 
 
 # meiva:note
-# The send/reply body: `--body` if given, else read it from stdin -- rejecting an
+# The send/reply body: `--body` if given, else the text read by main -- rejecting an
 # empty/whitespace body from either source (a blank send is a mistake).
-def body_arg(body: str | None, stdin: TextIO) -> str:
+def body_arg(body: str | None, piped_body: str) -> str:
     if body is None:
-        body = str(stdin.read())
+        body = piped_body
     if not body.strip():
         raise ValueError("no body: pass a non-empty --body or pipe text on stdin")
     return body
@@ -190,7 +188,7 @@ def _run(args: argparse.Namespace, proc: Process) -> Any:
                 auth,
                 args.to,
                 args.subject,
-                body_arg(args.body, proc.stdin),
+                args.body,
                 cc=args.cc,
                 attach=args.attach,
                 dry_run=args.dry_run,
@@ -210,7 +208,7 @@ def _run(args: argparse.Namespace, proc: Process) -> Any:
                 auth,
                 args.to,
                 args.subject,
-                body_arg(args.body, proc.stdin),
+                args.body,
                 cc=args.cc,
                 attach=args.attach,
                 dry_run=args.dry_run,
@@ -221,7 +219,7 @@ def _run(args: argparse.Namespace, proc: Process) -> Any:
             return reply(
                 auth,
                 args.message_id,
-                body_arg(args.body, proc.stdin),
+                args.body,
                 reply_all=args.reply_all,
                 attach=args.attach,
                 dry_run=args.dry_run,
@@ -232,8 +230,10 @@ def _run(args: argparse.Namespace, proc: Process) -> Any:
 
 # meiva:note
 # The CLI: parse `argv`, run the lens against the process facts in `proc`, print the JSON.
-def main(argv: Sequence[str], proc: Process) -> None:
+def main(argv: Sequence[str], proc: Process, stdin: TextIO) -> None:
     args = _build_parser().parse_args(argv)
+    if args.cmd in {"send", "reply", "draft"}:
+        args.body = body_arg(args.body, stdin.read() if args.body is None else "")
     print(json.dumps(_run(args, proc), ensure_ascii=False, indent=2))
 
 
@@ -250,6 +250,6 @@ if __name__ == "__main__":
             ),
             mirror_root=_home / "Downloads" / "gmail",
             now_ts=int(time.time()),
-            stdin=sys.stdin,
         ),
+        sys.stdin,
     )

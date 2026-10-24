@@ -82,7 +82,7 @@ def _run(**fields: Any) -> Any:
         "inbounds": (),
         "meta": record_module.AgentMeta("user", "terminated", ""),
         "transcript": (),
-        "skills_touched": [],
+        "skills_touched": (),
     }
     values.update(fields)
     return record_module.RunInputs(**values)
@@ -321,7 +321,9 @@ def _evidence_record(
             events=tuple(events),
             inbounds=tuple(inbounds),
             meta=record_module.AgentMeta("user", status, "delivered"),
-            task_receipts=task_receipts,
+            task_receipts=(
+                record_module.TaskReceipts(**task_receipts) if task_receipts is not None else None
+            ),
         )
     )
 
@@ -413,7 +415,7 @@ def test_evidence_block_reports_prompt_source_and_task_receipts(record: Any) -> 
             week="2026-10-17",
             inbounds=(_inbound("agent:12", "peer brief"),),
             meta=record_module.AgentMeta("agent:12", "idling", "delivered"),
-            task_receipts={"note": 3, "status": 1, "results": 2, "state_changes": 1},
+            task_receipts=record_module.TaskReceipts(3, 1, 2, 1),
         )
     )
 

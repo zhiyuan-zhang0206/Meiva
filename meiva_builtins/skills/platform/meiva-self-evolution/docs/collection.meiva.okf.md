@@ -26,6 +26,10 @@ process without its machine token fails before any request. A checkpoint that
 cannot be read leaves that agent's transcript empty and prints a warning naming
 the agent.
 
+`RunInputs` carries the loaded skill names as a tuple and task-receipt counts as
+the four integers of `TaskReceipts`. Record rendering creates its own output
+lists and objects; it retains no mutable receipt row or loaded-skills list.
+
 Parent: [[meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.meiva.okf.md]].
 
 Every record carries the instruction its run works from. A human source (`user`, plus the pre-2026-06-19 web console `ui:web`) outranks the agent's own spawner, which outranks a `schedule:` sender; the earliest message of the winning kind supplies the text verbatim, and `task_prompt_source` names the winner. Resurrect, heartbeat, restart and fork inbounds are empty by construction, so a run driven by one falls through to the transcript's first human-authored message that is not the engine's system preamble — the inherited task, marked `transcript`. A task taken from a human message consumes exactly that message: every later human message is a follow-up or a correction, never a second task. `task_prompt_of` applies the transcript fallback at read time, so records written before this rule still expose the task their conversation shows.

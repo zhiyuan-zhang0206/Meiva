@@ -32,7 +32,7 @@ def test_build_record_adds_leak_audit_only_for_eval_collection(tmp_path: Path) -
         "inbounds": (),
         "meta": record_mod.AgentMeta("user", "completed", "done"),
         "transcript": (),
-        "skills_touched": [],
+        "skills_touched": (),
     }
     weekly = record_mod.build_record(record_mod.RunInputs(**values))
     audited = record_mod.build_record(record_mod.RunInputs(**values, leak_paths=paths))

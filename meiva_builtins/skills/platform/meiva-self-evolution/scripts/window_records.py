@@ -13,7 +13,7 @@ from typing import NamedTuple, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from record import AgentMeta, Event, Inbound, RunInputs, build_record
+from record import AgentMeta, Event, Inbound, RunInputs, TaskReceipts, build_record
 
 _BUILTIN_HELP_CALL_RE = re.compile(r"(?<![a-zA-Z0-9_.])help\s*\(")
 _BUILTIN_HELP_ON_MEIVA_RE = re.compile(r"(?<![a-zA-Z0-9_.])help\s*\(\s*meiva\.")
@@ -96,7 +96,7 @@ class WindowRows:
     logs: Mapping[int, list[Event]]
     inbounds: Mapping[int, list[Inbound]]
     meta: Mapping[int, AgentMeta]
-    receipts: Mapping[int, dict[str, int]]
+    receipts: Mapping[int, TaskReceipts]
     transcripts: Mapping[int, list[dict[str, str]]]
     skills: Mapping[int, list[str]]
 
@@ -114,7 +114,7 @@ def window_records(selected: Sequence[int], week: str, rows: WindowRows) -> list
                 inbounds=tuple(rows.inbounds.get(agent_id, [])),
                 meta=rows.meta[agent_id],
                 transcript=tuple(rows.transcripts[agent_id]),
-                skills_touched=rows.skills[agent_id],
+                skills_touched=tuple(rows.skills[agent_id]),
                 task_receipts=rows.receipts.get(agent_id),
             )
         )
