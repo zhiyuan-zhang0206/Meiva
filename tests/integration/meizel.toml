@@ -2,12 +2,8 @@
 "test_schedule_runner_cleanup.py" = ["child_schedule_runner.py"]
 
 [debt.first-party-patch]
-"test_impersonation_notifications.py#monkeypatch.setattr base.agents.impersonation.relay_inbox" = 1
-"test_impersonation_notifications.py#monkeypatch.setattr base.agents.impersonation.renew" = 1
 "test_impersonation_notifications.py#monkeypatch.setattr base.db.Database.write_transaction" = 1
 "test_impersonation_notifications.py#monkeypatch.setattr cli.commands.agents.impersonation.relay_token_from_env" = 1
-"test_impersonation_notifications.py#monkeypatch.setattr cli.commands.agents.impersonation_adapters.emit_claude" = 2
-"test_impersonation_notifications.py#monkeypatch.setattr cli.commands.agents.impersonation_relay.reserve_delivery" = 1
 
 [debt.restricted-python]
 "test_schedule_runner_cleanup.py#python -c" = 1

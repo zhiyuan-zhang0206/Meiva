@@ -35,17 +35,19 @@ def test_the_input_budget_must_be_positive() -> None:
         LmSettings.model_validate({"MEIVA_REPLY_SUGGESTION_MAX_INPUT_TOKENS": 0})
 
 
-def test_the_policy_is_read_from_the_config_owner_each_time() -> None:
-    config = snapshot_process_config()
-    config.set_field("reply_suggestion_gate_threshold", 0.7)
-    config.set_field("reply_suggestion_max_candidates", 2)
+def test_the_policy_is_read_from_the_config_owner_it_is_given() -> None:
+    first = snapshot_process_config()
+    first.set_field("reply_suggestion_gate_threshold", 0.7)
+    first.set_field("reply_suggestion_max_candidates", 2)
+    second = snapshot_process_config()
+    second.set_field("reply_suggestion_enabled", False)
 
-    first = reply_suggestion_policy(config)
-    config.set_field("reply_suggestion_enabled", False)
-    second = reply_suggestion_policy(config)
+    one = reply_suggestion_policy(first)
+    other = reply_suggestion_policy(second)
 
-    assert (first.gate_threshold, first.max_candidates, first.enabled) == (0.7, 2, True)
-    assert second.enabled is False
+    assert (one.gate_threshold, one.max_candidates, one.enabled) == (0.7, 2, True)
+    assert other.enabled is False
+    assert other.max_candidates == 3
 
 
 def test_the_draft_model_is_built_with_reasoning_off_and_a_bounded_wait() -> None:

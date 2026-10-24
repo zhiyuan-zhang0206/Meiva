@@ -8,15 +8,15 @@
 # as agent_id.
 
 import psycopg
+import pytest
 
 from gateway.tests.auth.gateway_config import gateway_test_client, spawn_headers
 from gateway.tests.extensions.draft_support import drafted_agent
-from gateway.tests.support.runner_ops.ops_stub import RunnerOps
+from gateway.tests.support.runner_ops.local_runner import executed_ops
 
 
-def test_draft_spawns_meiva_guide_agent(
-    db_conn: psycopg.Connection, gateway_local_runner: RunnerOps
-) -> None:
+@pytest.mark.usefixtures("gateway_local_runner")
+def test_draft_spawns_meiva_guide_agent(db_conn: psycopg.Connection) -> None:
     with gateway_test_client() as client:
         r = client.post(
             "/api/keyed/v1/guide/draft",
@@ -25,8 +25,8 @@ def test_draft_spawns_meiva_guide_agent(
         )
     assert r.status_code == 200, r.text
     agent_id = r.json()["agent_id"]
-    (launch,) = gateway_local_runner.calls_of("spawn-launch")
-    assert launch.payload["agent_id"] == agent_id
+    launched = executed_ops(db_conn, "spawn-launch")
+    assert [(op.status, op.result) for op in launched] == [("completed", {"id": agent_id})]
     drafted = drafted_agent(db_conn, agent_id)
     assert drafted.label == "meiva-guide"
     assert "install the linear MCP server" in drafted.prompt

@@ -14,6 +14,7 @@ from gateway.tests.support.runner_ops.ops_stub import (
     OpsCall,
     OpsReply,
     completed,
+    expecting,
     refused,
     register_machine,
     runner_ops,
@@ -58,8 +59,7 @@ REMOTE = "remote-host"
 
 @pytest.fixture(autouse=True)
 def only_the_machines_a_test_registers(db_conn: psycopg.Connection) -> None:
-    """The gateway's own machine is registered as a runner for every gateway test; the
-    aggregate here is over exactly the machines each test serves."""
+    """The aggregate here is over exactly the machines each test serves."""
     db_conn.execute("TRUNCATE machines")
     db_conn.commit()
 
@@ -104,11 +104,11 @@ def test_aggregate_skips_stopped_and_known_down_hosts(db_conn: psycopg.Connectio
         return {"inventory_read": _read({"X": _plugin(enabled=True)}, {}, name)}
 
     with (
-        runner_ops(db_conn, "A", answer("A")) as a,
-        runner_ops(db_conn, "B", answer("B")) as b,
-        runner_ops(db_conn, "C", answer("C")) as c,
-        runner_ops(db_conn, "D", answer("D")) as d,
-        runner_ops(db_conn, "E", answer("E")) as e,
+        runner_ops(db_conn, "A", answer("A")),
+        runner_ops(db_conn, "B", answer("B")),
+        runner_ops(db_conn, "C", answer("C")),
+        runner_ops(db_conn, "D", answer("D")),
+        runner_ops(db_conn, "E", answer("E")),
     ):
         db_conn.execute("UPDATE machines SET stopped_at = now() WHERE name = 'B'")
         db_conn.commit()
@@ -125,9 +125,13 @@ def test_aggregate_skips_stopped_and_known_down_hosts(db_conn: psycopg.Connectio
             resp = client.get("/api/inventory")
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert [r.name for r in (a, b, c, d, e) if r.calls_of("inventory_read")] == ["A", "D", "E"]
     assert body["machines"] == ["A", "B", "C", "D", "E"]
     assert body["unreachable"] == ["B", "C"]
+    # meiva:note
+    # every host that was dialed answered with plugin X, so the hosts that carry it are exactly
+    # the hosts that were dialed
+    x = {r["name"]: r for r in body["plugins"]}["X"]
+    assert set(x["hosts"]) == {"A", "D", "E"}
 
 
 # meiva:note
@@ -194,13 +198,12 @@ def test_aggregate_excludes_gateway_column(db_conn: psycopg.Connection) -> None:
     answer = {"inventory_read": _read({"X": _plugin(enabled=True)}, {}, REMOTE)}
     with (
         runner_ops(db_conn, REMOTE, answer),
-        runner_ops(db_conn, "gw-host", answer, roles=("gateway",)) as gateway_host,
+        runner_ops(db_conn, "gw-host", answer, roles=("gateway",)),
         gateway_test_client() as client,
     ):
         resp = client.get("/api/inventory")
     assert resp.status_code == 200, resp.text
     assert resp.json()["machines"] == [REMOTE]
-    assert gateway_host.calls == []
 
 
 def test_get_single_machine_offline_503(db_conn: psycopg.Connection) -> None:
@@ -220,18 +223,18 @@ def test_put_capability_rejection_surfaced(db_conn: psycopg.Connection) -> None:
         mcp_results={},
         applied=False,
     )
-    answer = {"inventory_write": completed(rejection.model_dump(mode="json"))}
-    with runner_ops(db_conn, REMOTE, answer) as runner, gateway_test_client() as client:
-        resp = client.put(
-            f"/api/inventory?machine={REMOTE}",
-            json={"plugins": {"no_such": True}, "mcp_servers": {}},
-        )
+    answer = completed(rejection.model_dump(mode="json"))
+    forwarded = {"plugins": {"no_such": True}, "mcp_servers": {}}
+    with (
+        runner_ops(db_conn, REMOTE, {"inventory_write": expecting(forwarded, answer)}),
+        gateway_test_client() as client,
+    ):
+        resp = client.put(f"/api/inventory?machine={REMOTE}", json=forwarded)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["applied"] is False
     assert body["plugin_results"]["no_such"]["ok"] is False
     assert body["plugin_results"]["no_such"]["reason"]
-    assert runner.payloads("inventory_write") == [{"plugins": {"no_such": True}, "mcp_servers": {}}]
 
 
 def test_put_unknown_machine_404() -> None:

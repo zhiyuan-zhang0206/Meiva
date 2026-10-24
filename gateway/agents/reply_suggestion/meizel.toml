@@ -4,7 +4,7 @@ exports = ["configuration.py", "router.py", "service.py", "tests"]
 "cache.py" = ["schemas.py"]
 "configuration.py" = ["plan.py", "service.py"]
 "plan.py" = ["schemas.py"]
-"router.py" = ["configuration.py", "schemas.py", "service.py"]
+"router.py" = ["schemas.py", "service.py"]
 "service.py" = ["cache.py", "excerpt.py", "plan.py", "schemas.py"]
 "tests" = ["cache.py", "configuration.py", "excerpt.py", "plan.py", "schemas.py", "service.py"]
 

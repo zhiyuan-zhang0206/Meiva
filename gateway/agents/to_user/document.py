@@ -13,7 +13,7 @@ from base.cluster.machine import gateway_auth_headers
 from base.cluster.machine.boot import gateway_access_from_boot
 from base.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered, lookup
 from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.http.config import runtime_view
+from gateway.http.config import gateway_config
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable, dispatch_to_machine
 
 router = APIRouter()
@@ -62,7 +62,7 @@ async def get_to_user(
     reference: Annotated[list[str] | None, Query()] = None,
 ) -> ToUserDocument:
     machine = await asyncio.to_thread(home_machine, request, agent_id)
-    max_depth = runtime_view(request).to_user.max_chain_depth
+    max_depth = gateway_config(request).to_user.max_chain_depth
     query = resource_request(agent_id, reference or [], max_depth=max_depth)
     return await read_snapshot(request, query, machine)
 
@@ -145,7 +145,7 @@ async def get_resource(
     reference: Annotated[list[str], Query(min_length=1)],
 ) -> Response:
     machine = await asyncio.to_thread(home_machine, request, agent_id)
-    to_user = runtime_view(request).to_user
+    to_user = gateway_config(request).to_user
     query = resource_request(agent_id, reference, max_depth=to_user.max_chain_depth)
     parent = resource_request(agent_id, query.references[:-1], max_depth=to_user.max_chain_depth)
     document = await read_snapshot(request, parent, machine)

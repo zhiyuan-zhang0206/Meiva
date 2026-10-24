@@ -14,6 +14,8 @@ from base.packages.tests.model_catalog import AddModels
 from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 from gateway.tests.support.runner_ops.ops_stub import OpsReply, RunnerOps, runner_ops
 
+pytestmark = pytest.mark.usefixtures("gateway_local_runner")
+
 
 @pytest.fixture
 def withdrawn_model(add_models: AddModels, model_catalog: ModelCatalog) -> tuple[str, ModelCatalog]:

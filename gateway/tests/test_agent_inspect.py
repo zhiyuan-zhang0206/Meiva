@@ -12,6 +12,7 @@ from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.support.runner_ops.ops_stub import (
     OpsReply,
     completed,
+    expecting,
     failed,
     refused,
     runner_ops,
@@ -107,14 +108,11 @@ def test_inspect_live_returns_only_window_independent_fields(
         {"shells": [{"id": 5, "name": "live-shell", "created_at": None, "uptime_seconds": 42}]}
     )
     with (
-        runner_ops(db_conn, "runner-a", {"shell_probe": probe}) as runner,
+        runner_ops(db_conn, "runner-a", {"shell_probe": expecting({"agent_id": aid}, probe)}),
         gateway_test_client() as client,
     ):
         response = client.get(f"/api/agents/{aid}/inspect/live")
 
-    assert [(call.kind, call.payload) for call in runner.calls] == [
-        ("shell_probe", {"agent_id": aid})
-    ]
     assert response.status_code == 200
     body = response.json()
     assert set(body) == {
@@ -230,13 +228,10 @@ def test_inspect_shells_probed_on_agents_machine(db_conn: psycopg.Connection) ->
         {"shells": [{"id": 5, "name": "desktop-remove", "created_at": None, "uptime_seconds": 42}]}
     )
     with (
-        runner_ops(db_conn, "runner-a", {"shell_probe": probe}) as runner,
+        runner_ops(db_conn, "runner-a", {"shell_probe": expecting({"agent_id": aid}, probe)}),
         gateway_test_client() as client,
     ):
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
-    assert [(call.kind, call.payload) for call in runner.calls] == [
-        ("shell_probe", {"agent_id": aid})
-    ]
     assert body["shells"] == [
         {
             "id": 5,

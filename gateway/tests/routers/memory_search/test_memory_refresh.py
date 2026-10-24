@@ -3,15 +3,12 @@ from __future__ import annotations
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
 from pathlib import Path
 
-from base.config.tests.configuration import snapshot_process_config
 from base.deploy.git.memory_repo import init_local_repo, run_git
 from base.deploy.git.tests.memory_checkouts import commit_note
 from base.deploy.git.tests.memory_checkouts import memory_checkout as memory_checkout
-from gateway.http.config import gateway_config_from_boot
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client, gateway_test_config
 
 
 def test_refresh_updates_the_checkout_read_by_the_app(
@@ -25,19 +22,21 @@ def test_refresh_updates_the_checkout_read_by_the_app(
     other = tmp_path / "unrelated"
     init_local_repo("main", other)
     other_head = run_git("rev-parse", "HEAD", cwd=other)
-    boot = snapshot_process_config()
-    boot.set_field("memory_keep_local", True)
-    config = replace(gateway_config_from_boot(boot), memory_root=root)
+    keeping = {"memory_keep_local": True}
+    following = {"memory_keep_local": False, "track_branch": "consolidated"}
 
-    with gateway_test_client(config=config, boot=boot) as client:
+    with gateway_test_client(
+        config=gateway_test_config(keeping, memory_root=root), fields=keeping
+    ) as client:
         initial_note = client.get("/api/memory/note", params={"path": "note.md"})
         assert initial_note.status_code == 200
         assert "before refresh" in initial_note.json()["body"]
         kept = client.post("/api/memory/refresh")
         assert kept.status_code == 200
         assert kept.json()["head"] == before
-        boot.set_field("memory_keep_local", False)
-        boot.set_field("track_branch", "consolidated")
+    with gateway_test_client(
+        config=gateway_test_config(following, memory_root=root), fields=following
+    ) as client:
         refreshed = client.post("/api/memory/refresh")
         assert refreshed.status_code == 200
         assert refreshed.json()["head"] == after
@@ -69,12 +68,14 @@ def test_refresh_keeps_serving_while_git_waits(
         f"Path({str(observed)!r}).write_text(str(Path({str(released)!r}).exists()))\n"
     )
     hook.chmod(0o700)
-    boot = snapshot_process_config()
-    boot.set_field("memory_keep_local", False)
-    boot.set_field("track_branch", "main")
-    config = replace(gateway_config_from_boot(boot), memory_root=root)
+    fields = {"memory_keep_local": False, "track_branch": "main"}
 
-    with gateway_test_client(config=config, boot=boot) as client, ThreadPoolExecutor() as executor:
+    with (
+        gateway_test_client(
+            config=gateway_test_config(fields, memory_root=root), fields=fields
+        ) as client,
+        ThreadPoolExecutor() as executor,
+    ):
         refresh = executor.submit(client.post, "/api/memory/refresh")
         deadline = time.monotonic() + 10
         while not started.exists() and time.monotonic() < deadline:

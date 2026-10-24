@@ -18,7 +18,6 @@ budget applies to tests and fixture metadata as well as source code.
 ### Test coverage scope
 - `tests/components/agent/` — agent core (loop, graph, messages, state, hooks)
 - `tests/components/meiva/` — SDK surface (meiva.* namespace)
-- `tests/components/gateway/` — API gateway
 - `tests/components/cli/` — command-line tools
 - `tests/components/base/` — base library (`base/packages/*/tests/` holds the tests of `base/packages`)
 - `tests/components/services/` — backend services

@@ -29,12 +29,19 @@ class ValidatedFleetConfig(FleetConfig):
 
 
 @pytest.fixture
-def owned_image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def owner_names() -> tuple[str, ...]:
+    return ("meiva_fleet",)
+
+
+@pytest.fixture
+def owned_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, owner_names: tuple[str, ...]
+) -> Path:
     image = tmp_path / "images" / "config.json"
     image.parent.mkdir()
     image.write_text(ValidatedFleetConfig().model_dump_json())
-    owner = PluginConfigOwner("meiva_fleet", ValidatedFleetConfig, image)
-    monkeypatch.setattr(plugin_config, "config_owners", lambda: {owner.name: owner})
+    owners = {name: PluginConfigOwner(name, ValidatedFleetConfig, image) for name in owner_names}
+    monkeypatch.setattr(plugin_config, "config_owners", lambda: owners)
     return image
 
 
@@ -140,31 +147,21 @@ def test_unexpected_persistence_failure_keeps_original_exception_and_bytes(
     assert owned_image.read_bytes() == saved
 
 
+# meiva:note
+# Two owners declare the same fields: attributing a field to one of them fails with a ValueError
+# that no request handler anticipates.
+@pytest.mark.parametrize("owner_names", [("meiva_fleet", "meiva_fleet_copy")])
 @pytest.mark.parametrize("consumer", ["gateway", "host"])
-@pytest.mark.parametrize("error_type", [ValueError, RuntimeError])
 def test_unexpected_owner_failure_keeps_original_exception_and_bytes(
     owned_image: Path,
-    monkeypatch: pytest.MonkeyPatch,
     consumer: Literal["gateway", "host"],
-    error_type: type[Exception],
     *,
     config_authority: ConfigAuthority,
     machine_identity: MachineIdentity,
 ) -> None:
-    from gateway.routers.configuration import runtime as config_router
-    from ops import host_config
-
     saved = owned_image.read_bytes()
-    failure = error_type("unexpected declaration dependency failure")
-
-    def fail_owner(_fields: set[str]) -> PluginConfigOwner | None:
-        raise failure
-
-    module = config_router if consumer == "gateway" else host_config
-    monkeypatch.setattr(module, "patch_owner", fail_owner)
-    with pytest.raises(error_type) as captured:
+    with pytest.raises(ValueError, match="more than one declaration owner"):
         write_request(
             consumer, config_authority=config_authority, local_machine=machine_identity.name()
         )
-    assert captured.value is failure
     assert owned_image.read_bytes() == saved

@@ -5,6 +5,9 @@ from gateway.tests.auth.gateway_config import (
     GatewayTestClient as GatewayTestClient,
 )
 from gateway.tests.auth.gateway_config import (
+    anonymous_gateway_client as anonymous_gateway_client,
+)
+from gateway.tests.auth.gateway_config import (
     gateway_test_app as gateway_test_app,
 )
 from gateway.tests.auth.gateway_config import (
@@ -26,6 +29,7 @@ from gateway.tests.auth.gateway_config import (
 __all__ = [
     "SPAWN_PATH",
     "GatewayTestClient",
+    "anonymous_gateway_client",
     "gateway_test_app",
     "gateway_test_client",
     "gateway_test_process",

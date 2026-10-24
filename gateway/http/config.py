@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args, get_type_hints
 from urllib.parse import urlsplit
 
 from fastapi import Request
@@ -14,10 +14,135 @@ from base.agents.upload_delivery.paths import (
     MAX_AGENT_UPLOAD_FILES,
     MAX_UPLOAD_BYTES,
 )
+from base.clock import ClockConfig
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine.boot import machine_from_boot
-from base.config import ConfigBoot, Settings
+from base.config import ConfigBoot
 from base.paths import gateway_memory_dir
 from gateway.http.middleware.cors import cors_allowed_origins, trusted_request_hosts
+
+
+# meiva:note
+# The page sizes and windows a list or read endpoint uses when its query leaves one out.
+# Each field is the `display` setting of the same name, read once by the root.
+@dataclass(frozen=True)
+class DisplayDefaults:
+    shell_capture_default_lines: int
+    config_audit_default_last: int
+    fleet_graph_decay_lambda: float
+    cluster_events_default_limit: int
+    neighbors_default_depth: int
+    neighbors_default_limit: int
+    messages_default_limit: int
+    notices_open_default_limit: int
+    notices_resolved_default_page: int
+    schedules_runs_default_limit: int
+    alerts_default_limit: int
+    metrics_default_window_days: int
+    events_default_limit: int
+    timeline_default_limit: int
+
+
+# meiva:note
+# The models a request falls back to: the default chat model, the hierarchy model and the
+# `llm_override` that routes every model call of the cluster to one model when it is set.
+@dataclass(frozen=True)
+class ModelDefaults:
+    llm_model: str
+    hierarchy_model: str
+    llm_override: str
+
+
+# meiva:note
+# The understanding options of the agent config domain. Both are `None` in a process profile
+# that does not build the domain (the gateway's); the request then reads the cluster's value
+# from the unit `.env` instead.
+@dataclass(frozen=True)
+class UnderstandingDomain:
+    chunk_ratio: float | None
+    enabled: bool | None
+
+
+# meiva:note
+# Server-sent-event tuning: how often a stream checks that its client is still connected, the
+# events per second a throttled stream lets through, and how many events one channel may hold
+# while its client is slow.
+@dataclass(frozen=True)
+class SseTuning:
+    disconnect_poll_seconds: float
+    throttle_rate: float
+    channel_pending_limit: int
+
+
+# meiva:note
+# Alert intake: whether an alert also notifies the IM bridge, and the scoped webhook token an
+# alert sender presents (empty when no scoped token is configured).
+@dataclass(frozen=True)
+class AlertSettings:
+    im_notify_enabled: bool
+    webhook_token: str = field(repr=False)
+
+
+# meiva:note
+# What a `to_user` document read may cost: the longest resource chain it follows and the
+# largest resource it fetches.
+@dataclass(frozen=True)
+class ToUserLimits:
+    max_chain_depth: int
+    max_resource_bytes: int
+
+
+# meiva:note
+# The Grafana reverse proxy: off unless enabled, and the address it forwards to.
+@dataclass(frozen=True)
+class GrafanaProxy:
+    enabled: bool
+    host: str
+    port: int
+
+
+# meiva:note
+# Where a delivered page is reachable (`gateway_url`, empty when none is configured) and how
+# long a page lives when its author names no lifetime.
+@dataclass(frozen=True)
+class PageSettings:
+    gateway_url: str
+    default_ttl_seconds: float
+
+
+# meiva:note
+# The memory pool checkout policy of a refresh: keep local commits, and the branch to follow.
+@dataclass(frozen=True)
+class MemoryPoolPolicy:
+    keep_local: bool
+    track_branch: str
+
+
+# meiva:note
+# The memory-search tunables: the embedding provider and its key, the vector backend, the
+# waits for the concurrency gate and for a whole search, and the candidate counts of the
+# reranking and deduplication purposes.
+@dataclass(frozen=True)
+class MemorySearchSettings:
+    embedding_backend: str
+    backend: str
+    uri: str
+    embedding_timeout: float
+    api_key: str | None = field(repr=False)
+    acquire_timeout: float
+    deadline: float
+    rerank_model: str
+    rerank_candidates: int
+    dedup_candidates: int
+
+
+# meiva:note
+# How an agent's heartbeat is judged by the live inspection: the idle time after which an
+# agent counts as idle and the interval at which it beats.
+@dataclass(frozen=True)
+class HeartbeatTiming:
+    idle_threshold_seconds: float
+    interval_seconds: float
 
 
 @dataclass(frozen=True)
@@ -36,6 +161,27 @@ class GatewayConfig:
     # it once, so a handler and a test hand the same directory around as a value.
     upload_home: Path
     human_auth: Literal["required", "trusted_network"]
+    # meiva:note
+    # The settings the request handlers read, grouped by what they tune. The root reads each
+    # from the process's configuration owner once; a handler reads only this value, never the
+    # owner, and a changed `.env` reaches a handler at the next restart like every other field
+    # here.
+    display: DisplayDefaults
+    models: ModelDefaults
+    understanding: UnderstandingDomain
+    sse: SseTuning
+    alerts: AlertSettings
+    to_user: ToUserLimits
+    grafana: GrafanaProxy
+    pages: PageSettings
+    memory_pool: MemoryPoolPolicy
+    memory_search: MemorySearchSettings
+    heartbeat: HeartbeatTiming
+    status_probe_timeout_seconds: float
+    notice_ttl_limit_seconds: float
+    timeline_compact_history: int
+    message_timestamps: bool
+    clock: ClockConfig
     trusted_hosts: frozenset[str] = frozenset()
     # meiva:note
     # How long a lifecycle request (resurrect / terminate / restart) may wait on the home
@@ -94,8 +240,9 @@ class GatewayConfig:
 
 def gateway_config_from_boot(config: ConfigBoot) -> GatewayConfig:
     """Snapshot HTTP policy without creating or booting another config owner."""
-    gateway = config.view.gateway
-    services = config.view.services
+    view = config.view
+    gateway = view.gateway
+    services = view.services
     gateway_url: str = gateway.gateway_url
     machine = machine_from_boot(config)
     explicit_secure: bool | None = gateway.session_cookie_secure
@@ -108,8 +255,17 @@ def gateway_config_from_boot(config: ConfigBoot) -> GatewayConfig:
             gateway_url=gateway_url,
         )
     )
+    display = view.display
+    lm = view.lm
+    daemon = view.daemon
+    alerts_token = view.alerts.webhook_token
+    gemini_key = lm.gemini_api_key
+    # meiva:note
+    # The gateway profile builds no agent domain; its understanding options then come from the
+    # unit `.env` at the request (see `agents/history/configuration.py`).
+    agent = view.agent if view.has_domain("agent") else None
     return GatewayConfig(
-        cluster_secret=config.view.data_plane.cluster_secret,
+        cluster_secret=view.data_plane.cluster_secret,
         session_ttl_seconds=gateway.session_ttl_seconds,
         mcp_endpoint_enabled=gateway.mcp_endpoint_enabled,
         allowed_origins=allowed_origins,
@@ -122,6 +278,76 @@ def gateway_config_from_boot(config: ConfigBoot) -> GatewayConfig:
         memory_root=gateway_memory_dir(roles=machine.role()),
         upload_home=Path.home(),
         human_auth=gateway.human_auth,
+        display=DisplayDefaults(
+            shell_capture_default_lines=display.shell_capture_default_lines,
+            config_audit_default_last=display.config_audit_default_last,
+            fleet_graph_decay_lambda=display.fleet_graph_decay_lambda,
+            cluster_events_default_limit=display.cluster_events_default_limit,
+            neighbors_default_depth=display.neighbors_default_depth,
+            neighbors_default_limit=display.neighbors_default_limit,
+            messages_default_limit=display.messages_default_limit,
+            notices_open_default_limit=display.notices_open_default_limit,
+            notices_resolved_default_page=display.notices_resolved_default_page,
+            schedules_runs_default_limit=display.schedules_runs_default_limit,
+            alerts_default_limit=display.alerts_default_limit,
+            metrics_default_window_days=display.metrics_default_window_days,
+            events_default_limit=display.events_default_limit,
+            timeline_default_limit=display.timeline_default_limit,
+        ),
+        models=ModelDefaults(
+            llm_model=lm.llm_model,
+            hierarchy_model=lm.hierarchy_model,
+            llm_override=lm.llm_override,
+        ),
+        understanding=UnderstandingDomain(
+            chunk_ratio=None if agent is None else agent.understanding_chunk_ratio,
+            enabled=None if agent is None else agent.understanding_enabled,
+        ),
+        sse=SseTuning(
+            disconnect_poll_seconds=gateway.sse_disconnect_poll_seconds,
+            throttle_rate=gateway.sse_throttle_rate,
+            channel_pending_limit=gateway.sse_channel_pending_limit,
+        ),
+        alerts=AlertSettings(
+            im_notify_enabled=view.alerts.im_notify_enabled,
+            webhook_token="" if alerts_token is None else alerts_token.get_secret_value(),
+        ),
+        to_user=ToUserLimits(
+            max_chain_depth=view.to_user.max_chain_depth,
+            max_resource_bytes=view.to_user.max_resource_bytes,
+        ),
+        grafana=GrafanaProxy(
+            enabled=gateway.grafana_proxy_enabled,
+            host=gateway.grafana_host,
+            port=gateway.grafana_port,
+        ),
+        pages=PageSettings(
+            gateway_url=gateway_url, default_ttl_seconds=daemon.page_default_ttl_seconds
+        ),
+        memory_pool=MemoryPoolPolicy(
+            keep_local=view.general.memory_keep_local, track_branch=view.general.track_branch
+        ),
+        memory_search=MemorySearchSettings(
+            embedding_backend=services.embedding_backend,
+            backend=services.memory_search_backend,
+            uri=services.memory_search_uri,
+            embedding_timeout=services.memory_embed_timeout_seconds,
+            api_key=None if gemini_key is None else gemini_key.get_secret_value(),
+            acquire_timeout=services.memory_search_acquire_timeout_seconds,
+            deadline=services.memory_search_deadline_seconds,
+            rerank_model=services.memory_rerank_model,
+            rerank_candidates=services.memory_rerank_candidates,
+            dedup_candidates=services.memory_dedup_candidates,
+        ),
+        heartbeat=HeartbeatTiming(
+            idle_threshold_seconds=daemon.heartbeat_idle_threshold_seconds,
+            interval_seconds=daemon.heartbeat_interval_seconds,
+        ),
+        status_probe_timeout_seconds=gateway.status_probe_timeout_seconds,
+        notice_ttl_limit_seconds=daemon.notice_ttl_limit_seconds,
+        timeline_compact_history=gateway.timeline_compact_history,
+        message_timestamps=view.general.message_timestamps,
+        clock=clock_config_from_boot(config),
         trusted_hosts=trusted_request_hosts(
             allowed_origins=allowed_origins,
             machine_host=machine.host(),
@@ -130,10 +356,61 @@ def gateway_config_from_boot(config: ConfigBoot) -> GatewayConfig:
     )
 
 
+_PLACEHOLDERS: dict[object, object] = {int: 0, float: 0.0, bool: False, str: ""}
+
+
 # meiva:note
-# The gateway process's own configuration as it reads now.
-#
-# A handler reads tunables here, never from the process-global `settings`: the gateway's
-# config owner is the one thing a test builds the app with (`gateway_test_client(fields=...)`).
-def runtime_view(request: Request) -> Settings:
-    return request.app.state.gateway_process.config.view
+# One group filled with placeholders: `0`, `0.0`, `False` or `""` by field type, `None` for an
+# optional field. A field of any other type fails here rather than getting a made-up value.
+def _placeholders[G](group: type[G]) -> G:
+    values: dict[str, object] = {}
+    for name, hint in get_type_hints(group).items():
+        if hint in _PLACEHOLDERS:
+            values[name] = _PLACEHOLDERS[hint]
+        elif type(None) in get_args(hint):
+            values[name] = None
+        else:
+            raise TypeError(f"{group.__name__}.{name} has no placeholder for {hint!r}")
+    return group(**values)
+
+
+# meiva:note
+# A config whose settings are all placeholders, for code that must not read the configuration:
+# the OpenAPI document (the schema of a route does not depend on a setting value) and a
+# stand-in app of a test, which sets, through `dataclasses.replace`, the few fields the code
+# under test reads. No handler may read a placeholder.
+def placeholder_config() -> GatewayConfig:
+    return GatewayConfig(
+        cluster_secret="",
+        session_ttl_seconds=3600,
+        mcp_endpoint_enabled=False,
+        allowed_origins=(),
+        browser_origin="",
+        session_cookie_secure=False,
+        human_auth="required",
+        memory_root=Path("/nonexistent/memory"),
+        upload_home=Path("/nonexistent/home"),
+        display=_placeholders(DisplayDefaults),
+        models=_placeholders(ModelDefaults),
+        understanding=_placeholders(UnderstandingDomain),
+        sse=_placeholders(SseTuning),
+        alerts=_placeholders(AlertSettings),
+        to_user=_placeholders(ToUserLimits),
+        grafana=_placeholders(GrafanaProxy),
+        pages=_placeholders(PageSettings),
+        memory_pool=_placeholders(MemoryPoolPolicy),
+        memory_search=_placeholders(MemorySearchSettings),
+        heartbeat=_placeholders(HeartbeatTiming),
+        status_probe_timeout_seconds=0.0,
+        notice_ttl_limit_seconds=0.0,
+        timeline_compact_history=0,
+        message_timestamps=False,
+        clock=_placeholders(ClockConfig),
+    )
+
+
+# meiva:note
+# The config the gateway app was built with: the one frozen value a handler reads its settings
+# from.
+def gateway_config(request: Request) -> GatewayConfig:
+    return request.app.state.gateway_config

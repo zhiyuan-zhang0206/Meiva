@@ -5,7 +5,10 @@ import pytest
 
 from base.config import settings
 from base.db import create_agent
-from gateway.tests.auth.gateway_config import GatewayTestClient
+from gateway.tests.auth.gateway_config import (
+    GatewayTestClient,
+    reconfigure,
+)
 from gateway.tests.history.test_timeline import CompactHistoryCases
 from gateway.tests.history.test_timeline import test_client as test_client
 from gateway.tests.support.checkpoints.unreadable import put_unreadable_head
@@ -27,11 +30,11 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             version="2",
         )
 
-        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = 0
+        reconfigure(test_client, timeline_compact_history=0)
         disabled = test_client.get(f"/api/agents/{tid}/timeline", params={"limit": 50}).json()
         assert disabled["has_more"] is False
 
-        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = 1
+        reconfigure(test_client, timeline_compact_history=1)
         enabled = test_client.get(f"/api/agents/{tid}/timeline", params={"limit": 50}).json()
         assert enabled["has_more"] is True
         assert all(not item["item_id"].startswith("s") for item in enabled["items"])
@@ -52,7 +55,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="2",
         )
-        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
+        reconfigure(test_client, timeline_compact_history=-1)
 
         crossed = test_client.get(
             f"/api/agents/{tid}/timeline", params={"before": "2.0", "limit": 2}
@@ -111,7 +114,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="3",
         )
-        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
+        reconfigure(test_client, timeline_compact_history=-1)
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline",
@@ -146,7 +149,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="3",
         )
-        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = 1
+        reconfigure(test_client, timeline_compact_history=1)
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline",
@@ -184,7 +187,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="3",
         )
-        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = depth
+        reconfigure(test_client, timeline_compact_history=depth)
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline",
@@ -224,7 +227,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             version="3",
         )
 
-        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = 1
+        reconfigure(test_client, timeline_compact_history=1)
         blocked = test_client.get(
             f"/api/agents/{tid}/timeline",
             params={"before": f"s2.{older_id}.1.0", "limit": 50},
@@ -243,7 +246,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
         ).json()
         assert invalid_rank == {"items": [], "msg_count": 3, "has_more": False}
 
-        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
+        reconfigure(test_client, timeline_compact_history=-1)
         stale_rank = test_client.get(
             f"/api/agents/{tid}/timeline",
             params={"before": f"s99.{newer_id}.2.0", "limit": 1},
@@ -285,7 +288,7 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
         # The live head declares three messages and cannot be deserialized: a page that
         # reads it would be a 503, so a 200 with the exact count proves it was not read.
         put_unreadable_head(settings.data_plane.db_url, tid, messages=3, version="2")
-        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = 1
+        reconfigure(test_client, timeline_compact_history=1)
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline",

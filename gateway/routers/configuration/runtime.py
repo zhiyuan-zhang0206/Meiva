@@ -33,7 +33,7 @@ from base.packages.plugin_config_admin import (
 )
 from base.packages.plugin_config_images import PluginConfigChangedError, PluginConfigOwner
 from base.packages.plugins.plugin_errors import InvalidConfigOverlay
-from gateway.http.config import runtime_view
+from gateway.http.config import gateway_config
 from gateway.http.model_catalog import require_model_catalog
 from gateway.routers.configuration import write_plan
 from gateway.routers.refusal import HttpFailure
@@ -343,7 +343,7 @@ async def get_config_audit(
 ) -> ConfigAuditView:
 
     effective_last = (
-        last if last is not None else runtime_view(request).display.config_audit_default_last
+        last if last is not None else gateway_config(request).display.config_audit_default_last
     )
     if machine == "all":
         runners = await asyncio.to_thread(list_agent_runners, request.app.state.db)
@@ -395,7 +395,7 @@ def get_resolved_config(request: Request, model: str | None = None) -> ResolvedC
     from base.lm.registry import explain_setting, tuning_field_names
 
     catalog = require_model_catalog(request)
-    target = model or runtime_view(request).lm.llm_model
+    target = model or gateway_config(request).models.llm_model
     metas = {m.name: m for m in panel_metadata(authority=request.app.state.config_authority)}
     per_agent = per_agent_field_names()
 

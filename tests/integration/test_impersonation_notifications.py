@@ -35,8 +35,8 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from cli.commands.agents import impersonation_adapters as adapters
 from cli.commands.agents import impersonation_relay as relay
+from cli.commands.agents.impersonation_adapters import RelayAdapter
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import enqueue_termination_inbounds, force_terminate_transaction
 
@@ -495,14 +495,17 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
         if transport_dead:
             raise OSError("executor transport is gone")
 
-    def forbidden(_db: object, *_args: Any, **_kwargs: Any) -> Any:
-        pytest.fail("A terminal relay must not read/reserve an ordinary inbox or renew its lease")
+    def claude_adapter(_provider: str, _thread_id: str | None, **_options: Any) -> RelayAdapter:
+        return RelayAdapter(emit, notify_terminal=True)
 
-    monkeypatch.setattr(adapters, "emit_claude", emit)
+    # meiva:note
+    # Retained patch: `cmd_relay` takes the relay credential from the process environment or
+    # stdin and has no parameter for it; a fixed credential is the one thing this test cannot hand
+    # it by value.
     monkeypatch.setattr(cli_impersonation, "relay_token_from_env", lambda: session["relay_token"])
-    monkeypatch.setattr(leases, "relay_inbox", forbidden)
-    monkeypatch.setattr(leases, "renew", forbidden)
-    monkeypatch.setattr(relay, "reserve_delivery", forbidden)
+    lease_before = db_conn.execute(
+        "SELECT status, expires_at FROM agent_impersonations WHERE id=%s", (session["id"],)
+    ).fetchone()
     args = build_parser().parse_args(
         [
             "impersonate",
@@ -517,7 +520,11 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
     import asyncio
 
     result = await asyncio.to_thread(
-        relay.cmd_relay, args, database_factory=lambda: database, machine=machine_identity
+        relay.cmd_relay,
+        args,
+        database_factory=lambda: database,
+        machine=machine_identity,
+        adapter_factory=claude_adapter,
     )
     assert result == (1 if transport_dead else 0)
     assert len(emitted) == 1
@@ -532,12 +539,23 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (owner.agent_id,)
     ).fetchone() == ("terminated",)
+    # meiva:note
+    # A terminal relay neither reads nor reserves an ordinary inbox (no per-message delivery row
+    # exists for the lease) and does not renew the lease it found ended.
+    assert db_conn.execute(
+        "SELECT count(*) FROM agent_impersonation_messages WHERE lease_id=%s", (session["id"],)
+    ).fetchone() == (0,)
+    assert (
+        db_conn.execute(
+            "SELECT status, expires_at FROM agent_impersonations WHERE id=%s", (session["id"],)
+        ).fetchone()
+        == lease_before
+    )
 
 
 async def test_running_relay_delivers_termination_once_without_reserving_input(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     *,
@@ -590,7 +608,6 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
             return ()
 
     lease_uuid = UUID(session["id"])
-    monkeypatch.setattr(adapters, "emit_claude", emitted.append)
     listener = Listener()
     await relay.relay_inbox(
         owner.agent_id,
@@ -598,7 +615,7 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
         read_inbox=read,
         reserve=reserve,
         listener=listener,
-        emit=adapters.resolve_adapter("claude", None).send,
+        emit=emitted.append,
     )
     assert len(emitted) == 2
     assert emitted[0].startswith("Handoff brief\n\nMeiva control active:")

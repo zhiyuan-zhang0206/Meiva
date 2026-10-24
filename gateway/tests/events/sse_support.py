@@ -60,16 +60,12 @@ def refused_redis_url() -> str:
 
 
 # meiva:note
-# Test helper: slice an SSE byte stream into frames + parse the JSON
-#     on data lines, the way the browser does: split lines on "
-# " only
-#     (str.splitlines() would also break on U+0085 / U+2028 / U+2029 and
-#     silently re-merge a payload the writer split there) and rejoin data
-#     lines with "
-# ", so writer corruption fails here as a parse error.
+# Test helper: slice an SSE byte stream into frames and parse the JSON on data lines, the way
+# the browser does: split lines on "\n" only (str.splitlines() would also break on U+0085 /
+# U+2028 / U+2029 and silently re-merge a payload the writer split there) and rejoin data
+# lines with "\n", so writer corruption fails here as a parse error.
 #
-#     Ignores `:` comment frames (heartbeat / stream open / dropped).
-#
+# Ignores `:` comment frames (heartbeat / stream open / dropped).
 def decode_frames_for_test(chunks: list[bytes]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     text = b"".join(chunks).decode()

@@ -109,7 +109,7 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
     from agent.impersonation_handoff import note_stamp, start_update
     from base.agents.history.timeline import build_timeline_items
     from base.agents.history.timeline_item import hydrate
-    from gateway.agents.history.paging import window_before
+    from gateway.agents.history.paging import Row, window_before
 
     lease = start(
         owner,
@@ -135,9 +135,13 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
     assert page[-1].payload == "Message 14"
     cursor = page[-5].item_id
     older = hydrate(database, items, owner.agent_id, limit=5, before=cursor)
-    window, more = window_before(older, cursor, 5)
-    assert [item.payload for item in window] == [f"Message {i}" for i in range(5, 10)]
-    assert more
+    rows = [
+        Row(item.item_id, item.kind, item.source is not None and item.impersonation is None)
+        for item in older
+    ]
+    window = window_before(rows, cursor, 5)
+    assert [older[i].payload for i in window.indices] == [f"Message {i}" for i in range(5, 10)]
+    assert window.has_more
     assert page[-1].impersonation is not None
     assert page[-1].impersonation.executor_name == "Codex: thoughtful squirrel"
     archived, _ = build_timeline_items(

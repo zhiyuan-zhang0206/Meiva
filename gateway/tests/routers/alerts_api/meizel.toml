@@ -1,6 +1,7 @@
 exports = ["alerts_support.py"]
 
 [uses]
+"test_alerts_ingest.py" = ["alerts_support.py"]
 "test_list_unresolved_first_and_filters.py" = ["alerts_support.py"]
 
 [debt.first-party-patch]

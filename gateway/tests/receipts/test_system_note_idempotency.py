@@ -11,6 +11,8 @@ from base.events.live.bus import EventBus
 from gateway.agents.system_note import system_note_blocking
 from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 
+pytestmark = pytest.mark.usefixtures("gateway_local_runner")
+
 
 def test_system_note_replay_and_immutable_policy(db_conn: psycopg.Connection) -> None:
     with gateway_test_client() as client:

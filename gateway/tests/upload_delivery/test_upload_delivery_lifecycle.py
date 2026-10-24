@@ -300,7 +300,8 @@ async def test_failed_copies_hold_after_the_attempt_budget_and_alert_once(
             conn.execute("UPDATE upload_delivery_batches SET next_attempt_at=now()")
         await recovery.round()
         await recovery.close()
-    assert len(runner.calls_of("upload-receive-v1")) == source.MAX_COPY_ATTEMPTS
+    final = source.status(client.app.state.db_pool, agent, batch_id)
+    assert (final.state, final.attempts) == ("hold", source.MAX_COPY_ATTEMPTS)
 
 
 @pytest.mark.asyncio

@@ -17,7 +17,13 @@ from base.db import Database, create_agent
 from gateway.agents import lifecycle
 from gateway.tests.auth.gateway_config import gateway_test_config
 from gateway.tests.support.db_faults.missing_table import missing_table
-from gateway.tests.support.runner_ops.ops_stub import OpsCall, OpsReply, completed, runner_ops
+from gateway.tests.support.runner_ops.ops_stub import (
+    OpsCall,
+    OpsReply,
+    completed,
+    expecting,
+    runner_ops,
+)
 from ops.rpc_schemas import TerminateAgentRequest
 
 _ACCEPTED = {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
@@ -44,9 +50,15 @@ async def test_a_missing_task_table_never_changes_an_accepted_termination(
     database: Database, db_conn: psycopg.Connection
 ) -> None:
     agent_id = _agent_on(db_conn, "hint-runner")
+    forwarded = {
+        "path": f"/api/agents/{agent_id}/terminate",
+        "body": TerminateAgentRequest().model_dump(),
+    }
     with (
-        runner_ops(db_conn, "hint-runner", {"lifecycle": completed({"status": "enqueued"})}) as (
-            runner
+        runner_ops(
+            db_conn,
+            "hint-runner",
+            {"lifecycle": expecting(forwarded, completed({"status": "enqueued"}))},
         ),
         database.pool(max_size=2) as pool,
         missing_table(db_conn, "agent_tasks"),
@@ -54,12 +66,6 @@ async def test_a_missing_task_table_never_changes_an_accepted_termination(
         response = await lifecycle.terminate_agent_with_open_tasks(
             agent_id, TerminateAgentRequest(), pool, db=database, config=gateway_test_config()
         )
-    assert runner.payloads("lifecycle") == [
-        {
-            "path": f"/api/agents/{agent_id}/terminate",
-            "body": TerminateAgentRequest().model_dump(),
-        }
-    ]
     assert response.model_dump() == _ACCEPTED
 
 

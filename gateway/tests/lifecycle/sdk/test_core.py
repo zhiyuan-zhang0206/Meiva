@@ -7,7 +7,7 @@ import meiva
 from base.api_contracts.agent_contract import InvalidModelConfig
 from meiva.tests.fixtures.pin_agent import pin_agent
 
-pytestmark = pytest.mark.usefixtures("sdk_model_owner")
+pytestmark = pytest.mark.usefixtures("sdk_model_owner", "gateway_local_runner")
 
 
 def _inbound_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:

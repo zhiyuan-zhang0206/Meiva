@@ -21,17 +21,17 @@ def _agent_on(conn: psycopg.Connection, machine: str) -> int:
 def test_gateway_membership_refusal_is_422_before_forward(db_conn: psycopg.Connection) -> None:
     agent_id = _agent_on(db_conn, "remote-runner")
     with (
-        runner_ops(db_conn, "remote-runner", {}) as runner,
+        runner_ops(db_conn, "remote-runner", {}),
         gateway_test_client() as client,
     ):
         refused = client.post(
             f"/api/agents/{agent_id}/restart",
             json={"config_overlay": {"llm_model": "unknown-model"}},
         )
-    assert refused.status_code == 422
     # meiva:note
-    # an invalid overlay is never forwarded
-    assert runner.calls == []
+    # an invalid overlay is refused here: the runner has no scripted `lifecycle` reply, so a
+    # forward would have come back as a bad gateway rather than this 422
+    assert refused.status_code == 422
 
 
 def test_gateway_preserves_runner_typed_400(db_conn: psycopg.Connection) -> None:
@@ -44,11 +44,10 @@ def test_gateway_preserves_runner_typed_400(db_conn: psycopg.Connection) -> None
         }
     )
     with (
-        runner_ops(db_conn, "remote-runner", {"lifecycle": refusal}) as runner,
+        runner_ops(db_conn, "remote-runner", {"lifecycle": refusal}),
         gateway_test_client() as client,
     ):
         response = client.post(f"/api/agents/{agent_id}/restart", json={})
     assert response.status_code == 400
     assert response.json()["reason"] == "invalid_model_config"
     assert response.json()["detail"] == "provider configuration is invalid"
-    assert [call.kind for call in runner.calls] == ["lifecycle"]

@@ -2,8 +2,9 @@ import uuid
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager, nullcontext
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
-from typing import Any, Literal, Self
+from typing import Any, Literal, Self, cast
 
 import httpx
 import httpx2
@@ -22,16 +23,19 @@ from gateway.app import create_app
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from gateway.http.config import GatewayConfig, gateway_config_from_boot
 from gateway.http.model_catalog import load_model_catalog
+from gateway.tests.auth.gateway_auth import gateway_credentials
 
 __all__ = [
     "SPAWN_PATH",
     "GatewayTestClient",
+    "anonymous_gateway_client",
     "gateway_config_fields",
     "gateway_test_app",
     "gateway_test_client",
     "gateway_test_config",
     "gateway_test_process",
     "post_spawn",
+    "reconfigure",
     "spawn_headers",
     "spawn_via_http",
 ]
@@ -53,11 +57,27 @@ def gateway_config_fields(**fields: Any) -> Generator[dict[str, Any]]:
 # meiva:note
 # The app config a test client gets by default (human auth required), with `changes`
 # applied: a tuning value a test shrinks or a limit it lowers, passed as a `GatewayConfig`
-# field to `gateway_test_client(config=...)`.
-def gateway_test_config(**changes: Any) -> GatewayConfig:
+# field to `gateway_test_client(config=...)`. The positional `fields` are configuration fields applied to the
+# owner the config is derived from, for a setting that is a value of the config
+# (`gateway_test_config({"memory_rerank_candidates": 40})`); pass the same `fields` to the client so the
+# process the app runs on holds them too.
+def gateway_test_config(
+    fields: Mapping[str, Any] | None = None, /, **changes: Any
+) -> GatewayConfig:
     return replace(
-        gateway_config_from_boot(snapshot_process_config()), human_auth="required", **changes
+        gateway_config_from_boot(_resolve_boot(None, fields)), human_auth="required", **changes
     )
+
+
+# meiva:note
+# Replace the frozen config of a running test app with a copy that has `changes` applied. A
+# handler reads `app.state.gateway_config` at each request, so the next request sees the new
+# value; use it where one test needs two values of one tunable, and build a second app
+# (`gateway_test_client(config=...)`) where the tunable must hold from the start.
+def reconfigure(client: TestClient, **changes: Any) -> GatewayConfig:
+    app = cast(FastAPI, client.app)
+    app.state.gateway_config = replace(app.state.gateway_config, **changes)
+    return app.state.gateway_config
 
 
 def _resolve_boot(
@@ -147,8 +167,22 @@ def gateway_test_app(
     )
 
 
+# meiva:note
+# A test client over a gateway app. It carries the app's cluster secret as its bearer unless
+# the test gives its own `Authorization` header or asks for an anonymous client
+# (`credentials=False`); the default is read from the app's own config at build time, so a
+# config carrying a rotated secret yields a client carrying it.
 class GatewayTestClient(TestClient):
     app: FastAPI
+
+    def __init__(self, app: FastAPI, *args: Any, credentials: bool = True, **kwargs: Any) -> None:
+        config = getattr(app.state, "gateway_config", None)
+        if credentials and isinstance(config, GatewayConfig):
+            headers = dict(kwargs.get("headers") or {})
+            if not any(name.lower() == "authorization" for name in headers):
+                headers.update(gateway_credentials(config))
+            kwargs["headers"] = headers
+        super().__init__(app, *args, **kwargs)
 
     def __enter__(self) -> Self:
         super().__enter__()
@@ -204,6 +238,12 @@ def gateway_test_client(
         )
         with GatewayTestClient(assembled, **kwargs) as client:
             yield client
+
+
+# meiva:note
+# A gateway test client that presents no credential: the module under test is about admission,
+# and each test says what it presents.
+anonymous_gateway_client = partial(gateway_test_client, credentials=False)
 
 
 def spawn_headers(key: str | None = None, extra: Mapping[str, str] | None = None) -> dict[str, str]:

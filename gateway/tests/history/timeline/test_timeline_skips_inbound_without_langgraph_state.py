@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import psycopg
 import pytest
 from langchain_core.messages import BaseMessage, HumanMessage
@@ -13,7 +15,7 @@ from base.clock import Clock
 from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
-from gateway.tests.auth.gateway_config import GatewayTestClient
+from gateway.tests.auth.gateway_config import GatewayTestClient, reconfigure
 from gateway.tests.history.test_timeline import test_client as test_client
 from gateway.tests.history.test_timeline import timeline_items
 
@@ -265,7 +267,8 @@ class TestSystemPromptInColdLoad:
         (``MEIVA_TIMELINE_DEFAULT_LIMIT``); 50 is only that field's default."""
         from langchain_core.messages import HumanMessage
 
-        test_client.app.state.config_authority.runtime.display.timeline_default_limit = 5
+        config = test_client.app.state.gateway_config
+        reconfigure(test_client, display=replace(config.display, timeline_default_limit=5))
 
         tid = create_agent(db_conn)
         self._put_checkpoint(  # pyright: ignore[reportUnknownMemberType]
