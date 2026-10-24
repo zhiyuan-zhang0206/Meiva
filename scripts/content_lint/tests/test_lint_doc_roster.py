@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from scripts.content_lint import lint_doc_roster as lint
@@ -204,16 +206,43 @@ def test_parse_healthcheck_roster_strips_py_suffix():
     assert parsed == {"gateway", "lgtm"}
 
 
-def test_diagnostic_imports_include_nested_and_aliased_modules(tmp_path):
+def test_composition_and_diagnostic_imports_include_nested_and_aliased_modules(
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "probes.py"
     source.write_text(
-        "def probe():\n    from services.supervision.healthchecks import redis_acl as check, protocol_probe\n    from services.supervision.healthchecks.permissions_helper import probe\n"
+        "def probe():\n    from services.supervision.healthchecks import redis_acl as check\n    from services.supervision.healthchecks.permissions_helper import probe\n"
     )
-    assert lint.diagnostic_healthchecks(probes_path=source) == {
+    composition = tmp_path / "composition.py"
+    composition.write_text(
+        "def build_services():\n    from services.supervision.healthchecks.protocol_probe import probe as probe_protocol\n"
+    )
+    assert lint.imported_healthchecks(source_paths=(composition, source)) == {
         "redis_acl",
         "protocol_probe",
         "permissions_helper",
     }
+
+
+def test_a_module_needs_an_actual_composition_import(tmp_path: Path) -> None:
+    composition = tmp_path / "composition.py"
+    composition.write_text(
+        "from services.supervision.healthchecks.protocol_probe import probe as unix_probe\n"
+    )
+    roster = tmp_path / "roster.md"
+    roster.write_text(_healthcheck_table("protocol_probe"))
+
+    def check_source() -> int:
+        return lint.check_healthcheck_roster(
+            roster_path=roster,
+            services=(),
+            directory={"protocol_probe"},
+            hand_added=lint.imported_healthchecks(source_paths=(composition,)),
+        )
+
+    assert check_source() == 0
+    composition.write_text("pass\n")
+    assert check_source() == 1
 
 
 def test_real_healthcheck_documentation_matches_current_sources():

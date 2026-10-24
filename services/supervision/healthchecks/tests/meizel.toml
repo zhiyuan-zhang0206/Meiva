@@ -32,4 +32,4 @@
 "test_protocol_probe.py#python -c" = 1
 
 [debt.third-party-patch]
-"test_protocol_probe.py#monkeypatch.setattr psutil.process_iter" = 2
+"test_protocol_probe.py#monkeypatch.setattr psutil.process_iter" = 1

@@ -64,7 +64,6 @@ def venv() -> DaemonProbe:
 
 def redis_acl() -> DaemonProbe:
     from base.cluster import ownership
-    from services.supervision.healthchecks import protocol_probe
     from services.supervision.healthchecks import redis_acl as check
 
     port = ownership.redis_port_of(settings.data_plane.redis_url)  # ambient: S
@@ -80,7 +79,7 @@ def redis_acl() -> DaemonProbe:
             return DaemonProbe.down(f"native Redis runtime ACL PING failed: {type(exc).__name__}")
         return DaemonProbe.up("Redis runtime ACL authenticated and answered PING")
 
-    return protocol_probe.probe_protocol(ping)
+    return ping()
 
 
 def pgbouncer(*, machine: MachineIdentity) -> DaemonProbe:
@@ -89,7 +88,6 @@ def pgbouncer(*, machine: MachineIdentity) -> DaemonProbe:
     from base.host.db_authority.delivery import POOLER_ADMIN, read_pooler_admin
     from base.host.db_authority.model import AuthorityRefusedError
     from base.paths import meiva_home
-    from services.supervision.healthchecks import protocol_probe
 
     record = get_record(meiva_home())
     if record is None:
@@ -109,13 +107,12 @@ def pgbouncer(*, machine: MachineIdentity) -> DaemonProbe:
             return DaemonProbe.up("native pooler admin console and required listeners answered")
         return DaemonProbe.down(f"pooler listener failure: loopback={loopback}, public={public}")
 
-    return protocol_probe.probe_protocol(protocol)
+    return protocol()
 
 
 def browser_reach() -> DaemonProbe:
     from services.desktop.browser.probe import probe_browser
     from services.supervision.healthchecks import browser_reach as check
-    from services.supervision.healthchecks import protocol_probe
 
     url = settings.services.gateway_health_url.strip()
     if not url:
@@ -137,7 +134,7 @@ def browser_reach() -> DaemonProbe:
             return DaemonProbe.unavailable(f"host baseline also failed: {detail}")
         return DaemonProbe.down(f"browser-specific reachability failure: {detail}")
 
-    return protocol_probe.probe_protocol(protocol)
+    return protocol()
 
 
 # meiva:note
@@ -215,7 +212,7 @@ class StationProbe:
 
 def lgtm_write_path() -> DaemonProbe:
     from base.telemetry.lgtm_local import backend_urls
-    from services.supervision.healthchecks import lgtm, protocol_probe
+    from services.supervision.healthchecks import lgtm
 
     loki_url = backend_urls()["loki"]
     port = urlsplit(loki_url).port
@@ -226,7 +223,7 @@ def lgtm_write_path() -> DaemonProbe:
         ok, reason = lgtm.write_path_probe(loki_url)
         return DaemonProbe.up(reason) if ok else DaemonProbe.down(reason)
 
-    return protocol_probe.probe_protocol(protocol)
+    return protocol()
 
 
 class LokiReport:
