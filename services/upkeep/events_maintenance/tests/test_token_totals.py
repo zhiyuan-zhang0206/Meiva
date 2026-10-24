@@ -2,19 +2,11 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
-from unittest.mock import Mock
 
 import psycopg
 import pytest
 
-from base.config import ConfigBoot
-from base.db.code_version_gate import ProcessDbGate
-from base.native_process import code_version
-from base.native_process.loaded_commit import LoadedCommit
 from services.upkeep.events_maintenance import rollup, token_totals
 
 _TODAY = date(2026, 6, 30)
@@ -136,50 +128,23 @@ def _raw_usage(db: psycopg.Connection, agent: int, day: date, tokens_in: int) ->
     )
 
 
-def test_the_command_line_rebuilds_the_totals_only_when_its_range_reaches_the_watermark(
+def test_a_range_rebuilds_the_totals_only_when_it_reaches_the_watermark(
     db: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    tmp_path: Path,
 ) -> None:
-    image = LoadedCommit(tmp_path, "captured-before-checkout-moved")
-    capture = Mock(return_value=image)
-    count = Mock(return_value=7)
-    monkeypatch.setattr(LoadedCommit, "capture", capture)
-    monkeypatch.setattr(code_version, "first_parent_count", count)
-    monkeypatch.setattr(rollup, "process_name", lambda: "rollup-operator")
     agent = _agent(db)
     today = datetime.now(UTC).date()
     old = today - timedelta(days=40)
     _ledger(db, agent, old, 100, 10)
     token_totals.fold_totals(db, today=today)
     assert _total(db, agent) == (100, 10)
-
-    class _Database:
-        @contextmanager
-        def connect(self) -> Generator[psycopg.Connection]:
-            yield db
-
-    def database(
-        config: ConfigBoot, *, gate: ProcessDbGate, local_host: Callable[[], str]
-    ) -> _Database:
-        assert isinstance(config, ConfigBoot)
-        assert isinstance(gate, ProcessDbGate)
-        assert gate.application_name() == "meiva:rollup-operator:v7"
-        return _Database()
-
-    monkeypatch.setattr(rollup, "events_maintenance_db", database)
     _raw_usage(db, agent, old, 150)
 
-    recent = (today - timedelta(days=1)).strftime("%Y%m%d")
-    rollup.main(["--from", recent, "--to", recent])
-    assert "rebuilt" not in capsys.readouterr().out
+    recent = today - timedelta(days=1)
+    untouched = rollup.roll_range(db, recent, recent, today=today)
+    assert not untouched.rebuilt
     assert _total(db, agent) == (100, 10)
 
-    day = old.strftime("%Y%m%d")
-    rollup.main(["--from", day, "--to", day])
-    assert "rebuilt agent_model_tokens_total" in capsys.readouterr().out
+    refolded = rollup.roll_range(db, old, old, today=today)
+    assert refolded.rebuilt
+    assert refolded.result.tokens_rows == 1
     assert _total(db, agent) == (150, 1)
-    assert capture.call_count == 2
-    assert count.call_count == 2
-    count.assert_called_with(tmp_path, image.sha)

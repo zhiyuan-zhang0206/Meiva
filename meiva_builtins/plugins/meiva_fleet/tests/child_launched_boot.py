@@ -80,7 +80,7 @@ def launched_imports_share_boot() -> None:
     assert installation is not None
     _assert_shared_boot(context, installation, reads)
     _assert_runtime_resources_cold(context, installation)
-    assert installation.sampling.worker is None
+    assert installation.require_sampling().worker is None
     importlib.reload(meiva)
     assert meiva.context is context
     assert installed() is installation

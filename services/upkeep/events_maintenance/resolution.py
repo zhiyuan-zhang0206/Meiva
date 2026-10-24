@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from psycopg.rows import dict_row
@@ -482,7 +482,7 @@ def run_resolution_slice(
     config: EventsMaintenanceConfig,
     *,
     cadence: AutoDismissCadence,
-    now: datetime | None = None,
+    now: datetime,
 ) -> ResolutionResult | None:
     """Run one fixed-window resolution pass, or return None when the record is stale.
 
@@ -493,9 +493,8 @@ def run_resolution_slice(
     a fabricated recovery).
     """
 
-    at = now or datetime.now(UTC)
     try:
-        counts = _read_window_counts(pool, config, at, cadence)
+        counts = _read_window_counts(pool, config, now, cadence)
     except Exception:
         _log.warning("resolution query failed; gauge not emitted", exc_info=True)
         return None

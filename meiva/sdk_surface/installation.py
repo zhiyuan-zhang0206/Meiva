@@ -68,13 +68,20 @@ class Installation:
     disabled: frozenset[str]
     faces: bool
     undo: tuple[Callable[[], None], ...]
-    sampling: SamplingPolicyOwner = field(default_factory=SamplingPolicyOwner)
+    sampling: SamplingPolicyOwner | None = None
     configs: Mapping[str, BaseModel] = field(default_factory=dict[str, BaseModel])
     catalog: ModelCatalog | None = None
     provider_keys: ProviderKeys | None = None
     authority: ConfigAuthority | None = None
     clock_factory: Callable[[], Clock] | None = None
     producer: Callable[[], Any] | None = None
+
+    # meiva:note
+    # The sampling owner of an installation that meters SDK calls; a bare provider mount has none.
+    def require_sampling(self) -> SamplingPolicyOwner:
+        if self.sampling is None:
+            raise RuntimeError("the SDK installation meters no calls")
+        return self.sampling
 
     def require_catalog(self) -> ModelCatalog:
         """Return this installation's explicit model facts or refuse a non-model installation."""

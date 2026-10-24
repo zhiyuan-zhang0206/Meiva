@@ -50,3 +50,16 @@ The inbound-message writes, the wake publish and the live-agent reads that once 
 package are owned by [[base/agents/inbox/docs/inbox.meiva.okf.md]].
 
 Test admission and dial-fixture evidence: [[test-database-safety.meiva.okf.md]].
+
+## Transactions on a pool
+
+`write_transaction(pool)` takes a `ConnectionSource`: anything that lends one connection for a
+`with` block and commits when the block ends normally. `psycopg_pool.ConnectionPool` is one.
+`base/db/tests/lost_ack.py` holds the other, `LostAckPool`, whose n-th lending commits for real
+and then raises; it produces the one fault a database cannot be asked for (durable work, lost
+acknowledgement), so a function that takes its pool as an argument is tested without a patch.
+
+The async twin is `AsyncConnectionSource` (anything that lends one connection for an `async with`
+block; `AsyncConnectionPool` is one). `base/db/tests/parked_pool.py` holds `ParkedAsyncPool`, whose
+n-th borrow waits at the pool until released and, on request, absorbs the first cancellation of that
+wait: the interrupt watcher's tests drive it instead of subclassing a pool.

@@ -388,7 +388,7 @@ def _read_launch_state(
         )
         row = cur.fetchone()
         snapshot = snapshot_module.select_one(
-            conn, agent_id, catalog=catalog, default_model_reader=lambda: default_model
+            conn, agent_id, catalog=catalog, default_model=default_model
         )
     if row is None or snapshot is None:
         return launch_state.launch_state(None, None, None, None)
@@ -461,7 +461,7 @@ def creation_availability(
     try:
         with pool.connection() as conn:
             snap = snapshot_module.select_one(
-                conn, agent_id, catalog=catalog, default_model_reader=lambda: default_model
+                conn, agent_id, catalog=catalog, default_model=default_model
             )
     except Exception as exc:
         logger.warning(

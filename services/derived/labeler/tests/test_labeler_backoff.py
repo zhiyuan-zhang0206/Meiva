@@ -6,92 +6,70 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.config import settings
-from base.config.service_read import ConfigAuthority
 from base.daemon.health import Liveness
 from base.db import create_agent, pool
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
-from base.lm.catalog.provider_keys import ProviderKeys
-from base.packages.tests.model_catalog import inert_keys
 from services.derived.labeler import daemon
-from services.derived.labeler.tests.slices import labeler_db
+from services.derived.labeler.tests.slices import labeler_config, labeler_db, model_inputs
 
 
-def _seed_chat(db: psycopg.Connection, tid: int) -> None:
+def _seed_chat(db: psycopg.Connection, tid: int, content: str = "do the thing") -> None:
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
             "VALUES (%s, %s, 'chat', 'user')",
-            (tid, "do the thing"),
+            (tid, content),
         )
 
 
-@pytest.mark.asyncio
-async def test_dispatch_loop_uses_labeler_model_not_main_model(
+def _label(db: psycopg.Connection, tid: int) -> str | None:
+    db.commit()
+    with db.cursor() as cur:
+        cur.execute("SELECT label FROM agents WHERE id = %s", (tid,))
+        row = cur.fetchone()
+    assert row is not None
+    return row[0]
+
+
+async def _until(condition: Any, *, what: str, timeout_s: float = 15.0) -> None:
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while not condition():
+        if asyncio.get_running_loop().time() > deadline:
+            pytest.fail(f"timed out waiting for {what}")
+        await asyncio.sleep(0.02)
+
+
+async def test_dispatch_loop_labels_an_unlabeled_agent_with_the_configured_model(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     event_bus: EventBus,
-    *,
-    config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    *,
     database_gate: ProcessDbGate,
 ) -> None:
-    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
-    monkeypatch.setattr(settings.lm, "labeler_model", "deepseek-v4-flash")
-    config = daemon.labeler_config()
-    monkeypatch.setattr(daemon, "POLL_INTERVAL_S", 0.0)
-
     a = create_agent(db_conn)
     _seed_chat(db_conn, a)
     db_conn.commit()
-
-    captured: list[str] = []
-
-    def _reject_build(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("stubbed generate_label_async must not call build_chat_model")
-
-    async def _capture(
-        _tid: int,
-        _prompt: str,
-        cfg: Any,
-        _db: object,
-        _bus: EventBus,
-        *,
-        build_chat_model: object,
-        catalog: ModelCatalog,
-        keys: ProviderKeys,
-        llm_override: str,
-        overrides: ModelOverrides,
-    ) -> None:
-        assert build_chat_model is _reject_build
-        assert catalog is model_catalog
-        captured.append(cfg.labeler_model)
-        raise asyncio.CancelledError
-
-    monkeypatch.setattr(daemon, "generate_label_async", _capture)
-
     p = pool(gate=database_gate)
+    loop = asyncio.create_task(
+        daemon.dispatch_loop(
+            p,
+            labeler_db(database_gate=database_gate),
+            event_bus,
+            Liveness(daemon.LIVENESS_TIMEOUT_S),
+            labeler_config("say:Label from the labeler model"),
+            **model_inputs(model_catalog),
+        )
+    )
     try:
-        with pytest.raises(asyncio.CancelledError):
-            await daemon.dispatch_loop(
-                p,
-                labeler_db(database_gate=database_gate),
-                event_bus,
-                Liveness(daemon.LIVENESS_TIMEOUT_S),
-                config,
-                build_chat_model=_reject_build,
-                catalog=model_catalog,
-                keys=inert_keys(model_catalog),
-                llm_override=config_authority.runtime.lm.llm_override,
-                overrides=ModelOverrides.from_pins({}),
-            )
+        await _until(lambda: _label(db_conn, a) is not None, what="the label")
     finally:
+        loop.cancel()
+        await asyncio.gather(loop, return_exceptions=True)
         p.close()
 
-    assert captured == ["deepseek-v4-flash"]
+    assert _label(db_conn, a) == "Label from the labeler model"
 
 
 def test_select_unlabeled_excludes_attempted_ids(db_conn: psycopg.Connection) -> None:
@@ -158,106 +136,51 @@ def test_select_unlabeled_prompts_from_task_system_note(db_conn: psycopg.Connect
     assert b not in rows
 
 
+# meiva:note
+# The first agent's request makes the provider fail, which leaves its label unset. The
+# loop must not attempt it again while the polls go on, and must still label a new agent.
 async def test_failed_label_is_not_retried_but_new_agents_are_processed(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     event_bus: EventBus,
-    *,
-    config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
+    loguru_records: list[dict[str, Any]],
+    *,
     database_gate: ProcessDbGate,
 ) -> None:
     failed = create_agent(db_conn)
-    _seed_chat(db_conn, failed)
+    _seed_chat(db_conn, failed, "FAIL this one")
     db_conn.commit()
-    calls: list[int] = []
-    fresh: list[int] = []
-    ticks = 0
 
-    def _reject_build(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("stubbed generate_label_async must not call build_chat_model")
+    def failures_of(agent_id: int) -> int:
+        return sum(
+            1
+            for record in loguru_records
+            if record["extra"].get("event") == "label_generate_failed"
+            and record["extra"].get("agent_id") == agent_id
+        )
 
-    async def poll(_delay: float) -> None:
-        nonlocal ticks
-        ticks += 1
-        if ticks == 3:
-            fresh.append(create_agent(db_conn))
-            _seed_chat(db_conn, fresh[0])
-            db_conn.commit()
-        if ticks == 5:
-            raise asyncio.CancelledError
-
-    async def failed_generation(tid: int, *_args: Any, **kwargs: Any) -> bool:
-        assert kwargs["build_chat_model"] is _reject_build
-        calls.append(tid)
-        return False
-
-    monkeypatch.setattr(daemon.asyncio, "sleep", poll)
-    monkeypatch.setattr(daemon, "generate_label_async", failed_generation)
     p = pool(gate=database_gate)
-    try:
-        with pytest.raises(asyncio.CancelledError):
-            await daemon.dispatch_loop(
-                p,
-                labeler_db(database_gate=database_gate),
-                event_bus,
-                Liveness(120),
-                daemon.labeler_config(),
-                build_chat_model=_reject_build,
-                catalog=model_catalog,
-                keys=inert_keys(model_catalog),
-                llm_override=config_authority.runtime.lm.llm_override,
-                overrides=ModelOverrides.from_pins({}),
-            )
-    finally:
-        p.close()
-    assert calls == [failed, fresh[0]]
-    assert db_conn.execute("SELECT label FROM agents WHERE id = %s", (failed,)).fetchone() == (
-        None,
+    loop = asyncio.create_task(
+        daemon.dispatch_loop(
+            p,
+            labeler_db(database_gate=database_gate),
+            event_bus,
+            Liveness(120),
+            labeler_config("failif:FAIL:rate-limit"),
+            **model_inputs(model_catalog),
+        )
     )
-
-
-async def test_dispatch_loop_hands_injected_factory_to_real_generate_label(
-    db_conn: psycopg.Connection,
-    event_bus: EventBus,
-    *,
-    config_authority: ConfigAuthority,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
-) -> None:
-    tid = create_agent(db_conn)
-    _seed_chat(db_conn, tid)
-    db_conn.commit()
-    config = daemon.labeler_config()
-    overrides = ModelOverrides.from_pins({})
-    stop = RuntimeError("stop after factory call")
-    built: list[str] = []
-
-    def build(model: str, **kwargs: object) -> object:
-        built.append(model)
-        assert kwargs["thinking"] == {"type": "disabled"}
-        assert kwargs["catalog"] is model_catalog
-        assert kwargs["llm_override"] == config_authority.runtime.lm.llm_override
-        assert kwargs["overrides"] is overrides
-        raise stop
-
-    p = pool(gate=database_gate)
     try:
-        with pytest.raises(RuntimeError) as caught:
-            await daemon.dispatch_loop(
-                p,
-                labeler_db(database_gate=database_gate),
-                event_bus,
-                Liveness(daemon.LIVENESS_TIMEOUT_S),
-                config,
-                build_chat_model=build,
-                catalog=model_catalog,
-                keys=inert_keys(model_catalog),
-                llm_override=config_authority.runtime.lm.llm_override,
-                overrides=overrides,
-            )
-        assert caught.value is stop
+        await _until(lambda: failures_of(failed) == 1, what="the first failed attempt")
+        fresh = create_agent(db_conn)
+        _seed_chat(db_conn, fresh)
+        db_conn.commit()
+        await _until(lambda: _label(db_conn, fresh) is not None, what="the new agent's label")
+        await asyncio.sleep(0.3)
     finally:
+        loop.cancel()
+        await asyncio.gather(loop, return_exceptions=True)
         p.close()
 
-    assert built == [config.labeler_model]
+    assert failures_of(failed) == 1
+    assert _label(db_conn, failed) is None

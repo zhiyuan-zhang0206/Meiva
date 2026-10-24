@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from cProfile import Profile
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -24,7 +23,7 @@ from base.agents.history.hierarchy.usage import MessageUsage
 from base.agents.history.message_tokens import MessageTokens
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
-from base.config import settings
+from base.config import ConfigBoot, settings
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from services.derived.insights.run_timeline import context
@@ -259,10 +258,10 @@ def call(view: HistoryView, at: int, catalog: ModelCatalog):
         found: RequestBreakdown,
         *,
         catalog: ModelCatalog,
-        default_model_reader: Callable[[], str],
+        default_model: str,
     ) -> ContextBreakdownResponse:
         assert catalog is app_state.catalog
-        assert default_model_reader is app_state.default_model_reader
+        assert default_model == "deepseek-v4-flash-vision-exp"
 
         return ContextBreakdownResponse(
             total_input_tokens=found.total.tokens,
@@ -280,12 +279,14 @@ def call(view: HistoryView, at: int, catalog: ModelCatalog):
             ],
         )
 
+    boot = ConfigBoot()
+    boot.set_field("llm_model", "deepseek-v4-flash-vision-exp")
     app_state = SimpleNamespace(
         db=cast(Database, object()),
         db_pool=object(),
         run_timeline_reader=Views(view),
         catalog=catalog,
-        default_model_reader=lambda: "deepseek-v4-flash-vision-exp",
+        boot=boot,
         context_breakdown_response=breakdown,
     )
     request = cast(Request, SimpleNamespace(app=SimpleNamespace(state=app_state)))

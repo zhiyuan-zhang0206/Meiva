@@ -278,14 +278,12 @@ def _load(
 def _model_target(
     db: Database, agent_id: int, *, catalog: ModelCatalog, read: UnderstandingRead
 ) -> tuple[str, ModelOverrides]:
-    # meiva:note
-    # `agent_model_target` takes the default model as a reader; the value is already read.
     return agent_model_target(
         db,
         agent_id,
         fallback=read.hierarchy_model,
         catalog=catalog,
-        default_model_reader=lambda: read.default_model,
+        default_model=read.default_model,
     )
 
 

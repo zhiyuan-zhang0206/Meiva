@@ -33,6 +33,7 @@ Agent directory, roster and detail preserve database facts while their required
 `supports_vision` field becomes null. The app's retained catalog result selects
 this read-only capability mode; there is no second catalog owner. Resolution and
 validation are owned by [[base/agents/observation/docs/observation.meiva.okf.md]].
+Routes that resolve an agent's effective model read the cluster default once per request through `request_default_model` and hand the value down.
 Health remains process liveness, not an assertion that model operations work.
 
 Reply suggestions and HTTP MCP tools receive a catalog reader so their

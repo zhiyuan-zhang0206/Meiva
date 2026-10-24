@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from base.cluster.machine import MachineIdentity
@@ -14,10 +15,16 @@ from services.upkeep.events_maintenance import daemon
 from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
 
 
+# meiva:note
+# The service configuration for a test: the boot owner's values with any field replaced. The mirror
+# directory defaults to one that holds no mirror files.
 def events_maintenance_config(
     process_config: ConfigBoot, **overrides: Any
 ) -> EventsMaintenanceConfig:
-    return replace(daemon.events_maintenance_config(process_config), **overrides)
+    return replace(
+        daemon.events_maintenance_config(process_config, mirror_dir=Path("/nonexistent-mirror")),
+        **overrides,
+    )
 
 
 def events_maintenance_db(

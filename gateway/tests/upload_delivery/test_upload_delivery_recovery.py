@@ -45,9 +45,9 @@ def uploaded_agent(
     machine_identity: MachineIdentity,
 ) -> Iterator[tuple[GatewayTestClient, int]]:
     # meiva:note
-    # The native upload code (`base.agents.upload_delivery.source`, `ops.upload_delivery`) reads
-    # `Path.home()` itself, so the one retained patch points it at the directory the gateway is
-    # built with (needs base/ops: take the home as a value).
+    # The native receiver (`ops.upload_delivery.receive`) reads `Path.home()` itself, so the one
+    # retained patch points it at the directory the gateway is built with (needs ops: take the
+    # home as a value). The gateway side takes that directory as `upload_home`.
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     unit = current_unit(local_machine=machine_identity.name())
     agent = seed_agent(db_conn)
@@ -234,6 +234,7 @@ def test_source_fsync_loss_and_concurrent_recovery_use_one_identity(
             [("f.png", b"native", "image/png")],
             InboundProvenance("cluster_bearer", "http"),
             local_machine=machine_identity.name(),
+            upload_home=client.app.state.gateway_config.upload_home,
         )
 
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -427,7 +428,8 @@ def test_guarded_routes_reject_invalid_agent_paths_before_native_effects(
     assert client.get(path).status_code == 422
     assert client.get(path + "/objects/0").status_code == 422
     assert db_conn.execute("SELECT count(*) FROM upload_delivery_batches").fetchone() == (0,)
-    assert not source.agent_upload_dir(invalid_agent, create=False, home=Path.home()).exists()
+    home = client.app.state.gateway_config.upload_home
+    assert not source.agent_upload_dir(invalid_agent, create=False, home=home).exists()
 
 
 # meiva:note

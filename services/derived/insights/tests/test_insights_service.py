@@ -53,13 +53,15 @@ def _app(
     timeline_inputs: TimestampPolicy = _TIMELINE_INPUTS,
     world: World | None = None,
 ) -> Any:
+    boot = ConfigBoot()
+    boot.set_field("llm_model", "deepseek-v4-flash-vision-exp")
     app = build_app(
         world.db if world else cast(Database, object()),
         world.pool if world else cast(ConnectionPool[Any], object()),
         _CONFIG,
         home=home,
         catalog=model_catalog,
-        default_model_reader=lambda: "deepseek-v4-flash-vision-exp",
+        boot=boot,
         timeline_inputs=timeline_inputs,
     )
     if world:
@@ -252,11 +254,11 @@ async def test_daemon_binds_live_rendering_to_its_configuration_owner(
         "home": str(short_dir),
     }
     assert apps[0].state.config.run_timeline_message_text_max == 37
-    model_reader = apps[0].state.default_model_reader
+    assert apps[0].state.boot is boot
     boot.set_field("llm_model", "first-process-model")
-    assert model_reader() == "first-process-model"
+    assert apps[0].state.boot.view.lm.llm_model == "first-process-model"
     boot.set_field("llm_model", "updated-process-model")
-    assert model_reader() == "updated-process-model"
+    assert apps[0].state.boot.view.lm.llm_model == "updated-process-model"
     inputs: TimestampPolicy = apps[0].state.timeline_inputs
     assert inputs.timestamps_enabled is False
     assert inputs.clock.format_timestamp(datetime(2026, 10, 10, 12, tzinfo=UTC)) == (

@@ -2,11 +2,15 @@ exports = ["daemon.py", "resolution.py", "rollup.py", "token_totals.py"]
 
 [uses]
 "alert_reconciler.py" = ["config.py"]
-"daemon.py" = ["alert_reconciler.py", "blob_vacuum.py", "config.py", "registry_gauge.py", "resolution.py", "rollup.py", "telemetry_replay.py", "token_totals.py"]
+"daemon.py" = ["alert_reconciler.py", "blob_vacuum.py", "config.py", "health_components.py", "loop_roster.py", "passes.py", "registry_gauge.py", "resolution.py", "rollup.py", "telemetry_replay.py", "token_totals.py"]
+"passes.py" = ["pass_policy.py"]
 "resolution.py" = ["config.py"]
 "rollup.py" = ["config.py", "token_totals.py"]
-"tests" = ["alert_reconciler.py", "blob_vacuum.py", "config.py", "daemon.py", "registry_gauge.py", "resolution.py", "rollup.py", "telemetry_replay.py", "token_totals.py"]
+"tests" = ["alert_reconciler.py", "blob_vacuum.py", "config.py", "daemon.py", "health_components.py", "loop_roster.py", "pass_policy.py", "passes.py", "registry_gauge.py", "resolution.py", "rollup.py", "telemetry_replay.py", "token_totals.py"]
 "token_totals.py" = ["config.py"]
 
 [purity]
 "__init__.py" = "strict"
+"health_components.py" = "strict"
+"loop_roster.py" = "strict"
+"pass_policy.py" = "strict"
