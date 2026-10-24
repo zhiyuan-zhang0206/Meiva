@@ -99,6 +99,7 @@ from services.agent_runner.agent_host.runtime import (
     cached_runtime,
     evict_runtimes,
     read_last_active_at,
+    record_harness_exit,
     refresh_cached_runtime,
 )
 from services.agent_runner.agent_host.scheduling.admission import TurnAdmission
@@ -174,7 +175,10 @@ class AgentHost:
         # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
         self._harness_registry = FileSessionRegistry(harness_sessions_dir())
         self._registrations = RegistrationStore(harness_registrations_dir())
-        self._sessions = HarnessSessions(self._registrations)
+        self._sessions = HarnessSessions(
+            self._registrations,
+            record_exit=partial(record_harness_exit, self._control_pool),
+        )
         self._rejected_configs: dict[int, str] = {}
         self._normalized_configs: dict[int, str] = {}
         # Eviction preserves in-flight runtimes so the next turn can reuse the same build.

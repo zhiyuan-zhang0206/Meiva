@@ -118,6 +118,14 @@ class AgyTransport:
     def alive(self) -> bool:
         return self._process is not None and self._process.returncode is None
 
+    # meiva:note
+    # The exit status of the CLI child, same three states as everywhere else: None
+    # while it runs or when no child was ever started, 0 normal, non-zero abnormal.
+    # The session records it on close, after this process has been reaped.
+    @property
+    def returncode(self) -> int | None:
+        return None if self._process is None else self._process.returncode
+
     @property
     def conversation_id(self) -> str | None:
         return self._conversation_id

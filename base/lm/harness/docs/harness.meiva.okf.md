@@ -112,6 +112,15 @@ completed-key replay are defined in
 Session registry persistence, attachment claims and harness matching are defined in
 [[base/lm/harness/docs/session-identity.meiva.okf.md|Harness session identity]].
 
+## How a session ends
+
+`close()` waits for the CLI child (and its tree) and then answers `exit_code`, in the
+same three states the agent row carries: `None` while the child is running or was
+never observable, `0` for a normal exit, non-zero for an abnormal one. The bridge
+re-exposes it as `TurnEngine.exit_code` for the host that retires the session, and
+only a close that finished is recorded — an agent on the built-in loop has no child
+at all and stays `NULL` rather than record a fake `0` (task #5616).
+
 ## Testing
 
 `base/lm/harness/tests/` covers the shared half alone — the handoff render and

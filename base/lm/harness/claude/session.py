@@ -30,10 +30,13 @@ from base.lm.harness.events import (
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import (
     ChildProbe,
+    ExitStatus,
     ProcessObservation,
     PsutilChildProbe,
     client_pid,
+    client_process,
     describe,
+    process_returncode,
     settle_close,
     snapshot,
     wait_gone,
@@ -170,7 +173,7 @@ class TurnTicket:
         self._future.exception()
 
 
-class ClaudeSession:
+class ClaudeSession(ExitStatus):
     def __init__(
         self,
         config: BridgeConfig,
@@ -203,6 +206,9 @@ class ClaudeSession:
         self._completed: OrderedDict[str, TurnOutcome] = OrderedDict()
         self._active: TurnTicket | None = None
         self._client: Any | None = None
+        # meiva:note
+        # The CLI child's exit status once this session closed it (three states: None
+        # while running/never observed, 0 normal, non-zero abnormal). Task #5616.
         self._reader: asyncio.Task[None] | None = None
         self._deadlines: dict[str, asyncio.Task[None]] = {}
         self._tasks = asyncio.TaskGroup()
@@ -254,7 +260,12 @@ class ClaudeSession:
             except ExceptionGroup as group:
                 self._emit(SessionFaulted(turn_id=None, error=f"session tasks failed: {group!r}"))
         if self._client is not None:
+            # meiva:note
+            # The SDK releases its transport inside `disconnect()`, so hold the child
+            # process now and ask it for its exit status afterwards (task #5616).
+            child = client_process(self._client)
             await self._client.disconnect()
+            self._exit_code = process_returncode(child)
         await settle_close(
             self._probe,
             watched,

@@ -76,6 +76,10 @@ class FakeSession:
         self.handoff_ticket: FakeTicket | None = None
         self.submitted: list[tuple[str, str | None, str]] = []
         self.session_id = None
+        # meiva:note
+        # The adapter contract's third state holder (task #5616): a fake has no child
+        # process, so it answers None unless a test sets one.
+        self.exit_code: int | None = None
         self._queue: list[BridgeEvent] = []
         self._n = 0
         self._opening = opening
