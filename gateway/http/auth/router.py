@@ -10,6 +10,7 @@ GET  /api/auth/check               — report whether the current session is val
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 from typing import Any
 
@@ -93,7 +94,7 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
     secret = config.cluster_secret
 
     login_limiter: LoginRateLimiter = request.app.state.login_limiter
-    remaining = login_limiter.lockout_remaining(ip)
+    remaining = login_limiter.lockout_remaining(ip, now=time.time())
     if remaining > 0:
         return error_response(
             request,
@@ -108,7 +109,7 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
     password = body.password
 
     if not password:
-        login_limiter.record_failure(ip)
+        login_limiter.record_failure(ip, now=time.time())
         return error_response(
             request,
             code="invalid_password",
@@ -126,7 +127,7 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
         cache=request.app.state.machine_token_acceptance,
     )
     if mint is None:
-        login_limiter.record_failure(ip)
+        login_limiter.record_failure(ip, now=time.time())
         return error_response(
             request,
             code="invalid_password",
@@ -237,7 +238,7 @@ async def redeem_login_ticket(body: LoginTicketRedeemRequest, request: Request) 
     """
     ip = request.client.host if request.client else "unknown"
     login_limiter: LoginRateLimiter = request.app.state.login_limiter
-    remaining = login_limiter.lockout_remaining(ip)
+    remaining = login_limiter.lockout_remaining(ip, now=time.time())
     if remaining > 0:
         return error_response(
             request,
@@ -251,7 +252,7 @@ async def redeem_login_ticket(body: LoginTicketRedeemRequest, request: Request) 
 
     mint = await _consume_login_ticket(request, body.ticket)
     if mint is None:
-        login_limiter.record_failure(ip)
+        login_limiter.record_failure(ip, now=time.time())
         return error_response(
             request,
             code="invalid_login_ticket",

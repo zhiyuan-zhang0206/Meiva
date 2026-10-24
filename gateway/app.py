@@ -180,9 +180,10 @@ def _build_request_resources(
 
     app.state.auth401_log = rejection_log.AuthRejectionLog()
     app.state.login_limiter = LoginRateLimiter(
-        max_failures_reader=lambda: config.view.gateway.login_max_failures,
-        lockout_seconds_reader=lambda: config.view.gateway.login_lockout_seconds,
-        config=LoginRateLimitConfig(),
+        LoginRateLimitConfig(
+            max_failures=config.view.gateway.login_max_failures,
+            lockout_seconds=config.view.gateway.login_lockout_seconds,
+        )
     )
 
     insights_client = insights_router.build_client(process.home)
