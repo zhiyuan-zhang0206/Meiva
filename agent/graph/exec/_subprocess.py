@@ -50,6 +50,7 @@ from ._child_boundary import (
 from ._guard import inspection_refusal, violation_refusal
 from ._output_pipe import ExecOutputPipe
 from ._poll import Stop, plan_poll
+from ._remote import run_via_exec_host
 from ._result import ExecCrashed, ExecResult
 from ._stream import ExecOutputChunkPublisher, StreamingTextIO
 
@@ -220,10 +221,78 @@ def _write_request_failure(
     return None
 
 
+async def _run_local_child(
+    *,
+    parent: ParentFacts,
+    agent_id: int | None,
+    request_path: Path,
+    result_path: Path,
+    timeout: float,
+    stream: StreamingTextIO,
+    chunk_publisher: ExecOutputChunkPublisher | None,
+    cancel_event: asyncio.Event,
+    config_overlay: dict[str, object] | None,
+    birth_config: dict[str, object] | None,
+) -> tuple[int | None, bool, bool] | ExecCrashed:
+    domain: ExecProcessDomain | None = None
+    reader: ExecOutputPipe | None = None
+    try:
+        try:
+            launch = plan_child_launch(
+                parent,
+                agent_id,
+                request_path,
+                result_path,
+                config_overlay=config_overlay,
+                birth_config=birth_config,
+            )
+            proc, domain = spawn_exec_child(launch)
+        except OSError as exc:
+            return ExecCrashed(
+                output=f"exec subprocess could not be spawned: {exc}",
+                exc=exc,
+            )
+
+        leader = psutil.Process(proc.pid)
+        reader = ExecOutputPipe(proc, stream)
+        reader.watch()
+
+        cancelled, timed_out = await _poll_child(
+            domain, leader, stream, chunk_publisher, cancel_event, timeout, reader
+        )
+        if cancelled or timed_out:
+            await _await_leader_exit(domain, leader)
+        _close_domain(domain)
+        await reader.finish(_OUTPUT_DRAIN_TIMEOUT_S)
+        _close_output(reader)
+
+        if chunk_publisher is not None:
+            pending = stream.take_pending()
+            if pending:
+                chunk_publisher.publish(pending)
+
+        return proc.returncode, cancelled, timed_out
+    except BaseException as original:
+        # meiva:note
+        # Cancellation by the exec node's outer shield (asyncio.wait_for) and any other
+        # failure leave nothing running: the same synchronous, bounded close as above.
+        if domain is not None:
+            try:
+                _close_domain(domain)
+                if reader is not None:
+                    reader.finish_now(_OUTPUT_DRAIN_TIMEOUT_S)
+                    _close_output(reader)
+            except Exception as cleanup:
+                original.add_note(f"exec cleanup failed: {cleanup!r}")
+        raise
+
+
 # meiva:note
 # Run `code` in one disposable child process; poll every 50ms monitoring
 # exit / cancel_event / deadline (same priority as the old thread loop:
-# cancel > deadline > natural completion).
+# cancel > deadline > natural completion). When `exec-host.sock` is listening
+# in `exec_dir.parent`, delegates child spawn and process-group supervision to
+# `exec-host`; otherwise spawns `agent.execution.child` locally.
 #
 # Returns the `ExecResult` sum type the exec node dispatches plus the raw
 # child envelope (None when the child never wrote one — SIGKILL / watchdog /
@@ -257,44 +326,37 @@ async def run_in_subprocess(
         return request_error, None
 
     stream = StreamingTextIO(max_chars=accumulation_max_chars)
-    domain: ExecProcessDomain | None = None
-    reader: ExecOutputPipe | None = None
     try:
-        try:
-            launch = plan_child_launch(
-                parent,
-                agent_id,
-                request_path,
-                result_path,
+        outcome = await run_via_exec_host(
+            exec_dir=exec_dir,
+            parent=parent,
+            agent_id=agent_id,
+            request_path=request_path,
+            result_path=result_path,
+            timeout=timeout,
+            stream=stream,
+            chunk_publisher=chunk_publisher,
+            cancel_event=cancel_event,
+            config_overlay=config_overlay,
+            birth_config=birth_config,
+        )
+        if outcome is None:
+            outcome = await _run_local_child(
+                parent=parent,
+                agent_id=agent_id,
+                request_path=request_path,
+                result_path=result_path,
+                timeout=timeout,
+                stream=stream,
+                chunk_publisher=chunk_publisher,
+                cancel_event=cancel_event,
                 config_overlay=config_overlay,
                 birth_config=birth_config,
             )
-            proc, domain = spawn_exec_child(launch)
-        except OSError as exc:
-            return ExecCrashed(
-                output=f"exec subprocess could not be spawned: {exc}",
-                exc=exc,
-            ), None
-
-        leader = psutil.Process(proc.pid)
-        reader = ExecOutputPipe(proc, stream)
-        reader.watch()
-
-        cancelled, timed_out = await _poll_child(
-            domain, leader, stream, chunk_publisher, cancel_event, timeout, reader
-        )
-        if cancelled or timed_out:
-            await _await_leader_exit(domain, leader)
-        _close_domain(domain)
-        await reader.finish(_OUTPUT_DRAIN_TIMEOUT_S)
-        _close_output(reader)
-
-        if chunk_publisher is not None:
-            pending = stream.take_pending()
-            if pending:
-                chunk_publisher.publish(pending)
-
-        payload, envelope_error = read_result_envelope(result_path, proc.returncode)
+        if isinstance(outcome, ExecCrashed):
+            return outcome, None
+        returncode, cancelled, timed_out = outcome
+        payload, envelope_error = read_result_envelope(result_path, returncode)
         return (
             result_from_payload(
                 stream.getvalue(),
@@ -307,19 +369,6 @@ async def run_in_subprocess(
             ),
             payload,
         )
-    except BaseException as original:
-        # meiva:note
-        # Cancellation by the exec node's outer shield (asyncio.wait_for) and any other
-        # failure leave nothing running: the same synchronous, bounded close as above.
-        if domain is not None:
-            try:
-                _close_domain(domain)
-                if reader is not None:
-                    reader.finish_now(_OUTPUT_DRAIN_TIMEOUT_S)
-                    _close_output(reader)
-            except Exception as cleanup:
-                original.add_note(f"exec cleanup failed: {cleanup!r}")
-        raise
     finally:
         for path in (request_path, result_path):
             with contextlib.suppress(FileNotFoundError):
