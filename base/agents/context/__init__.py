@@ -41,6 +41,7 @@ from typing import TYPE_CHECKING, Any, Self
 
 from base.agents.context.clients import ClientSet, LazyConnection
 from base.agents.context.identity import AgentIdentity
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
 from base.agents.sdk.capture import SdkCaptureOwner
@@ -144,6 +145,15 @@ class MeivaContext:
         if self.clock_factory is None:
             raise RuntimeError("this MeivaContext carries no clock factory")
         return self.clock_factory()
+
+    # meiva:note
+    # The message-timestamp policy of the unit of work that asks: this owner's clock and the
+    # agent's `general.message_timestamps`, read once.
+    def timestamp_policy(self) -> TimestampPolicy:
+        return TimestampPolicy(
+            clock=self.require_clock(),
+            timestamps_enabled=self.require_agent().read("general", "message_timestamps"),
+        )
 
     bus: EventBus | None = None
     """The cluster Redis / live-events handle, for the same."""

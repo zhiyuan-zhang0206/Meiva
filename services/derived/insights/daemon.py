@@ -15,7 +15,7 @@ from pathlib import Path
 
 import uvicorn
 
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -83,11 +83,9 @@ async def run(*, home: Path, config: ConfigBoot, database: Callable[[], Database
                     home=home,
                     catalog=build_model_catalog(),
                     default_model_reader=lambda: config.view.lm.llm_model,
-                    timeline_inputs=TimelineReadInputs(
-                        clock_factory=lambda: Clock(
-                            clock_config_from_boot(config), timers=SYSTEM_TIMERS
-                        ),
-                        timestamps_enabled=lambda: config.view.general.message_timestamps,
+                    timeline_inputs=TimestampPolicy(
+                        clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+                        timestamps_enabled=config.view.general.message_timestamps,
                     ),
                 ),
                 log_level="warning",

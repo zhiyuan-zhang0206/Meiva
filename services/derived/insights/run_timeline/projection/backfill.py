@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 
 from base.agents.history.checkpoint_segment import read_checkpoint_segment
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.config import ConfigBoot
@@ -35,9 +35,9 @@ def main() -> None:
             process="timeline-projection-backfill",
         ),
     )
-    inputs = TimelineReadInputs(
-        lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
-        lambda: config.view.general.message_timestamps,
+    inputs = TimestampPolicy(
+        clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+        timestamps_enabled=config.view.general.message_timestamps,
     )
     pending = list(dict.fromkeys(args.agent_ids))
     counts = dict.fromkeys(pending, 0)

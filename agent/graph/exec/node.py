@@ -69,7 +69,6 @@ from agent.messages import exec_output_message
 from agent.nodes import AFTER_EXEC, EXEC
 from agent.state import AttachState, validate_plugin_state_keys
 from base.agents.context import MeivaContext, agent_id_from_config
-from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.messages.kwargs import ExecStatus
 from base.events.live.projection import Cancelled, ExecOutput, ExecStart
 from base.events.live.publisher import AgentEventPublisher
@@ -141,10 +140,7 @@ async def exec_node(
         agent_id=agent_id_from_config(config),
         turn_progress=runtime.context.turn_progress,
         stall=StallConfig(runtime.context.require_agent().read("agent", "node_stall_dump_seconds")),
-        timeline_inputs=TimelineReadInputs(
-            runtime.context.require_clock,
-            lambda: runtime.context.require_agent().read("general", "message_timestamps"),
-        ),
+        timeline_inputs=runtime.context.timestamp_policy(),
         timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
     ):
         return await exec_node_impl(state, runtime, config, process=process)

@@ -41,7 +41,7 @@ from base.agents.history.hierarchy.generate import (
 from base.agents.history.hierarchy.group import GroupReplyError
 from base.agents.history.hierarchy.leaf_groups import UnitGroup, parse_reply, resolve_groups
 from base.agents.history.hierarchy.units import MessageUnit, catalog_line, divide_units
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.lm.catalog import ModelCatalog
 
 _CHUNK_PROMPT = """The messages above are background; what follows is a separate task.
@@ -111,7 +111,7 @@ def generate_chunk(
     prefix: Sequence[BaseMessage],
     start_offset: int,
     *,
-    timeline_inputs: TimelineReadInputs,
+    timeline_inputs: TimestampPolicy,
     model: str,
     catalog: ModelCatalog,
     agent_id: int,

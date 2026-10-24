@@ -28,7 +28,6 @@ from agent.llm.usage import log_llm_usage
 from agent.nodes import AFTER_EXEC, BEFORE_EXEC
 from agent.state_channels import CircuitState
 from base.agents.context import MeivaContext, agent_id_from_config
-from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.events.live.projection import TokenUsage
 from base.events.live.publisher import AgentEventPublisher
@@ -202,10 +201,7 @@ async def llm_attempt(
         agent_id=agent_id,
         turn_progress=runtime.context.turn_progress,
         stall=StallConfig(runtime.context.require_agent().read("agent", "node_stall_dump_seconds")),
-        timeline_inputs=TimelineReadInputs(
-            runtime.context.require_clock,
-            lambda: runtime.context.require_agent().read("general", "message_timestamps"),
-        ),
+        timeline_inputs=runtime.context.timestamp_policy(),
         timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
     ):
         try:

@@ -17,8 +17,9 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.agent_contract import AgentStatus
+from base.clock import Clock
 from base.config import settings
 from base.db import Database, create_agent
 from base.lm.catalog import ModelCatalog
@@ -154,7 +155,7 @@ class Harness:
         self.decide = FakeDecide()
         self.chat = FakeChat()
         self.service = ReplySuggestionService(decide=self.decide, draft_model=self.chat.factory)
-        self.rendering = TimelineReadInputs(_no_clock, lambda: False)
+        self.rendering = TimestampPolicy(clock=Clock.from_settings(), timestamps_enabled=False)
         self.agent_id = self._create_idle_agent()
         self._versions = 0
         self.store(conversation())
@@ -197,7 +198,3 @@ class Harness:
             catalog=self.catalog,
             keys=None if isinstance(self.catalog, CatalogLoadFailure) else inert_keys(self.catalog),
         )
-
-
-def _no_clock() -> Any:
-    raise AssertionError("the excerpt never renders a timestamp")

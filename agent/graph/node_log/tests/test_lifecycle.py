@@ -6,14 +6,14 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 
 from agent.graph import node_log
 from agent.graph.node_log import StallConfig, node_lifecycle
-from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.messages.kwargs import MeivaMsgType
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.observation.turn_progress import TurnProgress
 from base.clock import Clock
 from base.events.live.tests.live_capture import LiveEvents
 from base.log.tests.log_records import LogRecords
 
-_TIMELINE_INPUTS = TimelineReadInputs(Clock.from_settings, lambda: False)
+_TIMELINE_INPUTS = TimestampPolicy(clock=Clock.from_settings(), timestamps_enabled=False)
 _TIMELINE_LIMIT = 100
 
 
@@ -23,7 +23,7 @@ def _enter(
     *,
     node: str = "llm",
     full_window: bool = False,
-    timeline_inputs: TimelineReadInputs = _TIMELINE_INPUTS,
+    timeline_inputs: TimestampPolicy = _TIMELINE_INPUTS,
     timeline_limit: int = _TIMELINE_LIMIT,
 ):
     return node_lifecycle(
@@ -244,7 +244,9 @@ async def test_a_render_failure_leaves_the_cursor_so_the_next_enter_renders_the_
         async with _enter(
             live_events,
             messages,
-            timeline_inputs=TimelineReadInputs(Clock.from_settings, failing_timestamps),
+            timeline_inputs=TimestampPolicy(
+                clock=Clock.from_settings(), timestamps_enabled=failing_timestamps()
+            ),
         ):
             pass
     assert _snapshots(await live_events.events()) == []

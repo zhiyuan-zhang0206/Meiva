@@ -39,9 +39,9 @@ from typing import Literal, cast
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items
-from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.messages.envelope import inbound_body
 from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.lm.content import message_addl_kwargs
 
 UnitKind = Literal["work", "text", "inbound", "note"]
@@ -107,7 +107,7 @@ def _by_message(items: Sequence[TimelineItem]) -> list[tuple[int, list[TimelineI
 
 
 def read_times(
-    messages: Sequence[BaseMessage], *, timeline_inputs: TimelineReadInputs
+    messages: Sequence[BaseMessage], *, timeline_inputs: TimestampPolicy
 ) -> list[datetime | None]:
     """The time each message was read by the model, per message in message order.
 
@@ -201,7 +201,7 @@ class _Divider:
 
 
 def divide_units(
-    messages: Sequence[BaseMessage], *, timeline_inputs: TimelineReadInputs
+    messages: Sequence[BaseMessage], *, timeline_inputs: TimestampPolicy
 ) -> list[MessageUnit]:
     """Divide a message list into layer-0 units, ordered by first message index.
 

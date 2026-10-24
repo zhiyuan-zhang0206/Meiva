@@ -25,13 +25,13 @@ from base.agents.history.delta_read_compat import (
     wrap_saver_reads_with_delta_reconstruction,
 )
 from base.agents.history.timeline import TimelineItem, build_timeline_items
-from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.messages.identity import normalize_stored_message_ids
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
 from base.config import settings
 
-_TIMELINE_INPUTS = TimelineReadInputs(
-    Clock.from_settings, lambda: settings.general.message_timestamps
+_TIMELINE_INPUTS = TimestampPolicy(
+    clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
 
 

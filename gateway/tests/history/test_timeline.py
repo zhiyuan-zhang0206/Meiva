@@ -24,15 +24,15 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import BaseMessage, HumanMessage
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
 from base.config import settings
 from base.db import create_agent
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.support.checkpoints.unreadable import put_unreadable_head
 
-_TIMELINE_INPUTS = TimelineReadInputs(
-    Clock.from_settings, lambda: settings.general.message_timestamps
+_TIMELINE_INPUTS = TimestampPolicy(
+    clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
 
 

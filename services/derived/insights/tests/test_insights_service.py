@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage
 from psycopg_pool import ConnectionPool
 
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
@@ -41,8 +41,8 @@ from services.derived.insights.run_timeline.tests.test_projection import World
 from services.derived.insights.run_timeline.tests.test_projection import world as world
 
 _CONFIG = InsightsConfig(run_timeline_message_text_max=20)
-_TIMELINE_INPUTS = TimelineReadInputs(
-    lambda: Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS), lambda: False
+_TIMELINE_INPUTS = TimestampPolicy(
+    clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS), timestamps_enabled=False
 )
 
 
@@ -50,7 +50,7 @@ def _app(
     *,
     home: Path,
     model_catalog: ModelCatalog,
-    timeline_inputs: TimelineReadInputs = _TIMELINE_INPUTS,
+    timeline_inputs: TimestampPolicy = _TIMELINE_INPUTS,
     world: World | None = None,
 ) -> Any:
     app = build_app(
@@ -153,27 +153,15 @@ def test_the_app_answers_over_the_bound_socket(
     assert not thread.is_alive()
 
 
-class RenderingPolicy:
-    def __init__(self, *, enabled: bool) -> None:
-        self.enabled = enabled
-        self.reads = 0
-        self.clock_reads = 0
-        self.error: ValueError | None = None
-        self.inputs = TimelineReadInputs(self.clock, self.timestamps)
-
-    def timestamps(self) -> bool:
-        self.reads += 1
-        if self.error is not None:
-            raise self.error
-        return self.enabled
-
-    def clock(self) -> Clock:
-        self.clock_reads += 1
-        return Clock(
+def _policy(*, enabled: bool) -> TimestampPolicy:
+    return TimestampPolicy(
+        clock=Clock(
             ClockConfig("UTC", "UTC", False),
             now=lambda: datetime(2026, 10, 10, 12, tzinfo=UTC),
             timers=SYSTEM_TIMERS,
-        )
+        ),
+        timestamps_enabled=enabled,
+    )
 
 
 def _compact_history(world: World) -> list[str]:
@@ -193,19 +181,15 @@ def _compact_history(world: World) -> list[str]:
     return world.loads
 
 
-def test_apps_keep_their_rendering_policy_and_cache_separate_and_live(
+def test_apps_keep_their_rendering_policy_and_cache_separate(
     world: World, tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
     loads = _compact_history(world)
-    hidden, shown = RenderingPolicy(enabled=False), RenderingPolicy(enabled=True)
-    first = _app(
-        home=tmp_path, model_catalog=model_catalog, timeline_inputs=hidden.inputs, world=world
-    )
-    second = _app(
-        home=tmp_path, model_catalog=model_catalog, timeline_inputs=shown.inputs, world=world
-    )
-    assert first.state.timeline_inputs is hidden.inputs
-    assert second.state.timeline_inputs is shown.inputs
+    hidden, shown = _policy(enabled=False), _policy(enabled=True)
+    first = _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=hidden, world=world)
+    second = _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=shown, world=world)
+    assert first.state.timeline_inputs is hidden
+    assert second.state.timeline_inputs is shown
     path = "/api/agents/9/run-timeline/messages?start=0&end=0&full=true"
 
     assert TestClient(first).get(path).json()["messages"][0]["parts"][0]["text"] == (
@@ -214,41 +198,6 @@ def test_apps_keep_their_rendering_policy_and_cache_separate_and_live(
     assert TestClient(second).get(path).json()["messages"][0]["parts"][0]["text"] == (
         "Compact summary [2026-10-10 12:00:00]:\n\nsummary"
     )
-
-    assert (hidden.reads, hidden.clock_reads) == (3, 0)
-    assert (shown.reads, shown.clock_reads) == (3, 3)
-    assert len(loads) == 2
-
-    shown.enabled = False
-    assert TestClient(second).get(path).json()["messages"][0]["parts"][0]["text"] == (
-        "Compact summary:\n\nsummary"
-    )
-    assert (shown.reads, shown.clock_reads) == (4, 3)
-    assert len(loads) == 2
-
-
-def test_a_rendering_error_propagates_and_does_not_cache_a_failed_view(
-    world: World, tmp_path: Path, *, model_catalog: ModelCatalog
-) -> None:
-    loads = _compact_history(world)
-    policy = RenderingPolicy(enabled=False)
-    failure = ValueError("invalid rendering policy")
-    policy.error = failure
-    client = TestClient(
-        _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=policy.inputs, world=world)
-    )
-    path = "/api/agents/9/run-timeline/messages?start=0&end=0&full=true"
-    with pytest.raises(ValueError) as caught:
-        client.get(path)
-    assert caught.value is failure
-
-    policy.error = None
-    assert client.get(path).status_code == 200
-    assert len(loads) == 2
-    policy.error = failure
-    with pytest.raises(ValueError) as caught:
-        client.get(path)
-    assert caught.value is failure
     assert len(loads) == 2
 
 
@@ -308,16 +257,10 @@ async def test_daemon_binds_live_rendering_to_its_configuration_owner(
     assert model_reader() == "first-process-model"
     boot.set_field("llm_model", "updated-process-model")
     assert model_reader() == "updated-process-model"
-    inputs: TimelineReadInputs = apps[0].state.timeline_inputs
-    assert inputs.timestamps_enabled() is False
-    assert inputs.clock_factory().format_timestamp(datetime(2026, 10, 10, 12, tzinfo=UTC)) == (
+    inputs: TimestampPolicy = apps[0].state.timeline_inputs
+    assert inputs.timestamps_enabled is False
+    assert inputs.clock.format_timestamp(datetime(2026, 10, 10, 12, tzinfo=UTC)) == (
         "[2026-10-10 21:00:00]"
-    )
-    boot.set_field("message_timestamps", True)
-    boot.set_field("timezone", "UTC")
-    assert inputs.timestamps_enabled() is True
-    assert inputs.clock_factory().format_timestamp(datetime(2026, 10, 10, 12, tzinfo=UTC)) == (
-        "[2026-10-10 12:00:00]"
     )
     assert closed == [True]
     assert not insights_pidfile(short_dir).exists()

@@ -72,13 +72,13 @@ from base.agents.impersonation import (
     relay_get,
 )
 from base.agents.impersonation import native_status as read_status
-from base.agents.impersonation.notes import HandoffNotes
 from base.agents.impersonation.relay import (
     record_degradation,
     record_relay_failure,
     stamp_relay_failure,
 )
 from base.agents.impersonation.status import ImpersonationStatus
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision, relay_exited
 from base.agents.observation.relay_supervision import heartbeat_fresh as _heartbeat_fresh
 from base.agents.observation.relay_supervision import terminate_relay as terminate_relay
@@ -229,7 +229,7 @@ async def _activate_accepted(
     incarnation: RuntimeIncarnation,
     relays: RelaySupervision,
     *,
-    notes: HandoffNotes,
+    notes: TimestampPolicy,
     host: TakeoverHost,
 ) -> dict[str, Any] | None:
     """Activate an accepted lease; None when the relay gate failed and native control resumes."""
@@ -294,7 +294,7 @@ async def settle_checkpoint(
     *,
     activate_accepted: bool = True,
     incarnation: RuntimeIncarnation | None,
-    notes: HandoffNotes,
+    notes: TimestampPolicy,
     host: TakeoverHost,
 ) -> bool:
     """After invocation+flush, activate; apply terminal deltas exactly once."""

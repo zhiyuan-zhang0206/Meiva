@@ -89,7 +89,7 @@ from base.agents.history.hierarchy.rebuild import (
     run_rebuild,
 )
 from base.agents.history.hierarchy.units import divide_units
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.observation.snapshot import agent_model_target
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides
@@ -184,7 +184,9 @@ def describe(
         tools=tools,
         corrections=inputs.corrections(),
         on_call=calls.append,
-        timeline_inputs=TimelineReadInputs(inputs.clock_factory, inputs.timestamps_enabled),
+        timeline_inputs=TimestampPolicy(
+            clock=inputs.clock_factory(), timestamps_enabled=inputs.timestamps_enabled()
+        ),
     )
 
 
@@ -298,7 +300,9 @@ async def run_job(
         unit.kind == "note"
         for unit in divide_units(
             list(located.messages),
-            timeline_inputs=TimelineReadInputs(inputs.clock_factory, inputs.timestamps_enabled),
+            timeline_inputs=TimestampPolicy(
+                clock=inputs.clock_factory(), timestamps_enabled=inputs.timestamps_enabled()
+            ),
         )
     ):
         # Nothing but framework-injected notes: there is no matter to describe.

@@ -56,7 +56,6 @@ from agent.messages import has_conversation
 from agent.nodes import BEFORE_LLM, CLAIM, END
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from base.agents.context import MeivaContext, agent_id_from_config
-from base.agents.history.timeline_inputs import TimelineReadInputs
 
 from ._decide import decide
 from ._dispatch import BatchState, dispatch_batch
@@ -218,10 +217,7 @@ async def claim_node(
         turn_progress=runtime.context.turn_progress,
         stall=StallConfig(runtime.context.require_agent().read("agent", "node_stall_dump_seconds")),
         full_window=will_idle,
-        timeline_inputs=TimelineReadInputs(
-            runtime.context.require_clock,
-            lambda: runtime.context.require_agent().read("general", "message_timestamps"),
-        ),
+        timeline_inputs=runtime.context.timestamp_policy(),
         timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
     ):
         return await claim_node_impl(state, runtime, config)

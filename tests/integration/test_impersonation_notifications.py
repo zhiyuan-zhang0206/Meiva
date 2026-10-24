@@ -22,8 +22,8 @@ from base.agents import impersonation as leases
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.impersonation.maintenance import remind_expiring_impersonations
-from base.agents.impersonation.notes import HandoffNotes
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
@@ -322,7 +322,7 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
         owner.agent_id,
         runtime.context.relays,
         incarnation=successor,
-        notes=HandoffNotes(Clock.from_settings, lambda: False),
+        notes=TimestampPolicy(clock=Clock.from_settings(), timestamps_enabled=False),
         host=process_host(machine_identity.name()),
     )
     resumed = await claim_node(

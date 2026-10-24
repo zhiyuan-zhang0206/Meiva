@@ -29,7 +29,6 @@ from agent.hooks.compact_events import emit_compact_finished, emit_compact_start
 from agent.messages import NoteTag, security_note_message, system_note_message
 from agent.nodes import BEFORE_LLM, CLAIM, END
 from base.agents.context import MeivaContext
-from base.agents.messages.envelope import EnvelopeReadInputs
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.injection_scan import scan_inbound_content
 from base.agents.messages.kwargs import MeivaMsgType
@@ -105,9 +104,7 @@ async def _handle_chat(
             read_security_enabled=lambda: ctx.require_agent().read(
                 "agent", "security_scan_enabled"
             ),
-            envelope_inputs=EnvelopeReadInputs(
-                ctx.require_clock, lambda: ctx.require_agent().read("general", "message_timestamps")
-            ),
+            envelope_inputs=ctx.timestamp_policy(),
             expand_command=ctx.require_commands().expand,
             gateway=lambda: ctx.gateway,
         )

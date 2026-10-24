@@ -21,7 +21,7 @@ from base.agents.history.checkpoint import (
 from base.agents.history.checkpoint_segment import read_checkpoint_segment
 from base.agents.history.hierarchy.serve import serve_nodes
 from base.agents.history.hierarchy.store import load_nodes
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db import Database
 from services.derived.insights.run_timeline.projection.derive import segment_view
@@ -63,9 +63,9 @@ class World:
         self.loads: list[str] = []
         self.clock = 0.0
         self.version = 0
-        self.inputs = TimelineReadInputs(
-            lambda: Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
-            lambda: False,
+        self.inputs = TimestampPolicy(
+            clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
+            timestamps_enabled=False,
         )
         self.jobs = IndexJobs(self.step)
         self.reader = self.new_reader()

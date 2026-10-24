@@ -6,7 +6,7 @@
 
 from fastapi import Request
 
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock
 from base.config.domains.agent.runtime import AgentRuntimeSettings
 from base.config.service_read import ConfigAuthority
@@ -27,10 +27,9 @@ __all__ = [
 ]
 
 
-def timeline_rendering(config: GatewayConfig) -> TimelineReadInputs:
+def timeline_rendering(config: GatewayConfig) -> TimestampPolicy:
     clock = Clock(config.clock, timers=SYSTEM_TIMERS)
-    timestamps = config.message_timestamps
-    return TimelineReadInputs(clock_factory=lambda: clock, timestamps_enabled=lambda: timestamps)
+    return TimestampPolicy(clock=clock, timestamps_enabled=config.message_timestamps)
 
 
 def timeline_read(config: GatewayConfig) -> TimelineRead:

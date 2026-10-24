@@ -5,17 +5,17 @@ from datetime import UTC, datetime
 from langchain_core.messages import AIMessage
 
 from base.agents.history.timeline import ai_message_items, build_timeline_items
-from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.kwargs import ExecStatus
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
 from base.config import settings
 from gateway.tests.history.test_timeline import (
     test_client as test_client,
 )
 
-_TIMELINE_INPUTS = TimelineReadInputs(
-    Clock.from_settings, lambda: settings.general.message_timestamps
+_TIMELINE_INPUTS = TimestampPolicy(
+    clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
 
 
