@@ -33,7 +33,7 @@ RUN = PlanRun(
 # Keep the native job fields from run 40114717531 and add the new producer generation step.
 def _job(attempt: int = 1, **changes: Any) -> dict[str, Any]:
     return {
-        "id": 120933519352,
+        "id": 120933519351 + attempt,
         "run_id": RUN.run_id,
         "workflow_name": "CI",
         "head_branch": "trunk-merge/pr-6957/fca509c9-56d0-4d24-8ceb-3d90b65e10d2",
@@ -157,6 +157,22 @@ def test_complete_pagination_considers_the_highest_actual_attempt() -> None:
     assert producer_attempt(records(pages, "jobs"), RUN) == 2
     with pytest.raises(ValueError, match="complete population"):
         records(pages[:1], "jobs")
+
+
+@pytest.mark.parametrize("identifier", [None, True, 0, -1, "9", {}])
+def test_pagination_requires_native_positive_record_ids(identifier: object) -> None:
+    with pytest.raises(ValueError, match="positive native ids"):
+        records([{"total_count": 1, "jobs": [_job(id=identifier)]}], "jobs")
+
+
+def test_repeated_unrelated_row_cannot_hide_a_newer_producer() -> None:
+    unrelated = _job(id=10, name="another job")
+    pages = [
+        {"total_count": 3, "jobs": [_job(), unrelated]},
+        {"total_count": 3, "jobs": [unrelated]},
+    ]
+    with pytest.raises(ValueError, match="repeated a native record"):
+        records(pages, "jobs")
 
 
 @pytest.mark.parametrize(

@@ -39,7 +39,16 @@ def records(pages: object, field: str) -> list[dict[str, Any]]:
         result.extend(batch)
     if totals != {len(result)}:
         raise ValueError("GitHub pagination did not deliver the complete population")
+    _validate_record_ids(result)
     return result
+
+
+def _validate_record_ids(rows: list[dict[str, Any]]) -> None:
+    identifiers = [row["id"] for row in rows]
+    if any(type(identifier) is not int or identifier <= 0 for identifier in identifiers):
+        raise ValueError("GitHub records require positive native ids")
+    if len(set(identifiers)) != len(identifiers):
+        raise ValueError("GitHub pagination repeated a native record")
 
 
 def _producer_versions(jobs: list[dict[str, Any]], run: PlanRun) -> dict[int, dict[str, Any]]:

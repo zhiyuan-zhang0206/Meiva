@@ -39,7 +39,7 @@ fingerprint guesses an execution identity. The consumer checks the bundle receip
 against the marker before restoring input.
 Artifacts are named by run and actual producer attempt and must be unique,
 unexpired and tied to the same source. API errors, malformed metadata, incomplete
-pagination and deadline expiry fail closed.
+pagination, duplicate native records and deadline expiry fail closed.
 
 Shared plans require schema v2 and `--file-shard-shared` on producer and consumers.
 Before restricting collection, the plugin compares the exact Git tree, clean
