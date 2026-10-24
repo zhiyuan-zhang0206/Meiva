@@ -620,7 +620,7 @@ def test_snapshot_retention_scans_the_nested_computer_dir(
 
 
 def test_retention_family_sets_stay_in_sync() -> None:
-    from base.host.system.logs_job import FAMILY_DAYS
+    from base.host.system.logs_content import FAMILY_DAYS
     from cli.commands.observability.logs import FAMILY_DEFAULT_DAYS
     from cli.parsers.logs import FAMILY_DAYS_NAMES
 

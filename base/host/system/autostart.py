@@ -50,7 +50,6 @@ from loguru import logger
 from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S, boot_start_arguments
 from base.host.system.boot_unit import install, uninstall
 from base.host.system.cron import (
-    LAUNCHD_LABEL_PREFIX,
     bootout_launchd_job,
     launchd_env_block,
     meiva_binary_path,
@@ -60,6 +59,7 @@ from base.host.system.cron import (
     unregister_platform_job,
 )
 from base.host.system.hostport import Host
+from base.host.system.job_values import LAUNCHD_LABEL_PREFIX
 from base.paths import meiva_home
 
 _LABEL = f"{LAUNCHD_LABEL_PREFIX}.autostart"
