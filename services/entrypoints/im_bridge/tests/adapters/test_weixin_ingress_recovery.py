@@ -2,28 +2,27 @@
 
 import asyncio
 from pathlib import Path
-from typing import Any
 
 import psycopg
 import pytest
 
 from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter, save_account
 from services.entrypoints.im_bridge.ingress.store import WeixinIngressStore
-from services.entrypoints.im_bridge.ingress.types import (
-    IngressStatus,
-    StalePollBindingError,
-)
+from services.entrypoints.im_bridge.ingress.types import IngressStatus
+from services.entrypoints.im_bridge.outbound.claim_fence import StalePollBindingError
 from services.entrypoints.im_bridge.tests.adapters.weixin_native import NativeWeixin, message
+from services.entrypoints.im_bridge.tests.support import failing_update, held_table_lock
 
 
 async def replace_account(native: NativeWeixin, account_id: str) -> WeixinAdapter:
     save_account(
+        native.state_dir,
         account_id=account_id,
         bot_token="isolated-test-token",  # noqa: S106
         user_id="owner",
         base_url="https://provider.example",
     )
-    adapter = WeixinAdapter(native.core, client=native.adapter._http)
+    adapter = WeixinAdapter(native.core, state_dir=native.state_dir, client=native.adapter._http)
     native.core.register(adapter)
     store = WeixinIngressStore(native.pool)
     store.initialize("https://provider.example", account_id)
@@ -116,56 +115,51 @@ async def test_account_caches_preserve_legacy_files_and_never_restore_old_peer_s
 
 
 async def test_fresh_simultaneous_switch_calls_once_and_hint_failure_keeps_business_acceptance(
-    native_weixin: NativeWeixin, monkeypatch: pytest.MonkeyPatch
+    native_weixin: NativeWeixin, db_url: str
 ) -> None:
-    core = native_weixin.core
-    owner = core._handle_command
-    entered, release = asyncio.Event(), asyncio.Event()
-    calls = 0
-
-    async def controlled(*args: Any, **kwargs: Any) -> object:
-        nonlocal calls
-        calls += 1
-        entered.set()
-        await release.wait()
-        return await owner(*args, **kwargs)
-
-    async def failed_hint(*_args: object, **_kwargs: object) -> None:
-        raise RuntimeError("injected hint failure")
-
-    monkeypatch.setattr(core, "_handle_command", controlled)
-    monkeypatch.setattr(core, "_send", failed_hint)
+    native_weixin.provider_send_responses.append({"ret": 1, "errmsg": "injected hint failure"})
     payload = message(f"/switch {native_weixin.agent_id}", "6")
-    first = asyncio.create_task(native_weixin.adapter._handle_message(payload))
-    await entered.wait()
-    duplicate = await native_weixin.adapter._handle_message(payload)
-    assert duplicate.status == IngressStatus.CLAIMED
-    release.set()
+    with held_table_lock(db_url, "im_bridge_outbound_replays") as held:
+        first = asyncio.create_task(native_weixin.adapter._handle_message(payload))
+        await asyncio.to_thread(held.wait_for_waiters, 1)
+        duplicate = await native_weixin.adapter._handle_message(payload)
+        assert duplicate.status == IngressStatus.CLAIMED
     accepted = await first
     assert accepted.status == IngressStatus.ACCEPTED
     assert accepted.result is not None and accepted.result["agent_id"] == native_weixin.agent_id
-    assert calls == 1
+    switch_lookups = [
+        request
+        for request in native_weixin.gateway_requests
+        if request.url.path == f"/api/agents/{native_weixin.agent_id}"
+    ]
+    assert len(switch_lookups) == 1
+    requests_after_acceptance = len(native_weixin.gateway_requests)
     assert await native_weixin.adapter._handle_message(payload) == accepted
-    assert calls == 1
+    assert len(native_weixin.gateway_requests) == requests_after_acceptance
 
 
 async def test_committed_command_then_completion_failure_recovers_uncertain_without_reexecution(
-    native_weixin: NativeWeixin, monkeypatch: pytest.MonkeyPatch
+    native_weixin: NativeWeixin, db_conn: psycopg.Connection
 ) -> None:
     ingress, binding = await native_weixin.adapter._ensure_ingress()
-    finish = ingress.store.finish
-
-    def fail_finish(*_args: object, **_kwargs: object) -> None:
-        raise RuntimeError("injected process failure after business owner")
-
-    monkeypatch.setattr(ingress.store, "finish", fail_finish)
     payload = message(f"/switch {native_weixin.agent_id}", "7")
-    with pytest.raises(RuntimeError, match="after business owner"):
+    with (
+        failing_update(
+            db_conn,
+            "weixin_ingress_receipts",
+            when="NEW.status = 'accepted'",
+            message="injected process failure after business owner",
+        ),
+        pytest.raises(psycopg.errors.RaiseException, match="after business owner"),
+    ):
         await native_weixin.adapter._handle_message(payload)
     before = len(native_weixin.gateway_requests)
-    monkeypatch.setattr(ingress.store, "finish", finish)
     # A fresh adapter generation does not pretend the prior process has died.
-    replacement = WeixinAdapter(native_weixin.core, client=native_weixin.adapter._http)
+    replacement = WeixinAdapter(
+        native_weixin.core,
+        state_dir=native_weixin.state_dir,
+        client=native_weixin.adapter._http,
+    )
     native_weixin.core.register(replacement)
     recovered = await replacement._handle_message(payload)
     assert recovered.status == IngressStatus.UNCERTAIN
@@ -222,24 +216,29 @@ async def test_superseded_poll_waiting_for_provider_cannot_admit_or_checkpoint(
 
 
 async def test_unclaimed_source_is_rejected_at_restart_and_never_dispatched_late(
-    native_weixin: NativeWeixin, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    native_weixin: NativeWeixin, db_conn: psycopg.Connection
 ) -> None:
     ingress, binding = await native_weixin.adapter._ensure_ingress()
-    dispatch = ingress.dispatch
-
-    async def before_first_claim(*_args: object) -> None:
-        raise RuntimeError("injected interruption before command claim")
-
-    monkeypatch.setattr(ingress, "dispatch", before_first_claim)
     payload = message(f"/switch {native_weixin.agent_id}", "25")
-    with pytest.raises(RuntimeError, match="before command claim"):
+    with (
+        failing_update(
+            db_conn,
+            "weixin_ingress_receipts",
+            when="NEW.status = 'claimed'",
+            message="injected interruption before command claim",
+        ),
+        pytest.raises(psycopg.errors.RaiseException, match="before command claim"),
+    ):
         await native_weixin.adapter._handle_message(payload)
-    monkeypatch.setattr(ingress, "dispatch", dispatch)
     assert db_conn.execute("SELECT status FROM weixin_ingress_receipts").fetchone() == ("retained",)
     with pytest.raises(RuntimeError, match="unprocessed"):
         ingress.store.checkpoint(binding, "", "blocked-while-retained")
     before = len(native_weixin.gateway_requests)
-    replacement = WeixinAdapter(native_weixin.core, client=native_weixin.adapter._http)
+    replacement = WeixinAdapter(
+        native_weixin.core,
+        state_dir=native_weixin.state_dir,
+        client=native_weixin.adapter._http,
+    )
     native_weixin.core.register(replacement)
     native_weixin.provider_responses.append(
         {"ret": 0, "msgs": [], "get_updates_buf": "after-restart"}
@@ -260,34 +259,27 @@ async def test_unclaimed_source_is_rejected_at_restart_and_never_dispatched_late
 
 
 async def test_retained_source_is_not_dispatched_by_poll_or_redelivery_in_process(
-    native_weixin: NativeWeixin, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    native_weixin: NativeWeixin, db_conn: psycopg.Connection
 ) -> None:
-    ingress, _binding = await native_weixin.adapter._ensure_ingress()
-    dispatch = ingress.dispatch
-    claims = 0
-
-    async def interrupted(*_args: object) -> None:
-        raise RuntimeError("injected failure before command claim")
-
-    monkeypatch.setattr(ingress, "dispatch", interrupted)
     payload = message(f"/switch {native_weixin.agent_id}", "26")
     # A failure before the claim is raised to the poll owner, never swallowed or retried inline.
-    with pytest.raises(RuntimeError, match="before command claim"):
+    with (
+        failing_update(
+            db_conn,
+            "weixin_ingress_receipts",
+            when="NEW.status = 'claimed'",
+            message="injected failure before command claim",
+        ),
+        pytest.raises(psycopg.errors.RaiseException, match="before command claim"),
+    ):
         await native_weixin.adapter._handle_message(payload)
-    monkeypatch.setattr(ingress, "dispatch", dispatch)
-    original_claim = ingress.store.claim
-
-    def counting_claim(*args: Any, **kwargs: Any) -> Any:
-        nonlocal claims
-        claims += 1
-        return original_claim(*args, **kwargs)
-
-    monkeypatch.setattr(ingress.store, "claim", counting_claim)
     native_weixin.provider_responses.append({"ret": 0, "msgs": [payload], "get_updates_buf": "n"})
     with pytest.raises(RuntimeError, match="unprocessed"):
         await native_weixin.adapter._poll_once("", 35000)
-    assert claims == 0
-    assert db_conn.execute("SELECT status FROM weixin_ingress_receipts").fetchone() == ("retained",)
+    assert db_conn.execute("SELECT status,attempt_id FROM weixin_ingress_receipts").fetchone() == (
+        "retained",
+        None,
+    )
     assert db_conn.execute("SELECT cursor FROM weixin_ingress_cursors").fetchone() == ("",)
 
 

@@ -17,6 +17,7 @@ from services.entrypoints.im_bridge.tests.adapters.weixin_native import (
 from services.entrypoints.im_bridge.tests.adapters.weixin_native import (
     native_weixin as native_weixin,
 )
+from services.entrypoints.im_bridge.tests.conftest import state_dir as state_dir
 from services.entrypoints.im_bridge.types import SpawnDraft
 
 

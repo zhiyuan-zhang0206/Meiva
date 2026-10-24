@@ -6,15 +6,15 @@ import pytest
 
 from base.db import Database, create_agent
 from services.entrypoints.im_bridge.ingress.store import WeixinIngressStore
+from services.entrypoints.im_bridge.ingress.tests.db_faults import failing_insert, failing_update
 from services.entrypoints.im_bridge.ingress.types import (
     IngressIdentityConflictError,
-    IngressReceipt,
     IngressRoute,
     IngressRouteKind,
     IngressStatus,
     ProviderSource,
-    StalePollBindingError,
 )
+from services.entrypoints.im_bridge.outbound.claim_fence import StalePollBindingError
 
 
 def source(message_id: str = "1", *, account: str = "account") -> ProviderSource:
@@ -222,13 +222,13 @@ def test_post_insert_failure_rolls_back_provider_receipt_chat_and_central_audit(
         store = WeixinIngressStore(pool)
         binding = store.initialize("https://provider.example", "account")
         binding = store.checkpoint(binding, "", "", provider_empty=True)
-
-        def fail_after_real_insert(_row: tuple[object, ...]) -> IngressReceipt:
-            raise RuntimeError("receipt result failed after native insert")
-
-        failing_store = WeixinIngressStore(pool, receipt_builder=fail_after_real_insert)
-        with pytest.raises(RuntimeError, match="after native insert"):
-            failing_store.retain(
+        with (
+            failing_insert(
+                db_conn, "weixin_ingress_receipts", message="receipt failed after native insert"
+            ),
+            pytest.raises(psycopg.errors.RaiseException, match="after native insert"),
+        ):
+            store.retain(
                 binding,
                 source(),
                 {"text": "original"},
@@ -247,38 +247,24 @@ def test_post_insert_failure_rolls_back_provider_receipt_chat_and_central_audit(
 
 
 def test_failed_empty_checkpoint_rolls_back_cursor_and_activation_together(
+    db_conn: psycopg.Connection,
     database: Database,
 ) -> None:
-    from collections.abc import Generator
-    from contextlib import contextmanager
-
-    from psycopg_pool import ConnectionPool
-
-    from services.entrypoints.im_bridge.ingress import store as store_owner
-
-    original_transaction = store_owner.write_transaction
     with database.pool(min_size=1, max_size=2) as pool:
         store = WeixinIngressStore(pool)
         draining = store.checkpoint(
             store.initialize("https://provider.example", "account"), "", "opaque-start"
         )
-
-        @contextmanager
-        def fail_before_commit(
-            native_pool: ConnectionPool,
-        ) -> Generator[psycopg.Connection, None, None]:
-            with original_transaction(native_pool) as conn:
-                yield conn
-                assert conn.execute(
-                    "SELECT state,cursor FROM weixin_ingress_cursors"
-                ).fetchone() == ("active", "new-empty-opaque")
-                raise RuntimeError("injected checkpoint commit interruption")
-
-        failing_store = WeixinIngressStore(pool, tx_factory=fail_before_commit)
-        with pytest.raises(RuntimeError, match="checkpoint commit interruption"):
-            failing_store.checkpoint(
-                draining, "opaque-start", "new-empty-opaque", provider_empty=True
-            )
+        with (
+            failing_update(
+                db_conn,
+                "weixin_ingress_cursors",
+                when="NEW.state = 'active'",
+                message="checkpoint commit interruption",
+            ),
+            pytest.raises(psycopg.errors.RaiseException, match="commit interruption"),
+        ):
+            store.checkpoint(draining, "opaque-start", "new-empty-opaque", provider_empty=True)
         restored = store.refresh_binding(draining)
         assert restored.cursor == "opaque-start" and restored.state.value == "draining"
         committed = store.checkpoint(

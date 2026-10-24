@@ -13,9 +13,12 @@ from services.entrypoints.im_bridge.types import SendNotStartedError
 @pytest.mark.parametrize("channel", ["telegram", "weixin"])
 @pytest.mark.parametrize("acknowledged", [False, True])
 async def test_connect_failure_marker_cannot_escape_after_a_successful_prefix(
-    channel: str, acknowledged: bool, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    channel: str,
+    acknowledged: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    state_dir: Path,
 ) -> None:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     calls: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -33,20 +36,20 @@ async def test_connect_failure_marker_cannot_escape_after_a_successful_prefix(
                     telegram_owner_id=42,
                 ),
                 client=client,
+                state_dir=state_dir,
             )
             text = "a" * 5000
         else:
-            monkeypatch.setattr(
-                weixin,
-                "load_account",
-                lambda: {
-                    "account_id": "test",
-                    "base_url": "https://ilink.example",
-                    "bot_token": "test",
-                    "user_id": "owner",
-                },
+            # meiva:note
+            # A test credential for a fake account; the S106 suppression is the harness's.
+            weixin.save_account(
+                state_dir,
+                account_id="test",
+                base_url="https://ilink.example",
+                bot_token="test",  # noqa: S106
+                user_id="owner",
             )
-            adapter = weixin.WeixinAdapter(None, client=client)
+            adapter = weixin.WeixinAdapter(None, client=client, state_dir=state_dir)
             adapter._chunk_delay_seconds = 0
             text = "a" * 3000
         if acknowledged:

@@ -2,6 +2,8 @@
 
 import asyncio
 import secrets
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -19,12 +21,15 @@ from services.entrypoints.im_bridge.types import InboundMessage
 @pytest.mark.parametrize("fault", [RuntimeError("WS handler bug"), KeyError("missing input")])
 async def test_ws_callback_fault_fails_the_service_group_without_marking_seen(
     fault: Exception,
+    state_dir: Path,
 ) -> None:
     class FaultingCore(FakeCore):
         async def handle_inbound(self, message: InboundMessage) -> None:
             raise fault
 
-    adapter = FeishuAdapter(FaultingCore(), feishu_config())
+    adapter = FeishuAdapter(
+        FaultingCore(), feishu_config(), state_dir=state_dir, proxy_configured=False
+    )
     with pytest.raises(ExceptionGroup) as caught:
         async with asyncio.TaskGroup() as tasks:
             adapter._main_loop = asyncio.get_running_loop()
@@ -39,14 +44,21 @@ async def test_ws_callback_fault_fails_the_service_group_without_marking_seen(
     assert not adapter._seen_messages
 
 
-async def test_ws_closing_rejects_queued_events_and_ends_owner_wait(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from unittest.mock import AsyncMock
+# meiva:note
+# Records the events its handler receives instead of forwarding them to the core.
+class _RecordingEvents(FeishuAdapter):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.handled: list[Any] = []
 
-    adapter = FeishuAdapter(FakeCore(), feishu_config())
-    handler = AsyncMock()
-    monkeypatch.setattr(adapter, "_handle_event", handler)
+    async def _handle_event(self, data: Any) -> None:
+        self.handled.append(data)
+
+
+async def test_ws_closing_rejects_queued_events_and_ends_owner_wait(state_dir: Path) -> None:
+    adapter = _RecordingEvents(
+        FakeCore(), feishu_config(), state_dir=state_dir, proxy_configured=False
+    )
 
     async def lifecycle() -> None:
         async with asyncio.TaskGroup() as tasks:
@@ -59,13 +71,13 @@ async def test_ws_closing_rejects_queued_events_and_ends_owner_wait(
             adapter.begin_shutdown()
             adapter._on_im_message(make_event())
             await asyncio.sleep(0)
-        handler.assert_not_called()
-        assert adapter._ws_exit.cancelled()
+        assert adapter._ws_exit is not None and adapter._ws_exit.cancelled()
+        assert len(adapter.handled) <= 1
 
     await asyncio.wait_for(lifecycle(), timeout=2)
 
 
-async def test_ws_worker_failure_reaches_the_same_service_owner() -> None:
+async def test_ws_worker_failure_reaches_the_same_service_owner(state_dir: Path) -> None:
     import threading
 
     import lark_oapi.ws.client as _lark_ws_client  # noqa: F401  # pyright: ignore[reportUnusedImport]
@@ -86,6 +98,7 @@ async def test_ws_worker_failure_reaches_the_same_service_owner() -> None:
             feishu_poll_interval_seconds=0,
         ),
         FaultingWsClient(),
+        state_dir=state_dir,
     )
     with pytest.raises(ExceptionGroup) as caught:
         async with asyncio.TaskGroup() as tasks:
@@ -104,6 +117,7 @@ async def test_ws_worker_failure_reaches_the_same_service_owner() -> None:
 @pytest.mark.parametrize("late_fault", [False, True])
 async def test_service_wait_stops_while_sdk_worker_stays_blocked(
     late_fault: bool,
+    state_dir: Path,
 ) -> None:
     import threading
 
@@ -129,6 +143,7 @@ async def test_service_wait_stops_while_sdk_worker_stays_blocked(
             feishu_poll_interval_seconds=0,
         ),
         BlockedWsClient(),
+        state_dir=state_dir,
     )
     try:
         async with asyncio.timeout(2):
@@ -146,7 +161,7 @@ async def test_service_wait_stops_while_sdk_worker_stays_blocked(
         release.set()
 
 
-async def test_queued_ws_job_is_not_send_ready_and_shutdown_cancels_boot() -> None:
+async def test_queued_ws_job_is_not_send_ready_and_shutdown_cancels_boot(state_dir: Path) -> None:
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
@@ -172,6 +187,7 @@ async def test_queued_ws_job_is_not_send_ready_and_shutdown_cancels_boot() -> No
             feishu_poll_interval_seconds=0,
         ),
         client,
+        state_dir=state_dir,
     )
     try:
         async with asyncio.timeout(2):
@@ -195,27 +211,24 @@ async def test_queued_ws_job_is_not_send_ready_and_shutdown_cancels_boot() -> No
         executor.shutdown(wait=False, cancel_futures=True)
 
 
-async def test_active_task_creation_fault_reaches_owner(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    adapter = FeishuAdapter(FakeCore(), feishu_config())
-    fault = RuntimeError("active service task creation failed")
+async def test_active_task_creation_fault_reaches_owner(state_dir: Path) -> None:
+    adapter = FeishuAdapter(
+        FakeCore(), feishu_config(), state_dir=state_dir, proxy_configured=False
+    )
+    async with asyncio.TaskGroup() as finished_group:
+        pass
     with pytest.raises(ExceptionGroup) as caught:
         async with asyncio.TaskGroup() as tasks:
             adapter._main_loop = asyncio.get_running_loop()
-            adapter._tasks = tasks
+            adapter._tasks = finished_group
             adapter._ws_exit = adapter._main_loop.create_future()
             adapter._accepting_events = True
             tasks.create_task(adapter._observe_ws_exit(adapter._ws_exit))
-
-            def fail_create(*args: object, **kwargs: object) -> None:
-                raise fault
-
-            monkeypatch.setattr(tasks, "create_task", fail_create)
             try:
                 adapter._on_im_message(make_event())
                 await asyncio.wait_for(asyncio.Event().wait(), timeout=2)
             finally:
                 adapter.begin_shutdown()
-    assert caught.value.exceptions == (fault,)
+    (fault,) = caught.value.exceptions
+    assert isinstance(fault, RuntimeError) and "is finished" in str(fault)
     assert not adapter.core.received

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import socket
 import threading
 import time
@@ -10,83 +11,48 @@ from typing import cast
 import pytest
 
 from services.redis_bridge import relay
+from services.redis_bridge.tests.relay_support import (
+    GatedAddress,
+    SocketDefect,
+    backend_listener,
+    blocked_dials,
+    close_all,
+    occupied_address,
+    wait_bound,
+    wait_until,
+)
 
-
-class _EndServingError(RuntimeError):
-    pass
-
-
-class _AcceptOnce:
-    def __init__(self, client: socket.socket) -> None:
-        self.client = client
-        self.accepted = False
-        self.closed = False
-
-    def accept(self) -> tuple[socket.socket, tuple[str, int]]:
-        if self.accepted:
-            raise _EndServingError("caller failure")
-        self.accepted = True
-        return self.client, ("127.0.0.1", 1)
-
-    def close(self) -> None:
-        self.closed = True
-
-
-def _close(*connections: socket.socket) -> None:
-    for connection in connections:
-        with suppress(OSError):
-            connection.shutdown(socket.SHUT_RDWR)
-        connection.close()
+_OVERLONG_LABEL_HOST = "a" * 64 + ".example"
 
 
 def test_serving_exit_reclaims_an_accepted_idle_connection() -> None:
-    client, accepted = socket.socketpair()
-    backend: socket.socket | None = None
     existing_threads = set(threading.enumerate())
-    with socket.socket() as backend_listener:
-        backend_listener.bind(("127.0.0.1", 0))
-        backend_listener.listen()
-        backend_listener.settimeout(2.0)
+    with backend_listener() as backend_side, occupied_address() as unbindable:
+        client, accepted = socket.socketpair()
         client.settimeout(2.0)
-
-        class Listener(_AcceptOnce):
-            def accept(self) -> tuple[socket.socket, tuple[str, int]]:
-                nonlocal backend
-                if self.accepted:
-                    backend, _ = backend_listener.accept()
-                    backend.sendall(b"ready")
-                    assert client.recv(5) == b"ready"
-                return super().accept()
-
-        listener = Listener(accepted)
+        service = relay.RelayService(unbindable, backend_side.getsockname(), rebind_delay_s=0.0)
+        service._admit(accepted, ("127.0.0.1", 1))
+        backend, _ = backend_side.accept()
         try:
-            with pytest.raises(_EndServingError, match="caller failure"):
-                relay.serve_forever(
-                    ("127.0.0.1", 1),
-                    backend_listener.getsockname(),
-                    open_listener=lambda _address: cast(socket.socket, listener),
-                )
-            assert listener.closed
+            backend.sendall(b"ready")
+            assert client.recv(5) == b"ready"
+            with pytest.raises(relay.ListenerExhaustedError, match="5 times in a row"):
+                relay.run_service(service)
             assert accepted.fileno() == -1
             assert client.recv(1) == b""
         finally:
-            _close(client, accepted)
-            if backend is not None:
-                _close(backend)
+            close_all(client, accepted, backend)
             for worker in set(threading.enumerate()) - existing_threads:
                 worker.join(timeout=2.0)
-                assert not worker.is_alive(), "regression experiment must reclaim its workers"
+                assert not worker.is_alive(), "serving exit must reclaim its workers"
 
 
 def test_stop_fences_admission_and_reclaims_idle_pumps() -> None:
-    with socket.socket() as backend_listener:
-        backend_listener.bind(("127.0.0.1", 0))
-        backend_listener.listen()
-        backend_listener.settimeout(2.0)
-        service = relay.RelayService(("127.0.0.1", 0), backend_listener.getsockname())
+    with backend_listener() as backend_side:
+        service = relay.RelayService(("127.0.0.1", 0), backend_side.getsockname())
         client, accepted = socket.socketpair()
         service._admit(accepted, ("127.0.0.1", 1))
-        backend, _ = backend_listener.accept()
+        backend, _ = backend_side.accept()
         owners = tuple(service._connections)
         try:
             backend.sendall(b"ready")
@@ -101,71 +67,41 @@ def test_stop_fences_admission_and_reclaims_idle_pumps() -> None:
                 assert refused_accepted.fileno() == -1
                 assert not service._connections
             finally:
-                _close(refused, refused_accepted)
+                close_all(refused, refused_accepted)
         finally:
-            _close(client, backend)
+            close_all(client, backend)
             service.stop(2.0)
 
 
 def test_one_stop_budget_retains_blocked_dns_then_reaps_late_backend(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    started = threading.Barrier(3)
-    release = threading.Event()
-    backends: list[socket.socket] = []
-    peers: list[socket.socket] = []
-    calls: list[tuple[tuple[str, int], float]] = []
-
-    def connect(address: tuple[str, int], timeout: float) -> socket.socket:
-        calls.append((address, timeout))
-        backend, peer = socket.socketpair()
-        backends.append(backend)
-        peers.append(peer)
-        started.wait(timeout=2.0)
-        assert release.wait(2.0)
-        return backend
-
-    monkeypatch.setattr(relay.socket, "create_connection", connect)
-    service = relay.RelayService(("127.0.0.1", 0), ("redis.example", 6380))
-    clients = [socket.socketpair() for _ in range(2)]
-    for _client, accepted in clients:
-        service._admit(accepted, ("127.0.0.1", 1))
-    owners = tuple(service._connections)
-    try:
-        started.wait(timeout=2.0)
+    with blocked_dials(2) as stalled:
+        assert stalled.entered.wait(2.0)
         before = time.monotonic()
-        assert not service.stop(0.08)
+        assert not stalled.service.stop(0.08)
         assert time.monotonic() - before < 0.3
-        assert len(service._connections) == 2
+        assert len(stalled.service._connections) == 2
         assert "2 connection owner(s) retained" in capsys.readouterr().out
-        assert all(accepted.fileno() == -1 for _, accepted in clients)
-        release.set()
-        assert service.stop(2.0)
-        assert all(owner.completed() and not owner._pumps for owner in owners)
-        assert all(backend.fileno() == -1 for backend in backends)
-        assert calls == [(("redis.example", 6380), 5.0)] * 2
-    finally:
-        release.set()
-        service.stop(2.0)
-        _close(*(endpoint for pair in clients for endpoint in pair), *peers, *backends)
+        assert all(accepted.fileno() == -1 for _, accepted in stalled.client_pairs)
+        stalled.release.set()
+        assert stalled.service.stop(2.0)
+        assert all(owner.completed() and not owner._pumps for owner in stalled.owners)
+        for _ in stalled.owners:
+            peer, _ = stalled.backend_side.accept()
+            with peer:
+                peer.settimeout(2.0)
+                assert peer.recv(1) == b""
 
 
 def test_late_unknown_error_is_visible_and_collected_by_the_original_service(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     entered = threading.Event()
     release = threading.Event()
     error = ValueError("late resolver implementation defect")
-
-    def connect(*_args: object, **_kwargs: object) -> socket.socket:
-        entered.set()
-        assert release.wait(2.0)
-        raise error
-
-    monkeypatch.setattr(relay.socket, "create_connection", connect)
-    service = relay.RelayService(("127.0.0.1", 0), ("redis.example", 6380))
+    gated = GatedAddress("redis.example", 6380, entered=entered, release=release, fail=error)
+    service = relay.RelayService(("127.0.0.1", 0), gated)
     client, accepted = socket.socketpair()
     service._admit(accepted, ("127.0.0.1", 1))
     owner = service._connections[0]
@@ -184,38 +120,19 @@ def test_late_unknown_error_is_visible_and_collected_by_the_original_service(
         release.set()
         with suppress(ValueError):
             service.stop(2.0)
-        _close(client, accepted)
-
-
-class _RecvDefect:
-    def __init__(self, connection: socket.socket, error: BaseException) -> None:
-        self.connection = connection
-        self.error = error
-
-    def recv(self, _size: int) -> bytes:
-        raise self.error
-
-    def sendall(self, data: bytes) -> None:
-        self.connection.sendall(data)
-
-    def shutdown(self, how: int) -> None:
-        self.connection.shutdown(how)
-
-    def close(self) -> None:
-        self.connection.close()
+        close_all(client, accepted)
 
 
 def test_unknown_pump_error_interrupts_reverse_and_is_raised_by_service() -> None:
     error = LookupError("forwarding implementation defect")
-    with socket.socket() as backend_listener:
-        backend_listener.bind(("127.0.0.1", 0))
-        backend_listener.listen()
-        backend_listener.settimeout(2.0)
+    with backend_listener() as backend_side:
         client, accepted = socket.socketpair()
-        service = relay.RelayService(("127.0.0.1", 0), backend_listener.getsockname())
-        service._admit(cast(socket.socket, _RecvDefect(accepted, error)), ("127.0.0.1", 1))
+        service = relay.RelayService(("127.0.0.1", 0), backend_side.getsockname())
+        service._admit(
+            cast(socket.socket, SocketDefect(accepted, recv_error=error)), ("127.0.0.1", 1)
+        )
         owner = service._connections[0]
-        backend, _ = backend_listener.accept()
+        backend, _ = backend_side.accept()
         try:
             assert owner._done.wait(2.0), "unknown pump failure must release the reverse pump"
             owner._thread.join(timeout=2.0)
@@ -229,156 +146,178 @@ def test_unknown_pump_error_interrupts_reverse_and_is_raised_by_service() -> Non
         finally:
             with suppress(LookupError):
                 service.stop(2.0)
-            _close(client, accepted, backend)
+            close_all(client, accepted, backend)
 
 
 def test_cleanup_keeps_primary_caller_error_and_records_secondary(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    entered = threading.Event()
     release = threading.Event()
     secondary = ValueError("secondary backend defect")
-
-    def connect(*_args: object, **_kwargs: object) -> socket.socket:
-        entered.set()
-        assert release.wait(2.0)
-        raise secondary
-
-    class Listener(_AcceptOnce):
-        def accept(self) -> tuple[socket.socket, tuple[str, int]]:
-            if self.accepted:
-                assert entered.wait(2.0)
-                release.set()
-            return super().accept()
-
-    monkeypatch.setattr(relay.socket, "create_connection", connect)
-    client, accepted = socket.socketpair()
-    service = relay.RelayService(
-        ("127.0.0.1", 0),
-        ("redis.example", 6380),
-        open_listener=lambda _address: cast(socket.socket, Listener(accepted)),
+    gated = GatedAddress(
+        "redis.example", 6380, entered=threading.Event(), release=release, fail=secondary
     )
-    try:
-        with pytest.raises(_EndServingError, match="caller failure"):
-            relay.run_service(service)
-        assert service._errors == [secondary]
-        assert "secondary backend defect" in capsys.readouterr().err
-        assert accepted.fileno() == -1
-    finally:
+    client, accepted = socket.socketpair()
+    with occupied_address() as unbindable:
+        service = relay.RelayService(unbindable, gated, rebind_delay_s=0.0)
+        service._admit(accepted, ("127.0.0.1", 1))
         release.set()
-        with suppress(ValueError):
-            service.stop(2.0)
-        _close(client, accepted)
+        try:
+            with pytest.raises(relay.ListenerExhaustedError):
+                relay.run_service(service)
+            assert service._errors == [secondary]
+            assert "secondary backend defect" in capsys.readouterr().err
+            assert accepted.fileno() == -1
+        finally:
+            with suppress(ValueError):
+                service.stop(2.0)
+            close_all(client, accepted)
 
 
-@pytest.mark.parametrize("timeout", [-1.0, float("inf"), float("nan")])
+@pytest.mark.parametrize("timeout", [-1.0, math.inf, math.nan])
 def test_stop_rejects_nonfinite_or_negative_budget(timeout: float) -> None:
     service = relay.RelayService(("127.0.0.1", 0), ("127.0.0.1", 6380))
     with pytest.raises(ValueError, match="finite and nonnegative"):
         service.stop(timeout)
 
 
-class _RebindAfterOneAccept:
-    def __init__(self, listener: socket.socket) -> None:
-        self.listener = listener
-        self.accepted = False
-
-    def accept(self) -> tuple[socket.socket, tuple[str, int]]:
-        if self.accepted:
-            raise OSError("interface lost")
-        connection = self.listener.accept()
-        self.accepted = True
-        return connection
-
-    def close(self) -> None:
-        self.listener.close()
-
-    def shutdown(self, how: int) -> None:
-        self.listener.shutdown(how)
+@pytest.mark.parametrize("delay", [-1.0, math.inf, math.nan])
+def test_rebind_delay_must_be_finite_and_nonnegative(delay: float) -> None:
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        relay.RelayService(("127.0.0.1", 0), ("127.0.0.1", 6380), rebind_delay_s=delay)
 
 
-def test_rebound_listener_preserves_the_old_live_connection() -> None:
-    listeners = [relay.open_listener(("127.0.0.1", 0)) for _ in range(2)]
-    first_address, second_address = [listener.getsockname() for listener in listeners]
-    rebound = threading.Event()
-    opens = 0
+def test_the_rebind_delay_doubles_to_its_cap() -> None:
+    delays = [relay.INITIAL_REBIND_DELAY_S]
+    for _ in range(6):
+        delays.append(relay.next_rebind_delay(delays[-1]))
+    assert delays == [1.0, 2.0, 4.0, 8.0, 16.0, 30.0, 30.0]
+    assert relay.next_rebind_delay(0.0) == 0.0
 
-    def open_listener(_address: tuple[str, int]) -> socket.socket:
-        nonlocal opens
-        opens += 1
-        if opens == 1:
-            return cast(socket.socket, _RebindAfterOneAccept(listeners[0]))
-        rebound.set()
-        return listeners[1]
 
-    with socket.socket() as backend_listener:
-        backend_listener.bind(("127.0.0.1", 0))
-        backend_listener.listen()
-        backend_listener.settimeout(2.0)
+def test_rebound_listener_preserves_the_old_live_connection(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with backend_listener() as backend_side:
         service = relay.RelayService(
-            first_address,
-            backend_listener.getsockname(),
-            open_listener=open_listener,
-            sleep=lambda _delay: None,
+            ("127.0.0.1", 0), backend_side.getsockname(), rebind_delay_s=0.0
         )
         with ThreadPoolExecutor(max_workers=1) as executor:
             serving = executor.submit(relay.run_service, service)
-            client = socket.create_connection(first_address, timeout=2.0)
-            backend, _ = backend_listener.accept()
+            first = wait_bound(service)
+            client = socket.create_connection(first, timeout=2.0)
+            backend, _ = backend_side.accept()
             try:
-                assert rebound.wait(2.0)
                 client.sendall(b"old request")
                 assert backend.recv(11) == b"old request"
+                assert service._listener is not None
+                service._listener.close()
+                second = wait_bound(service, previous=first)
+                client.sendall(b"old again")
+                assert backend.recv(9) == b"old again"
                 backend.sendall(b"old response")
                 assert client.recv(12) == b"old response"
-                new_client = socket.create_connection(second_address, timeout=2.0)
-                new_backend, _ = backend_listener.accept()
+                new_client = socket.create_connection(second, timeout=2.0)
+                new_backend, _ = backend_side.accept()
                 try:
                     new_client.sendall(b"new")
                     assert new_backend.recv(3) == b"new"
                 finally:
-                    _close(new_client, new_backend)
+                    close_all(new_client, new_backend)
             finally:
                 service.request_stop()
                 serving.result(timeout=3.0)
-                _close(client, backend, *listeners)
+                close_all(client, backend)
             assert not service._connections
+    assert "listener accept failed" in capsys.readouterr().out
 
 
-def test_failed_worker_admission_closes_the_unowned_accepted_socket(
-    monkeypatch: pytest.MonkeyPatch,
+def test_an_admitted_connection_clears_the_listener_failure_count() -> None:
+    with backend_listener() as backend_side:
+        service = relay.RelayService(
+            ("127.0.0.1", 0), backend_side.getsockname(), rebind_delay_s=0.0
+        )
+        endpoints: list[socket.socket] = []
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            serving = executor.submit(relay.run_service, service)
+            address: tuple[str, int] | None = None
+            try:
+                for index in range(relay.MAX_LISTENER_FAILURES + 2):
+                    address = wait_bound(service, previous=address)
+                    client = socket.create_connection(address, timeout=2.0)
+                    backend, _ = backend_side.accept()
+                    endpoints.extend((client, backend))
+                    client.sendall(bytes([index]))
+                    assert backend.recv(1) == bytes([index])
+                    assert service._listener is not None
+                    service._listener.close()
+                assert not serving.done(), "an admitted connection must reset the failure count"
+            finally:
+                service.request_stop()
+                serving.result(timeout=3.0)
+                close_all(*endpoints)
+
+
+def test_listener_that_never_binds_gives_up_after_the_failure_limit(
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    error = RuntimeError("worker admission failed")
+    with occupied_address() as unbindable:
+        service = relay.RelayService(unbindable, ("127.0.0.1", 6380), rebind_delay_s=0.0)
+        with pytest.raises(relay.ListenerExhaustedError, match="5 times in a row"):
+            relay.run_service(service)
+    assert capsys.readouterr().out.count("listener bind failed") == relay.MAX_LISTENER_FAILURES
 
-    def fail_start(_thread: threading.Thread) -> None:
-        raise error
 
-    monkeypatch.setattr(relay.threading.Thread, "start", fail_start)
+def test_listener_bind_failures_back_off_until_the_address_returns(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    holder = socket.socket()
+    holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    holder.bind(("127.0.0.1", 0))
+    holder.listen()
+    name = holder.getsockname()
+    address = (name[0], name[1])
+    service = relay.RelayService(address, ("127.0.0.1", 6380), rebind_delay_s=0.05)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        serving = executor.submit(relay.run_service, service)
+        try:
+            wait_until(lambda: service._listener_failures >= 3, "three failed binds")
+            assert service.bound_address() is None
+            holder.close()
+            assert wait_bound(service) == address
+        finally:
+            holder.close()
+            service.request_stop()
+            serving.result(timeout=3.0)
+    assert "listener bind failed" in capsys.readouterr().out
+
+
+def test_failed_worker_admission_closes_the_unowned_accepted_socket() -> None:
     service = relay.RelayService(("127.0.0.1", 0), ("127.0.0.1", 6380))
     client, accepted = socket.socketpair()
+    previous = threading.stack_size()
     try:
-        with pytest.raises(RuntimeError) as refused:
+        threading.stack_size(2**50)
+        with pytest.raises(RuntimeError, match="can't start new thread"):
             service._admit(accepted, ("127.0.0.1", 1))
-        assert refused.value is error
+    finally:
+        threading.stack_size(previous)
+    try:
         assert accepted.fileno() == -1
         assert not service._connections
         assert service.stop(0.0)
     finally:
-        _close(client, accepted)
+        close_all(client, accepted)
 
 
 def test_serving_reaps_completed_connections_without_stopping_admission() -> None:
-    with socket.socket() as backend_listener:
-        backend_listener.bind(("127.0.0.1", 0))
-        backend_listener.listen()
-        backend_listener.settimeout(2.0)
+    with backend_listener() as backend_side:
         client, accepted = socket.socketpair()
         client.settimeout(2.0)
-        service = relay.RelayService(("127.0.0.1", 0), backend_listener.getsockname())
+        service = relay.RelayService(("127.0.0.1", 0), backend_side.getsockname())
         service._admit(accepted, ("127.0.0.1", 1))
         owner = service._connections[0]
-        backend, _ = backend_listener.accept()
+        backend, _ = backend_side.accept()
         backend.settimeout(2.0)
         try:
             client.shutdown(socket.SHUT_WR)
@@ -393,90 +332,60 @@ def test_serving_reaps_completed_connections_without_stopping_admission() -> Non
             assert owner.completed()
         finally:
             service.stop(2.0)
-            _close(client, accepted, backend)
+            close_all(client, accepted, backend)
 
 
-@pytest.mark.parametrize("worker_primary", [False, True])
-def test_pump_cleanup_preserves_primary_and_collects_every_secondary(
-    monkeypatch: pytest.MonkeyPatch,
+def test_two_pump_defects_are_both_retained_and_the_first_is_raised(
     capsys: pytest.CaptureFixture[str],
-    worker_primary: bool,
 ) -> None:
-    primary = LookupError("first worker or pump cleanup defect")
-    secondary = ValueError("later pump cleanup defect")
-    with socket.socket() as backend_listener:
-        backend_listener.bind(("127.0.0.1", 0))
-        backend_listener.listen()
-        backend_listener.settimeout(2.0)
+    first = LookupError("reverse pump defect")
+    second = ValueError("forward pump defect")
+    gate = threading.Event()
+    with backend_listener() as backend_side:
         client, accepted = socket.socketpair()
-        client.settimeout(2.0)
-        service = relay.RelayService(("127.0.0.1", 0), backend_listener.getsockname())
-        source = cast(socket.socket, _RecvDefect(accepted, primary)) if worker_primary else accepted
-        service._admit(source, ("127.0.0.1", 1))
+        endpoint = SocketDefect(accepted, recv_error=second, recv_gate=gate, sendall_error=first)
+        service = relay.RelayService(("127.0.0.1", 0), backend_side.getsockname())
+        service._admit(cast(socket.socket, endpoint), ("127.0.0.1", 1))
         owner = service._connections[0]
-        backend, _ = backend_listener.accept()
-        backend.settimeout(2.0)
+        backend, _ = backend_side.accept()
         try:
-            if not worker_primary:
-                client.shutdown(socket.SHUT_WR)
-                assert backend.recv(1) == b""
-                backend.shutdown(socket.SHUT_WR)
-                assert client.recv(1) == b""
+            backend.sendall(b"data for the defective client side")
+            wait_until(lambda: service._errors == [first], "the reverse pump failure")
+            gate.set()
             assert owner._done.wait(2.0)
-            owner._thread.join(timeout=2.0)
-            first, second = owner._pumps
-            original_stop = relay.Pump.stop
-
-            def stop_with_cleanup_defect(pump: relay.Pump, timeout: float) -> bool:
-                finished = original_stop(pump, timeout)
-                if pump is first and not worker_primary:
-                    raise primary
-                if pump is second:
-                    raise secondary
-                return finished
-
-            with monkeypatch.context() as patched:
-                patched.setattr(relay.Pump, "stop", stop_with_cleanup_defect)
-                with pytest.raises(LookupError) as collected:
-                    service.stop(2.0)
-            assert collected.value is primary
-            assert service._errors == [primary, secondary]
+            with pytest.raises(LookupError) as collected:
+                service.stop(2.0)
+            assert collected.value is first
+            assert service._errors == [first, second]
             stderr = capsys.readouterr().err
-            assert stderr.count(str(primary)) == 1
-            assert stderr.count(str(secondary)) == 1
+            assert stderr.count(str(first)) == 1
+            assert stderr.count(str(second)) == 1
             assert owner.completed()
             assert not service._connections
         finally:
+            gate.set()
             with suppress(LookupError):
                 service.stop(2.0)
-            _close(client, accepted, backend)
+            close_all(client, accepted, backend)
 
 
 def test_worker_failure_cleanup_retains_both_original_errors(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     primary = LookupError("pump worker primary defect")
     secondary = ValueError("pump worker shutdown secondary defect")
     client, accepted = socket.socketpair()
-    source = cast(socket.socket, _RecvDefect(accepted, primary))
-    original_request_stop = relay.Pump.request_stop
-
-    def request_stop_with_defect(pump: relay.Pump) -> None:
-        original_request_stop(pump)
-        if pump._source is source and threading.current_thread() is pump._thread:
-            raise secondary
-
-    monkeypatch.setattr(relay.Pump, "request_stop", request_stop_with_defect)
-    with socket.socket() as backend_listener:
-        backend_listener.bind(("127.0.0.1", 0))
-        backend_listener.listen()
-        backend_listener.settimeout(2.0)
-        service = relay.RelayService(("127.0.0.1", 0), backend_listener.getsockname())
-        service._admit(source, ("127.0.0.1", 1))
+    endpoint = cast(
+        socket.socket,
+        SocketDefect(accepted, sendall_error=primary, worker_shutdown_error=secondary),
+    )
+    with backend_listener() as backend_side:
+        service = relay.RelayService(("127.0.0.1", 0), backend_side.getsockname())
+        service._admit(endpoint, ("127.0.0.1", 1))
         owner = service._connections[0]
-        backend, _ = backend_listener.accept()
+        backend, _ = backend_side.accept()
         try:
+            backend.sendall(b"data for the defective client side")
             assert owner._done.wait(2.0)
             with pytest.raises(LookupError) as collected:
                 service.stop(2.0)
@@ -489,104 +398,29 @@ def test_worker_failure_cleanup_retains_both_original_errors(
         finally:
             with suppress(LookupError):
                 service.stop(2.0)
-            _close(client, accepted, backend)
+            close_all(client, accepted, backend)
 
 
 def test_connect_failure_cleanup_preserves_primary_and_retains_secondary(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    primary = LookupError("connect primary defect")
     secondary = ValueError("connection close secondary defect")
-    original_close = relay.Connection._close_sockets
-
-    def fail_connect(*_args: object, **_kwargs: object) -> socket.socket:
-        raise primary
-
-    def close_with_defect(owner: relay.Connection) -> None:
-        original_close(owner)
-        if threading.current_thread() is owner._thread:
-            raise secondary
-
-    monkeypatch.setattr(relay.socket, "create_connection", fail_connect)
-    monkeypatch.setattr(relay.Connection, "_close_sockets", close_with_defect)
     client, accepted = socket.socketpair()
-    service = relay.RelayService(("127.0.0.1", 0), ("redis.example", 6380))
-    service._admit(accepted, ("127.0.0.1", 1))
+    endpoint = cast(socket.socket, SocketDefect(accepted, worker_shutdown_error=secondary))
+    service = relay.RelayService(("127.0.0.1", 0), (_OVERLONG_LABEL_HOST, 6380))
+    service._admit(endpoint, ("127.0.0.1", 1))
     owner = service._connections[0]
     try:
         assert owner._done.wait(2.0)
-        with pytest.raises(LookupError) as collected:
+        with pytest.raises(UnicodeError) as collected:
             service.stop(2.0)
-        assert collected.value is primary
+        primary = collected.value
         assert service._errors == [primary, secondary]
         stderr = capsys.readouterr().err
         assert str(primary) in stderr and str(secondary) in stderr
         assert owner.completed()
         assert not service._connections
     finally:
-        with suppress(LookupError, ValueError):
+        with suppress(UnicodeError, ValueError):
             service.stop(2.0)
-        _close(client, accepted)
-
-
-def test_listener_that_never_binds_gives_up_after_the_failure_limit() -> None:
-    attempts: list[tuple[str, int]] = []
-    delays: list[float] = []
-
-    def never_binds(address: tuple[str, int]) -> socket.socket:
-        attempts.append(address)
-        raise OSError("can't assign requested address")
-
-    with pytest.raises(relay.ListenerExhaustedError, match="5 times in a row"):
-        relay.serve_forever(
-            ("10.0.0.9", 6380),
-            ("127.0.0.1", 6380),
-            open_listener=never_binds,
-            sleep=delays.append,
-        )
-
-    assert len(attempts) == relay.MAX_LISTENER_FAILURES
-    assert delays == [1.0, 2.0, 4.0, 8.0]
-
-
-def test_an_admitted_connection_clears_the_listener_failure_count() -> None:
-    results: list[object] = []
-
-    class OneClient(_AcceptOnce):
-        def accept(self) -> tuple[socket.socket, tuple[str, int]]:
-            if self.accepted:
-                raise OSError("descriptor went bad")
-            return super().accept()
-
-    clients = [socket.socketpair() for _ in range(relay.MAX_LISTENER_FAILURES + 2)]
-    plan: list[object] = []
-    for client, _peer in clients:
-        plan.append(OSError("not yet"))
-        plan.append(OneClient(client))
-    served = iter(plan)
-
-    def open_listener(_address: tuple[str, int]) -> socket.socket:
-        try:
-            item = next(served)
-        except StopIteration:
-            service.request_stop()
-            raise OSError("done") from None
-        results.append(item)
-        if isinstance(item, OSError):
-            raise item
-        return cast(socket.socket, item)
-
-    service = relay.RelayService(
-        ("10.0.0.9", 6380),
-        ("127.0.0.1", 1),
-        open_listener=open_listener,
-        sleep=lambda _delay: None,
-    )
-    try:
-        service.serve_forever()
-    finally:
-        service.request_stop()
-        for client, peer in clients:
-            _close(client, peer)
-    assert len(results) == len(plan)
+        close_all(client, accepted)

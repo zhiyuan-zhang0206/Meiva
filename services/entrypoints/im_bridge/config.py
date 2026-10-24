@@ -11,6 +11,15 @@ receives the slice it needs through its constructor. See
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+
+
+# meiva:note
+# The directory of the bridge's disk-backed state (switch state, notice filters, Telegram's
+# poll offset, Weixin's account and caches) under a Meiva home. Each process root passes it
+# on; nothing below the roots reads the home.
+def state_dir_of(home: Path) -> Path:
+    return home / "state" / "im_bridge"
 
 
 @dataclass(frozen=True)

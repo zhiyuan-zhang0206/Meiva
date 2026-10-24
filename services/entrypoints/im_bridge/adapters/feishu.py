@@ -11,6 +11,7 @@ import concurrent.futures
 import json
 from collections import deque
 from collections.abc import Callable, Coroutine
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -63,9 +64,18 @@ class FeishuAdapter(IMAdapter):
 
     channel = "feishu"
 
-    def __init__(self, core: Any, config: FeishuCredentialsConfig) -> None:
+    def __init__(
+        self,
+        core: Any,
+        config: FeishuCredentialsConfig,
+        *,
+        state_dir: Path,
+        proxy_configured: bool,
+    ) -> None:
         super().__init__(core)
         self._config = config
+        self._state_dir = state_dir
+        self._proxy_configured = proxy_configured
         self._replay_window_s = config.delivery_watchdog_stale_claimed_threshold_seconds
         self._app_id = ""
         self._app_secret = ""
@@ -165,7 +175,9 @@ class FeishuAdapter(IMAdapter):
         if self._last_open_id:
             return
         prefix = f"{self.channel}:"
-        keys = [k for k in load_switch_state() if k.startswith(prefix) and k != prefix]
+        keys = [
+            k for k in load_switch_state(self._state_dir) if k.startswith(prefix) and k != prefix
+        ]
         if len(keys) == 1:
             self._last_open_id = keys[0][len(prefix) :]
             logger.info("FeishuAdapter: seeded owner open id: {}", self._last_open_id)
@@ -260,7 +272,7 @@ class FeishuAdapter(IMAdapter):
         # Let the handshake use the machine's proxy configuration (issue #2089):
         # the SDK pins proxy=None on websockets>=15, which makes the long
         # connection direct-only and therefore unreachable behind a proxy.
-        allow_env_proxy_for_ws()
+        allow_env_proxy_for_ws(proxy_configured=self._proxy_configured)
         client: Any = lark.ws.Client(  # pyright: ignore[reportUnknownMemberType]
             self._app_id, self._app_secret, event_handler=handler
         )
@@ -730,16 +742,19 @@ class FeishuAdapter(IMAdapter):
         response = self._create_message(client, request)
         if not response.success():
             raise RuntimeError(f"feishu card send failed: code={response.code} msg={response.msg}")
-        data = response.data
-        chat_id_resolved = getattr(data, "chat_id", "") if data is not None else ""
-        if chat_id_resolved:
-            self._sent_chat_ids[chat_id] = chat_id_resolved
-        # Delivery-count surface (task #4250): one line per API-confirmed send.
-        logger.info(
-            "feishu send ok chat_id={} message_id={}",
-            chat_id,
-            getattr(data, "message_id", "") if data is not None else "",
-        )
+        self._record_send(chat_id, response.data)
+
+    # meiva:note
+    # Remember the p2p chat a confirmed send resolved, and log the delivery-count line (task
+    # #4250: one per API-confirmed send). Returns the resolved chat id, "" when the response
+    # carries none.
+    def _record_send(self, chat_id: str, data: Any) -> str:
+        resolved = getattr(data, "chat_id", "") if data is not None else ""
+        if resolved:
+            self._sent_chat_ids[chat_id] = resolved
+        message_id = getattr(data, "message_id", "") if data is not None else ""
+        logger.info("feishu send ok chat_id={} message_id={}", chat_id, message_id)
+        return resolved
 
     def _send_one(self, client: Any, chat_id: str, text: str) -> str:
         """Send one text segment; returns the p2p chat id from the response
@@ -766,17 +781,7 @@ class FeishuAdapter(IMAdapter):
             # Sanitized on purpose: the SDK response may embed request internals
             # but never credentials; keep it that way in the raised error.
             raise RuntimeError(f"feishu send failed: code={response.code} msg={response.msg}")
-        data = response.data
-        chat_id_resolved = getattr(data, "chat_id", "") if data is not None else ""
-        if chat_id_resolved:
-            self._sent_chat_ids[chat_id] = chat_id_resolved
-        # Delivery-count surface (task #4250): one line per API-confirmed send.
-        logger.info(
-            "feishu send ok chat_id={} message_id={}",
-            chat_id,
-            getattr(data, "message_id", "") if data is not None else "",
-        )
-        return chat_id_resolved
+        return self._record_send(chat_id, response.data)
 
 
 def segment_text(text: str, limit: int) -> list[str]:

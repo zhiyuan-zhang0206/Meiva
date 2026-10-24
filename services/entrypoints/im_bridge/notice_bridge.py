@@ -20,7 +20,6 @@ from base.db.transaction import write_transaction
 from base.events.notifications.catalog import core_catalog
 from base.events.notifications.policy import enabled_for
 from base.events.notifications.store import read_overrides_sync
-from base.paths import meiva_home
 from services.entrypoints.im_bridge import copy
 from services.entrypoints.im_bridge.config import ImBridgeConfig
 from services.entrypoints.im_bridge.notice_poll_store import NoticePollStore
@@ -45,10 +44,6 @@ _PRIORITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 # FYI rows are filtered independently of that category and create no outbound intent.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
 _NEEDS_INPUT = core_catalog()["core.needs_input"]
-
-
-def state_dir() -> Path:
-    return meiva_home() / "state" / "im_bridge"
 
 
 # Direct-DB reads (R3 door ④, decision 2): the notice bridge reads
@@ -103,10 +98,13 @@ def _parse_filter_tokens(rest: list[str]) -> dict[str, Any]:
 class NoticeBridge:
     """Push fleet notices to the owner chat; own reply mode + filters."""
 
-    def __init__(self, core: Any, config: ImBridgeConfig, *, db_pool: Any = None) -> None:
+    def __init__(
+        self, core: Any, config: ImBridgeConfig, *, db_pool: Any = None, state_dir: Path
+    ) -> None:
         self._config = config
         self.core = core
         self.db_pool = db_pool
+        self._state_dir = state_dir
         self.poll_store = NoticePollStore(core.outbound_store)
         self._reply_modes: dict[str, dict[str, Any]] = {}  # chat_id -> mode
         self._filters: dict[str, Any] = {"min_priority": None, "agent": None}
@@ -115,7 +113,7 @@ class NoticeBridge:
     # -- persistence -------------------------------------------------------
 
     def _load_state(self) -> None:
-        d = state_dir()
+        d = self._state_dir
         d.mkdir(parents=True, exist_ok=True)
         with suppress(FileNotFoundError):
             self._filters = json.loads((d / "notice_filters.json").read_text())
@@ -123,7 +121,7 @@ class NoticeBridge:
             raise TypeError("notice filters must be an object")
 
     def _save(self, name: str, value: Any) -> None:
-        (state_dir() / name).write_text(json.dumps(value))
+        (self._state_dir / name).write_text(json.dumps(value))
 
     # -- gateway -----------------------------------------------------------
 

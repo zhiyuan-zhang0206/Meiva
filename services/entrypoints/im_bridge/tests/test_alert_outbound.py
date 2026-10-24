@@ -6,8 +6,8 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
+import psycopg
 import pytest
-from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from base.telemetry.alerts import upsert_alert
@@ -19,10 +19,8 @@ from services.entrypoints.im_bridge.alert_outbound import (
     AlertOwnerDecision,
 )
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
-from services.entrypoints.im_bridge.outbound.types import OutboundIntent
-from services.entrypoints.im_bridge.outbound.worker import IMOutboxWorker
-from services.entrypoints.im_bridge.tests.test_timeline_outbox import RecordingAdapter
-from services.entrypoints.im_bridge.tests.test_timeline_outbox import pool as pool
+from services.entrypoints.im_bridge.tests.support import failing_insert
+from services.entrypoints.im_bridge.tests.test_timeline_outbox import RecordingAdapter, worker_for
 from services.entrypoints.im_bridge.types import PreparedOutboundSend, SendNotStartedError
 
 
@@ -130,7 +128,7 @@ async def test_recovery_after_committed_fact_without_rpc_or_next_webhook(pool: C
     service = bridge(pool, adapter)
     await service.poll_once()
     assert receipt_count(pool) == (1, 1)
-    await IMOutboxWorker(service.store.outbound, service.adapters).run_once()
+    await worker_for(service.store.outbound, service.adapters).run_once()
     assert adapter.sent and adapter.recipients == [adapter.owner]
     with pool.connection() as conn:
         assert native_sent_count(conn, {group}) == 1
@@ -222,7 +220,7 @@ async def test_any_real_sent_completes_revision_but_ambiguous_channel_is_not_rep
     ambiguous.error = RuntimeError("https://provider/botSECRET/contextTOKEN")
     service = bridge(pool, good, ambiguous)
     await service.accept(group)
-    worker = IMOutboxWorker(service.store.outbound, service.adapters)
+    worker = worker_for(service.store.outbound, service.adapters)
     with pytest.raises(RuntimeError) as caught:
         await worker.run_once()
     assert caught.value is ambiguous.error
@@ -251,7 +249,7 @@ async def test_unresolved_sending_after_restart_stays_unconfirmed_without_second
         conn.execute(
             "UPDATE im_bridge_outbound_intents SET status='sending',attempt_id=%s", (uuid4(),)
         )
-    await IMOutboxWorker(service.store.outbound, service.adapters).run_once()
+    await worker_for(service.store.outbound, service.adapters).run_once()
     assert adapter.sent == []
     with pool.connection() as conn:
         assert native_sent_count(conn, {group}) == 0
@@ -316,23 +314,19 @@ async def test_retained_receipt_recovers_after_source_retention_without_new_prep
 
 
 async def test_acceptance_insert_failure_rolls_back_all_intents_and_receipt(
-    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    pool: ConnectionPool, db_conn: psycopg.Connection
 ):
     [group] = ingest(pool, [item("a")])
     service = bridge(pool, AlertAdapter(), AlertAdapter("weixin"))
-    original = service.store.outbound.insert_intent
-    count = 0
-
-    def fail_second(conn: Connection, intent: OutboundIntent | None) -> int:
-        nonlocal count
-        count += 1
-        result = original(conn, intent)
-        if count == 2:
-            raise RuntimeError("injected after intent writes")
-        return result
-
-    monkeypatch.setattr(service.store.outbound, "insert_intent", fail_second)
-    with pytest.raises(RuntimeError, match="injected"):
+    with (
+        failing_insert(
+            db_conn,
+            "im_bridge_outbound_intents",
+            when="NEW.channel = 'weixin'",
+            message="injected after intent writes",
+        ),
+        pytest.raises(psycopg.errors.RaiseException, match="injected"),
+    ):
         await service.accept(group)
     assert receipt_count(pool) == (0, 0)
 

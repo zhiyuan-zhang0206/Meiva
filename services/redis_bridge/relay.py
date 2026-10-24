@@ -41,6 +41,14 @@ def _log(message: str) -> None:
     sys.stdout.flush()
 
 
+# meiva:note
+# The pause before the rebind attempt that follows a wait of `delay_s`: doubled, capped at
+# `_MAX_REBIND_DELAY_S`. A zero delay stays zero, which is how a test serves a rebuilt
+# listener without waiting.
+def next_rebind_delay(delay_s: float) -> float:
+    return min(delay_s * 2.0, _MAX_REBIND_DELAY_S)
+
+
 def open_listener(address: tuple[str, int]) -> socket.socket:
     family = socket.AF_INET6 if ":" in address[0] else socket.AF_INET
     listener = socket.socket(family, socket.SOCK_STREAM)
@@ -241,14 +249,14 @@ class RelayService:
         listen_address: tuple[str, int],
         backend_address: tuple[str, int],
         *,
-        open_listener: Callable[[tuple[str, int]], socket.socket] = open_listener,
-        sleep: Callable[[float], None] | None = None,
+        rebind_delay_s: float = INITIAL_REBIND_DELAY_S,
     ) -> None:
+        if not math.isfinite(rebind_delay_s) or rebind_delay_s < 0:
+            raise ValueError("relay rebind delay must be finite and nonnegative")
         self._listen_address = listen_address
         self._backend_address = backend_address
-        self._open_listener = open_listener
+        self._rebind_delay_s = rebind_delay_s
         self._stopped = threading.Event()
-        self._sleep = sleep if sleep is not None else self._stopped.wait
         self._lock = threading.RLock()
         self._listener: socket.socket | None = None
         self._connections: list[Connection] = []
@@ -286,6 +294,19 @@ class RelayService:
                         finished = connection.completed()
                     if finished:
                         self._connections.remove(connection)
+
+    # meiva:note
+    # The address the live listener is bound to, with the operating system's port when the
+    # configured port is 0, or None while no listener is open (or one that was just closed).
+    def bound_address(self) -> tuple[str, int] | None:
+        with self._lock:
+            if self._listener is None:
+                return None
+            try:
+                name = self._listener.getsockname()
+            except OSError:
+                return None
+            return (name[0], name[1])
 
     def request_stop(self) -> None:
         with self._lock:
@@ -337,18 +358,19 @@ class RelayService:
             ListenerExhaustedError: the listener failed `MAX_LISTENER_FAILURES` times in a
                 row; an admitted connection clears the count.
         """
-        delay_s = INITIAL_REBIND_DELAY_S
+        delay_s = self._rebind_delay_s
         while not self._stopped.is_set():
             listener: socket.socket | None = None
             try:
-                listener = self._open_listener(self._listen_address)
+                listener = open_listener(self._listen_address)
                 with self._lock:
                     self._listener = listener
+                bound = listener.getsockname()
                 _log(
-                    f"relay listening on {self._listen_address[0]}:{self._listen_address[1]} -> "
+                    f"relay listening on {bound[0]}:{bound[1]} -> "
                     f"{self._backend_address[0]}:{self._backend_address[1]}"
                 )
-                delay_s = INITIAL_REBIND_DELAY_S
+                delay_s = self._rebind_delay_s
                 self._accept(listener)
             except OSError as exc:
                 _log(f"listener bind failed: {exc}; retrying in {delay_s:g}s")
@@ -366,8 +388,8 @@ class RelayService:
                     f"listener on {self._listen_address[0]}:{self._listen_address[1]} failed "
                     f"{self._listener_failures} times in a row"
                 )
-            self._sleep(delay_s)
-            delay_s = min(delay_s * 2.0, _MAX_REBIND_DELAY_S)
+            self._stopped.wait(delay_s)
+            delay_s = next_rebind_delay(delay_s)
 
     def _accept(self, listener: socket.socket) -> None:
         while not self._stopped.is_set():
@@ -399,19 +421,6 @@ def run_service(service: RelayService) -> None:
         raise
     else:
         service.stop()
-
-
-def serve_forever(
-    listen_address: tuple[str, int],
-    backend_address: tuple[str, int],
-    *,
-    open_listener: Callable[[tuple[str, int]], socket.socket] = open_listener,
-    sleep: Callable[[float], None] | None = None,
-) -> None:
-    """Serve with an owner that stops and collects connections on every exit."""
-    run_service(
-        RelayService(listen_address, backend_address, open_listener=open_listener, sleep=sleep)
-    )
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

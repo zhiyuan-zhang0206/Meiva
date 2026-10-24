@@ -1,12 +1,15 @@
-exports = ["feishu.py", "feishu_poll_cursor.py", "feishu_ws_proxy.py", "telegram.py", "weixin.py", "weixin_login.py"]
+exports = ["feishu.py", "feishu_poll_cursor.py", "feishu_ws_proxy.py", "run_plan.py", "telegram.py", "weixin.py", "weixin_login.py", "ws_proxy_plan.py"]
 
 [uses]
 "feishu.py" = ["feishu_inbound.py", "feishu_poll_cursor.py", "feishu_ws_proxy.py"]
 "feishu_inbound.py" = ["feishu_poll_cursor.py"]
+"feishu_ws_proxy.py" = ["ws_proxy_plan.py"]
 "weixin_login.py" = ["weixin.py"]
 
 [purity]
 "__init__.py" = "strict"
+"run_plan.py" = "strict"
+"ws_proxy_plan.py" = "strict"
 
 [debt.third-party-patch]
 "feishu_ws_proxy.py#setattr lark_oapi.ws.client._ws_connect_kwargs" = 1

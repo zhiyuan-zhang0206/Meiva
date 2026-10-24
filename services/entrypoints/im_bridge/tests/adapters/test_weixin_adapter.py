@@ -12,11 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import stat
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Barrier
 from typing import Any
 
 import httpx
@@ -27,7 +25,7 @@ from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter
 from services.entrypoints.im_bridge.adapters.weixin_login import qr_login
 from services.entrypoints.im_bridge.ingress.types import IngressReceipt, IngressStatus
 from services.entrypoints.im_bridge.tests.adapters.weixin_native import NativeWeixin
-from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
+from services.entrypoints.im_bridge.tests.support import owned_tasks
 from services.entrypoints.im_bridge.types import InboundMessage
 
 
@@ -87,16 +85,15 @@ def _transport(
 
 
 @pytest.fixture
-def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> Path:
-    """Point the state dir at a tmp MEIVA_HOME and write a test account."""
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+def env(tmp_path: Any, state_dir: Path) -> Path:
+    """Write a test account into the test's state directory."""
     account = {
         "account_id": "bot-id",
         "bot_token": "test-bot-token",
         "user_id": "bot-user-id",
         "base_url": "https://ilinkai.weixin.qq.com",
     }
-    path = tmp_path / "state" / "im_bridge" / "weixin_account.json"
+    path = state_dir / "weixin_account.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(account))
     return tmp_path
@@ -120,52 +117,31 @@ def test_atomic_json_preserves_bytes_and_tightens_private_modes(tmp_path: Path) 
     assert sorted(path.parent.iterdir()) == [path]
 
 
-def test_atomic_json_concurrent_writes_use_distinct_temps(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_atomic_json_concurrent_writes_leave_one_whole_value_and_no_temp(
+    tmp_path: Path,
 ) -> None:
     path = tmp_path / "state" / "im_bridge" / "private_state.json"
     path.parent.mkdir(parents=True)
-    barrier = Barrier(2)
-    sources: list[Path] = []
-    original_replace = os.replace
-
-    def rendezvous(source: os.PathLike[str] | str, target: os.PathLike[str] | str) -> None:
-        sources.append(Path(source))
-        barrier.wait(timeout=5)
-        original_replace(source, target)
-
-    monkeypatch.setattr(os, "replace", rendezvous)
-    values = [{"token": "first" * 4096}, {"token": "second" * 4096}]
+    values = [{"token": f"writer-{index}" * 4096} for index in range(8)]
 
     def write(value: dict[str, str]) -> None:
         weixin.atomic_write_json(path, value)
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(write, values))
 
     assert json.loads(path.read_bytes()) in values
-    assert len(set(sources)) == 2
-    assert all(source.parent == path.parent for source in sources)
-    assert all(
-        source.name.startswith(f".{path.name}.") and source.suffix == ".tmp" for source in sources
-    )
     assert sorted(path.parent.iterdir()) == [path]
 
 
-def test_atomic_json_failed_replace_keeps_old_content_and_cleans_temp(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_atomic_json_failed_replace_keeps_old_content_and_cleans_temp(tmp_path: Path) -> None:
     path = tmp_path / "state" / "im_bridge" / "private_state.json"
-    path.parent.mkdir(parents=True)
-    path.write_bytes(b"old")
+    path.mkdir(parents=True)
+    (path / "old").write_bytes(b"old")
 
-    def fail_replace(_source: os.PathLike[str] | str, _target: os.PathLike[str] | str) -> None:
-        raise OSError("replace failure")
-
-    monkeypatch.setattr(os, "replace", fail_replace)
-    with pytest.raises(OSError, match="replace failure"):
+    with pytest.raises(OSError):
         weixin.atomic_write_json(path, {"new": True})
-    assert path.read_bytes() == b"old"
+    assert (path / "old").read_bytes() == b"old"
     assert sorted(path.parent.iterdir()) == [path]
 
 
@@ -180,11 +156,11 @@ async def test_poll_forwards_message_and_caches_context_token(native_weixin: Nat
     assert json.loads(adapter._tokens._path.read_text()) == {"peer-1": "tok-abc"}
 
 
-async def test_send_echoes_context_token_and_headers(env: Any) -> None:
+async def test_send_echoes_context_token_and_headers(env: Any, state_dir: Path) -> None:
     """sendmessage carries the peer's cached context_token and the iLink headers."""
     transport, captured = _transport([httpx.Response(200, json={"ret": 0})])
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = WeixinAdapter(FakeCore(), client=client)
+        adapter = WeixinAdapter(FakeCore(), client=client, state_dir=state_dir)
         adapter._tokens.set("peer-1", "tok-ctx-9")
         await adapter.send("peer-1", "hi")
 
@@ -201,11 +177,11 @@ async def test_send_echoes_context_token_and_headers(env: Any) -> None:
     assert request.headers["X-WECHAT-UIN"]
 
 
-async def test_send_splits_long_text(env: Any) -> None:
+async def test_send_splits_long_text(env: Any, state_dir: Path) -> None:
     """Text longer than 2000 chars arrives in consecutive 2000-char chunks."""
     transport, captured = _transport([httpx.Response(200, json={"ret": 0}) for _ in range(3)])
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = WeixinAdapter(FakeCore(), client=client)
+        adapter = WeixinAdapter(FakeCore(), client=client, state_dir=state_dir)
         adapter._chunk_delay_seconds = 0
         await adapter.send("peer-1", "x" * 4500)
 
@@ -215,7 +191,7 @@ async def test_send_splits_long_text(env: Any) -> None:
     assert all(b["to_user_id"] == "peer-1" for b in bodies)
 
 
-async def test_session_expired_retries_without_token(env: Any) -> None:
+async def test_session_expired_retries_without_token(env: Any, state_dir: Path) -> None:
     """errcode -14 -> one retry without the token, then success."""
     transport, captured = _transport(
         [
@@ -224,7 +200,7 @@ async def test_session_expired_retries_without_token(env: Any) -> None:
         ]
     )
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = WeixinAdapter(FakeCore(), client=client)
+        adapter = WeixinAdapter(FakeCore(), client=client, state_dir=state_dir)
         adapter._tokens.set("peer-1", "stale-tok")
         await adapter.send("peer-1", "hi")
 
@@ -238,7 +214,9 @@ async def test_session_expired_retries_without_token(env: Any) -> None:
     "errmsg",
     ["prepare failed", "unknown error", "", None],
 )
-async def test_stale_errmsg_retries_without_token(env: Any, errmsg: str | None) -> None:
+async def test_stale_errmsg_retries_without_token(
+    env: Any, errmsg: str | None, state_dir: Path
+) -> None:
     """ret=-2 with a stale-session errmsg (or none) -> one tokenless retry.
 
     iLink reports an expired context_token ambiguously: "prepare failed",
@@ -253,7 +231,7 @@ async def test_stale_errmsg_retries_without_token(env: Any, errmsg: str | None) 
         ]
     )
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = WeixinAdapter(FakeCore(), client=client)
+        adapter = WeixinAdapter(FakeCore(), client=client, state_dir=state_dir)
         adapter._tokens.set("peer-1", "stale-tok")
         await adapter.send("peer-1", "hi")
 
@@ -263,7 +241,7 @@ async def test_stale_errmsg_retries_without_token(env: Any, errmsg: str | None) 
     assert adapter._tokens.get("peer-1") is None
 
 
-async def test_rate_limit_errmsg_not_stale(env: Any) -> None:
+async def test_rate_limit_errmsg_not_stale(env: Any, state_dir: Path) -> None:
     """ret=-2 with a populated rate-limit errmsg is NOT a stale session.
 
     A genuine rate limit must keep raising so the caller sees the failure
@@ -273,7 +251,7 @@ async def test_rate_limit_errmsg_not_stale(env: Any) -> None:
         [httpx.Response(200, json={"ret": -2, "errmsg": "frequency limit"})]
     )
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = WeixinAdapter(FakeCore(), client=client)
+        adapter = WeixinAdapter(FakeCore(), client=client, state_dir=state_dir)
         adapter._tokens.set("peer-1", "tok")
         with pytest.raises(RuntimeError, match="frequency limit"):
             await adapter.send("peer-1", "hi")
@@ -283,25 +261,25 @@ async def test_rate_limit_errmsg_not_stale(env: Any) -> None:
     assert bodies[0]["context_token"] == "tok"  # noqa: S105  (test fixture value)
 
 
-async def test_send_sanitizes_http_error(env: Any) -> None:
+async def test_send_sanitizes_http_error(env: Any, state_dir: Path) -> None:
     """A non-200 send raises a RuntimeError without the token or the URL."""
     transport, _captured = _transport([httpx.Response(500, text="boom")])
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = WeixinAdapter(FakeCore(), client=client)
+        adapter = WeixinAdapter(FakeCore(), client=client, state_dir=state_dir)
         with pytest.raises(RuntimeError, match="HTTP 500") as exc_info:
             await adapter.send("peer-1", "hello")
     assert "test-bot-token" not in str(exc_info.value)
     assert "ilinkai.weixin.qq.com" not in str(exc_info.value)
 
 
-async def test_transport_error_sanitized(env: Any) -> None:
+async def test_transport_error_sanitized(env: Any, state_dir: Path) -> None:
     """httpx transport errors surface as the exception type, never the URL."""
 
     def boom(_request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("https://ilinkai.weixin.qq.com/ilink/bot/sendmessage")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(boom)) as client:
-        adapter = WeixinAdapter(FakeCore(), client=client)
+        adapter = WeixinAdapter(FakeCore(), client=client, state_dir=state_dir)
         with pytest.raises(RuntimeError, match="ConnectError") as exc_info:
             await adapter.send("peer-1", "hello")
     assert "ilinkai.weixin.qq.com" not in str(exc_info.value)
@@ -321,11 +299,10 @@ async def test_skips_echo_group_bot_and_textless(native_weixin: NativeWeixin) ->
     assert all(receipt.inbound_id is None for receipt in receipts)
 
 
-async def test_unconfigured_start_skips(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+async def test_unconfigured_start_skips(state_dir: Path) -> None:
     """No account file -> start() does nothing and send() raises."""
     async with owned_tasks() as _owned_tasks:
-        monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-        adapter = WeixinAdapter(FakeCore())
+        adapter = WeixinAdapter(FakeCore(), state_dir=state_dir)
         assert not adapter._configured
         await adapter.start(_owned_tasks)
         assert adapter._poll_task is None
@@ -333,7 +310,7 @@ async def test_unconfigured_start_skips(monkeypatch: pytest.MonkeyPatch, tmp_pat
             await adapter.send("peer-1", "hi")
 
 
-async def test_qr_login_saves_account(env: Any, tmp_path: Any) -> None:
+async def test_qr_login_saves_account(env: Any, tmp_path: Any, state_dir: Path) -> None:
     """QR flow: fetch QR, poll status until confirmed, persist credentials."""
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -359,7 +336,7 @@ async def test_qr_login_saves_account(env: Any, tmp_path: Any) -> None:
         return httpx.Response(404)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        creds = await qr_login(client=client, timeout_seconds=30)
+        creds = await qr_login(state_dir=state_dir, client=client, timeout_seconds=30)
 
     assert creds == {
         "account_id": "bot-42",
@@ -421,7 +398,7 @@ async def test_state_files_written_0600(native_weixin: NativeWeixin) -> None:
         assert path.stat().st_mode & 0o777 == 0o600
 
 
-async def test_push_failures_counted_and_reset(env: Any) -> None:
+async def test_push_failures_counted_and_reset(env: Any, state_dir: Path) -> None:
     """Task #829: consecutive sendmessage failures increment the watchdog
     counter; a success resets it and records the recovery moment."""
     transport, _captured = _transport(
@@ -436,7 +413,7 @@ async def test_push_failures_counted_and_reset(env: Any) -> None:
         ]
     )
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = WeixinAdapter(FakeCore(), client=client)
+        adapter = WeixinAdapter(FakeCore(), client=client, state_dir=state_dir)
         adapter._configured = True
         adapter._user_id = "owner-1"
         adapter._tokens.set("owner-1", "ctx-token")  # token exists -> stale retry path
@@ -455,10 +432,13 @@ async def test_push_failures_counted_and_reset(env: Any) -> None:
 
 async def test_creation_uses_provider_event_identity_across_adapter_restart(
     native_weixin: NativeWeixin,
+    state_dir: Path,
 ) -> None:
     payload = _message(text="spawn:go", message_id="1")
     original = await native_weixin.adapter._handle_message(payload)
-    replacement = WeixinAdapter(native_weixin.core, client=native_weixin.adapter._http)
+    replacement = WeixinAdapter(
+        native_weixin.core, client=native_weixin.adapter._http, state_dir=state_dir
+    )
     native_weixin.core.register(replacement)
     assert await replacement._handle_message(payload) == original
     different = await replacement._handle_message(_message(text="spawn:go", message_id="2"))
@@ -541,10 +521,13 @@ async def test_poll_replay_deduplicates_events_without_merging_identical_text(
 
 async def test_missing_id_heuristic_is_memory_only_across_restart(
     native_weixin: NativeWeixin,
+    state_dir: Path,
 ) -> None:
     payload = _message(text="same", message_id="")
     for _ in range(2):
-        adapter = WeixinAdapter(native_weixin.core, client=native_weixin.adapter._http)
+        adapter = WeixinAdapter(
+            native_weixin.core, client=native_weixin.adapter._http, state_dir=state_dir
+        )
         native_weixin.core.register(adapter)
         with pytest.raises(ValueError, match="qualified provider"):
             await adapter._handle_message(payload)

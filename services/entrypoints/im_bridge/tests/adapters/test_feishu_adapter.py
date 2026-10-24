@@ -13,6 +13,7 @@ import json
 import threading
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -27,7 +28,7 @@ from services.entrypoints.im_bridge.adapters.feishu import (
     segment_text,
 )
 from services.entrypoints.im_bridge.tests.slices import feishu_config
-from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
+from services.entrypoints.im_bridge.tests.support import owned_tasks
 from services.entrypoints.im_bridge.types import InboundMessage
 
 
@@ -144,8 +145,10 @@ async def websocket_ready(adapter: FeishuAdapter) -> AsyncGenerator[None]:
 class PatchingAdapter(FeishuAdapter):
     """Adapter with the lark ws client construction replaced by a fake."""
 
-    def __init__(self, core: FakeCore, config: Any, ws_client: FakeWsClient) -> None:
-        super().__init__(core, config)
+    def __init__(
+        self, core: FakeCore, config: Any, ws_client: FakeWsClient, *, state_dir: Path
+    ) -> None:
+        super().__init__(core, config, state_dir=state_dir, proxy_configured=False)
         self._ws_client_impl = ws_client
 
     def _build_ws_client(self) -> Any:
@@ -153,8 +156,8 @@ class PatchingAdapter(FeishuAdapter):
 
 
 @pytest.fixture
-def adapter() -> FeishuAdapter:
-    return FeishuAdapter(FakeCore(), feishu_config())
+def adapter(state_dir: Path) -> FeishuAdapter:
+    return FeishuAdapter(FakeCore(), feishu_config(), state_dir=state_dir, proxy_configured=False)
 
 
 # -- inbound ---------------------------------------------------------------
@@ -229,15 +232,20 @@ async def test_ws_callback_drops_when_no_main_loop(adapter: FeishuAdapter) -> No
 # -- credentials / lifecycle ------------------------------------------------
 
 
-async def test_start_skips_without_credentials() -> None:
+async def test_start_skips_without_credentials(state_dir: Path) -> None:
     async with owned_tasks() as _owned_tasks:
-        adapter = FeishuAdapter(FakeCore(), feishu_config(feishu_app_id="", feishu_app_secret=""))
+        adapter = FeishuAdapter(
+            FakeCore(),
+            feishu_config(feishu_app_id="", feishu_app_secret=""),
+            state_dir=state_dir,
+            proxy_configured=False,
+        )
         await adapter.start(_owned_tasks)
         assert adapter._ws_task is None
         assert adapter._ws_client is None
 
 
-async def test_start_connects_with_credentials() -> None:
+async def test_start_connects_with_credentials(state_dir: Path) -> None:
     # The ws thread's first act is a COLD import of lark_oapi.ws.client (a
     # protobuf + websocket import chain, seconds on a loaded CI runner) before
     # the fake's start() can run, so the timed wait below would race that
@@ -250,7 +258,7 @@ async def test_start_connects_with_credentials() -> None:
 
         ws_client = FakeWsClient()
         credentials = feishu_config(feishu_app_id="cli_x", feishu_app_secret="secret_x")  # noqa: S106
-        adapter = PatchingAdapter(FakeCore(), credentials, ws_client)
+        adapter = PatchingAdapter(FakeCore(), credentials, ws_client, state_dir=state_dir)
         await adapter.start(_owned_tasks)
         assert (adapter._app_id, adapter._app_secret) == ("cli_x", "secret_x")
         assert adapter._ws_task is not None
@@ -267,61 +275,40 @@ async def test_start_connects_with_credentials() -> None:
 # -- ws proxy (issue #2089) -------------------------------------------------
 
 
-def test_ws_connect_kwargs_defer_to_the_machine_proxy(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A host that reaches the network only through a proxy must keep its long
-    connection. The SDK pins ``proxy=None`` on websockets>=15 (its historical
-    direct behavior), which turns the environment discovery off — the builder
-    restores it whenever the machine names a proxy, and keeps the SDK's own
-    direct behavior when it does not.
-
-    A wss target is covered by ``HTTPS_PROXY`` (websockets' per-target discovery
-    also honors ``NO_PROXY``); an ``ALL_PROXY``-only environment still connects
-    directly, because that discovery maps no ``all`` scheme onto a websocket
-    target. The key list is the env registry's — the same one ``child_env``
-    forwards to service children.
-    """
+# meiva:note
+# A host that reaches the network only through a proxy must keep its long
+# connection. The SDK pins ``proxy=None`` on websockets>=15 (its historical
+# direct behavior), which turns the environment discovery off — the builder
+# restores it whenever the machine names a proxy, and keeps the SDK's own
+# direct behavior when it does not.
+#
+# Whether the machine names a proxy is the env registry's judgment over the launching
+# environment (`network_proxy_configured`), made once by the daemon root; the builder is
+# a pure function of that fact.
+def test_ws_connect_kwargs_defer_to_the_machine_proxy() -> None:
     import inspect
 
     import websockets
 
-    from base.host.env.registry import NETWORK_PROXY_KEYS
-    from services.entrypoints.im_bridge.adapters import feishu_ws_proxy
+    from services.entrypoints.im_bridge.adapters.ws_proxy_plan import ws_connect_kwargs
 
-    for key in NETWORK_PROXY_KEYS:
-        monkeypatch.delenv(key, raising=False)
     proxy_param = inspect.signature(websockets.connect).parameters.get("proxy")
     # The fix rests on websockets' "argument omitted = discover from the
     # environment" default (proxy=True). If a future websockets flips it, fail
     # here rather than letting the long connection go direct-only again.
     assert proxy_param is not None and proxy_param.default is True
-    assert feishu_ws_proxy.ws_connect_kwargs() == {"proxy": None}
-
-    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
-    assert feishu_ws_proxy.ws_connect_kwargs() == {}
-    monkeypatch.delenv("HTTPS_PROXY")
-
-    monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:7897")
-    assert feishu_ws_proxy.ws_connect_kwargs() == {}
+    assert ws_connect_kwargs(proxy_configured=False, supports_proxy=True) == {"proxy": None}
+    assert ws_connect_kwargs(proxy_configured=True, supports_proxy=True) == {}
 
 
-def test_ws_connect_kwargs_mirror_the_sdk_version_guard(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_ws_connect_kwargs_mirror_the_sdk_version_guard() -> None:
     """websockets<15 has no ``proxy`` parameter and its ``connect()`` rejects
     unknown keyword arguments — so the builder must mirror the SDK's version
     guard and emit nothing on such an install, regardless of the environment."""
-    import websockets
+    from services.entrypoints.im_bridge.adapters.ws_proxy_plan import ws_connect_kwargs
 
-    from services.entrypoints.im_bridge.adapters import feishu_ws_proxy
-
-    def legacy_connect(uri: str) -> None:
-        """A pre-15 ``connect`` — no ``proxy`` parameter."""
-
-    monkeypatch.setattr(websockets, "connect", legacy_connect)
-    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
-    assert feishu_ws_proxy.ws_connect_kwargs() == {}
+    assert ws_connect_kwargs(proxy_configured=True, supports_proxy=False) == {}
+    assert ws_connect_kwargs(proxy_configured=False, supports_proxy=False) == {}
 
 
 async def test_sdk_connect_call_site_resolves_the_patched_builder() -> None:
@@ -344,30 +331,32 @@ async def test_sdk_connect_call_site_resolves_the_patched_builder() -> None:
     )
 
 
+# meiva:note
+# ``lark.ws.Client`` takes no proxy parameter, so the SDK's module-level
+# kwargs builder is the only seam (``Client._connect`` resolves it by name at
+# connect time). Building the ws client must install the proxy-aware builder in
+# its place, bound to the adapter's proxy fact.
+@pytest.mark.parametrize(("proxy_configured", "expected"), [(True, {}), (False, {"proxy": None})])
 async def test_build_ws_client_installs_the_env_proxy_kwargs_builder(
-    monkeypatch: pytest.MonkeyPatch,
+    proxy_configured: bool, expected: dict[str, Any], state_dir: Path
 ) -> None:
-    """``lark.ws.Client`` takes no proxy parameter, so the SDK's module-level
-    kwargs builder is the only seam (``Client._connect`` resolves it by name at
-    connect time). Building the ws client must install the env-aware builder in
-    its place."""
     # Warm the COLD lark import inside the running loop, like
     # test_start_connects_with_credentials does: the SDK binds a module-level
     # event loop on its first import.
     import lark_oapi.ws.client as ws_client_module
 
-    from services.entrypoints.im_bridge.adapters import feishu_ws_proxy
-
-    adapter = FeishuAdapter(FakeCore(), feishu_config(feishu_rest_timeout_seconds=7.5))
+    adapter = FeishuAdapter(
+        FakeCore(),
+        feishu_config(feishu_rest_timeout_seconds=7.5),
+        state_dir=state_dir,
+        proxy_configured=proxy_configured,
+    )
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105 — a literal, never a real credential
-    monkeypatch.setattr(ws_client_module, "_ws_connect_kwargs", lambda: {"proxy": None})
 
     adapter._build_ws_client()
 
-    assert ws_client_module._ws_connect_kwargs is feishu_ws_proxy.ws_connect_kwargs
-    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
-    assert ws_client_module._ws_connect_kwargs() == {}
+    assert ws_client_module._ws_connect_kwargs() == expected
 
 
 # -- outbound ---------------------------------------------------------------
@@ -487,40 +476,23 @@ def test_segment_chunks() -> None:
 # -- REST timeout (task #698 G6) -------------------------------------------
 
 
-def test_rest_client_applies_configured_timeout(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_rest_client_applies_configured_timeout(state_dir: Path) -> None:
     """The outbound REST client pins the configured timeout explicitly.
 
     The lark SDK's own default (30s) is an SDK-version property, not a
     contract — the adapter must pass MEIVA_FEISHU_REST_TIMEOUT_SECONDS through
     so a hung Feishu line cannot park an IM outbound at an unknown default.
     """
-    seen: list[float] = []
-
-    class _Builder:
-        def app_id(self, value: str) -> _Builder:
-            return self
-
-        def app_secret(self, value: str) -> _Builder:
-            return self
-
-        def timeout(self, value: float) -> _Builder:
-            seen.append(value)
-            return self
-
-        def build(self) -> object:
-            return object()
-
-    import lark_oapi
-
-    monkeypatch.setattr(lark_oapi.Client, "builder", staticmethod(_Builder))
-    adapter = FeishuAdapter(FakeCore(), feishu_config(feishu_rest_timeout_seconds=7.5))
+    adapter = FeishuAdapter(
+        FakeCore(),
+        feishu_config(feishu_rest_timeout_seconds=7.5),
+        state_dir=state_dir,
+        proxy_configured=False,
+    )
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105
     client = adapter._build_rest_client()
-    assert client is not None
-    assert seen == [7.5]
+    assert client._config.timeout == 7.5
 
 
 async def test_send_with_buttons_renders_interactive_card(adapter: FeishuAdapter) -> None:
@@ -635,8 +607,10 @@ def make_list_response(items: list[SimpleNamespace]) -> SimpleNamespace:
     )
 
 
-def poll_adapter(rest: FakeRestClient) -> FeishuAdapter:
-    adapter = FeishuAdapter(FakeCore(), feishu_config())
+def poll_adapter(rest: FakeRestClient, state_dir: Path) -> FeishuAdapter:
+    adapter = FeishuAdapter(
+        FakeCore(), feishu_config(), state_dir=state_dir, proxy_configured=False
+    )
     adapter._rest_client = rest
     return adapter
 
