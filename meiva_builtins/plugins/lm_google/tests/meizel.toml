@@ -1,2 +1,3 @@
-[debt.unresolved-patch]
-"test_implicit_cache.py#monkeypatch.setattr llm.async_client.models.generate_content" = 2
+[uses]
+"conftest.py" = ["gemini_server.py"]
+"test_implicit_cache.py" = ["gemini_server.py"]

@@ -1,4 +1,4 @@
-exports = ["daemon.py"]
+exports = ["daemon.py", "tests"]
 
 [uses]
 "daemon.py" = ["escalation.py"]

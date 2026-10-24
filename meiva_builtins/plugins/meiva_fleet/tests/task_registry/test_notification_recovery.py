@@ -1,9 +1,8 @@
 from uuid import uuid4
 
 import psycopg
-import pytest
 
-from base import telemetry
+import meiva
 from base.db import fetch_one
 from base.db import pool as db_pool
 from base.db.code_version_gate import ProcessDbGate
@@ -16,24 +15,19 @@ from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import seed_ag
 
 
 def test_sdk_commit_survives_producer_loss(
-    db_conn: psycopg.Connection,
-    root_task_id: int,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    database_gate: ProcessDbGate,
+    db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
 ) -> None:
     actor = seed_agent(db_conn)
     owner = seed_agent(db_conn, status="terminated")
     pin_agent(actor)
-
-    def lost_after_commit(*args: object) -> None:
-        raise RuntimeError("producer lost after transaction")
-
-    monkeypatch.setattr(telemetry, "emit_prepared", lost_after_commit)
-    with pytest.raises(RuntimeError):
-        task_registry.create(
-            "survives", "work", parent=root_task_id, owner=owner, operation_key=str(uuid4())
-        )
+    task_registry.commit_creation(
+        meiva.context,
+        "survives",
+        "work",
+        parent=root_task_id,
+        owner=owner,
+        operation_key=str(uuid4()),
+    )
     with db_conn.cursor() as cur:
         cur.execute("SELECT id FROM agent_tasks WHERE title='survives'")
         task_id = int(fetch_one(cur, "accepted task")[0])

@@ -2,6 +2,8 @@ from typing import Any
 
 import pytest
 from google.genai import types
+from google.genai.errors import ClientError
+from langchain_core.exceptions import ModelError
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -12,13 +14,10 @@ from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.factory import build_chat_model
 from base.lm.usage import log_usage_from_message
+from meiva_builtins.plugins.lm_google.tests.gemini_server import GeminiServer
 
 
-async def test_google_tool_call_uses_complete_prefix_and_accounts_cache_reads(
-    monkeypatch: pytest.MonkeyPatch,
-    model_catalog: ModelCatalog,
-    loguru_records: list[dict[str, Any]],
-) -> None:
+def _gemini_flash(model_catalog: ModelCatalog, server: GeminiServer) -> ChatGoogleGenerativeAI:
     llm = build_chat_model(
         "gemini-3.8-flash",
         catalog=model_catalog,
@@ -26,13 +25,20 @@ async def test_google_tool_call_uses_complete_prefix_and_accounts_cache_reads(
         llm_override="",
         overrides=ModelOverrides.from_pins(None),
         streaming=False,
+        base_url=server.url,
     )
     assert isinstance(llm, ChatGoogleGenerativeAI)
-    requests: list[dict[str, Any]] = []
+    return llm
 
-    async def generate(**request: Any) -> types.GenerateContentResponse:
-        requests.append(request)
-        return types.GenerateContentResponse(
+
+async def test_google_tool_call_uses_complete_prefix_and_accounts_cache_reads(
+    model_catalog: ModelCatalog,
+    loguru_records: list[dict[str, Any]],
+    gemini_server: GeminiServer,
+) -> None:
+    llm = _gemini_flash(model_catalog, gemini_server)
+    gemini_server.answer(
+        types.GenerateContentResponse(
             candidates=[
                 types.Candidate(
                     content=types.Content(role="model", parts=[types.Part(text="summary")]),
@@ -46,20 +52,19 @@ async def test_google_tool_call_uses_complete_prefix_and_accounts_cache_reads(
                 cached_content_token_count=200,
             ),
         )
-
-    monkeypatch.setattr(llm.async_client.models, "generate_content", generate)
+    )
     response = await ainvoke_tool_call(
         llm,
         [SystemMessage(content="stable system head"), HumanMessage(content="history")],
         timeout_seconds=settings.lm.llm_compact_timeout_seconds,
     )
     assert response.text == "summary"
-    assert len(requests) == 1
-    config = requests[0]["config"]
-    assert config.cached_content is None
-    assert config.system_instruction.parts[0].text == "stable system head"
-    assert config.tools[0].function_declarations[0].name == "execute_code"
-    assert requests[0]["contents"][0].parts[0].text == "history"
+    [request] = gemini_server.received
+    assert request.path == "/v1beta/models/gemini-3.8-flash:generateContent"
+    assert "cachedContent" not in request.body
+    assert request.body["systemInstruction"]["parts"][0]["text"] == "stable system head"
+    assert request.body["tools"][0]["functionDeclarations"][0]["name"] == "execute_code"
+    assert request.body["contents"][0]["parts"][0]["text"] == "history"
     assert response.usage_metadata is not None
     assert response.usage_metadata.get("input_token_details", {}).get("cache_read") == 200
 
@@ -69,37 +74,16 @@ async def test_google_tool_call_uses_complete_prefix_and_accounts_cache_reads(
 
 
 async def test_cache_403_has_no_application_recovery(
-    monkeypatch: pytest.MonkeyPatch,
-    model_catalog: ModelCatalog,
+    model_catalog: ModelCatalog, gemini_server: GeminiServer
 ) -> None:
-    from google.genai.errors import ClientError
-    from langchain_core.exceptions import ModelError
-
-    llm = build_chat_model(
-        "gemini-3.8-flash",
-        catalog=model_catalog,
-        keys=ProviderKeys({"GEMINI_API_KEY": "test-not-a-real-key"}),
-        llm_override="",
-        overrides=ModelOverrides.from_pins(None),
-        streaming=False,
-    )
-    assert isinstance(llm, ChatGoogleGenerativeAI)
-    calls = 0
-    failure = ClientError(
-        403, {"error": {"message": "CachedContent not found or permission denied"}}
-    )
-
-    async def reject(**_request: Any) -> types.GenerateContentResponse:
-        nonlocal calls
-        calls += 1
-        raise failure
-
-    monkeypatch.setattr(llm.async_client.models, "generate_content", reject)
+    llm = _gemini_flash(model_catalog, gemini_server)
+    gemini_server.refuse(403, "CachedContent not found or permission denied", "PERMISSION_DENIED")
     with pytest.raises(ModelError) as caught:
         await ainvoke_tool_call(
             llm,
             [SystemMessage(content="head"), HumanMessage(content="history")],
             timeout_seconds=settings.lm.llm_compact_timeout_seconds,
         )
-    assert caught.value.__cause__ is failure
-    assert calls == 1
+    assert isinstance(caught.value.__cause__, ClientError)
+    assert caught.value.__cause__.code == 403
+    assert len(gemini_server.received) == 1

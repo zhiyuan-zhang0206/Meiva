@@ -3,13 +3,11 @@
 "test_multiple_tool_calls_meiva_syntax_fix.py" = ["hook_support.py"]
 "test_syntax_fix.py" = ["child_ruff_without_path.py"]
 "test_syntax_fix_helpers.py" = ["legacy_fixers_support.py"]
-"test_syntax_fix_billing.py" = ["hook_support.py"]
+"child_repair_billing.py" = ["hook_support.py"]
+"test_syntax_fix_billing.py" = ["child_repair_billing.py"]
 "test_syntax_fix_part2.py" = ["hook_support.py"]
 
 [external]
 "legacy_fixers_support.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
 "test_syntax_fix.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
 "test_syntax_fix_part2.py" = "checks the syntax repairer's output with the same compile the agent code goes through"
-
-[debt.first-party-patch]
-"test_syntax_fix_billing.py#monkeypatch.setattr base.lm.usage.emit_billing_from_message" = 1

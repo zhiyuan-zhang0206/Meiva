@@ -17,6 +17,9 @@ from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 from meiva.sdk_surface import install
 from meiva.sdk_surface.installation import installed
+from meiva.tests.fixtures.gateway_wire import GatewayWire
+from meiva.tests.fixtures.gateway_wire import gateway_stub as gateway_stub
+from meiva.tests.fixtures.gateway_wire import wire as wire
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet.tests.registry_support import (
     fleet_registry,
@@ -292,23 +295,19 @@ def _label_of(db_conn: psycopg.Connection, agent_id: int) -> str | None:
 
 
 def test_set_label_hands_the_agents_own_label_to_the_gateway(
-    load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
+    load_activity_plugin: None, wire: GatewayWire
 ):
-    from meiva import gateway_client
-
-    calls: list[tuple[int, str, str]] = []
-
-    def patch_label(agent_id: int, label: str, *, source: str = "self") -> None:
-        calls.append((agent_id, label, source))
-
-    monkeypatch.setattr(gateway_client, "patch_label", patch_label)
-    pin_agent(7)
+    wire.stub.reply("PATCH", "/api/agents/7", {})
+    pin_agent(7, clients=wire.context.clients)
     set_label = meiva.self.set_label
     assert callable(set_label)
     set_label("auth-refactor lead")
     set_label("")
 
-    assert calls == [(7, "auth-refactor lead", "self"), (7, "", "self")]
+    assert [(sent.method, sent.path, sent.body) for sent in wire.sent] == [
+        ("PATCH", "/api/agents/7", {"label": "auth-refactor lead", "source": "self"}),
+        ("PATCH", "/api/agents/7", {"label": "", "source": "self"}),
+    ]
 
 
 def test_plugin_registers_ui_notice_members(load_activity_plugin: None):
@@ -330,39 +329,31 @@ def test_notify_validates_title_priority_and_blocking(load_activity_plugin: None
 
 
 def test_fleet_spawn_preserves_caller_creation_key(
-    load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
+    load_activity_plugin: None, wire: GatewayWire
 ) -> None:
-    captured: list[dict[str, Any]] = []
-
-    def capture(**kwargs: Any) -> int:
-        captured.append(kwargs)
-        return 42
-
-    monkeypatch.setattr(meiva.gateway_client, "spawn", capture)
+    wire.stub.reply("POST", "/api/keyed/v1/agents", {"id": 42})
+    pin_agent(7, clients=wire.context.clients)
     assert meiva.agents.spawn(prompt="one goal", idempotency_key="fleet-birth") == 42
-    assert captured[0]["idempotency_key"] == "fleet-birth"
-    assert captured[0]["label"] is None
+    [sent] = wire.sent
+    assert sent.headers["idempotency-key"] == "fleet-birth"
+    assert "label" not in sent.body
     assert "idempotency_key" in inspect.signature(meiva.agents.spawn).parameters
 
 
 def test_fleet_spawn_forwards_keyed_fork_without_mode_flag(
-    load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
+    load_activity_plugin: None, wire: GatewayWire
 ) -> None:
-    captured: list[dict[str, Any]] = []
-
-    def capture(**kwargs: Any) -> int:
-        captured.append(kwargs)
-        return 42
-
-    monkeypatch.setattr(meiva.gateway_client, "spawn", capture)
+    wire.stub.reply("POST", "/api/keyed/v1/agents", {"id": 42})
+    pin_agent(7, clients=wire.context.clients)
     assert meiva.agents.spawn(fork_from=1, idempotency_key="fork-intent") == 42
-    assert captured[0]["fork_from"] == 1
-    assert captured[0]["idempotency_key"] == "fork-intent"
+    [sent] = wire.sent
+    assert sent.body["fork_from"] == 1
+    assert sent.headers["idempotency-key"] == "fork-intent"
     assert "require_idempotency" not in inspect.signature(meiva.agents.spawn).parameters
     obsolete: dict[str, Any] = {"idempotency_key": "intent", "require_idempotency": True}
     with pytest.raises(TypeError, match="require_idempotency"):
         meiva.agents.spawn(**obsolete)
-    assert len(captured) == 1
+    assert len(wire.sent) == 1
 
 
 def test_fleet_declares_compact_preparation_in_its_manifest() -> None:

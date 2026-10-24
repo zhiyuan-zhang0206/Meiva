@@ -9,7 +9,7 @@ import pytest
 
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet import task_registry
-from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import inserts_failing
+from meiva_builtins.plugins.meiva_fleet.task_maintenance.tests.failing_writes import inserts_failing
 
 
 def _seed_agent(db: psycopg.Connection) -> int:

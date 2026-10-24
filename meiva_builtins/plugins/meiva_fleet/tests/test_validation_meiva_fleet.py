@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 from uuid import uuid4
 
-import httpx
 import psycopg
 import pytest
 
-from meiva.gateway_client import use_client
+from meiva.tests.fixtures.gateway_wire import GatewayWire
+from meiva.tests.fixtures.gateway_wire import gateway_stub as gateway_stub
+from meiva.tests.fixtures.gateway_wire import wire as wire
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
     root_task_id as root_task_id,
@@ -97,42 +97,29 @@ class TestTasksEntries:
 
 
 class TestNoticeEntries:
-    def test_notify_title_unwraps(self) -> None:
+    def test_notify_title_unwraps(self, wire: GatewayWire) -> None:
         from meiva_builtins.plugins.meiva_fleet import plugin as fleet_plugin
 
-        requests: list[httpx.Request] = []
-
-        def answer(request: httpx.Request) -> httpx.Response:
-            requests.append(request)
-            return httpx.Response(
-                201,
-                json={
-                    "id": 1,
-                    "pending_count": 0,
-                    "superseded": [],
-                    "pending_notices": [],
-                },
-            )
-
-        pin_agent(900001)
+        wire.stub.reply(
+            "POST",
+            "/api/agents/900001/notices",
+            {"id": 1, "pending_count": 0, "superseded": [], "pending_notices": []},
+            status=201,
+        )
+        pin_agent(900001, clients=wire.context.clients)
         inputs: dict[str, Any] = {
             "title": ("Hi",),
             "content": ("detail",),
             "priority": ("P2",),
             "idempotency_key": "notice-intent",
         }
-        with (
-            httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(answer)) as http,
-            use_client(http),
-        ):
-            notice = fleet_plugin.notify(**inputs)
-        [request] = requests
-        assert (request.method, request.url.path) == ("POST", "/api/agents/900001/notices")
-        body = json.loads(request.content)
-        assert body["title"] == "Hi"
-        assert body["content"] == "detail"
-        assert body["priority"] == "P2"
-        assert request.headers["Idempotency-Key"] == "notice-intent"
+        notice = fleet_plugin.notify(**inputs)
+        [sent] = wire.sent
+        assert (sent.method, sent.path) == ("POST", "/api/agents/900001/notices")
+        assert sent.body["title"] == "Hi"
+        assert sent.body["content"] == "detail"
+        assert sent.body["priority"] == "P2"
+        assert sent.headers["idempotency-key"] == "notice-intent"
         assert notice == 1
 
     def test_notify_multi_element_title_type_errors(self) -> None:

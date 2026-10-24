@@ -7,18 +7,24 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from base import telemetry
+import meiva
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.tests.fixtures.pin_agent import pin_agent
-from meiva_builtins.plugins.meiva_fleet import _task_receipts, task_registry
+from meiva_builtins.plugins.meiva_fleet import task_registry
+from meiva_builtins.plugins.meiva_fleet.task_maintenance.tests.failing_writes import inserts_failing
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
     root_task_id as root_task_id,
 )
-from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import seed_agent, seed_owned_task
+from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
+    seed_agent,
+    seed_owned_task,
+)
 
 
 def _facts(db: psycopg.Connection, tid: int) -> tuple[object, object, object]:
@@ -65,18 +71,10 @@ def test_concurrent_duplicate_note_has_one_business_effect(
 
 
 def test_post_commit_failure_replay_preserves_intervening_state(
-    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, monkeypatch: pytest.MonkeyPatch
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, emitted_events: EmittedEvents
 ) -> None:
     _actor, _owner, tid = seed_owned_task(db_conn, root_task_id)
-    real_emit = telemetry.emit_prepared
-
-    def fail_emit(*_args: object) -> None:
-        raise RuntimeError("committed response lost")
-
-    monkeypatch.setattr(telemetry, "emit_prepared", fail_emit)
-    with pytest.raises(RuntimeError, match="response lost"):
-        task_registry.log(tid, "committed", operation_key="lost")
-    monkeypatch.setattr(telemetry, "emit_prepared", real_emit)
+    task_registry.commit_update(meiva.context, tid, note="committed", operation_key="lost")
     current = seed_agent(db_conn)
     task_registry.update(tid, owner=current, operation_key=str(uuid4()))
     db_conn.execute(
@@ -84,36 +82,49 @@ def test_post_commit_failure_replay_preserves_intervening_state(
     )
     db_conn.commit()
     before = _facts(db_conn, tid)
-    monkeypatch.setattr(telemetry, "emit_prepared", fail_emit)
+    emitted_events.clear()
     assert task_registry.update(tid, note="committed", operation_key="lost") is None
     assert _facts(db_conn, tid) == before
+    assert emitted_events.names() == []
 
 
-@pytest.mark.parametrize("failure", ["notification", "receipt", "audit"])
-def test_producer_failure_rolls_back_entire_operation(
-    redis_url: str,
-    db_conn: psycopg.Connection,
-    root_task_id: int,
-    monkeypatch: pytest.MonkeyPatch,
-    failure: str,
+def test_publication_emits_the_committed_events_once_and_in_order(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, emitted_events: EmittedEvents
 ) -> None:
-    from base.telemetry import audit_events
+    _actor, _owner, tid = seed_owned_task(db_conn, root_task_id)
+    emitted_events.clear()
+    committed = task_registry.commit_update(
+        meiva.context, tid, note="published", operation_key=str(uuid4())
+    )
+    assert emitted_events.names() == []
+    assert not committed.replayed
+    assert committed.events[0].event_name == "task_update"
 
+    task_registry.publish_update(committed)
+
+    assert emitted_events.names() == [event.event_name for event in committed.events]
+    assert [event.attributes for event in emitted_events] == [
+        event.attributes for event in committed.events
+    ]
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        pytest.param("inbound_messages", id="notification"),
+        pytest.param("task_update_receipts", id="receipt"),
+        pytest.param("audit_events", id="audit"),
+    ],
+)
+def test_producer_failure_rolls_back_entire_operation(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, table: str
+) -> None:
     _actor, _owner, tid = seed_owned_task(db_conn, root_task_id)
     before = _facts(db_conn, tid)
-    module, name = {
-        "notification": (task_registry, "_queue_after_update"),
-        "receipt": (_task_receipts, "record_update"),
-        "audit": (audit_events, "record_audit"),
-    }[failure]
-    real = getattr(module, name)
-
-    def fail_after_effect(*args: object, **kwargs: object) -> None:
-        real(*args, **kwargs)
-        raise RuntimeError("producer failed")
-
-    monkeypatch.setattr(module, name, fail_after_effect)
-    with pytest.raises(RuntimeError, match="producer failed"):
+    with (
+        inserts_failing(db_conn, table),
+        pytest.raises(psycopg.errors.RaiseException, match=f"{table} inserts refused"),
+    ):
         task_registry.log(tid, "rolled back", operation_key="rollback")
     assert _facts(db_conn, tid) == before
     assert db_conn.execute("SELECT count(*) FROM task_update_receipts").fetchone() == (0,)

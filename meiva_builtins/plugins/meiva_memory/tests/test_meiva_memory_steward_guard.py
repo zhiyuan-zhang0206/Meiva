@@ -13,10 +13,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+from base.host.proc import run_bounded
+from meiva_builtins.plugins.meiva_memory.template import validate
+
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _STEWARD = (
     _REPO_ROOT / "meiva_builtins" / "plugins" / "meiva_memory" / "skills" / "scripts" / "steward.py"
 )
+
+
+_VALIDATOR = _REPO_ROOT / "meiva_builtins" / "plugins" / "meiva_memory" / "template" / "validate.py"
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -145,16 +151,6 @@ def test_regenerate_indexes_writes_every_directory_index(unit_home: Path) -> Non
     assert (pool / "index.md").is_file()
 
 
-def _run_validator(pool: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603 — sys.executable + the validator copy seeded in the pool
-        [sys.executable, str(pool / "validate.py")],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
-
-
 def test_a_new_root_note_passes_the_pool_validator_after_the_steward(tmp_path: Path) -> None:
     """Nothing maintains `MEMORY.md` pointers as notes are written with `meiva.files`: the steward's
     rebuild adds the root note's pointer and the directory's, so the pool validator (the pre-commit
@@ -168,14 +164,13 @@ def test_a_new_root_note_passes_the_pool_validator_after_the_steward(tmp_path: P
     _git(pool, "config", "user.email", "steward-test@example.invalid")
     _git(pool, "config", "user.name", "Steward Test")
     shutil.copy(template / "MEMORY.md", pool / "MEMORY.md")
-    shutil.copy(template / "validate.py", pool / "validate.py")
     _git(pool, "add", "-A")
     _git(pool, "commit", "-qm", "seed")
     _git(pool, "checkout", "-qb", "machine-testbox")
     (pool / "rule.md").write_text(_NOTE)
     (pool / "topics").mkdir()
     (pool / "topics" / "retry.md").write_text(_NOTE.replace("Retry rule", "Topic rule"))
-    assert _run_validator(pool).returncode != 0  # the new notes are orphans until indexed
+    assert validate.validate_bundle(pool)[0] != []  # the new notes are orphans until indexed
 
     remote = tmp_path / "remote.git"
     subprocess.run(  # noqa: S603 — fixed argv, test-local fixture repo
@@ -195,6 +190,15 @@ def test_a_new_root_note_passes_the_pool_validator_after_the_steward(tmp_path: P
     assert "## Setup (keep current, do not drop)" in memory_index
     assert "- [Retry rule](rule.md) — Retries above three hurt" in memory_index
     assert "- [topics/](topics/index.md) — 1 notes" in memory_index
-    validated = _run_validator(pool)
-    assert validated.returncode == 0, validated.stderr
+    findings, checked = validate.validate_bundle(pool)
+    assert findings == []
+    assert checked > 0
     assert _git(pool, "status", "--porcelain").strip() == ""
+
+
+def test_the_validator_script_passes_its_own_template() -> None:
+    proc = run_bounded(
+        [sys.executable, str(_VALIDATOR)], capture_output=True, text=True, timeout=120
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "OKF validation passed" in proc.stdout

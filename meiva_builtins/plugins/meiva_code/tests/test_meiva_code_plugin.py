@@ -13,44 +13,42 @@ import pytest
 import meiva
 from agent.state import BaseAgentState, CompactState, build_agent_state
 from base.config.service_read import ConfigAuthority
-from base.lm import factory
 from base.lm.catalog import ModelCatalog
-from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
 )
-from base.packages.tests.model_catalog import inert_keys
-from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install, process_context
-from meiva.sdk_surface.tests.installation_holder import inert_sampling
-from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
-from meiva_builtins.plugins.meiva_code.tests.surface_support import code_registry
+from meiva.tests.fixtures.pin_agent import pin_agent
+from meiva.tests.fixtures.scripted_chat_model import OVERRIDE, Script, ScriptedModels
+from meiva_builtins.plugins.meiva_code.tests.surface_support import (
+    authority_with,
+    install_code_surface,
+)
 
 
 @pytest.fixture(autouse=True)
-def load_meiva_code_plugin(
-    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog, config_authority: ConfigAuthority
-):
+def load_meiva_code_plugin(model_catalog: ModelCatalog, config_authority: ConfigAuthority):
     """Install meiva_code's declared SDK surface (cwd namespace, wraps, skill source) for each
-    test and uninstall it after. Use a valid local sampling policy for SDK calls."""
-    from base.agents.sdk import call_policy
-
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
-    install.install(
-        code_registry(),
-        catalog=model_catalog,
-        provider_keys=inert_keys(model_catalog),
-        authority=config_authority,
-        config_images=DiskPluginConfigImages(resolve_meiva_home()),
-        sampling=inert_sampling(),
-    )
+    test and uninstall it after."""
+    install_code_surface(model_catalog, config_authority)
 
     yield
 
     install.uninstall()
+
+
+# meiva:note
+# The surface reinstalled over a configuration whose text-path model for `meiva.understand` is a
+# scripted model: the real provider factory resolves the override, and the script keeps the
+# requests the wrapped core sent to it.
+@pytest.fixture
+def understand_script(
+    model_catalog: ModelCatalog, config_authority: ConfigAuthority, scripted_models: ScriptedModels
+) -> Script:
+    authority = authority_with(config_authority, llm_override=OVERRIDE)
+    install.uninstall()
+    install_code_surface(model_catalog, authority)
+    return scripted_models.script(authority.service_field_value("understand_text_model"), "ok")
 
 
 def make_state_with_cwd(
@@ -155,9 +153,7 @@ def test_get_cwd_outside_turn_raises():
         meiva.cwd.get()
 
 
-def test_default_cwd_is_workspace_when_bootstrapped(
-    unit_home: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_default_cwd_is_workspace_when_bootstrapped(unit_home: Path):
     """In bootstrapped process, cwd default = own workspace dir (and already created)."""
     from meiva_builtins.plugins.meiva_code._state import default_cwd
 
@@ -166,12 +162,11 @@ def test_default_cwd_is_workspace_when_bootstrapped(
     assert (unit_home / "workspaces" / "5").is_dir()
 
 
-def test_default_cwd_home_without_bootstrap(monkeypatch: pytest.MonkeyPatch):
+def test_default_cwd_home_without_bootstrap():
     """No process identity (test/REPL directly construct state) → keep $HOME placeholder behavior."""
     from meiva_builtins.plugins.meiva_code._state import default_cwd
 
-    pin_no_identity()
-    monkeypatch.delenv("MEIVA_AGENT_ID", raising=False)
+    pin_agent(None)
     assert default_cwd() == str(Path.home())
 
 
@@ -678,20 +673,6 @@ def test_read_wrap_target_missing_still_injects(tmp_path: Path, default_home: Pa
 # ── meiva.understand wrap (paths follow the tracked cwd) ────────────────────
 
 
-def stub_understand_text_path(monkeypatch: pytest.MonkeyPatch) -> dict:
-    """Stub the text-path provider so wrap tests never hit a real model."""
-    from unittest.mock import MagicMock
-
-    llm = MagicMock()
-    response = MagicMock()
-    response.content = "ok"
-    response.response_metadata = {}
-    llm.invoke.return_value = response
-    captured: dict = {"llm": llm}
-    monkeypatch.setattr(factory, "build_chat_model", lambda _model, **_kw: llm)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    return captured
-
-
 # ── hash-based dedup ─────────────────────────────────────────────────────
 
 
@@ -705,13 +686,15 @@ def stub_understand_text_path(monkeypatch: pytest.MonkeyPatch) -> dict:
 
 
 def test_read_wrap_oversized_agents_md_truncates_and_archives(
-    tmp_path: Path, monkeypatch, default_home: Path
+    tmp_path: Path,
+    default_home: Path,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
 ):
     """A context file over exec_output_max_chars is injected truncated
     (head + tail) with the full text archived to the workspace .exec_output/
     ring — same logic as exec output overflow; the archive path rides in the
     note so the agent can read / grep the complete content."""
-    from base.config import settings
     from base.paths import workspace_dir
 
     repo = tmp_path / "repo"
@@ -721,7 +704,8 @@ def test_read_wrap_oversized_agents_md_truncates_and_archives(
     (repo / "AGENTS.md").write_bytes(big)
     (repo / "foo.py").write_text("# code")
 
-    monkeypatch.setattr(settings.sandbox, "exec_output_max_chars", 500)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    install.uninstall()
+    install_code_surface(model_catalog, authority_with(config_authority, exec_output_max_chars=500))
     pin_agent(123)
     overflow = workspace_dir(123) / ".exec_output"
 

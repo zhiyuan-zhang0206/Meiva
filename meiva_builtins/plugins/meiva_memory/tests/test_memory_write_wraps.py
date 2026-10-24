@@ -233,35 +233,14 @@ def test_outside_an_exec_turn_nothing_is_recorded_and_nothing_fails(exec_turn: P
     assert not process_context.in_exec_turn()
 
 
-_BOUNDARY_PROBE = """
-import json
-import sys
-
-sys.path.insert(0, sys.argv[1])
-import meiva  # noqa: F401
-
-loaded_with_meiva = set(sys.modules)
-import meiva_builtins.plugins.meiva_memory.plugin  # the exec subprocess's face of the plugin
-import meiva_builtins.plugins.meiva_memory.written_notes
-
-# Absolute: the decision call stack, services, the agent runtime and langchain/langgraph never load.
-absolute = ("base.lm.decision.call", "base.lm.catalog.decide.http", "services.", "agent.",
-            "langchain", "langgraph")
-# Relative: `import meiva` itself already loads httpx (the gateway client's transport), so the
-# plugin's face may add nothing on top of that.
-added = set(sys.modules) - loaded_with_meiva
-print(json.dumps({
-    "absolute": sorted(n for n in sys.modules if n.startswith(absolute)),
-    "added_httpx": sorted(n for n in added if n.startswith("httpx")),
-}))
-"""
+_BOUNDARY_CHILD = Path(__file__).with_name("child_face_boundary.py")
 
 
 def test_the_subprocess_face_imports_no_decision_stack_agent_runtime_or_new_http_client() -> None:
     """The wraps run in the exec subprocess: the plugin's face brings in no decision-call code, no
     service, no agent-runtime module, and no httpx beyond what `import meiva` loads."""
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
-        [sys.executable, "-I", "-B", "-X", "utf8", "-c", _BOUNDARY_PROBE, str(_REPO_ROOT)],
+        [sys.executable, "-I", "-B", "-X", "utf8", str(_BOUNDARY_CHILD)],
         cwd=_REPO_ROOT,
         capture_output=True,
         text=True,
@@ -269,4 +248,9 @@ def test_the_subprocess_face_imports_no_decision_stack_agent_runtime_or_new_http
         check=False,
     )
     assert proc.returncode == 0, proc.stderr
-    assert json.loads(proc.stdout.strip().splitlines()[-1]) == {"absolute": [], "added_httpx": []}
+    boundary = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert boundary["imported"][1:] == [
+        "meiva_builtins.plugins.meiva_memory.plugin",
+        "meiva_builtins.plugins.meiva_memory.written_notes",
+    ]
+    assert (boundary["absolute"], boundary["added_httpx"]) == ([], [])

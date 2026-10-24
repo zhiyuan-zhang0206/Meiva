@@ -20,9 +20,9 @@ from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db import fetch_one
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet import task_registry
+from meiva_builtins.plugins.meiva_fleet.task_maintenance.tests.failing_writes import inserts_failing
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.notes import record_notes
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
-    inserts_failing,
     persisted_priority,
     seed_agent,
 )

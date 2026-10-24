@@ -1,3 +1,2 @@
-from meiva_builtins.plugins.meiva_memory.tests.gateway_reads.gateway_stub import (
-    gateway as gateway,
-)
+from meiva.tests.fixtures.gateway_wire import gateway_stub as gateway_stub
+from meiva.tests.fixtures.gateway_wire import wire as wire
