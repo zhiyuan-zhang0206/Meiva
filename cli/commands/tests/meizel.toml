@@ -36,3 +36,9 @@ exports = ["health_port_guard.py", "test_single_box.py"]
 "test_service_probe_ports.py#monkeypatch.setattr base.config.settings.services.gateway_health_url" = 1
 "test_service_probe_ports.py#monkeypatch.setattr base.config.settings.services.memory_search_port" = 1
 "test_unit_capability_commands.py#monkeypatch.setattr base.config.settings.general.machine_host" = 1
+
+[debt.test-subclass-override]
+"test_permissions_cmd.py#subclass services.desktop.permissions_helper.onboarding.GateService.check" = 1
+"test_permissions_cmd.py#subclass services.desktop.permissions_helper.onboarding.GateService.defer" = 1
+"test_permissions_cmd.py#subclass services.desktop.permissions_helper.onboarding.GateService.onboard" = 1
+"test_permissions_cmd.py#subclass services.desktop.permissions_helper.onboarding.GateService.restart_helper" = 1

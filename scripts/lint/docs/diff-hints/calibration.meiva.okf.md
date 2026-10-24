@@ -18,8 +18,8 @@ The first real one is the next set of reviewed pull requests, and this page is u
 
 | Measure | Value |
 |---|---|
-| Sites raised | 656 (0.31 per changed file) |
-| Answers needed at path level | 449, of which 247 are `deleted-test` (one per file; one per directory with a directory trailer) |
+| Sites raised | 625 (0.30 per changed file) |
+| Answers needed at path level | 450, of which 261 are `deleted-test` (one per file; one per directory with a directory trailer) |
 | Reviewed findings | 73 |
 | Findings that are a diff shape | 38 (52%) |
 | Of those, a hint fired on the cited site | 33 (87%) on the fitted set; of all 73 findings 45% |
@@ -41,7 +41,7 @@ count: every hit is a real removal and no detector decides it.
 
 | Id | Sites | Files | Judged | Misfires | Findings hit | Note |
 |---|---|---|---|---|---|---|
-| `ambient-read` | 123 | 49 | 30 | 0 | 3 | 24 of the 30 are a `time.monotonic` read for a deadline, a duration or a TTL, answered in one line; 6 read the environment, home, platform, settings or the wall clock |
+| `ambient-read` | 78 | 36 | 30 | 0 | 3 | 16 of the 30 are an interval clock in a function that also sleeps (the next wait is decided inside the loop); 14 read the environment, home, platform, settings or the wall clock |
 | `service-locator` | 102 | 34 | 20 | 0 | 1 | |
 | `lambda-dependency` | 45 | 22 | 30 | 2 | 2 | `pipeline_factory=lambda: pipeline`, a single lazily built resource, which the conventions allow |
 | `test-seam` | 33 | 20 | 33 | 0 | 3 | 18 are an armed flag or a value assigned on a fake's own fixture object, which the red line rules out and the reviews found |
@@ -54,7 +54,7 @@ count: every hit is a real removal and no detector decides it.
 | `callable-default` | 6 | 5 | 6 | 2 | 0 | `database_factory = never_dialed`, a default that raises |
 | `callable-bag` | 3 | 3 | 3 | 1 | 1 | `WrapAdded`, the undo record of a wrap layer, not a dependency |
 | `spy-assert` | 2 | 2 | 2 | 0 | 0 | |
-| `deleted-test` | 247 | 247 | not judged | not judged | 6 | |
+| `deleted-test` | 261 | 261 | not judged | not judged | 6 | |
 
 Pooled over the 219 judged sites: 7 misfires (3.2%). `callable-default` and `spy-assert` hit no
 finding because the reviewed callbacks and spies were leftovers outside the added lines.
@@ -75,8 +75,15 @@ What the calibration changed, each from a sample of the hits:
   `ParkedPool(AsyncConnectionPool)` case.
 - `ambient-read` first counted a `datetime.now(UTC)` handed straight to a call as `now=`,
   `*_at` or `*_ts` (the shell reading once and passing the value, which is the form the hint
-  asks for) and generated ids (`uuid4`); both are out. It stays broad on purpose: clock reads in
-  a shell are the most common thing the red line moves into a root, and the answer is one line.
+  asks for) and generated ids (`uuid4`); both are out.
+- `ambient-read` first asked about every `time.monotonic()`; 24 of 30 sampled sites were a
+  deadline, a duration or a TTL. The conventions scope injection by what a test needs to steer
+  ([Tests do not patch](../../../../docs/conventions/python-conventions.md#tests-do-not-patch-production-takes-what-a-test-needs-to-control):
+  "production code that no test needs to steer may still `import time`"), so an interval clock
+  (`time.monotonic`, `time.perf_counter` and their `_ns` forms) asks only when the same function
+  also sleeps, where "how long to wait next" is a decision inside a loop. The wall clock
+  (`time.time`, `datetime.now`, `utcnow`, `today`) is still always asked: it almost always feeds a
+  decision.
 - A field compared with a literal was added to `wildcard-case` and removed again: 4 of its 17
   sites were on a reviewed finding, the rest compared wire kinds (`item.kind == "system_prompt"`).
 - Renames: the first run read a moved file as a new file and asked about its old contents again.

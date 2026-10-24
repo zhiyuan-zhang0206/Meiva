@@ -75,5 +75,13 @@
 [debt.stdlib-patch]
 "test_browser_session.py#monkeypatch.setattr time.time" = 1
 
+[debt.test-subclass-override]
+"test_browser_mcp_daemon.py#subclass services.desktop.browser.tab_groups.grouping.AgentTabGroups.group_new_page" = 1
+"test_browser_mcp_daemon.py#subclass services.desktop.browser.tab_groups.grouping.AgentTabGroups.release_page" = 1
+"test_browser_mcp_daemon.py#subclass services.desktop.browser.tab_groups.grouping.AgentTabGroups.snapshot" = 1
+"test_browser_mcp_daemon_tab_groups.py#subclass services.desktop.browser.tab_groups.grouping.AgentTabGroups.group_new_page" = 1
+"test_browser_mcp_daemon_tab_groups.py#subclass services.desktop.browser.tab_groups.grouping.AgentTabGroups.release_page" = 1
+"test_browser_mcp_daemon_tab_groups.py#subclass services.desktop.browser.tab_groups.grouping.AgentTabGroups.snapshot" = 1
+
 [debt.unresolved-patch]
 "test_browser_session.py#monkeypatch.setattr keeper.inject_once" = 3

@@ -211,16 +211,49 @@ def _node_seams(
     return found
 
 
+# meiva:note
+# Whether the call is `<receiver>.setattr` or `.delattr`, the monkeypatch methods whose `raising`
+# keyword lets a patch of a missing name pass. `delenv` and `delitem` with `raising=False` are not
+# this: deleting a variable that may be absent is what they are for.
+def _is_raising_patch(call: ast.Call) -> bool:
+    return isinstance(call.func, ast.Attribute) and call.func.attr in ("setattr", "delattr")
+
+
+# meiva:note
+# `(line, what)` for a `raising` that is not literally True, or None.
+def _raising_value(call: ast.Call) -> tuple[int, str] | None:
+    for keyword in call.keywords:
+        if keyword.arg == "raising" and not _is_true(keyword.value):
+            what = "False" if _is_false(keyword.value) else "a value that may be False"
+            return keyword.value.lineno, what
+        if keyword.arg is None and _dict_sets_raising_false(keyword.value):
+            return keyword.value.lineno, "False"
+    if len(call.args) >= 4 and _is_false(call.args[3]):
+        return call.args[3].lineno, "False"
+    return None
+
+
+def _is_true(node: ast.expr) -> bool:
+    return isinstance(node, ast.Constant) and node.value is True
+
+
+def _dict_sets_raising_false(node: ast.expr) -> bool:
+    if not isinstance(node, ast.Dict):
+        return False
+    return any(
+        isinstance(key, ast.Constant) and key.value == "raising" and _is_false(value)
+        for key, value in zip(node.keys, node.values, strict=True)
+    )
+
+
 def _raising_false(unit: Unit) -> list[Site]:
-    detail = "`raising=False` lets a patch miss its target silently"
-    return [
-        Site(HintId.TEST_SEAM, unit.path, keyword.value.lineno, detail)
-        for call in unit.calls
-        for keyword in call.keywords
-        if keyword.arg == "raising"
-        and _is_false(keyword.value)
-        and keyword.value.lineno in unit.added
-    ]
+    sites: list[Site] = []
+    for call in unit.calls:
+        found = _raising_value(call) if _is_raising_patch(call) else None
+        if found is not None and found[0] in unit.added:
+            detail = f"`raising={found[1]}` lets a patch miss its target silently"
+            sites.append(Site(HintId.TEST_SEAM, unit.path, found[0], detail))
+    return sites
 
 
 # meiva:note

@@ -4,3 +4,6 @@ exports = ["failing_writes.py"]
 "test_daemon_entry.py" = ["pidfile_holder.py"]
 "test_escalation_concurrency.py" = ["failing_writes.py", "test_task_maintenance_escalation.py"]
 "test_task_maintenance_escalation.py" = ["failing_writes.py"]
+
+[debt.test-subclass-override]
+"test_task_maintenance_escalation.py#subclass base.events.live.bus.EventBus.publish_best_effort_sync" = 1

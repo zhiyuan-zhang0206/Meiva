@@ -14,7 +14,7 @@ CASES = [
     pytest.param(
         HintId.AMBIENT_READ,
         "cli/x.py",
-        "import time\n\ndef f():\n    return time.monotonic()\n",
+        "import time\n\ndef f():\n    return time.time()\n",
         "import time\n\ndef f(now: float):\n    time.sleep(1)\n    return now\n",
         id="ambient-clock",
     ),
@@ -268,7 +268,7 @@ def test_a_hint_fires_on_its_shape_and_not_on_the_clean_shape(
 
 
 def test_a_composition_root_is_found_by_its_file_name() -> None:
-    clock = "import time\n\ndef f():\n    return time.monotonic()\n"
+    clock = "import time\n\ndef f():\n    return time.time()\n"
     locator = "def f(request):\n    return request.app.state.thing\n"
     assert hints(clock, "cli/main.py") == []
     assert hints(clock, "cli/commands/runtime.py") == []
@@ -295,22 +295,20 @@ def test_a_protocol_fires_above_base_and_not_in_base() -> None:
 
 
 def test_production_hints_do_not_judge_tests_and_test_hints_do_not_judge_production() -> None:
-    clock = "import time\n\ndef f():\n    return time.monotonic()\n"
+    clock = "import time\n\ndef f():\n    return time.time()\n"
     assert hints(clock, "cli/tests/test_x.py") == []
     spy = "def f(m):\n    m.assert_called_once()\n"
     assert hints(spy, "cli/x.py") == []
 
 
 def test_files_outside_the_application_and_test_packages_are_not_judged() -> None:
-    clock = "import time\n\ndef f():\n    return time.monotonic()\n"
+    clock = "import time\n\ndef f():\n    return time.time()\n"
     assert hints(clock, "scripts/x.py") == []
     assert hints(clock, "docs/x.txt") == []
 
 
 def test_only_added_lines_raise_a_hint() -> None:
-    source = (
-        "import time\n\ndef f():\n    return time.monotonic()\n\ndef g():\n    return time.time()\n"
-    )
+    source = "import time\n\ndef f():\n    return time.time()\n\ndef g():\n    return time.time()\n"
     assert [s.line for s in sites(source)] == [4, 7]
     assert [s.line for s in sites(source, added=frozenset({7}))] == [7]
     assert sites(source, added=frozenset({1, 2})) == []
@@ -338,13 +336,21 @@ def test_removed_tests_are_listed_per_file() -> None:
     assert "2 test(s) removed: test_a, test_b" in found[0].detail
 
 
-def test_a_test_added_back_anywhere_in_the_diff_is_a_move_not_a_deletion() -> None:
+def test_a_test_added_back_in_a_file_of_the_same_name_is_a_move_not_a_deletion() -> None:
     moved_to = FileChange(
-        "cli/tests/test_y.py", frozenset({1}), ("def test_a():",), (), deleted=False
+        "cli/pkg/tests/test_x.py", frozenset({1}), ("def test_a():",), (), deleted=False
     )
     removal = _removal("cli/tests/test_x.py", "test_a", "test_b")
     found = deleted_tests((removal, moved_to), ROLES)
     assert "1 test(s) removed: test_b" in found[0].detail
+
+
+def test_the_same_test_name_in_an_unrelated_file_is_a_different_test() -> None:
+    elsewhere = FileChange(
+        "cli/tests/test_other.py", frozenset({1}), ("def test_a():",), (), deleted=False
+    )
+    found = deleted_tests((_removal("cli/tests/test_x.py", "test_a"), elsewhere), ROLES)
+    assert "1 test(s) removed: test_a" in found[0].detail
 
 
 def test_removing_a_non_test_function_or_production_code_raises_nothing() -> None:
@@ -388,3 +394,96 @@ def test_configuring_a_real_resource_fixture_or_a_double_s_own_dict_is_not_a_sea
     assert hints(resource, "cli/tests/test_x.py") == []
     assert hints(own, "cli/tests/test_x.py") == []
     assert hints(armed, "cli/tests/test_x.py") == [HintId.TEST_SEAM]
+
+
+def test_raising_set_by_a_value_a_dict_or_a_position_is_still_a_tolerated_miss() -> None:
+    variable = "def test_a(monkeypatch, flag):\n    monkeypatch.setattr('a.b', 1, raising=flag)\n"
+    spread = "def test_a(monkeypatch):\n    monkeypatch.setattr('a.b', 1, **{'raising': False})\n"
+    positional = "def test_a(monkeypatch, o):\n    monkeypatch.setattr(o, 'x', 1, False)\n"
+    strict = "def test_a(monkeypatch, o):\n    monkeypatch.setattr(o, 'x', 1, raising=True)\n"
+    delenv = "def test_a(monkeypatch):\n    monkeypatch.delenv('A', raising=False)\n"
+    for source in (variable, spread, positional):
+        assert hints(source, "cli/tests/test_x.py") == [HintId.TEST_SEAM], source
+    assert hints(strict, "cli/tests/test_x.py") == []
+    assert hints(delenv, "cli/tests/test_x.py") == []
+
+
+def test_a_wildcard_case_fails_only_when_it_always_ends_in_a_failure() -> None:
+    nested = (
+        "def f(x, y):\n    match x:\n        case 1:\n            return 1\n"
+        "        case _:\n            if y:\n                raise ValueError(x)\n            return 0\n"
+    )
+    returned = (
+        "from typing import assert_never\n\ndef f(x: int):\n    match x:\n        case 1:\n"
+        "            return 1\n        case _:\n            return assert_never(x)\n"
+    )
+    assert hints(nested) == [HintId.WILDCARD_CASE]
+    assert hints(returned) == []
+
+
+def test_a_selector_guarded_in_its_own_body_is_fine_but_not_by_a_nested_def() -> None:
+    guarded = "def f(action: str):\n    if action == 'a':\n        return 1\n    raise ValueError(action)\n"
+    nested = (
+        "def f(action: str):\n    def fail():\n        raise ValueError(action)\n"
+        "    if action == 'a':\n        return 1\n    return 2\n"
+    )
+    assert hints(guarded) == []
+    assert hints(nested) == [HintId.WILDCARD_CASE]
+
+
+def test_none_fallback_sees_a_named_default_a_truthy_test_and_an_attribute_target() -> None:
+    named = "def default_fetch(): ...\n\ndef f(fetch=None):\n    fetch = fetch or default_fetch\n    return fetch\n"
+    imported = "from lib.mod import default_fetch\n\ndef f(fetch=None):\n    return fetch or default_fetch\n"
+    constant = "from lib.mod import DEFAULT_LIMIT\n\ndef f(limit=None):\n    return limit or DEFAULT_LIMIT\n"
+    truthy = "def f(client=None):\n    return client if client else Client()\n"
+    attribute = "class A:\n    def __init__(self, client=None):\n        if client is None:\n            self.client = Client()\n"
+    annotated = "def f(client=None):\n    if client is None:\n        client: Client = make()\n    return client\n"
+    for source in (named, imported, truthy, attribute, annotated):
+        assert hints(source) == [HintId.NONE_FALLBACK], source
+    assert hints(constant) == []
+
+
+def test_a_signature_over_several_lines_is_judged_by_any_added_line_of_the_parameter() -> None:
+    source = (
+        "def f(\n    a: int,\n    run: Callable[\n        [], int\n    ] = int,\n):\n    return a\n"
+    )
+    assert hints(source) == [HintId.CALLABLE_DEFAULT]
+    only_default = sites(source, added=frozenset({5}))
+    assert [s.hint for s in only_default] == [HintId.CALLABLE_DEFAULT]
+    assert sites(source, added=frozenset({1})) == []
+
+
+def test_an_aliased_callable_import_is_still_a_callable() -> None:
+    source = "from collections.abc import Callable as Cb\n\ndef f(run: Cb[[], int] = int):\n    return run\n"
+    assert hints(source) == [HintId.CALLABLE_DEFAULT]
+
+
+def test_freezing_a_class_that_already_held_a_list_is_asked() -> None:
+    source = "from dataclasses import dataclass\n\n@dataclass(frozen=True)\nclass V:\n    items: list[str]\n"
+    assert [s.line for s in sites(source, added=frozenset({3}))] == [5]
+    assert sites(source, added=frozenset({1})) == []
+
+
+def test_an_interval_clock_asks_only_where_the_function_also_sleeps() -> None:
+    duration = "import time\n\ndef f():\n    started = time.monotonic()\n    return time.monotonic() - started\n"
+    polling = (
+        "import time\n\ndef f():\n    deadline = time.monotonic() + 3\n"
+        "    while time.monotonic() < deadline:\n        time.sleep(0.1)\n"
+    )
+    asyncio_poll = (
+        "import asyncio\nimport time\n\nasync def f():\n    t = time.perf_counter()\n"
+        "    await asyncio.sleep(1)\n    return t\n"
+    )
+    nested = (
+        "import time\n\ndef f():\n    def g():\n        return time.monotonic()\n"
+        "    time.sleep(1)\n    return g\n"
+    )
+    assert hints(duration) == []
+    assert [s.hint for s in sites(polling)] == [HintId.AMBIENT_READ] * 2
+    assert hints(asyncio_poll) == [HintId.AMBIENT_READ]
+    assert hints(nested) == []
+
+
+def test_the_wall_clock_always_asks() -> None:
+    wall = "import time\nfrom datetime import UTC, datetime\n\ndef f():\n    return time.time(), datetime.now(UTC)\n"
+    assert hints(wall) == [HintId.AMBIENT_READ, HintId.AMBIENT_READ]

@@ -42,7 +42,9 @@ def _own_line(node: ast.AST) -> int | None:
 
 
 def _holds(node: ast.AST, lines: list[int]) -> bool:
-    start = getattr(node, "lineno", 0)
+    start = min(
+        [getattr(node, "lineno", 0), *(d.lineno for d in getattr(node, "decorator_list", ()))]
+    )
     end = getattr(node, "end_lineno", None) or start
     at = bisect_left(lines, start)
     return at < len(lines) and lines[at] <= end

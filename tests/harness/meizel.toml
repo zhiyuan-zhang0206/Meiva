@@ -31,3 +31,6 @@
 "test_e2e_residue_sweep.py#monkeypatch.setattr time.sleep" = 3
 "test_helperproc.py#monkeypatch.setattr os._exit" = 1
 "test_home_isolation.py#monkeypatch.setattr os.environ" = 1
+
+[debt.test-subclass-override]
+"test_helperproc.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.spawn_process" = 1

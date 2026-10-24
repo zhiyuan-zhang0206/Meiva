@@ -17,7 +17,7 @@ Each hint prints the site, then once per id: `why` (the principle in a sentence)
 
 | Id | Fires on (added lines) | Instead, first choice |
 |---|---|---|
-| `ambient-read` | production file, not a root: `time.*` clocks, `datetime.now/utcnow/today`, `os.environ`, `os.getenv`, `os.getcwd`, `Path.home/cwd`, `platform.*`, `sys.platform`, `socket.gethostname`, `random.*`, a read of `settings`; not a clock handed to a call as `now=`/`*_at`/`*_ts` | take the value; lift a loop's decision into a pure function of `now` and keep the sleep in the shell |
+| `ambient-read` | production file, not a root: the wall clock `time.time`, an interval clock (`time.monotonic`, `time.perf_counter`) only in a function that also sleeps, `datetime.now/utcnow/today`, `os.environ`, `os.getenv`, `os.getcwd`, `Path.home/cwd`, `platform.*`, `sys.platform`, `socket.gethostname`, `random.*`, a read of `settings`; not a clock handed to a call as `now=`/`*_at`/`*_ts` | take the value; lift a loop's decision into a pure function of `now` and keep the sleep in the shell |
 | `callable-default` | a parameter annotated `Callable`, `Coroutine` or `Awaitable`, or named `*_fn`, `*_hook`, `*_cb`, `*_reader`, `*_factory`, `*_fetch`, with a default | required parameter; a value if it only fetches one; a plan if it is an effect |
 | `callable-bag` | a dataclass, `NamedTuple`, `TypedDict`, `Protocol` or `BaseModel` with two or more `Callable` fields | values in, a plan out; one narrow port in `base/` for a real effect |
 | `none-fallback` | production file: a `None` default and `x or Call()`, `if x is None: x = Call()` or `Call() if x is None else x` | required parameter; split a borrowed and an owned mode into two types |
@@ -45,13 +45,19 @@ syntax cannot tell a closed vocabulary from a wire value; a required callable ty
 `Callable` type alias (`DecideCall = Callable[..., Awaitable[...]]`); and an if-chain over
 enum members without a final `else` (only `match` is looked at).
 
-Found in review and left for a later change, because each widens a detector: `raising=` set by a
-variable, `**{...}` or a position; a `raise` anywhere in a `case _:` body (including in a nested
-branch or def) counts as failing; `none-fallback` does not see `x or default_name`, `x if x else
-Foo()`, an annotated assignment or `self.x = Foo()`; `mutable-in-frozen` and `callable-default`
-need the field or parameter line to be added (a class turned `frozen=True` over an existing
-`list` field is missed, as is `from typing import Callable as Cb`); and `deleted-test` does not
-report a test whose name another file of the same diff adds, whatever it tests.
+The diff hint now asks about `raising=` set by a variable, `**{...}` or a fourth positional
+argument; these shapes remain tolerated misses of the deterministic meizel code.
+Other gaps closed after review: a `case _:` body fails only when it ends in a `raise` or
+`assert_never`; a selector is guarded only by a `raise` in its own body, not a nested def;
+`none-fallback` also sees `x or default_name` (an imported or module-level implementation,
+not a constant), `x if x else Foo()`, an annotated assignment and `self.x = Foo()`;
+`mutable-in-frozen` asks when the `@dataclass(frozen=True)` line is the added one;
+`callable-default` judges any added line of a parameter's name, annotation and default and sees
+`Callable as Cb`; and `deleted-test` treats a name as moved only when a file of the same base
+name adds it. Still open: a `frozen=FLAG` that is not a literal, a `frozen` set through
+`dataclasses.dataclass(...)` applied as a function, and the pre-push stage judging `HEAD` rather
+than the pushed ref (the ref arrives in an environment variable that the lint on `os.environ`
+keeps tooling from reading).
 
 ## Adding or changing a hint
 

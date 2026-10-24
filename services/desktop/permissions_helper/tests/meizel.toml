@@ -54,6 +54,12 @@ exports = ["permissions_helper"]
 [debt.restricted-python]
 "test_helper_retirement.py#python -c" = 2
 
+[debt.test-subclass-override]
+"test_ax_tree_wire.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.call" = 1
+"test_onboarding.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.ping" = 2
+"test_onboarding.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.request_grants" = 1
+"test_onboarding.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.spawn_process" = 1
+
 [debt.third-party-patch]
 "test_helper_retirement.py#monkeypatch.setattr psutil.Process" = 1
 

@@ -36,3 +36,7 @@
 [debt.restricted-python]
 "test_diagnostic_work_ownership.py#python -c" = 1
 "test_meiva_root_glue.py#python -c" = 1
+
+[debt.test-subclass-override]
+"test_root_diagnostics.py#subclass services.supervision.meiva_root.health.HealthMonitor.health_snapshot" = 1
+"test_root_diagnostics.py#subclass services.supervision.meiva_root.health.HealthMonitor.run_round" = 1

@@ -17,19 +17,37 @@ _SELECTORS = frozenset({"action", "status", "role", "kind", "mode", "op", "verb"
 _LITERAL_OPS = (ast.Eq, ast.NotEq, ast.In, ast.NotIn)
 
 
-def _fails(statements: list[ast.stmt]) -> bool:
-    for stmt in statements:
-        for node in ast.walk(stmt):
-            if isinstance(node, ast.Raise):
-                return True
-            if isinstance(node, ast.Call):
-                callee = node.func
-                name = callee.id if isinstance(callee, ast.Name) else None
-                if name == "assert_never" or (
-                    isinstance(callee, ast.Attribute) and callee.attr == "assert_never"
-                ):
-                    return True
-    return False
+def _is_assert_never(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    callee = node.func
+    return (isinstance(callee, ast.Name) and callee.id == "assert_never") or (
+        isinstance(callee, ast.Attribute) and callee.attr == "assert_never"
+    )
+
+
+# meiva:note
+# Whether a `case` body always ends in a failure: its last statement raises, or calls (or
+# returns the call of) `assert_never`. A `raise` in one branch of a nested statement does not
+# make the other branches fail.
+def _always_fails(statements: list[ast.stmt]) -> bool:
+    if not statements:
+        return False
+    last = statements[-1]
+    if isinstance(last, ast.Raise):
+        return True
+    return (
+        isinstance(last, ast.Expr | ast.Return)
+        and last.value is not None
+        and _is_assert_never(last.value)
+    )
+
+
+# meiva:note
+# Whether a function raises or calls `assert_never` in its own body (not in a nested def): the
+# guard of a selector against an unknown value.
+def _guards(function: FunctionNode) -> bool:
+    return any(isinstance(n, ast.Raise) or _is_assert_never(n) for n in own_nodes(function))
 
 
 def _wildcard_cases(unit: Unit) -> list[Site]:
@@ -41,7 +59,7 @@ def _wildcard_cases(unit: Unit) -> list[Site]:
         wildcard = (
             isinstance(pattern, ast.MatchAs) and pattern.pattern is None and pattern.name is None
         )
-        if wildcard and not _fails(node.body):
+        if wildcard and not _always_fails(node.body):
             detail = "`case _:` neither raises nor calls `assert_never`"
             sites.append(Site(HintId.WILDCARD_CASE, unit.path, pattern.lineno, detail))
     return sites
@@ -75,7 +93,7 @@ def _selector_compare(node: ast.AST, selectors: frozenset[str]) -> str | None:
 
 def _selector_sites(function: FunctionNode, unit: Unit) -> list[Site]:
     selectors = _selector_parameters(function)
-    if not selectors or _fails(function.body):
+    if not selectors or _guards(function):
         return []
     first: dict[str, int] = {}
     for node in own_nodes(function):

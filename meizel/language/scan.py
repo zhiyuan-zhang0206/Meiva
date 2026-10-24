@@ -25,8 +25,11 @@ from meizel.graph.model import (
 from meizel.graph.universe import Universe
 from meizel.language import fixtures, purity, typescript
 from meizel.language.bindings import (
+    ClassFacts,
+    find_class,
     is_imported_binding,
     module_bindings,
+    overridable_methods,
     provides,
     unambiguous_function_lines,
 )
@@ -34,6 +37,7 @@ from meizel.language.input_mutations import InputListAppend, input_list_appends
 from meizel.language.mounts import mount_facts
 from meizel.language.python_commands import PythonCommands
 from meizel.language.restricted import EXTERNAL_FORMS, const_str
+from meizel.lint_common import is_test_path
 
 __all__ = [
     "EXTERNAL_FORMS",
@@ -90,6 +94,9 @@ _MONKEYPATCH_METHODS = frozenset({"setattr", "delattr", "setitem", "delitem", "s
 # read as a use of it.
 _ENVIRONMENT = ".".join(("os", "environ"))
 _PATCH_OPTIONS = frozenset({"spec", "create", "spec_set", "autospec", "new_callable"})
+# meiva:note
+# The monkeypatch methods whose `raising=False` lets a patch of a missing name pass.
+_RAISING_METHODS = frozenset({"setattr"})
 _LEAVES = frozenset(
     {
         ast.Constant,
@@ -130,6 +137,19 @@ _LEAVES = frozenset(
         ast.Continue,
     }
 )
+
+
+def _tolerates_missing_target(node: ast.Call) -> bool:
+    return any(
+        keyword.arg == "raising"
+        and isinstance(keyword.value, ast.Constant)
+        and keyword.value.value is False
+        for keyword in node.keywords
+    )
+
+
+def _is_dunder(name: str) -> bool:
+    return name.startswith("__") and name.endswith("__")
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,6 +321,7 @@ class Scanner(PythonCommands):
 
     def visit_class_def(self, node: ast.ClassDef) -> None:
         previous_requester, self.fixture_requester = self.fixture_requester, None
+        self.record_test_subclass(node)
         for outer in (*node.decorator_list, *node.bases, *node.keywords):
             self.visit(outer)
         purity.record_class(self.purity_state, node, self.dotted)
@@ -308,6 +329,45 @@ class Scanner(PythonCommands):
         collect_scope(inner, node.body, self.package, walrus=self.walrus)
         self.enter(inner, node.body)
         self.fixture_requester = previous_requester
+
+    # meiva:note
+    # A class in a test that overrides a method of a concrete first-party class. The subclass
+    # replaces behavior by name, which is a patch under another spelling. A fake that implements
+    # a `Protocol` or an abstract base, and a base that lives in tests, is the form the red line
+    # asks for and is not recorded.
+    def record_test_subclass(self, node: ast.ClassDef) -> None:
+        if not (self.test_file or is_test_path(self.path)):
+            return
+        methods = [
+            stmt
+            for stmt in node.body
+            if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef)
+            and not _is_dunder(stmt.name)
+        ]
+        for base in node.bases if methods else ():
+            info = self.production_class(base)
+            if info is not None:
+                self.record_overrides(info, methods)
+
+    # meiva:note
+    # The concrete first-party class outside tests that a base expression names, or None.
+    def production_class(self, base: ast.expr) -> ClassFacts | None:
+        dotted = self.dotted(base.value if isinstance(base, ast.Subscript) else base)
+        info = None if dotted is None else find_class(self.u, dotted)
+        if info is None or info.abstract or info.file == self.path:
+            return None
+        return None if is_test_path(info.file) or fixtures.is_test_file(info.file) else info
+
+    def record_overrides(
+        self, info: ClassFacts, methods: list[ast.FunctionDef | ast.AsyncFunctionDef]
+    ) -> None:
+        inherited = overridable_methods(self.u, info)
+        for method in methods:
+            if method.name in inherited:
+                target = f"{info.module}.{info.name}.{method.name}"
+                self.patches.append(
+                    Patch(method.lineno, "subclass", target, Code.TEST_SUBCLASS_OVERRIDE)
+                )
 
     def enter(self, inner: Scope, body: list[ast.stmt]) -> None:
         outer, self.scope = self.scope, inner
@@ -547,6 +607,7 @@ class Scanner(PythonCommands):
             return
         method = cast("ast.Attribute", node.func).attr
         form = f"monkeypatch.{method}"
+        self.record_raising_false(node, method, form)
         if method in {"setenv", "delenv"}:
             name = const_str(node.args[0])
             self.patches.append(
@@ -587,6 +648,24 @@ class Scanner(PythonCommands):
                 form,
                 is_module=is_mod,
             )
+
+    def record_raising_false(self, node: ast.Call, method: str, form: str) -> None:
+        if method in _RAISING_METHODS and _tolerates_missing_target(node):
+            self.patches.append(
+                Patch(node.lineno, form, self.monkeypatch_target(node), Code.PATCH_RAISING_FALSE)
+            )
+
+    # meiva:note
+    # The patched name of a `monkeypatch.setattr` / `delattr` call, as its record spells it.
+    def monkeypatch_target(self, node: ast.Call) -> str:
+        first = node.args[0]
+        text = self.string_value(first)
+        if text is not None:
+            return text
+        dotted = self.dotted(first)
+        base = " ".join(ast.unparse(first).split())[:80] if dotted is None else dotted
+        name = const_str(node.args[1]) if len(node.args) > 1 else None
+        return f"{base}.{name}" if name else base
 
     def monkeypatch_item(self, node: ast.Call, form: str) -> None:
         if self.is_sys_modules(node.args[0]):

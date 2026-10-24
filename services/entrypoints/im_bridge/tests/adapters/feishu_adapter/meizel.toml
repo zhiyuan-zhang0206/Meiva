@@ -1,0 +1,2 @@
+[debt.test-subclass-override]
+"test_websocket_owner.py#subclass services.entrypoints.im_bridge.adapters.feishu.FeishuAdapter._handle_event" = 1

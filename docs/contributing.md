@@ -100,7 +100,9 @@ violations pass, anything new fails, and the debt may only shrink
   Give a rule change its own PR. A queued comparison that includes it applies the same key check
   to the combined change; comparisons without rule changes are judged by totals as before.
 - Patching is debt of every kind: `first-party-patch`, `stdlib-patch`, `third-party-patch`,
-  `env-patch` and `unresolved-patch` (a target the imports do not resolve). Do not add one;
+  `env-patch` and `unresolved-patch` (a target the imports do not resolve), and the two
+  patch-shaped codes `patch-raising-false` and `test-subclass-override` (a test class that
+  overrides a method of production code). Do not add one;
   pass the dependency in as an explicit parameter
   ([patching](../meizel/docs/checker/patching.meiva.okf.md)). When a symbol is renamed, `debt carry
   --rename-target OLD=NEW` moves its entries; when a function or class moves to another file,

@@ -1,1 +1,4 @@
 exports = ["group_child.py"]
+
+[debt.test-subclass-override]
+"test_output_pipe.py#subclass agent.graph.exec._stream.StreamingTextIO.write" = 1
