@@ -102,7 +102,7 @@ def _in_child_wait(child: subprocess.Popen[bytes], thread_id: int) -> bool:
     code = frame.f_code
     if not (
         (
-            code.co_filename == subprocess.Popen.communicate.__code__.co_filename
+            code.co_filename == subprocess.Popen[bytes].communicate.__code__.co_filename
             and code.co_name == "_wait"
         )
         or (
@@ -112,7 +112,7 @@ def _in_child_wait(child: subprocess.Popen[bytes], thread_id: int) -> bool:
     ):
         return False
     while frame is not None:
-        if frame.f_code is subprocess.Popen.communicate.__code__:
+        if frame.f_code is subprocess.Popen[bytes].communicate.__code__:
             return frame.f_locals.get("self") is child
         frame = frame.f_back
     return False
