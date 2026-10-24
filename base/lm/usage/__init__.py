@@ -361,10 +361,17 @@ def emit_billing_event(
     # Billing must never affect the call it observes, including while tracing is initializing or an
     # exporter is unavailable.
     try:
-        from base.telemetry import tracing
+        from base.telemetry.otlp.trace_readiness import PROCESS_RECORDING, TRACE_INIT_WAIT_S
 
-        tracing.ensure_init_resolved()
-        if not tracing.is_initialized():
+        reading = PROCESS_RECORDING.read(timeout=TRACE_INIT_WAIT_S)
+        if reading.first_timeout:
+            logger.warning(
+                "trace init not resolved within timeout — proceeding without recording",
+                event="trace",
+                action="init_resolved_timeout",
+                timeout_s=TRACE_INIT_WAIT_S,
+            )
+        if not reading.ready:
             return
 
         from opentelemetry import trace as otel_trace

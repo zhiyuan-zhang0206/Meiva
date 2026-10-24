@@ -104,10 +104,19 @@ finite join, including errors received after an earlier unfinished return. A
 secondary teardown failure cannot replace the primary error. `DrainResult`
 acknowledges local processing or observation, not collector durability.
 
-An imported `tracing` module registers its own public `shutdown(timeout=2)`.
-It closes arm/retry admission, wakes the retry wait, and finitely observes both
-same Threads. A first-use 30-second arm timeout still permits late success
-until real shutdown; shutdown does not take the slow SDK initialization lock.
+An imported `tracing` module registers `shutdown(timeout=2, readiness=PROCESS_RECORDING)`.
+The process boot root passes that same resource into initialization; billing and public span
+facades observe it without importing the SDK owner. A reservation creates one pending Future,
+and entering the actual initializer makes it running. Closing an idle or pending resource
+cancels it and prevents later admission. Closing a running initializer does not claim it
+finished: only that initializer publishes its result. A cancelled pending read returns false
+without spending the timeout diagnostic. A first-use 30-second timeout permits late success.
+
+Shutdown closes arm/retry admission, wakes the retry wait, and finitely observes the same
+owners. TraceArm startup and worker joins occur outside admission locks; the existing collector-retry constructor retains its original startup path. Stopping an arm before its
+start rejects any later start. If native startup raised and completion was never observed,
+shutdown reports unconfirmed completion; that does not assert a live thread was observed.
+Shutdown does not take the slow SDK initialization lock.
 The retry continues to read settings only after each 300-second wait. Cold exit
 never imports tracing or starts its SDK merely to shut it down.
 

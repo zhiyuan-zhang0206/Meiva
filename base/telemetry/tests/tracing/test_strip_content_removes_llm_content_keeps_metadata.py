@@ -15,6 +15,7 @@ from base.log.tests.log_records import loguru_records as loguru_records
 from base.paths import traces_dir
 from base.telemetry import trace_mirror
 from base.telemetry import tracing as tracing_mod
+from base.telemetry.otlp.trace_readiness import TraceReadiness
 from base.telemetry.tests.otlp.identity_inputs import ignore_arguments, machine_identity
 from base.telemetry.tests.test_tracing import collector_up as collector_up
 from base.telemetry.tests.test_tracing import (
@@ -29,8 +30,9 @@ from base.telemetry.tests.test_tracing import (
     production_process_by_default as production_process_by_default,
 )
 from base.telemetry.tests.test_tracing import (
-    reset_tracing_init_flag as reset_tracing_init_flag,
+    reset_trace_workers as reset_trace_workers,
 )
+from base.telemetry.tests.test_tracing import trace_readiness as trace_readiness
 from base.telemetry.tracing import OtlpJsonHttpSpanExporter, initialize_tracing
 
 
@@ -272,7 +274,7 @@ def test_disk_watermark_exceeded(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 
 
 def test_initialize_relief_pass_runs_when_disk_over_watermark(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
 ):
     """The bounded-disk pass (gzip / retention / cap) runs BEFORE the
     watermark guard: an over-watermark disk still gets its relief pass — the
@@ -312,6 +314,7 @@ def test_initialize_relief_pass_runs_when_disk_over_watermark(
         machine=machine_identity(),
         home=tmp_path,
         config=trace_config(enabled=True, strip_content=True, retention_days=14, max_dir_mb=2048),
+        readiness=trace_readiness,
     )
 
     # ...but the relief pass still ran: the stale segment is pruned, the gzip
@@ -322,7 +325,9 @@ def test_initialize_relief_pass_runs_when_disk_over_watermark(
     assert init_calls == []
 
 
-def test_initialize_sets_trace_content_false(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_initialize_sets_trace_content_false(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
+):
     """initialize_tracing forces TRACELOOP_TRACE_CONTENT=false before
     Traceloop.init when strip_content is on."""
     under_watermark(monkeypatch)
@@ -333,15 +338,20 @@ def test_initialize_sets_trace_content_false(monkeypatch: pytest.MonkeyPatch, tm
         machine=machine_identity(),
         home=tmp_path,
         config=trace_config(enabled=True, strip_content=True),
+        readiness=trace_readiness,
     )
-    wait_init_resolved()
+    wait_init_resolved(trace_readiness=trace_readiness)
 
     assert os.environ["TRACELOOP_TRACE_CONTENT"] == "false"
     assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_initialize_skips_when_collector_unreachable(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: LogRecords
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    loguru_records: LogRecords,
+    *,
+    trace_readiness: TraceReadiness,
 ):
     """Local collector not answering at init -> recording stays off, no
     Traceloop.init, and a warning event carries the endpoint (the same
@@ -363,10 +373,15 @@ def test_initialize_skips_when_collector_unreachable(
     monkeypatch.setattr(tracing_mod, "start_collector_retry", ignore_arguments)
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    initialize_tracing(machine=machine_identity(), home=tmp_path, config=trace_config(enabled=True))
+    initialize_tracing(
+        machine=machine_identity(),
+        home=tmp_path,
+        config=trace_config(enabled=True),
+        readiness=trace_readiness,
+    )
 
     assert calls == []
-    assert tracing_mod.state["initialized"] is False
+    assert trace_readiness.ready is False
     warned = warned_fields(loguru_records)
     assert warned
     assert warned[0].get("action") == "recording_disabled_collector_unreachable"
@@ -374,17 +389,26 @@ def test_initialize_skips_when_collector_unreachable(
 
 
 def test_initialize_skips_when_disk_over_watermark(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: LogRecords
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    loguru_records: LogRecords,
+    *,
+    trace_readiness: TraceReadiness,
 ):
     """Disk over watermark: recording stays off, no Traceloop.init, and a
     warning telemetry event is emitted carrying the measured numbers."""
     monkeypatch.setattr(tracing_mod, "disk_usage", fixed_disk_usage(0.951, 2 * 1024**3))
     calls: list[dict] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    initialize_tracing(machine=machine_identity(), home=tmp_path, config=trace_config(enabled=True))
+    initialize_tracing(
+        machine=machine_identity(),
+        home=tmp_path,
+        config=trace_config(enabled=True),
+        readiness=trace_readiness,
+    )
 
     assert calls == []
-    assert tracing_mod.state["initialized"] is False
+    assert trace_readiness.ready is False
     warned = warned_fields(loguru_records)
     assert warned, "a degradation warning must be logged"
     attrs = warned[0]

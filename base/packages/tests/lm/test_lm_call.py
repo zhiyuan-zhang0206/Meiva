@@ -8,6 +8,7 @@ used to each inline.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -23,6 +24,7 @@ from base.lm.call import answer_text, extract_text, invoke_text
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.effort import ReasoningEffort
+from base.packages.tests.lm.providers.lm_process import run_billing
 from base.packages.tests.model_catalog import inert_keys
 
 
@@ -78,69 +80,8 @@ def test_invoke_text_returns_flattened_text(*, model_catalog: ModelCatalog) -> N
     assert llm.messages[0].content == [{"type": "text", "text": "q"}]
 
 
-def test_invoke_text_emits_chat_billing_span_from_llm_model_name(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
-) -> None:
-    """A successful shared text call records the priced provider usage it consumed.
-
-    The regression this catches is ``meiva.understand`` and ``meiva.web.fetch``
-    returning an answer without the one-call/one-billing-span ledger row.
-    """
-    from opentelemetry import trace as otel_trace
-
-    from base.telemetry import tracing as tracing_mod
-
-    class _Span:
-        def __init__(self) -> None:
-            self.attributes: dict[str, Any] = {}
-
-        def set_attribute(self, key: str, value: Any) -> None:
-            self.attributes[key] = value
-
-        def end(self) -> None:
-            pass
-
-    class _Tracer:
-        def __init__(self) -> None:
-            self.spans: list[_Span] = []
-
-        def start_span(self, _name: str, *, start_time: int | None = None) -> _Span:
-            span = _Span()
-            self.spans.append(span)
-            return span
-
-    tracer = _Tracer()
-    monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
-    monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
-    llm = _FakeLLM(
-        AIMessage(
-            content="answer",
-            usage_metadata={
-                "input_tokens": 100,
-                "output_tokens": 10,
-                "total_tokens": 110,
-                "input_token_details": {"cache_read": 20},
-            },
-        ),
-        model_name="deepseek-v4-pro",
-    )
-
-    assert (
-        invoke_text(
-            llm,
-            [{"type": "text", "text": "q"}],
-            desc="d",
-            error_type=ValueError,
-            catalog=model_catalog,
-        )
-        == "answer"
-    )
-
-    assert len(tracer.spans) == 1
-    assert tracer.spans[0].attributes["meiva.billing.vendor"] == "deepseek"
-    assert tracer.spans[0].attributes["meiva.billing.usage_kind"] == "chat"
-    assert tracer.spans[0].attributes["meiva.billing.tokens_in"] == 100
-    assert tracer.spans[0].attributes["meiva.billing.cache_read_tokens"] == 20
+def test_invoke_text_emits_chat_billing_span_from_llm_model_name(tmp_path: Path) -> None:
+    run_billing(tmp_path, "invoke", "message", "none")
 
 
 def test_invoke_text_logs_priced_chat_usage_with_source(

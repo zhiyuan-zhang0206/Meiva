@@ -6,14 +6,16 @@ langchain-anthropic / langchain-openai all plumb cache + reasoning figures into
 usage_metadata.{input,output}_token_details.
 """
 
-import time
+import sys
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
 from langchain_core.messages import AIMessage
 
 from agent.llm.usage import log_llm_usage
+from base.host.proc import run_bounded
 from base.packages.plugin_providers import build_model_catalog
 
 
@@ -193,122 +195,43 @@ def test_price_snapshot_rides_payload(loguru_records):
     assert "cost" not in loguru_records[0]["message"]
 
 
-def test_log_llm_usage_emits_agent_billing_span(
-    monkeypatch: pytest.MonkeyPatch,
-    loguru_records: list[dict[str, Any]],
-) -> None:
-    """A streamed agent response emits its quoted usage as one billing span.
-
-    The regression this catches is a log-only price snapshot that leaves the
-    billing ledger without the completed provider call.
-    """
-    from opentelemetry import trace as otel_trace
-
-    from base.lm.pricing import quote
-    from base.telemetry import tracing as tracing_mod
-
-    class _Span:
-        def __init__(self, start_time: int | None) -> None:
-            self.start_time = start_time
-            self.attributes: dict[str, Any] = {}
-
-        def set_attribute(self, key: str, value: Any) -> None:
-            self.attributes[key] = value
-
-        def end(self) -> None:
-            pass
-
-    class _Tracer:
-        def __init__(self) -> None:
-            self.spans: list[_Span] = []
-
-        def start_span(self, _name: str, *, start_time: int | None = None) -> _Span:
-            span = _Span(start_time)
-            self.spans.append(span)
-            return span
-
-    tracer = _Tracer()
-    priced_at = datetime(2026, 8, 17, 0, 0, tzinfo=UTC)
-    expected = quote(
-        "deepseek-v4-pro", 1_000, 100, 800, at=priced_at, prices=build_model_catalog().prices
-    )
-    assert expected is not None
-    monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
-    monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
-    message = AIMessage(
-        content="",
-        usage_metadata={
-            "input_tokens": 1_000,
-            "output_tokens": 100,
-            "total_tokens": 1_100,
-            "input_token_details": {"cache_read": 800},
+def test_log_llm_usage_emits_agent_billing_span(tmp_path: Path) -> None:
+    result = run_bounded(
+        [sys.executable, "-I", str(Path(__file__).with_name("billing_usage_child.py")), "priced"],
+        env={
+            "HOME": str(tmp_path),
+            "MEIVA_HOME": str(tmp_path),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_CONFIG_BOOT": "eager",
+            "MEIVA_PROCESS_PROFILE": "agent",
         },
+        timeout=60,
+        capture_output=True,
+        text=True,
     )
+    assert result.returncode == 0, result.stdout + result.stderr
 
-    before_ns = time.time_ns()
-    log_llm_usage(
-        message,
-        agent_id=7,
-        model="deepseek-v4-pro",
-        latency_ms=1_234.5,
-        priced_at=priced_at,
-        catalog=build_model_catalog(),
+
+def test_log_llm_usage_skips_billing_when_usage_metadata_is_incomplete(tmp_path: Path) -> None:
+    result = run_bounded(
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("billing_usage_child.py")),
+            "incomplete",
+        ],
+        env={
+            "HOME": str(tmp_path),
+            "MEIVA_HOME": str(tmp_path),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_CONFIG_BOOT": "eager",
+            "MEIVA_PROCESS_PROFILE": "agent",
+        },
+        timeout=60,
+        capture_output=True,
+        text=True,
     )
-    after_ns = time.time_ns()
-
-    assert len(tracer.spans) == 1
-    span = tracer.spans[0]
-    assert span.start_time is not None
-    assert before_ns <= span.start_time + 1_234_500_000 <= after_ns
-    assert span.attributes["meiva.billing.vendor"] == "deepseek"
-    assert span.attributes["meiva.billing.usage_kind"] == "agent"
-    assert span.attributes["meiva.billing.tokens_in"] == 1_000
-    assert span.attributes["meiva.billing.tokens_out"] == 100
-    assert span.attributes["meiva.billing.cache_read_tokens"] == 800
-    assert span.attributes["meiva.billing.cost"] == round(expected.cost_usd, 6)
-    assert loguru_records[0]["extra"]["cost_usd"] == pytest.approx(expected.cost_usd)  # pyright: ignore[reportUnknownMemberType]
-
-
-def test_log_llm_usage_skips_billing_when_usage_metadata_is_incomplete(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Incomplete standardized usage remains observable but is not billable.
-
-    The regression this catches is a provider response lacking one token total
-    becoming a misleading partial or zero-token billing ledger event.
-    """
-    from opentelemetry import trace as otel_trace
-
-    from base.telemetry import tracing as tracing_mod
-
-    class _Span:
-        def set_attribute(self, _key: str, _value: Any) -> None:
-            pass
-
-        def end(self) -> None:
-            pass
-
-    class _Tracer:
-        def __init__(self) -> None:
-            self.spans: list[_Span] = []
-
-        def start_span(self, _name: str, *, start_time: int | None = None) -> _Span:
-            span = _Span()
-            self.spans.append(span)
-            return span
-
-    tracer = _Tracer()
-    monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
-    monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
-    message = AIMessage(
-        content="",
-        usage_metadata={"input_tokens": 100, "output_tokens": 0, "total_tokens": 100},
-    )
-    object.__setattr__(message, "usage_metadata", {"input_tokens": 100, "total_tokens": 100})
-
-    log_llm_usage(message, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog())
-
-    assert tracer.spans == []
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_price_snapshot_absent_for_unpriced_model(

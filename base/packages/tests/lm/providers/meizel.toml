@@ -1,7 +1,7 @@
-exports = ["provider_plugin_support.py"]
+exports = ["lm_process.py", "provider_plugin_support.py"]
 
 [uses]
-"_billing_child.py" = ["billing_sensors.py"]
+"_billing_child.py" = ["billing_sensors.py", "invoke_billing.py"]
 "lm_process.py" = ["_billing_child.py", "_fail_fast_child.py"]
 "test_call_fail_fast.py" = ["lm_process.py"]
 "test_lm_billing.py" = ["lm_process.py"]

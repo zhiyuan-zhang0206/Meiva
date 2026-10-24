@@ -8,7 +8,6 @@ from __future__ import annotations
 import atexit
 import sys
 import threading
-from pathlib import Path
 
 
 def cold() -> None:
@@ -29,34 +28,45 @@ def cold() -> None:
 
 
 def loaded() -> None:
-    owners: list[object] = []
+    import socket
+
+    from base.cluster.machine import MachineFacts
+    from base.paths import meiva_home
+    from base.telemetry.otlp.trace_config import TraceConfig
+    from base.telemetry.otlp.trace_readiness import PROCESS_RECORDING
+    from base.telemetry.otlp.trace_workers import CollectorRetry
+
+    owners: list[CollectorRetry] = []
 
     def observe() -> None:
         from base.telemetry import tracing
 
         assert tracing.state["closed"]
+        assert PROCESS_RECORDING.resolved and not PROCESS_RECORDING.ready
         assert len(owners) == 1
-        assert owners[0].finished.is_set()  # type: ignore[attr-defined]
-        assert not owners[0]._thread.is_alive()  # type: ignore[attr-defined]
+        assert owners[0].finished.is_set()
+        assert not owners[0]._thread.is_alive()
         sys.stdout.write("loaded trace exit observed\n")
 
     atexit.register(observe)
     from base.telemetry import tracing
-    from base.telemetry.tests.otlp.identity_inputs import machine_identity
-    from base.telemetry.tests.test_tracing import trace_config
 
-    entered = threading.Event()
-
-    def arm(endpoint: str, stop_requested: threading.Event, **_identity: object) -> None:
-        entered.set()
-        stop_requested.wait()
-
-    tracing.arm_tracing = arm  # type: ignore[assignment]
-    tracing.start_arm_thread(
-        trace_config(endpoint="http://local-test-collector"), machine_identity(), Path(".meiva")
-    )
-    assert entered.wait(5)
-    owners.append(tracing.state["arm_owner"])
+    # meiva:note
+    # A bound but non-listening socket owns an actually unavailable endpoint. The real
+    # collector preflight admits one retry worker; the registered exit hook must wake it.
+    with socket.socket() as unavailable:
+        unavailable.bind(("127.0.0.1", 0))
+        port = unavailable.getsockname()[1]
+        tracing.initialize_tracing(
+            machine=MachineFacts.of(name="exit-test", role={"agent-runner"}),
+            home=meiva_home(),
+            config=TraceConfig(True, False, f"http://127.0.0.1:{port}", 3, 2048, 1.0, True),
+            readiness=PROCESS_RECORDING,
+        )
+        owner = tracing.state["retry_owner"]
+        assert isinstance(owner, CollectorRetry)
+        assert not owner.finished.is_set()
+        owners.append(owner)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,7 @@
-exports = ["armed_tracing.py", "event_capture.py"]
+exports = ["armed_tracing.py", "event_capture.py", "trace_process.py"]
 
 [uses]
+"trace_facade_child.py" = ["armed_tracing.py"]
+"trace_lifecycle_child.py" = ["armed_tracing.py"]
+"trace_process.py" = ["trace_facade_child.py", "trace_lifecycle_child.py"]
 "test_event_capture.py" = ["event_capture.py"]
