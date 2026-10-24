@@ -45,9 +45,7 @@ def test_local_policy_reads_live_file(tmp_path: Path, serves_gateway: bool) -> N
     env = {"MEIVA_MACHINE_SERVE_GATEWAY": "true"} if serves_gateway else {}
 
     def read() -> SamplingPolicy:
-        return call_policy.read_policy(
-            env=env, env_path=env_file, gateway_url="http://gateway.invalid"
-        )
+        return call_policy.read_policy(env=env, env_path=env_file)
 
     env_file.write_text("MEIVA_SDK_CALL_SAMPLING_ENABLED=true\nMEIVA_SDK_CALL_SAMPLE_EVERY=4\n")
     assert read() == SamplingPolicy(sampling_enabled=True, sample_every=4)
@@ -129,9 +127,7 @@ def test_enrolled_process_reads_gateway_policy(tmp_path: Path) -> None:
             "MEIVA_GATEWAY_URL": gateway.url,
             "MEIVA_API_TOKEN": "machine-token",
         }
-        policy = call_policy.read_policy(
-            env=env, env_path=tmp_path / ".env", gateway_url=gateway.url
-        )
+        policy = call_policy.read_policy(env=env, env_path=tmp_path / ".env")
     assert policy == SamplingPolicy(sampling_enabled=True, sample_every=2)
     assert [r.headers["authorization"] for r in gateway.requests] == ["Bearer machine-token"]
     assert [r.path for r in gateway.requests] == ["/api/bootstrap"]

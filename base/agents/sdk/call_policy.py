@@ -29,7 +29,7 @@ class SamplingPolicy(BaseModel):
 # say the cluster hands it out: read from the file when this process's config source is local, from
 # the gateway otherwise. The caller names every input; the file is read again on each call so an
 # edit reaches a running process within one refresh.
-def read_policy(*, env: Mapping[str, str], env_path: Path, gateway_url: str) -> SamplingPolicy:
+def read_policy(*, env: Mapping[str, str], env_path: Path) -> SamplingPolicy:
     from base.host.env.boot_policy import BootstrapFetch
     from base.host.env.bootstrap import (
         config_source_is_local,
@@ -46,7 +46,7 @@ def read_policy(*, env: Mapping[str, str], env_path: Path, gateway_url: str) -> 
         aliases = env_file
     else:
         aliases = fetch_bootstrap_config(
-            gateway_url,
+            env["MEIVA_GATEWAY_URL"],
             bearer=delivered_token(env),
             tuning=BootstrapFetch(timeout_s=2.0, attempts=1),
         )
@@ -222,25 +222,17 @@ class SamplingPolicyOwner:
 
 # meiva:note
 # The sampling owner a process installs when its root names none: the composition root of a bare
-# SDK process. The first snapshot is this process's own settings, and every refresh re-reads the
-# process environment's `.env` or asks the gateway (`read_policy`). The settings, the environment
-# and the file location are read here, once; the owner and `read_policy` take them as values.
+# SDK process. It serves the default policy until its first refresh lands (an unconfigured SDK
+# emits every call, which is the safe side), and every refresh re-reads the process environment's
+# `.env` or asks the gateway (`read_policy`). Only the environment and the file location are read
+# here, once; no configuration is booted for a sampling default.
 def process_sampling_owner() -> SamplingPolicyOwner:
     from functools import partial
 
-    from base.config import settings
     from base.host.env.dotenv_file import process_env_file
     from base.host.env.registry import process_environment
 
     return SamplingPolicyOwner(
-        initial=SamplingPolicy(
-            sampling_enabled=settings.observability.sdk_call_sampling_enabled,
-            sample_every=settings.observability.sdk_call_sample_every,
-        ),
-        fetch=partial(
-            read_policy,
-            env=process_environment(),
-            env_path=process_env_file(),
-            gateway_url=settings.gateway.gateway_url,
-        ),
+        initial=SamplingPolicy(),
+        fetch=partial(read_policy, env=process_environment(), env_path=process_env_file()),
     )
