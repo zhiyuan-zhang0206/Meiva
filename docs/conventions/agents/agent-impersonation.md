@@ -243,6 +243,15 @@ previous one's fallback:
    now carries `unapplied_handoff_receipt`, separating "reaped while a receipt was still
    owed" from an ordinary crash.
 
+A host restart reaches none of these rungs, and does not need to. The boot settle turns this
+machine's `running` rows idling without a crash marker, and the host's own durable pending scan
+(`services/agent_runner/agent_host/scheduling/pending_wakes.py`) selects any row on its machine
+whose lease still owes a receipt — exactly what a restart leaves behind. The first turn of that
+wake writes the receipt, so the silent agent this section describes cannot outlive a reboot
+(#5623 measured that path instead of adding a fourth way in). What the rungs add is a bound and
+a trace for the row whose own turns cannot settle it: without them the scan keeps waking it, one
+turn at a time, with nothing that ever stops.
+
 A settle that succeeds clears the row's crash marker, but only while nothing of that row's
 work is still owing: `clear_turn_fatal` requires an ended lease with no receipt left
 unapplied. The condition is that fact rather than the marker's timestamp, because a stamp
@@ -271,9 +280,18 @@ WHERE l.status <> 'active' AND l.handoff_applied_at IS NULL
 A hit inside the grace is a row the heartbeat will re-check; `status = 'terminated'` with
 `termination_source = 'reaper'` is a row the reaper already took, and its audit event says
 whether the receipt was still owed. Known limits: a database that refuses every write loses
-the stamp too (the next host start still idles the row, but only an external nudge revives
-it), rung 2 leaves a paused agent asleep, and the grace window holds roughly three chances
-before the reaper takes the row.
+the stamp too — the next host start still idles the row and the pending scan wakes it, so
+what is lost is the marker (the reaper's bound on that row), not the recovery; rung 2 leaves a
+paused agent asleep, and the grace window holds roughly three chances before the reaper takes
+the row.
+
+Two states sit outside both the rungs and the scan. A row whose machine runs no host at all
+(retired, or offline long enough that the row is all that is left) has nobody to scan it or run
+its turn, and a row already `terminated` is out of the scan's reach by design — its WHERE
+clause admits idling and running rows. Neither is silent about itself: the first keeps the owed lease
+and the row's status as its record, the second keeps the termination and its
+`termination_source`, and both still show the receipt as owed. What is lost in them is the turn
+that would settle it, not the evidence that it is owed.
 
 ## Return control
 
