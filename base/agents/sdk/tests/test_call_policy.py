@@ -158,15 +158,15 @@ def test_unexpected_refresh_error_persists_until_a_valid_snapshot(
 ) -> None:
     env_path = tmp_path / ".env"
     if failure == "unreadable_file":
-        cache = sampling_owner_failing_to_read(env_path)
+        cache = sampling_owner_failing_to_read(env_path, refresh_seconds=3600.0)
         cache.refresh()
     elif failure == "bad_url":
-        cache = gateway_sampling_owner("ftp://gateway.invalid", env_path)
+        cache = gateway_sampling_owner("ftp://gateway.invalid", env_path, refresh_seconds=3600.0)
         cache.refresh()
     else:
         status = 401 if failure == "unauthorized" else 500
         with serve_json({}, status=status) as gateway:
-            cache = gateway_sampling_owner(gateway.url, env_path)
+            cache = gateway_sampling_owner(gateway.url, env_path, refresh_seconds=3600.0)
             cache.refresh()
     assert cache.error is not None
     original = cache.error[0]
@@ -177,6 +177,7 @@ def test_unexpected_refresh_error_persists_until_a_valid_snapshot(
         assert caught.value is original
         depths.append(sum(1 for _ in traceback.walk_tb(caught.value.__traceback__)))
     assert depths[0] == depths[1]  # Repeated callers do not accumulate each other's stacks.
+    assert cache.worker is None
 
 
 def test_an_outage_does_not_clear_an_invalid_configuration(tmp_path: Path) -> None:
