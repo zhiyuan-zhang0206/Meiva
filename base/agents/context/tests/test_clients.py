@@ -199,12 +199,7 @@ def test_description_carries_the_gateway_endpoint_and_no_secret() -> None:
 
     from base.cluster.machine import MachineIdentity
 
-    machine = MachineIdentity(
-        name=lambda: "child",
-        role=lambda: frozenset({"agent-runner"}),
-        host=lambda: "localhost",
-        description=lambda: None,
-    )
+    machine = MachineIdentity.of(name="child", role="agent-runner")
     child = MeivaContext.from_description(
         description, clients=ClientSet(gateway_url=description["gateway_url"]), machine=machine
     )

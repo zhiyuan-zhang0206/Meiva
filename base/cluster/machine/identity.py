@@ -1,6 +1,6 @@
 import enum
 from collections.abc import Callable, Iterable
-from typing import Literal
+from typing import Literal, Self
 
 __all__ = [
     "MachineIdentity",
@@ -49,6 +49,10 @@ _UNSET = _Unset.TOKEN
 # meiva:note
 # Explicitly owned machine identity cache. Each field resolves lazily and
 # independently, sharing one reset() for test isolation and one set() for explicit injection.
+#
+# `of` builds an identity from declared facts and `replaced` derives one with some facts swapped;
+# neither reads configuration or mutates an owner. The reader constructor, `set` and `reset` are
+# the older entries and go once their callers build identities from facts.
 class MachineIdentity:
     def __init__(
         self,
@@ -67,6 +71,39 @@ class MachineIdentity:
         self._description: str | None = None
         self._description_resolved: bool = False
         self._host: str | None = None
+
+    @classmethod
+    def of(
+        cls,
+        *,
+        name: str,
+        role: str | Iterable[str],
+        host: str = "localhost",
+        description: str | None = None,
+    ) -> Self:
+        return cls(
+            name=_constant(name),
+            role=_declared_roles_reader(role),
+            host=_constant(host),
+            description=_constant(description),
+        )
+
+    def replaced(
+        self,
+        *,
+        name: str | _Unset = _UNSET,
+        role: str | Iterable[str] | _Unset = _UNSET,
+        host: str | _Unset = _UNSET,
+        description: str | _Unset | None = _UNSET,
+    ) -> Self:
+        return type(self)(
+            name=self.name if isinstance(name, _Unset) else _constant(name),
+            role=self.role if isinstance(role, _Unset) else _declared_roles_reader(role),
+            host=self.host if isinstance(host, _Unset) else _constant(host),
+            description=(
+                self.description if isinstance(description, _Unset) else _constant(description)
+            ),
+        )
 
     def name(self) -> str:
         if self._name is None:
@@ -193,3 +230,30 @@ def _coerce_roles(role: str | Iterable[str]) -> MachineRoles:
     if isinstance(role, str):
         return _parse_roles(role)
     return _parse_roles(",".join(role))
+
+
+def _constant[T](value: T) -> Callable[[], T]:
+    return lambda: value
+
+
+# meiva:note
+# The capability tokens an identity declares, as a reader: no token at all is the unconfigured
+# machine (`MachineRoleMissing`), an unknown token is `MachineRoleInvalid`; both surface when the
+# role is read, as they do for an identity built from configuration.
+def _declared_roles_reader(role: str | Iterable[str]) -> Callable[[], MachineRoles]:
+    tokens = (
+        frozenset(t.strip() for t in role.split(",") if t.strip())
+        if isinstance(role, str)
+        else frozenset(role)
+    )
+
+    def read() -> MachineRoles:
+        if not tokens:
+            return roles_from_flags(
+                serve_gateway=False,
+                serve_agent_runner=False,
+                serve_observability_station=False,
+            )
+        return _parse_roles(",".join(sorted(tokens)))
+
+    return read

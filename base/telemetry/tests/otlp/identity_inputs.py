@@ -1,20 +1,10 @@
-from base.cluster.machine import MachineIdentity, MachineRoleMissing, MachineRoles
+from base.cluster.machine import MachineIdentity, MachineRoles
 
 
 def machine_identity(
     *, name: str = "test-runner", roles: MachineRoles | None = frozenset({"agent-runner"})
 ) -> MachineIdentity:
-    def read_roles() -> MachineRoles:
-        if roles is None:
-            raise MachineRoleMissing("test unit is unconfigured")
-        return roles
-
-    return MachineIdentity(
-        name=lambda: name,
-        role=read_roles,
-        host=lambda: "localhost",
-        description=lambda: None,
-    )
+    return MachineIdentity.of(name=name, role=() if roles is None else roles)
 
 
 def allow_identity(*_args: object, **_kwargs: object) -> bool:

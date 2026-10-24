@@ -45,6 +45,11 @@ owner, so a configuration repair can take effect without touching another
 process context. `roles_from_flags` owns capability validation for roots that
 provide configuration readers.
 
+`MachineIdentity.of(name=, role=, host=, description=)` builds an identity from declared
+facts and `replaced(...)` derives one with some facts swapped; neither reads configuration
+or mutates an owner, and an unconfigured or invalid fact still surfaces when it is read.
+The reader constructor, `set` and `reset` are the older entries.
+
 
 `MeivaContext.machine` carries the exact root-owned identity. SDK machine reads use
 `meiva.context.require_machine()` and reject an absent context or a partial context

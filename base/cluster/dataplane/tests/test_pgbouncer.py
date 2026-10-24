@@ -11,12 +11,7 @@ from base.cluster.machine import MachineIdentity
 
 @pytest.fixture
 def probe_machine() -> MachineIdentity:
-    return MachineIdentity(
-        name=lambda: "pooler-probe",
-        role=lambda: frozenset({"gateway"}),
-        host=lambda: "10.0.0.5",
-        description=lambda: None,
-    )
+    return MachineIdentity.of(name="pooler-probe", role="gateway", host="10.0.0.5")
 
 
 def _fail_admin_dial(

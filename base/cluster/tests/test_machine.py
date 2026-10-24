@@ -113,6 +113,49 @@ def test_owned_identity_rejects_invalid_supplied_facts() -> None:
         )
 
 
+def test_an_identity_of_declared_facts_reads_them_back() -> None:
+    owner = MachineIdentity.of(
+        name=" box ", role="agent-runner,gateway", host=" 10.0.0.2 ", description=" voice "
+    )
+    assert owner.name() == "box"
+    assert owner.role() == frozenset({"agent-runner", "gateway"})
+    assert owner.host() == "10.0.0.2"
+    assert owner.description() == "voice"
+    bare = MachineIdentity.of(name="box", role=["gateway"])
+    assert bare.host() == "localhost" and bare.description() is None
+
+
+def test_declared_facts_surface_the_unconfigured_and_invalid_cases_when_read() -> None:
+    with pytest.raises(MachineNameMissing):
+        MachineIdentity.of(name=" ", role="gateway").name()
+    with pytest.raises(MachineRoleMissing):
+        MachineIdentity.of(name="m", role=()).role()
+    with pytest.raises(MachineRoleInvalid, match="typo"):
+        MachineIdentity.of(name="m", role="gateway,typo").role()
+    assert MachineIdentity.of(name="m", role="gateway,typo").name() == "m"
+
+
+def test_replaced_swaps_only_the_named_facts_and_leaves_the_original_alone() -> None:
+    original = MachineIdentity.of(name="a", role="gateway", host="h1", description="d")
+    derived = original.replaced(role="agent-runner", description=None)
+    assert (derived.name(), derived.host()) == ("a", "h1")
+    assert derived.role() == frozenset({"agent-runner"}) and derived.description() is None
+    assert original.role() == frozenset({"gateway"}) and original.description() == "d"
+
+
+def test_replaced_reads_through_for_the_facts_it_does_not_name() -> None:
+    names = ["first"]
+    configured = MachineIdentity(
+        name=lambda: names[0],
+        role=lambda: frozenset({"gateway"}),
+        host=lambda: "h",
+        description=lambda: None,
+    )
+    derived = configured.replaced(host="elsewhere")
+    assert derived.name() == "first" and derived.host() == "elsewhere"
+    assert configured.host() == "h"
+
+
 @pytest.fixture
 def machine_config() -> ConfigBoot:
     """A test root owns its snapshot and field repairs, independent of other roots."""

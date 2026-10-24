@@ -22,12 +22,7 @@ from base.telemetry.tests.capture.armed_tracing import BillingRuntime
 def disabled() -> None:
     config = TraceConfig.of(settings.observability, endpoint_explicit=False)
     assert config.enabled is False
-    machine = MachineIdentity(
-        name=lambda: "billing-child",
-        role=frozenset,
-        host=lambda: "localhost",
-        description=lambda: "billing child",
-    )
+    machine = MachineIdentity.of(name="billing-child", role=(), description="billing child")
     tracing.initialize_tracing(machine=machine, home=meiva_home(), config=config)
     assert not tracing.is_initialized()
     assert not isinstance(trace.get_tracer_provider(), TracerProvider)
