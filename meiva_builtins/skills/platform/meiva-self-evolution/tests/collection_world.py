@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlsplit
 import psycopg
 
 from base.cluster.machine import GatewayAccess
+from base.host.env.process_profile import ProcessProfile
 
 BASE = datetime.fromisoformat("2026-08-13T00:00:00+00:00")
 
@@ -138,7 +139,7 @@ def grant(
     *,
     human_bearer: str = "test-secret",
     delivered_bearer: str | None = None,
-    profile: str | None = None,
+    profile: ProcessProfile | None = None,
 ) -> GatewayAccess:
     return GatewayAccess(
         gateway_url=url,
