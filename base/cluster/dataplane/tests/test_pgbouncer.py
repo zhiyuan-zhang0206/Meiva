@@ -6,17 +6,12 @@ import pytest
 
 from base.cluster import port_preflight
 from base.cluster.dataplane import pooler as base_pooler
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineFacts, MachineIdentity, MachineIdentityReader
 
 
 @pytest.fixture
-def probe_machine() -> MachineIdentity:
-    return MachineIdentity(
-        name=lambda: "pooler-probe",
-        role=lambda: frozenset({"gateway"}),
-        host=lambda: "10.0.0.5",
-        description=lambda: None,
-    )
+def probe_machine() -> MachineFacts:
+    return MachineFacts.of(name="pooler-probe", role="gateway", host="10.0.0.5")
 
 
 def _fail_admin_dial(
@@ -29,35 +24,39 @@ def _fail_admin_dial(
 
 def test_public_probe_is_a_noop_for_loopback_only_bind(
     monkeypatch: pytest.MonkeyPatch,
-    probe_machine: MachineIdentity,
+    probe_machine: MachineFacts,
 ) -> None:
     """A loopback-only pooler has no public listener, so the fast path calls nothing."""
-
-    def loopback(*, machine: MachineIdentity) -> list[str]:
-        assert machine is probe_machine
-        return ["127.0.0.1"]
-
-    monkeypatch.setattr(port_preflight, "bind_addrs", loopback)
 
     def _fail_host_lookup() -> str:
         pytest.fail("loopback-only probe must not resolve the reachable host")
 
+    owner = MachineIdentity(
+        name=probe_machine.name,
+        role=probe_machine.role,
+        host=_fail_host_lookup,
+        description=probe_machine.description,
+    )
+
+    def loopback(*, machine: MachineIdentityReader) -> list[str]:
+        assert machine is owner
+        return ["127.0.0.1"]
+
     def _fail_listener_scan(_port: int) -> set[str]:
         pytest.fail("loopback-only probe must not inspect listeners")
 
-    monkeypatch.setattr(probe_machine, "host", _fail_host_lookup)
+    monkeypatch.setattr(port_preflight, "bind_addrs", loopback)
     monkeypatch.setattr(port_preflight, "listener_addrs", _fail_listener_scan)
     monkeypatch.setattr(base_pooler, "admin_reachable", _fail_admin_dial)
 
     assert (
-        base_pooler.pgbouncer_public_listener_reachable(6433, "meiva_main", machine=probe_machine)
-        is True
+        base_pooler.pgbouncer_public_listener_reachable(6433, "meiva_main", machine=owner) is True
     )
 
 
 def test_public_probe_accepts_the_exact_reachable_host_in_the_socket_table(
     monkeypatch: pytest.MonkeyPatch,
-    probe_machine: MachineIdentity,
+    probe_machine: MachineFacts,
 ) -> None:
     """The configured address itself proves the public listener is bound."""
     scanned: list[int] = []
@@ -66,7 +65,7 @@ def test_public_probe_accepts_the_exact_reachable_host_in_the_socket_table(
         scanned.append(port)
         return {"127.0.0.1", "10.0.0.5"}
 
-    def private_bind(*, machine: MachineIdentity) -> list[str]:
+    def private_bind(*, machine: MachineIdentityReader) -> list[str]:
         assert machine is probe_machine
         return ["127.0.0.1", "10.0.0.5"]
 
@@ -95,7 +94,7 @@ def test_public_probe_interprets_socket_table_bindings(
     monkeypatch: pytest.MonkeyPatch,
     addrs: set[str],
     expected: bool,
-    probe_machine: MachineIdentity,
+    probe_machine: MachineFacts,
 ) -> None:
     """Only the reachable address or a wildcard covers the public front door;
     loopback-only and unknown (empty) results remain degraded."""
@@ -103,7 +102,7 @@ def test_public_probe_interprets_socket_table_bindings(
     def _listener_addrs(_port: int) -> set[str]:
         return addrs
 
-    def private_bind(*, machine: MachineIdentity) -> list[str]:
+    def private_bind(*, machine: MachineIdentityReader) -> list[str]:
         assert machine is probe_machine
         return ["127.0.0.1", "10.0.0.5"]
 

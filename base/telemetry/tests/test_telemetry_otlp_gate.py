@@ -4,7 +4,7 @@ import pytest
 
 from base import config
 from base.cluster import derive
-from base.cluster.machine import MachineNameMissing, MachineRoleInvalid, MachineRoleMissing
+from base.cluster.machine import MachineIdentity, MachineNameMissing, MachineRoleInvalid
 from base.telemetry import observability
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.tests.otlp.identity_inputs import machine_identity
@@ -59,14 +59,16 @@ def test_export_gate_roles_marker_and_override(
 
 
 def test_explicit_endpoint_does_not_read_machine(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
-    machine = machine_identity()
+    facts = machine_identity()
 
     def reject() -> str:
         raise AssertionError("explicit endpoints need no production identity")
 
-    monkeypatch.setattr(machine, "name", reject)
+    machine = MachineIdentity(
+        name=reject, role=facts.role, host=facts.host, description=facts.description
+    )
     assert telemetry_otlp.observability_export_allowed(
         machine, home=tmp_path, endpoint_explicit=True
     )
@@ -75,12 +77,7 @@ def test_explicit_endpoint_does_not_read_machine(
 def test_missing_role_preserves_runner_bootstrap_gate(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    machine = machine_identity()
-
-    def missing() -> frozenset[str]:
-        raise MachineRoleMissing("not configured")
-
-    monkeypatch.setattr(machine, "role", missing)
+    machine = machine_identity(roles=None)
     monkeypatch.setattr(derive, "home_label", _production_label)
     assert telemetry_otlp.observability_export_allowed(
         machine, home=tmp_path, endpoint_explicit=False
@@ -91,7 +88,14 @@ def test_missing_role_preserves_runner_bootstrap_gate(
 def test_invalid_roles_propagate_outside_transport_isolation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operation: str
 ) -> None:
-    machine = machine_identity(roles=frozenset({"unknown"}))
+    facts = machine_identity()
+
+    def invalid_roles() -> frozenset[str]:
+        return frozenset({"unknown"})
+
+    machine = MachineIdentity(
+        name=facts.name, role=invalid_roles, host=facts.host, description=facts.description
+    )
     monkeypatch.setattr(derive, "home_label", _production_label)
     with pytest.raises(MachineRoleInvalid):
         if operation == "gateway":

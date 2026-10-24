@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from base.cluster.machine import MachineIdentity
 from base.telemetry import tracing
 from base.telemetry.otlp import trace_workers as lifecycle
 from base.telemetry.tests.otlp.identity_inputs import machine_identity
@@ -189,15 +190,16 @@ def test_retry_unknown_error_retains_identity(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_trace_identity_defect_fails_before_sdk_arm(
-    monkeypatch: pytest.MonkeyPatch,
     fresh_state: dict[str, Any],
 ) -> None:
-    machine = machine_identity()
+    facts = machine_identity()
 
     def invalid() -> str:
         raise RuntimeError("invalid machine reader")
 
-    monkeypatch.setattr(machine, "name", invalid)
+    machine = MachineIdentity(
+        name=invalid, role=facts.role, host=facts.host, description=facts.description
+    )
     with pytest.raises(RuntimeError, match="invalid machine reader"):
         tracing.start_arm_thread(trace_config(endpoint="http://collector"), machine, Path(".meiva"))
     assert fresh_state.get("arm_owner") is None

@@ -45,6 +45,22 @@ owner, so a configuration repair can take effect without touching another
 process context. `roles_from_flags` owns capability validation for roots that
 provide configuration readers.
 
+`MachineFacts.of(name=, role=, host=, description=)` freezes declared facts. It copies
+capability iterables and rejects unknown nonempty tokens immediately; an explicitly empty name
+or capability set remains a missing fact, whose corresponding read raises `MachineNameMissing`
+or `MachineRoleMissing`. Disabled consumers therefore need not read an unrelated missing role.
+`replaced(...)` derives another frozen value without changing the original. Neither value has
+`set` or `reset`.
+
+`MachineFacts.capture(owner, ...)` is an explicit snapshot operation on a reader owner. It reads
+unreplaced fields once, preserves only the two documented Missing states, and propagates invalid
+roles and other read failures. Overrides are selected before reads, so an overridden invalid
+field is not fetched. A later owner repair/reset cannot change the captured value.
+
+`MachineIdentityReader` is the shared read-only contract of facts and the legacy `MachineIdentity`
+owner. The legacy reader constructor and its cache/set/reset behavior remain for live command
+repair; `CommandRuntime.machine` retains that concrete mutation-capable type. Read-only consumers
+accept the shared contract, without treating a reader owner as a frozen value.
 
 `MeivaContext.machine` carries the exact root-owned identity. SDK machine reads use
 `meiva.context.require_machine()` and reject an absent context or a partial context

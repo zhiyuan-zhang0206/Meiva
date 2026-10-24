@@ -16,7 +16,7 @@ import os
 import shutil
 
 import base.host.proc
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.native_process.ownership import OwnedProcess, capture_tree
 
 
@@ -204,7 +204,7 @@ def _lsof_listener_name_addrs(port: int) -> set[str]:
 LOOPBACK_ALIASES = frozenset({"127.0.0.1", "::1", "localhost", "ip6-localhost"})
 
 
-def serves_off_box(*, machine: MachineIdentity) -> bool:
+def serves_off_box(*, machine: MachineIdentityReader) -> bool:
     """Whether this host declares a reachable address other machines can dial.
 
     The single predicate behind every off-box listener decision (data plane,
@@ -215,7 +215,7 @@ def serves_off_box(*, machine: MachineIdentity) -> bool:
     return machine.host() not in LOOPBACK_ALIASES
 
 
-def bind_addrs(*, machine: MachineIdentity) -> list[str]:
+def bind_addrs(*, machine: MachineIdentityReader) -> list[str]:
     """Loopback plus this host's reachable address, de-duplicated (loopback alone
     when reachable resolves to localhost — the single-box default).
 

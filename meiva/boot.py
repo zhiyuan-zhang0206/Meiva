@@ -38,7 +38,7 @@ from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentity, MachineIdentityReader
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.host.env.agent_env import AGENT_ID_ENV
@@ -119,7 +119,7 @@ def process_sampling_owner() -> SamplingPolicyOwner:
     return owner
 
 
-def database_factory(*, config: ConfigBoot, machine: MachineIdentity) -> DatabaseFactory:
+def database_factory(*, config: ConfigBoot, machine: MachineIdentityReader) -> DatabaseFactory:
     from threading import Lock
 
     from base.native_process.code_version import CodeVersion
@@ -162,7 +162,7 @@ def database_factory(*, config: ConfigBoot, machine: MachineIdentity) -> Databas
 def process_clients(
     *,
     config: ConfigBoot,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     database: DatabaseFactory,
     gateway_url: str | Callable[[], str],
 ) -> ClientSet:
@@ -204,7 +204,7 @@ def process_clients(
 # The clients of a root that holds its own database factory: the gateway endpoint derives from the
 # configuration.
 def clients_over(
-    config: ConfigBoot, machine: MachineIdentity, database: DatabaseFactory
+    config: ConfigBoot, machine: MachineIdentityReader, database: DatabaseFactory
 ) -> ClientSet:
     return process_clients(
         config=config, machine=machine, database=database, gateway_url=gateway_endpoint(config)
@@ -214,7 +214,7 @@ def clients_over(
 # meiva:note
 # The clients of a root that owns nothing but its configuration and its machine identity: the
 # database factory and the gateway endpoint derive from them.
-def derived_clients(config: ConfigBoot, machine: MachineIdentity) -> ClientSet:
+def derived_clients(config: ConfigBoot, machine: MachineIdentityReader) -> ClientSet:
     return clients_over(config, machine, database_factory(config=config, machine=machine))
 
 
@@ -314,7 +314,7 @@ def ensure_plugins_loaded(
     *,
     surface: bool = True,
     config: ConfigBoot | None = None,
-    machine: MachineIdentity | None = None,
+    machine: MachineIdentityReader | None = None,
     context: MeivaContext | None = None,
     clients: ClientSet | None = None,
     validate_state: StateGate | None = None,
@@ -411,7 +411,7 @@ class LoadInputs:
     surface: bool
     disabled: tuple[str, ...]
     config: ConfigBoot
-    machine: MachineIdentity
+    machine: MachineIdentityReader
     clients: ClientSet
     sampling: SamplingPolicyOwner
     caller: CallerIdentity | None
@@ -428,7 +428,7 @@ def _load_inputs(
     surface: bool,
     disabled: tuple[str, ...],
     config: ConfigBoot | None,
-    machine: MachineIdentity | None,
+    machine: MachineIdentityReader | None,
     context: MeivaContext | None,
     clients: ClientSet | None,
     caller: CallerIdentity | None,
@@ -469,7 +469,7 @@ def _load_inputs(
     )
 
 
-def _context_machine(context: MeivaContext | None) -> MachineIdentity | None:
+def _context_machine(context: MeivaContext | None) -> MachineIdentityReader | None:
     return None if context is None else context.machine
 
 
@@ -675,7 +675,7 @@ def record_harness_failure(exc: BaseException) -> None:
 # clock stay the context's own, so this boot holds none of them.
 @dataclass(frozen=True, slots=True)
 class BorrowedBoot:
-    machine: MachineIdentity
+    machine: MachineIdentityReader
     database: DatabaseFactory
 
 

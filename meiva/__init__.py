@@ -26,7 +26,7 @@ if "_LOADED_IMAGE" not in globals():
 # external API while removing the "must mutate settings before import"
 # invariant.
 from base.agents.context import MeivaContext
-from base.cluster.machine import MachineIdentity as _MachineIdentity
+from base.cluster.machine import MachineIdentityReader as _MachineIdentityReader
 from base.config import ConfigBoot
 from base.packages.plugins.loading import StateGate
 
@@ -191,7 +191,7 @@ def ensure_plugins_loaded(
     *,
     surface: bool = True,
     config: ConfigBoot | None = None,
-    machine: _MachineIdentity | None = None,
+    machine: _MachineIdentityReader | None = None,
     context: MeivaContext | None = None,
     validate_state: StateGate | None = None,
 ) -> None:
