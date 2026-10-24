@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import cast
 
 from fastapi import Request
 
@@ -41,3 +42,10 @@ def require_model_catalog(request: Request) -> ModelCatalog:
 
 def catalog_for_observation(result: ModelCatalog | CatalogLoadFailure) -> ModelCatalog | None:
     return None if isinstance(result, CatalogLoadFailure) else result
+
+
+# meiva:note
+# The cluster default model as of this request. The config authority is the live owner, so the
+# request is the unit of work that reads it once and hands the value down.
+def request_default_model(request: Request) -> str:
+    return cast(str, request.app.state.config_authority.service_field_value("llm_model"))

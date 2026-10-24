@@ -14,6 +14,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.config import ConfigBoot
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from gateway.routers.proxies import insights as proxy
@@ -147,13 +148,15 @@ def test_an_unavailable_service_is_a_gateway_error_not_a_crash(
 def test_the_gateway_declares_exactly_what_the_service_serves(
     tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
+    boot = ConfigBoot()
+    boot.set_field("llm_model", "deepseek-v4-flash-vision-exp")
     service = build_app(
         cast(Database, object()),
         cast(ConnectionPool[Any], object()),
         InsightsConfig(run_timeline_message_text_max=1),
         home=tmp_path,
         catalog=model_catalog,
-        default_model_reader=lambda: "deepseek-v4-flash-vision-exp",
+        boot=boot,
         timeline_inputs=TimestampPolicy(
             clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
             timestamps_enabled=False,

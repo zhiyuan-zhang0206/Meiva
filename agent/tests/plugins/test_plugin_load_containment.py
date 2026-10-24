@@ -233,8 +233,8 @@ def test_the_loader_retains_the_roots_explicit_owners(config_authority: ConfigAu
         assert installation.registry is loaded.registry
         assert settings.model_catalog() is catalog
         assert settings.config_authority() is config_authority
-        sampling = installation.sampling
-        sampling.reader = call_policy.SamplingPolicy
+        sampling = installation.require_sampling()
+        sampling.fetch = call_policy.SamplingPolicy
         sampling.value = sampling.read()
         refresh = sampling.worker
         load_extensions(catalog=catalog, authority=config_authority)

@@ -66,12 +66,7 @@ def load_activity_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     bootstrap fetch, and `installed_fleet_surface` (meiva_builtins) does not take a
     `sampling=` owner to install instead.
     """
-    from base.agents.sdk import call_policy
 
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     with installed_fleet_surface():
         yield
 
@@ -132,7 +127,7 @@ def test_notify_defaults_to_response_and_snapshot_lists_question(
         db_conn,
         agent_id,
         catalog=build_model_catalog(),
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert snap is not None
     assert snap.unread_notice_count == 0
@@ -168,7 +163,7 @@ def test_notify_require_response_rides_awaiting_worklist(
         db_conn,
         agent_id,
         catalog=build_model_catalog(),
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert snap is not None
     assert snap.unread_notice_count == 0
@@ -198,7 +193,7 @@ def test_sdk_question_keeps_number_order_in_snapshot(
         db_conn,
         agent_id,
         catalog=build_model_catalog(),
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert snapshot is not None
     question = snapshot.notices_awaiting_response[0].question
@@ -250,7 +245,7 @@ def test_notify_records_task_id_and_rides_snapshot(
         db_conn,
         agent_id,
         catalog=build_model_catalog(),
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert snap is not None
     assert [n.task_id for n in snap.notices_awaiting_response] == [tid]
@@ -353,7 +348,7 @@ def test_response_notice_content_edits_publish_refreshed_snapshot(
         db_conn,
         agent_id,
         catalog=build_model_catalog(),
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert snapshot is not None
     awaiting = snapshot.notices_awaiting_response
@@ -411,7 +406,7 @@ def test_dismiss_notice_withdraws(
         db_conn,
         agent_id,
         catalog=build_model_catalog(),
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert snap is not None
     assert snap.unread_notice_count == 0

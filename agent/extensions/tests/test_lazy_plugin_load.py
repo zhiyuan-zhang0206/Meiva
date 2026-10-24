@@ -20,7 +20,6 @@ from typing import Any
 import pytest
 
 import meiva
-from base.agents.sdk import call_policy
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
@@ -41,11 +40,6 @@ from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    # These tests exercise lazy installation, independently of live sampling refresh.
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     # Each test drives the installation slot + agent identity explicitly;
     # snapshot-restore so nothing leaks between tests. Any SDK surface already
     # installed in this process (meiva.memory, meiva.tasks, meiva.cwd ...) is taken out

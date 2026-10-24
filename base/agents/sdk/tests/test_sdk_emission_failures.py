@@ -7,19 +7,12 @@ from base import telemetry
 from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage_telemetry
 from base.agents.sdk.tally import SdkCallTally
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 
 
 @pytest.fixture
 def sampling_owner() -> call_policy.SamplingPolicyOwner:
-    return call_policy.SamplingPolicyOwner()
-
-
-@pytest.fixture(autouse=True)
-def _full_sampling(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
+    return fixed_sampling_owner()
 
 
 def test_simple_emit_unknown_error_is_not_recovered(

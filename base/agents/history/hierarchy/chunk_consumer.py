@@ -268,7 +268,7 @@ async def run_job(
         job.agent_id,
         fallback=inputs.hierarchy_model(),
         catalog=models.catalog,
-        default_model_reader=inputs.default_model,
+        default_model=inputs.default_model(),
     )
     try:
         history, closing_segment = await asyncio.to_thread(

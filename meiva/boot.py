@@ -36,6 +36,7 @@ from base.clock.configuration import ClockConfig, clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.host.env.agent_env import AGENT_ID_ENV
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.loading import StateGate
 from meiva.mcps import McpClients
@@ -202,11 +203,11 @@ def context_from_description(
 
 
 def has_launched_identity() -> bool:
-    return "MEIVA_AGENT_ID" in os.environ
+    return AGENT_ID_ENV in os.environ
 
 
 def launched_context(*, config: ConfigBoot | None = None) -> MeivaContext | None:
-    raw = os.environ.get("MEIVA_AGENT_ID")
+    raw = os.environ.get(AGENT_ID_ENV)
     if raw is None:
         return None
     if config is None:

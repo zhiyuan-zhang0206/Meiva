@@ -5,7 +5,7 @@ import json
 import logging
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from langchain_core.messages import AIMessage, BaseMessage
@@ -49,7 +49,7 @@ from gateway.agents.schemas import (
 )
 from gateway.agents.system_note import system_note_blocking as system_note_blocking
 from gateway.http.config import gateway_config
-from gateway.http.model_catalog import require_model_catalog
+from gateway.http.model_catalog import request_default_model, require_model_catalog
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
 from ops.lifecycle.delivery import deliver_chat_inbound, reconcile_chat_delivery
@@ -96,9 +96,7 @@ def _prepare_message_content(
             request.app.state.db_pool,
             agent_id,
             catalog=catalog,
-            default_model_reader=lambda: cast(
-                str, request.app.state.config_authority.service_field_value("llm_model")
-            ),
+            default_model=request_default_model(request),
         )
         if not model_supports_vision(model, catalog=catalog):
             raise HTTPException(
@@ -562,7 +560,5 @@ def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownRe
         agent_id,
         latest_request_breakdown(messages),
         catalog=require_model_catalog(request),
-        default_model_reader=lambda: cast(
-            str, request.app.state.config_authority.service_field_value("llm_model")
-        ),
+        default_model=request_default_model(request),
     )
