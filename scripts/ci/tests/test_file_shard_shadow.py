@@ -569,9 +569,9 @@ def test_failed_shared_planning_removes_a_previous_successful_plan(tmp_path: Pat
 
 
 # meiva:note
-# The child receives a collection control explicitly; the parent environment stays unchanged.
-@pytest.mark.parametrize("control", ["PYTHONHASHSEED", "ImageVersion"])
-def test_actual_collection_environment_drift_is_rejected(tmp_path: Path, control: str) -> None:
+# The child receives a setting or image label explicitly; the parent stays unchanged.
+@pytest.mark.parametrize("control", ["PYTHONHASHSEED", "ImageOS", "ImageVersion"])
+def test_actual_collection_environment_admission(tmp_path: Path, control: str) -> None:
     manifest, _ = shared_plan(tmp_path)
     value = "17" if os.environ.get(control) != "17" else "23"
     result = subprocess.run(  # noqa: S603
@@ -603,10 +603,20 @@ def test_actual_collection_environment_drift_is_rejected(tmp_path: Path, control
         check=False,
         timeout=30,
     )
-    assert result.returncode == 4
-    assert "identical source, runtime and population" in result.stderr
-    assert control in result.stderr
-    assert f'"{control}": "{value}"' in result.stderr
+    if control == "ImageVersion":
+        assert result.returncode == 0, result.stdout + result.stderr
+        observed = json.loads((tmp_path / "check.json").read_text())
+        assert observed["matched"] is True
+        assert observed["runner_image_version"] == value
+        assert (
+            observed["producer_image_version"]
+            == json.loads(manifest.read_text())["runner_image_version"]
+        )
+    else:
+        assert result.returncode == 4
+        assert "identical source, runtime and population" in result.stderr
+        assert control in result.stderr
+        assert f'"{control}": "{value}"' in result.stderr
 
 
 @pytest.mark.parametrize("field", ["nodeid", "fixtures"])

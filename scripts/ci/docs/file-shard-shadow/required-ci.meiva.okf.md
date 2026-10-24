@@ -41,13 +41,22 @@ Artifacts are named by run and actual producer attempt and must be unique,
 unexpired and tied to the same source. API errors, malformed metadata, incomplete
 pagination, duplicate native records and deadline expiry fail closed.
 
-Shared plans require schema v2 and `--file-shard-shared` on producer and consumers.
+Shared plans require schema v3 and `--file-shard-shared` on producer and consumers.
 Before restricting collection, the plugin compares the exact Git tree, clean
 tracked index and worktree, lock bytes, installed distribution names/versions,
 Python implementation/version/platform, loaded module plugins and original
 collection roots. The existing configuration and duration checks still apply;
 configuration includes ignore, ignore-glob and deselect inputs. Python hash-seed,
-plugin-autoload, locale/timezone and runner-image controls must match as well.
+plugin-autoload, locale/timezone and ImageOS controls must match as well.
+ImageVersion is provider provenance, recorded as `runner_image_version` in the
+plan and as producer/consumer image versions in collection and runtime reports.
+Hosted runners can receive different rolling image releases in one run; that
+label is not a collection parameter. Schema v3 separates it from strict identity
+instead of ignoring a key during comparison. The repository has no collection
+consumer of ImageVersion. Node and fixture checks do not compare skip-condition
+values or every native binary/library build, and image-label acceptance does not
+claim equivalent native capabilities.
+
 Application environment isolation remains owned by the same tree's pytest
 bootstrap: worker-specific homes, leased ports and event channels are resources,
 not shared plan inputs. Untracked diagnostics and generated test artifacts do

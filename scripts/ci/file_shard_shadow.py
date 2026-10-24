@@ -85,7 +85,6 @@ def _read_collection_identity(config: pytest.Config) -> CollectionIdentity:
                 "LANG",
                 "TZ",
                 "ImageOS",
-                "ImageVersion",
             )
         },
     )
@@ -130,8 +129,9 @@ class BaselineGroup(BaseModel):
 class Plan(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    schema_version: Literal[2] = 2
+    schema_version: Literal[3] = 3
     identity: CollectionIdentity | None = None
+    runner_image_version: str | None = None
     pytest_version: str
     pytest_split_version: str
     durations_sha256: str
@@ -165,6 +165,7 @@ _RUNTIME = pytest.StashKey[dict[str, "RuntimeNode"]]()
 _COLLECTION_SECONDS = pytest.StashKey[float]()
 _DURATION_DIGEST = pytest.StashKey[str]()
 _IDENTITY = pytest.StashKey[CollectionIdentity]()
+_RUNNER_IMAGE_VERSION = pytest.StashKey[str | None]()
 
 
 class RuntimeNode(BaseModel):
@@ -188,6 +189,8 @@ class RuntimeReport(BaseModel):
     durations_sha256: str
     pytest_config_sha256: str
     collection_seconds: Seconds
+    runner_image_version: str | None = None
+    producer_image_version: str | None = None
     nodes: dict[str, RuntimeNode]
 
 
@@ -322,6 +325,8 @@ def _validate_plan_inputs(config: pytest.Config, plan: Plan) -> None:
             raise pytest.UsageError(
                 "Shared plan requires identical source, runtime and population; identity differences: "
                 + _identity_difference(plan.identity, actual)
+                + f"; runner image provenance: producer={plan.runner_image_version!r}, "
+                + f"consumer={config.stash[_RUNNER_IMAGE_VERSION]!r}"
             )
         if config.getoption("file_shard_count") != len(plan.groups):
             raise pytest.UsageError("Shared plan requires the same group count")
@@ -359,8 +364,11 @@ def _load_group(config: pytest.Config) -> None:
 
 
 @pytest.hookimpl(tryfirst=True)
+# meiva:note
+# GitHub publishes the case-sensitive ImageVersion label; it is provenance, not identity.
 def pytest_configure(config: pytest.Config) -> None:
     _configure_runtime(config)
+    config.stash[_RUNNER_IMAGE_VERSION] = os.environ.get("ImageVersion")  # noqa: SIM112
     output = config.getoption("file_shard_plan")
     check = config.getoption("file_shard_check")
     execute = config.getoption("file_shard_execute")
@@ -422,6 +430,7 @@ def _plan(session: pytest.Session) -> Plan:
     candidate = algorithm(count, [nodes[0] for nodes in by_file.values()], weights)
     return Plan(
         identity=session.config.stash.get(_IDENTITY, None),
+        runner_image_version=session.config.stash[_RUNNER_IMAGE_VERSION],
         pytest_version=pytest.__version__,
         pytest_split_version=version("pytest-split"),
         durations_sha256=digest,
@@ -464,6 +473,8 @@ def _check(session: pytest.Session) -> None:
     matched = not (missing or extra or changed or len(actual) != len(session.items))
     report = {
         "group": index,
+        "runner_image_version": config.stash[_RUNNER_IMAGE_VERSION],
+        "producer_image_version": config.stash[_PLAN].runner_image_version,
         "matched": matched,
         "collection_seconds": time.perf_counter() - _STARTED,
         "node_count": len(session.items),
@@ -536,6 +547,10 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         pytest_config_sha256=_configuration_digest(config),
         collection_seconds=config.stash.get(_COLLECTION_SECONDS, 0.0),
         nodes=config.stash[_RUNTIME],
+        runner_image_version=config.stash[_RUNNER_IMAGE_VERSION],
+        producer_image_version=(
+            config.stash[_PLAN].runner_image_version if _PLAN in config.stash else None
+        ),
     )
     _report_path(config, "file_shard_runtime_report").write_text(
         report.model_dump_json(indent=2) + "\n"
