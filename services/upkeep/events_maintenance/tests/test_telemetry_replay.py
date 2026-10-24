@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import psycopg
-import pytest
 
 from base.telemetry.delivery.mirror import event_id
 from services.upkeep.events_maintenance import telemetry_replay as replay
@@ -46,7 +45,7 @@ def _stored(db: psycopg.Connection, marker: str) -> list[str]:
 
 
 def test_a_pass_stores_telemetry_and_log_rows_and_resumes_after_a_partial_line(
-    db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
     marker = f"replay-{time.monotonic_ns()}"
     mirror = tmp_path / "events-20261002.jsonl"
@@ -59,25 +58,23 @@ def test_a_pass_stores_telemetry_and_log_rows_and_resumes_after_a_partial_line(
         + _line("spawn", "audit", marker)
         + tail[:20]
     )
-    monkeypatch.setattr(replay, "logs_dir", lambda: tmp_path)
 
-    assert replay.recover_telemetry_events(db_conn) == 2
+    assert replay.recover_telemetry_events(db_conn, logs=tmp_path) == 2
     assert _stored(db_conn, marker) == ["llm_usage", "log"]
     assert _stored(db_conn, marker + "-quiet") == []
-    assert replay.recover_telemetry_events(db_conn) == 0
+    assert replay.recover_telemetry_events(db_conn, logs=tmp_path) == 0
 
     with mirror.open("ab") as handle:
         handle.write(tail[20:])
-    assert replay.recover_telemetry_events(db_conn) == 1
+    assert replay.recover_telemetry_events(db_conn, logs=tmp_path) == 1
     assert _stored(db_conn, marker) == ["llm_usage", "log", "turn_end"]
 
 
 def test_a_row_the_live_writer_already_stored_is_not_stored_twice(
-    db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
     marker = f"replay-{time.monotonic_ns()}"
     (tmp_path / "events-20261002.jsonl").write_bytes(_line("llm_usage", "telemetry", marker))
-    monkeypatch.setattr(replay, "logs_dir", lambda: tmp_path)
     row = json.loads((tmp_path / "events-20261002.jsonl").read_bytes())
     db_conn.execute(
         "INSERT INTO telemetry_events (event_uid, ts, machine, cluster, process, category, "
@@ -87,15 +84,14 @@ def test_a_row_the_live_writer_already_stored_is_not_stored_twice(
     )
     db_conn.commit()
 
-    assert replay.recover_telemetry_events(db_conn) == 0
+    assert replay.recover_telemetry_events(db_conn, logs=tmp_path) == 0
     assert _stored(db_conn, marker) == ["llm_usage"]
 
 
 def test_the_rollup_and_other_derived_files_are_not_replayed(
-    db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
     marker = f"replay-{time.monotonic_ns()}"
     (tmp_path / "events-20261002.rollup.jsonl").write_bytes(_line("llm_usage", "telemetry", marker))
-    monkeypatch.setattr(replay, "logs_dir", lambda: tmp_path)
 
-    assert replay.recover_telemetry_events(db_conn) == 0
+    assert replay.recover_telemetry_events(db_conn, logs=tmp_path) == 0

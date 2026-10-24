@@ -1,0 +1,4 @@
+[uses]
+"test_loops.py" = ["slices.py"]
+"test_shells.py" = ["runner_stub.py", "slices.py"]
+"test_sweep.py" = ["slices.py"]

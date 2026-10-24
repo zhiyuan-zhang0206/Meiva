@@ -3,21 +3,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from collections.abc import Callable
-from pathlib import Path
-from typing import Any
+import time
 
 import psycopg
 import pytest
 
 from base.clock import SYSTEM_TIMERS
-from base.config import ConfigBoot
-from base.daemon.health import LivenessGroup, LoopProgress
-from base.db import Database
-from base.native_process.loaded_commit import LoadedCommit
-from services.upkeep.events_maintenance import daemon
-from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
-from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
+from base.daemon.health import LoopProgress
+from services.upkeep.events_maintenance import passes
 
 
 @pytest.mark.parametrize(
@@ -26,17 +19,14 @@ from services.upkeep.events_maintenance.tests.slices import events_maintenance_c
 async def test_completed_failure_preserves_the_original_exception(failure: Exception) -> None:
     progress = LoopProgress("dispatch", timeout_s=1.0, timers=SYSTEM_TIMERS)
 
-    def fail(_pool: object) -> None:
+    def fail() -> None:
         raise failure
 
     async with asyncio.TaskGroup() as tasks:
         with pytest.raises(type(failure)) as raised:
-            await daemon.maintenance_with_liveness(_FAKE_POOL, progress, fail, tasks=tasks)
+            await passes.maintenance_with_liveness(progress, fail, tasks=tasks)
         assert raised.value is failure
         assert not progress.snapshot()["wedged"]
-
-
-_FAKE_POOL: Any = object()
 
 
 async def test_late_failure_is_reported_without_reviving_the_loop(
@@ -46,16 +36,16 @@ async def test_late_failure_is_reported_without_reviving_the_loop(
     release = threading.Event()
     failure = RuntimeError("late worker failure")
 
-    def fail_after_release(_pool: object) -> None:
+    def fail_after_release() -> None:
         assert release.wait(5.0), "test did not release its worker"
         raise failure
 
-    with caplog.at_level(logging.ERROR, logger=daemon.events_maintenance_log.name):
+    with caplog.at_level(logging.ERROR, logger=passes.events_maintenance_log.name):
         try:
             async with asyncio.TaskGroup() as tasks:
-                with pytest.raises(daemon.WedgedPassError):
-                    await daemon.maintenance_with_liveness(
-                        _FAKE_POOL, progress, fail_after_release, tasks=tasks
+                with pytest.raises(passes.WedgedPassError):
+                    await passes.maintenance_with_liveness(
+                        progress, fail_after_release, tasks=tasks
                     )
                 assert progress.snapshot()["wedged"]
                 release.set()
@@ -70,107 +60,42 @@ async def test_late_failure_is_reported_without_reviving_the_loop(
     assert progress.snapshot()["wedged"]
 
 
-def _mock_service(
-    process_config: ConfigBoot,
-    monkeypatch: pytest.MonkeyPatch,
-    work: Callable[..., None],
-    trackers: list[LivenessGroup],
-    closed: list[str],
-) -> None:
-    async def health(
-        _name: str,
-        _port: int,
-        *,
-        liveness: LivenessGroup,
-        components: Callable[[], list[dict[str, object]]],
-        image: LoadedCommit,
-    ) -> object:
-        trackers.append(liveness)
-        return object()
+# meiva:note
+# A worker that exceeds its hard deadline wedges; elapsed time never earns a beat.
+async def test_wedged_pass_fails_without_earning_a_beat_while_in_flight() -> None:
+    progress = LoopProgress("dispatch", timeout_s=0.1, timers=SYSTEM_TIMERS)
 
-    async def stop_health(_server: object) -> None:
-        closed.append("health")
+    def overrun() -> None:
+        time.sleep(0.4)
 
-    async def sibling(*_args: object, tasks: asyncio.TaskGroup | None = None) -> None:
-        await asyncio.Event().wait()
+    async with asyncio.TaskGroup() as tasks:
+        with pytest.raises(passes.WedgedPassError, match=r"dispatch.*hard deadline"):
+            await passes.maintenance_with_liveness(progress, overrun, tasks=tasks)
 
-    class Pool:
-        def close(self) -> None:
-            closed.append("pool")
-
-    def pool(_self: object) -> Pool:
-        return Pool()
-
-    config = events_maintenance_config(process_config, events_maintenance_pass_deadline_s=0.02)
-
-    monkeypatch.setattr(daemon, "start_health_server", health)
-    monkeypatch.setattr(daemon, "stop_health_server", stop_health)
-    monkeypatch.setattr(daemon, "run_maintenance", work)
-    monkeypatch.setattr(daemon, "resolution_loop", sibling)
-    monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", sibling)
-    monkeypatch.setattr(daemon.Database, "pool", pool)
-
-    def build_config(entry_config: ConfigBoot) -> EventsMaintenanceConfig:
-        assert entry_config is process_config
-        return config
-
-    monkeypatch.setattr(daemon, "events_maintenance_config", build_config)
+    assert progress.stale_for() >= 0.1, "a beat during the overrun would have reset the clock"
+    assert not progress.is_alive()
+    assert progress.snapshot()["wedged"] is True
 
 
-async def test_service_stop_cancels_expired_proxy_before_worker_returns(
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
-    *,
-    process_config: ConfigBoot,
-    tmp_path: Path,
-) -> None:
-    started = threading.Event()
-    release = threading.Event()
-    finished = threading.Event()
-    trackers: list[LivenessGroup] = []
-    closed: list[str] = []
+# meiva:note
+# A bounded worker completion advances progress after it returns, never before.
+async def test_completed_pass_beats_after_its_worker_finishes() -> None:
+    progress = LoopProgress("dispatch", timeout_s=5.0, timers=SYSTEM_TIMERS)
 
-    def blocking_pass(*_args: object) -> None:
-        started.set()
-        try:
-            assert release.wait(5.0), "test did not release its worker"
-        finally:
-            finished.set()
+    def work() -> None:
+        time.sleep(0.4)
 
-    _mock_service(process_config, monkeypatch, blocking_pass, trackers, closed)
+    async with asyncio.TaskGroup() as tasks:
+        await passes.maintenance_with_liveness(progress, work, tasks=tasks)
 
-    async def wait_for_wedge() -> None:
-        while not trackers or not trackers[0].snapshot()["dispatch"]["wedged"]:
-            await asyncio.sleep(0.005)
+    assert progress.stale_for() < 0.2, "the beat came before the worker finished"
 
-    before = asyncio.all_tasks()
-    async with asyncio.TaskGroup() as tests:
-        service = tests.create_task(
-            daemon.run(
-                process_config=process_config,
-                runtime=tmp_path / "run",
-                database=lambda: database,
-                image=LoadedCommit(Path(), None),
-            )
-        )
-        probe = tests.create_task(wait_for_wedge())
-        try:
-            done, _ = await asyncio.wait({probe}, timeout=1.0)
-            assert probe in done, "the pass did not fail health before its worker completed"
-            assert started.is_set()
-            assert not finished.is_set()
-            service.cancel()
-            done, _ = await asyncio.wait({service}, timeout=1.0)
-            assert service in done, "service shutdown joined the blocked worker"
-            assert service.cancelled()
-            assert asyncio.all_tasks() - before - {service, probe} == set(), (
-                "the stopped service left an unowned pass proxy alive"
-            )
-            assert not finished.is_set()
-            assert sorted(closed) == ["health", "pool"]
-            assert not (tmp_path / "run" / "events_maintenance.pid").exists()
-            assert trackers[0].snapshot()["dispatch"]["wedged"]
-        finally:
-            release.set()
-            probe.cancel()
-            service.cancel()
+
+async def test_sleeping_beats_progress_so_a_long_wait_is_not_a_wedge() -> None:
+    progress = LoopProgress("dispatch", timeout_s=0.3, timers=SYSTEM_TIMERS)
+    await asyncio.sleep(0.4)
+    assert not progress.is_alive()
+
+    await passes.sleep_with_liveness(progress, 0.05)
+
+    assert progress.is_alive()

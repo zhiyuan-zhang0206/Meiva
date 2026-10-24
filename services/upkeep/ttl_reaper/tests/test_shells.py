@@ -1,13 +1,16 @@
-"""Shell reclamation against the real Postgres fixture: expired shell rows
-dispatch a shell_kill op to their home machine and are deleted only on a
-definitive verdict (killed / absent / machine_absent) — unreachable machines,
-failed ops and unknown machines leave the row for the next round. Owners are
-notified only when the reap interrupted a running job; an idle or already-absent
-shell's reaping is silent. A renewal between the select and the dispatch wins."""
+# meiva:note
+# Shell reclamation against the real Postgres fixture and a real runner listener: expired shell
+# rows dispatch a shell_kill op to their home machine and are deleted only on a definitive verdict
+# (killed / absent / machine_absent). Unreachable machines, failed ops, malformed answers and
+# unknown machines leave the row for the next round. Owners are notified only when the reap
+# interrupted a running job; an idle or already-absent shell's reaping is silent. A renewal between
+# the select and the dispatch wins.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+import asyncio
+import threading
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -17,7 +20,6 @@ from psycopg_pool import ConnectionPool
 
 from base.api_contracts.agent_contract import ShellKillMode
 from base.clock import SYSTEM_TIMERS
-from base.clock.tests.fakes import fix_zone
 from base.daemon.loop_health import LoopProgress
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
@@ -26,7 +28,17 @@ from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from ops.rpc_schemas import ShellKillResult
 from services.upkeep.ttl_reaper import shells
+from services.upkeep.ttl_reaper.config import TtlReaperConfig
 from services.upkeep.ttl_reaper.shells import claim_shell_row_still_expired, reap_expired_shells
+from services.upkeep.ttl_reaper.tests.runner_stub import (
+    Reply,
+    completed,
+    failed,
+    refused,
+    register_url,
+    runner,
+)
+from services.upkeep.ttl_reaper.tests.slices import reaper_config
 
 
 def _progress() -> LoopProgress:
@@ -38,18 +50,22 @@ async def _reap(
     *,
     database_gate: ProcessDbGate,
     bus: EventBus | None = None,
-    dispatch_fn: shells.ShellKillDispatcher = shells.cluster_rpc.dispatch_to_machine,
-    expired_rows_fn: Callable[
-        [ConnectionPool], list[dict[str, Any]]
-    ] = shells.expired_shell_rows_blocking,
+    config: TtlReaperConfig | None = None,
 ) -> list[tuple[int, int]]:
     return await reap_expired_shells(
         pool,
         Database.from_settings(gate=database_gate),
         bus or EventBus.from_settings(),
         _progress(),
-        expired_rows_fn=expired_rows_fn,
-        dispatch_fn=dispatch_fn,
+        config or reaper_config(),
+    )
+
+
+def _killed(*, interrupted: bool, name: str | None = None) -> Reply:
+    return completed(
+        ShellKillResult(mode=ShellKillMode.KILLED, interrupted=interrupted, name=name).model_dump(
+            mode="json"
+        )
     )
 
 
@@ -63,12 +79,13 @@ def reaper_pool(db_url: str, *, database_gate: ProcessDbGate) -> Iterator[Connec
     pool.close()
 
 
-def _running_agent(conn: psycopg.Connection) -> int:
+def _running_agent(conn: psycopg.Connection, *, machine: str = "unknown") -> int:
     aid = create_agent(conn)
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'user', 'running')",
-            (aid,),
+            "INSERT INTO agents_meta (id, spawner, status, machine) "
+            "VALUES (%s, 'user', 'running', %s)",
+            (aid, machine),
         )
     conn.commit()
     return aid
@@ -89,15 +106,30 @@ def _insert_shell_row(
     session_id: int,
     *,
     expires_at: datetime,
+    lived: timedelta = timedelta(hours=1),
 ) -> None:
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
-            "VALUES (%s, %s, %s, now() - interval '1 hour') "
+            "VALUES (%s, %s, %s, %s) "
             "ON CONFLICT (agent_id, session_id) DO UPDATE SET expires_at = EXCLUDED.expires_at",
-            (agent_id, session_id, expires_at),
+            (agent_id, session_id, expires_at, expires_at - lived),
         )
     db_conn.commit()
+
+
+def _expired() -> datetime:
+    return datetime.now(UTC) - timedelta(minutes=1)
+
+
+def _rows(conn: psycopg.Connection, agent_id: int) -> list[int]:
+    return [
+        row[0]
+        for row in conn.execute(
+            "SELECT session_id FROM agent_shell_ttls WHERE agent_id = %s ORDER BY session_id",
+            (agent_id,),
+        ).fetchall()
+    ]
 
 
 async def test_reap_expired_shells_deletes_on_killed(
@@ -107,72 +139,63 @@ async def test_reap_expired_shells_deletes_on_killed(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    aid = _running_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
-            "VALUES (%s, 3, now() - interval '1 minute', now() - interval '1 hour 1 minute')",
-            (aid,),
-        )
-        cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
-    db_conn.commit()
+    aid = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(db_conn, aid, 3, expires_at=_expired())
 
-    async def _dispatch(
-        _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
-    ) -> dict[str, object]:
-        assert machine == "macmini"
-        assert kind == "shell_kill"
-        assert payload == {"agent_id": aid, "session_id": 3}
-        return ShellKillResult(
-            mode=ShellKillMode.KILLED, interrupted=True, name="build"
-        ).model_dump()
-
-    reaped = await _reap(
-        reaper_pool, database_gate=database_gate, bus=event_bus, dispatch_fn=_dispatch
-    )
+    with runner(db_conn, "macmini", lambda _call: _killed(interrupted=True, name="build")) as wire:
+        reaped = await _reap(reaper_pool, database_gate=database_gate, bus=event_bus)
 
     assert reaped == [(aid, 3)]
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
-        row = cur.fetchone()
-        assert row is not None and row[0] == 0
-    msgs = _system_inbounds(db_conn, aid)
-    assert len(msgs) == 1
-    assert "Shell session 'build' (id 3, agent" in msgs[0]
-    assert "expired at " in msgs[0] and "TTL 1h" in msgs[0], msgs[0]
-    assert "interrupting a running task" in msgs[0]
+    assert [(call["kind"], call["payload"]) for call in wire.calls] == [
+        ("shell_kill", {"agent_id": aid, "session_id": 3})
+    ]
+    assert _rows(db_conn, aid) == []
+    [message] = _system_inbounds(db_conn, aid)
+    assert "Shell session 'build' (id 3, agent" in message
+    assert "TTL 1h" in message
+    assert "interrupting a running task" in message
 
 
 async def test_reap_expired_shells_keeps_row_on_unreachable(
-    db_conn: psycopg.Connection,
-    reaper_pool: ConnectionPool,
-    *,
-    database_gate: ProcessDbGate,
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
-    aid = _running_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
-            "VALUES (%s, 7, now() - interval '1 minute')",
-            (aid,),
-        )
-        cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
-    db_conn.commit()
+    aid = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(db_conn, aid, 7, expires_at=_expired())
 
-    async def _dispatch(
-        _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
-    ) -> dict[str, object]:
-        raise shells.cluster_rpc.ClusterOpUnreachable("boom")
-
-    reaped = await _reap(reaper_pool, database_gate=database_gate, dispatch_fn=_dispatch)
+    with runner(db_conn, "macmini", lambda _call: refused(404)):
+        reaped = await _reap(reaper_pool, database_gate=database_gate)
 
     assert reaped == []
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
-        row = cur.fetchone()
-        assert row is not None and row[0] == 1
+    assert _rows(db_conn, aid) == [7]
 
 
+async def test_reap_expired_shells_keeps_row_when_the_machine_has_no_address(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, *, database_gate: ProcessDbGate
+) -> None:
+    aid = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(db_conn, aid, 7, expires_at=_expired())
+    register_url(db_conn, "macmini", None)
+
+    assert await _reap(reaper_pool, database_gate=database_gate) == []
+    assert _rows(db_conn, aid) == [7]
+
+
+async def test_reap_expired_shells_keeps_row_when_the_op_fails(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, *, database_gate: ProcessDbGate
+) -> None:
+    aid = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(db_conn, aid, 7, expires_at=_expired())
+
+    with runner(db_conn, "macmini", lambda _call: failed({"error": "boom"})):
+        assert await _reap(reaper_pool, database_gate=database_gate) == []
+
+    assert _rows(db_conn, aid) == [7]
+
+
+# meiva:note
+# Task #4143: a machine absent from the registry is a definitive verdict — the expired row
+# is dropped as an absent session instead of being deferred forever, and nothing notifies
+# (nothing on a gone machine was interrupted).
 async def test_reap_expired_shells_absent_machine_terminalizes_row(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
@@ -180,33 +203,13 @@ async def test_reap_expired_shells_absent_machine_terminalizes_row(
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    """Task #4143: a machine absent from the registry is a definitive verdict —
-    the expired row is dropped as an absent session instead of being deferred
-    forever, and nothing notifies (nothing on a gone machine was interrupted)."""
-    aid = _running_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
-            "VALUES (%s, 8, now() - interval '1 minute', now() - interval '1 hour 1 minute')",
-            (aid,),
-        )
-        cur.execute("UPDATE agents_meta SET machine = 'ghost' WHERE id = %s", (aid,))
-    db_conn.commit()
+    aid = _running_agent(db_conn, machine="ghost")
+    _insert_shell_row(db_conn, aid, 8, expires_at=_expired())
 
-    async def _dispatch(
-        _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
-    ) -> dict[str, object]:
-        raise shells.cluster_rpc.ClusterOpTargetAbsent(
-            "machine 'ghost' is absent from the machines registry"
-        )
-
-    reaped = await _reap(reaper_pool, database_gate=database_gate, dispatch_fn=_dispatch)
+    reaped = await _reap(reaper_pool, database_gate=database_gate)
 
     assert reaped == [(aid, 8)]
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
-        row = cur.fetchone()
-        assert row is not None and row[0] == 0
+    assert _rows(db_conn, aid) == []
     assert _system_inbounds(db_conn, aid) == []
     # The synthetic verdict is spelled ``machine_absent`` — distinct from the
     # live-host ``absent`` (session already ended) it must not masquerade as.
@@ -223,123 +226,61 @@ async def test_reap_expired_shells_keeps_row_on_unknown_machine(
     db_conn: psycopg.Connection, reaper_pool: ConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
     aid = _running_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
-            "VALUES (%s, 9, now() - interval '1 minute')",
-            (aid,),
-        )
-    db_conn.commit()
+    _insert_shell_row(db_conn, aid, 9, expires_at=_expired())
 
-    reaped = await _reap(reaper_pool, database_gate=database_gate)
-    assert reaped == []
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
-        row = cur.fetchone()
-        assert row is not None and row[0] == 1
+    assert await _reap(reaper_pool, database_gate=database_gate) == []
+    assert _rows(db_conn, aid) == [9]
 
 
-async def test_reap_expired_shells_idle_reaping_is_silent(
+# meiva:note
+# Only a reap that interrupts running work messages the owner; an empty shell and an
+# already-gone session are reclaimed without a notice.
+@pytest.mark.parametrize(
+    "reply",
+    [_killed(interrupted=False), completed({"mode": "absent"})],
+    ids=["idle-kill", "session-already-gone"],
+)
+async def test_reap_expired_shells_reaping_without_an_interrupted_job_is_silent(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
+    reply: Reply,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    """A killed shell that carried no running job is reclaimed without a
-    notice — the user ruling: only a reap that interrupts running work
-    messages the owner."""
-    aid = _running_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
-            "VALUES (%s, 4, now() - interval '1 minute', now() - interval '31 minutes')",
-            (aid,),
-        )
-        cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
-    db_conn.commit()
+    aid = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(db_conn, aid, 4, expires_at=_expired(), lived=timedelta(minutes=31))
 
-    async def _dispatch(
-        _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
-    ) -> dict[str, object]:
-        return ShellKillResult(mode=ShellKillMode.KILLED, interrupted=False).model_dump()
-
-    reaped = await _reap(reaper_pool, database_gate=database_gate, dispatch_fn=_dispatch)
+    with runner(db_conn, "macmini", lambda _call: reply):
+        reaped = await _reap(reaper_pool, database_gate=database_gate)
 
     assert reaped == [(aid, 4)]
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
-        row = cur.fetchone()
-        assert row is not None and row[0] == 0
+    assert _rows(db_conn, aid) == []
     assert _system_inbounds(db_conn, aid) == []
 
 
-async def test_reap_expired_shells_absent_reaping_is_silent(
-    db_conn: psycopg.Connection,
-    reaper_pool: ConnectionPool,
-    *,
-    database_gate: ProcessDbGate,
-) -> None:
-    """A session already gone was not interrupted — reclaiming its row sends
-    no notice (previously it notified; the 2026-08-27 ruling narrows shell
-    notices to interrupted work)."""
-    aid = _running_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
-            "VALUES (%s, 5, now() - interval '1 minute')",
-            (aid,),
-        )
-        cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
-    db_conn.commit()
-
-    async def _dispatch(
-        _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
-    ) -> dict[str, object]:
-        return ShellKillResult(mode=ShellKillMode.ABSENT).model_dump()
-
-    reaped = await _reap(reaper_pool, database_gate=database_gate, dispatch_fn=_dispatch)
-
-    assert reaped == [(aid, 5)]
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
-        row = cur.fetchone()
-        assert row is not None and row[0] == 0
-    assert _system_inbounds(db_conn, aid) == []
-
-
+# meiva:note
+# A shell_kill result missing `interrupted` is malformed: the row stays for the next round
+# and nothing is notified.
 async def test_reap_expired_shells_result_without_interrupted_is_deferred(
-    db_conn: psycopg.Connection,
-    reaper_pool: ConnectionPool,
-    *,
-    database_gate: ProcessDbGate,
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
-    """A shell_kill result missing `interrupted` is malformed: the row stays
-    for the next round and nothing is notified."""
-    aid = _running_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
-            "VALUES (%s, 6, now() - interval '1 minute')",
-            (aid,),
-        )
-        cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
-    db_conn.commit()
+    aid = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(db_conn, aid, 6, expires_at=_expired())
 
-    async def _dispatch(
-        _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
-    ) -> dict[str, object]:
-        return {"mode": "killed"}
-
-    reaped = await _reap(reaper_pool, database_gate=database_gate, dispatch_fn=_dispatch)
+    with runner(db_conn, "macmini", lambda _call: completed({"mode": "killed"})):
+        reaped = await _reap(reaper_pool, database_gate=database_gate)
 
     assert reaped == []
     assert _system_inbounds(db_conn, aid) == []
-    row = db_conn.execute(
-        "SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s AND session_id = 6", (aid,)
-    ).fetchone()
-    assert row is not None and row[0] == 1
+    assert _rows(db_conn, aid) == [6]
 
 
+# meiva:note
+# A watcher (`meiva.watcher.at/cron/launch`) is just an `agent_shell_ttls` row with no
+# registry of its own (docs/decisions/2026-09-27-watchers-are-never-restarted.md): a reclaimed
+# watcher-shaped session, one that was running a script at its TTL deadline like a real
+# watcher always is, gets the same interruption notice any other reclaimed shell with live
+# work gets, and exactly once.
 async def test_reap_expired_shells_notifies_for_a_watcher_shaped_session(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
@@ -347,111 +288,150 @@ async def test_reap_expired_shells_notifies_for_a_watcher_shaped_session(
     database_gate: ProcessDbGate,
     event_bus: EventBus,
 ) -> None:
-    """A watcher (`meiva.watcher.at/cron/launch`) is just an `agent_shell_ttls`
-    row with no registry of its own (docs/decisions/2026-09-27-watchers-are-never-
-    restarted.md): there is no special case left in this pass, so a reclaimed
-    watcher-shaped session — one that was actually running a script, exactly
-    like a real watcher always is at its TTL deadline — gets the SAME
-    interruption notice any other reclaimed shell with live work gets, and
-    exactly once."""
-    aid = _running_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
-            "VALUES (%s, 7, now() - interval '1 minute', now() - interval '31 minutes')",
-            (aid,),
-        )
-        cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
-    db_conn.commit()
+    aid = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(db_conn, aid, 7, expires_at=_expired(), lived=timedelta(minutes=31))
 
-    async def _dispatch(
-        _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
-    ) -> dict[str, object]:
-        # A watcher's session always has a running job (its generated script,
-        # sleeping toward its next fire) — the runner reports it as such.
-        return ShellKillResult(
-            mode=ShellKillMode.KILLED, interrupted=True, name="test-watcher"
-        ).model_dump()
-
-    reaped = await _reap(
-        reaper_pool, database_gate=database_gate, bus=event_bus, dispatch_fn=_dispatch
-    )
+    with runner(db_conn, "macmini", lambda _call: _killed(interrupted=True, name="test-watcher")):
+        reaped = await _reap(reaper_pool, database_gate=database_gate, bus=event_bus)
 
     assert reaped == [(aid, 7)]
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
-        row = cur.fetchone()
-        assert row is not None and row[0] == 0
-    msgs = _system_inbounds(db_conn, aid)
-    assert len(msgs) == 1
-    assert "test-watcher" in msgs[0] and "interrupting a running task" in msgs[0]
+    assert _rows(db_conn, aid) == []
+    [message] = _system_inbounds(db_conn, aid)
+    assert "test-watcher" in message and "interrupting a running task" in message
 
 
+# meiva:note
+# The race the claim closes: both rows of the machine were selected as expired, then the
+# owner renewed the second while the first was being killed. The pass must not kill the
+# renewed row: its claim fails and the live row survives.
 async def test_reap_expired_shells_skips_row_renewed_after_select(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, *, database_gate: ProcessDbGate
+) -> None:
+    aid = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(db_conn, aid, 43, expires_at=_expired())
+    _insert_shell_row(db_conn, aid, 44, expires_at=_expired())
+
+    def renew_the_second_while_the_first_is_killed(call: dict[str, Any]) -> Reply:
+        if call["payload"]["session_id"] == 43:
+            with psycopg.connect(db_conn.info.dsn) as renewer:
+                renewer.execute(
+                    "UPDATE agent_shell_ttls SET expires_at = now() + interval '1 hour', "
+                    "renewals = renewals + 1 WHERE agent_id = %s AND session_id = 44",
+                    (aid,),
+                )
+        return _killed(interrupted=False)
+
+    with runner(db_conn, "macmini", renew_the_second_while_the_first_is_killed) as wire:
+        reaped = await _reap(reaper_pool, database_gate=database_gate)
+
+    assert reaped == [(aid, 43)]
+    assert [call["payload"]["session_id"] for call in wire.calls] == [43]
+    assert _rows(db_conn, aid) == [44]
+
+
+async def test_a_dispatch_past_its_deadline_defers_the_row(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, *, database_gate: ProcessDbGate
+) -> None:
+    aid = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(db_conn, aid, 5, expires_at=_expired())
+    release = threading.Event()
+
+    def hang(_call: dict[str, Any]) -> Reply:
+        release.wait(10.0)
+        return _killed(interrupted=False)
+
+    try:
+        with runner(db_conn, "macmini", hang):
+            reaped = await _reap(
+                reaper_pool,
+                database_gate=database_gate,
+                config=reaper_config(shell_kill_deadline_s=0.2),
+            )
+    finally:
+        release.set()
+
+    assert reaped == []
+    assert _rows(db_conn, aid) == [5]
+
+
+async def test_machines_are_reclaimed_concurrently_and_one_machines_rows_in_order(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
+    event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    """The race the claim closes: the expired-row select ran first, then the
-    owner renewed (deadline now in the future). The pass must not kill —
-    the stale select's row fails the claim and the live row survives."""
-    aid = _running_agent(db_conn)
-    _insert_shell_row(db_conn, aid, 44, expires_at=datetime.now(UTC) - timedelta(minutes=1))
-    with db_conn.cursor() as cur:
-        cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
-        # The renewal that landed after the (stale) select: deadline moved forward.
-        cur.execute(
-            "UPDATE agent_shell_ttls SET expires_at = now() + interval '1 hour', "
-            "renewals = renewals + 1 WHERE agent_id = %s AND session_id = %s",
-            (aid, 44),
-        )
-    db_conn.commit()
+    slow = _running_agent(db_conn, machine="slow")
+    fast = _running_agent(db_conn, machine="fast")
+    for aid, session_id in ((slow, 1), (fast, 2), (slow, 3), (fast, 4)):
+        _insert_shell_row(db_conn, aid, session_id, expires_at=_expired())
+    release = threading.Event()
+    arrivals: list[tuple[str, int]] = []
 
-    stale_rows: list[dict[str, Any]] = [
-        {
-            "agent_id": aid,
-            "session_id": 44,
-            "machine": "macmini",
-            "expires_at": datetime.now(UTC) - timedelta(minutes=1),
-            "created_at": datetime.now(UTC) - timedelta(hours=2),
-        }
-    ]
+    def answering(machine: str) -> Any:
+        def answer(call: dict[str, Any]) -> Reply:
+            arrivals.append((machine, call["payload"]["session_id"]))
+            if machine == "slow":
+                release.wait(10.0)
+            return _killed(interrupted=False)
 
-    def _stale_select(_pool: ConnectionPool) -> list[dict[str, Any]]:
-        return stale_rows
+        return answer
 
-    dispatched: list[tuple[str, object]] = []
+    try:
+        with runner(db_conn, "slow", answering("slow")), runner(db_conn, "fast", answering("fast")):
+            task = asyncio.create_task(
+                _reap(reaper_pool, database_gate=database_gate, bus=event_bus)
+            )
+            for _ in range(500):
+                if _rows(db_conn, fast) == []:
+                    break
+                await asyncio.sleep(0.01)
+                db_conn.rollback()
+            assert _rows(db_conn, fast) == []
+            assert [session for machine, session in arrivals if machine == "fast"] == [2, 4]
+            assert [session for machine, session in arrivals if machine == "slow"] == [1]
+            assert _rows(db_conn, slow) == [1, 3]
 
-    async def _dispatch(
-        _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
-    ) -> dict[str, object]:
-        dispatched.append((kind, payload))
-        return ShellKillResult(mode=ShellKillMode.KILLED, interrupted=True, name="x").model_dump()
+            release.set()
+            reaped = await task
+    finally:
+        release.set()
 
-    reaped = await _reap(
-        reaper_pool,
-        database_gate=database_gate,
-        expired_rows_fn=_stale_select,
-        dispatch_fn=_dispatch,
-    )
+    assert sorted(session for _aid, session in reaped) == [1, 2, 3, 4]
+    assert [session for machine, session in arrivals if machine == "slow"] == [1, 3]
 
-    assert reaped == []
-    assert dispatched == []
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
-            (aid, 44),
-        )
-        row = cur.fetchone()
-        assert row is not None and row[0] == 1
+
+# meiva:note
+# Only local registry evidence proves machine absence; a runner cannot claim it.
+@pytest.mark.parametrize(
+    "answer", [{"mode": "machine_absent"}, {"mode": "later"}, {"mode": None}, {}]
+)
+async def test_runner_invalid_mode_preserves_row_without_false_cleanup(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    caplog: pytest.LogCaptureFixture,
+    answer: dict[str, object],
+    emitted_events: EmittedEvents,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    aid = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(db_conn, aid, 3, expires_at=_expired())
+
+    with runner(db_conn, "macmini", lambda _call: completed(answer)):
+        assert await _reap(reaper_pool, database_gate=database_gate) == []
+
+    assert _rows(db_conn, aid) == [3]
+    assert _system_inbounds(db_conn, aid) == []
+    assert "shell_ttl_expired" not in emitted_events.names()
+    assert "returned" in caplog.text
 
 
 def test_claim_still_expired_true_for_expired_row(
     db_conn: psycopg.Connection, reaper_pool: ConnectionPool
 ) -> None:
     aid = _running_agent(db_conn)
-    _insert_shell_row(db_conn, aid, 41, expires_at=datetime.now(UTC) - timedelta(minutes=1))
+    _insert_shell_row(db_conn, aid, 41, expires_at=_expired())
     assert claim_shell_row_still_expired(reaper_pool, aid, 41)
 
 
@@ -497,87 +477,3 @@ def test_claim_still_expired_false_for_missing_row(
 ) -> None:
     aid = _running_agent(db_conn)
     assert not claim_shell_row_still_expired(reaper_pool, aid, 43)
-
-
-def test_human_ttl_formats_compact_durations() -> None:
-    """The notice's TTL duration reads compactly: whole hours/months as h/m,
-    anything else in seconds; negative (clock-skewed) durations clamp to 0s."""
-    from services.upkeep.ttl_reaper.shells import human_ttl
-
-    assert human_ttl(3600) == "1h"
-    assert human_ttl(2 * 3600) == "2h"
-    assert human_ttl(1800) == "30m"
-    assert human_ttl(90) == "90s"
-    assert human_ttl(0) == "0s"
-    assert human_ttl(-61) == "0s"
-
-
-def test_wall_clock_renders_cluster_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The notice's expiry time renders in the cluster timezone: bare HH:MM on
-    the cluster's today, MM-DD HH:MM when the TTL crosses midnight."""
-    from datetime import UTC, datetime, timedelta
-    from zoneinfo import ZoneInfo
-
-    sh = ZoneInfo("Asia/Shanghai")
-    fix_zone(monkeypatch, sh)
-    now = datetime.now(sh)
-
-    # A specific wall-clock moment on the cluster's today: the same instant
-    # fed in as UTC must render the Shanghai wall clock, no date prefix.
-    at = now.replace(hour=23, minute=59, second=0, microsecond=0)
-    assert shells.wall_clock(at.astimezone(UTC)) == "23:59"
-
-    # A moment on the cluster's tomorrow (TTL crossing midnight) carries the MM-DD prefix.
-    cross = (now + timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
-    assert shells.wall_clock(cross) == cross.strftime("%m-%d %H:%M")
-
-
-def test_wall_clock_none_falls_back_to_host_zone(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Clock.zone() None is the host-zone fallback signal: the stamp matches
-    dt.astimezone(None) (machine-local), not UTC."""
-    from datetime import UTC, datetime
-
-    fix_zone(monkeypatch, None)
-    # A moment on the host's today: the fallback stamp carries no date prefix.
-    # (A fixed past date would cross midnight and gain the MM-DD prefix the
-    # next day — a time-bomb assertion that expired 2026-08-28.)
-    dt = (
-        datetime.now()
-        .astimezone()
-        .replace(hour=12, minute=0, second=0, microsecond=0)
-        .astimezone(UTC)
-    )
-    assert shells.wall_clock(dt) == dt.astimezone(None).strftime("%H:%M")
-
-
-@pytest.mark.parametrize(
-    "payload", [{"mode": "machine_absent"}, {"mode": "later"}, {"mode": None}, {}]
-)
-async def test_runner_invalid_mode_preserves_row_without_false_cleanup(
-    db_conn: psycopg.Connection,
-    reaper_pool: ConnectionPool,
-    caplog: pytest.LogCaptureFixture,
-    payload: dict[str, object],
-    emitted_events: EmittedEvents,
-    *,
-    database_gate: ProcessDbGate,
-) -> None:
-    """Only local registry evidence proves machine absence; a runner cannot claim it."""
-    aid = _running_agent(db_conn)
-    _insert_shell_row(db_conn, aid, 3, expires_at=datetime.now(UTC) - timedelta(minutes=1))
-    with db_conn.cursor() as cur:
-        cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
-    db_conn.commit()
-
-    async def dispatch(
-        _db: object, _machine: str, _kind: str, _payload: dict[str, object], **_kwargs: object
-    ) -> dict[str, object]:
-        return payload
-
-    assert await _reap(reaper_pool, database_gate=database_gate, dispatch_fn=dispatch) == []
-    assert db_conn.execute(
-        "SELECT session_id FROM agent_shell_ttls WHERE agent_id = %s", (aid,)
-    ).fetchall() == [(3,)]
-    assert _system_inbounds(db_conn, aid) == []
-    assert "shell_ttl_expired" not in emitted_events.names()
-    assert "returned" in caplog.text

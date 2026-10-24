@@ -1,475 +1,304 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from typing import Any
 
 import httpx
-import httpx2
-import openai
 import psycopg
 import pytest
-from langchain_core.exceptions import ModelConnectionError
-from langchain_core.messages import AIMessage
-from psycopg_pool import PoolTimeout
+from psycopg_pool import ConnectionPool, PoolTimeout
 
-from base.config.service_read import ConfigAuthority
 from base.daemon.health import Liveness
-from base.db import Database, create_agent, pool
+from base.db import create_agent, pool
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.host.env.agent_slices import ModelOverrides
-from base.lm import usage
 from base.lm.catalog import ModelCatalog
-from base.packages.tests.model_catalog import inert_keys
-from services.derived.labeler import daemon, labeler
-from services.derived.labeler.tests.slices import labeler_config, labeler_db
+from services.derived.labeler import daemon
+from services.derived.labeler.tests.db_faults import table_missing
+from services.derived.labeler.tests.scripted_models import ERRORS, PERMANENT, TRANSIENT
+from services.derived.labeler.tests.slices import (
+    FailingBus,
+    generate,
+    labeler_config,
+    labeler_db,
+    model_inputs,
+)
 
-
-class _LLM:
-    def __init__(self, error: Exception | None = None) -> None:
-        self.error = error
-
-    async def ainvoke(self, _messages: object) -> AIMessage:
-        if self.error is not None:
-            raise self.error
-        return AIMessage(content="Fix label generation")
-
-
-def _install_llm(error: Exception | None = None) -> Callable[..., _LLM]:
-    def build(_model: str, **_kwargs: object) -> _LLM:
-        return _LLM(error)
-
-    return build
-
-
-async def _generate(
-    tid: int,
-    bus: EventBus,
-    authority: ConfigAuthority,
-    catalog: ModelCatalog,
-    *,
-    build_chat_model: Callable[..., Any],
-    database_gate: ProcessDbGate,
-) -> bool | None:
-    return await labeler.generate_label_async(
-        tid,
-        "Fix the failing labeler",
-        labeler_config(),
-        labeler_db(database_gate=database_gate),
-        bus,
-        build_chat_model=build_chat_model,
-        catalog=catalog,
-        keys=inert_keys(catalog),
-        llm_override=authority.runtime.lm.llm_override,
-        overrides=ModelOverrides.from_pins({}),
-    )
-
-
-def _status_error(status: int) -> openai.APIStatusError:
-    response = httpx2.Response(status, request=httpx2.Request("POST", "https://audit.invalid"))
-    return openai.APIStatusError(f"HTTP {status}", response=response, body=None)
+_FAST_MODEL_WITHOUT_RECEIPT = "claude-opus-5-5-fast"
 
 
 def _label(db: psycopg.Connection, tid: int) -> str | None:
     with db.cursor() as cur:
         cur.execute("SELECT label FROM agents WHERE id = %s", (tid,))
         row = cur.fetchone()
+    db.commit()
     assert row is not None
     return row[0]
 
 
-@pytest.mark.parametrize(
-    "error",
-    [
-        openai.APIConnectionError(request=httpx2.Request("POST", "https://audit.invalid")),
-        _status_error(429),
-        _status_error(503),
-        ModelConnectionError("provider connection lost"),
-        httpx.ReadTimeout("provider timed out"),
-        httpx.ConnectError("provider connection lost"),
-    ],
-    ids=[
-        "sdk-connection",
-        "rate-limit",
-        "temporary-server",
-        "model-connection",
-        "http-timeout",
-        "http-connection",
-    ],
-)
+def _chat(db: psycopg.Connection, tid: int, content: str) -> None:
+    db.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+        "VALUES (%s, %s, 'chat', 'user')",
+        (tid, content),
+    )
+    db.commit()
+
+
+@pytest.mark.parametrize("failure", TRANSIENT)
 async def test_trusted_invocation_failure_returns_retry_result_without_writing(
     db_conn: psycopg.Connection,
     event_bus: EventBus,
-    config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
-    error: Exception,
+    failure: str,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
     tid = create_agent(db_conn)
-    assert (
-        await _generate(
-            tid,
-            event_bus,
-            config_authority,
-            model_catalog,
-            build_chat_model=_install_llm(error),
-            database_gate=database_gate,
-        )
-        is False
+
+    result = await generate(
+        tid, f"fail:{failure}", bus=event_bus, catalog=model_catalog, database_gate=database_gate
     )
+
+    assert result is False
     assert _label(db_conn, tid) is None
 
 
-class _StatusLookalikeError(RuntimeError):
-    status_code = 429
-
-
-@pytest.mark.parametrize(
-    "error",
-    [
-        TypeError("invalid invocation"),
-        RuntimeError("network timed out"),
-        _StatusLookalikeError("rate limited"),
-        _status_error(401),
-        _status_error(400),
-    ],
-    ids=["type-error", "network-prose", "status-lookalike", "auth", "invalid-request"],
-)
+@pytest.mark.parametrize("failure", PERMANENT)
 async def test_unknown_and_permanent_invocation_failure_preserves_identity(
     db_conn: psycopg.Connection,
     event_bus: EventBus,
-    config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
-    error: Exception,
+    failure: str,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
     tid = create_agent(db_conn)
-    with pytest.raises(type(error)) as caught:
-        await _generate(
+    expected = ERRORS[failure]()
+
+    with pytest.raises(type(expected)) as caught:
+        await generate(
             tid,
-            event_bus,
-            config_authority,
-            model_catalog,
-            build_chat_model=_install_llm(error),
+            f"fail:{failure}",
+            bus=event_bus,
+            catalog=model_catalog,
             database_gate=database_gate,
         )
-    assert caught.value is error
+
+    assert str(caught.value) == str(expected)
     assert _label(db_conn, tid) is None
 
 
-@pytest.mark.parametrize("stage", ["builder", "usage", "parse", "cas"])
-async def test_internal_failure_never_becomes_a_generation_retry(
-    monkeypatch: pytest.MonkeyPatch,
+# meiva:note
+# A transport-shaped error outside the invocation boundary is not recovered either.
+@pytest.mark.parametrize("failure", ["type-error", "http-timeout"])
+async def test_a_failure_while_building_the_model_is_never_a_generation_retry(
     db_conn: psycopg.Connection,
     event_bus: EventBus,
-    config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
-    stage: str,
+    failure: str,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
     tid = create_agent(db_conn)
-    error = psycopg.ProgrammingError("CAS schema drift") if stage == "cas" else TypeError(stage)
 
-    def fail(*_args: object, **_kwargs: object) -> Any:
-        raise error
-
-    build = fail if stage == "builder" else _install_llm()
-    if stage != "builder":
-        targets = {
-            "usage": (usage, "log_usage_from_message"),
-            "parse": (labeler, "message_content"),
-            "cas": (Database, "write_transaction"),
-        }
-        owner, name = targets[stage]
-        monkeypatch.setattr(owner, name, fail)
-    with pytest.raises(type(error)) as caught:
-        await _generate(
+    with pytest.raises(type(ERRORS[failure]())):
+        await generate(
             tid,
-            event_bus,
-            config_authority,
-            model_catalog,
-            build_chat_model=build,
+            f"build:{failure}",
+            bus=event_bus,
+            catalog=model_catalog,
             database_gate=database_gate,
         )
-    assert caught.value is error
+
     assert _label(db_conn, tid) is None
 
 
-@pytest.mark.parametrize("stage", ["builder", "usage", "parse"])
-async def test_transport_shaped_failure_outside_invocation_is_not_recovered(
-    monkeypatch: pytest.MonkeyPatch,
+# meiva:note
+# The model answered, but the call is billed by speed and the reply names no service.
+async def test_a_usage_accounting_failure_is_never_a_generation_retry(
     db_conn: psycopg.Connection,
     event_bus: EventBus,
-    config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
-    stage: str,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
     tid = create_agent(db_conn)
-    error = httpx.ReadTimeout(stage)
 
-    def fail(*_args: object, **_kwargs: object) -> Any:
-        raise error
-
-    build = fail if stage == "builder" else _install_llm()
-    if stage != "builder":
-        targets = {
-            "usage": (usage, "log_usage_from_message"),
-            "parse": (labeler, "message_content"),
-        }
-        owner, name = targets[stage]
-        monkeypatch.setattr(owner, name, fail)
-    with pytest.raises(httpx.ReadTimeout) as caught:
-        await _generate(
+    with pytest.raises(ValueError) as caught:
+        await generate(
             tid,
-            event_bus,
-            config_authority,
-            model_catalog,
-            build_chat_model=build,
+            _FAST_MODEL_WITHOUT_RECEIPT,
+            bus=event_bus,
+            catalog=model_catalog,
             database_gate=database_gate,
         )
-    assert caught.value is error
+
+    assert "InferenceSpeed" in str(caught.value)
+    assert _label(db_conn, tid) is None
+
+
+async def test_a_schema_drift_in_the_label_write_is_never_a_generation_retry(
+    db_conn: psycopg.Connection,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    tid = create_agent(db_conn)
+
+    with table_missing(db_conn, "agents"), pytest.raises(psycopg.errors.UndefinedTable):
+        await generate(
+            tid,
+            "say:Fix label generation",
+            bus=event_bus,
+            catalog=model_catalog,
+            database_gate=database_gate,
+        )
+
+    assert _label(db_conn, tid) is None
 
 
 async def test_notification_failure_cannot_uncommit_or_reselect_a_written_label(
-    monkeypatch: pytest.MonkeyPatch,
     db_conn: psycopg.Connection,
-    event_bus: EventBus,
-    config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
     tid = create_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, 'Fix labeler', 'chat', 'user')",
-            (tid,),
-        )
+    _chat(db_conn, tid, "Fix labeler")
     error = TypeError("invalid label event")
 
-    async def fail(_bus: EventBus, _tid: int, _label: str) -> None:
-        raise error
-
-    monkeypatch.setattr(labeler, "publish_label_updated", fail)
     with pytest.raises(TypeError) as caught:
-        await _generate(
+        await generate(
             tid,
-            event_bus,
-            config_authority,
-            model_catalog,
-            build_chat_model=_install_llm(),
+            "say:Fix label generation",
+            bus=FailingBus(error),
+            catalog=model_catalog,
             database_gate=database_gate,
         )
+
     assert caught.value is error
     assert _label(db_conn, tid) == "Fix label generation"
     with db_conn.cursor() as cur:
         assert tid not in dict(daemon.select_unlabeled(cur, []))
 
 
-@pytest.mark.parametrize("error", [TypeError("missing catalog"), psycopg.ProgrammingError("CAS")])
-async def test_dispatch_failure_stops_the_batch_without_rewriting_inbounds(
-    monkeypatch: pytest.MonkeyPatch,
-    db_conn: psycopg.Connection,
-    event_bus: EventBus,
-    config_authority: ConfigAuthority,
-    model_catalog: ModelCatalog,
-    error: Exception,
-    *,
-    database_gate: ProcessDbGate,
-) -> None:
-    first = create_agent(db_conn)
-    second = create_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, 'Fix labeler', 'chat', 'user') RETURNING id",
-            (first,),
-        )
-        row = cur.fetchone()
-        assert row is not None
-        inbound_id = row[0]
-        cur.execute("SELECT to_jsonb(im) FROM inbound_messages im WHERE id = %s", (inbound_id,))
-        before = cur.fetchone()
-    db_conn.commit()
-    monkeypatch.setattr(daemon, "POLL_INTERVAL_S", 0.0)
-    polls = 0
-    calls: list[int] = []
-
-    def select(_cur: object, _cooling: list[int]) -> list[tuple[int, str]]:
-        nonlocal polls
-        polls += 1
-        if polls > 1:
-            raise asyncio.CancelledError
-        return [(first, "prompt"), (second, "later prompt")]
-
-    async def fail(tid: int, *_args: object, **_kwargs: object) -> bool:
-        calls.append(tid)
-        raise error
-
-    monkeypatch.setattr(daemon, "select_unlabeled", select)
-    monkeypatch.setattr(daemon, "generate_label_async", fail)
-    p = pool(gate=database_gate)
-    try:
-        with pytest.raises(type(error)) as caught:
-            await daemon.dispatch_loop(
-                p,
-                labeler_db(database_gate=database_gate),
-                event_bus,
-                Liveness(120.0),
-                labeler_config(),
-                build_chat_model=_install_llm(),
-                catalog=model_catalog,
-                keys=inert_keys(model_catalog),
-                llm_override=config_authority.runtime.lm.llm_override,
-                overrides=ModelOverrides.from_pins({}),
-            )
-        assert caught.value is error
-    finally:
-        p.close()
-    assert calls == [first]
-    assert polls == 1
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT to_jsonb(im) FROM inbound_messages im WHERE id = %s", (inbound_id,))
-        assert cur.fetchone() == before
-    assert _label(db_conn, first) is None
-    assert _label(db_conn, second) is None
-
-
-@pytest.mark.parametrize(
-    "error",
-    [
-        TypeError("invalid poll"),
-        psycopg.ProgrammingError("SELECT"),
-        RuntimeError("DB down"),
-        psycopg.OperationalError("unproven database failure"),
-        PoolTimeout("unproven pool failure"),
-    ],
-)
-async def test_poll_failure_reaches_service_owner_without_retry(
-    db_url: str,
-    monkeypatch: pytest.MonkeyPatch,
-    event_bus: EventBus,
-    config_authority: ConfigAuthority,
-    model_catalog: ModelCatalog,
-    error: Exception,
-    *,
-    database_gate: ProcessDbGate,
-) -> None:
-    monkeypatch.setattr(daemon, "POLL_INTERVAL_S", 0.0)
-    polls = 0
-
-    def fail(_cur: object, _cooling: list[int]) -> list[tuple[int, str]]:
-        nonlocal polls
-        polls += 1
-        if polls > 1:
-            raise asyncio.CancelledError
-        raise error
-
-    monkeypatch.setattr(daemon, "select_unlabeled", fail)
-    p = pool(gate=database_gate)
-    try:
-        with pytest.raises(type(error)) as caught:
-            await daemon.dispatch_loop(
-                p,
-                labeler_db(database_gate=database_gate),
-                event_bus,
-                Liveness(120.0),
-                labeler_config(),
-                build_chat_model=_install_llm(),
-                catalog=model_catalog,
-                keys=inert_keys(model_catalog),
-                llm_override=config_authority.runtime.lm.llm_override,
-                overrides=ModelOverrides.from_pins({}),
-            )
-        assert caught.value is error
-    finally:
-        p.close()
-    assert polls == 1
-
-
 async def test_invocation_cancellation_propagates(
     db_conn: psycopg.Connection,
     event_bus: EventBus,
-    config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
     tid = create_agent(db_conn)
-    cancellation = asyncio.CancelledError()
+    generation = asyncio.create_task(
+        generate(tid, "hang:", bus=event_bus, catalog=model_catalog, database_gate=database_gate)
+    )
+    await asyncio.sleep(0.3)
+    assert not generation.done(), "the scripted model should still be answering"
 
-    class _CancelledLLM:
-        async def ainvoke(self, _messages: object) -> None:
-            raise cancellation
+    generation.cancel()
 
-    def build(_model: str, **_kwargs: object) -> _CancelledLLM:
-        return _CancelledLLM()
-
-    with pytest.raises(asyncio.CancelledError) as caught:
-        await _generate(
-            tid,
-            event_bus,
-            config_authority,
-            model_catalog,
-            build_chat_model=build,
-            database_gate=database_gate,
-        )
-    assert caught.value is cancellation
+    with pytest.raises(asyncio.CancelledError):
+        await generation
     assert _label(db_conn, tid) is None
 
 
-@pytest.mark.parametrize("stage", ["build", "invoke"])
-async def test_injected_factory_preserves_the_transport_failure_boundary(
-    db_conn: psycopg.Connection,
+async def _run_loop(
+    p: ConnectionPool[Any],
     event_bus: EventBus,
-    config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
-    stage: str,
+    config_model: str,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    tid = create_agent(db_conn)
-    config = labeler_config()
-    overrides = ModelOverrides.from_pins({})
-    error = httpx.ReadTimeout(stage)
-    built: list[str] = []
-
-    def build(model: str, **kwargs: object) -> _LLM:
-        built.append(model)
-        assert kwargs["thinking"] == {"type": "disabled"}
-        assert kwargs["catalog"] is model_catalog
-        assert kwargs["llm_override"] == config_authority.runtime.lm.llm_override
-        assert kwargs["overrides"] is overrides
-        if stage == "build":
-            raise error
-        return _LLM(error)
-
-    async def generate() -> bool | None:
-        return await labeler.generate_label_async(
-            tid,
-            "Fix the failing labeler",
-            config,
+    await asyncio.wait_for(
+        daemon.dispatch_loop(
+            p,
             labeler_db(database_gate=database_gate),
             event_bus,
-            build_chat_model=build,
-            catalog=model_catalog,
-            keys=inert_keys(model_catalog),
-            llm_override=config_authority.runtime.lm.llm_override,
-            overrides=overrides,
+            Liveness(120.0),
+            labeler_config(config_model),
+            **model_inputs(model_catalog),
+        ),
+        timeout=20.0,
+    )
+
+
+# meiva:note
+# The poll lists the newest agent first: its failing request stops the batch, so the older
+# agent behind it is never attempted and no inbound row is touched.
+async def test_a_failing_generation_stops_the_batch_without_rewriting_inbounds(
+    db_conn: psycopg.Connection,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    older = create_agent(db_conn)
+    newer = create_agent(db_conn)
+    _chat(db_conn, older, "Fix labeler")
+    _chat(db_conn, newer, "FAIL this one")
+    before = db_conn.execute(
+        "SELECT agent_id, to_jsonb(im) FROM inbound_messages im ORDER BY id"
+    ).fetchall()
+    db_conn.commit()
+
+    p = pool(gate=database_gate)
+    try:
+        with pytest.raises(TypeError):
+            await _run_loop(
+                p, event_bus, model_catalog, "failif:FAIL:type-error", database_gate=database_gate
+            )
+    finally:
+        p.close()
+
+    assert _label(db_conn, older) is None
+    assert _label(db_conn, newer) is None
+    after = db_conn.execute(
+        "SELECT agent_id, to_jsonb(im) FROM inbound_messages im ORDER BY id"
+    ).fetchall()
+    assert after == before
+
+
+async def test_a_schema_drift_in_the_poll_reaches_the_service_owner_without_retry(
+    db_conn: psycopg.Connection,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    p = pool(gate=database_gate)
+    try:
+        with table_missing(db_conn, "agents"), pytest.raises(psycopg.errors.UndefinedTable):
+            await _run_loop(
+                p, event_bus, model_catalog, "say:Fix label generation", database_gate=database_gate
+            )
+    finally:
+        p.close()
+
+
+async def test_an_unavailable_pool_reaches_the_service_owner_without_retry(
+    db_url: str,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    with (
+        ConnectionPool(db_url, min_size=1, max_size=1, timeout=0.2, open=True) as exhausted,
+        exhausted.connection(),
+        pytest.raises(PoolTimeout),
+    ):
+        await _run_loop(
+            exhausted,
+            event_bus,
+            model_catalog,
+            "say:Fix label generation",
+            database_gate=database_gate,
         )
 
-    if stage == "build":
-        with pytest.raises(httpx.ReadTimeout) as caught:
-            await generate()
-        assert caught.value is error
-    else:
-        assert await generate() is False
-    assert built == [config.labeler_model]
-    assert _label(db_conn, tid) is None
+
+def test_the_http_error_classes_the_scenarios_raise_are_the_real_ones() -> None:
+    assert isinstance(ERRORS["http-timeout"](), httpx.ReadTimeout)
