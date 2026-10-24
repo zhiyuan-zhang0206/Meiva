@@ -81,7 +81,9 @@ def _agent(conn: psycopg.Connection, cwd: Path | None, wanted: list[str]) -> int
 
 @pytest.fixture
 def skill_pool(db_url: str) -> Iterator[ConnectionPool]:
-    with ConnectionPool(db_url, min_size=1, max_size=1, kwargs={"autocommit": True}) as pool:
+    with ConnectionPool[psycopg.Connection](
+        db_url, min_size=1, max_size=1, kwargs={"autocommit": True}
+    ) as pool:
         yield pool
 
 

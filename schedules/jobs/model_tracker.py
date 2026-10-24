@@ -10,13 +10,13 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import assert_never
 
+from base.host.proc import run_bounded
 from schedules.jobs.agent_directory import notify_report_agent
 from schedules.plans.directory_plan import ReportRecipient
 from schedules.plans.tracker_report import (
@@ -43,14 +43,13 @@ class ModelTracker:
 
 def run_tracker(_slot: datetime, _payload: str | None, *, tracker: ModelTracker) -> None:
     try:
-        done = subprocess.run(
+        done = run_bounded(
             tracker.command,
             cwd=tracker.cwd,
             env=dict(tracker.env),
             capture_output=True,
             text=True,
             timeout=tracker.timeout,
-            check=False,
         )
         verdict = plan_tracker_exit(done.returncode, done.stdout + done.stderr)
         match verdict:

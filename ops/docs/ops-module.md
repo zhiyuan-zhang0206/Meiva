@@ -177,8 +177,10 @@ outage.
 retry loop's `Timers` and a credential read. `RpcClient.system()` is the one
 composition entry that reads the process settings (the RPC timeout and retry count,
 and the gateway access); the module-level `dispatch_to_machine` and `dispatch_to_url`
-are its one-shot shorthand for callers that hold no client of their own, and a
-caller that builds a client passes it to `RpcClient.dispatch_to_machine` instead.
+are its one-shot shorthand for callers that hold no client of their own. Both
+shorthand entries reject an unknown operation kind before constructing the system
+client or reading configuration. A caller that builds a client passes it to
+`RpcClient.dispatch_to_machine` instead.
 The credential read is a required lazy factory, called on every attempt including
 retries, so a credential refreshed between attempts is the one presented;
 authentication therefore retains its existing refresh lifetime. The HTTP client is

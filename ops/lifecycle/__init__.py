@@ -12,7 +12,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.lifecycle import release_browser_pages
-from base.agents.messages.inbound import WakeTriggerKind
+from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_kind
 from base.api_contracts.agent_contract import (
     AgentStatus,
     CancelResult,
@@ -319,7 +319,8 @@ def _read_resurrect_facts(
 #     refusal conditions are logged with the input queued. A new message or explicit
 #     operator resurrection can try again later.
 #
-#     A live agent ends the call after its one status read. For a terminated agent the shell
+#     The trigger kind is canonicalized before any database read. A live agent then ends the
+#     call after its one status read. For a terminated agent the shell
 #     reads the recovery breaker, the trigger's notice source and the home machine, and
 #     `resurrect_plan.plan_resurrection` decides between skipping and forwarding.
 async def resurrect_if_terminated(
@@ -331,6 +332,7 @@ async def resurrect_if_terminated(
     trigger_inbound_kind: WakeTriggerKind,
     local_machine: str,
 ) -> AgentStatus:
+    trigger_inbound_kind = validate_wake_trigger_kind(trigger_inbound_kind)
     status = await asyncio.to_thread(get_agent_status, db, agent_id)
     if status is not AgentStatus.TERMINATED:
         return status
