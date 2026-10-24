@@ -48,10 +48,10 @@ def with_cluster_policy[C: BaseModel](plugin: str, config: C) -> C:
     from base.host.env.bootstrap import (
         cluster_plugin_config_values,
         config_source_is_local,
-        process_environment,
         should_fetch_from_gateway,
     )
     from base.host.env.dotenv_file import process_env_file, read_env_aliases
+    from base.host.env.registry import process_environment
 
     # meiva:note
     # TODO(config-boot values): the plugin config image is bound deep under the SDK install; its
@@ -102,7 +102,8 @@ def overlay_config_classes(
 
 # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
 def read_service_config[C: BaseModel](plugin: str, cls: type[C]) -> C | None:
-    from base.host.env.bootstrap import process_environment, service_plugin_config_packet
+    from base.host.env.bootstrap import service_plugin_config_packet
+    from base.host.env.registry import process_environment
 
     packet = service_plugin_config_packet(process_environment())
     if packet is None:

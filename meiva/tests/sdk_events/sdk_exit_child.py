@@ -22,7 +22,7 @@ def main() -> None:
     from base.agents.context import MeivaContext
     from base.agents.context.clients import ClientSet
     from base.agents.context.identity import AgentIdentity
-    from base.agents.sdk import call_policy
+    from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
     from base.cluster.machine.boot import machine_from_boot
     from base.config import ConfigBoot
     from meiva.sdk_surface import metering, process_context
@@ -40,9 +40,7 @@ def main() -> None:
         raise RuntimeError("the plugin load installed no client set")
     attachment.close()
     process_context.unbind_context()
-    sampling = call_policy.SamplingPolicyOwner(
-        initial=call_policy.SamplingPolicy(), fetch=call_policy.SamplingPolicy
-    )
+    sampling = fixed_sampling_owner()
     wrapped = metering.make_recorder(lambda: "done", "probe.exit", sampling, installation.clients)
     if wrapped() != "done":
         raise RuntimeError("the metered call changed its result")

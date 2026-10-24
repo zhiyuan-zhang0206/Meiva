@@ -358,7 +358,8 @@ def test_every_field_restart_required_names_a_kind_that_consumes_it() -> None:
 
     from base.config import FIELD_REFS
     from base.config.config_registry import ALLOWED_RESTART_REQUIRED, RESTART_REQUIRED_PROFILE
-    from base.config.profiles import PROCESS_PROFILES, ProcessProfile
+    from base.config.profiles import PROCESS_PROFILES
+    from base.host.env.process_profile import ProcessProfile
 
     def _extra(ref: object) -> dict[str, Any]:
         info = getattr(ref, "info", ref)

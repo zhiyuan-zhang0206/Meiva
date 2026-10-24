@@ -19,6 +19,7 @@ import inspect
 import io
 from collections.abc import Callable, Generator, Iterator
 from dataclasses import replace
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import cast
 
@@ -30,7 +31,10 @@ from base.agents.context.clients import ClientSet
 from base.agents.context.identity import ExternalLease
 from base.agents.sdk import call_policy
 from base.agents.sdk.tally import SdkCallTally
-from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
+from base.agents.sdk.tests.sampling_owners import (
+    fixed_sampling_owner,
+    sampling_owner_failing_to_read,
+)
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
 from base.packages.plugin_config_images import DiskPluginConfigImages
@@ -405,12 +409,9 @@ async def test_async_calls_measure_each_concurrent_entry(
 
 @pytest.mark.parametrize("async_call", [False, True])
 async def test_recorder_rejects_invalid_sampling_before_the_original_call(
-    async_call: bool,
+    async_call: bool, tmp_path: Path
 ) -> None:
     calls: list[str] = []
-
-    def invalid() -> call_policy.SamplingPolicy:
-        raise TypeError("invalid sampling configuration")
 
     def body() -> str:
         calls.append("side effect")
@@ -419,20 +420,17 @@ async def test_recorder_rejects_invalid_sampling_before_the_original_call(
     async def async_body() -> str:
         return body()
 
-    owner = call_policy.SamplingPolicyOwner(initial=call_policy.SamplingPolicy(), fetch=invalid)
-    # meiva:note
-    # the first read starts the refresh; the invalid answer lands on its worker
-    owner.read()
-    assert owner.worker is not None and owner.worker.completed.wait(5)
+    owner = sampling_owner_failing_to_read(tmp_path / ".env")
+    owner.refresh()
     original = async_body if async_call else body
     wrapped = metering.make_recorder(original, "plugin.write", owner, None)
     assert inspect.signature(wrapped) == inspect.signature(original)
-    with pytest.raises(TypeError, match="invalid sampling configuration"):
+    with pytest.raises(UnicodeDecodeError):
         res = wrapped()
         if inspect.isawaitable(res):
             await res
     assert calls == []
-    with pytest.raises(TypeError, match="invalid sampling configuration"):
+    with pytest.raises(UnicodeDecodeError):
         owner.close()
 
 

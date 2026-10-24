@@ -20,6 +20,7 @@ from langgraph.runtime import Runtime
 from agent.messages import inbound_message, tail_has_agent_inbound
 from agent.state import CompactState, build_agent_state
 from base.agents.context import MeivaContext
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.db.code_version_gate import ProcessDbGate
@@ -29,7 +30,6 @@ from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install
-from meiva.sdk_surface.tests.installation_holder import inert_sampling
 from meiva_builtins.plugins.meiva_sdk_reminder.agent_runtime import (
     AGENT_REPLY_CATEGORY,
     CATEGORIES,
@@ -203,7 +203,7 @@ def load_meiva_code_plugin() -> Iterator[None]:
     install.install(
         ExtensionRegistry((("meiva_code", plugin.contribute()),)),
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
-        sampling=inert_sampling(),
+        sampling=fixed_sampling_owner(),
     )
 
     yield

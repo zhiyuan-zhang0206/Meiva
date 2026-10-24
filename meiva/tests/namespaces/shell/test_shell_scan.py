@@ -11,13 +11,14 @@ import pytest
 
 import meiva.shell as sh
 from base.agents.messages.security_finding import SecurityFindingEntry
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.config import Settings
 from base.config.domains.display import DisplaySettings
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.installation import Installation
-from meiva.sdk_surface.tests.installation_holder import held_installation, inert_sampling
+from meiva.sdk_surface.tests.installation_holder import held_installation
 from meiva.shell import sessions
 
 pytestmark = pytest.mark.usefixtures("sdk_model_owner", "pty_service", "_isolated_agent")
@@ -132,7 +133,9 @@ def test_capture_default_lines_follow_display_config(
         _wait_for(done.exists)
 
         with held_installation(
-            Installation.bare(catalog=model_catalog, authority=authority, sampling=inert_sampling())
+            Installation.bare(
+                catalog=model_catalog, authority=authority, sampling=fixed_sampling_owner()
+            )
         ):
             default_window = sessions.capture(sid).splitlines()
         explicit_window = sessions.capture(sid, lines=150).splitlines()

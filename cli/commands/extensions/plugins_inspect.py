@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import sys
 import textwrap
 import traceback
@@ -14,6 +15,17 @@ from agent.extensions.catalog import (
     declared_vs_registered,
     entry_point_signature,
 )
+from base.agents.sdk.call_policy import SamplingPolicyOwner, process_sampling_owner
+
+
+# meiva:note
+# The sampling owner of one CLI verb: it is the process root, so it builds the owner from the process
+# environment and closes it at interpreter exit.
+def _verb_sampling() -> SamplingPolicyOwner:
+    sampling = process_sampling_owner()
+    atexit.register(sampling.close)
+    return sampling
+
 
 _WRAP = 96
 _LABEL = 13
@@ -183,14 +195,13 @@ def _where(exc: BaseException) -> str:
 # meiva:link cli/commands/extensions/docs/plugin-inspection.meiva.okf.md
 def cmd_plugins_verify() -> int:
     from agent.state import plugin_state_schema
-    from meiva.boot import process_sampling_owner
     from meiva.sdk_surface.extensions import load_extensions
 
     failures: list[tuple[str, BaseException]] = []
     try:
         loaded = load_extensions(
             report=lambda name, exc: failures.append((name, exc)),
-            sampling=process_sampling_owner(),
+            sampling=_verb_sampling(),
             validate_state=plugin_state_schema,
         )
     except Exception as exc:

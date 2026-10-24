@@ -33,11 +33,7 @@ from base.host.env.config_lite_table import (
     FIELD_CAPABILITIES,
     FIELD_SCOPES,
 )
-
-# The process-profile roles `child_env` / the authority projections accept —
-# the existing MEIVA_PROCESS_PROFILE vocabulary (base/config/profiles.py), not
-# a new enum.
-ProcessRole = Literal["gateway", "agent", "runner"]
+from base.host.env.process_profile import ProcessProfile, parse_process_profile
 
 # ── Passthrough rows (A1: every non-Settings env key declared exactly once) ──
 
@@ -330,16 +326,6 @@ def launch_input_keys() -> frozenset[str]:
 # ── Projections ──
 
 
-def _require_role(role: ProcessRole) -> None:
-    """Fail fast on a role outside the MEIVA_PROCESS_PROFILE vocabulary — the
-    role axis of the env projections is that vocabulary, not a new enum."""
-    if role not in ("gateway", "agent", "runner"):
-        raise ValueError(
-            f"unknown process role {role!r} — must be one of gateway/agent/runner "
-            f"(the MEIVA_PROCESS_PROFILE vocabulary)"
-        )
-
-
 def _ensure_validated() -> None:
     """A1: a passthrough row whose key is also a Settings alias is a duplicate
     declaration — two homes for one fact, the drift class this registry kills.
@@ -404,34 +390,34 @@ def session_child_env_keys() -> frozenset[str]:
     )
 
 
-def process_environment() -> dict[str, str]:
-    # meiva:note
-    # The inherited environment, for a caller that must hand a child a modified view of it
-    # (the codex adapter drops credential variables before spawning). Reading os.environ
-    # lives here, with the other env owners, instead of in the caller.
-    # meiva:link base/host/env/docs/registry.meiva.okf.md
-    return dict(os.environ)
+# meiva:note
+# This process's live environment, read-only: the one door below the config boot for a composition
+# root that hands the environment down as a value. A caller that must hand a child a modified view
+# of it copies first (`dict(process_environment())`).
+# meiva:link base/host/env/docs/registry.meiva.okf.md
+def process_environment() -> Mapping[str, str]:
+    return os.environ
 
 
-def env_keep_set(role: ProcessRole) -> frozenset[str]:
+def env_keep_set(role: ProcessProfile) -> frozenset[str]:
     """The env-authority force families: keys whose unit-.env declaration must
     win over a polluted parent environment (cluster-scope aliases + machine
     identity). Role-independent today (every process enforces cluster env
     authority); the parameter exists for the day a profile needs a different
     keep set. dotenv_boot's per-unit force exemptions (health ports, the
     gateway URL series, the cluster secret) are its own, applied on top."""
-    _require_role(role)
+    parse_process_profile(role)
     _ensure_validated()
     return cluster_scope_aliases() | env_identity_keys()
 
 
-def env_authority_drop_set(role: ProcessRole) -> frozenset[str]:
+def env_authority_drop_set(role: ProcessProfile) -> frozenset[str]:
     """The env-authority drop families: keys removed from os.environ when the
     unit's .env does not declare them (cluster-scope aliases + machine
     identity). The gateway process additionally drops every agent-runner
     cluster-scope alias UNCONDITIONALLY (it never reads them; /api/bootstrap
     serves them from the .env FILE) — dotenv_boot applies that pop separately
     via `agent_runner_cluster_aliases`."""
-    _require_role(role)
+    parse_process_profile(role)
     _ensure_validated()
     return cluster_scope_aliases() | env_identity_keys()

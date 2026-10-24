@@ -6,12 +6,12 @@ import pytest
 from agent.extensions import catalog as catalog_mod
 from agent.state import plugin_state_schema
 from base import paths
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.packages.plugins.enable_config import write_local
 from base.packages.plugins.gate import ContributionMismatch
 from base.packages.plugins.loading.registry import declarations
 from base.packages.plugins.manifest import ManifestError
 from meiva.sdk_surface.extensions import load_extensions
-from meiva.sdk_surface.tests.installation_holder import inert_sampling
 
 
 @pytest.fixture(autouse=True)
@@ -43,6 +43,7 @@ from pydantic import BaseModel
 from agent.hooks import Hook
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import PluginContributions
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 
 
 class DemoState(BaseModel):
@@ -111,7 +112,7 @@ def test_declarations_are_attributed_to_the_declaring_plugin():
     _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
 
-    catalog = catalog_mod.build_catalog()
+    catalog = catalog_mod.build_catalog(sampling=fixed_sampling_owner())
     view = catalog.plugin("demo")
 
     assert view.enabled is True
@@ -134,7 +135,7 @@ def test_a_disabled_plugin_reports_no_declarations():
     _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=False)
 
-    view = catalog_mod.build_catalog().plugin("demo")
+    view = catalog_mod.build_catalog(sampling=fixed_sampling_owner()).plugin("demo")
 
     assert view.enabled is False
     assert view.contributions == ()
@@ -144,8 +145,8 @@ def test_a_reload_does_not_accumulate_contributions():
     _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
 
-    first = catalog_mod.build_catalog().plugin("demo").contributions
-    second = catalog_mod.build_catalog().plugin("demo").contributions
+    first = catalog_mod.build_catalog(sampling=fixed_sampling_owner()).plugin("demo").contributions
+    second = catalog_mod.build_catalog(sampling=fixed_sampling_owner()).plugin("demo").contributions
 
     assert len(first) == len(second)
 
@@ -156,7 +157,7 @@ def test_framework_hooks_are_not_reported_as_plugin_contributions():
     _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
 
-    catalog = catalog_mod.build_catalog()
+    catalog = catalog_mod.build_catalog(sampling=fixed_sampling_owner())
     reported = {c.detail for view in catalog.plugins for c in view.contributions}
     framework = {
         f"{type(h).__module__}.{type(h).__qualname__}"
@@ -221,7 +222,7 @@ def test_declared_vs_registered_reports_both_directions():
     _write_plugin("declared", _DECLARED_PLUGIN, manifest=_MANIFEST, runtime=_DECLARED_RUNTIME)
     _enable(declared=True)
 
-    view = catalog_mod.build_catalog().plugin("declared")
+    view = catalog_mod.build_catalog(sampling=fixed_sampling_owner()).plugin("declared")
     assert view.manifest is not None
     statuses = {
         (e.surface, e.identifier): e.status for e in catalog_mod.declared_vs_registered(view)
@@ -239,7 +240,7 @@ def test_a_plugin_without_a_manifest_fails_the_catalog():
     _enable(demo=True)
 
     with pytest.raises(ManifestError, match=r"demo.*meiva-plugin\.json not found"):
-        catalog_mod.build_catalog()
+        catalog_mod.build_catalog(sampling=fixed_sampling_owner())
 
 
 def test_install_time_manifest_keys_have_no_runtime_registry():
@@ -256,7 +257,7 @@ def test_install_time_manifest_keys_have_no_runtime_registry():
 def test_unknown_plugin_fails_fast_and_names_the_installed_ones():
     _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
-    catalog = catalog_mod.build_catalog()
+    catalog = catalog_mod.build_catalog(sampling=fixed_sampling_owner())
 
     with pytest.raises(catalog_mod.UnknownPluginError, match="demo"):
         catalog.plugin("nope")
@@ -266,7 +267,10 @@ def test_a_dashed_name_resolves_to_the_plugin_directory():
     _write_plugin("demo_plugin", _DEMO_PLUGIN)
     _enable(demo_plugin=True)
 
-    assert catalog_mod.build_catalog().plugin("demo-plugin").name == "demo_plugin"
+    assert (
+        catalog_mod.build_catalog(sampling=fixed_sampling_owner()).plugin("demo-plugin").name
+        == "demo_plugin"
+    )
 
 
 _HOOK_POINTS = ("after_init", "before_llm", "before_exec", "after_exec")
@@ -331,7 +335,7 @@ def load_failures() -> LoadFailures:
 
 def _registered(load_failures: LoadFailures) -> dict[str, tuple[str, ...]]:
     registry = load_extensions(
-        validate_state=plugin_state_schema, report=load_failures, sampling=inert_sampling()
+        validate_state=plugin_state_schema, report=load_failures, sampling=fixed_sampling_owner()
     ).registry
     return {
         name: tuple(point for point in _HOOK_POINTS if contributions.hooks(point))
@@ -491,7 +495,7 @@ def test_a_valid_state_declaration_is_admitted(load_failures: LoadFailures):
     _enable(gate_state=True)
 
     registry = load_extensions(
-        validate_state=plugin_state_schema, report=load_failures, sampling=inert_sampling()
+        validate_state=plugin_state_schema, report=load_failures, sampling=fixed_sampling_owner()
     ).registry
 
     assert [(plugin, cls.__name__) for plugin, cls in registry.state_classes()] == [

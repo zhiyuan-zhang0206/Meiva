@@ -13,11 +13,11 @@ import pytest
 
 import meiva
 from agent.state import BaseAgentState, CompactState, build_agent_state
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install, process_context
-from meiva.sdk_surface.tests.installation_holder import inert_sampling
 from meiva_builtins.plugins.meiva_code.tests.surface_support import code_registry
 
 
@@ -26,7 +26,7 @@ def _installed_surface():
     install.install(
         code_registry(),
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
-        sampling=inert_sampling(),
+        sampling=fixed_sampling_owner(),
     )
     yield
     install.uninstall()

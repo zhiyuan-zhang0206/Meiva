@@ -5,7 +5,6 @@ import subprocess
 import sys
 import threading
 import traceback
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -14,80 +13,71 @@ import pytest
 from pydantic import ValidationError
 
 from base.agents.sdk import call_policy
-from base.agents.sdk.call_policy import SamplingPolicy
-from base.host.net.tests.local_http import serve_json
+from base.agents.sdk.call_policy import SamplingPolicy, SamplingSource
+from base.agents.sdk.tests.sampling_owners import (
+    fixed_sampling_owner,
+    gateway_sampling_owner,
+    sampling_owner_failing_to_read,
+    sampling_owner_serving,
+)
+from base.host.net.tests.local_http import closed_port_url, serve_hangup, serve_json
 
-
-# meiva:note
-# A fetch that answers with one scripted outcome, replaceable between refreshes: a policy to
-# return or an exception to raise.
-class ScriptedFetch:
-    def __init__(self, outcome: SamplingPolicy | BaseException) -> None:
-        self.outcome = outcome
-
-    def __call__(self) -> SamplingPolicy:
-        if isinstance(self.outcome, BaseException):
-            raise self.outcome
-        return self.outcome
-
-
-def _owner(
-    fetch: Callable[[], SamplingPolicy], initial: SamplingPolicy | None = None
-) -> call_policy.SamplingPolicyOwner:
-    return call_policy.SamplingPolicyOwner(
-        initial=SamplingPolicy() if initial is None else initial, fetch=fetch
-    )
+_ENABLED_EVERY_3 = {"MEIVA_SDK_CALL_SAMPLING_ENABLED": "true", "MEIVA_SDK_CALL_SAMPLE_EVERY": "3"}
 
 
 @pytest.mark.parametrize("serves_gateway", [True, False])
 def test_local_policy_reads_live_file(tmp_path: Path, serves_gateway: bool) -> None:
     env_file = tmp_path / ".env"
     env = {"MEIVA_MACHINE_SERVE_GATEWAY": "true"} if serves_gateway else {}
-
-    def read() -> SamplingPolicy:
-        return call_policy.read_policy(env=env, env_path=env_file)
+    source = SamplingSource(env=env, env_path=env_file)
 
     env_file.write_text("MEIVA_SDK_CALL_SAMPLING_ENABLED=true\nMEIVA_SDK_CALL_SAMPLE_EVERY=4\n")
-    assert read() == SamplingPolicy(sampling_enabled=True, sample_every=4)
+    assert call_policy.read_policy(source) == SamplingPolicy(sampling_enabled=True, sample_every=4)
     env_file.write_text("MEIVA_SDK_CALL_SAMPLING_ENABLED=false\nMEIVA_SDK_CALL_SAMPLE_EVERY=7\n")
-    assert read() == SamplingPolicy(sampling_enabled=False, sample_every=7)
+    assert call_policy.read_policy(source) == SamplingPolicy(sampling_enabled=False, sample_every=7)
     env_file.write_text("")
-    assert read() == SamplingPolicy()
+    assert call_policy.read_policy(source) == SamplingPolicy()
 
 
-def test_remote_policy_refreshes_without_waiting_for_network(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+def test_the_launch_environment_alone_gives_the_first_snapshot() -> None:
+    assert call_policy.policy_from_aliases({}) == SamplingPolicy()
+    assert call_policy.policy_from_aliases(_ENABLED_EVERY_3) == SamplingPolicy(
+        sampling_enabled=True, sample_every=3
+    )
 
-    def read() -> SamplingPolicy:
-        started.set()
-        assert release.wait(5)
-        return SamplingPolicy(sampling_enabled=True, sample_every=3)
 
-    cache = _owner(read)
-    original = cache.refresh
+def test_a_negative_refresh_wait_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="nonnegative"):
+        SamplingSource(env={}, env_path=tmp_path / ".env", refresh_seconds=-1.0)
 
-    def refresh() -> None:
+
+def test_remote_policy_refreshes_without_waiting_for_network(tmp_path: Path) -> None:
+    gate = threading.Event()
+    with serve_json(_ENABLED_EVERY_3, gate=gate) as gateway:
+        cache = gateway_sampling_owner(gateway.url, tmp_path / ".env")
         try:
-            original()
+            assert cache.read() == SamplingPolicy()
+            assert gateway.arrived.wait(2)
+            assert cache.read() == SamplingPolicy()
+            assert len(gateway.requests) == 1
         finally:
-            finished.set()
-
-    monkeypatch.setattr(cache, "refresh", refresh)
-    try:
-        assert cache.read() == SamplingPolicy()
-        assert started.wait(2)
-        assert cache.read() == SamplingPolicy()
-    finally:
-        release.set()
-        assert finished.wait(2)
-    assert cache.read() == SamplingPolicy(sampling_enabled=True, sample_every=3)
+            gate.set()
+        worker = cache.worker
+        assert worker is not None and worker.completed.wait(5)
+        assert cache.read() == SamplingPolicy(sampling_enabled=True, sample_every=3)
 
 
-def test_failed_refresh_preserves_policy_and_warns(monkeypatch: pytest.MonkeyPatch) -> None:
-    cache = _owner(
-        ScriptedFetch(httpx.ConnectError("gateway unavailable")),
+def test_the_first_refresh_is_due_one_wait_after_the_owner_is_built(tmp_path: Path) -> None:
+    owner = sampling_owner_serving(SamplingPolicy(), tmp_path / ".env", refresh_seconds=3600.0)
+    for _ in range(3):
+        assert owner.read() == SamplingPolicy()
+    assert owner.worker is None
+
+
+def test_failed_refresh_preserves_policy_and_warns(tmp_path: Path) -> None:
+    cache = gateway_sampling_owner(
+        closed_port_url(),
+        tmp_path / ".env",
         initial=SamplingPolicy(sampling_enabled=True, sample_every=5),
     )
     reports: list[Any] = []
@@ -120,37 +110,21 @@ def test_ratio_rejects_invalid_values(value: Any) -> None:
 
 
 def test_enrolled_process_reads_gateway_policy(tmp_path: Path) -> None:
-    served = {"MEIVA_SDK_CALL_SAMPLING_ENABLED": "true", "MEIVA_SDK_CALL_SAMPLE_EVERY": "2"}
-    with serve_json(served) as gateway:
+    with serve_json(_ENABLED_EVERY_3) as gateway:
         env = {
             "MEIVA_MACHINE_SERVE_AGENT_RUNNER": "true",
             "MEIVA_GATEWAY_URL": gateway.url,
             "MEIVA_API_TOKEN": "machine-token",
         }
-        policy = call_policy.read_policy(env=env, env_path=tmp_path / ".env")
-    assert policy == SamplingPolicy(sampling_enabled=True, sample_every=2)
+        policy = call_policy.read_policy(SamplingSource(env=env, env_path=tmp_path / ".env"))
+    assert policy == SamplingPolicy(sampling_enabled=True, sample_every=3)
     assert [r.headers["authorization"] for r in gateway.requests] == ["Bearer machine-token"]
     assert [r.path for r in gateway.requests] == ["/api/bootstrap"]
 
 
-def _http_failure(status: int) -> httpx.HTTPStatusError:
-    response = httpx.Response(status, request=httpx.Request("GET", "https://gateway/api/bootstrap"))
-    return httpx.HTTPStatusError("bootstrap rejected", request=response.request, response=response)
-
-
-@pytest.mark.parametrize(
-    "error",
-    [
-        httpx.ConnectError("offline"),
-        httpx.ReadError("connection lost"),
-        httpx.ReadTimeout("timed out"),
-        httpx.PoolTimeout("busy"),
-        httpx.RemoteProtocolError("connection closed"),
-        _http_failure(429),
-    ],
-)
+@pytest.mark.parametrize("outage", ["refused", "timeout", "hangup", "rate_limited"])
 def test_expected_fetch_failure_retains_the_valid_snapshot(
-    monkeypatch: pytest.MonkeyPatch, error: Exception
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, outage: str
 ) -> None:
     from base.telemetry import emitter
 
@@ -159,101 +133,101 @@ def test_expected_fetch_failure_retains_the_valid_snapshot(
 
     monkeypatch.setattr(emitter, "init_telemetry", initialize)
     snapshot = SamplingPolicy(sampling_enabled=True, sample_every=5)
-    cache = _owner(ScriptedFetch(error), initial=snapshot)
-    cache.refresh()
+    env_path = tmp_path / ".env"
+    if outage == "refused":
+        cache = gateway_sampling_owner(closed_port_url(), env_path, initial=snapshot)
+        cache.refresh()
+    elif outage == "timeout":
+        with serve_json({}, delay_s=1.0) as gateway:
+            cache = gateway_sampling_owner(gateway.url, env_path, initial=snapshot, timeout_s=0.2)
+            cache.refresh()
+    elif outage == "hangup":
+        with serve_hangup() as url:
+            cache = gateway_sampling_owner(url, env_path, initial=snapshot)
+            cache.refresh()
+    else:
+        with serve_json({}, status=429) as gateway:
+            cache = gateway_sampling_owner(gateway.url, env_path, initial=snapshot)
+            cache.refresh()
     assert cache.read() is snapshot
 
 
-@pytest.mark.parametrize(
-    "error",
-    [
-        _http_failure(401),
-        _http_failure(500),
-        httpx.LocalProtocolError("invalid request"),
-        httpx.UnsupportedProtocol("bad URL"),
-        PermissionError("config unreadable"),
-        TypeError("invalid config shape"),
-        RuntimeError("reader bug"),
-    ],
-)
+@pytest.mark.parametrize("failure", ["unauthorized", "server_error", "bad_url", "unreadable_file"])
 def test_unexpected_refresh_error_persists_until_a_valid_snapshot(
-    monkeypatch: pytest.MonkeyPatch, error: Exception
+    tmp_path: Path, failure: str
 ) -> None:
-    fetch = ScriptedFetch(error)
-    cache = _owner(fetch, initial=SamplingPolicy(sample_every=5))
-    cache.refresh()
+    env_path = tmp_path / ".env"
+    if failure == "unreadable_file":
+        cache = sampling_owner_failing_to_read(env_path)
+        cache.refresh()
+    elif failure == "bad_url":
+        cache = gateway_sampling_owner("ftp://gateway.invalid", env_path)
+        cache.refresh()
+    else:
+        status = 401 if failure == "unauthorized" else 500
+        with serve_json({}, status=status) as gateway:
+            cache = gateway_sampling_owner(gateway.url, env_path)
+            cache.refresh()
+    assert cache.error is not None
+    original = cache.error[0]
     depths: list[int] = []
     for _ in range(2):
-        with pytest.raises(type(error)) as caught:
+        with pytest.raises(type(original)) as caught:
             cache.read()
-        assert caught.value is error
+        assert caught.value is original
         depths.append(sum(1 for _ in traceback.walk_tb(caught.value.__traceback__)))
     assert depths[0] == depths[1]  # Repeated callers do not accumulate each other's stacks.
 
-    fetch.outcome = httpx.ConnectError("still offline")
+
+def test_an_outage_does_not_clear_an_invalid_configuration(tmp_path: Path) -> None:
+    with serve_json({}, status=500) as gateway:
+        cache = gateway_sampling_owner(gateway.url, tmp_path / ".env")
+        cache.refresh()
+    assert cache.error is not None
+    original = cache.error[0]
+
     cache.refresh()
-    with pytest.raises(type(error)):
-        cache.read()  # An outage must not clear an already-invalid configuration.
-    recovered = SamplingPolicy(sampling_enabled=True, sample_every=7)
-    fetch.outcome = recovered
-    cache.refresh()
-    assert cache.read() is recovered
+
+    assert cache.error is not None and cache.error[0] is original
+    with pytest.raises(type(original)):
+        cache.read()
 
 
-def test_invalid_schema_is_not_reported_as_a_retained_policy(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    cache = _owner(lambda: SamplingPolicy(sample_every=0))
+def test_a_valid_snapshot_clears_an_invalid_configuration(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    cache = sampling_owner_failing_to_read(env_path, refresh_seconds=3600.0)
+    cache.refresh()
+    with pytest.raises(UnicodeDecodeError):
+        cache.read()
+
+    env_path.write_text("MEIVA_SDK_CALL_SAMPLING_ENABLED=true\nMEIVA_SDK_CALL_SAMPLE_EVERY=7\n")
+    cache.refresh()
+
+    assert cache.read() == SamplingPolicy(sampling_enabled=True, sample_every=7)
+
+
+def test_invalid_schema_is_not_reported_as_a_retained_policy(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    cache = sampling_owner_serving(SamplingPolicy(), env_path)
+    env_path.write_text("MEIVA_SDK_CALL_SAMPLE_EVERY=0\n")
     cache.refresh()
     with pytest.raises(ValidationError):
         cache.read()
 
 
-def test_failed_policy_read_still_starts_one_refresh_when_due(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    error = TypeError("invalid policy")
-    started, release, finished = threading.Event(), threading.Event(), threading.Event()
-    snapshot = SamplingPolicy(sample_every=9)
-    fetches: list[str] = []
-    failing = True
-
-    def fetch() -> SamplingPolicy:
-        if failing:
-            raise error
-        fetches.append("fetch")
-        started.set()
-        assert release.wait(5)
-        return snapshot
-
-    cache = _owner(fetch)
-    clock = [10.0]
-    monkeypatch.setattr(call_policy.time, "monotonic", lambda: clock[0])
+def test_failed_policy_read_still_starts_a_refresh_when_due(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    cache = sampling_owner_serving(SamplingPolicy(), env_path, refresh_seconds=0.0)
+    env_path.write_text("MEIVA_SDK_CALL_SAMPLE_EVERY=0\n")
     cache.refresh()
-    assert cache.next_refresh == 15.0
-    failing = False
-    original = cache.refresh
+    snapshot = SamplingPolicy(sample_every=9)
+    env_path.write_text("MEIVA_SDK_CALL_SAMPLE_EVERY=9\n")
 
-    def refresh() -> None:
-        try:
-            original()
-        finally:
-            finished.set()
-
-    monkeypatch.setattr(cache, "refresh", refresh)
-    clock[0] = 15.0
-    try:
-        for _ in range(2):
-            with pytest.raises(TypeError, match="invalid policy"):
-                cache.read()
-        assert started.wait(2)
-        assert cache.refreshing
-        assert fetches == ["fetch"]
-    finally:
-        release.set()
-        assert finished.wait(2)
-    assert cache.read() is snapshot
-    assert cache.next_refresh == 20.0
+    with pytest.raises(ValidationError):
+        cache.read()
+    worker = cache.worker
+    assert worker is not None and worker.completed.wait(5)
+    assert cache.read() == snapshot
 
 
 def test_sdk_telemetry_cold_import_does_not_load_httpx(tmp_path: Path) -> None:
@@ -276,7 +250,7 @@ def test_sdk_telemetry_cold_import_does_not_load_httpx(tmp_path: Path) -> None:
 def test_refresh_dependency_import_failure_reaches_the_caller(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cache = _owner(ScriptedFetch(SamplingPolicy()))
+    cache = fixed_sampling_owner()
     monkeypatch.setitem(sys.modules, "httpx", None)
     cache.refresh()
     with pytest.raises(ImportError, match="httpx"):
@@ -286,7 +260,7 @@ def test_refresh_dependency_import_failure_reaches_the_caller(
 def test_invalid_refresh_dependency_classification_reaches_the_caller(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cache = _owner(ScriptedFetch(SamplingPolicy()))
+    cache = fixed_sampling_owner()
     monkeypatch.delattr(httpx, "HTTPStatusError")
     cache.refresh()
     with pytest.raises(AttributeError, match="HTTPStatusError"):

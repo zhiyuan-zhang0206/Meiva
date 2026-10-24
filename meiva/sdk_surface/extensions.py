@@ -24,7 +24,7 @@ from base.packages.plugins.loading import StateGate
 from base.packages.plugins.loading.faces import LoadedExtensions, import_faces
 
 from . import install as sdk_install
-from .installation import EventPipelines, SamplingPolicyOwner
+from .installation import EventPipelines, SamplingPolicyOwner, installed
 
 
 # meiva:note
@@ -63,7 +63,7 @@ def load_extensions(
     disabled_entries: Sequence[str] = (),
     validate_state: StateGate | None = None,
 ) -> LoadedExtensions:
-    previous = sdk_install.uninstall() if not surface else None
+    previous = installed() if not surface else None
     if previous is not None:
         if sampling is None:
             sampling = previous.sampling
@@ -73,6 +73,9 @@ def load_extensions(
             clock = previous.clock
     if sampling is None:
         raise ValueError("the first plugin load needs the sampling owner its root retains")
+
+    if not surface:
+        sdk_install.uninstall(retaining_sampling=sampling)
 
     loaded = import_faces(surface=surface, report=report, validate_state=validate_state)
     admitted = sdk_install.install(

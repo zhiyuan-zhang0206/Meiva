@@ -164,10 +164,11 @@ def test_wrong_home_source_is_refused(tmp_path: Path, monkeypatch: pytest.Monkey
 
 
 @pytest.mark.parametrize("key", ["MEIVA_PROCESS_PROFILE", "MEIVA_LAUNCHER_PROFILE"])
+@pytest.mark.parametrize("profile", ["agent", "untrusted-delivery"])
 def test_launcher_delivery_cannot_be_transplanted(
-    key: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    key: str, profile: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv(key, "untrusted-delivery")
+    monkeypatch.setenv(key, profile)
     monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     with pytest.raises(RuntimeError, match="without a launcher"):
         repair.load_installed_runtime(tmp_path, Path(sys.prefix).parent)
