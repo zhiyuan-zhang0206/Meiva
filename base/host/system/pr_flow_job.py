@@ -23,124 +23,50 @@ ever pass there — would register its own pair, never prod's.
 
 from __future__ import annotations
 
-import shlex
 import sys
 from pathlib import Path
-from xml.sax.saxutils import escape
 
 from loguru import logger
 
 import base.host.system.cron
+from base.host.system import pr_flow_content as content
 from base.host.system.hostport import Host
-
-# Daily at 00:25 host-local (macmini lives on the fleet wall clock,
-# Asia/Shanghai): just past midnight so the previous day is complete, clear of
-# the 00:00 self-evolution fire and the 04:00/04:40/05:00 maintenance block.
-_HOUR = 0
-_MINUTE = 25
-
-_CRON_MARKER = "# meiva-pr-flow"
-
-
-def trunk_token_path() -> Path:
-    """The Trunk API token the sampler reads — the design's credential file."""
-    return Path.home() / ".trunk" / "api-token"
-
-
-_LABEL = f"{base.host.system.cron.LAUNCHD_LABEL_PREFIX}.pr-flow"
+from base.host.system.job_readings import read_launchd_path, read_meiva_binary
+from base.host.system.job_values import JobPaths, JobRoots, plist_path
 
 
 def launchd_plist_path() -> Path:
-    return Path.home() / "Library" / "LaunchAgents" / f"{_LABEL}.plist"
+    return plist_path(content.LABEL, user_home=Path.home())
 
 
-def _log_file() -> Path:
-    return Path(base.host.system.cron.job_home()) / "logs" / "pr-flow.out.log"
-
-
-def _python_path(*, host: Host) -> str:
-    """The owning checkout's venv python, beside the venv's `meiva` binary."""
-    return str(Path(base.host.system.cron.meiva_binary_path(host=host)).parent / "python")
-
-
-def _script_path() -> str:
-    from base.paths import repo_root
-
-    return str(repo_root() / "scripts" / "ci" / "pull_requests" / "pr_flow_export.py")
-
-
-def _shell_command(*, host: Host) -> str:
-    return f"{shlex.quote(_python_path(host=host))} {shlex.quote(_script_path())}"
-
-
-def launchd_plist_content(*, host: Host) -> str:
-    log_file = _log_file()
-    return f"""<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>{_LABEL}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/bin/sh</string>
-        <string>-c</string>
-        <string>{escape(_shell_command(host=host))}</string>
-    </array>
-{base.host.system.cron.launchd_env_block(host=host)}
-    <key>StartCalendarInterval</key>
-    <dict>
-            <key>Hour</key>
-            <integer>{_HOUR}</integer>
-            <key>Minute</key>
-            <integer>{_MINUTE}</integer>
-    </dict>
-    <key>RunAtLoad</key>
-    <false/>
-    <key>StandardOutPath</key>
-    <string>{log_file}</string>
-    <key>StandardErrorPath</key>
-    <string>{log_file}</string>
-</dict>
-</plist>
-"""
-
-
-def register_macos(*, host: Host) -> int:
-    """Rewrite and reload the PR-flow LaunchAgent."""
-    label = _LABEL
-    plist_path = launchd_plist_path()
-    plist_path.parent.mkdir(parents=True, exist_ok=True)
-    log_file = _log_file()
+def register_macos(*, roots: JobRoots, host: Host) -> int:
+    paths = JobPaths(roots, read_meiva_binary(roots.repo, host=host))
+    path_env = read_launchd_path(paths.meiva, user_home=roots.user_home, host=host)
+    label = content.LABEL
+    destination = plist_path(content.LABEL, user_home=roots.user_home)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    log_file = content.log_path(roots)
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    plist_path.write_text(launchd_plist_content(host=host), encoding="utf-8")
+    destination.write_text(
+        content.launchd_plist_content(paths=paths, path_env=path_env), encoding="utf-8"
+    )
 
-    if base.host.system.cron.reload_launchd_job(label, plist_path, host=host) != 0:
+    if base.host.system.cron.reload_launchd_job(label, destination, host=host) != 0:
         return 1
-    logger.info("launchd job '{}' loaded (daily at {:02d}:{:02d})", label, _HOUR, _MINUTE)
+    logger.info(
+        "launchd job '{}' loaded (daily at {:02d}:{:02d})", label, content.HOUR, content.MINUTE
+    )
     return 0
 
 
 def unregister_macos(*, host: Host) -> int:
-    retired = base.host.system.cron.remove_launchd_job(_LABEL, launchd_plist_path(), host=host)
+    retired = base.host.system.cron.remove_launchd_job(
+        content.LABEL, launchd_plist_path(), host=host
+    )
     return 0 if retired else 1
 
 
-def _cron_entry(*, host: Host) -> str:
-    log_file = _log_file()
-    return (
-        f"{_MINUTE} {_HOUR} * * * {base.host.system.cron.cron_env_prefix()}"
-        f"/bin/sh -c {shlex.quote(_shell_command(host=host))} "
-        f">> {shlex.quote(str(log_file))} 2>&1  {_CRON_MARKER}"
-    )
-
-
-def register_linux(*, host: Host) -> int:
-    """Replace the PR-flow line in the user crontab.
-
-    Lines are matched by the marker as a substring.
-    """
+def register_linux(*, roots: JobRoots, host: Host) -> int:
     missing_rc = base.host.system.cron.require_crontab(
         "  * PR flow: crontab not installed; the daily sampler job cannot be registered",
         missing_returncode=1,
@@ -150,12 +76,14 @@ def register_linux(*, host: Host) -> int:
     if missing_rc is not None:
         return missing_rc
 
-    marker = _CRON_MARKER
-    log_file = _log_file()
+    paths = JobPaths(roots, read_meiva_binary(roots.repo, host=host))
+
+    marker = content.MARKER
+    log_file = content.log_path(roots)
     log_file.parent.mkdir(parents=True, exist_ok=True)
     if base.host.system.cron.replace_crontab_entry(
         marker,
-        _cron_entry(host=host),
+        content.cron_entry(paths),
         skip_phrase="PR-flow registration",
         update_failure=lambda err: print(f"  * crontab update failed: {err}", file=sys.stderr),  # noqa: T201
         host=host,
@@ -167,55 +95,40 @@ def register_linux(*, host: Host) -> int:
 
 def unregister_linux(*, host: Host) -> int:
     return base.host.system.cron.remove_crontab_entry(
-        _CRON_MARKER, write_failure_rc=1, on_removed=None, host=host
+        content.MARKER, write_failure_rc=1, on_removed=None, host=host
     )
 
 
-def credential_blocker(*, production: bool, host: Host) -> str | None:
-    """Why this unit cannot run the sampler, or None when it can.
-
-    Cheap and local by design (converge runs on every start): production-home
-    identity (`production`, decided by the caller from the machine and home), `gh` on PATH, the Trunk token file. No network probes — the
-    sampler itself reports its own fetch failures loudly when it runs.
-    """
+def credential_blocker(*, production: bool, roots: JobRoots, host: Host) -> str | None:
     if not production:
         return "not the registered production home"
     if host.which("gh") is None:
         return "gh CLI not on PATH"
-    token = trunk_token_path()
+    token = content.trunk_token_path(roots)
     if not token.exists() or not token.read_text(encoding="utf-8").strip():
         return f"no Trunk API token at {token}"
     return None
 
 
-def register_pr_flow_job(*, enabled: bool, production: bool, host: Host) -> None:
-    """Register the daily PR-flow sampler (idempotent).
-
-    Skipped when OS jobs are off (`MEIVA_OS_JOBS_ENABLED` — the test suite), when
-    this home is not the default home (`owns_os_jobs`) or when the credential
-    gate says this host cannot run the sampler; the skip reason is logged so
-    converge output explains the absence.
-    """
+def register_pr_flow_job(*, enabled: bool, production: bool, roots: JobRoots, host: Host) -> None:
     if not enabled:
         base.host.system.cron.skip_os_job("pr flow")
         return
-    if not base.host.system.cron.owns_os_jobs("pr flow"):
+    if not base.host.system.cron.owns_os_job_home("pr flow", home=roots.home):
         return
-    blocker = credential_blocker(production=production, host=host)
+    blocker = credential_blocker(production=production, roots=roots, host=host)
     if blocker is not None:
         logger.info("PR-flow sampler job not registered: {}", blocker)
         return
     base.host.system.cron.register_platform_job(
         "PR-flow",
-        macos=lambda: register_macos(host=host),
-        linux=lambda: register_linux(host=host),
+        macos=lambda: register_macos(roots=roots, host=host),
+        linux=lambda: register_linux(roots=roots, host=host),
         host=host,
     )
 
 
 def unregister_pr_flow_job(*, host: Host) -> None:
-    """Remove the PR-flow sampler job; safe when none is registered, and a no-op
-    outside the default home."""
     if not base.host.system.cron.owns_os_jobs("pr flow"):
         return
     base.host.system.cron.unregister_platform_job(

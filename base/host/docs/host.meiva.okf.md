@@ -83,3 +83,26 @@ the hooks. A separate child runs the actual async retry through a standard event
 loop that records `call_later` delays; those observations prove scheduling values
 and attempt counts, not that one or two real seconds elapsed. Other retry
 consumers and their existing wait contracts retain their interfaces.
+
+The four recurring maintenance jobs (logs, packages refresh, PR flow and WAL-G)
+receive `JobRoots` from the converge command's existing home, checkout, user
+session values. Platform dispatch remains in the existing `Host` resource shell. Their `*_content.py` owners render commands,
+launchd XML and cron entries without `Host` or ambient path reads. The registrar
+first applies its existing switch/home/policy gates, then captures the checkout
+binary and, for launchd, the PATH. PR-flow checks production, `gh` and the token
+file before capturing executable locations; token contents never enter a job value.
+`RefreshSchedule` belongs to `packages_content.py`, including its existing validation.
+
+`job_readings.py` is the one executable/PATH capture policy, also used by the
+legacy health/autostart composition in `cron.py`. `job_values.py` owns the shared
+label namespace, plist destination and environment encoding. Shell assignments
+quote the home, and XML string values escape XML characters after shell quoting.
+The four complete maintenance definitions support spaces and XML metacharacters;
+this does not claim to repair the untouched health/autostart plist fields.
+
+Registration still protects the scheduler's default-home namespace at its write
+boundary. Removal retains its ambient-home capture and the same protection.
+The existing crontab lock encloses the read, decision and write; a failed read
+cannot rewrite the table. Command-protocol tests retain scheduler error/return-code
+coverage. Separate tests execute rendered commands in disposable files with bounded
+real shells and parse real XML; they do not register in the user's scheduler.
