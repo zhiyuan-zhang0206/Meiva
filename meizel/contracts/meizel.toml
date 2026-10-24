@@ -17,7 +17,7 @@ exports = ["analysis.py", "cli.py", "enumerations.py", "sync.py"]
 
 [uses]
 "ambient_read.py" = ["debt.py", "manifest.py", "policy.py"]
-"analysis.py" = ["ambient_read.py", "debt.py", "ledger.py", "manifest.py", "policy.py", "rule.py"]
+"analysis.py" = ["ambient_read.py", "debt.py", "enumerations.py", "ledger.py", "manifest.py", "policy.py", "rule.py"]
 "bootstrap.py" = ["analysis.py", "debt.py", "manifest.py", "rule.py"]
 "cli.py" = ["analysis.py", "bootstrap.py", "debt_carry.py", "enumerations.py", "explain.py", "policy.py", "sync.py"]
 "debt_carry.py" = ["debt.py", "debt_edit.py", "debt_report.py", "debt_rules.py", "debt_sites.py", "debt_symbol.py", "manifest.py", "rule.py"]

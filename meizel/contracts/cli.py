@@ -97,7 +97,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--changed",
         nargs="+",
         metavar="file",
-        help="judge only these files' fact edges, plus the declared graphs; skips stale checks",
+        help="judge these files' facts, declared graphs and global role lists; skip stale graph checks",
     )
     show = commands.add_parser("explain", help="show a node's view of the graph")
     show.add_argument("path")
