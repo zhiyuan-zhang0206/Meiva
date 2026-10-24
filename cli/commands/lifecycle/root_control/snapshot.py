@@ -141,6 +141,8 @@ def _health(value: object) -> dict[str, HealthRow]:
     rows = _object(value, "root status health block")
     health: dict[str, HealthRow] = {}
     for unit_id, item in rows.items():
+        if unit_id.startswith(("diagnostic:", "observer:")):
+            continue
         reached = _object(item, f"health of {unit_id!r}").get("restart_limit_reached")
         if not isinstance(reached, bool):
             raise SnapshotError(f"health of {unit_id!r} lacks restart_limit_reached")
