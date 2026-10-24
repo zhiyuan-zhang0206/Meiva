@@ -6,3 +6,9 @@ from base.packages.tests.model_catalog import model_catalog as model_catalog
 from base.packages.tests.model_catalog import set_prices as set_prices
 from meiva.tests.fixtures.model_owner import model_installation as model_installation
 from meiva.tests.fixtures.model_owner import sdk_model_owner as sdk_model_owner
+from services.agent_runner.agent_host.tests.runtime.host_support import event_tap as event_tap
+from services.agent_runner.agent_host.tests.runtime.host_support import host_plugin as host_plugin
+from services.agent_runner.agent_host.tests.runtime.host_support import host_pools as host_pools
+from services.agent_runner.agent_host.tests.runtime.host_support import rig as rig
+from services.agent_runner.agent_host.tests.runtime.host_support import wired as wired
+from services.agent_runner.agent_host.tests.runtime.host_support import wired_with as wired_with

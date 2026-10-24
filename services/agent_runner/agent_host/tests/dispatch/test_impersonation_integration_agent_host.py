@@ -20,6 +20,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog
+from base.paths import meiva_home
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 
 
@@ -69,6 +70,7 @@ async def test_replacement_host_admission_ends_the_takeover_without_respawning_i
     leases.activate(database, event_bus, lease["id"], owner)
     graph = _HandoffGraph()
     host = AgentHost(
+        home=meiva_home(),
         policy=configured_policy(),
         pool=aops_pool,
         checkpointer=MagicMock(),
@@ -161,6 +163,7 @@ async def test_restarted_host_settles_the_ended_takeover_without_an_external_mes
     leases.activate(database, event_bus, lease["id"], predecessor)
     graph = _HandoffGraph()
     host = AgentHost(
+        home=meiva_home(),
         policy=configured_policy(),
         pool=aops_pool,
         checkpointer=MagicMock(),
@@ -186,6 +189,7 @@ async def test_restarted_host_settles_the_ended_takeover_without_an_external_mes
     assert Path(ended["handoff_path"]).is_file()
     assert graph.values["impersonation_handoff_id"] == f"{agent_id}:0"
     assert host.stats.turns_started == 0
+    assert host.stats.cache_misses == 0 and host._runtimes == {}, "the wake built no runtime"
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ("idling",)
@@ -233,6 +237,7 @@ async def test_lease_controls_settle_the_handoff_of_a_dead_relays_lease(
     db_conn.commit()
     graph = _HandoffGraph()
     host = AgentHost(
+        home=meiva_home(),
         policy=configured_policy(),
         pool=aops_pool,
         checkpointer=MagicMock(),
@@ -346,6 +351,7 @@ def _handoff_host(
     from services.agent_runner.agent_host.host import AgentHost
 
     return AgentHost(
+        home=meiva_home(),
         policy=configured_policy(),
         pool=aops_pool,
         checkpointer=MagicMock(),

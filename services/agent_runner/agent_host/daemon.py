@@ -84,6 +84,7 @@ from base.deploy.timing import assert_clock_lattice, clock_values
 from base.events.live.bus import EventBus, EventBusConfig
 from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE
 from base.host.exit_codes import hard_exit as _hard_exit
+from base.host.runtime_interpreter import external_plugin_read_root
 from base.native_process.code_version import CodeVersion
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.packages.composer_commands import CommandCatalog
@@ -104,6 +105,7 @@ from .lifecycle.configuration import (
     host_policy,
     initialize_logging,
     load_installation,
+    pool_bounds,
     understanding_inputs,
 )
 from .lifecycle.graceful_exit import serve_until_exit, write_exit_restart
@@ -157,7 +159,7 @@ TURN_PROGRESS_PUBLISH_TIMEOUT_S = 3.0
 PLUGINS_POLL_INTERVAL_S = 30.0
 
 
-def plugins_fingerprint() -> str:
+def plugins_fingerprint(root: Path) -> str:
     """A cheap fingerprint of the external-plugin directory.
 
     One entry per plugin subdirectory: name + plugin.py (size, mtime_ns).
@@ -165,9 +167,6 @@ def plugins_fingerprint() -> str:
     any other file under the dir does not. The directory itself missing is a
     valid state (no plugins) — the fingerprint is then empty, not an error.
     """
-    from base.host.runtime_interpreter import external_plugin_read_root
-
-    root = external_plugin_read_root()
     if not root.exists():
         return ""
     parts: list[str] = []
@@ -188,11 +187,11 @@ def plugins_fingerprint() -> str:
 # itself, which starts the graceful exit: running turns settle at their restart, the
 # drains run, then the supervisor restarts the host fresh.
 # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
-async def watch_plugins_for_restart() -> None:
-    baseline = plugins_fingerprint()
+async def watch_plugins_for_restart(root: Path, *, interval_s: float) -> None:
+    baseline = plugins_fingerprint(root)
     while True:
-        await asyncio.sleep(PLUGINS_POLL_INTERVAL_S)
-        now = plugins_fingerprint()
+        await asyncio.sleep(interval_s)
+        now = plugins_fingerprint(root)
         if now == baseline:
             continue
         host_log.info(
@@ -383,6 +382,7 @@ def background_loops(
     *,
     installation: Installation,
     config: ConfigBoot,
+    plugins_root: Path,
 ) -> dict[str, Coroutine[object, object, None]]:
     """The daemon's background loops for plugins, logs, exec memory and understanding chunks.
 
@@ -393,7 +393,9 @@ def background_loops(
     the gap. `run` starts them in one `TaskGroup`.
     """
     return {
-        "plugins_watch": watch_plugins_for_restart(),
+        "plugins_watch": watch_plugins_for_restart(
+            plugins_root, interval_s=PLUGINS_POLL_INTERVAL_S
+        ),
         "stdout_log_rotate": rotate_stdout_log_forever(),
         "exec_memory_guard": run_memory_guard_forever(host_log),
         "understanding_chunks": understanding_loop_forever(
@@ -412,7 +414,7 @@ async def build_checkpointer(
     pool: AsyncConnectionPool[psycopg.AsyncConnection],
     plugin_state_classes: Iterable[type[BaseModel]] = (),
     *,
-    read_checkpoint_interval: Callable[[], int],
+    checkpoint_interval: int,
 ) -> AsyncPostgresSaver:
     """One saver for the whole host, over the workload pool.
 
@@ -437,7 +439,7 @@ async def build_checkpointer(
         conn=saver_pool, serde=build_checkpoint_serde(plugin_state_classes)
     )
     wrap_saver_writes_with_loud_failure(checkpointer)
-    wrap_saver_writes_with_nstep_interval(checkpointer, read_checkpoint_interval)
+    wrap_saver_writes_with_nstep_interval(checkpointer, checkpoint_interval)
     # Transition layer (tasks #3180/#3181): vanilla-era readers must see
     # delta-written threads' messages. Inert on vanilla-written data.
     wrap_saver_reads_with_delta_reconstruction(checkpointer)
@@ -518,7 +520,8 @@ def boot_handles(
             events_channel=config.view.data_plane.events_channel,
         )
     )
-    return build_shared_pool(db), build_control_pool(db), bus, db
+    bounds = pool_bounds(config)
+    return build_shared_pool(db, bounds), build_control_pool(db, bounds), bus, db
 
 
 async def _dispatch_host(
@@ -530,11 +533,12 @@ async def _dispatch_host(
     *,
     installation: Installation,
     config: ConfigBoot,
+    plugins_root: Path,
 ) -> None:
     """Run dispatcher siblings, joined before the owned heartbeat and turn drain."""
     async with asyncio.TaskGroup() as background:
         for name, loop in background_loops(
-            control_pool, db, installation=installation, config=config
+            control_pool, db, installation=installation, config=config, plugins_root=plugins_root
         ).items():
             background.create_task(loop, name=name)
         await InboundWakeDispatcher(
@@ -602,7 +606,7 @@ async def run(
         checkpointer = await build_checkpointer(
             workload_pool,
             [cls for _plugin, cls in installation.registry.state_classes()],
-            read_checkpoint_interval=lambda: config.view.agent.checkpoint_interval,
+            checkpoint_interval=config.view.agent.checkpoint_interval,
         )
         # One graph shares the dynamic state schema for all hosted turns.
         host = AgentHost(
@@ -619,6 +623,7 @@ async def run(
             extensions=installation.registry,
             commands=CommandCatalog.system(skills=meiva_skills.names),
             plugin_configs=installation.configs,
+            home=home,
         )
         # The clock reader is injected, not imported by the scheduler: it owns no
         # pool, and this keeps the uncancellable-turn report able to say how long
@@ -680,6 +685,7 @@ async def run(
                     bus,
                     installation=installation,
                     config=config,
+                    plugins_root=external_plugin_read_root(),
                 ),
                 turns=scheduler,
                 progress=host.turn_progress,

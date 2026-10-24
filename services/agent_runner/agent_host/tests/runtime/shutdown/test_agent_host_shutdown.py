@@ -104,6 +104,12 @@ def exercise_shutdown(failure: str, home: Path) -> None:
     _run_shutdown(failure, database_gate=database_gate, home=home)
 
 
+async def _install_plugin_soon(root: Path) -> None:
+    await asyncio.sleep(0.05)
+    (root / "alpha").mkdir(parents=True, exist_ok=True)
+    (root / "alpha" / "plugin.py").write_text("x = 1\n", encoding="utf-8")
+
+
 def _run_shutdown(failure: str, *, database_gate: ProcessDbGate, home: Path) -> None:
     """Run real signal/asyncio unwinding in a disposable child interpreter."""
     from agent import graph, process_boot
@@ -142,11 +148,17 @@ def _run_shutdown(failure: str, *, database_gate: ProcessDbGate, home: Path) -> 
         events.append("boot_settled")
         return []
 
-    original_loops = daemon.background_loops
-
-    def loops(*args: Any, installation: Installation, config: ConfigBoot) -> dict[str, Any]:
+    def loops(
+        *_args: Any, installation: Installation, config: ConfigBoot, plugins_root: Path
+    ) -> dict[str, Any]:
         if failure == "plugin":
-            return original_loops(*args, installation=installation, config=config)
+            # meiva:note
+            # The watcher sees a plugin appear under its directory and raises the restart signal.
+            return {
+                "plugins_watch": daemon.watch_plugins_for_restart(plugins_root, interval_s=0.01),
+                "installer": _install_plugin_soon(plugins_root),
+                "sibling": background(),
+            }
         failing = {} if failure in {"dispatcher_returns", "heartbeat"} else {"failed": fail()}
         return {**failing, "sibling": background()}
 
@@ -188,8 +200,6 @@ def _run_shutdown(failure: str, *, database_gate: ProcessDbGate, home: Path) -> 
             start_health_server=AsyncMock(return_value=object()),
             stop_health_server=close_health,
             background_loops=loops,
-            plugins_fingerprint=MagicMock(side_effect=["before", "after"]),
-            PLUGINS_POLL_INTERVAL_S=0.01,
             rotate_stdout_log_forever=background,
             InboundWakeDispatcher=MagicMock(return_value=MagicMock(run=dispatch)),
         ),

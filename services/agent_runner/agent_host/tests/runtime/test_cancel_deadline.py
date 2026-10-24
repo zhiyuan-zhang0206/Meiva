@@ -6,12 +6,9 @@ from services.agent_runner.agent_host import settlement
 from services.agent_runner.agent_host.dispatcher import HostRestartRequiredError
 
 
-async def test_repeated_cancel_does_not_reset_cleanup_deadline(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settlement, "CANCEL_UNWIND_TIMEOUT_S", 0.03)
+async def test_repeated_cancel_does_not_reset_cleanup_deadline() -> None:
     child = asyncio.create_task(asyncio.Event().wait())
-    waiting = asyncio.create_task(settlement.wait_shielded_task(child))
+    waiting = asyncio.create_task(settlement.wait_shielded_task(child, timeout_s=0.03))
     try:
         for _ in range(5):
             await asyncio.sleep(0.005)

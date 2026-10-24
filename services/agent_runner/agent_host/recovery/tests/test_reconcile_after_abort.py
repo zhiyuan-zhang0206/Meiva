@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock
 
 import psycopg
-import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
@@ -13,13 +12,14 @@ from agent.startup import consume_claimed_inbounds
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog
-from services.agent_runner.agent_host import host as host_module
+from base.paths import meiva_home
 from services.agent_runner.agent_host import settlement as settlement_mod
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
@@ -168,7 +168,6 @@ async def test_cold_build_consumes_claims_without_reading_checkpoint_history(
     redis_url: str,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     *,
@@ -184,9 +183,9 @@ async def test_cold_build_consumes_claims_without_reading_checkpoint_history(
     )
     agent = incarnation.agent_id
     claimed = claimed_row(db_conn, agent, "claimed")
-    unusable_saver = Mock()
-    monkeypatch.setattr(host_module, "build_runtime", AsyncMock())
+    unusable_saver: Any = object()
     host = AgentHost(
+        home=meiva_home(),
         policy=configured_policy(),
         pool=aops_pool,
         checkpointer=unusable_saver,
@@ -197,9 +196,8 @@ async def test_cold_build_consumes_claims_without_reading_checkpoint_history(
         machine=configured_machine(),
         commands=CommandCatalog.system(skills=list),
     )
-    slices = AgentSlices.resolve(default_reader=configured_policy().default_reader)
+    slices = AgentSlices.resolve(default_reader=defaults())
 
     await host._build_runtime(agent, "fingerprint", slices, incarnation=incarnation)
 
     assert row_statuses(db_conn, [claimed]) == {claimed: "done"}
-    assert unusable_saver.method_calls == []

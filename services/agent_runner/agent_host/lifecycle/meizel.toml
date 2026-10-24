@@ -1,4 +1,9 @@
-exports = ["configuration.py", "graceful_exit.py", "instance.py", "shells.py", "shutdown.py"]
+exports = ["cleanup_failures.py", "configuration.py", "graceful_exit.py", "instance.py", "lease_controls.py", "shells.py", "shutdown.py"]
+
+[uses]
+"shells.py" = ["cleanup_failures.py"]
 
 [purity]
 "__init__.py" = "strict"
+"cleanup_failures.py" = "strict"
+"lease_controls.py" = "strict"

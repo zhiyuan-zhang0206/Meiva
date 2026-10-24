@@ -40,22 +40,37 @@ __all__ = [
     "HostCachePolicy",
     "HostPolicy",
     "HostStats",
+    "StallTiming",
     "StoredConfig",
     "admit_stored_model",
     "config_fingerprint",
 ]
 
 
+# meiva:note
+# The bounds of the no-progress stall guard around one graph invocation: how often it looks at
+# the turn-progress clock, how long a silent turn is tolerated, and how long a cancelled
+# invocation has to unwind before the host must restart.
+@dataclass(frozen=True)
+class StallTiming:
+    scan_interval_s: float
+    no_progress_timeout_s: float
+    unwind_timeout_s: float
+
+
+# meiva:note
+# The runtime cache's bounds: how long an unused runtime stays warm and how many are kept.
 @dataclass(frozen=True)
 class HostCachePolicy:
-    """The cache limits read at one eviction, never at host construction."""
-
     idle_ttl_seconds: float
     size: int
 
 
 # meiva:note
-# Capacity and the provider keys are fixed at construction; cache and model readers remain live.
+# What one host is configured with, read once by the composition root. Capacity, the cache
+# limits, the model defaults, the registration lifetime and the stall bounds are values; a
+# change to the cluster configuration reaches the host with its next start. `default_reader`
+# and `clock_factory` are the two readers the base context and slice APIs still take.
 #
 # `provider_keys` is built by the daemon at boot, after the bootstrap delivered the keys to its
 # environment.
@@ -63,13 +78,14 @@ class HostCachePolicy:
 class HostPolicy:
     max_concurrent_turns: int
     provider_keys: ProviderKeys
-    cache: Callable[[], HostCachePolicy]
-    default_model: Callable[[], str]
-    llm_override: Callable[[], str]
+    cache: HostCachePolicy
+    default_model: str
+    llm_override: str
     default_reader: Callable[[str, str], Any]
     clock_factory: Callable[[], Clock]
     handoff_notes: TimestampPolicy
-    harness_registration_ttl_seconds: Callable[[], float]
+    harness_registration_ttl_seconds: float
+    stall: StallTiming
 
     def resolve_slices(
         self,
@@ -78,7 +94,7 @@ class HostPolicy:
         plugin_configs: Mapping[str, BaseModel] | None,
     ) -> AgentSlices:
         """Resolve the model at the existing slice boundary, with pins taking precedence."""
-        brain = AgentBrain(pins["llm_model"] if "llm_model" in pins else self.default_model())
+        brain = AgentBrain(pins.get("llm_model", self.default_model))
         return AgentSlices.resolve(
             pins,
             plugin_pins,
@@ -189,7 +205,7 @@ def admit_stored_model(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     llm_override: str,
-    default_model: Callable[[], str],
+    default_model: str,
 ) -> bool:
     """Admit the stored model configuration a hosted wake is about to bind.
 
@@ -217,7 +233,7 @@ def admit_stored_model(
     Returns True when the wake may proceed, False when the configuration cannot
     build (the caller returns without a turn).
     """
-    model = pins.get("llm_model") or default_model()
+    model = pins.get("llm_model") or default_model
     try:
         validate_model_launch(model=model, catalog=catalog, keys=keys, llm_override=llm_override)
     except ValueError as exc:

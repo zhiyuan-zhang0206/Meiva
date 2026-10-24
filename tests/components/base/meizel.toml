@@ -4,8 +4,6 @@ exports = ["helper_chain_probe.py"]
 "test_shutdown.py" = ["child_graceful_stop.py", "plugin_restart_probe.py"]
 
 [debt.first-party-patch]
-"plugin_restart_probe.py#assignment services.agent_runner.agent_host.daemon.PLUGINS_POLL_INTERVAL_S" = 1
-"plugin_restart_probe.py#assignment services.agent_runner.agent_host.daemon.plugins_fingerprint" = 1
 "test_shutdown.py#monkeypatch.setattr base.host.exit_codes.logging.shutdown" = 1
 "test_shutdown.py#monkeypatch.setattr base.host.exit_codes.os._exit" = 2
 "test_shutdown.py#monkeypatch.setattr base.host.exit_codes.sys.stderr" = 1

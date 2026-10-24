@@ -1,3 +1,4 @@
+from dataclasses import replace
 from typing import Any
 
 from base.agents.messages.timestamp_policy import TimestampPolicy
@@ -6,27 +7,40 @@ from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import settings
 from base.config.tests.configuration import defaults, snapshot_process_config
+from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import inert_keys
-from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy
+from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy, StallTiming
 
 
+# meiva:note
+# A host policy with this process's settings as its values, the way the root reads them once;
+# `changes` name the fields a test gives other values.
 def configured_policy(**changes: Any) -> HostPolicy:
-    return HostPolicy(
-        max_concurrent_turns=settings.daemon.host_max_concurrent_turns,
-        provider_keys=inert_keys(build_model_catalog()),
-        cache=lambda: HostCachePolicy(
-            idle_ttl_seconds=settings.daemon.host_agent_idle_ttl_seconds,
-            size=settings.daemon.host_agent_cache_size,
+    daemon = settings.daemon
+    return replace(
+        HostPolicy(
+            max_concurrent_turns=daemon.host_max_concurrent_turns,
+            provider_keys=inert_keys(build_model_catalog()),
+            cache=HostCachePolicy(
+                idle_ttl_seconds=daemon.host_agent_idle_ttl_seconds,
+                size=daemon.host_agent_cache_size,
+            ),
+            default_model=settings.lm.llm_model,
+            llm_override=settings.lm.llm_override,
+            default_reader=defaults(),
+            clock_factory=Clock.from_settings,
+            handoff_notes=TimestampPolicy(
+                clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
+            ),
+            harness_registration_ttl_seconds=daemon.harness_registration_ttl_seconds,
+            stall=StallTiming(
+                scan_interval_s=daemon.host_turn_progress_scan_interval_seconds,
+                no_progress_timeout_s=daemon.host_turn_no_progress_timeout_seconds,
+                unwind_timeout_s=CANCEL_UNWIND_TIMEOUT_S,
+            ),
         ),
-        default_model=lambda: settings.lm.llm_model,
-        llm_override=lambda: settings.lm.llm_override,
-        default_reader=defaults(**changes),
-        clock_factory=Clock.from_settings,
-        handoff_notes=TimestampPolicy(
-            clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
-        ),
-        harness_registration_ttl_seconds=lambda: settings.daemon.harness_registration_ttl_seconds,
+        **changes,
     )
 
 

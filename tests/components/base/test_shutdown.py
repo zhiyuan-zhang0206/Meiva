@@ -152,7 +152,12 @@ def test_plugin_restart_runs_the_product_handlers_cleanup(unit_home: Path) -> No
     env = dict(os.environ)
     env.update(MEIVA_HOME=str(unit_home), MEIVA_CONFIG_FETCH="skip")
     result = subprocess.run(  # noqa: S603 — fixed test-owned Python script
-        [sys.executable, str(Path(__file__).with_name("plugin_restart_probe.py")), str(marker)],
+        [
+            sys.executable,
+            str(Path(__file__).with_name("plugin_restart_probe.py")),
+            str(marker),
+            str(unit_home / "plugins"),
+        ],
         cwd=repo,
         env=env,
         capture_output=True,

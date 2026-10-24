@@ -31,6 +31,7 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths import meiva_home
 from services.agent_runner.agent_host.daemon import build_checkpointer
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
@@ -160,8 +161,9 @@ class Cluster:
     # and the resumed turn waits for the next host's scan. No dispatcher or scan loop runs in
     # this cluster either way.
     async def host(self, *, drain_s: float = 30, wakes: bool = False) -> Host:
-        checkpointer = await build_checkpointer(self.pool, read_checkpoint_interval=lambda: 1)
+        checkpointer = await build_checkpointer(self.pool, checkpoint_interval=1)
         host = AgentHost(
+            home=meiva_home(),
             pool=self.pool,
             checkpointer=checkpointer,
             graph=build_graph(checkpointer, ExtensionRegistry()),
@@ -169,9 +171,7 @@ class Cluster:
             bus=self.bus,
             db=self.database,
             catalog=self.catalog,
-            policy=dataclasses.replace(
-                configured_policy(), llm_override=lambda: scripted_model.OVERRIDE
-            ),
+            policy=configured_policy(llm_override=scripted_model.OVERRIDE),
             commands=CommandCatalog.system(skills=list),
             # meiva:note
             # The exec child's request names a gateway; the tests' code never calls it.

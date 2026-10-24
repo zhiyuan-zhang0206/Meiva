@@ -14,9 +14,11 @@ from agent.state import AgentState, CircuitState
 from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
+from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -24,7 +26,6 @@ from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 class RecordingPublisher:
@@ -56,11 +57,11 @@ def breaker_ctx(*, database_gate: ProcessDbGate) -> MeivaContext:
         ops_pool=None,
         llm=MagicMock(),
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
+        agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
-        clock_factory=configured_policy().clock_factory,
+        clock_factory=Clock.from_settings,
     )
 
 
@@ -87,11 +88,11 @@ async def reject_turn(
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=cast(AgentEventPublisher, publisher),
-            agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
+            agent=AgentSlices.resolve(default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
-            clock_factory=configured_policy().clock_factory,
+            clock_factory=Clock.from_settings,
         ),
         agent_id=agent_id,
         circuit=None,
