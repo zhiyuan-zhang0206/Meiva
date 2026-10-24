@@ -10,8 +10,9 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_boot
-from cli.commands.data_plane.pgbouncer import converge_pgbouncer
+from cli.commands.data_plane.pgbouncer import converge_pgbouncer, ensure_pgbouncer_step
 from cli.database.runtime import CommandRuntime
 
 _DIRECT_URL = "postgresql://meiva_main:sek@127.0.0.1:5433/meiva_main"
@@ -132,3 +133,19 @@ def test_a_home_with_no_cluster_record_is_left_untouched(
     converge_pgbouncer(_plane(command_runtime, pooler=False), home)
 
     assert (home / ".env").read_text() == f"MEIVA_DB_URL={_POOLED_URL}\n"
+
+
+# meiva:note
+# The step is glue between the converge context and the work: it reads the configuration the
+# context carries, never the process's settings. The process under test runs with the pooler
+# off; this context turns it on, so the step moves a direct URL onto the pooler's port only if
+# it read the context.
+def test_the_step_reads_the_configuration_of_its_context(ctx: ConvergeCtx) -> None:
+    home = _born_home(ctx.meiva_home, db_url=_DIRECT_URL)
+    ctx.config.set_field("pgbouncer_enabled", True)
+    ctx.config.set_field("db_url", _DIRECT_URL)
+    ctx.config.set_field("redis_url", "redis://127.0.0.1:6380/0")
+
+    ensure_pgbouncer_step(ctx)
+
+    assert "MEIVA_DB_URL=" + _POOLED_URL in (home / ".env").read_text()

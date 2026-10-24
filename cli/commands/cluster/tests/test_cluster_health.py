@@ -1,684 +1,524 @@
-"""Healthy probes stay silent; unhealthy probes signal without release mutations.
-Grafana rules grade notifications from the recorded health_probe_failing event."""
+# meiva:note
+# `meiva cluster health-probe` end to end: a whole round against a real cluster at test scale.
+#
+# The gateway is a loopback listener, the data plane the suite's throwaway Postgres and Redis,
+# the prod checkout a real git repository, the home a directory under `tmp_path` with a root
+# manifest, and the events the round emits are read from the capture pipeline. A fault is made
+# the way it happens: a gateway that answers 503, an agent table with nobody in it, an edited
+# file in the checkout. What each check says and how a failure is classed is decided from values
+# (`test_health_verdicts.py`) and how each reading is taken is `test_health_readings.py`; this
+# file proves the shell wires them: the exit status, the streams, and the one event per failed
+# check plus the heartbeat.
 
 from __future__ import annotations
 
-import subprocess
-from collections.abc import Callable
-from functools import partial
+import dataclasses
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import psycopg
 import pytest
 
-from base.agents.context.clients import DatabaseFactory
-from base.cluster.machine import MachineIdentity
-from base.config import ConfigBoot
-from base.db.tests.fakes import patch_database
-from base.telemetry.tests.capture.event_capture import FollowedAttributes
-from cli.commands.cluster import health as cluster_health
+from base.db import Database
+from base.telemetry import EventPipeline
+from base.telemetry.tests.capture.event_capture import EmittedEvents, FollowedAttributes
+from cli.commands.cluster.health import cmd_health_probe, health_options, run_health_probe
+from cli.commands.cluster.health_readings import HealthOptions
+from cli.commands.cluster.plans.health_verdicts import HealthRules
+from cli.commands.cluster.tests.gateway_server import Reply, serving
 from cli.commands.cluster.tests.health_probe_inputs import (
-    Probe,
-    bridge_status,
-    healthy,
-    redis_bridge_verdict,
-    service_probe_verdict,
-    unhealthy,
+    emitted_events as emitted_events,
 )
 from cli.commands.cluster.tests.health_probe_inputs import (
-    all_checks_pass as all_checks_pass,
+    entry_command as entry_command,
 )
 from cli.commands.cluster.tests.health_probe_inputs import (
-    config_boot_environment as config_boot_environment,
-)
-from cli.commands.cluster.tests.health_probe_inputs import emitted_events as emitted_events
-from cli.commands.cluster.tests.health_probe_inputs import (
-    probe as probe,
+    gateway as gateway,
 )
 from cli.commands.cluster.tests.health_probe_inputs import (
-    provider_guard_healthy as provider_guard_healthy,
+    git_checkout,
+    launch_record,
+    live_agent,
 )
 from cli.commands.cluster.tests.health_probe_inputs import (
-    provider_guard_reports as provider_guard_reports,
+    healthy_options as healthy_options,
 )
 from cli.commands.cluster.tests.health_probe_inputs import (
-    quiet_host_health as quiet_host_health,
+    probe_command as probe_command,
 )
+from cli.commands.cluster.tests.health_probe_inputs import ran as ran
+from cli.commands.cluster.tests.health_probe_inputs import signals as signals
 from cli.commands.cluster.tests.health_probe_inputs import (
-    quiet_schema_health as quiet_schema_health,
-)
-from cli.commands.cluster.tests.health_probe_inputs import (
-    quiet_service_health as quiet_service_health,
-)
-from cli.commands.cluster.tests.health_probe_inputs import (
-    ran as ran,
-)
-from cli.commands.cluster.tests.health_probe_inputs import (
-    schema_verdicts as schema_verdicts,
-)
-from cli.commands.cluster.tests.health_probe_inputs import (
-    signals as signals,
+    unreachable_database as unreachable_database,
 )
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
-
-def test_schema_health_db_flake_is_healthy(
-    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
-) -> None:
-    """A transient connection failure leaves liveness/population to grade the outage."""
-
-    class _FlakyConnect:
-        def __init__(self, *a: object, **kw: object) -> None:
-            raise ConnectionError("pgbouncer blip")
-
-    patch_database(monkeypatch, connect=_FlakyConnect)
-    assert cluster_health.schema_health(database_factory=operator_database) is True
+_HEALTH = ("GET", "/api/health")
+_DECLARED = {"health_probe_ran", "health_probe_failing"}
 
 
-def test_schema_health_real_skew_is_unhealthy(
-    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
-) -> None:
-    """A genuine code/DB migration-set disagreement still fails the check."""
-    from base.deploy.schema.migrations import CodeBehindSchema
+# meiva:note
+# One cluster the probe can be run against: a gateway host with a live agent and a start that
+# launched nothing, and the options of a round that holds it to its rules. A test changes the
+# options or the cluster, then calls `probe`.
+@dataclass
+class Cluster:
+    command: CommandRuntime
+    options: HealthOptions
+    database: Callable[[], Database]
+    producer: Callable[[], EventPipeline]
+    conn: psycopg.Connection
 
-    class _AheadConnect:
-        def __init__(self, *a: object, **kw: object) -> None:
-            pass
-
-        def __enter__(self) -> _AheadConnect:
-            return self
-
-        def __exit__(self, *a: object) -> None:
-            return None
-
-        def cursor(self) -> _AheadCursor:
-            return _AheadCursor()
-
-    class _AheadCursor:
-        def __enter__(self) -> _AheadCursor:
-            return self
-
-        def __exit__(self, *a: object) -> None:
-            return None
-
-        def execute(self, *a: object) -> None:
-            raise CodeBehindSchema("DB has migrations this checkout lacks")
-
-    patch_database(monkeypatch, connect=_AheadConnect)
-    assert cluster_health.schema_health(database_factory=operator_database) is False
-
-
-def test_agent_population_db_error_is_environment_class(
-    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
-) -> None:
-    """A failed population query is not evidence that the running code regressed."""
-
-    def _down(**_kwargs: object) -> object:
-        raise ConnectionError("pgbouncer unavailable")
-
-    patch_database(monkeypatch, connect=_down)
-    assert (
-        cluster_health.agent_population_failure_class(1, database_factory=operator_database)
-        == "environment"
-    )
-
-
-def test_liveness_retry_recovers_before_reporting_outage(
-    db_url: str,
-    redis_url: str,
-    probe: Probe,
-    isolated_cluster_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A brief data-plane restart window is healthy once liveness recovers.
-
-    A failed round spends the fixed retry budget exactly once — three attempts,
-    two 30-second waits — because the checks that now run after a failure add no
-    liveness work and no extra waiting (task #5064)."""
-    answers = iter([False, False, True])
-    monkeypatch.setattr(cluster_health, "gateway_liveness", lambda: next(answers))
-    sleeps: list[float] = []
-    monkeypatch.setattr(cluster_health.time, "sleep", sleeps.append)
-    monkeypatch.setattr(cluster_health, "agent_population", healthy)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(cluster_health, "schema_health", healthy)
-    monkeypatch.setattr(
-        cluster_health, "service_probes", partial(service_probe_verdict, failures=[])
-    )
-    monkeypatch.setattr(
-        cluster_health, "redis_bridge_probe", partial(redis_bridge_verdict, result=None)
-    )
-    monkeypatch.setattr(cluster_health, "disk_usage_failure", lambda: None)
-    # Keep the editable-install check independent of the real prod venv.
-    monkeypatch.setattr(cluster_health, "editable_install_failure", lambda: None)
-
-    assert probe() == 0
-    assert sleeps == [30.0, 30.0]  # two waits between the three attempts
-
-    answers = iter([False, False, False])
-    assert probe() == 1
-    assert sleeps == [30.0, 30.0, 30.0, 30.0]  # a fully failed round spends no more
-
-
-def test_environment_liveness_failure_signals_without_counting(
-    probe: Probe,
-    all_checks_pass: None,
-    isolated_cluster_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A data-plane failure signals but cannot launch an unrelated code rollback."""
-    rollback_commands: list[list[str]] = []
-    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
-    monkeypatch.setattr(cluster_health, "data_plane_abnormal", healthy)
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda command, **_kw: rollback_commands.append(command),  # type: ignore[arg-type]
-    )
-
-    assert probe() == 1
-    assert rollback_commands == []
-
-
-def test_code_liveness_failure_is_unhealthy(
-    probe: Probe,
-    all_checks_pass: None,
-    isolated_cluster_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A gateway failure with a healthy data plane remains unhealthy."""
-    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
-    monkeypatch.setattr(cluster_health, "data_plane_abnormal", unhealthy)
-
-    assert probe() == 1
-
-
-def test_agent_population_classifies_db_failure_as_environment(
-    probe: Probe,
-    all_checks_pass: None,
-    isolated_cluster_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Population-query connection failure is environmental; a low count is code-class."""
-    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: True)
-    monkeypatch.setattr(cluster_health, "agent_population", unhealthy)  # pyright: ignore[reportUnknownArgumentType]
-
-    def _environment(_min_agents: int, *, database_factory: DatabaseFactory) -> str:
-        assert callable(database_factory)
-        return "environment"
-
-    monkeypatch.setattr(cluster_health, "agent_population_failure_class", _environment)
-
-    assert probe() == 1
-
-    def _code(_min_agents: int, *, database_factory: DatabaseFactory) -> str:
-        assert callable(database_factory)
-        return "code"
-
-    monkeypatch.setattr(cluster_health, "agent_population_failure_class", _code)
-    assert probe() == 1
+    def probe(self, **changes: Any) -> int:
+        options = dataclasses.replace(self.options, **changes)
+        return run_health_probe(
+            options,
+            database_factory=self.database,
+            producer=self.producer,
+            command=self.command,
+        )
 
 
 @pytest.fixture
-def isolated_cluster_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    # Unit tests have no production checkout; dedicated cases pin this guard.
-    from base.deploy.git import cluster_drift
-
-    monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: None)
-    return tmp_path
-
-
-def test_every_run_emits_the_heartbeat_healthy_or_not(
+def cluster(
     db_url: str,
     redis_url: str,
-    probe: Probe,
-    all_checks_pass: None,
-    isolated_cluster_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    signals: FollowedAttributes,
+    db_conn: psycopg.Connection,
+    probe_command: CommandRuntime,
+    healthy_options: HealthOptions,
+    operator_database: Callable[[], Database],
+    emitted_events: EmittedEvents,
+) -> Iterator[Cluster]:
+    live_agent(db_conn)
+    launch_record(probe_command.home)
+    yield Cluster(
+        probe_command, healthy_options, operator_database, emitted_events.producer, db_conn
+    )
+    # meiva:note
+    # Whatever a round emits is one of the two events the probe declares, with the declared
+    # category and level.
+    for event in emitted_events:
+        assert event.category == "telemetry"
+        assert event.event_name in _DECLARED
+        assert event.level == ("info" if event.event_name == "health_probe_ran" else "warning")
+
+
+def _checks(signals: FollowedAttributes) -> list[object]:
+    return [signal["check"] for signal in signals]
+
+
+def test_a_healthy_cluster_exits_0_prints_every_check_and_only_beats(
+    cluster: Cluster,
+    capsys: pytest.CaptureFixture[str],
     ran: FollowedAttributes,
+    signals: FollowedAttributes,
 ) -> None:
-    """`health_probe_ran` is the probe's dead-man heartbeat: one per run on every
-    path, carrying the unhealthy-check count; the failing event is separate."""
-    assert probe() == 0
+    assert cluster.probe() == 0
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out.splitlines() == [
+        "  ✓ gateway liveness",
+        "  ✓ agent population (>= 1)",
+        "  ✓ schema health",
+        "  ✓ service probes",
+        "  ✓ disk usage",
+        "  ✓ editable install records",
+        "  ✓ source tree integrity",
+        "  ✓ provider account guard",
+    ]
     assert ran == [{"unhealthy_checks": 0}]
     assert signals == []
 
-    monkeypatch.setattr(
-        cluster_health,
-        "service_probes",
-        partial(service_probe_verdict, failures=["meiva-main-frontend"]),
-    )
-    assert probe() == 1  # the alert-only path
-    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
-    assert probe() == 1  # the primary-check path, reported alongside the still-failing one
-    assert ran == [{"unhealthy_checks": 0}, {"unhealthy_checks": 1}, {"unhealthy_checks": 2}]
-    assert len(signals) == 3  # service_probe; then gateway_liveness and service_probe
 
-
-def test_a_refused_checkout_emits_no_heartbeat(
-    probe: Probe,
-    isolated_cluster_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    ran: FollowedAttributes,
+# meiva:note
+# `health_probe_ran` is the dead-man heartbeat: one per run on every path, carrying the
+# unhealthy-check count; the failing event is separate.
+def test_every_run_emits_the_heartbeat_healthy_or_not(
+    cluster: Cluster, ran: FollowedAttributes, signals: FollowedAttributes
 ) -> None:
-    """A wrong-checkout refusal (exit 2) never observed the cluster, so it is not a run."""
-    import base.paths
+    assert cluster.probe() == 0
+    launch_record(cluster.command.home, "frontend")
+    assert cluster.probe() == 1
+    with serving({_HEALTH: Reply(status=503, body={})}) as dead:
+        assert cluster.probe(gateway_url=dead.url) == 1
 
-    def _refuse(_root: Path) -> str:
-        return "dev checkout"
-
-    monkeypatch.setattr(base.paths, "prod_service_checkout_error", _refuse)
-
-    assert probe() == 2
-    assert ran == []
+    assert ran == [{"unhealthy_checks": 0}, {"unhealthy_checks": 1}, {"unhealthy_checks": 2}]
+    assert _checks(signals) == ["service_probe", "gateway_liveness", "service_probe"]
 
 
-# ─── failing checks emit the signal ──────────────────────────────────────────
-
-
-def test_service_probe_failure_emits_the_alert_only_signal(
-    probe: Probe,
-    all_checks_pass: None,
-    isolated_cluster_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_a_refused_checkout_never_observes_the_cluster_and_emits_no_heartbeat(
+    cluster: Cluster,
+    capsys: pytest.CaptureFixture[str],
+    ran: FollowedAttributes,
     signals: FollowedAttributes,
 ) -> None:
-    """A dead selected service fails the probe and emits its failing check."""
-    monkeypatch.setattr(
-        cluster_health,
-        "service_probes",
-        partial(service_probe_verdict, failures=["meiva-main-frontend"]),
-    )
+    # meiva:note
+    # A wrong-checkout refusal (exit 2) is not a run: a worktree driving the probe is the
+    # 2026-08-07 accident (task #1025), and the cron log shows the distinct exit code.
+    assert cluster.probe(checkout_refusal="dev checkout") == 2
 
-    assert probe() == 1
+    assert capsys.readouterr().err == "health-probe refused: dev checkout\n"
+    assert ran == [] and signals == []
 
+
+def test_a_dead_gateway_over_a_working_data_plane_is_a_code_class_failure(
+    cluster: Cluster, signals: FollowedAttributes
+) -> None:
+    with serving({_HEALTH: Reply(status=503, body={})}) as dead:
+        assert cluster.probe(gateway_url=dead.url) == 1
+
+    assert len(dead.requests) == 3
     assert signals == [
         {
-            "check": "service_probe",
-            "failure_class": "alert-only",
-            "message": "FAIL: service probe — not healthy: meiva-main-frontend",
+            "check": "gateway_liveness",
+            "failure_class": "code",
+            "message": "FAIL: gateway liveness — health endpoint unreachable or non-200",
         }
     ]
 
 
-def test_disk_over_watermark_fails_and_signals(
-    probe: Probe,
-    all_checks_pass: None,
-    isolated_cluster_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_a_dead_gateway_over_a_dead_data_plane_is_an_environment_failure_that_says_so(
+    cluster: Cluster,
+    unreachable_database: Callable[[], Database],
+    capsys: pytest.CaptureFixture[str],
     signals: FollowedAttributes,
 ) -> None:
-    """A data volume over the 90% watermark fails the probe (exit 1) and emits
-    the `disk_usage` signal; rolling back code frees no disk space (the
-    2026-08-08 outage class: checkpoint growth filled the disk and the gateway
-    could not start)."""
-    monkeypatch.setattr(
-        cluster_health, "disk_usage_failure", lambda: "data volume 92.4% used (watermark 90%)"
-    )
+    # meiva:note
+    # A data-plane failure signals but cannot launch an unrelated code rollback.
+    cluster.database = unreachable_database
+    with serving({_HEALTH: Reply(status=503, body={})}) as dead:
+        assert cluster.probe(gateway_url=dead.url) == 1
 
-    assert probe() == 1
-
-    assert len(signals) == 1
-    assert signals[0]["check"] == "disk_usage"
-    assert signals[0]["failure_class"] == "alert-only"
-    assert "92.4%" in str(signals[0]["message"])
+    assert signals[0]["check"] == "gateway_liveness"
+    assert signals[0]["failure_class"] == "environment"
+    assert "  environment-class failure" in capsys.readouterr().err
 
 
-def test_wal_archiving_failure_signals_with_its_message(
-    probe: Probe,
-    all_checks_pass: None,
-    isolated_cluster_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_a_gateway_that_answers_on_the_third_attempt_is_healthy(
+    cluster: Cluster, signals: FollowedAttributes, ran: FollowedAttributes
+) -> None:
+    answers = (Reply(status=503, body={}), Reply(status=503, body={}), Reply(body={}))
+    with serving({_HEALTH: answers}) as flapping:
+        assert cluster.probe(gateway_url=flapping.url) == 0
+
+    assert len(flapping.requests) == 3
+    assert signals == [] and ran == [{"unhealthy_checks": 0}]
+
+
+def test_an_empty_cluster_fails_the_population_floor_with_the_class_local_intent_explains(
+    cluster: Cluster,
+    capsys: pytest.CaptureFixture[str],
     signals: FollowedAttributes,
 ) -> None:
-    """A broken archiver fails the probe like the disk check does."""
-    failure = "WAL archiving: the archiver is failing"
+    # meiva:note
+    # Local intent cannot hide a real global outage: the last start launched no agent host, so
+    # the signal carries the maintenance class for the reader, and it is still emitted.
+    cluster.conn.execute("UPDATE agents_meta SET status = 'terminated'")
+    cluster.conn.commit()
 
-    def failing_archiver(**_inputs: object) -> str:
-        return failure
-
-    monkeypatch.setattr(cluster_health, "walg_archive_failure", failing_archiver)
-
-    assert probe() == 1
+    assert cluster.probe() == 1
 
     assert signals == [
-        {"check": "walg_archive", "failure_class": "alert-only", "message": f"FAIL: {failure}"}
+        {
+            "check": "agent_population",
+            "failure_class": "maintenance",
+            "message": "FAIL: agent population — fewer than 1 agent(s) running/idling",
+        }
+    ]
+    assert "local agent maintenance explains the low population" in capsys.readouterr().err
+
+
+def test_an_empty_cluster_whose_start_launched_the_agent_host_is_a_code_failure(
+    cluster: Cluster, signals: FollowedAttributes
+) -> None:
+    cluster.conn.execute("UPDATE agents_meta SET status = 'terminated'")
+    cluster.conn.commit()
+    launch_record(cluster.command.home, "agent-host")
+
+    assert cluster.probe() == 1
+
+    population = next(s for s in signals if s["check"] == "agent_population")
+    assert population["failure_class"] == "code"
+
+
+def test_a_reenabled_host_keeps_a_low_population_unhealthy(
+    cluster: Cluster, signals: FollowedAttributes
+) -> None:
+    cluster.conn.execute("UPDATE agents_meta SET status = 'terminated'")
+    cluster.conn.commit()
+    assert cluster.probe() == 1
+    launch_record(cluster.command.home, "agent-host")
+    assert cluster.probe() == 1
+
+    populations = [s for s in signals if s["check"] == "agent_population"]
+    assert [s["failure_class"] for s in populations] == ["maintenance", "code"]
+
+
+def test_an_unreachable_database_is_an_environment_class_population_failure_not_a_schema_one(
+    cluster: Cluster,
+    unreachable_database: Callable[[], Database],
+    capsys: pytest.CaptureFixture[str],
+    signals: FollowedAttributes,
+) -> None:
+    # meiva:note
+    # Maintenance intent does not turn a database failure into an expected population: with
+    # the agent table unreachable the class is the environment's, and the schema check stays
+    # silent because a connection flake is not a skew.
+    cluster.database = unreachable_database
+
+    assert cluster.probe() == 1
+
+    population = next(s for s in signals if s["check"] == "agent_population")
+    assert population["failure_class"] == "environment"
+    assert "schema" not in _checks(signals)
+    assert "  environment-class failure" in capsys.readouterr().err
+
+
+def test_an_agent_floor_of_zero_is_met_by_an_empty_cluster(cluster: Cluster) -> None:
+    cluster.conn.execute("UPDATE agents_meta SET status = 'terminated'")
+    cluster.conn.commit()
+
+    assert cluster.probe(rules=HealthRules(0, check_schema=True, disk_watermark=0.9)) == 0
+
+
+def test_a_schema_skew_fails_the_round_and_a_disabled_check_does_not(
+    cluster: Cluster, capsys: pytest.CaptureFixture[str], signals: FollowedAttributes
+) -> None:
+    name = "29991231T000000_from-the-future"
+    cluster.conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
+    cluster.conn.commit()
+    try:
+        assert cluster.probe() == 1
+        failing = capsys.readouterr()
+        skip = HealthRules(1, check_schema=False, disk_watermark=0.9)
+        assert cluster.probe(rules=skip) == 0
+    finally:
+        cluster.conn.execute("DELETE FROM schema_migrations WHERE name = %s", (name,))
+        cluster.conn.commit()
+
+    assert "FAIL: schema health" in failing.err
+    assert signals == [
+        {
+            "check": "schema",
+            "failure_class": "code",
+            "message": "FAIL: schema health — applied version behind required (CodeBehindSchema)",
+        }
     ]
 
 
-def test_wal_archiving_is_never_dialed_while_off(
-    probe: Probe,
-    all_checks_pass: None,
-    isolated_cluster_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
+# meiva:note
+# A dead selected service fails the probe and emits its failing check.
+def test_a_launched_service_nobody_answers_for_fails_the_probe_alert_only(
+    cluster: Cluster, signals: FollowedAttributes
 ) -> None:
-    from services.backup.walg import probe as walg_probe
+    launch_record(cluster.command.home, "frontend")
 
-    def explode() -> object:
-        raise AssertionError("the probe dialed Postgres while WAL-G is off")
+    assert cluster.probe() == 1
 
-    monkeypatch.setattr(walg_probe, "admin_connection", explode)
-
-    assert probe() == 0
-
-
-def test_disk_under_watermark_passes(
-    probe: Probe, all_checks_pass: None, isolated_cluster_home: Path
-) -> None:
-    """Healthy disk usage keeps the probe green (no alert, exit 0)."""
-    rc = probe()
-    assert rc == 0
+    assert len(signals) == 1
+    assert signals[0]["check"] == "service_probe"
+    assert signals[0]["failure_class"] == "alert-only"
+    assert str(signals[0]["message"]).startswith("FAIL: service probe — not healthy: frontend")
 
 
-def test_disk_usage_fraction_uses_statvfs_family(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The fraction comes from shutil.disk_usage — the statvfs family shared
-    with the trace disk-watermark guard and the 312 watcher — not df(1),
-    whose offset to statvfs is unstable and fires late."""
-
-    class _Usage:
-        total = 200
-        used = 174
-        free = 26
-
-    def _disk_usage(_path: object) -> _Usage:
-        return _Usage()
-
-    monkeypatch.setattr(cluster_health.shutil, "disk_usage", _disk_usage)
-    frac = cluster_health.disk_usage_fraction()
-    assert frac is not None
-    assert abs(frac - 0.87) < 1e-9
-
-
-def test_disk_usage_fraction_oserror_is_quiet(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A broken measurement must not synthesize a disk-full alarm."""
-
-    def _raise_usage(*a: object, **kw: object) -> object:
-        raise OSError("statvfs unavailable")
-
-    monkeypatch.setattr(cluster_health.shutil, "disk_usage", _raise_usage)
-    assert cluster_health.disk_usage_fraction() is None
-    assert cluster_health.disk_usage_failure() is None
-
-
-def test_disk_usage_failure_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Exactly at the watermark is healthy; strictly over it alerts."""
-    monkeypatch.setattr(cluster_health, "disk_usage_fraction", lambda: 0.90)
-    assert cluster_health.disk_usage_failure() is None
-    monkeypatch.setattr(cluster_health, "disk_usage_fraction", lambda: 0.9001)
-    assert cluster_health.disk_usage_failure() is not None
-
-
-def test_source_tree_failure_signals(
-    probe: Probe,
-    all_checks_pass: None,
-    isolated_cluster_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
+# meiva:note
+# Rolling back code frees no disk space (the 2026-08-08 outage class: checkpoint growth filled
+# the disk and the gateway could not start). A watermark of zero is exceeded by any real volume.
+def test_a_data_volume_over_the_watermark_fails_first_and_is_alert_only(
+    cluster: Cluster,
+    capsys: pytest.CaptureFixture[str],
     signals: FollowedAttributes,
 ) -> None:
-    """A tampered prod source tree fails the probe (exit 1) and emits the
-    `source_tree` signal; rolling back code does not undo an on-disk edit (the
-    2026-08-28 outage class: edited source broke `import meiva` for every agent on
-    the box)."""
-    message = "prod source tree tampered: untracked outside whitelist: junk.txt"
-    monkeypatch.setattr(cluster_health, "source_tree_failure", lambda: message)  # pyright: ignore[reportUnknownArgumentType]
+    over = HealthRules(1, check_schema=True, disk_watermark=0.0)
+    with serving({_HEALTH: Reply(status=503, body={})}) as dead:
+        assert cluster.probe(rules=over, gateway_url=dead.url) == 1
 
-    assert probe() == 1
+    assert _checks(signals) == ["disk_usage", "gateway_liveness"]
+    assert signals[0]["failure_class"] == "alert-only"
+    err = capsys.readouterr().err
+    assert err.index("FAIL: disk usage") < err.index("FAIL: gateway liveness")
+    assert "(watermark 0%)" in err
+
+
+# meiva:note
+# The 2026-08-28 outage class: edited source broke `import meiva` for every agent on the box.
+# Rolling back code does not undo an on-disk edit.
+def test_a_tampered_prod_checkout_fails_the_probe_alert_only(
+    cluster: Cluster, tmp_path: Path, signals: FollowedAttributes
+) -> None:
+    source = git_checkout(tmp_path / "prod-source")
+    (source / "junk.txt").write_text("edited in place")
+
+    assert cluster.probe(source_root=source) == 1
 
     assert len(signals) == 1
     assert signals[0]["check"] == "source_tree"
     assert "junk.txt" in str(signals[0]["message"])
 
 
-def test_source_tree_clean_passes(
-    probe: Probe,
-    all_checks_pass: None,
-    isolated_cluster_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_a_clean_prod_checkout_passes(cluster: Cluster, tmp_path: Path) -> None:
+    assert cluster.probe(source_root=git_checkout(tmp_path / "prod-source")) == 0
+
+
+def test_a_broken_wal_archiver_configuration_fails_the_probe_alert_only(
+    cluster: Cluster, tmp_path: Path, signals: FollowedAttributes
 ) -> None:
-    """A clean tree must not fail the probe — the whitelist exists so the
-    routine frontend/ build output never fires a false alarm. The check is
-    patched so the test does not depend on this host's prod tree state."""
-    monkeypatch.setattr(cluster_health, "source_tree_failure", lambda: None)  # pyright: ignore[reportUnknownArgumentType]
+    assert cluster.probe(walg_config_file=tmp_path / "missing-walg.json") == 1
 
-    rc = probe()
-
-    assert rc == 0
-
-
-def test_source_tree_guard_skipped_is_a_distinct_alert(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A blind guard must not look like a clean tree: when
-    ``source_tree_violations`` reports the guard as skipped, the probe names
-    the failure 'guard skipped' (with the reason), never 'tampered'."""
-    from base.deploy.git import cluster_drift, source_tree_guard
-
-    def _violations_skipped(_repo: Path) -> tuple[str, ...]:
-        return ("guard skipped: git unavailable",)
-
-    monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: Path("/nonexistent"))
-    monkeypatch.setattr(source_tree_guard, "source_tree_violations", _violations_skipped)
-
-    failure = cluster_health.source_tree_failure()
-
-    assert failure == "prod source tree guard skipped: git unavailable"
-
-
-def test_signal_repeats_every_unhealthy_run_and_stops_when_healthy(
-    db_url: str,
-    redis_url: str,
-    probe: Probe,
-    all_checks_pass: None,
-    isolated_cluster_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    signals: FollowedAttributes,
-) -> None:
-    """The probe fires every few minutes; a persistent outage emits the signal on
-    every run (a Grafana `for:` needs continuous samples), a healthy run emits
-    nothing, and no state file is kept."""
-    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
-    assert probe() == 1
-    assert probe() == 1
-    assert [signal["check"] for signal in signals] == ["gateway_liveness"] * 2
-
-    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: True)
-    assert probe() == 0
-    assert len(signals) == 2
-    assert not list(isolated_cluster_home.iterdir())
-
-
-def test_signal_names_the_failed_check(
-    db_url: str,
-    redis_url: str,
-    probe: Probe,
-    all_checks_pass: None,
-    isolated_cluster_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    signals: FollowedAttributes,
-) -> None:
-    """A changed failure reason is a different check, grouped separately by Grafana;
-    a check that starts failing adds its own signal without silencing the others."""
-    monkeypatch.setattr(
-        cluster_health,
-        "service_probes",
-        partial(service_probe_verdict, failures=["meiva-main-frontend"]),
-    )
-    assert probe() == 1
-    monkeypatch.setattr(cluster_health, "gateway_liveness_with_retry", lambda: False)
-    assert probe() == 1
-
-    assert [signal["check"] for signal in signals] == [
-        "service_probe",
-        "gateway_liveness",
-        "service_probe",
+    assert signals == [
+        {
+            "check": "walg_archive",
+            "failure_class": "alert-only",
+            "message": "FAIL: WAL archiving: the WAL-G configuration is unusable",
+        }
     ]
 
 
-# ── checks report independently: one failure never silences the others ───────
-
-
-def test_schema_failure_does_not_mask_the_provider_guard(
-    probe: Probe,
-    all_checks_pass: None,
-    isolated_cluster_home: Path,
-    schema_verdicts: list[bool],
-    provider_guard_reports: list[tuple[str, str]],
-    signals: list[dict[str, object]],
-    ran: list[dict[str, object]],
+def test_a_low_provider_balance_and_halted_agents_both_report_in_the_same_run(
+    cluster: Cluster,
+    capsys: pytest.CaptureFixture[str],
+    signals: FollowedAttributes,
+    ran: FollowedAttributes,
 ) -> None:
-    """A schema/code skew used to end the round before checks 9-10, so the balance
-    runway went fully silent exactly when the fleet needed it (2026-10-12
-    evaluation of task #5064). The provider guard still runs and reports its
-    balance signal next to the schema failure."""
-    schema_verdicts.append(False)
-    provider_guard_reports.append(
-        (
-            "provider_balance",
-            "FAIL: provider balance — account balance below the configured minimum "
-            "(MEIVA_PROVIDER_GUARD_BALANCE_MIN_CNY=¥500); top up the provider account "
-            "before it runs dry",
-        )
+    halted = live_agent(cluster.conn)
+    cluster.conn.execute(
+        "UPDATE agents_meta SET permanent_reject_streak = 2, last_turn_fatal_at = now() "
+        "WHERE id = %s",
+        (halted,),
     )
+    cluster.conn.commit()
+    balance = {
+        "is_available": True,
+        "balance_infos": [{"currency": "CNY", "total_balance": "12.50"}],
+    }
+    with serving({("GET", "/user/balance"): Reply(body=balance)}) as provider:
+        guard = dataclasses.replace(
+            cluster.options.provider,
+            balance_enabled=True,
+            deepseek_api_key="sk-test",
+            balance_url=f"{provider.url}/user/balance",
+            blocked_agents_enabled=True,
+            blocked_agents_min=1,
+        )
+        assert cluster.probe(provider=guard) == 1
 
-    assert probe() == 1
-
-    assert [signal["check"] for signal in signals] == ["schema", "provider_balance"]
-    assert "balance below the configured minimum" in str(signals[1]["message"])
+    assert provider.requests[0].headers["authorization"] == "Bearer sk-test"
+    assert _checks(signals) == ["provider_balance", "provider_blocked_agents"]
     assert ran == [{"unhealthy_checks": 2}]
+    err = capsys.readouterr().err
+    assert "(provider balance detail: ¥12.50" in err
+    assert "(provider blocked-agents detail: 1 agent(s) halted" in err
+    assert "12.50" not in str(signals[0]["message"])
 
 
-def test_every_failing_check_reports_in_one_run(
-    probe: Probe,
-    all_checks_pass: None,
-    isolated_cluster_home: Path,
-    schema_verdicts: list[bool],
-    provider_guard_reports: list[tuple[str, str]],
-    signals: list[dict[str, object]],
-    ran: list[dict[str, object]],
+def test_a_schema_failure_does_not_mask_the_provider_guard(
+    cluster: Cluster, signals: FollowedAttributes
 ) -> None:
-    """One round reports every failed check as its own event — the shape Grafana
-    groups per `attributes_check` — including both provider-guard checks (9 and
-    10), which used to stop at the first failure inside the guard as well."""
-    schema_verdicts.append(False)
-    provider_guard_reports.extend(
-        [
-            ("provider_balance", "FAIL: provider balance — account balance below the minimum"),
-            (
-                "provider_blocked_agents",
-                "FAIL: provider blocked agents — multiple agents are halted by permanent "
-                "provider rejections",
-            ),
-        ]
+    # meiva:note
+    # A schema/code skew used to end the round before the provider checks, so the balance
+    # runway went fully silent exactly when the fleet needed it (2026-10-12 evaluation of task
+    # #5064).
+    name = "29991231T000000_from-the-future"
+    cluster.conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
+    cluster.conn.commit()
+    low = {"is_available": True, "balance_infos": [{"currency": "CNY", "total_balance": "1"}]}
+    try:
+        with serving({("GET", "/user/balance"): Reply(body=low)}) as provider:
+            guard = dataclasses.replace(
+                cluster.options.provider,
+                balance_enabled=True,
+                deepseek_api_key="sk-test",
+                balance_url=f"{provider.url}/user/balance",
+            )
+            assert cluster.probe(provider=guard) == 1
+    finally:
+        cluster.conn.execute("DELETE FROM schema_migrations WHERE name = %s", (name,))
+        cluster.conn.commit()
+
+    assert _checks(signals) == ["schema", "provider_balance"]
+
+
+# meiva:note
+# The probe fires every few minutes; a persistent outage emits the signal on every run (a
+# Grafana `for:` needs continuous samples), a healthy run emits nothing, and no state file is
+# kept.
+def test_a_persistent_outage_signals_every_run_and_a_healthy_run_signals_nothing(
+    cluster: Cluster, signals: FollowedAttributes
+) -> None:
+    before = sorted(path.name for path in cluster.command.home.rglob("*"))
+    with serving({_HEALTH: Reply(status=503, body={})}) as dead:
+        assert cluster.probe(gateway_url=dead.url) == 1
+        assert cluster.probe(gateway_url=dead.url) == 1
+    assert _checks(signals) == ["gateway_liveness"] * 2
+
+    assert cluster.probe() == 0
+    assert len(signals) == 2
+    assert sorted(path.name for path in cluster.command.home.rglob("*")) == before
+
+
+def test_repeated_rounds_never_touch_the_home_beyond_reading_it(
+    cluster: Cluster, tmp_path: Path
+) -> None:
+    # meiva:note
+    # The probe observes and signals; it never selects a release, rolls back code or publishes
+    # known-good state, so legacy bookkeeping files in the home are exactly as they were.
+    legacy = {
+        "health_probe_failures": "999\ncode\nold outage\n2026-09-01T00:00:00+00:00",
+        "health_probe_pending_lkg_passes": "candidate\n999",
+    }
+    for name, content in legacy.items():
+        (cluster.command.home / name).write_text(content)
+    source = git_checkout(tmp_path / "prod-source")
+    (source / "junk.txt").write_text("edited in place")
+
+    with serving({_HEALTH: Reply(status=503, body={})}) as dead:
+        for _round in range(3):
+            assert cluster.probe(gateway_url=dead.url, source_root=source) == 1
+
+    assert {name: (cluster.command.home / name).read_text() for name in legacy} == legacy
+
+
+def test_the_command_reads_its_round_from_its_own_configuration(
+    probe_command: CommandRuntime, tmp_path: Path
+) -> None:
+    probe_command.config.set_field("gateway_url", "http://gw.test:8000")
+    probe_command.config.set_field("health_probe_agent_min", 0)
+
+    options = health_options(probe_command, check_schema=False)
+
+    assert options.gateway_url == "http://gw.test:8000"
+    assert options.rules == HealthRules(agent_min=0, check_schema=False, disk_watermark=0.90)
+    assert options.source_root == probe_command.home / "source"
+    assert options.walg_config_file is None
+    assert options.checkout_refusal is None
+    assert options.provider.balance_min_cny == 500.0
+
+
+def test_the_command_runs_a_round_from_its_configuration(
+    entry_command: CommandRuntime,
+    operator_database: Callable[[], Database],
+    emitted_events: EmittedEvents,
+    capsys: pytest.CaptureFixture[str],
+    ran: FollowedAttributes,
+) -> None:
+    # meiva:note
+    # The disk line depends on the volume of the machine running the suite, so the exit status
+    # is not asserted; the lines below come from the command's own configuration.
+    rc = cmd_health_probe(
+        check_schema=False,
+        database_factory=operator_database,
+        producer=emitted_events.producer,
+        command=entry_command,
     )
 
-    assert probe() == 1
-
-    assert [signal["check"] for signal in signals] == [
-        "schema",
-        "provider_balance",
-        "provider_blocked_agents",
-    ]
-    assert ran == [{"unhealthy_checks": 3}]
-
-
-# ── the gate's entry port rides in check 5 (alert-only) ───────────────────────
-
-
-def test_dark_gate_fails_the_probe_without_arming_rollback(
-    probe: Probe,
-    monkeypatch: pytest.MonkeyPatch,
-    all_checks_pass: None,
-    isolated_cluster_home: Path,
-    signals: FollowedAttributes,
-) -> None:
-    """The boundary this check was placed for: a dark entry port signals and exits 1.
-    The 2026-08-01 cause was a converge step that failed to reinstall the launchd
-    job — rolling the cluster's code back would re-run that step identically, so
-    rollback is not the remedy."""
-    monkeypatch.setattr(
-        cluster_health,
-        "service_probes",
-        partial(service_probe_verdict, failures=["gate entry :3000 not answering (dark)"]),
-    )
-    assert probe() == 1
-    assert any("not answering" in str(signal["message"]) for signal in signals)
-
-
-# ── the Redis bridge rides in check 5 (alert-only) ───────────────────────────
-
-
-def test_redis_bridge_probe_reports_running_but_dead_listener(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-    """A relay whose PING path is dead is reported even when its process is up."""
-
-    def read_roles(*, machine: MachineIdentity) -> frozenset[str] | None:
-        del machine
-        return frozenset({"gateway"})
-
-    import cli.commands._repo as _repo_commands
-    import cli.commands.converge.redis_bridge as bridge
-
-    monkeypatch.setattr(_repo_commands, "roles_or_none", read_roles)
-
-    def probe(*, machine: MachineIdentity, config: ConfigBoot) -> bridge.RedisBridgeStatus:
-        assert machine is command_runtime.machine
-        assert config is command_runtime.config
-        return bridge_status(serving=False, detail="connection refused")
-
-    monkeypatch.setattr(bridge, "probe_redis_bridge", probe)
-
-    failure = cluster_health.redis_bridge_probe(
-        machine=command_runtime.machine, config=command_runtime.config
-    )
-
-    assert failure is not None
-    assert "failed authenticated PING" in failure
-    assert "connection refused" in failure
-
-
-def test_redis_bridge_failure_signals_without_arming_rollback(
-    probe: Probe,
-    monkeypatch: pytest.MonkeyPatch,
-    all_checks_pass: None,
-    isolated_cluster_home: Path,
-    signals: FollowedAttributes,
-) -> None:
-    failure = "Redis bridge 10.64.0.7:6380 failed authenticated PING (connection refused)"
-    monkeypatch.setattr(
-        cluster_health, "redis_bridge_probe", partial(redis_bridge_verdict, result=failure)
-    )
-
-    assert probe() == 1
-    assert any("Redis bridge" in str(signal["message"]) for signal in signals)
-
-
-# ── resurrect audit rows are no health signal ────────────────────────────────
-
-
-def test_resurrect_audit_rows_do_not_make_the_probe_unhealthy(
-    db_conn: psycopg.Connection,
-    probe: Probe,
-    all_checks_pass: None,
-    isolated_cluster_home: Path,
-    signals: FollowedAttributes,
-) -> None:
-    """The probe no longer counts `resurrect` audit events: after the automatic
-    crash resurrection was removed they only record explicit resurrects and new
-    messages to a terminated agent, so a burst of them is not a crash loop."""
-    for _ in range(10):
-        db_conn.execute(
-            "INSERT INTO audit_events (event_uid, ts, agent_id, machine, process, event_name, "
-            "level, source) VALUES (%s, now(), 1, 'm', 'p', 'resurrect', 'info', 'test')",
-            (uuid4().int % (1 << 62),),
-        )
-    db_conn.commit()
-
-    assert probe() == 0
-    assert signals == []
+    out = capsys.readouterr().out
+    assert rc in (0, 1)
+    assert "  ✓ gateway liveness" in out
+    assert "  ✓ agent population (>= 0)" in out
+    assert "schema health" not in out
+    assert len(ran) == 1

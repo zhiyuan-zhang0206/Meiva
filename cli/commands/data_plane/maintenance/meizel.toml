@@ -1,0 +1,8 @@
+exports = ["plan.py", "process_scan.py", "report_lines.py", "survivors.py"]
+
+[purity]
+"__init__.py" = "strict"
+"plan.py" = "strict"
+"process_scan.py" = "strict"
+"report_lines.py" = "strict"
+"survivors.py" = "strict"

@@ -75,7 +75,7 @@ What a bundle carries and who shares it:
 
 ## Wiring
 
-- **Birth** (`cli/commands/_data_plane.complete_gateway_data_plane`, start
+- **Birth** (`cli/commands/data_plane/completion.py:complete_gateway_data_plane`, start
   intent `configured`): `ensure_groups` -> `ensure_monitor` ->
   `create_ledger` -> `ensure_pooler_admin` -> `mint_generation` -> pooler
   serving the pending pair -> a pooled `SELECT 1` as each login -> `activate`.

@@ -34,12 +34,16 @@ from base.cluster import (
 )
 from base.cluster.authority import ensure_groups
 from base.cluster.checkpoint_schema import PostgresCheckpointSchema
-from base.cluster.dataplane.pg_admin import OwnerAuthority, local_owner_authority, owner_conninfo
+from base.cluster.dataplane.pg_admin import (
+    OwnerAuthority,
+    local_owner_authority,
+    owner_conninfo,
+    pg_admin_url,
+)
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import apply_pending_migrations, required_migration_set
 from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, Groups
-from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.bringup import prepare_memory_vectors
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 from cli.commands.lifecycle.tests.start_storage.owned_postgres import Plane, write_record
@@ -175,7 +179,7 @@ def _prepared_state(conninfo: str) -> tuple[set[str], bool]:
 # schema baseline, checkpoint setup, migrations and the indexer's memory
 # table ran over the owner's own login (a LOGIN owner with a password).
 def _provision_by_owner_login(plane: Plane, identity: str) -> None:
-    admin = ci.pg_admin_url(plane.port)
+    admin = pg_admin_url(plane.port)
     with psycopg.connect(admin, autocommit=True) as conn:
         conn.execute(
             sql.SQL("CREATE ROLE {} LOGIN NOSUPERUSER PASSWORD {}").format(
@@ -217,14 +221,14 @@ def _grant_groups(plane: Plane, identity: str) -> None:
 # meiva:note
 # Today's start order through the admin authority; returns database creation.
 def _provision_by_authority(plane: Plane, identity: str) -> bool:
-    admin = ci.pg_admin_url(plane.port)
+    admin = pg_admin_url(plane.port)
     created = provision_database(identity, base_admin_url=admin, expected_data_dir=plane.data_dir)
     _prepare_by_authority(plane, identity, database_created=created)
     return created
 
 
 def _prepare_by_authority(plane: Plane, identity: str, *, database_created: bool) -> None:
-    admin = ci.pg_admin_url(plane.port)
+    admin = pg_admin_url(plane.port)
     ensure_pgvector_extension(identity, base_admin_url=admin, expected_data_dir=plane.data_dir)
 
     ensure_checkpoint_schema(
@@ -267,7 +271,7 @@ def test_authority_matches_owner_login_privileges_and_is_idempotent(plane: Plane
 # The owner is born NOLOGIN; it still migrates, provisions and dumps.
 def test_owner_without_login_keeps_every_admin_path(plane: Plane, tmp_path: Path) -> None:
     identity = "meiva_nolg"
-    admin = ci.pg_admin_url(plane.port)
+    admin = pg_admin_url(plane.port)
     created = provision_database(identity, base_admin_url=admin, expected_data_dir=plane.data_dir)
     with psycopg.connect(admin, autocommit=True) as conn:
         assert conn.execute(
@@ -345,7 +349,7 @@ def test_owner_without_login_keeps_every_admin_path(plane: Plane, tmp_path: Path
 def test_an_authority_bound_to_another_postgres_refuses_before_any_ddl(plane: Plane) -> None:
     identity = "meiva_cust"
     created = provision_database(
-        identity, base_admin_url=ci.pg_admin_url(plane.port), expected_data_dir=plane.data_dir
+        identity, base_admin_url=pg_admin_url(plane.port), expected_data_dir=plane.data_dir
     )
     assert created is True
     authority = local_owner_authority(plane.url(identity), remote_plane=False)

@@ -57,7 +57,7 @@ either only with `--keep-shell-sessions`. See [operator procedure](../../docs/co
 `cli/start_identity.py` durably records the home, capabilities, credentials, and the
 port table under the home lifecycle lock; init stops there. `cli/start_intent.py`
 admits an initialized home for `meiva start` (Settings-free, no side effects), holds
-the lock through readiness (`admitted_start`), and a repeated start preserves identity; the service
+the lock through readiness (`admitted_home`), and a repeated start preserves identity; the service
 selection is named again on every start and never stored. A home never initialized, one whose init was
 interrupted, unknown existing resources, and a destroyed home refuse a start; an
 initialized home refuses an init. The contract is in

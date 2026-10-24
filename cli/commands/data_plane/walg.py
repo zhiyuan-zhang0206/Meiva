@@ -1,4 +1,5 @@
-"""`meiva backup walg`: check that WAL-G can work, run the daily tick, restore, show what it is doing."""
+# meiva:note
+# `meiva backup walg`: check that WAL-G can work, run the daily tick, restore, show what it is doing.
 
 from __future__ import annotations
 
@@ -17,87 +18,85 @@ from services.backup.walg.archive import expected_archive
 from services.backup.walg.restore import RecoveryTarget, RestoreError, restored_instance
 
 
-def cmd_walg_check() -> int:
-    """Run the pre-flight steps; the exit code is non-zero when any step failed."""
+# meiva:note
+# This command's configuration: one boot of the process environment, read at the command's door.
+# WAL-G's settings travel from here as values.
+def _boot() -> ConfigBoot:
     config = ConfigBoot()
+    if not config.prepared:
+        config.read_process_environment()
+    return config
 
-    def path_reader() -> Path | None:
-        if not config.prepared:
-            config.read_process_environment()
-        return config.view.walg.walg_config_file
 
-    steps = check.run_check(path_reader=path_reader)
+# meiva:note
+# The services' WAL-G API takes the configuration path as a reader (`path_reader`); the door has
+# already read it, so the reader answers that one value.
+def path_reader_for(walg_config_file: Path | None) -> Callable[[], Path | None]:
+    def read() -> Path | None:
+        return walg_config_file
+
+    return read
+
+
+def _throwaway(config: ConfigBoot) -> ThrowawayConfig:
+    return ThrowawayConfig(configured_base(config.view.data_plane.pg_throwaway_base))
+
+
+# meiva:note
+# Run the pre-flight steps; the exit code is non-zero when any step failed.
+def cmd_walg_check() -> int:
+    steps = check.run_check(path_reader=path_reader_for(_boot().view.walg.walg_config_file))
     for step in steps:
         print(f"  {'✓' if step.ok else '✗'} {step.name}: {step.detail}")
     return 0 if all(step.ok for step in steps) else 1
 
 
+# meiva:note
+# One output line with a UTC timestamp: the OS job's output is appended to a log file.
 def _stamped(line: str) -> None:
-    """One output line with a UTC timestamp: the OS job's output is appended to a log file."""
     print(f"{datetime.now(UTC):%Y-%m-%dT%H:%M:%SZ} {line}", flush=True)
 
 
+# meiva:note
+# Run one daily tick (backup, verify, retention); non-zero only when a step failed.
+#
+# The OS job runs exactly this, and so can an operator: concurrent runs stand down
+# and a skipped or repeated run is harmless.
 def cmd_walg_run(*, database_for_url: Callable[[str], Database]) -> int:
-    """Run one daily tick (backup, verify, retention); non-zero only when a step failed.
-
-    The OS job runs exactly this, and so can an operator: concurrent runs stand down
-    and a skipped or repeated run is harmless.
-    """
-    config = ConfigBoot()
-
-    def path_reader() -> Path | None:
-        if not config.prepared:
-            config.read_process_environment()
-        return config.view.walg.walg_config_file
-
-    if not config.prepared:
-        config.read_process_environment()
-    throwaway = ThrowawayConfig(configured_base(config.view.data_plane.pg_throwaway_base))
+    config = _boot()
     return tick.run_tick(
         _stamped,
-        path_reader=path_reader,
+        path_reader=path_reader_for(config.view.walg.walg_config_file),
         database_for_url=database_for_url,
-        throwaway=throwaway,
+        throwaway=_throwaway(config),
     )
 
 
+# meiva:note
+# Run the recovery drill on the newest backup now; non-zero unless it passed.
+#
+# The tick runs the same drill once a week before its backup; a success here counts
+# as that week's drill.
 def cmd_walg_drill(*, database_for_url: Callable[[str], Database]) -> int:
-    """Run the recovery drill on the newest backup now; non-zero unless it passed.
-
-    The tick runs the same drill once a week before its backup; a success here counts
-    as that week's drill.
-    """
-    config = ConfigBoot()
-
-    def path_reader() -> Path | None:
-        if not config.prepared:
-            config.read_process_environment()
-        return config.view.walg.walg_config_file
-
-    if not config.prepared:
-        config.read_process_environment()
-    throwaway = ThrowawayConfig(configured_base(config.view.data_plane.pg_throwaway_base))
+    config = _boot()
     return tick.run_drill_now(
-        _stamped, path_reader=path_reader, database_for_url=database_for_url, throwaway=throwaway
+        _stamped,
+        path_reader=path_reader_for(config.view.walg.walg_config_file),
+        database_for_url=database_for_url,
+        throwaway=_throwaway(config),
     )
 
 
+# meiva:note
+# Restore a backup into an empty directory and recover it to the target.
+#
+# The directory ends as a promoted database, its scratch Postgres shut down: it is
+# not started, and it is never this home's live data directory. `user` is the restored
+# cluster's superuser (the OS user that ran initdb on the source; default: this OS user).
 def cmd_walg_restore(
     *, directory: str, backup: str, time: str | None, lsn: str | None, user: str | None = None
 ) -> int:
-    """Restore a backup into an empty directory and recover it to the target.
-
-    The directory ends as a promoted database, its scratch Postgres shut down: it is
-    not started, and it is never this home's live data directory. `user` is the restored
-    cluster's superuser (the OS user that ran initdb on the source; default: this OS user).
-    """
-    config = ConfigBoot()
-
-    def path_reader() -> Path | None:
-        if not config.prepared:
-            config.read_process_environment()
-        return config.view.walg.walg_config_file
-
+    path_reader = path_reader_for(_boot().view.walg.walg_config_file)
     if not walg_config.enabled(path_reader=path_reader):
         print("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to restore from")
         return 1
@@ -211,15 +210,10 @@ def _tick_lines() -> list[str]:
     return lines
 
 
+# meiva:note
+# Print configuration, binary, key fingerprint, archiver, daily-tick and drill facts; exits 0.
 def cmd_walg_status() -> int:
-    """Print configuration, binary, key fingerprint, archiver, daily-tick and drill facts; exits 0."""
-    config = ConfigBoot()
-
-    def path_reader() -> Path | None:
-        if not config.prepared:
-            config.read_process_environment()
-        return config.view.walg.walg_config_file
-
+    path_reader = path_reader_for(_boot().view.walg.walg_config_file)
     path = walg_config.configured_path(path_reader=path_reader)
     if path is None:
         print("WAL-G archiving is off (MEIVA_WALG_CONFIG_FILE is not set)")
@@ -233,14 +227,14 @@ def cmd_walg_status() -> int:
     return 0
 
 
-def warn_archive_inactive(*, path_reader: Callable[[], Path | None]) -> None:
-    """Say so when WAL archiving is configured but this Postgres is not carrying it.
-
-    A retained postmaster is only reloaded, so it keeps the launch arguments of its
-    previous start: `archive_mode` and the archive command take effect at the next
-    new launch. A warning, not a failure: the health probe is the alert.
-    """
-    expected = expected_archive(path_reader=path_reader)
+# meiva:note
+# Say so when WAL archiving is configured but this Postgres is not carrying it.
+#
+# A retained postmaster is only reloaded, so it keeps the launch arguments of its previous
+# start: `archive_mode` and the archive command take effect at the next new launch. A warning,
+# not a failure: the health probe is the alert.
+def warn_archive_inactive(walg_config_file: Path | None) -> None:
+    expected = expected_archive(path_reader=path_reader_for(walg_config_file))
     if expected is None:
         return
     try:

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 __all__ = ["CallerHost", "ServicePathChoice", "choose_service_path"]
@@ -14,6 +14,9 @@ __all__ = ["CallerHost", "ServicePathChoice", "choose_service_path"]
 #
 # The entry reads these once; nothing below it reads the environment or probes a port.
 # `occupied_ports` are those of the fixed port table that something already holds.
+# `transport_key` is the key the operator exported to open a database-capability bundle, already
+# taken out of the environment (empty when none was exported); only a join that carries a
+# bundle reads it. It is a secret, so it stays out of the repr.
 @dataclass(frozen=True)
 class CallerHost:
     service_path: str | None
@@ -21,6 +24,7 @@ class CallerHost:
     virtual_env: str | None
     prefix_venv: str | None
     occupied_ports: frozenset[int]
+    transport_key: str = field(default="", repr=False)
 
 
 # meiva:note

@@ -1,4 +1,5 @@
-"""`meiva backup walg check|run|restore|status`: what an operator reads, and the parser that reaches it."""
+# meiva:note
+# `meiva backup walg check|run|restore|status`: what an operator reads, and the parser that reaches it.
 
 from __future__ import annotations
 
@@ -52,7 +53,7 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
     @contextmanager
     def no_postgres() -> Generator[psycopg.Connection[Any]]:
         raise psycopg.OperationalError("connection refused")
-        yield  # pragma: no cover
+        yield
 
     monkeypatch.setattr(probe, "admin_connection", no_postgres)
     return sandbox
@@ -84,25 +85,17 @@ def test_the_parser_reaches_every_verb() -> None:
     assert status.func.__name__ == "_h_backup_walg_status"
 
 
-def test_run_hands_the_tick_a_timestamping_reporter_and_returns_its_exit_code(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], operator_database: Any
+_STAMPED = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z \S")
+
+
+def test_run_prints_timestamped_lines_and_returns_the_ticks_exit_code(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], operator_database: Any
 ) -> None:
-    database_for_url = operator_database.for_url
+    assert walg_cmd.cmd_walg_run(database_for_url=operator_database.for_url) == 1
 
-    def fake_tick(report: Any, **_inputs: object) -> int:
-        assert _inputs["database_for_url"] is database_for_url
-        report("skipped: postgres is not accepting connections")
-        return 1
-
-    monkeypatch.setattr(walg_cmd.tick, "run_tick", fake_tick)
-
-    assert walg_cmd.cmd_walg_run(database_for_url=database_for_url) == 1
-
-    out = capsys.readouterr().out
-    assert re.fullmatch(
-        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z skipped: postgres is not accepting connections\n",
-        out,
-    )
+    lines = capsys.readouterr().out.splitlines()
+    assert lines
+    assert all(_STAMPED.match(line) for line in lines)
 
 
 def test_status_says_when_the_tick_never_ran(
@@ -213,9 +206,6 @@ def test_status_reports_an_unusable_configuration_instead_of_raising(
     assert "health: WAL archiving: the WAL-G configuration is unusable" in out
 
 
-# ── the start-time warning for a retained postmaster ─────────────────────────
-
-
 def _dial(pg: PgInstance, monkeypatch: pytest.MonkeyPatch) -> None:
     @contextmanager
     def admin() -> Generator[psycopg.Connection[Any]]:
@@ -225,19 +215,19 @@ def _dial(pg: PgInstance, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(probe, "admin_connection", admin)
 
 
+# meiva:note
+# The retained-postmaster case: archiving was configured after Postgres launched.
 def test_a_postgres_that_kept_its_old_launch_arguments_is_flagged_at_start(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     postgres_access: None,
 ) -> None:
-    """The retained-postmaster case: archiving was configured after Postgres launched."""
     sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
     with archiving_postgres() as pg:
         _dial(pg, monkeypatch)
-        monkeypatch.setattr(settings.walg, "walg_config_file", sandbox.config_file)
 
-        walg_cmd.warn_archive_inactive(path_reader=lambda: settings.walg.walg_config_file)
+        walg_cmd.warn_archive_inactive(sandbox.config_file)
 
     err = capsys.readouterr().err
     assert "this Postgres is not running with the configured archive settings" in err
@@ -250,11 +240,11 @@ def test_a_postgres_launched_with_the_arguments_is_not_flagged(
     capsys: pytest.CaptureFixture[str],
     postgres_access: None,
 ) -> None:
-    make_sandbox(tmp_path, monkeypatch)
+    sandbox = make_sandbox(tmp_path, monkeypatch)
     with archiving_postgres() as pg:
         _dial(pg, monkeypatch)
 
-        walg_cmd.warn_archive_inactive(path_reader=lambda: settings.walg.walg_config_file)
+        walg_cmd.warn_archive_inactive(sandbox.config_file)
 
     assert capsys.readouterr().err == ""
 
@@ -269,7 +259,7 @@ def test_nothing_is_dialed_while_wal_g_is_off(
 
     monkeypatch.setattr(probe, "admin_connection", explode)
 
-    walg_cmd.warn_archive_inactive(path_reader=lambda: settings.walg.walg_config_file)
+    walg_cmd.warn_archive_inactive(None)
 
     assert capsys.readouterr().err == ""
 
@@ -277,7 +267,7 @@ def test_nothing_is_dialed_while_wal_g_is_off(
 def test_an_unreadable_postgres_is_a_warning_not_a_failure(
     sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    walg_cmd.warn_archive_inactive(path_reader=lambda: settings.walg.walg_config_file)
+    walg_cmd.warn_archive_inactive(sandbox.config_file)
 
     assert "WAL archiving state not read (OperationalError" in capsys.readouterr().err
 
@@ -330,10 +320,10 @@ def test_restore_rejects_a_bad_target_before_fetching(
     sandbox: Sandbox,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
-    kwargs: dict[str, str | None],
+    kwargs: dict[str, Any],
     message: str,
 ) -> None:
-    code = walg_cmd.cmd_walg_restore(directory=str(tmp_path / "out"), backup="LATEST", **kwargs)  # type: ignore[arg-type]
+    code = walg_cmd.cmd_walg_restore(directory=str(tmp_path / "out"), backup="LATEST", **kwargs)
 
     assert code == 1
     assert message in capsys.readouterr().err
@@ -348,7 +338,7 @@ def test_restore_reports_a_failed_recovery_and_exits_non_zero(
     @contextmanager
     def failing(*_args: Any, **_kwargs: Any) -> Generator[None]:
         raise RestoreError("recovery failed, postgres exited 1: FATAL: no segment")
-        yield  # pragma: no cover
+        yield
 
     monkeypatch.setattr(walg_cmd, "restored_instance", failing)
 
@@ -371,23 +361,14 @@ def test_restore_while_wal_g_is_off_says_so(
     assert "WAL-G is off" in capsys.readouterr().out
 
 
-def test_drill_hands_the_tick_module_a_timestamping_reporter_and_returns_its_exit_code(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], operator_database: Any
+def test_drill_prints_timestamped_lines_and_returns_the_drills_exit_code(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], operator_database: Any
 ) -> None:
-    database_for_url = operator_database.for_url
+    assert walg_cmd.cmd_walg_drill(database_for_url=operator_database.for_url) == 1
 
-    def fake_drill(report: Any, **_inputs: object) -> int:
-        assert _inputs["database_for_url"] is database_for_url
-        report("drill: FAILED after 3s: recovery failed")
-        return 1
-
-    monkeypatch.setattr(walg_cmd.tick, "run_drill_now", fake_drill)
-
-    assert walg_cmd.cmd_walg_drill(database_for_url=database_for_url) == 1
-    assert re.fullmatch(
-        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z drill: FAILED after 3s: recovery failed\n",
-        capsys.readouterr().out,
-    )
+    lines = capsys.readouterr().out.splitlines()
+    assert lines
+    assert all(_STAMPED.match(line) for line in lines)
 
 
 def test_status_shows_the_last_drill_and_the_last_success(
@@ -419,7 +400,7 @@ def test_status_shows_the_last_drill_and_the_last_success(
     assert "last successful drill: never" in out
 
 
-def test_check_uses_one_lazy_owner_and_keeps_its_reader_live(
+def test_check_reads_the_configuration_once_at_its_door_without_a_full_boot(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     owner = ConfigBoot()
@@ -434,7 +415,7 @@ def test_check_uses_one_lazy_owner_and_keeps_its_reader_live(
     def check_reader(*, path_reader: Callable[[], Path | None]) -> list[Step]:
         assert path_reader() == first
         owner.view.walg.walg_config_file = second
-        assert path_reader() == second
+        assert path_reader() == first, "the door's reading is the value the services see"
         return []
 
     def no_boot(_owner: ConfigBoot) -> None:

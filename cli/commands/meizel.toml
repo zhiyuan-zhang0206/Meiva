@@ -2,13 +2,14 @@ exports = ["agents", "cluster", "converge", "data_plane", "duration.py", "extens
 
 [uses]
 "_repo.py" = ["_setup.py"]
+"probe.py" = ["probe_report.py"]
 "cluster" = ["_repo.py", "converge", "probe.py"]
 "converge" = ["_repo.py"]
 "data_plane" = ["converge"]
 "extensions" = ["_repo.py", "converge", "duration.py"]
 "lifecycle" = ["_repo.py", "_setup.py", "cluster", "converge", "data_plane", "extensions", "observability", "probe.py"]
 "observability" = ["converge"]
-"tests" = ["_repo.py", "_setup.py", "converge", "data_plane", "extensions", "lifecycle", "observability", "permissions.py", "probe.py"]
+"tests" = ["_repo.py", "_setup.py", "converge", "data_plane", "extensions", "lifecycle", "observability", "permissions.py", "probe.py", "probe_report.py"]
 
 [external]
 "harness.py" = "runs the Python file or stdin the operator names, inside a harness attachment: the operator-authored program is run content, not a dependency of this repository"
@@ -16,3 +17,4 @@ exports = ["agents", "cluster", "converge", "data_plane", "duration.py", "extens
 [purity]
 "__init__.py" = "strict"
 "duration.py" = "strict"
+"probe_report.py" = "strict"

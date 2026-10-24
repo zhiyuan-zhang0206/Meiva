@@ -1,4 +1,5 @@
 [uses]
+"test_gateway_cold_start.py" = ["_gateway_cold_start_child.py"]
 "test_pg_owner_authority.py" = ["owned_postgres.py"]
 "test_start_host_dependencies.py" = ["_host_dependencies_path_child.py"]
 "test_start_migrations.py" = ["owned_postgres.py"]

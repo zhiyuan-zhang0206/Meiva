@@ -9,18 +9,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from base.host.system.hostport import Host
-from base.host.system.tests.fake_commands import DARWIN_ARM64
 from cli.commands.data_plane import host_dependencies
-from cli.commands.lifecycle.start import cold_start_steps
+from cli.commands.lifecycle.start.cold_start import cold_start_steps
 
 RUNNER = frozenset({"agent-runner"})
 REPO_ROOT = Path(__file__).resolve().parents[5]
 CHILD = Path(__file__).with_name("_host_dependencies_path_child.py")
-
-
-def _run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-    return subprocess.CompletedProcess([], 0, "", "")
 
 
 def test_host_dependency_step_runs_first() -> None:
@@ -30,12 +24,7 @@ def test_host_dependency_step_runs_first() -> None:
 
 
 def _owner_doc() -> Path:
-    return (
-        Path(host_dependencies.__file__).resolve().parents[1]
-        / "lifecycle"
-        / "docs"
-        / "start-host-dependencies.meiva.okf.md"
-    )
+    return REPO_ROOT / "cli/commands/lifecycle/docs/start-host-dependencies.meiva.okf.md"
 
 
 def _bullet_names(text: str, label: str) -> set[str]:
@@ -63,12 +52,13 @@ def test_the_owner_doc_names_the_same_groups_and_optional_rows() -> None:
 # A gate refusal over a host this process chooses, as stderr text. The child's
 # world holds no executable at all: its `Host` reports nothing on PATH and the
 # process PATH is empty too, so a probe that reached for the environment instead of
-# the host could not make the outcome depend on the machine running the test.
+# the host could not make the outcome depend on the machine running the test. Its home is a
+# fresh directory: importing the configuration must not read the operator's real unit.
 def _refusal(platform: str, tmp_path: Path) -> str:
     result = subprocess.run(
         [sys.executable, str(CHILD), str(tmp_path), platform],
         cwd=REPO_ROOT,
-        env={"PATH": str(tmp_path)},
+        env={"PATH": str(tmp_path), "MEIVA_HOME": str(tmp_path / "home")},
         capture_output=True,
         text=True,
         timeout=120,
@@ -104,20 +94,15 @@ def test_a_macos_host_is_refused_over_launchctl_with_its_repair(tmp_path: Path) 
 
 
 # meiva:note
-# A macOS host takes the launchctl rows even while the test process runs on Linux:
-# the platform comes from `Host`, never from `sys.platform`.
-def test_the_platform_is_read_from_the_host_not_the_process() -> None:
-    host = Host(
-        run=_run,
-        which=lambda name: f"/usr/bin/{name}",
-        platform=DARWIN_ARM64,
-        uid=1000,
-    )
+# A macOS selection takes the launchctl rows even while the test process runs on Linux: the
+# platform is a value of the scope (read from the converge context's host), never `sys.platform`.
+def test_the_platform_is_a_value_of_the_scope_not_the_process() -> None:
     scope = host_dependencies.StartScope(
         roles=RUNNER,
         services=frozenset({"gateway"}),
         data_plane=None,
-        host=host,
+        macos=True,
+        is_root=False,
         os_jobs=True,
         permissions_helper=False,
         require_github_pr=False,

@@ -14,6 +14,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 
+import psycopg
 import pytest
 
 from base.daemon.health import DaemonProbe
@@ -22,18 +23,23 @@ from base.native_process.root_control.client import RootClientError
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import root_driver
 from cli.commands.lifecycle.stop import do_stop
-from cli.commands.lifecycle.stop.restart import restart_agent_host
+from cli.commands.lifecycle.stop.restart import (
+    admit_agent_host_restart,
+    cmd_restart_agent_host,
+    restart_agent_host,
+)
 from cli.commands.lifecycle.tests.scripted_root import UnitRow, scripted_root
 from cli.commands.lifecycle.tests.stop.stop_support import (
     stop_environment,
     stop_request,
 )
 from cli.database import OperatorDatabaseFactory
-from cli.database.lifecycle_audit import lifecycle_audit
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+from cli.database.tests.lifecycle_rows import LifecycleRows
+from cli.database.tests.lifecycle_rows import lifecycle_rows as lifecycle_rows
 from services.supervision.roster.service_spec import ServiceSpec
 
 # meiva:note
@@ -76,6 +82,7 @@ def test_a_stop_downs_the_services_then_the_pty_sessions_unit_and_leaves_what_it
         rc = do_stop(
             stop_request(preserve=frozenset({"frontend"}), keep_browser=True),
             stop_environment(rooted, operator_database, operator_pipeline),
+            retained_children=[],
         )
     assert rc == 0
     asked = verbs(root.calls)
@@ -99,6 +106,7 @@ def test_keeping_the_shell_sessions_keeps_their_service_running_in_the_tree(
         rc = do_stop(
             stop_request(keep_shell_sessions=True, preserve=frozenset({"frontend"})),
             stop_environment(rooted, operator_database, operator_pipeline),
+            retained_children=[],
         )
     assert rc == 0
     assert verbs(root.calls) == [("down", "agent-host")]
@@ -114,6 +122,7 @@ def test_an_explicit_force_asks_the_root_for_the_interrupting_verb_on_both_stops
         rc = do_stop(
             stop_request(force=True, preserve=frozenset({"frontend"})),
             stop_environment(rooted, operator_database, operator_pipeline),
+            retained_children=[],
         )
     assert rc == 0
     asked = verbs(root.calls)
@@ -135,6 +144,7 @@ def test_a_normal_stop_never_uses_the_interrupting_verb_when_the_root_is_slow(
         rc = do_stop(
             stop_request(timeout=0.5, preserve=frozenset({"frontend"})),
             stop_environment(rooted, operator_database, operator_pipeline),
+            retained_children=[],
         )
     assert rc == 1
     assert time.monotonic() - started < 2.5, "the root's stop spends the operator's budget"
@@ -159,6 +169,7 @@ def test_a_force_stop_spends_the_operators_budget_on_the_root_as_well(
         do_stop(
             stop_request(force=True, timeout=0.5, preserve=frozenset({"frontend"})),
             stop_environment(rooted, operator_database, operator_pipeline),
+            retained_children=[],
         )
     assert time.monotonic() - started < 2.5
 
@@ -183,6 +194,7 @@ def test_a_force_stop_lists_the_live_service_tree_before_it_asks_and_stops_only_
             stop_environment(
                 rooted, operator_database, operator_pipeline, stdin=io.StringIO(answer)
             ),
+            retained_children=[],
         )
     assert rc == 0
     out = capsys.readouterr().out
@@ -217,62 +229,55 @@ def unready() -> DaemonProbe:
     return DaemonProbe.down("unready")
 
 
+# meiva:note
+# The restart as the command composes it: admit the live root, then down and up through it with
+# the agent-host spec a test chose (its readiness probe is the subject of two of the cases).
 def restart(
-    runtime: CommandRuntime,
-    probe: Callable[[], DaemonProbe],
-    audit: list[str],
-    *,
-    force: bool = False,
+    runtime: CommandRuntime, probe: Callable[[], DaemonProbe], *, force: bool = False
 ) -> int:
-    def record(verb: str, units: Sequence[str]) -> None:
-        audit.append(f"{verb}:{','.join(units)}")
-
-    with lifecycle_audit(record):
-        return restart_agent_host(
-            runtime, agent_host(probe), force=force, timeout=12.0, start_timeout=0.2
-        )
+    client = admit_agent_host_restart(runtime, timeout=12.0)
+    assert client is not None
+    return restart_agent_host(
+        runtime, client, agent_host(probe), force=force, timeout=12.0, start_timeout=0.2
+    )
 
 
 @pytest.mark.parametrize(("force", "verb"), [(False, "down"), (True, "force-down")])
 def test_restart_agent_host_downs_then_ups_it_with_the_chosen_interruption(
-    rooted: CommandRuntime, force: bool, verb: str
+    rooted: CommandRuntime, lifecycle_rows: LifecycleRows, force: bool, verb: str
 ) -> None:
-    audit: list[str] = []
     with scripted_root(rooted.home, [UnitRow("agent-host"), UnitRow("gateway")]) as root:
-        rc = restart(rooted, ready, audit, force=force)
+        rc = restart(rooted, ready, force=force)
     assert rc == 0
     assert verbs(root.calls) == [(verb, "agent-host"), ("up", "agent-host")]
-    assert audit == [f"{verb}:agent-host", "up:agent-host"], (
+    assert lifecycle_rows.requests() == [(verb, ["agent-host"]), ("up", ["agent-host"])], (
         "each request is named before it leaves"
     )
     assert root.units["agent-host"].state == "running" and root.units["gateway"].state == "running"
 
 
 def test_restart_agent_host_without_a_live_root_changes_nothing(
-    rooted: CommandRuntime, capsys: pytest.CaptureFixture[str]
+    rooted: CommandRuntime, lifecycle_rows: LifecycleRows, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    audit: list[str] = []
-    assert restart(rooted, ready, audit) == 1
-    assert audit == []
+    assert admit_agent_host_restart(rooted, timeout=12.0) is None
+    assert lifecycle_rows.requests() == []
     assert "no live meiva-root on this unit" in capsys.readouterr().err
 
 
 def test_restart_agent_host_refuses_a_root_that_runs_no_agent_host(
-    rooted: CommandRuntime, capsys: pytest.CaptureFixture[str]
+    rooted: CommandRuntime, lifecycle_rows: LifecycleRows, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    audit: list[str] = []
     with scripted_root(rooted.home, [UnitRow("gateway")]) as root:
-        assert restart(rooted, ready, audit) == 1
-    assert verbs(root.calls) == [] and audit == []
+        assert admit_agent_host_restart(rooted, timeout=12.0) is None
+    assert verbs(root.calls) == [] and lifecycle_rows.requests() == []
     assert "runs no agent-host unit" in capsys.readouterr().err
 
 
 def test_restart_agent_host_fails_when_it_does_not_become_ready(
     rooted: CommandRuntime, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    audit: list[str] = []
     with scripted_root(rooted.home, [UnitRow("agent-host")]) as root:
-        assert restart(rooted, unready, audit) == 1
+        assert restart(rooted, unready) == 1
     assert verbs(root.calls) == [("down", "agent-host"), ("up", "agent-host")]
     assert "agent-host did not become ready after restart" in capsys.readouterr().err
 
@@ -280,10 +285,59 @@ def test_restart_agent_host_fails_when_it_does_not_become_ready(
 def test_restart_agent_host_raises_when_the_root_refuses_the_up_and_never_waits(
     rooted: CommandRuntime,
 ) -> None:
-    audit: list[str] = []
     with (
         scripted_root(rooted.home, [UnitRow("agent-host", refuse_up=True)]) as root,
         pytest.raises(root_driver.RootDriverError, match="up agent-host failed"),
     ):
-        restart(rooted, ready, audit)
+        restart(rooted, ready)
     assert verbs(root.calls) == [("down", "agent-host"), ("up", "agent-host")]
+
+
+# meiva:note
+# The command end to end with the roster's own agent-host spec: nothing answers its health port
+# here, so the restart brings the unit up through the root and then reports it never became ready.
+def test_the_command_restarts_agent_host_through_the_root_and_reports_a_unit_that_never_answers(
+    rooted: CommandRuntime,
+    operator_database: OperatorDatabaseFactory,
+    db_conn: psycopg.Connection,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with scripted_root(rooted.home, [UnitRow("agent-host")]) as root:
+        rc = cmd_restart_agent_host(
+            force=False,
+            timeout=12.0,
+            start_timeout=0.2,
+            database_factory=operator_database,
+            command=rooted,
+        )
+    assert rc == 1
+    assert verbs(root.calls) == [("down", "agent-host"), ("up", "agent-host")]
+    assert "agent-host did not become ready after restart" in capsys.readouterr().err
+    # meiva:note
+    # The command audited itself: its two requests and its failed outcome are rows of this test's
+    # database.
+    recorded = db_conn.execute(
+        "SELECT event_name, attributes->>'verb', attributes->>'outcome' FROM audit_events "
+        "WHERE event_name IN ('lifecycle_request', 'lifecycle_result') ORDER BY id"
+    ).fetchall()
+    assert recorded == [
+        ("lifecycle_request", "down", None),
+        ("lifecycle_request", "up", None),
+        ("lifecycle_result", "up", "failed"),
+    ]
+
+
+def test_the_command_without_a_live_root_says_so_and_exits_nonzero(
+    rooted: CommandRuntime,
+    operator_database: OperatorDatabaseFactory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc = cmd_restart_agent_host(
+        force=False,
+        timeout=12.0,
+        start_timeout=0.2,
+        database_factory=operator_database,
+        command=rooted,
+    )
+    assert rc == 1
+    assert "no live meiva-root on this unit" in capsys.readouterr().err

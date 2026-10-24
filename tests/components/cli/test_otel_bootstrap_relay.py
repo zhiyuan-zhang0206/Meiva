@@ -16,6 +16,7 @@ from base.host.db_authority import unit
 from base.host.db_authority.api import telemetry_token
 from base.paths.tests.homes import point_home
 from cli.commands.observability import otel_collector as collector
+from cli.commands.observability.inputs import collector_settings
 from cli.database.tests.command_inputs import command_machine as command_machine
 from gateway.tests.agents.gateway_auth import without_credentials
 from tests.fixtures.gateway_config import gateway_test_client
@@ -86,6 +87,9 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
             Path(__file__).resolve().parents[3],
             tmp_path,
             roles=frozenset({"agent-runner"}),
+            settings=collector_settings(
+                observability=settings, data_plane=config.settings.data_plane
+            ),
             database_factory=operator_database,
             machine=command_machine,
         )
@@ -116,12 +120,9 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
         "http://example.test:54318#fragment",
     ],
 )
-def test_missing_or_invalid_gateway_projection_fails_closed(
-    monkeypatch: pytest.MonkeyPatch, endpoint: str
-) -> None:
-    monkeypatch.setattr(config.settings.observability, "gateway_otlp_endpoint", endpoint)
+def test_missing_or_invalid_gateway_projection_fails_closed(endpoint: str) -> None:
     with pytest.raises(RuntimeError, match="gateway bootstrap"):
-        collector.gateway_otel_ingress_endpoint()
+        collector.gateway_otel_ingress_endpoint(endpoint)
 
 
 def test_a_valid_gateway_projection_carries_no_problem() -> None:

@@ -20,6 +20,7 @@ import psycopg
 import pytest
 
 from base.deploy.lifecycle import home_lifecycle_locks, start_serving
+from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.native_process import pid_starttime_ticks
 from base.sessions.pty import client
 from base.sessions.pty.tests import pty_jobs as jobs
@@ -85,6 +86,7 @@ def test_keeping_shell_sessions_preserves_unselected_process_and_real_pty(
     rc = do_stop(
         stop_request(keep_shell_sessions=True, timeout=5),
         stop_environment(stop_runtime, operator_database, operator_pipeline),
+        retained_children=[],
     )
     assert rc == 0
     assert orchestration.poll() is None
@@ -110,7 +112,11 @@ def test_the_restart_stop_leg_closes_the_shells_and_tells_a_busy_sessions_owner(
     name = "meiva-agent-987-shell-2056-smooth"
     busy_session(home, name, jobs.TERM_OK, pty_reaper)
     request = restart_stop_request(RESTART, roles=stop_runtime.machine.role())
-    rc = do_stop(request, stop_environment(stop_runtime, operator_database, operator_pipeline))
+    rc = do_stop(
+        request,
+        stop_environment(stop_runtime, operator_database, operator_pipeline),
+        retained_children=[],
+    )
     assert rc == 0
     assert not client.has_session(name), "a restart closes the persistent shells"
     assert [notice["name"] for notice in written_notices(db_conn)] == [name], (
@@ -133,6 +139,7 @@ def test_a_full_stop_closes_a_real_idle_shell_session(
     rc = do_stop(
         stop_request(timeout=5),
         stop_environment(stop_runtime, operator_database, operator_pipeline),
+        retained_children=[],
     )
     assert rc == 0
     assert not client.has_session(name)
@@ -152,6 +159,7 @@ def test_repeated_stop_needs_no_live_database(
     rc = do_stop(
         stop_request(timeout=1),
         stop_environment(stop_runtime, down, operator_pipeline),
+        retained_children=[],
     )
     assert rc == 0
 
@@ -223,7 +231,11 @@ def test_explicit_force_stops_host_and_closes_shell_sessions_unless_kept(
         if how != "stop"
         else stop_request(force=True, timeout=15.0)
     )
-    rc = do_stop(request, stop_environment(stop_runtime, operator_database, operator_pipeline))
+    rc = do_stop(
+        request,
+        stop_environment(stop_runtime, operator_database, operator_pipeline),
+        retained_children=[],
+    )
     assert rc == 0
     assert client.has_session(name) is kept
     assert written_notices(db_conn) == [], "force writes no owner notices"
@@ -248,6 +260,7 @@ def test_stop_reports_a_data_plane_failure_without_restarting_anything(
     rc = do_stop(
         stop_request(keep_infra=False, timeout=5),
         stop_environment(stop_runtime, operator_database, operator_pipeline),
+        retained_children=[],
     )
     assert rc == 1
     err = capsys.readouterr().err
@@ -288,12 +301,14 @@ def test_a_stop_run_from_inside_a_supervised_session_is_refused_before_it_stops_
         do_stop(
             stop_request(timeout=1),
             stop_environment(stop_runtime, operator_database, operator_pipeline),
+            retained_children=[],
         )
     # meiva:note
     # An explicit force is the operator's own interruption and was never refused for this.
     forced = do_stop(
         stop_request(force=True, timeout=1),
         stop_environment(stop_runtime, operator_database, operator_pipeline),
+        retained_children=[],
     )
     assert forced == 0
 
@@ -305,6 +320,21 @@ def test_retiring_extras_on_a_host_without_a_helper_retires_nothing(
     stop_extras(stop_runtime, deadline, retained=frozenset())
     with pytest.raises(ValueError, match="retains browser"):
         stop_extras(stop_runtime, deadline, retained=frozenset({"browser"}))
+
+
+# meiva:note
+# On a macOS host the stop hands this home's permissions helper to the launchd owner, asking
+# about the port the configuration registered, and what that owner refuses is the stop's failure.
+# A port no helper can be registered on is refused before any launchd job is queried.
+@pytest.mark.requires_host("darwin")
+def test_a_macos_stop_asks_the_helper_owner_about_its_configured_port_and_lets_a_refusal_through(
+    stop_runtime: CommandRuntime,
+) -> None:
+    macos = replace(stop_runtime, host=fake_host(platform=DARWIN_ARM64))
+    macos.config.set_field("permissions_helper_port", 0)
+
+    with pytest.raises(ValueError, match="canonical home and registered port"):
+        stop_extras(macos, time.monotonic() + 30.0, retained=frozenset())
 
 
 # meiva:note
@@ -323,6 +353,7 @@ def test_a_stop_revokes_the_serving_authority_of_the_prior_start(
         rc = do_stop(
             stop_request(force=force, timeout=5),
             stop_environment(stop_runtime, operator_database, operator_pipeline),
+            retained_children=[],
         )
         assert rc == 0
         assert not start_serving.state_path().exists(), f"force={force}"

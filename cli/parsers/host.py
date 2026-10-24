@@ -161,11 +161,10 @@ def h_stop(
         command=args.runtime,
         database_factory=args.database_factory,
         producer=args.producer,
-        retained_children=retained_children,
         stdin=sys.stdin,
     )
     try:
-        return cmd_stop(request, environment)
+        return cmd_stop(request, environment, retained_children)
     except ValueError as error:
         return refuse_conflict("stop", error)
 
@@ -224,7 +223,8 @@ def h_restart(
             return refuse_conflict("restart", error)
     if retained_children is None:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
-    from cli.commands.lifecycle.stop.restart import cmd_restart
+    from base.paths import repo_root
+    from cli.commands.lifecycle.stop.restart import cmd_restart, restart_runtime
 
     try:
         return cmd_restart(
@@ -237,6 +237,7 @@ def h_restart(
             force=args.mode == "force",
             timeout=args.timeout,
             start_timeout=args.start_timeout,
+            runtime=restart_runtime(repo_root(), home=args.runtime.home),
             retained_children=retained_children,
             database_factory=args.database_factory,
             producer=args.producer,
@@ -253,9 +254,11 @@ def _h_status(args: argparse.Namespace) -> int:
 
 
 def _h_converge(args: argparse.Namespace) -> int:
+    from base.paths import repo_root
     from cli.commands.lifecycle.converge_host import cmd_converge
 
     return cmd_converge(
+        repo=repo_root(),
         only_services=tuple(args.only_service or ()),
         disabled_services=tuple(args.disable_service or ()),
         all_services=args.all_services,
@@ -282,7 +285,7 @@ def _h_firewall_sync(args: argparse.Namespace) -> int:
 
 
 def _h_trace_ship(args: argparse.Namespace) -> int:
-    from base.paths import meiva_home, traces_dir
+    from base.paths import traces_dir
     from cli.commands.observability.trace import cmd_trace_ship
 
     return cmd_trace_ship(
@@ -290,7 +293,9 @@ def _h_trace_ship(args: argparse.Namespace) -> int:
         until=args.until,
         dry_run=args.dry_run,
         machine=args.runtime.machine,
-        traces_dir=traces_dir(meiva_home()),
+        traces_dir=traces_dir(args.runtime.home),
+        config=args.runtime.config,
+        home=args.runtime.home,
     )
 
 
@@ -639,6 +644,8 @@ def _h_lgtm(
     from cli.start_runtime import StartRuntime
 
     if args.lgtm_cmd in ("on", "off"):
+        if retained_children is None:
+            raise ValueError("PostgreSQL launch requires its caller-owned child retention")
         only = tuple(args.only_service or ())
         disabled = tuple(args.disable_service or ())
         enabled = args.lgtm_cmd == "on"
@@ -649,7 +656,7 @@ def _h_lgtm(
             only_services=only,
             disabled_services=disabled,
             all_services=args.all_services,
-            runtime=StartRuntime.development(repo_root()),
+            runtime=StartRuntime.admit(repo_root()),
             retained_children=retained_children,
             database_factory=args.database_factory,
             producer=args.producer,
@@ -659,9 +666,12 @@ def _h_lgtm(
         from cli.commands.observability.grafana_render import cmd_grafana_render
 
         return cmd_grafana_render(
-            force=args.force, repo_only=args.repo_only, database_factory=args.database_factory
+            home=args.runtime.home,
+            force=args.force,
+            repo_only=args.repo_only,
+            database_factory=args.database_factory,
         )
-    return cmd_lgtm_status(machine=args.runtime.machine)
+    return cmd_lgtm_status(home=args.runtime.home, machine=args.runtime.machine)
 
 
 def add_lgtm_parser(

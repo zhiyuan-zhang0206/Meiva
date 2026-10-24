@@ -149,45 +149,49 @@ def test_native_scope_excludes_grafana_archives_symlinks_and_nested_files(
     assert str(symlink) not in out
 
 
-def test_logs_path_flag_reaches_the_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+# meiva:note
+# `--logs-path` and `--size-mib` reach the command through the real parser and dispatch: a log
+# written just now is under the default 64 MiB threshold and kept, and rotates under `--size-mib 8`.
+def test_logs_path_and_size_flags_reach_the_command(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from cli import main as cli_main
-    from cli.commands.observability import logs as commands
 
-    seen: list[dict[str, object]] = []
+    log = _dated_file(tmp_path / "meiva-gateway.out.log", b"", datetime.now(UTC))
+    with log.open("r+b") as stream:
+        stream.truncate(9 << 20)
 
-    def rotate(**kwargs: object) -> int:
-        seen.append(kwargs)
-        return 0
+    kept = cli_main.main(["logs", "rotate", "--dry-run", "--logs-path", str(tmp_path)])
 
-    monkeypatch.setattr(commands, "cmd_logs_rotate", rotate)
+    assert kept == 0
+    assert f"rotate_state\tpath={log}\tbytes=0\taction=kept" in capsys.readouterr().out
 
-    rc = cli_main.main(
+    rotated = cli_main.main(
         ["logs", "rotate", "--dry-run", "--size-mib", "8", "--logs-path", str(tmp_path)]
     )
 
-    assert rc == 0
-    assert seen == [{"dry_run": True, "size_mib": 8, "logs_path": tmp_path}]
+    assert rotated == 0
+    assert f"rotate_state\tpath={log}\tbytes={9 << 20}\taction=rotated" in capsys.readouterr().out
+    assert log.stat().st_size == 9 << 20
 
 
+# meiva:note
+# A log that cannot be read cannot be archived: the failure is reported with the path, the exit
+# code is 1, the log is left as it was and no archive appears.
 def test_io_error_is_reported_and_sets_failure_exit_code(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from cli.commands.observability import logs
 
     log = _dated_file(tmp_path / "meiva-gateway.out.log", b"gateway", _NOW - timedelta(days=1))
-
-    def deny_copy(_source: str | Path, _archive: str | Path) -> None:
-        raise PermissionError("denied")
-
-    monkeypatch.setattr(logs.shutil, "copyfile", deny_copy)
-
-    rc = logs.cmd_logs_rotate(dry_run=False, size_mib=64, logs_path=tmp_path, now=_NOW)
+    log.chmod(0o000)
+    try:
+        rc = logs.cmd_logs_rotate(dry_run=False, size_mib=64, logs_path=tmp_path, now=_NOW)
+    finally:
+        log.chmod(0o600)
 
     captured = capsys.readouterr()
     assert rc == 1
     assert log.read_bytes() == b"gateway"
-    assert f"rotate_error\tpath={log}\terror=denied" in captured.err
+    assert not _archive(log).exists()
+    assert f"rotate_error\tpath={log}\terror=[Errno 13] Permission denied" in captured.err

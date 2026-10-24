@@ -27,6 +27,7 @@ from cli.commands.data_plane.stop_waits import remaining
 from cli.commands.lifecycle import root_driver
 from cli.commands.lifecycle.stop import browser, extras, shell_sessions
 from cli.commands.lifecycle.stop.announce import announce_stopping
+from cli.commands.lifecycle.stop.force_outcome import DataPlaneStopError, data_plane_failure
 from cli.commands.lifecycle.stop.render import data_plane_skip_line
 from cli.commands.lifecycle.stop.steps import (
     Announce,
@@ -49,28 +50,35 @@ from cli.database.runtime import CommandRuntime
 # meiva:note
 # Everything a stop reads from its invocation, handed down from the command entry.
 #
-# `retained_children` is the caller's registry of the processes it spawned, kept until its
-# final telemetry drain; `stdin` is the stream the confirm gate reads its answer from (None for a stop that
-# never asks, such as a restart's stop leg).
+# `stdin` is the stream the confirm gate reads its answer from (None for a stop that never asks,
+# such as a restart's stop leg). The caller's registry of the processes it spawned
+# (`retained_children`, kept until its final telemetry drain) is a mutable list the caller owns,
+# so it travels as an argument of the stop rather than inside this frozen value.
 @dataclass(frozen=True)
 class StopEnvironment:
     command: CommandRuntime
     database_factory: DatabaseFactory
     producer: Callable[[], EventPipeline]
-    retained_children: list[subprocess.Popen[bytes]] | None
     stdin: TextIO | None
     shell_cleanup_wait_s: float = shell_sessions.SHELL_SESSION_STOP_WAIT_S
 
 
 # meiva:note
-# What one stop accumulates while it runs: its deadline, its per-phase accounting, and
-# what the report must say (an escalated Postgres shutdown; the pooler's clients at its stop).
+# What one stop accumulates while it runs: its deadline and its per-phase accounting, which a
+# failed stop reports even though the plan raised before it could return anything.
 @dataclass
 class StopRun:
     deadline: float
     phases: list[tuple[str, float]]
-    notes: list[str]
-    clients: list[str]
+
+
+# meiva:note
+# What a completed stop has to say: an escalated Postgres shutdown (`notes`) and the pooler's
+# clients still connected at its stop (`clients`).
+@dataclass(frozen=True)
+class StopOutcome:
+    notes: tuple[str, ...]
+    clients: tuple[str, ...]
 
 
 # meiva:note
@@ -94,13 +102,31 @@ def timed_phase(phases: list[tuple[str, float]], label: str | None) -> Generator
 
 # meiva:note
 # Perform the plan's steps in order; the first failure stops the plan.
-def execute_plan(plan: StopPlan, env: StopEnvironment, run: StopRun, *, timed: bool) -> None:
+def execute_plan(
+    plan: StopPlan,
+    env: StopEnvironment,
+    run: StopRun,
+    retained_children: list[subprocess.Popen[bytes]] | None,
+    *,
+    timed: bool,
+) -> StopOutcome:
+    outcome = StopOutcome((), ())
     for step in plan.steps:
         with timed_phase(run.phases, phase_label(step) if timed else None):
-            _perform(step, env, run)
+            reported = _perform(step, env, run, retained_children)
+        if reported is not None:
+            outcome = reported
+    return outcome
 
 
-def _perform(step: StopStep, env: StopEnvironment, run: StopRun) -> None:
+# meiva:note
+# Perform one step; only the data-plane stop has something to report.
+def _perform(
+    step: StopStep,
+    env: StopEnvironment,
+    run: StopRun,
+    retained_children: list[subprocess.Popen[bytes]] | None,
+) -> StopOutcome | None:
     command = env.command
     match step:
         case ClearServing():
@@ -137,17 +163,25 @@ def _perform(step: StopStep, env: StopEnvironment, run: StopRun) -> None:
         case StopDataPlane(force):
             config = data_plane_config_from_boot(command.config)
             if force:
-                stop_cluster_instance(
-                    config, retained_children=env.retained_children, producer=env.producer
+                failure = data_plane_failure(
+                    stop_cluster_instance(
+                        config,
+                        home=command.home,
+                        retained_children=retained_children,
+                        producer=env.producer,
+                    )
                 )
+                if failure is not None:
+                    raise DataPlaneStopError(failure)
             else:
-                maintenance_stop.stop(
+                stopped = maintenance_stop.stop(
                     config,
                     remaining(run.deadline),
-                    notes=run.notes,
-                    clients=run.clients,
-                    retained_children=env.retained_children,
+                    home=command.home,
+                    retained_children=retained_children,
                     producer=env.producer,
                 )
+                return StopOutcome(stopped.notes, stopped.clients)
         case SkipDataPlane(plane):
             print(data_plane_skip_line(plane))
+    return None

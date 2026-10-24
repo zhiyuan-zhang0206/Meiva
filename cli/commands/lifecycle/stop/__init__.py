@@ -5,7 +5,9 @@
 # a normal stop's shell-session closure SIGKILLs what outlives its bounded grace. Explicit force
 # uses the separate resource teardown. Every keep-or-stop choice (shell sessions, browser,
 # extras, data plane, other services), the interruption mode and the budget are the caller's
-# explicit arguments; nothing here defaults or infers one.
+# explicit arguments; nothing here defaults or infers one. The caller's registry of the processes
+# it spawned (`retained_children`) is an argument of the stop as well: it is a list the caller
+# keeps mutating, so it stays out of the frozen `StopEnvironment`.
 #
 # The stop is a plan and a shell. `plan.plan_stop` turns the choices and the host facts read
 # here into the steps (what runs, in what order, what is kept); `execute` performs them. This
@@ -36,9 +38,14 @@ from cli.commands.lifecycle.stop.choices import (
 )
 from cli.commands.lifecycle.stop.evidence import require_unstarted_initialization
 from cli.commands.lifecycle.stop.execute import StopEnvironment, StopRun, execute_plan
+from cli.commands.lifecycle.stop.force_outcome import DataPlaneStopError
 from cli.commands.lifecycle.stop.plan import plan_stop, require_consistent
 from cli.commands.lifecycle.stop.render import preview_lines
-from cli.commands.lifecycle.stop.report import finish_stop, report_incomplete
+from cli.commands.lifecycle.stop.report import (
+    finish_stop,
+    report_force_incomplete,
+    report_incomplete,
+)
 from cli.commands.lifecycle.stop.steps import StopPlan
 from cli.database.lifecycle_audit import operator_lifecycle_audit
 from services.supervision.roster import build_services
@@ -88,7 +95,11 @@ def _agrees(stdin: TextIO | None) -> bool:
 # A refusal (a contradictory choice, a stop run from inside the work it drains) is raised
 # before a single unit is signalled.
 @exclusive_resources
-def do_stop(request: StopRequest, env: StopEnvironment) -> int:
+def do_stop(
+    request: StopRequest,
+    env: StopEnvironment,
+    retained_children: list[subprocess.Popen[bytes]] | None,
+) -> int:
     choices: StopChoices = request.choices
     require_consistent(choices, pty_unit=SERVICE_UNIT)
     require_valid_timeout(request.timeout)
@@ -103,15 +114,15 @@ def do_stop(request: StopRequest, env: StopEnvironment) -> int:
         try:
             unstarted = require_unstarted_initialization(env.command.home)
         except _STOP_FAILURES as exc:
-            report_incomplete(exc, [], owns_journal=False)
+            report_incomplete(exc, [], owns_journal=False, journal_opened=False)
             return 1
         if unstarted:
             plan = plan_stop(choices, replace(host, unstarted=True), request.window)
     if not _admitted(plan, request, env):
         return 0
     if choices.force:
-        return _run_force(plan, request, env)
-    return _run_normal(plan, request, env)
+        return _run_force(plan, request, env, retained_children)
+    return _run_normal(plan, request, env, retained_children)
 
 
 # meiva:note
@@ -129,34 +140,52 @@ def _admitted(plan: StopPlan, request: StopRequest, env: StopEnvironment) -> boo
     return True
 
 
-def _run_force(plan: StopPlan, request: StopRequest, env: StopEnvironment) -> int:
-    run = StopRun(deadline_after(request.timeout), [], [], [])
-    execute_plan(plan, env, run, timed=False)
+def _run_force(
+    plan: StopPlan,
+    request: StopRequest,
+    env: StopEnvironment,
+    retained_children: list[subprocess.Popen[bytes]] | None,
+) -> int:
+    run = StopRun(deadline_after(request.timeout), [])
+    try:
+        execute_plan(plan, env, run, retained_children, timed=False)
+    except DataPlaneStopError as exc:
+        report_force_incomplete(exc)
+        return 1
     return 0
 
 
-def _run_normal(plan: StopPlan, request: StopRequest, env: StopEnvironment) -> int:
+def _run_normal(
+    plan: StopPlan,
+    request: StopRequest,
+    env: StopEnvironment,
+    retained_children: list[subprocess.Popen[bytes]] | None,
+) -> int:
     deadline = deadline_after(request.timeout)
     owns_journal = begin("stop", deadline=deadline)
     # meiva:note
     # Per-phase accounting: a failed stop names each phase and how much of the shared budget it
     # consumed, so the operator sees WHERE the budget went, never a bare timeout (#2045).
-    run = StopRun(deadline, [], [], [])
+    run = StopRun(deadline, [])
     try:
-        execute_plan(plan, env, run, timed=True)
+        outcome = execute_plan(plan, env, run, retained_children, timed=True)
     except _STOP_FAILURES as exc:
-        report_incomplete(exc, run.phases, owns_journal=owns_journal)
+        report_incomplete(exc, run.phases, owns_journal=owns_journal, journal_opened=True)
         return 1
-    return finish_stop(owns_journal=owns_journal, notes=run.notes, clients=run.clients)
+    return finish_stop(owns_journal=owns_journal, notes=outcome.notes, clients=outcome.clients)
 
 
-def cmd_stop(request: StopRequest, env: StopEnvironment) -> int:
+def cmd_stop(
+    request: StopRequest,
+    env: StopEnvironment,
+    retained_children: list[subprocess.Popen[bytes]] | None,
+) -> int:
     # meiva:note
     # Stop this unit as the operator chose; retain its data.
     #
     # `keep_infra` is None exactly on a host without the gateway capability (no local data
     # plane); every other choice is a required explicit answer.
     with operator_lifecycle_audit(database_factory=env.database_factory) as audit:
-        code = do_stop(request, env)
+        code = do_stop(request, env, retained_children)
         audit.exited(code)
         return code

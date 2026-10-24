@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
+from base.host.atomic_io import write_text_atomic
 from base.telemetry.converge_report import report_converge_overwrite, report_converge_preserve
 
 LocalEditPolicy = Literal["preserve", "overwrite"]
@@ -18,6 +18,11 @@ LocalEditPolicy = Literal["preserve", "overwrite"]
 # `overwrite` restores a repository-owned surface and moves the record with it.
 # A destination with no record is adopted under either policy, and either hit
 # reports one telemetry event through converge_report.
+#
+# The content is published atomically and owner-only from creation (the temporary file is created
+# 0600 and the rename publishes only the fully written file), so a reader such as Grafana's
+# provisioning watcher never sees a torn render and a config carrying a bearer is never exposed
+# through the process umask.
 # meiva:link cli/commands/converge/docs/rendered-files.meiva.okf.md
 def write_rendered_guarded(
     path: Path,
@@ -26,7 +31,6 @@ def write_rendered_guarded(
     key: str,
     *,
     surface: str,
-    writer: Callable[[Path, str], None] | None = None,
     on_local_edit: LocalEditPolicy = "preserve",
 ) -> str | None:
     recorded: dict[str, str] = {}
@@ -48,10 +52,7 @@ def write_rendered_guarded(
                 "(this surface is repository-owned)"
             )
     path.parent.mkdir(parents=True, exist_ok=True)
-    if writer is None:
-        path.write_text(content, encoding="utf-8")
-    else:
-        writer(path, content)
+    write_text_atomic(path, content, encoding="utf-8", suffix="")
     recorded[key] = hashlib.sha256(content.encode("utf-8")).hexdigest()
     hashes_path.write_text(json.dumps(recorded, indent=2) + "\n", encoding="utf-8")
     return drift

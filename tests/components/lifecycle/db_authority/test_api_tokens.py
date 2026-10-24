@@ -32,9 +32,9 @@ from base.cluster.machine import (
 from base.config import settings
 from base.daemon.http_transport import start_daemon_http
 from base.host.db_authority import api, delivery, ledger, model, unit
-from base.host.env import bootstrap
 from base.host.net.auth import ClusterSecretMissingError, bearer_header, cookie_name
 from cli.commands.data_plane import bringup
+from cli.commands.data_plane.instance.launch_delivery import LaunchDelivery
 from gateway.http.auth import request_principal
 from gateway.http.auth.request_principal import cluster_credential
 from gateway.http.auth.webhook import authenticate_webhook
@@ -504,28 +504,27 @@ def test_a_bundle_cannot_be_issued_without_the_human_secret(gateway: Path, tmp_p
 # ── launch delivery and clients ─────────────────────────────────────────────
 
 
-def test_launch_delivers_each_service_its_class_token(
-    gateway: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_launch_delivers_each_service_its_class_token(gateway: Path) -> None:
     tokens = _tokens(gateway).api
-    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda *_args, **_kwargs: True)
-    assert bringup.api_delivery("gateway", remote_data_plane=False) == {
-        api.API_TOKEN_ENV: tokens.gateway
-    }
-    assert bringup.api_delivery("runner", remote_data_plane=False) == {
-        api.API_TOKEN_ENV: tokens.runner
-    }
+    launch = LaunchDelivery(
+        home=gateway,
+        remote_data_plane=False,
+        environment={"MEIVA_MACHINE_SERVE_GATEWAY": "true"},
+        env_file={},
+    )
+    assert bringup.api_delivery("gateway", delivery=launch) == {api.API_TOKEN_ENV: tokens.gateway}
+    assert bringup.api_delivery("runner", delivery=launch) == {api.API_TOKEN_ENV: tokens.runner}
 
 
 def test_a_pure_runner_launch_delivers_its_capability_token(
-    gateway: Path, runner_home: Path, monkeypatch: pytest.MonkeyPatch
+    gateway: Path, runner_home: Path
 ) -> None:
-    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda *_args, **_kwargs: False)
-    assert bringup.api_delivery("runner", remote_data_plane=False) == {
+    launch = LaunchDelivery(home=runner_home, remote_data_plane=False, environment={}, env_file={})
+    assert bringup.api_delivery("runner", delivery=launch) == {
         api.API_TOKEN_ENV: _tokens(gateway).api.runner
     }
     with pytest.raises(RuntimeError, match="cannot launch a gateway-class"):
-        bringup.api_delivery("gateway", remote_data_plane=False)
+        bringup.api_delivery("gateway", delivery=launch)
 
 
 def test_api_class_follows_the_login_class_else_the_single_capability() -> None:

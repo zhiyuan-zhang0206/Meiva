@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 
 import pytest
@@ -21,7 +20,6 @@ from base.deploy.schema.tests.migration_support import git, init_repo
 from base.host.system.tests.fake_commands import fake_host
 from cli.commands.lifecycle.start import readiness_preflight as preflight
 from cli.database.runtime import CommandRuntime
-from cli.start_runtime import StartRuntime
 
 
 @pytest.fixture
@@ -86,7 +84,6 @@ def _run(
         repo,
         home=home,
         check_launcher=check_launcher,
-        runtime=StartRuntime(repo, repo, Path(sys.executable).absolute()),
         only_services=(),
         disabled_services=(),
         all_services=True,

@@ -42,7 +42,6 @@ from base.paths import meiva_home
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli import parsers, preflight, start_intent
-from cli.commands.converge.spec import UserSession
 from cli.commands.lifecycle import stop
 from cli.commands.lifecycle.stop.execute import StopEnvironment
 from cli.database import (
@@ -52,7 +51,7 @@ from cli.database import (
     operator_database_factory,
     operator_event_pipeline,
 )
-from cli.database.runtime import CommandRuntime
+from cli.database.runtime import CommandRuntime, UserSession
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
@@ -201,9 +200,13 @@ def test_main_hands_start_the_explicit_caller_child_owner_or_a_fresh_one(
 def test_main_hands_stop_the_explicit_caller_child_owner(monkeypatch: pytest.MonkeyPatch) -> None:
     owners: list[list[subprocess.Popen[bytes]]] = []
 
-    def stopped(_request: object, env: StopEnvironment) -> int:
-        assert env.retained_children is not None
-        owners.append(env.retained_children)
+    def stopped(
+        _request: object,
+        _env: StopEnvironment,
+        retained_children: list[subprocess.Popen[bytes]] | None,
+    ) -> int:
+        assert retained_children is not None
+        owners.append(retained_children)
         return 0
 
     monkeypatch.setattr(stop, "cmd_stop", stopped)
@@ -216,8 +219,31 @@ def test_main_hands_stop_the_explicit_caller_child_owner(monkeypatch: pytest.Mon
     assert owners == [shared]
 
 
-def test_inspection_parser_cannot_launch_without_a_child_owner() -> None:
-    args = build_parser().parse_args(["start", "--all-services"])
+# meiva:note
+# A lifecycle command whose caller cannot be named is refused before it starts, and the refusal is
+# one operator-readable line, not a traceback: the working directory of this process is removed,
+# which is how a real shell loses it.
+def test_a_command_that_cannot_name_its_caller_is_refused_in_one_line(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    monkeypatch.chdir(gone)
+    gone.rmdir()
+    full_stop = ["--yes", "--close-shell-sessions", "--stop-browser", "--stop-extras"]
+    full_stop += ["--keep-no-services", "--mode", "smooth", "--timeout", "60"]
+
+    assert _main.main(["stop", *full_stop], retained_children=[]) == 1
+
+    err = capsys.readouterr().err
+    assert "cannot read the caller block" in err
+    assert "the command was not started" in err
+    assert "Traceback" not in err
+
+
+@pytest.mark.parametrize("verb", [["start"], ["lgtm", "on"], ["lgtm", "off"]])
+def test_inspection_parser_cannot_launch_without_a_child_owner(verb: list[str]) -> None:
+    args = build_parser().parse_args([*verb, "--all-services"])
     with pytest.raises(ValueError, match="caller-owned child retention"):
         args.func(args)
 
@@ -234,6 +260,7 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
     factories: list[DatabaseFactory] = []
     machines: list[MachineIdentity] = []
     readers: list[Callable[[], str]] = []
+    homes: list[Path] = []
     inputs: list[object] = []
 
     def build(
@@ -241,7 +268,7 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
     ) -> telemetry.EventPipeline:
         factories.append(database)
         machines.append(machine)
-        assert home == meiva_home()
+        homes.append(home)
         return pipeline
 
     def initialize(
@@ -254,6 +281,7 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
     def dispatch(args: argparse.Namespace) -> int:
         assert args.database_factory is factories[-1]
         assert args.runtime.machine is machines[-1]
+        assert args.runtime.home == homes[-1], "the producer and the runtime name one home"
         assert readers[-1] == args.runtime.machine.name
         inputs.append(args.producer())
         return 0
@@ -267,6 +295,7 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
     assert _main.main(["restart"]) == 0
     assert len(factories) == 1
     assert inputs == [pipeline, pipeline]
+    assert homes == [meiva_home().resolve()]
     assert _main.main(["restart"]) == 0
     assert machines[0] is not machines[1]
     assert factories[0] is not factories[1]
@@ -310,18 +339,17 @@ def _cold_report(
     if name == "stop":
         from cli.commands.data_plane.stop_waits import report_postgres_stop_escalation
 
-        notes: list[str] = []
-        report_postgres_stop_escalation(
+        note = report_postgres_stop_escalation(
             postgres.Escalation(detail="fast shutdown timed out", killed=(42,)),
-            notes,
             producer=args.producer,
         )
-        assert len(notes) == 1 and "fast shutdown timed out" in notes[0]
+        assert "fast shutdown timed out" in note
         return 0
     from base.config import settings
     from base.packages import dashboard_supply
     from cli.commands.converge.spec import ConvergeCtx
     from cli.commands.observability import lgtm_native
+    from cli.commands.observability.plans.lgtm.install import platform_tag
 
     original = RuntimeError("dashboard reader failed")
 
@@ -330,7 +358,7 @@ def _cold_report(
 
     monkeypatch.setattr(dashboard_supply, "render_dashboard_json", failed_render)
     repo = _REPO_ROOT
-    tag = lgtm_native.platform_tag(DARWIN_ARM64)
+    tag = platform_tag(DARWIN_ARM64.system, DARWIN_ARM64.machine)
     assert tag is not None
     native = path / "lgtm/native"
     native.mkdir(parents=True)

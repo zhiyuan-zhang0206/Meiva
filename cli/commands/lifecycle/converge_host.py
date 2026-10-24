@@ -73,7 +73,7 @@ from cli.commands.converge.plans.split_host_checks import (
 )
 from cli.commands.converge.plans.step_selection import SkipStep, StepScope, plan_steps
 from cli.commands.converge.redis_bridge import retire_launchd_redis_bridge
-from cli.commands.converge.spec import ConvergeCtx, ConvergeStep, UserSession
+from cli.commands.converge.spec import ConvergeCtx, ConvergeStep
 from cli.commands.converge.steps import (
     ensure_local_bin_on_path,
     ensure_local_git_hooks,
@@ -512,9 +512,9 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
 # meiva:note
 # Run the applicable converge steps in order; idempotent, fail-fast.
 #
-# The composition point of one converge operation: it reads the invoking user's session
-# once, builds the context the steps share from `command` (whose home is the home being
-# converged) and runs `steps` over it with `run_converge`.
+# The composition point of one converge operation: it builds the context the steps share
+# from `command` (whose home is the home being converged and whose session is the invoking
+# user's) and runs `steps` over it with `run_converge`.
 #
 # `roles is None` means the unit is not configured yet (fresh install): steps
 # with requires_unit_config=True are skipped with a printed notice. A
@@ -543,7 +543,7 @@ def converge_host(
         helper=command.helper,
         timers=command.timers,
         host=command.host,
-        session=UserSession.current(),
+        session=command.session,
     )
     # meiva:note
     # Host-global steps belong to the host's prod install (the default home
@@ -642,8 +642,15 @@ def selected_service_names(
     )
 
 
+# meiva:note
+# `meiva converge`: bring this host to the state the current code expects (idempotent).
+#
+# `repo` is the checkout whose code the host is converged to; the entry reads it once. The
+# fd limit is raised first because converge spawns services and the frontend's dependency
+# install, and their children inherit it.
 def cmd_converge(
     *,
+    repo: Path,
     only_services: tuple[str, ...],
     disabled_services: tuple[str, ...],
     all_services: bool,
@@ -651,12 +658,10 @@ def cmd_converge(
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
 ) -> int:
-    """`meiva converge` — bring this host to the state the current code expects (idempotent)."""
     from base.native_process.os_platform import raise_fd_limit
     from cli.commands import _repo
 
-    raise_fd_limit(65536)  # converge spawns services + frontend deps; children inherit
-    repo = _repo.repo_root()
+    raise_fd_limit(65536)
     roles = _repo.roles_or_none(machine=command.machine)
     print(
         f"[meiva converge] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}"

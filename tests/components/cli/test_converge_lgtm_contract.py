@@ -1,4 +1,6 @@
-"""Contract: the rendered LGTM configs equal the repository's deploy/lgtm provisioning files, and the native Loki template ships the noise-reducing log level."""
+# meiva:note
+# Contract: the rendered LGTM configs equal the repository's deploy/lgtm provisioning files, and the
+# native Loki template ships the noise-reducing log level.
 
 from __future__ import annotations
 
@@ -11,17 +13,45 @@ import yaml
 
 from base import config
 from base.cluster.machine import MachineIdentity
-from base.db import Database
-from base.packages import dashboard_supply
 from base.telemetry import EventPipeline
-from base.telemetry.lgtm_local import service_argv
+from base.telemetry.lgtm_local import service_argv, storage_dir
 from cli.commands.observability import lgtm_native
+from cli.commands.observability.inputs import lgtm_settings
+from cli.commands.observability.plans.lgtm.dashboard_plan import RenderedDashboard
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 _STUB_RENDER = '{"title": "Meiva Ops", "panels": []}\n'
+
+
+# meiva:note
+# Render with the process-wide settings these cases pin.
+def _render_configs(
+    repo: Path,
+    native_dir: Path,
+    home: Path,
+    *,
+    producer: Callable[[], EventPipeline],
+    machine: MachineIdentity,
+) -> None:
+    lgtm_native.render_configs(
+        repo,
+        native_dir,
+        home,
+        settings=lgtm_settings(
+            observability=config.settings.observability,
+            gateway=config.settings.gateway,
+            alerts=config.settings.alerts,
+            telegram=config.settings.telegram,
+        ),
+        storage_dir=storage_dir(home),
+        direct_db_url=config.settings.data_plane.db_url,
+        dashboard=RenderedDashboard(_STUB_RENDER, ()),
+        producer=producer,
+        machine=machine,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -32,17 +62,6 @@ def _default_provisioning_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(config.settings.gateway, "gateway_url", "")
     monkeypatch.setattr(config.settings.gateway, "gateway_port", 8000)
-
-    def render_dashboard_json(
-        _db: Database, _repo_only: bool = False
-    ) -> tuple[str, tuple[str, ...]]:
-        return _STUB_RENDER, ()
-
-    monkeypatch.setattr(
-        dashboard_supply,
-        "render_dashboard_json",
-        render_dashboard_json,
-    )
 
 
 def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_defaults(
@@ -73,11 +92,10 @@ def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_default
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr(config.settings.observability, "lgtm_listen_host", "127.0.0.1")
-    lgtm_native.render_configs(
+    _render_configs(
         repo,
         native_dir,
         home,
-        database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_machine,
     )
@@ -89,11 +107,10 @@ def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_default
 
     # A non-loopback setting flows through to the rendered listeners.
     monkeypatch.setattr(config.settings.observability, "lgtm_listen_host", "10.0.0.5")
-    lgtm_native.render_configs(
+    _render_configs(
         repo,
         native_dir,
         home,
-        database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_machine,
     )
@@ -166,11 +183,10 @@ def test_native_grafana_renders_from_the_repo_and_host_setting(
         "http://tempo.test:14318/",
     )
 
-    lgtm_native.render_configs(
+    _render_configs(
         repo,
         native_dir,
         home,
-        database_factory=operator_database,
         producer=operator_pipeline,
         machine=command_machine,
     )

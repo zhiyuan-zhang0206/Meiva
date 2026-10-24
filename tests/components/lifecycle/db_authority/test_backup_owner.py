@@ -30,6 +30,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.conninfo import conninfo_to_dict
 
 from base.cluster.dataplane import pooler
+from base.cluster.dataplane.pg_admin import pg_socket_dir
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.config import ConfigBoot, settings
 from base.db import Database
@@ -39,7 +40,6 @@ from base.host.db_authority import delivery
 from base.host.net.url_secret import url_with_port
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.tests.test_single_box import Born
 from cli.commands.tests.test_single_box import born as born
 from cli.commands.tests.test_single_box import configured as configured
@@ -102,7 +102,7 @@ def _seed_conversation(born: Born) -> int:
 def _assert_owner_dial(conninfo: str) -> None:
     """The home's administrator over its owner-only socket, acting as the owner."""
     target = conninfo_to_dict(conninfo)
-    assert target["host"] == str(ci.pg_socket_dir())
+    assert target["host"] == str(pg_socket_dir())
     assert target["user"] == getpass.getuser()
     assert target["dbname"] == "meiva"
     assert target["options"] == "-c role=meiva"

@@ -11,7 +11,7 @@ tags:
 # Start readiness
 
 `meiva start` first validates the persisted home (initialized by `meiva init`) and validates the service selection named on the command line (nothing is read back from an earlier start).
-Before converge, `cli/commands/data_plane/host_dependencies.py` runs the host
+Before converge, `cli/commands/data_plane/host_dependencies/` runs the host
 dependency preflight: it resolves every external executable and OS service the
 selected roster executes, installs a missing group through `scripts/provision/*`
 (Homebrew on macOS, apt on Debian/Ubuntu), re-probes, and refuses the start
@@ -35,7 +35,7 @@ The start entry (`cli/commands/lifecycle/start/`) is a shell too. Each decision 
 about the home's stand-down record), `admission` (a destroyed home or a disposable prod
 checkout, capabilities that differ from the ones `meiva init` recorded, whether a pure
 runner probes its gateway), `cold_start_plan` (the ordered preparation of a start with no live
-root, the schema checks of every admitted start, and who may migrate), `readiness_plan` (what
+root, executed by `cold_start`, the schema checks of every admitted start, and who may migrate), `readiness_plan` (what
 is reported and the exit code once readiness was waited for), `occupied_ports` and
 `gateway_hint` (the words), `login_link_plan` (whether to mint a one-time login link) and
 `start_config` (the configuration values a start reads, read once). The shell dials the root,
@@ -47,15 +47,20 @@ and executes plans. What a status snapshot means is decided by values in
 units to resume, which generation to refuse, what a stop takes down), the `poll_plan` (the next
 step of every wait on the root, its keeper or a service) and the `launch_plan` (the daemon
 command line and the keeper's seed). The home and the settings a launch reads
-(`RootLaunchInputs`) are handed in by the start entry; nothing in the driver reads the
-environment or settings.
+(`RootLaunchInputs`) are handed in by the start entry; the driver reads no settings. It still
+reads the process environment through `managed_service_env` when it builds the launched root's
+environment, and the start and stop shells reach the process-environment home through the base
+owners that take no home (`start_serving`, `launch_failures.record`, `status_journal`).
 
 The CLI's existing caller-owned child list retains a directly launched root
 through readiness, any later command work and the CLI telemetry drain, just as
 it retains directly launched PostgreSQL children. A failed readiness attempt
 does not release that handle. An embedded caller keeps the same explicit list
 for as long as it needs the native PID retained; root launch neither reaps nor
-terminates a child when a start phase returns.
+terminates a child when a start phase returns. The list is a required argument of each call
+that launches a child (`cmd_start_body`, `prepare_cold_start`, the LGTM toggle), never a field of
+the frozen values the start passes down; only the parser handlers, which may be built without
+one, refuse a launching verb that has none.
 
 `cmd_start_body` runs under the home's lifecycle lock (`exclusive_resources`) and returns an
 exit code: the same body serves `meiva start` and the start leg of `meiva restart`.

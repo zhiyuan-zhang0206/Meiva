@@ -177,7 +177,7 @@ def _init_and_start_settings_free() -> None:
     if not authority or scenario == "start_delivery_foreign":
         _boot_start_delivery(scenario, home)
     command, factory = _operator_handles()
-    with start_intent.admitted_start(site):
+    with start_intent.admitted_home(home):
         assert not command.config.prepared
         configured()
         if authority:
@@ -260,7 +260,7 @@ def _verify_start_delivery(
 
     from base.db import NoDatabaseAuthorityError
     from base.host.db_authority.tests.generation import seed_active_generation
-    from cli.commands.data_plane.bringup import adopt_gateway_login
+    from cli.commands.data_plane.completion import adopt_gateway_login
 
     config = command.config
     url: str = config.view.data_plane.db_url

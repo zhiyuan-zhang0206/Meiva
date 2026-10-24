@@ -27,9 +27,10 @@ from cli.commands import probe
 from cli.commands._repo import repo_root
 from cli.commands.converge import incomplete
 from cli.commands.lifecycle.status import cmd_status, gateway_report_from_body
-from cli.commands.lifecycle.status.gateway import GatewayReport
+from cli.commands.lifecycle.status.gateway import GatewayReport, gateway_status_lines
 from cli.commands.lifecycle.status.roster import NOT_LAUNCHED_NOTE
 from cli.commands.lifecycle.tests.scripted_root import UnitRow, scripted_root
+from cli.commands.lifecycle.tests.startup.start_harness import STATUS_PATH, gateway_listener
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
@@ -250,6 +251,24 @@ def test_the_root_column_reads_each_units_state_from_the_root(
     assert sess("agent-runner-watchdog") not in names
 
 
+# meiva:note
+# `meiva status` is the command to run on a host whose root misbehaves: a status the lifecycle
+# commands cannot read is named on stderr and the table still prints, with no unit running.
+def test_a_root_that_answers_with_an_unreadable_status_is_named_and_the_table_still_prints(
+    status: _Status, capsys: pytest.CaptureFixture[str]
+) -> None:
+    status.command.machine.set(role="gateway,agent-runner")
+    capsys.readouterr()
+    with scripted_root(status.command.home, [UnitRow("gateway")]) as root:
+        root.raw_unit_rows = [{"id": "gateway", "state": "running", "last_error": 5}]
+        assert cmd_status(database_factory=status.database_factory, command=status.command) == 0
+
+    captured = capsys.readouterr()
+    assert "meiva-root answered with an unreadable status" in captured.err
+    assert "last_error" in captured.err
+    assert _marks(_row(captured.out, "gateway"))[0] == "✗"
+
+
 def test_an_aborted_converge_is_reported_before_the_service_table(
     status: _Status, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -384,6 +403,86 @@ def test_a_pre_station_gateway_still_parses() -> None:
 def test_a_body_that_is_not_a_cluster_status_raises() -> None:
     with pytest.raises(ValidationError):
         gateway_report_from_body({"machine_name": "no-capabilities"})
+
+
+def test_the_view_names_the_observability_station_the_gateway_serves() -> None:
+    body: dict[str, object] = {
+        "machine_name": "station-a",
+        "serve_gateway": False,
+        "serve_agent_runner": False,
+        "serve_observability_station": True,
+        "paused": False,
+    }
+
+    lines = gateway_status_lines(gateway_report_from_body(body))
+
+    assert "  machine_name: station-a" in lines
+    assert "  serves:       observability-station" in lines
+
+
+# meiva:note
+# The gateway's own view is read through this command's configuration, with the credential
+# the command holds, and printed last.
+def test_the_gateways_own_view_is_read_with_the_credential_the_command_holds(
+    status: _Status, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = status.command.config
+    with gateway_listener() as gateway:
+        config.set_field("gateway_url", gateway.url)
+        config.set_field("cluster_secret", "status-test-cluster-secret")
+
+        out = status.run(capsys, role="agent-runner")
+
+    assert out.rstrip().splitlines()[-4:] == [
+        "gateway cluster status (GET /api/cluster/status):",
+        "  machine_name: gateway-double",
+        "  serves:       gateway",
+        "  paused:       False",
+    ]
+    assert gateway.requests == [STATUS_PATH]
+    assert gateway.authorizations == ["Bearer status-test-cluster-secret"]
+
+
+# meiva:note
+# The defect: a command with neither a machine API token nor a cluster secret died in a
+# traceback at the end of the report. It is a diagnostic: one line says what is missing, and
+# the sections before it are all there.
+def test_a_command_with_no_gateway_credential_says_so_inline_and_still_reports(
+    status: _Status, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = status.command.config
+    with gateway_listener() as gateway:
+        config.set_field("gateway_url", gateway.url)
+        config.set_field("cluster_secret", "")
+
+        out = status.run(capsys, role="agent-runner")
+
+    tail = out.rstrip().splitlines()
+    assert tail[-2] == "gateway cluster status (GET /api/cluster/status):"
+    assert tail[-1].startswith("  ✗ cannot authenticate to the gateway: ")
+    assert "MEIVA_CLUSTER_SECRET" in tail[-1]
+    assert gateway.requests == [], "a blank bearer is never sent"
+    assert "host (live cpu/memory/disk):" in out
+    assert "service " in out
+
+
+# meiva:note
+# Something answers on the gateway's address but not with a status body: that is the
+# gateway's state, printed inline, not a failure of the command.
+def test_a_gateway_that_answers_with_something_other_than_json_is_reported_inline(
+    status: _Status, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = status.command.config
+    with gateway_listener() as gateway:
+        gateway.status_body = b"<html>maintenance</html>"
+        config.set_field("gateway_url", gateway.url)
+        config.set_field("cluster_secret", "status-test-cluster-secret")
+
+        out = status.run(capsys, role="agent-runner")
+
+    tail = out.rstrip().splitlines()
+    assert tail[-2] == "gateway cluster status (GET /api/cluster/status):"
+    assert re.fullmatch(r"  ✗ gateway unreachable: the answer is not JSON \(.+\)", tail[-1])
 
 
 # meiva:note

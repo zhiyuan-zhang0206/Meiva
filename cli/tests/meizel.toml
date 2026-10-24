@@ -7,8 +7,6 @@ exports = ["bootstrap"]
 "test_unit_capability_cli.py" = ["bootstrap"]
 
 [debt.env-patch]
-"test_install_unit.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
-"test_install_unit.py#patch.dict os.environ" = 1
 "test_lite_verbs.py#monkeypatch.delenv os.environ.MEIVA_API_TOKEN" = 2
 "test_lite_verbs.py#monkeypatch.delenv os.environ.MEIVA_CONFIG_FETCH" = 3
 "test_lite_verbs.py#monkeypatch.delenv os.environ.MEIVA_LAUNCHER_PROFILE" = 2
@@ -27,21 +25,14 @@ exports = ["bootstrap"]
 "test_pty_commands.py#monkeypatch.delenv os.environ.MEIVA_CONFIG_FETCH" = 1
 "test_pty_commands.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_start_gate.py#patch.dict os.environ" = 1
-"test_unit_capability_cli.py#monkeypatch.setitem os.environ.MEIVA_MACHINE_SERVE_GATEWAY" = 1
-"test_unit_capability_cli.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
-"test_cluster_health_parser.py#monkeypatch.setattr cli.commands.cluster.health.cmd_health_probe" = 1
 "test_fleet_alert_silence.py#monkeypatch.setattr base.config.settings.alerts.grafana_admin_password" = 2
 "test_fleet_alert_silence.py#monkeypatch.setattr base.config.settings.observability.telemetry_grafana_url" = 1
 "test_fleet_alert_silence.py#monkeypatch.setattr cli.fleet_alert_silence.colocated_grafana" = 4
-"test_install_unit.py#monkeypatch.setattr base.host.db_authority.unit.install_bundle" = 1
-"test_install_unit.py#monkeypatch.setattr base.host.env.bootstrap.fetch_bootstrap_config" = 1
 "test_lite_verbs.py#monkeypatch.setattr base.host.db_authority.unit.consume_unit" = 2
 "test_lite_verbs.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 2
 "test_lite_verbs.py#monkeypatch.setattr cli.parsers.build_parser" = 3
-"test_logs_rotate.py#monkeypatch.setattr cli.commands.observability.logs.cmd_logs_rotate" = 1
-"test_logs_rotate.py#monkeypatch.setattr cli.commands.observability.logs.shutil.copyfile" = 1
 "test_main_dispatch.py#monkeypatch.setattr cli.commands.agents.control.cmd_agents_restart" = 1
 "test_main_dispatch.py#monkeypatch.setattr cli.parsers.build_parser" = 7
 "test_main_log_init.py#monkeypatch.setattr base.config.settings.observability.lgtm_storage_dir" = 1
@@ -62,9 +53,6 @@ exports = ["bootstrap"]
 "test_plugin_scaffold.py#monkeypatch.setattr base.paths.plugins_dir" = 1
 "test_plugin_scaffold.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1
 "test_pty_commands.py#monkeypatch.setattr base.sessions.pty.allocation_freeze.resume" = 1
-"test_unit_capability_cli.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
-"test_unit_capability_cli.py#monkeypatch.setattr base.config.settings.general.machine_host" = 1
-"test_unit_capability_cli.py#monkeypatch.setattr base.host.env.bootstrap.fetch_bootstrap_config" = 1
 
 [debt.stdlib-patch]
 "test_main_dispatch.py#monkeypatch.setattr os.environ" = 1

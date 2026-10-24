@@ -1,0 +1,17 @@
+exports = ["db_authority_replies.py", "destroy_plan.py", "gateway_replies.py", "health_verdicts.py", "provider_verdicts.py", "roster_table.py", "service_probe_plan.py", "unit_join_checks.py", "unit_join_steps.py"]
+
+[uses]
+"health_verdicts.py" = ["provider_verdicts.py", "service_probe_plan.py"]
+"unit_join_steps.py" = ["unit_join_checks.py"]
+
+[purity]
+"__init__.py" = "strict"
+"db_authority_replies.py" = "strict"
+"destroy_plan.py" = "strict"
+"gateway_replies.py" = "strict"
+"health_verdicts.py" = "strict"
+"provider_verdicts.py" = "strict"
+"roster_table.py" = "strict"
+"service_probe_plan.py" = "strict"
+"unit_join_checks.py" = "strict"
+"unit_join_steps.py" = "strict"

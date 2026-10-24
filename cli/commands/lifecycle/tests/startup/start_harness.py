@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import dataclasses
 import subprocess
-import sys
 from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -24,37 +23,29 @@ import pytest
 
 from base.cluster.machine import MachineRoles
 from base.deploy.lifecycle.start_serving import RootBirth
-from base.host.env.registry import process_environment
-from base.host.runtime_interpreter import LoadedRuntimeIdentity
 from base.sessions.env_forwarding import managed_service_env
 from base.telemetry import EventPipeline
+from cli.commands.data_plane.bringup import read_launch_delivery
 from cli.commands.lifecycle import root_driver
 from cli.commands.lifecycle.root_control.launch_plan import RootLaunchInputs
 from cli.commands.lifecycle.start import cmd_start_body, launch_roster
 from cli.commands.lifecycle.start.start_config import read_start_config
+from cli.commands.lifecycle.stop.restart import cmd_restart
+from cli.commands.lifecycle.tests.runtime_at import runtime_at
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.start_runtime import StartRuntime
+from ops.cluster_status import ClusterStatus
 from services.supervision.roster.service_spec import ServiceSpec
 
-__all__ = ["AdmittedRuntime", "Gateway", "Generation", "StartRun", "gateway_listener", "start_run"]
-
-
-# meiva:note
-# The start runtime whose loaded identity is the one the serving-root double observes.
-#
-# `StartRuntime` verifies the executing checkout against the process's loaded modules, which a
-# temporary git repo is not; the start only needs the identity it admitted to equal the one the
-# root reports, so the test says which identity that is.
-@dataclass(frozen=True)
-class AdmittedRuntime(StartRuntime):
-    loaded: LoadedRuntimeIdentity
-
-    def identity(self) -> LoadedRuntimeIdentity:
-        return self.loaded
-
-    def validate(self) -> None:
-        return None
+__all__ = [
+    "STATUS_PATH",
+    "Gateway",
+    "Generation",
+    "StartRun",
+    "gateway_listener",
+    "start_run",
+]
 
 
 # meiva:note
@@ -72,7 +63,7 @@ class StartRun:
     command: CommandRuntime
     database_factory: OperatorDatabaseFactory
     producer: Callable[[], EventPipeline]
-    runtime: AdmittedRuntime
+    runtime: StartRuntime
     children: list[subprocess.Popen[bytes]]
     # meiva:note
     # The home the process environment names. Base owners (serving state, launch-failure notes,
@@ -108,6 +99,11 @@ class StartRun:
         # owns the cluster's configuration, a pure runner fetches it.
         env = self.process_home / ".env"
         env.write_text("MEIVA_MACHINE_SERVE_GATEWAY=true\n" if gateway else "")
+        # meiva:note
+        # The launch delivery reads the invocation's own home: a gateway's `.env` is there too.
+        # A pure runner has no `.env` of its own to read, which is what makes it a runner.
+        if gateway:
+            (self.home / ".env").write_text("MEIVA_MACHINE_SERVE_GATEWAY=true\n")
         if remote_plane:
             config.set_field("db_url", "postgresql://meiva:pw@db.invalid:5432/meiva")
             config.set_field("redis_url", "rediss://meiva:pw@cache.invalid:6380/0")
@@ -129,10 +125,12 @@ class StartRun:
     def generation(self, roles: MachineRoles, roster: tuple[ServiceSpec, ...]) -> Generation:
         config = read_start_config(self.command.config)
         inputs = RootLaunchInputs(
-            home=self.home,
+            delivery=read_launch_delivery(
+                home=self.home,
+                remote_data_plane=config.data_plane.is_remote,
+                config=self.command.config,
+            ),
             service_path=config.service_path,
-            remote_data_plane=config.data_plane.is_remote,
-            environment=dict(process_environment()),
         )
         manifest = root_driver.launch_manifest(
             roster,
@@ -168,12 +166,47 @@ class StartRun:
             boot_attempt=boot_attempt,
         )
 
+    # meiva:note
+    # `cmd_restart` over `only` services, with the stop and start budgets a test can afford.
+    def restart(
+        self,
+        *,
+        only: tuple[str, ...],
+        keep_shell_sessions: bool = False,
+        keep_browser: bool = True,
+        timeout: float = 15.0,
+        start_timeout: float = 0.2,
+    ) -> int:
+        return cmd_restart(
+            only_services=only,
+            disabled_services=(),
+            all_services=False,
+            keep_shell_sessions=keep_shell_sessions,
+            keep_browser=keep_browser,
+            restart_extras=False,
+            force=False,
+            timeout=timeout,
+            start_timeout=start_timeout,
+            runtime=self.runtime,
+            retained_children=self.children,
+            database_factory=self.database_factory,
+            producer=self.producer,
+            command=self.command,
+        )
+
 
 # meiva:note
 # A committed checkout: what the launch generation binds to.
 def _commit(path: Path) -> Path:
     path.mkdir()
     (path / "app.py").write_text("value = 1\n")
+    # meiva:note
+    # The interpreter every service session launches through: the restart's readiness gate
+    # refuses a checkout whose `.venv/bin/python` cannot run.
+    python = path / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\n")
+    python.chmod(0o755)
     git = ["git", "-C", str(path), "-c", "user.name=Test", "-c", "user.email=test@example.invalid"]
     subprocess.run([*git, "init", "-q"], check=True)
     subprocess.run([*git, "add", "."], check=True)
@@ -199,7 +232,9 @@ def start_run(
     # Redis and Postgres: `meiva status` dials them, and nothing else on this host.
     del redis_url, db_url
     checkout = _commit(tmp_path / "checkout")
-    runtime = AdmittedRuntime(checkout, checkout, Path(sys.executable), serving_root.runtime)
+    # meiva:note
+    # The identity the start admitted is the one the serving-root double reports as its root's.
+    runtime = dataclasses.replace(runtime_at(checkout), loaded=serving_root.runtime)
     run = StartRun(
         # meiva:note
         # No helper: the platform of this run has none (Linux), so root custody is its own birth.
@@ -213,25 +248,42 @@ def start_run(
     yield run
 
 
+STATUS_PATH = "/api/cluster/status"
+
+# meiva:note
+# What a healthy gateway answers `GET /api/cluster/status` with: its own cluster-status snapshot.
+HEALTHY_STATUS = ClusterStatus(
+    machine_name="gateway-double", serve_gateway=True, serve_agent_runner=False, paused=False
+)
+
+
 # meiva:note
 # A local listener answering 200 on every path: the gateway a pure runner probes.
+#
+# Each request's path and `Authorization` header are kept in order. The status path answers
+# `status_body` (a healthy snapshot until a test replaces it), which both the runner's
+# liveness probe and the status view `meiva status` prints dial.
 @dataclass
 class Gateway:
     url: str
     requests: list[str]
+    authorizations: list[str | None]
+    status_body: bytes
 
 
 @contextmanager
 def gateway_listener() -> Generator[Gateway]:
-    gateway = Gateway("", [])
+    gateway = Gateway("", [], [], HEALTHY_STATUS.model_dump_json().encode())
 
     class Healthy(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             gateway.requests.append(self.path)
+            gateway.authorizations.append(self.headers.get("Authorization"))
+            body = gateway.status_body if self.path == STATUS_PATH else b"ok"
             self.send_response(200)
-            self.send_header("Content-Length", "2")
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(b"ok")
+            self.wfile.write(body)
 
         def log_message(self, format: str, *args: object) -> None:
             return None

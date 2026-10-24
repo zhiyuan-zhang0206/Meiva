@@ -14,6 +14,7 @@ from cli.commands.lifecycle.stop.closure_plan import (
     FailShells,
     ReportJobLeftover,
     SurvivorFact,
+    SurvivorRole,
     WriteNotices,
     forced_failure_message,
     job_leftover_line,
@@ -23,11 +24,11 @@ from cli.commands.lifecycle.stop.closure_plan import (
 
 
 def shell(session: str, pid: int, *, alive: bool = True) -> SurvivorFact:
-    return SurvivorFact(session=session, role="shell", pid=pid, alive=alive)
+    return SurvivorFact(session=session, role=SurvivorRole.SHELL, pid=pid, alive=alive)
 
 
 def job(session: str, pid: int, *, alive: bool = True) -> SurvivorFact:
-    return SurvivorFact(session=session, role="job", pid=pid, alive=alive)
+    return SurvivorFact(session=session, role=SurvivorRole.JOB, pid=pid, alive=alive)
 
 
 def test_a_clean_closure_notifies_the_owners_then_waits_for_the_service_table_to_empty() -> None:
@@ -88,9 +89,14 @@ def test_a_job_leftover_names_its_session_and_pid() -> None:
     )
 
 
-@pytest.mark.parametrize("forced", [False, True])
-def test_only_shells_and_jobs_are_survivors(forced: bool) -> None:
-    odd = SurvivorFact(session="s", role="helper", pid=1, alive=True)
-    # meiva:note
-    # Anything that is not a shell is a job: a diagnostic, never a gate.
-    assert ReportJobLeftover("s", 1) in plan_after_closure((odd,), forced=forced)
+# meiva:note
+# The closure names a survivor a shell or a job. Any other word is a contract break between the
+# service and this stop: it is refused where the outcome is read, never taken for a job.
+@pytest.mark.parametrize("raw", ["helper", "", "Shell"])
+def test_a_survivor_role_the_closure_does_not_name_is_refused(raw: str) -> None:
+    with pytest.raises(ValueError, match="is not a valid SurvivorRole"):
+        SurvivorRole(raw)
+
+
+def test_the_two_roles_are_the_closures_own_words() -> None:
+    assert {role.value for role in SurvivorRole} == {"shell", "job"}

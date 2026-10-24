@@ -1,108 +1,75 @@
+# meiva:note
+# The dependency table, the diagnosis of a reading and the gate's plan, asserted as values.
+#
+# Nothing here looks at a host: a test states the selection it wants as a `StartScope` and the
+# readings the shell would have recorded, and asserts which tools are required, what is wrong
+# with them and what the gate decides and prints. `test_host_dependency_gate.py` runs the shell
+# against real executables.
+
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any
 
 import pytest
 
-import cli.commands.data_plane.host_dependencies as hd
-from base.host.system.hostport import Host
-from base.host.system.tests.fake_commands import DARWIN_ARM64, LINUX_X86
-from cli.commands.data_plane.config import DataPlaneConfig
+from cli.commands.data_plane.host_dependencies import table
+from cli.commands.data_plane.host_dependencies.diagnosis import (
+    Absent,
+    DependencyProblem,
+    Found,
+    NodeVersion,
+    NoLocalPlane,
+    ProbeFailed,
+    Reading,
+    Unusable,
+    diagnose,
+    missing_tools,
+)
+from cli.commands.data_plane.host_dependencies.gate_plan import (
+    InstallGroups,
+    Ready,
+    Refuse,
+    Satisfied,
+    plan_gate,
+    plan_recheck,
+)
+from cli.commands.data_plane.host_dependencies.install_plan import (
+    exit_line,
+    launch_failure_line,
+    missing_script_line,
+    plan_install,
+)
+from cli.commands.data_plane.host_dependencies.scope import PlaneFacts, StartScope
+from cli.commands.data_plane.host_dependencies.table import HostTool
 
-FOREIGN_DB = "postgresql://meiva:pw@10.9.8.7:5432/meiva"
-FOREIGN_REDIS = "redis://meiva:pw@10.9.8.7:6380/0"
 GATEWAY = frozenset({"gateway"})
 RUNNER = frozenset({"agent-runner"})
 FULL_ROSTER = frozenset({"gateway", "frontend", "ops", "agent-host"})
 FRONTEND_ONLY = frozenset({"frontend"})
 HEADLESS = frozenset({"gateway"})
-_DEFAULT = object()
-
-# meiva:note
-# The systemctl probe reads the real `/run/systemd/system`, which the fake `Host` cannot supply, so a start that requires the boot unit only passes on a host that is running systemd.
-requires_systemd = pytest.mark.skipif(
-    not Path("/run/systemd/system").is_dir(),
-    reason="the systemctl probe reads the real /run/systemd/system",
-)
-
-
-# meiva:note
-# A test-only data-plane config; these credentials never leave the fake value.
-def _config(
-    *,
-    db_url: str = "postgresql://meiva:pw@127.0.0.1:5432/meiva",
-    redis_url: str = "redis://meiva:pw@127.0.0.1:6380/0",
-    pgbouncer: bool = True,
-) -> DataPlaneConfig:
-    return DataPlaneConfig(
-        db_url=db_url,
-        redis_url=redis_url,
-        redis_admin_password="admin",  # noqa: S106
-        cluster_secret="secret",  # noqa: S106
-        pgbouncer_enabled=pgbouncer,
-        pooler_max_client_conn=100,
-        redis_bin_dir="",
-        trusted_cidrs="",
-        events_channel="meiva:events",
-        memory_search_backend="pgvector",
-        embedding_backend="openai",
-    )
-
-
-def _no_install(_repo: Path, _component: str) -> None:
-    return
-
-
-def _run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-    return subprocess.CompletedProcess([], 0, "22.14.0\n", "")
-
-
-# meiva:note
-# A host where every tool resolves unless `present[name]` is False. The mapping is
-# live, so an install that lands a tool is visible to the next probe.
-def _host(
-    present: dict[str, bool] | None = None,
-    *,
-    macos: bool = False,
-    uid: int = 1000,
-) -> Host:
-    known: dict[str, bool] = present if present is not None else {}
-
-    def which(name: str) -> str | None:
-        return None if known.get(name) is False else f"/usr/bin/{name}"
-
-    return Host(
-        run=_run,
-        which=which,
-        platform=DARWIN_ARM64 if macos else LINUX_X86,
-        uid=uid,
-    )
+LOCAL_PLANE = PlaneFacts(is_remote=False, pgbouncer_enabled=True)
+REPO = Path("/repo")
 
 
 def _scope(
     *,
     roles: frozenset[str] | None = GATEWAY,
     services: frozenset[str] = FULL_ROSTER,
-    data_plane: DataPlaneConfig | object | None = _DEFAULT,
-    host: Host | None = None,
+    data_plane: PlaneFacts | None = LOCAL_PLANE,
+    macos: bool = False,
+    is_root: bool = False,
     os_jobs: bool = True,
     permissions_helper: bool = False,
     require_github_pr: bool = False,
     memory_keep_local: bool = False,
     prod_install: bool = True,
-) -> hd.StartScope:
-    plane = _config() if data_plane is _DEFAULT else data_plane
-    return hd.StartScope(
+) -> StartScope:
+    return StartScope(
         roles=roles,
         services=services,
-        # meiva:note
-        # `_DEFAULT` keeps "no local data plane" (`None`) distinguishable from "use the fixture".
-        data_plane=plane,  # pyright: ignore[reportArgumentType]
-        host=host or _host(),
+        data_plane=data_plane,
+        macos=macos,
+        is_root=is_root,
         os_jobs=os_jobs,
         permissions_helper=permissions_helper,
         require_github_pr=require_github_pr,
@@ -111,57 +78,29 @@ def _scope(
     )
 
 
+def _names(scope: StartScope) -> set[str]:
+    return {tool.name for tool in table.required_tools(scope)}
+
+
 # meiva:note
-# A probes set where every binary resolves; each test overrides only what it removes.
-class _DataPlane:
-    def __init__(
-        self,
-        *,
-        missing_postgres: tuple[str, ...] = (),
-        missing_redis: tuple[str, ...] = (),
-        pgbouncer: str = sys.executable,
-        node: hd.DependencyProblem | None = None,
-        redis: Any = None,
-    ) -> None:
-        self.gone = set(missing_postgres)
-        self.redis = redis
-        self._missing_redis = set(missing_redis)
-        self._pgbouncer = pgbouncer
-        self._node = node
-
-    def postgres(self, name: str) -> Path:
-        if name in self.gone:
-            raise RuntimeError(f"{name} not found")
-        return Path(sys.executable)
-
-    def redis_server(self, config: DataPlaneConfig) -> str:
-        if self.redis is not None:
-            return self.redis(config)
-        return "/missing/redis-server" if "redis-server" in self._missing_redis else sys.executable
-
-    def redis_cli(self, config: DataPlaneConfig) -> str:
-        if self.redis is not None:
-            return self.redis(config)
-        return "/missing/redis-cli" if "redis-cli" in self._missing_redis else sys.executable
-
-    def pgbouncer(self) -> str:
-        return self._pgbouncer
-
-    def node(self, _host: Host, _name: str) -> hd.DependencyProblem | None:
-        return self._node
-
-    def probes(self) -> hd.HostDependencyProbes:
-        return hd.HostDependencyProbes(
-            postgres=self.postgres,
-            redis_server=self.redis_server,
-            redis_cli=self.redis_cli,
-            pgbouncer=self.pgbouncer,
-            node=self.node,
-        )
+# Every required tool read as present, except the ones the test names.
+def _present(scope: StartScope, **replaced: Reading) -> dict[str, Reading]:
+    readings: dict[str, Reading] = {}
+    for tool in table.required_tools(scope):
+        match tool.name:
+            case "node":
+                readings[tool.name] = NodeVersion("22.14.0")
+            case _:
+                readings[tool.name] = Found(f"/usr/bin/{tool.name}", executable=True)
+    return {**readings, **replaced}
 
 
-def _names(scope: hd.StartScope) -> set[str]:
-    return {tool.name for tool in hd.required_tools(scope)}
+def _tool(name: str) -> HostTool:
+    return next(tool for tool in table.HOST_TOOLS if tool.name == name)
+
+
+def _problems(scope: StartScope, readings: dict[str, Reading]) -> dict[str, DependencyProblem]:
+    return {tool.name: problem for tool, problem in missing_tools(scope, readings)}
 
 
 def test_gateway_with_the_frontend_requires_the_full_table() -> None:
@@ -198,7 +137,7 @@ def test_runner_only_host_skips_the_local_data_plane() -> None:
 
 
 def test_remote_plane_skips_the_local_data_plane() -> None:
-    remote = _config(db_url=FOREIGN_DB, redis_url=FOREIGN_REDIS)
+    remote = PlaneFacts(is_remote=True, pgbouncer_enabled=True)
     assert _names(_scope(data_plane=remote)).isdisjoint({"redis-server", "pgbouncer", "postgres"})
 
 
@@ -207,17 +146,18 @@ def test_os_jobs_off_skips_the_scheduler_rows() -> None:
 
 
 def test_pooling_off_drops_pgbouncer() -> None:
-    assert "pgbouncer" not in _names(_scope(data_plane=_config(pgbouncer=False)))
+    plane = PlaneFacts(is_remote=False, pgbouncer_enabled=False)
+    assert "pgbouncer" not in _names(_scope(data_plane=plane))
 
 
 def test_macos_uses_launchctl_and_the_helper_tools() -> None:
-    names = _names(_scope(host=_host(macos=True), permissions_helper=True))
+    names = _names(_scope(macos=True, permissions_helper=True))
     assert {"launchctl", "swiftc", "codesign", "security", "openssl"} <= names
     assert names.isdisjoint({"crontab", "systemctl", "sudo"})
 
 
 def test_root_does_not_require_sudo() -> None:
-    assert "sudo" not in _names(_scope(host=_host(uid=0)))
+    assert "sudo" not in _names(_scope(is_root=True))
 
 
 def test_git_is_required_on_every_start() -> None:
@@ -248,371 +188,261 @@ def test_a_local_memory_pool_or_an_explicit_opt_out_drops_the_github_cli() -> No
 
 
 def test_a_dev_worktree_start_does_not_require_the_boot_unit() -> None:
-    scope = _scope(prod_install=False)
-    names = _names(scope)
+    names = _names(_scope(prod_install=False))
     assert "systemctl" not in names
     assert "sudo" not in names
     assert {"crontab", "git"} <= names
 
 
 def test_optional_tools_are_never_required() -> None:
-    assert {tool.name for tool in hd.HOST_TOOLS if tool.optional} == {"brew", "lsof", "ps"}
-    assert all(not tool.optional for tool in hd.required_tools(_scope()))
+    assert {tool.name for tool in table.HOST_TOOLS if tool.optional} == {"brew", "lsof", "ps"}
+    assert all(not tool.optional for tool in table.required_tools(_scope()))
 
 
-@requires_systemd
-def test_all_present_is_silent(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
-    assert (
-        hd.ensure_host_dependencies(
-            repo=tmp_path,
-            scope=_scope(),
-            probes=_DataPlane().probes(),
-            install=lambda _repo, _component: pytest.fail("unexpected install"),
-        )
-        == 0
+def test_every_group_names_its_provisioning_script_and_label() -> None:
+    groups = {tool.component for tool in table.HOST_TOOLS if tool.component is not None}
+    assert groups == {"data-plane", "node", "host-utils", "cli-tools"}
+    for group in groups:
+        assert table.provision_script(group).endswith(".sh")
+        assert table.provision_label(group)
+    with pytest.raises(ValueError, match="unknown provisioning group"):
+        table.provision_script("elsewhere")
+
+
+def test_all_present_is_no_problem() -> None:
+    scope = _scope()
+    assert missing_tools(scope, _present(scope)) == ()
+
+
+def test_the_postgres_reading_names_only_the_missing_tool() -> None:
+    scope = _scope()
+    problems = _problems(scope, _present(scope, pg_isready=Absent()))
+    assert set(problems) == {"pg_isready"}
+    assert "vendored" in problems["pg_isready"].detail
+    assert problems["pg_isready"].installable
+
+
+def test_a_postgres_tool_that_cannot_run_names_its_path() -> None:
+    scope = _scope()
+    problems = _problems(scope, _present(scope, initdb=Found("/opt/pg/initdb", executable=False)))
+    assert problems == {"initdb": DependencyProblem("/opt/pg/initdb is not executable")}
+
+
+def test_the_pgbouncer_reading_reports_the_resolved_path() -> None:
+    scope = _scope()
+    problems = _problems(scope, _present(scope, pgbouncer=Found("/missing/pgbouncer", False)))
+    assert set(problems) == {"pgbouncer"}
+    assert "/missing/pgbouncer" in problems["pgbouncer"].detail
+
+
+def test_a_bare_pgbouncer_name_means_it_is_not_installed() -> None:
+    problem = diagnose(_tool("pgbouncer"), Found("pgbouncer", executable=False))
+    assert problem == DependencyProblem("not on PATH (pgbouncer is not installed)")
+
+
+def test_an_unusable_redis_override_is_not_installable() -> None:
+    scope = _scope(services=HEADLESS)
+    reason = "MEIVA_REDIS_BIN_DIR requires an executable file"
+    problems = _problems(scope, _present(scope, **{"redis-server": Unusable(reason)}))
+    assert set(problems) == {"redis-server"}
+    assert "MEIVA_REDIS_BIN_DIR" in problems["redis-server"].detail
+    assert not problems["redis-server"].installable
+
+
+def test_a_redis_binary_that_cannot_run_is_installable() -> None:
+    problem = diagnose(_tool("redis-cli"), Found("/missing/redis-cli", executable=False))
+    assert problem == DependencyProblem("/missing/redis-cli is not executable")
+
+
+def test_a_selection_without_a_data_plane_has_no_redis_to_resolve() -> None:
+    problem = diagnose(_tool("redis-server"), NoLocalPlane())
+    assert problem == DependencyProblem("no local data plane in this selection", installable=False)
+
+
+def test_node_at_the_floor_or_above_is_usable() -> None:
+    for version in ("20.9.0", "20.10.1", "22.14.0"):
+        assert diagnose(_tool("node"), NodeVersion(version)) is None
+
+
+def test_node_older_than_the_floor_names_its_version() -> None:
+    problem = diagnose(_tool("node"), NodeVersion("18.19.1"))
+    assert problem == DependencyProblem("18.19.1 is older than 20.9")
+
+
+def test_a_node_version_that_does_not_parse_is_older_than_the_floor() -> None:
+    assert diagnose(_tool("node"), NodeVersion("")) == DependencyProblem(
+        "version unknown is older than 20.9"
     )
-    assert capsys.readouterr().out == ""
-
-
-@requires_systemd
-def test_missing_crontab_installs_host_utils_then_passes(
-    capsys: pytest.CaptureFixture[str], tmp_path: Path
-) -> None:
-    present = {"crontab": False}
-    installed: list[str] = []
-
-    def install(_repo: Path, component: str) -> None:
-        installed.append(component)
-        present["crontab"] = True
-
-    scope = _scope(host=_host(present))
-    assert (
-        hd.ensure_host_dependencies(
-            repo=tmp_path, scope=scope, probes=_DataPlane().probes(), install=install
-        )
-        == 0
+    assert diagnose(_tool("node"), NodeVersion("v22")) == DependencyProblem(
+        "v22 is older than 20.9"
     )
-    assert installed == ["host-utils"]
-    assert "crontab" in capsys.readouterr().out
 
 
-@requires_systemd
-def test_a_second_start_does_not_reinstall(
-    capsys: pytest.CaptureFixture[str], tmp_path: Path
-) -> None:
-    present = {"crontab": False}
-    installed: list[str] = []
+def test_a_node_whose_version_cannot_be_read_is_a_problem() -> None:
+    problem = diagnose(_tool("node"), ProbeFailed("timed out"))
+    assert problem == DependencyProblem("version probe failed: timed out")
 
-    def install(_repo: Path, component: str) -> None:
-        installed.append(component)
-        present["crontab"] = True
 
-    scope = _scope(host=_host(present))
-    assert (
-        hd.ensure_host_dependencies(
-            repo=tmp_path, scope=scope, probes=_DataPlane().probes(), install=install
-        )
-        == 0
+def test_a_missing_node_toolchain_binary_names_itself() -> None:
+    assert diagnose(_tool("npm"), Absent()) == DependencyProblem("npm is not on PATH")
+    assert diagnose(_tool("npx"), Found("/usr/bin/npx", executable=True)) is None
+
+
+def test_a_program_missing_from_path_says_so() -> None:
+    assert diagnose(_tool("crontab"), Absent()) == DependencyProblem("not on PATH")
+
+
+def test_the_shell_and_systemd_have_their_own_wording() -> None:
+    assert diagnose(_tool("sh"), Absent()) == DependencyProblem("/bin/sh is missing")
+    systemd = diagnose(_tool("systemctl"), Absent())
+    assert systemd is not None and "systemd is not this host's service manager" in systemd.detail
+
+
+def test_a_reading_of_the_wrong_kind_is_a_defect_not_a_host_condition() -> None:
+    with pytest.raises(ValueError, match="not a PostgreSQL tool reading"):
+        diagnose(_tool("initdb"), NodeVersion("22.0.0"))
+    with pytest.raises(ValueError, match="not a presence reading"):
+        diagnose(_tool("git"), Unusable("x"))
+
+
+def test_a_required_tool_without_a_reading_raises() -> None:
+    scope = _scope()
+    readings = _present(scope)
+    del readings["git"]
+    with pytest.raises(KeyError):
+        missing_tools(scope, readings)
+
+
+def _missing(
+    scope: StartScope, **replaced: Reading
+) -> tuple[tuple[HostTool, DependencyProblem], ...]:
+    return missing_tools(scope, _present(scope, **replaced))
+
+
+def test_all_present_is_silent() -> None:
+    scope = _scope()
+    assert plan_gate(_missing(scope), repo=REPO, macos=False) == Satisfied()
+
+
+def test_a_missing_installable_tool_installs_its_group_and_lists_it() -> None:
+    scope = _scope()
+    plan = plan_gate(_missing(scope, crontab=Absent()), repo=REPO, macos=False)
+    assert plan == InstallGroups(
+        report=("", "→ host dependencies", "  · crontab: not on PATH"), groups=("host-utils",)
     )
-    # meiva:note
-    # Discard the first run's report: the second run must be silent.
-    capsys.readouterr()
-    assert (
-        hd.ensure_host_dependencies(
-            repo=tmp_path, scope=scope, probes=_DataPlane().probes(), install=install
-        )
-        == 0
+
+
+def test_each_missing_group_installs_once_in_table_order() -> None:
+    scope = _scope()
+    plan = plan_gate(
+        _missing(scope, pg_isready=Absent(), initdb=Absent(), curl=Absent(), git=Absent()),
+        repo=REPO,
+        macos=False,
     )
-    assert installed == ["host-utils"]
-    assert "host dependencies" not in capsys.readouterr().out
+    assert isinstance(plan, InstallGroups)
+    assert plan.groups == ("data-plane", "host-utils", "cli-tools")
 
 
-# meiva:note
-# A host-owned tool cannot be fixed by any provisioner, so the gate must not spend
-# minutes installing the groups that could have been fixed before it refuses.
-def test_a_host_owned_refusal_skips_the_installers(
-    capsys: pytest.CaptureFixture[str], tmp_path: Path
-) -> None:
-    installs: list[str] = []
-
-    def install(_repo: Path, component: str) -> None:
-        installs.append(component)
-
+def test_a_host_owned_tool_refuses_before_any_install() -> None:
+    scope = _scope()
+    plan = plan_gate(_missing(scope, crontab=Absent(), systemctl=Absent()), repo=REPO, macos=False)
+    assert isinstance(plan, Refuse)
+    assert plan.report[:2] == ("", "→ host dependencies")
+    assert "    ✗ crontab: not on PATH" in plan.refusal
+    assert any(line.startswith("    ✗ systemctl:") for line in plan.refusal)
     assert (
-        hd.ensure_host_dependencies(
-            repo=tmp_path,
-            scope=_scope(host=_host({"crontab": False, "systemctl": False})),
-            probes=_DataPlane().probes(),
-            install=install,
-        )
-        == 1
+        "    install systemd and boot with it, or run `MEIVA_OS_JOBS_ENABLED=0 meiva start` to start without OS jobs"
+        in plan.refusal
     )
-    assert installs == []
-    err = capsys.readouterr().err
-    assert "✗ crontab" in err and "✗ systemctl" in err
 
 
-def test_missing_crontab_that_cannot_be_installed_names_the_tool_and_the_command(
-    capsys: pytest.CaptureFixture[str], tmp_path: Path
-) -> None:
+def test_a_missing_tool_that_stays_missing_names_the_tool_and_the_command() -> None:
+    scope = _scope()
+    remaining = _missing(scope, crontab=Absent())
+    refusal = plan_recheck(remaining, repo=REPO, macos=False)
+    assert isinstance(refusal, Refuse)
+    assert refusal.report == ()
     assert (
-        hd.ensure_host_dependencies(
-            repo=tmp_path,
-            scope=_scope(host=_host({"crontab": False})),
-            probes=_DataPlane().probes(),
-            install=_no_install,
-        )
-        == 1
+        refusal.refusal[1] == "✗ host dependency preflight failed: `meiva start` launched nothing."
     )
-    err = capsys.readouterr().err
-    assert "launched nothing" in err
-    assert "✗ crontab" in err
-    assert str(tmp_path / "scripts/provision/host_utils.sh") in err
+    assert "    ✗ crontab: not on PATH" in refusal.refusal
+    assert f"    Debian/Ubuntu: sudo bash {REPO}/scripts/provision/host_utils.sh" in refusal.refusal
+    assert "  Fix the host, then retry `meiva start`:" in refusal.refusal
 
 
-def test_a_host_owned_tool_refuses_with_the_escape_command(
-    capsys: pytest.CaptureFixture[str], tmp_path: Path
-) -> None:
-    installs: list[str] = []
-
-    def install(_repo: Path, component: str) -> None:
-        installs.append(component)
-
-    assert (
-        hd.ensure_host_dependencies(
-            repo=tmp_path,
-            scope=_scope(host=_host({"systemctl": False})),
-            probes=_DataPlane().probes(),
-            install=install,
-        )
-        == 1
-    )
-    err = capsys.readouterr().err
-    assert "✗ systemctl" in err
-    assert "MEIVA_OS_JOBS_ENABLED=0" in err
-    assert installs == []
+def test_a_host_owned_tool_refuses_with_the_escape_command() -> None:
+    scope = _scope()
+    plan = plan_gate(_missing(scope, systemctl=Absent()), repo=REPO, macos=False)
+    assert isinstance(plan, Refuse)
+    assert any("MEIVA_OS_JOBS_ENABLED=0" in line for line in plan.refusal)
 
 
-@requires_systemd
-def test_missing_postgres_installs_the_database_group(
-    capsys: pytest.CaptureFixture[str], tmp_path: Path
-) -> None:
-    probe = _DataPlane(missing_postgres=("initdb", "pg_ctl", "postgres", "pg_isready"))
-    installed: list[str] = []
-
-    def install(_repo: Path, component: str) -> None:
-        installed.append(component)
-        probe.gone.clear()
-
-    assert (
-        hd.ensure_host_dependencies(
-            repo=tmp_path, scope=_scope(), probes=probe.probes(), install=install
-        )
-        == 0
-    )
-    assert installed == ["data-plane"]
-    assert "initdb" in capsys.readouterr().out
-
-
-def test_node_older_than_the_floor_refuses(
-    capsys: pytest.CaptureFixture[str], tmp_path: Path
-) -> None:
-    problem = hd.DependencyProblem("18.19.1 is older than 20.9")
+def test_node_older_than_the_floor_refuses() -> None:
     scope = _scope(roles=RUNNER, data_plane=None, services=FRONTEND_ONLY)
-    assert (
-        hd.ensure_host_dependencies(
-            repo=tmp_path,
-            scope=scope,
-            probes=_DataPlane(node=problem).probes(),
-            install=_no_install,
-        )
-        == 1
+    plan = plan_gate(_missing(scope, node=NodeVersion("18.19.1")), repo=REPO, macos=False)
+    assert isinstance(plan, InstallGroups), "an old Node is fixed by the group's install"
+    final = plan_recheck(_missing(scope, node=NodeVersion("18.19.1")), repo=REPO, macos=False)
+    assert isinstance(final, Refuse)
+    assert "    ✗ node: 18.19.1 is older than 20.9" in final.refusal
+
+
+def test_an_unusable_redis_override_refuses_without_installing() -> None:
+    scope = _scope(services=HEADLESS)
+    missing = _missing(
+        scope, **{"redis-server": Unusable("MEIVA_REDIS_BIN_DIR requires an executable file")}
     )
-    err = capsys.readouterr().err
-    assert "18.19.1 is older than 20.9" in err
+    plan = plan_gate(missing, repo=REPO, macos=False)
+    assert isinstance(plan, Refuse)
+    assert any("MEIVA_REDIS_BIN_DIR" in line for line in plan.refusal)
 
 
-def test_unusable_redis_override_is_not_installable(
-    capsys: pytest.CaptureFixture[str], tmp_path: Path
-) -> None:
-    def override(_config: DataPlaneConfig) -> str:
-        raise RuntimeError("MEIVA_REDIS_BIN_DIR requires an executable file")
-
-    assert (
-        hd.ensure_host_dependencies(
-            repo=tmp_path,
-            scope=_scope(services=HEADLESS),
-            probes=_DataPlane(redis=override).probes(),
-            install=lambda _repo, _component: pytest.fail("unexpected install"),
-        )
-        == 1
-    )
-    assert "MEIVA_REDIS_BIN_DIR" in capsys.readouterr().err
-
-
-def test_mac_tool_refuses_with_xcode_select(
-    capsys: pytest.CaptureFixture[str], tmp_path: Path
-) -> None:
+def test_a_mac_tool_refuses_with_xcode_select() -> None:
     scope = _scope(
         roles=RUNNER,
         data_plane=None,
         services=HEADLESS,
-        host=_host({"codesign": False}, macos=True),
+        macos=True,
         os_jobs=False,
         permissions_helper=True,
     )
+    plan = plan_gate(_missing(scope, codesign=Absent()), repo=REPO, macos=True)
+    assert isinstance(plan, Refuse)
+    assert "    ✗ codesign: not on PATH" in plan.refusal
+    assert "    install the Apple Command Line Tools: `xcode-select --install`" in plan.refusal
+
+
+def test_macos_remediation_names_homebrew_instead_of_the_provision_scripts() -> None:
+    scope = _scope(macos=True, os_jobs=False)
+    plan = plan_recheck(_missing(scope, pg_isready=Absent(), git=Absent()), repo=REPO, macos=True)
+    assert isinstance(plan, Refuse)
+    assert "    macOS needs Homebrew first: https://brew.sh" in plan.refusal
+    assert "    brew install postgresql@17 redis@8.2 pgbouncer pgvector" in plan.refusal
+    assert "    brew install git gh" in plan.refusal
+    assert not any("Debian/Ubuntu" in line for line in plan.refusal)
+
+
+def test_after_the_install_a_complete_host_is_ready() -> None:
+    assert plan_recheck((), repo=REPO, macos=False) == Ready("  ✓ host dependencies ready")
+
+
+def test_an_install_runs_the_groups_script_through_bash() -> None:
+    step = plan_install("host-utils", repo=REPO, macos=False)
+    assert step.script == REPO / "scripts/provision/host_utils.sh"
+    assert step.argv == ("bash", str(step.script))
+    assert step.announcement == (
+        "  · installing cron + curl with apt (this can take several minutes)"
+    )
+
+
+def test_an_install_on_macos_names_homebrew() -> None:
+    step = plan_install("node", repo=REPO, macos=True)
     assert (
-        hd.ensure_host_dependencies(
-            repo=tmp_path,
-            scope=scope,
-            probes=_DataPlane().probes(),
-            install=lambda _repo, _component: pytest.fail("unexpected install"),
-        )
-        == 1
-    )
-    err = capsys.readouterr().err
-    assert "✗ codesign" in err
-    assert "xcode-select --install" in err
-
-
-def test_node_tool_problem_reports_the_missing_binary() -> None:
-    problem = hd.node_tool_problem(
-        "npm", which=lambda name: None if name == "npm" else "/usr/bin/" + name
-    )
-    assert problem is not None
-    assert "npm" in problem.detail
-
-
-# meiva:note
-# The production runner is `Host.run` (`base.host.proc.run_bounded`): it bounds the
-# whole process tree and, by design, has no `check=` keyword. A probe that passes
-# `subprocess.run`'s `check` would raise TypeError on every real host.
-def test_node_probe_uses_the_host_runner_contract() -> None:
-    def run(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        if "check" in kwargs:
-            raise TypeError("Popen.__init__() got an unexpected keyword argument 'check'")
-        return subprocess.CompletedProcess([], 0, "22.14.0\n", "")
-
-    assert hd.node_tool_problem("node", which=lambda name: "/usr/bin/" + name, run=run) is None
-
-
-def test_node_tool_problem_accepts_22() -> None:
-    assert hd.node_tool_problem("node", which=lambda name: "/usr/bin/" + name, run=_run) is None
-
-
-def test_node_tool_problem_rejects_the_ubuntu_18_default() -> None:
-    def run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess([], 0, "18.19.1\n", "")
-
-    problem = hd.node_tool_problem("node", which=lambda name: "/usr/bin/" + name, run=run)
-    assert problem is not None
-    assert "older than 20.9" in problem.detail
-
-
-@requires_systemd
-def test_the_postgres_probe_names_only_the_missing_tool() -> None:
-    probes = _DataPlane(missing_postgres=("pg_isready",)).probes()
-    missing = hd.missing_tools(_scope(), probes=probes)
-    named = {tool.name: problem.detail for tool, problem in missing}
-    assert set(named) == {"pg_isready"}
-    assert "vendored" in named["pg_isready"]
-
-
-@requires_systemd
-def test_the_pgbouncer_probe_reports_the_resolved_path() -> None:
-    probes = _DataPlane(pgbouncer="/missing/pgbouncer").probes()
-    missing = hd.missing_tools(_scope(), probes=probes)
-    assert [tool.name for tool, _problem in missing] == ["pgbouncer"]
-    assert "/missing/pgbouncer" in missing[0][1].detail
-
-
-# meiva:note
-# The Settings shape the step reads, built without constructing Settings; the
-# credentials are fake values that never leave this module.
-def _view(
-    *, permissions_helper: bool = False, os_jobs: bool = True, github_pr: bool = True
-) -> SimpleNamespace:
-    plane = SimpleNamespace(
-        db_url="postgresql://meiva:pw@127.0.0.1:5432/meiva",
-        redis_url="redis://meiva:pw@127.0.0.1:6380/0",
-        redis_admin_password="admin",  # noqa: S106
-        cluster_secret="secret",  # noqa: S106
-        pgbouncer_enabled=True,
-        pooler_max_client_conn=100,
-        redis_bin_dir="",
-        trusted_cidrs="",
-        events_channel="meiva:events",
-    )
-    return SimpleNamespace(
-        data_plane=plane,
-        services=SimpleNamespace(
-            memory_search_backend="pgvector",
-            embedding_backend="openai",
-            permissions_helper_enabled=permissions_helper,
-        ),
-        general=SimpleNamespace(
-            os_jobs_enabled=os_jobs,
-            require_github_pr=github_pr,
-            memory_keep_local=False,
-        ),
+        step.announcement == "  · installing Node.js with Homebrew (this can take several minutes)"
     )
 
 
-class _Ctx:
-    # meiva:note
-    # A duck-typed ConvergeCtx: the step reads only these fields. The home is the
-    # default one so `prod_install` is decided by the checkout path alone, while
-    # the process's own MEIVA_HOME (the test harness's temporary home) is what
-    # `owns_os_jobs` reads — the pair the real step sees.
-    repo = Path("/repo")
-    meiva_home = Path.home() / ".meiva"
-    roles = RUNNER
-    services = frozenset({"frontend"})
-    host = _host()
-
-    def read_config(self) -> Any:
-        return SimpleNamespace(view=_view())
-
-
-def test_step_refuses_when_the_check_fails() -> None:
-    calls: list[dict[str, object]] = []
-
-    def check(**kwargs: object) -> int:
-        calls.append(kwargs)
-        return 1
-
-    # meiva:note
-    # `_Ctx` is a duck-typed ConvergeCtx; pyright cannot see that it satisfies the protocol.
-    with pytest.raises(RuntimeError, match="refused this start"):
-        hd.ensure_host_dependencies_step(_Ctx(), check=check)  # pyright: ignore[reportArgumentType]
-    assert calls and calls[0]["repo"] == Path("/repo")
-    scope = calls[0]["scope"]
-    assert isinstance(scope, hd.StartScope)
-    assert scope.roles == RUNNER
-    assert "node" in _names(scope)
-    # meiva:note
-    # The two gates the step derives rather than hardcodes: OS jobs need the default
-    # home this process does not own, and the view's helper flag reaches the scope.
-    assert scope.os_jobs is False
-    assert scope.prod_install is True
-    assert scope.permissions_helper is False
-
-
-def test_step_passes_the_helper_flag_and_the_os_jobs_switch_through() -> None:
-    seen: list[hd.StartScope] = []
-
-    class _Incapable(_Ctx):
-        def read_config(self) -> Any:
-            return SimpleNamespace(view=_view(permissions_helper=True, os_jobs=False))
-
-    def check(**kwargs: object) -> int:
-        scope = kwargs["scope"]
-        assert isinstance(scope, hd.StartScope)
-        seen.append(scope)
-        return 0
-
-    # meiva:note
-    # `_Incapable` is a duck-typed ConvergeCtx; pyright cannot see the protocol match.
-    hd.ensure_host_dependencies_step(_Incapable(), check=check)  # pyright: ignore[reportArgumentType]
-    assert seen[0].permissions_helper is True
-    assert seen[0].os_jobs is False
+def test_the_install_failure_lines_name_the_script() -> None:
+    script = REPO / "scripts/provision/node.sh"
+    assert missing_script_line(script) == f"  ✗ provision script missing: {script}"
+    assert launch_failure_line(script, "boom") == "  ✗ node.sh failed to run: boom"
+    assert exit_line(script, 3) == "  ! node.sh exited 3; re-checking what landed"

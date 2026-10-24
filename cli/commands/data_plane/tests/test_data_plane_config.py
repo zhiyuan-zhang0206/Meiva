@@ -1,4 +1,6 @@
-"""`DataPlaneConfig`: what the data-plane commands read, mapped once and never leaked."""
+# meiva:note
+# `DataPlaneConfig`: what the data-plane commands read, mapped once and never leaked.
+
 
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ def test_the_mapping_reads_every_field_from_its_own_setting(
 ) -> None:
     boot = snapshot_process_config()
     redis_bin = str(tmp_path_factory.mktemp("redis-bin"))
+    walg_file = tmp_path_factory.mktemp("walg") / "walg.json"
     expected = {
         "db_url": "postgresql://owner:db-secret@db.example:5432/meiva",
         "redis_url": "redis://meiva:redis-secret@cache.example:6380/0",
@@ -31,6 +34,7 @@ def test_the_mapping_reads_every_field_from_its_own_setting(
         "events_channel": "meiva:mapped:events",
         "memory_search_backend": "numpy",
         "embedding_backend": "gemini",
+        "walg_config_file": walg_file,
     }
     for name, value in expected.items():
         boot.set_field(name, value)
@@ -69,9 +73,14 @@ def test_no_secret_or_login_reaches_the_repr(data_plane_config: DataPlaneConfig)
         "db.example",
     ):
         assert hidden not in text
-    assert "pgbouncer_enabled" in text and "trusted_cidrs" in text  # the repr still names the rest
+    # meiva:note
+    # the repr still names the rest
+    assert "pgbouncer_enabled" in text and "trusted_cidrs" in text
 
 
+# meiva:note
+# Assigning to a frozen field is the subject of this test, so the type checker's rejection of it
+# is the one thing the ignore silences.
 def test_the_config_is_frozen(data_plane_config: DataPlaneConfig) -> None:
     with pytest.raises(dataclasses.FrozenInstanceError):
         data_plane_config.pgbouncer_enabled = not data_plane_config.pgbouncer_enabled  # pyright: ignore[reportAttributeAccessIssue]

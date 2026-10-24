@@ -44,10 +44,17 @@ def health_verdicts(
 
 # meiva:note
 # Observe the service table and ask the current protocol probes.
+#
+# A root that answers with an unreadable status reads as no root yet: the wait keeps polling
+# and ends unready at its deadline, as it did before the snapshot was validated.
 def _fresh_round(
     client: RootClient, specs: tuple[ServiceSpec, ...]
 ) -> tuple[dict[str, UnitRow], dict[str, str]]:
-    snapshot = root_driver.root_status(client)
+    try:
+        snapshot = root_driver.root_status(client)
+    except root_driver.RootDriverError as exc:
+        logger.warning("readiness poll: {}", exc)
+        snapshot = None
     units = root_units(snapshot) if snapshot is not None else {}
     return units, health_verdicts(specs, snapshot)
 

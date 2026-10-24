@@ -1,241 +1,214 @@
-"""Prepare native LGTM assets and configuration for the root service roster.
-
-Preparation never registers OS jobs, launches services or retires another home.
-"""
+# meiva:note
+# Prepare native LGTM assets and configuration for the root service roster.
+#
+# Preparation never registers OS jobs, launches services or retires another home. The pinned
+# versions, the install plan, the rendered text and the warnings are decided by the modules under
+# `plans/`; this module reads the settings and the disk, downloads, extracts, writes and runs the
+# pinned Loki parser.
 
 from __future__ import annotations
 
 import hashlib
-import ipaddress
 import os
 import shlex
 import shutil
 import sys
 import tarfile
 import tempfile
+import time
 import zipfile
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
-from urllib.parse import urlparse
+from urllib.parse import urlsplit
 
 import yaml
 from dotenv import dotenv_values
 
 from base.agents.context.clients import DatabaseFactory
-from base.clock import SYSTEM_TIMERS, Timers
 from base.cluster.machine import MachineIdentity
-from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
-from base.host.net.resilience import Policy, retry
+from base.host.net.ports import SYSTEM_URL_OPENER
 from base.host.system.hostport import Host
-from base.native_process.os_platform import Platform
 from base.telemetry import EventPipeline
-from base.telemetry.lgtm_local import BACKENDS
+from base.telemetry.lgtm_local import BACKENDS, binary_path
 from base.telemetry.lgtm_local import storage_dir as _storage_dir
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
+from base.telemetry.station_endpoint import validated_observability_base
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability._lgtm_assets import NATIVE_CONSTANTS, load_versions
-from cli.commands.observability._lgtm_provisioning import render_provisioning
-from cli.commands.observability.lgtm import is_station_ctx
-from cli.commands.observability.observatory_urls import (
-    alerts_webhook_url,
-    observability_datasource_urls,
+from cli.commands.observability._lgtm_provisioning import render_dashboard, render_provisioning
+from cli.commands.observability.inputs import LgtmSettings, lgtm_settings
+from cli.commands.observability.plans.lgtm.archive import (
+    ExtractMember,
+    ExtractTree,
+    checksum_problem,
+    extraction_plan,
+    install_markers,
+    loki_verify_argv,
+    loki_verify_error,
+)
+from cli.commands.observability.plans.lgtm.dashboard_plan import DashboardOutcome
+from cli.commands.observability.plans.lgtm.download_report import (
+    attempt_failure_line,
+    budget_exceeded_message,
+    done_line,
+    give_up_message,
+    progress_line,
+)
+from cli.commands.observability.plans.lgtm.download_retry import (
+    AttemptState,
+    DownloadLimits,
+    content_length,
+    progress_due,
+    retry_wait,
+)
+from cli.commands.observability.plans.lgtm.install import (
+    InstallBackend,
+    InstalledMarkers,
+    plan_backend_installs,
+    platform_tag,
+    require_backend_selection,
+    station_backends,
+)
+from cli.commands.observability.plans.lgtm.render import (
+    CONFIG_TEMPLATES,
+    NativeRenderValues,
+    ReadSurface,
+    env_divergences,
+    listen_read_warnings,
+    render_config,
+    render_run_script,
+    tempo_topology_warning,
+)
+from cli.commands.observability.plans.lgtm.urls import (
+    alerts_webhook,
+    datasource_urls,
+    normalize_gateway_base,
+    pg_datasource,
 )
 
-SUPPORTED_TAGS = {"darwin_arm64", "linux_amd64"}
 
-
-def platform_tag(platform: Platform) -> str | None:
-    """Return the pinned release tag for a platform, if native LGTM supports it."""
-    machine = platform.machine.lower()
-    if platform.system == "darwin" and machine in {"arm64", "aarch64"}:
-        return "darwin_arm64"
-    if platform.system == "linux" and machine in {"x86_64", "amd64"}:
-        return "linux_amd64"
-    return None
-
-
-def native_versions(repo: Path, *, platform: Platform) -> dict[str, dict[str, str]]:
-    tag = platform_tag(platform)
-    if tag is None:
-        raise RuntimeError("Native LGTM has no pinned assets for this platform")
+# meiva:note
+# The pinned versions and per-platform archives for the release tag, from the checkout's
+# `versions.yml`.
+def native_versions(repo: Path, *, tag: str) -> dict[str, dict[str, str]]:
     return load_versions(repo, tag)
 
 
-def _binary_path(name: str, native_dir: Path) -> Path:
-    """Return the installed executable path for one native backend."""
-    return native_dir / NATIVE_CONSTANTS[name].binary_path
-
-
-@dataclass(frozen=True)
-class DownloadLimits:
-    total_budget_s: float
-    socket_timeout_s: float
-    attempts: int
-    retry_backoff_s: float
-    progress_interval_s: float
-
-
-@dataclass
-class DownloadProgress:
-    received: int = 0
+def _remaining(deadline: float) -> float:
+    return deadline - time.monotonic()
 
 
 # meiva:link cli/commands/observability/docs/lgtm/lgtm.meiva.okf.md
 def stream_download(
-    url: str,
-    destination: Path,
-    *,
-    open_url: UrlOpener,
-    timers: Timers,
-    limits: DownloadLimits,
-    deadline: float,
-    progress: DownloadProgress,
+    url: str, destination: Path, *, limits: DownloadLimits, deadline: float
 ) -> None:
-    def _remaining() -> float:
-        return deadline - timers.monotonic()
+    received = 0
+    last_report = 0.0
 
-    def _elapsed() -> float:
-        return limits.total_budget_s - _remaining()
-
-    def _require_budget() -> float:
-        remaining = _remaining()
+    def require_budget() -> float:
+        remaining = _remaining(deadline)
         if remaining <= 0:
             raise TimeoutError(
-                f"lgtm native download exceeded its {limits.total_budget_s:.0f}s budget "
-                f"({progress.received} bytes received, "
-                f"{max(-remaining, 0.0):.1f}s past the deadline)"
+                budget_exceeded_message(limits, received=received, remaining_s=remaining)
             )
         return remaining
 
-    last_progress = 0.0
-    total: int | None = None
+    def elapsed() -> float:
+        return limits.total_budget_s - _remaining(deadline)
+
     with (
-        open_url(url, min(limits.socket_timeout_s, _require_budget())) as response,
+        SYSTEM_URL_OPENER(url, min(limits.socket_timeout_s, require_budget())) as response,
         destination.open("wb") as output,
     ):
-        try:
-            total = int(response.headers.get("Content-Length") or 0)
-        except (TypeError, ValueError):
-            total = None
+        total = content_length(response.headers.get("Content-Length"))
         while True:
-            _require_budget()
+            require_budget()
             chunk = response.read1(1 << 16)
-            _require_budget()
+            require_budget()
             if not chunk:
                 break
             output.write(chunk)
-            progress.received += len(chunk)
-            elapsed = _elapsed()
-            if elapsed - last_progress >= limits.progress_interval_s:
-                percent = f" ({progress.received * 100 // total}%)" if total else ""
-                print(
-                    f"  · lgtm native: {progress.received / 1e6:.1f} MB{percent} in {elapsed:.0f}s"
-                )
-                last_progress = elapsed
-    print(f"  · lgtm native: downloaded {progress.received / 1e6:.1f} MB in {_elapsed():.0f}s")
+            received += len(chunk)
+            if progress_due(limits, elapsed_s=elapsed(), last_report_s=last_report):
+                last_report = elapsed()
+                print(progress_line(received=received, total=total, elapsed_s=last_report))
+    print(done_line(received=received, elapsed_s=elapsed()))
 
 
-def _download_policy(limits: DownloadLimits) -> Policy:
-    def _backoff(attempt: int) -> float:
-        return limits.retry_backoff_s * (attempt + 1)
-
-    return Policy(
-        max_attempts=limits.attempts,
-        backoff=_backoff,
-        jitter="none",
-        jitter_span=1.0,
-        classify=lambda _exc: True,
-        idempotent=True,
-        respect_retry_after=False,
-        on_final_failure=None,
-    )
+def _bytes_on_disk(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except FileNotFoundError:
+        return 0
 
 
+# meiva:note
+# Download `url` to `archive`, retrying until the attempts or the single deadline are spent.
+#
+# Network and filesystem failures are all retriable here. Each attempt starts from an empty file,
+# so the bytes reported for a failed attempt are the ones that attempt received.
 # meiva:link cli/commands/observability/docs/lgtm/lgtm.meiva.okf.md
-def download_with_retry(
-    url: str, archive: Path, *, open_url: UrlOpener, timers: Timers, limits: DownloadLimits
-) -> None:
-    started = timers.monotonic()
+def download_with_retry(url: str, archive: Path, *, limits: DownloadLimits) -> None:
+    started = time.monotonic()
     deadline = started + limits.total_budget_s
     attempt = 0
-    progress = DownloadProgress()
-
-    def _used() -> float:
-        return timers.monotonic() - started
-
-    def _remaining() -> float:
-        return deadline - timers.monotonic()
-
-    def _wait(seconds: float) -> None:
-        remaining = _remaining()
-        if remaining > 0:
-            timers.sleep(min(seconds, remaining))
-
-    def _download_once() -> None:
-        nonlocal attempt, progress
+    while True:
         attempt += 1
-        progress = DownloadProgress()
+        archive.unlink(missing_ok=True)
         try:
-            stream_download(
-                url,
-                archive,
-                open_url=open_url,
-                timers=timers,
-                limits=limits,
-                deadline=deadline,
-                progress=progress,
+            stream_download(url, archive, limits=limits, deadline=deadline)
+            return
+        except Exception as exc:
+            state = AttemptState(
+                attempt=attempt,
+                used_s=time.monotonic() - started,
+                remaining_s=_remaining(deadline),
+                received=_bytes_on_disk(archive),
             )
-        except Exception as exc:  # network and filesystem failures are all retriable here
-            print(
-                f"  ! lgtm native: download attempt {attempt}/{limits.attempts} failed after "
-                f"{_used():.0f}s ({max(_remaining(), 0.0):.0f}s of the "
-                f"{limits.total_budget_s:.0f}s budget left, {progress.received} bytes "
-                f"received): {exc}",
-                file=sys.stderr,
-            )
-            raise
-
-    try:
-        retry(_download_policy(limits), sleep=_wait)(_download_once)
-    except Exception as exc:
-        raise RuntimeError(
-            f"failed to download native LGTM backend from {url} after {attempt} attempt(s) "
-            f"({_used():.0f}s used of the {limits.total_budget_s:.0f}s budget, "
-            f"{max(_remaining(), 0.0):.0f}s left, {progress.received} bytes received by the "
-            f"last attempt): {exc}"
-        ) from exc
+            print(attempt_failure_line(limits, state, error=str(exc)), file=sys.stderr)
+            wait = retry_wait(limits, attempt=attempt, remaining_s=state.remaining_s)
+            if wait is None:
+                raise RuntimeError(give_up_message(limits, state, url=url, error=str(exc))) from exc
+            time.sleep(wait)
 
 
-def _extract_member(name: str, archive: Path, destination: Path, member: str | None = None) -> None:
-    """Copy the expected release member into its final binary path."""
-    member = member or NATIVE_CONSTANTS[name].archive_member
-    if member is None:
-        raise RuntimeError(f"native LGTM {name} must install a release tree")
+# meiva:note
+# Copy the expected release member into its final binary path.
+def _copy_zip_member(archive: Path, member: str, target: Path) -> None:
+    with (
+        zipfile.ZipFile(archive) as bundle,
+        bundle.open(member) as source,
+        target.open("wb") as output,
+    ):
+        shutil.copyfileobj(source, output)
+
+
+def _copy_tar_member(archive: Path, member: str, target: Path) -> None:
+    with tarfile.open(archive) as bundle:
+        source = bundle.extractfile(member)
+        if source is None:
+            raise KeyError(member)
+        with source, target.open("wb") as output:
+            shutil.copyfileobj(source, output)
+
+
+def _extract_member(name: str, archive: Path, destination: Path, member: str) -> None:
     with tempfile.TemporaryDirectory() as temporary_dir:
         extracted = Path(temporary_dir) / name
-        if archive.suffix == ".zip":
-            with (
-                zipfile.ZipFile(archive) as bundle,
-                bundle.open(member) as source,
-                extracted.open("wb") as target,
-            ):
-                shutil.copyfileobj(source, target)
-        else:
-            with tarfile.open(archive) as bundle:
-                source = bundle.extractfile(member)
-                if source is None:
-                    raise RuntimeError(f"native LGTM {name} archive has no {member} member")
-                with source, extracted.open("wb") as target:
-                    shutil.copyfileobj(source, target)
+        copy = _copy_zip_member if archive.suffix == ".zip" else _copy_tar_member
+        try:
+            copy(archive, member, extracted)
+        except KeyError as exc:
+            raise RuntimeError(f"native LGTM {name} archive has no {member} member") from exc
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(extracted), destination)
     destination.chmod(0o755)
 
 
+# meiva:note
+# Install a release archive tree after stripping its top-level directory.
 def _extract_tree(name: str, archive: Path, destination: Path) -> None:
-    """Install a release archive tree after stripping its top-level directory."""
     with tempfile.TemporaryDirectory() as temporary_dir:
         extracted = Path(temporary_dir) / "extracted"
         extracted.mkdir()
@@ -250,6 +223,8 @@ def _extract_tree(name: str, archive: Path, destination: Path) -> None:
         shutil.move(str(roots[0]), destination)
 
 
+# meiva:note
+# Download, hash-verify and install one pinned native backend.
 def download_and_verify(
     name: str,
     version: str,
@@ -257,32 +232,39 @@ def download_and_verify(
     native_dir: Path,
     *,
     tag: str,
-    open_url: UrlOpener,
-    timers: Timers,
     limits: DownloadLimits,
 ) -> None:
-    """Download, hash-verify, and install one pinned native backend binary."""
     with tempfile.TemporaryDirectory() as temporary_dir:
         archive = Path(temporary_dir) / Path(asset["url"]).name
         print(f"  · lgtm native: downloading {name} {version} from {asset['url']}")
-        download_with_retry(asset["url"], archive, open_url=open_url, timers=timers, limits=limits)
-        actual = hashlib.sha256(archive.read_bytes()).hexdigest()
-        if actual != asset["sha256"]:
-            raise RuntimeError(
-                f"native LGTM {name} {version} SHA256 mismatch: got {actual}, "
-                f"expected {asset['sha256']} — refusing to install"
-            )
+        download_with_retry(asset["url"], archive, limits=limits)
+        problem = checksum_problem(
+            name,
+            version,
+            actual=hashlib.sha256(archive.read_bytes()).hexdigest(),
+            expected=asset["sha256"],
+        )
+        if problem is not None:
+            raise RuntimeError(problem)
         service = NATIVE_CONSTANTS[name]
-        if service.archive_member is None:
-            _extract_tree(name, archive, native_dir / "grafana-home")
-        else:
-            _extract_member(name, archive, _binary_path(name, native_dir), asset["member"])
-    (native_dir / f"version-{name}").write_text(version + "\n", encoding="utf-8")
-    (native_dir / f"platform-{name}").write_text(tag + "\n", encoding="utf-8")
+        match extraction_plan(
+            archive_member=service.archive_member,
+            asset_member=asset["member"],
+            binary_path=service.binary_path,
+        ):
+            case ExtractTree(destination=destination):
+                _extract_tree(name, archive, native_dir / destination)
+            case ExtractMember(member=member, destination=destination):
+                _extract_member(name, archive, native_dir / destination, member)
+    for filename, content in install_markers(name, version=version, tag=tag):
+        (native_dir / filename).write_text(content, encoding="utf-8")
 
 
+# meiva:note
+# Publish text only when it differs, avoiding needless launchd churn. A `mode` creates the file
+# owner-restricted from the start and corrects an existing file's mode even when the text is
+# unchanged.
 def write_if_changed(path: Path, content: str, *, mode: int | None = None) -> None:
-    """Publish text only when it differs, avoiding needless launchd churn."""
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and path.read_text(encoding="utf-8") == content:
         if mode is not None:
@@ -299,238 +281,184 @@ def write_if_changed(path: Path, content: str, *, mode: int | None = None) -> No
         output.write(content)
 
 
-def _has_loopback_host(url: str) -> bool:
-    """Whether a configured URL resolves to a loopback hostname or address."""
-    hostname = urlparse(url).hostname
-    if hostname is None:
-        return False
-    if hostname.lower() == "localhost":
-        return True
-    try:
-        return ipaddress.ip_address(hostname).is_loopback
-    except ValueError:
-        return False
-
-
-def _url_host_port(url: str) -> str:
-    """`host:port` of a base URL — scheme and trailing slash stripped, the
-    Prometheus scrape-target form (the tempo target substitution's shape)."""
-    return url.rstrip("/").removeprefix("http://").removeprefix("https://")
-
-
-def _is_specific_non_loopback_listen(host: str) -> bool:
-    """Whether a listen host binds one specific address that loopback dials miss.
-
-    A wildcard bind (0.0.0.0 / ::) or a loopback bind still answers on
-    loopback, so neither breaks the default loopback read URLs. Only a specific
-    non-loopback IP does. Hostnames are not judged (resolution is out of scope
-    here); the external-migration form uses literal tailnet IPs.
-    """
-    h = host.strip().lower().removeprefix("[").removesuffix("]")
-    if h in ("0.0.0.0", "::", "localhost", "::1") or h.startswith("127."):  # noqa: S104 — wildcard classification, not a bind
-        return False
-    try:
-        return not ipaddress.ip_address(h).is_loopback
-    except ValueError:
-        return False
-
-
-def _warn_listen_read_mismatches() -> None:
-    """Warn when a native backend binds a specific non-loopback address while
-    its telemetry read URL still resolves to loopback.
-
-    Prometheus scrape targets and consumer reads use the telemetry URLs, so
-    a widened listen host with loopback read URLs breaks those read paths (QA nit on PR #727, Task #1795)."""
-    from base.config import settings
-
-    observability = settings.observability
-    backends = (
-        (
-            "loki",
-            "MEIVA_TELEMETRY_LOKI_URL",
-            observability.lgtm_listen_host,
-            observability.telemetry_loki_url,
-        ),
-        (
-            "prometheus",
-            "MEIVA_TELEMETRY_PROMETHEUS_URL",
-            observability.lgtm_listen_host,
-            observability.telemetry_prometheus_url,
-        ),
-        (
-            "grafana",
-            "MEIVA_TELEMETRY_GRAFANA_URL",
-            observability.lgtm_grafana_listen_host,
-            observability.telemetry_grafana_url,
-        ),
-    )
-    for backend, env_var, listen_host, read_url in backends:
-        if not _is_specific_non_loopback_listen(listen_host) or not _has_loopback_host(read_url):
-            continue
-        print(
-            "lgtm native: "
-            f"{env_var} resolves to {read_url} but {backend} listens on {listen_host} "
-            f"— set {env_var} to the listen address or keep the listen host loopback",
-            file=sys.stderr,
-        )
-
-
+# meiva:note
+# Print the divergences between the values about to be rendered and what the unit's `.env`
+# declares. A home without a `.env` has nothing to diverge from.
 def warn_env_file_divergence(meiva_home: Path, values: dict[str, str]) -> None:
-    """Warn when a value about to be rendered disagrees with this unit's .env.
-
-    Settings give an inherited environment value precedence over the file for
-    host-scope keys, and a long-lived parent forwards its snapshot to every
-    child it spawns — so a converge run inside such a session bakes the stale
-    value into the rendered tree silently (2026-09-14 wave: the tempo target
-    was re-rendered with the pre-change tailnet URL while .env said loopback;
-    task #3339). Comparing against the file makes the divergence loud, whatever
-    key it hits. A key the file does not declare is skipped: env-only supply is
-    legitimate (a not-yet-enrolled unit, the test suites).
-    """
     env_file = meiva_home / ".env"
     if not env_file.exists():
         return
-    declared = dotenv_values(env_file)
-    for alias, value in values.items():
-        file_value = declared.get(alias)
-        if file_value is None or file_value.rstrip("/") == value.rstrip("/"):
-            continue
-        print(
-            f"lgtm native: {alias} resolved to {value} but {env_file} declares "
-            f"{file_value} — an inherited environment value is in effect",
-            file=sys.stderr,
+    for warning in env_divergences(dotenv_values(env_file), values, env_file=str(env_file)):
+        print(warning, file=sys.stderr)
+
+
+def _render_warnings(settings: LgtmSettings) -> tuple[str, ...]:
+    obs = settings.observability
+    query_url = obs.telemetry_tempo_query_url.rstrip("/")
+    intake_endpoint = obs.telemetry_tempo_endpoint.rstrip("/")
+    topology = tempo_topology_warning(
+        query_url=query_url,
+        query=urlsplit(query_url),
+        intake_endpoint=intake_endpoint,
+        intake=urlsplit(intake_endpoint),
+    )
+    surfaces = tuple(
+        ReadSurface(backend, env_var, listen_host, read_url, urlsplit(read_url))
+        for backend, env_var, listen_host, read_url in (
+            ("loki", "MEIVA_TELEMETRY_LOKI_URL", obs.lgtm_listen_host, obs.telemetry_loki_url),
+            (
+                "prometheus",
+                "MEIVA_TELEMETRY_PROMETHEUS_URL",
+                obs.lgtm_listen_host,
+                obs.telemetry_prometheus_url,
+            ),
+            (
+                "grafana",
+                "MEIVA_TELEMETRY_GRAFANA_URL",
+                obs.lgtm_grafana_listen_host,
+                obs.telemetry_grafana_url,
+            ),
         )
+    )
+    return (*((topology,) if topology else ()), *listen_read_warnings(surfaces))
 
 
+# meiva:note
+# The datasource and webhook URLs Grafana's provisioning reads, resolved from the settings, the
+# machine and the cluster's direct database URL; the stderr notices they raise are printed here.
+#
+# libpq's parser is imported where it is used: the converge step table imports this module on
+# every CLI start, and only a station render needs it.
+def _grafana_endpoints(
+    settings: LgtmSettings, *, direct_db_url: str, machine: MachineIdentity
+) -> tuple[str, str, str, str]:
+    obs = settings.observability
+    base = validated_observability_base(obs.observability_url)
+    loki_url, prometheus_url = datasource_urls(
+        observatory_base=base,
+        loki_url=obs.telemetry_loki_url,
+        prometheus_url=obs.telemetry_prometheus_url,
+    )
+    from psycopg.conninfo import conninfo_to_dict
+
+    connection = conninfo_to_dict(direct_db_url)
+    pg = pg_datasource(
+        str(connection["host"]) if connection.get("host") else None,
+        str(connection["port"]) if connection.get("port") else None,
+        remote_observatory=bool(base),
+    )
+    if pg.warning is not None:
+        print(pg.warning, file=sys.stderr)
+    gateway_base = normalize_gateway_base(settings.webhook.gateway_url)
+    webhook = alerts_webhook(
+        remote_observatory=bool(obs.observability_url),
+        gateway_base=gateway_base,
+        gateway=urlsplit(gateway_base),
+        gateway_port=settings.webhook.gateway_port,
+        machine_host=machine.host(),
+    )
+    if webhook.notice is not None:
+        print(webhook.notice, file=sys.stderr)
+    return loki_url, prometheus_url, pg.host_port, webhook.url
+
+
+# meiva:note
+# Render the native templates from this checkout and the settings into `native_dir`.
+#
+# `direct_db_url` is the cluster's own Postgres URL (the Grafana SQL datasource derives its
+# `host:port` from it, never its credentials) and `dashboard` the outcome of the `meiva-ops`
+# render; both are effects the caller already performed. Grafana provisioning is converge-rendered
+# (`datasources.yml` and `contact.yml` carry settings-baked URLs); Grafana reads the rendered tree,
+# never the source checkout. The Loki config is checked against the deploy invariants before any
+# file is written.
 def render_configs(
     repo: Path,
     native_dir: Path,
     meiva_home: Path,
     *,
-    database_factory: DatabaseFactory,
+    settings: LgtmSettings,
+    storage_dir: Path,
+    direct_db_url: str,
+    dashboard: DashboardOutcome,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
 ) -> None:
-    """Render native templates from this checkout and host configuration."""
-    from base.config import settings
-
     source_dir = repo / "deploy/lgtm/native/config"
-    # Grafana provisioning is converge-rendered (datasources.yml / contact.yml
-    # carry settings-baked URLs); grafana reads the rendered tree, never the
-    # source checkout directly.
-    rendered_provisioning = native_dir / "config" / "provisioning"
-    tempo_query_url = settings.observability.telemetry_tempo_query_url.rstrip("/")
-    tempo_intake_endpoint = settings.observability.telemetry_tempo_endpoint.rstrip("/")
-    lgtm_listen_host = settings.observability.lgtm_listen_host
-    if _has_loopback_host(tempo_query_url) != _has_loopback_host(tempo_intake_endpoint):
-        print(
-            "lgtm native: MEIVA_TELEMETRY_TEMPO_QUERY_URL resolves to "
-            f"{tempo_query_url} but the Tempo intake endpoint is {tempo_intake_endpoint} "
-            "— set MEIVA_TELEMETRY_TEMPO_QUERY_URL to the remote cluster's query URL",
-            file=sys.stderr,
-        )
-    _warn_listen_read_mismatches()
+    obs = settings.observability
+    tempo_query_url = obs.telemetry_tempo_query_url.rstrip("/")
+    for warning in _render_warnings(settings):
+        print(warning, file=sys.stderr)
     warn_env_file_divergence(
         meiva_home,
         {
             "MEIVA_TELEMETRY_TEMPO_QUERY_URL": tempo_query_url,
-            "MEIVA_TELEMETRY_TEMPO_ENDPOINT": tempo_intake_endpoint,
-            "MEIVA_TELEMETRY_LOKI_URL": settings.observability.telemetry_loki_url,
-            "MEIVA_TELEMETRY_PROMETHEUS_URL": settings.observability.telemetry_prometheus_url,
-            "MEIVA_TELEMETRY_GRAFANA_URL": settings.observability.telemetry_grafana_url,
-            "MEIVA_OBSERVABILITY_URL": settings.observability.observability_url,
-            "MEIVA_LGTM_LISTEN_HOST": lgtm_listen_host,
-            "MEIVA_LGTM_GRAFANA_LISTEN_HOST": settings.observability.lgtm_grafana_listen_host,
-            "MEIVA_LGTM_LOKI_PORT": str(settings.observability.lgtm_loki_port),
-            "MEIVA_LGTM_GRAFANA_PORT": str(settings.observability.lgtm_grafana_port),
+            "MEIVA_TELEMETRY_TEMPO_ENDPOINT": obs.telemetry_tempo_endpoint.rstrip("/"),
+            "MEIVA_TELEMETRY_LOKI_URL": obs.telemetry_loki_url,
+            "MEIVA_TELEMETRY_PROMETHEUS_URL": obs.telemetry_prometheus_url,
+            "MEIVA_TELEMETRY_GRAFANA_URL": obs.telemetry_grafana_url,
+            "MEIVA_OBSERVABILITY_URL": obs.observability_url,
+            "MEIVA_LGTM_LISTEN_HOST": obs.lgtm_listen_host,
+            "MEIVA_LGTM_GRAFANA_LISTEN_HOST": obs.lgtm_grafana_listen_host,
+            "MEIVA_LGTM_LOKI_PORT": str(obs.lgtm_loki_port),
+            "MEIVA_LGTM_GRAFANA_PORT": str(obs.lgtm_grafana_port),
         },
     )
-    loki_url, prometheus_url, pg_url = observability_datasource_urls(
-        database_factory=database_factory
+    loki_url, prometheus_url, pg_url, webhook_url = _grafana_endpoints(
+        settings, direct_db_url=direct_db_url, machine=machine
     )
-    substitutions = {
-        "MEIVA_HOME": str(meiva_home),
-        "LGTM_STORAGE_DIR": str(_storage_dir(meiva_home)),
-        "MEIVA_PROVISIONING_PATH": str(rendered_provisioning),
-        "GRAFANA_PROVISIONING_PATH": str(rendered_provisioning / "dashboards"),
-        "MEIVA_TEMPO_QUERY_URL": tempo_query_url,
-        # Datasources and webhooks use their configured service endpoints;
-        # provisioning consumes them via Grafana's $__env{} expansion.
-        "LOKI_URL": loki_url,
-        "PROMETHEUS_URL": prometheus_url,
-        "PG_URL": pg_url,
-        # run.sh sources runtime.env; URL paths must remain literal shell data.
-        "ALERTS_WEBHOOK_URL": shlex.quote(alerts_webhook_url(machine=machine)),
-        "REPO": str(repo),
-        "lgtm_grafana_listen_host": settings.observability.lgtm_grafana_listen_host,
-        "LGTM_LOKI_PORT": str(settings.observability.lgtm_loki_port),
-        "LGTM_GRAFANA_PORT": str(settings.observability.lgtm_grafana_port),
+    values = NativeRenderValues(
+        meiva_home=str(meiva_home),
+        storage_dir=str(storage_dir),
+        provisioning_path=str(native_dir / "config" / "provisioning"),
+        repo=str(repo),
+        tempo_query_url=tempo_query_url,
+        loki_url=loki_url,
+        prometheus_url=prometheus_url,
+        pg_url=pg_url,
+        alerts_webhook_url=webhook_url,
+        telemetry_loki_url=obs.telemetry_loki_url,
+        telemetry_prometheus_url=obs.telemetry_prometheus_url,
+        telemetry_grafana_url=obs.telemetry_grafana_url,
+        listen_host=obs.lgtm_listen_host,
+        grafana_listen_host=obs.lgtm_grafana_listen_host,
+        loki_port=obs.lgtm_loki_port,
+        loki_grpc_port=obs.lgtm_loki_grpc_port,
+        grafana_port=obs.lgtm_grafana_port,
+    )
+    rendered = {
+        name: render_config(name, (source_dir / name).read_text(encoding="utf-8"), values)
+        for name in CONFIG_TEMPLATES
     }
-    for name in ("loki.yaml", "prometheus.yml", "grafana.ini", "runtime.env"):
-        template = (source_dir / name).read_text(encoding="utf-8")
-        template_substitutions = substitutions
-        if name == "prometheus.yml":
-            template_substitutions = {
-                **substitutions,
-                "MEIVA_TEMPO_QUERY_URL": _url_host_port(tempo_query_url),
-                "MEIVA_PROMETHEUS_SCRAPE_TARGET": _url_host_port(
-                    settings.observability.telemetry_prometheus_url
-                ),
-                "MEIVA_LOKI_SCRAPE_TARGET": _url_host_port(
-                    settings.observability.telemetry_loki_url
-                ),
-                "MEIVA_GRAFANA_SCRAPE_TARGET": _url_host_port(
-                    settings.observability.telemetry_grafana_url
-                ),
-            }
-        content = template
-        for key, value in template_substitutions.items():
-            content = content.replace(f"{{{{{key}}}}}", value)
-        # The loki listener host cannot ride the {{...}} pass: a YAML plain
-        # scalar must not start with '{' (it would parse as a flow mapping), and
-        # the rendered line must stay byte-identical to the historical unquoted
-        # address — so the template carries a brace-free token instead.
-        content = content.replace("__LGTM_LISTEN_HOST__", lgtm_listen_host)
-        content = content.replace("__LGTM_LOKI_PORT__", str(settings.observability.lgtm_loki_port))
-        content = content.replace(
-            "__LGTM_LOKI_GRPC_PORT__", str(settings.observability.lgtm_loki_grpc_port)
-        )
-        if name == "loki.yaml":
-            rendered = yaml.safe_load(content)
-            if not isinstance(rendered, dict):
-                raise TypeError("native Loki config must render to a mapping")
-            validate_loki_deploy_config(cast(dict[str, object], rendered))
+    loki_config = yaml.safe_load(rendered["loki.yaml"])
+    if not isinstance(loki_config, dict):
+        raise TypeError("native Loki config must render to a mapping")
+    validate_loki_deploy_config(cast(dict[str, object], loki_config))
+    for name, content in rendered.items():
         write_if_changed(native_dir / "config" / name, content)
-    run_script = (source_dir / "run.sh").read_text(encoding="utf-8")
-    for key, value in substitutions.items():
-        run_script = run_script.replace(f"{{{{{key}}}}}", value)
     rendered_run_script = native_dir / "grafana" / "run.sh"
-    write_if_changed(rendered_run_script, run_script)
+    write_if_changed(
+        rendered_run_script,
+        render_run_script((source_dir / "run.sh").read_text(encoding="utf-8"), values),
+    )
     rendered_run_script.chmod(0o755)
-    render_provisioning(repo, native_dir, database_factory=database_factory, producer=producer)
+    render_provisioning(repo, native_dir, dashboard=dashboard, producer=producer)
 
 
-def render_grafana_admin_password(native_dir: Path) -> None:
-    """Render the host-scoped Grafana credential when the setting is configured."""
-    from base.config import settings
-
-    credential = settings.alerts.grafana_admin_password
-    if credential is None:
+# meiva:note
+# Render the host-scoped Grafana credential when one is configured.
+def render_grafana_admin_password(native_dir: Path, password: str | None) -> None:
+    if password is None:
         return
-    credential_file = native_dir / "grafana/admin_password"
-    write_if_changed(credential_file, credential.get_secret_value() + "\n", mode=0o600)
+    write_if_changed(native_dir / "grafana/admin_password", password + "\n", mode=0o600)
 
 
-def _render_grafana_telegram_env(native_dir: Path) -> None:
-    """Render the direct Telegram contact point's bot token and chat id when this home has a bot.
-
-    The gateway's own alert path (webhook -> ingest -> im_bridge) cannot report that the
-    gateway is down; Grafana's Telegram notifier does not depend on it. Without a bot the file is
-    removed and run.sh falls back to inert placeholders."""
-    from base.config import settings
-
-    token = settings.telegram.telegram_bot_token
-    owner = settings.telegram.telegram_owner_id
+# meiva:note
+# Render the direct Telegram contact point's bot token and chat id when this home has a bot.
+#
+# The gateway's own alert path (webhook, ingest, im_bridge) cannot report that the gateway is
+# down; Grafana's Telegram notifier does not depend on it. Without a bot the file is removed and
+# `run.sh` falls back to inert placeholders.
+def render_grafana_telegram_env(native_dir: Path, *, token: str, owner: int) -> None:
     env_file = native_dir / "grafana/telegram.env"
     if not token or not owner:
         env_file.unlink(missing_ok=True)
@@ -542,113 +470,125 @@ def _render_grafana_telegram_env(native_dir: Path) -> None:
     write_if_changed(env_file, content, mode=0o600)
 
 
-def _download_limits() -> DownloadLimits:
-    from base.config import settings
+def _installed_markers(native_dir: Path, names: tuple[str, ...]) -> dict[str, InstalledMarkers]:
+    def read(path: Path) -> str | None:
+        return path.read_text(encoding="utf-8").strip() if path.exists() else None
 
-    observability = settings.observability
-    return DownloadLimits(
-        total_budget_s=observability.lgtm_native_download_budget_s,
-        socket_timeout_s=observability.lgtm_native_download_socket_timeout_s,
-        attempts=observability.lgtm_native_download_attempts,
-        retry_backoff_s=observability.lgtm_native_download_retry_backoff_s,
-        progress_interval_s=observability.lgtm_native_download_progress_interval_s,
-    )
+    return {
+        name: InstalledMarkers(
+            version=read(native_dir / f"version-{name}"),
+            platform_tag=read(native_dir / f"platform-{name}"),
+        )
+        for name in names
+    }
 
 
+# meiva:note
+# Prepare the selected pinned binaries and config; lifecycle belongs to meiva-root.
+#
+# `storage_dir` is the retained observation data volume, resolved by the composition root from
+# `MEIVA_LGTM_STORAGE_DIR`. The cluster's database URL and the dashboard render are read here
+# once and handed to the renderer as values.
 def ensure_lgtm_native(
     repo: Path,
     meiva_home: Path,
     *,
     services: frozenset[str],
+    settings: LgtmSettings,
+    storage_dir: Path,
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
     host: Host,
 ) -> None:
-    """Prepare selected pinned binaries and config; lifecycle belongs to meiva-root."""
-    if not services or services - set(BACKENDS):
-        raise ValueError("native LGTM preparation requires selected backend names")
-    tag = platform_tag(host.platform)
-    if tag not in SUPPORTED_TAGS:
+    require_backend_selection(services, BACKENDS)
+    tag = platform_tag(host.platform.system, host.platform.machine)
+    if tag is None:
         raise RuntimeError("Native LGTM has no pinned binaries for this platform")
     native_dir = meiva_home / "lgtm/native"
     for directory in ("bin", "config", "logs"):
         (native_dir / directory).mkdir(parents=True, exist_ok=True)
-    storage = _storage_dir(meiva_home)
     for sub in ("", "loki", "prom"):
-        (storage / sub).mkdir(parents=True, exist_ok=True)
-    for name, asset in native_versions(repo, platform=host.platform).items():
-        if name not in services:
-            continue
-        marker = native_dir / f"version-{name}"
-        platform_marker = native_dir / f"platform-{name}"
-        matching_platform = (
-            platform_marker.read_text().strip() == tag
-            if platform_marker.exists()
-            else tag == "darwin_arm64"
-        )
-        if matching_platform and marker.exists() and marker.read_text().strip() == asset["version"]:
-            print(f"  · lgtm native: {name} {asset['version']} present")
+        (storage_dir / sub).mkdir(parents=True, exist_ok=True)
+    assets = native_versions(repo, tag=tag)
+    plan = plan_backend_installs(
+        tag=tag,
+        pinned_versions={name: asset["version"] for name, asset in assets.items()},
+        installed=_installed_markers(native_dir, tuple(assets)),
+        services=services,
+    )
+    for step in plan:
+        asset = assets[step.name]
+        if not isinstance(step, InstallBackend):
+            print(f"  · lgtm native: {step.name} {asset['version']} present")
             continue
         download_and_verify(
-            name,
+            step.name,
             asset["version"],
             asset,
             native_dir,
             tag=tag,
-            open_url=SYSTEM_URL_OPENER,
-            timers=SYSTEM_TIMERS,
-            limits=_download_limits(),
+            limits=settings.download,
         )
-        print(f"  · lgtm native: installed {name} {asset['version']} ({tag})")
+        print(f"  · lgtm native: installed {step.name} {asset['version']} ({tag})")
     render_configs(
         repo,
         native_dir,
         meiva_home,
-        database_factory=database_factory,
+        settings=settings,
+        storage_dir=storage_dir,
+        direct_db_url=database_factory().direct_resolution().url,
+        dashboard=render_dashboard(database_factory),
         producer=producer,
         machine=machine,
     )
     if "grafana" in services:
-        render_grafana_admin_password(native_dir)
-        _render_grafana_telegram_env(native_dir)
+        render_grafana_admin_password(native_dir, settings.credentials.admin_password)
+        render_grafana_telegram_env(
+            native_dir,
+            token=settings.credentials.telegram_bot_token,
+            owner=settings.credentials.telegram_owner_id,
+        )
     if "loki" in services:
         verify_loki(meiva_home, host=host)
 
 
+# meiva:note
+# Use the pinned binary's own parser before starting the root generation.
 def verify_loki(home: Path, *, host: Host) -> None:
-    """Use the pinned binary's own parser before starting the root generation."""
-    from base.telemetry.lgtm_local import binary_path
-
-    result = host.run(
-        [
-            str(binary_path(home, "loki")),
-            f"-config.file={home.resolve()}/lgtm/native/config/loki.yaml",
-            "-verify-config",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    argv = loki_verify_argv(str(binary_path(home, "loki")), str(home.resolve()))
+    result = host.run(list(argv), capture_output=True, text=True, timeout=30)
     if result.returncode:
-        raise RuntimeError(f"Loki config verification failed: {result.stderr.strip()}")
+        raise RuntimeError(loki_verify_error(result.stderr))
 
 
+# meiva:note
+# Converge the native backends on the observability station.
+#
+# Provider identity is the legacy `lgtm-host` marker or the declarative `observability-station`
+# capability; both install the pinned binaries and render the configs and storage dirs of the
+# selected backends. Starting them belongs to `meiva-root`.
 def ensure_lgtm_native_step(ctx: ConvergeCtx) -> None:
-    """Converge the native backends on the observability station.
-
-    Provider identity is the legacy `lgtm-host` marker OR the declarative
-    `observability-station` capability; both install the pinned binaries and
-    render the configs and storage dirs of the selected backends. Starting them
-    belongs to `meiva-root`.
-    """
-    selected = ctx.services.intersection(BACKENDS)
-    if not is_station_ctx(ctx) or not selected:
+    selected = station_backends(
+        marker_present=(ctx.meiva_home / "lgtm-host").exists(),
+        roles=ctx.roles,
+        services=ctx.services,
+        backends=BACKENDS,
+    )
+    if not selected:
         return
+    view = ctx.read_config().view
     ensure_lgtm_native(
         ctx.repo,
         ctx.meiva_home,
         services=selected,
+        settings=lgtm_settings(
+            observability=view.observability,
+            gateway=view.gateway,
+            alerts=view.alerts,
+            telegram=view.telegram,
+        ),
+        storage_dir=_storage_dir(ctx.meiva_home),
         database_factory=ctx.database_factory,
         producer=ctx.producer,
         machine=ctx.machine,

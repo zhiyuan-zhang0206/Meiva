@@ -15,7 +15,11 @@ import pytest
 from base.deploy.lifecycle import launch_failures, start_serving
 from base.host.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from cli.commands.lifecycle.tests.scripted_root import UnitRow, scripted_root
-from cli.commands.lifecycle.tests.startup.start_harness import StartRun, gateway_listener
+from cli.commands.lifecycle.tests.startup.start_harness import (
+    STATUS_PATH,
+    StartRun,
+    gateway_listener,
+)
 
 pytestmark = pytest.mark.real_service_readiness_gate
 
@@ -33,6 +37,7 @@ def _row(
     state: str = "running",
     intent: str = "running",
     refuse_up: bool = False,
+    begins_rival_start: bool = False,
 ) -> UnitRow:
     generation = run.generation(roles, run.roster(roles, only=(session,)))
     return UnitRow(
@@ -41,6 +46,7 @@ def _row(
         intent=intent,
         manifest_digest=generation.units[session],
         refuse_up=refuse_up,
+        begins_rival_start=begins_rival_start,
     )
 
 
@@ -77,11 +83,8 @@ def test_a_gateway_host_does_not_probe_a_gateway_it_is(
         with scripted_root(run.home, [row], launch_digest=generation.launch_digest):
             assert run.start(only=("pty-sessions",)) == 0
 
-    # meiva:note
-    # The only request is the status block's own view of the gateway; the runner's liveness probe
-    # (`probe gateway`) never ran.
-    assert gateway.requests == ["/api/cluster/status"]
     assert "probe gateway" not in capsys.readouterr().out
+    assert gateway.requests == [STATUS_PATH], "only the status block's own view of the gateway"
     assert start_serving.is_serving()
 
 
@@ -168,17 +171,11 @@ def test_a_start_that_lost_its_serving_generation_never_reports_serving(
     with gateway_listener() as gateway:
         run.declare(gateway=False, agent_runner=True, gateway_url=gateway.url)
         generation = run.generation(RUNNER, run.roster(RUNNER, only=("pty-sessions",)))
-        row = _row(run, RUNNER, "pty-sessions", state="stopped", intent="stopped")
+        row = _row(
+            run, RUNNER, "pty-sessions", state="stopped", intent="stopped", begins_rival_start=True
+        )
 
-        with scripted_root(run.home, [row], launch_digest=generation.launch_digest) as root:
-            served = root.serve
-
-            def a_second_start_begins(verb: str, name: str | None) -> dict[str, object]:
-                if verb == "up":
-                    start_serving.begin_start()
-                return served(verb, name)
-
-            root.serve = a_second_start_begins
+        with scripted_root(run.home, [row], launch_digest=generation.launch_digest):
             assert run.start(only=("pty-sessions",)) == 1
 
     assert not start_serving.is_serving()

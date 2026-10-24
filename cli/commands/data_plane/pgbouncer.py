@@ -1,513 +1,460 @@
-"""Per-cluster PgBouncer transaction pooler.
-
-The pooled front door consumers dial past ~50 agents (each agent holds 2
-Postgres connections; see `agent/db/__init__.py`).
-PgBouncer is the third per-cluster data-plane process — a peer of this cluster's
-own Postgres and Redis (`cluster_instance.py`) — brought up on the cluster's own
-`pgbouncer` port (a registry-record fact; the port is no longer materialized in
-`.env` — MEIVA_DB_URL carries it) after schema preparation and group grants whenever
-`MEIVA_PGBOUNCER_ENABLED` (ON by default: past ~50 agents pooling is the density
-path). Setting it false is a kill-switch: nothing here runs, converge rewrites
-MEIVA_DB_URL to the direct Postgres port, and every consumer talks to Postgres
-directly through the one URL.
-
-Auth — always authenticated, whatever the cluster secret (docs/decisions/
-2026-09-26-internal-data-plane-always-authenticated.md):
-
-- **client → pgbouncer**: `auth_type = scram-sha-256` against a `userlist.txt`
-  (0600) rendered by `base.host.db_authority.delivery.render_userlist`: exactly the
-  delivered write generation's two logins with their stored SCRAM verifiers,
-  plus the operator admin-console entry `meiva_pooler_admin` (a userlist-only
-  name, never a PostgreSQL role). No plaintext password, no owner entry.
-- **pgbouncer → postgres**: over the owner-only unix socket with SCRAM
-  pass-through — the userlist verifier equals `pg_authid.rolpassword`, so the
-  client's SCRAM keys authenticate the backend hop (`local all all
-  scram-sha-256`); the pooler holds no server credential of its own.
-- **userlist change = restart**: a SIGHUP reload keeps a removed user that
-  already authenticated and still admits its new sessions, so changed userlist
-  (or ini) bytes restart the pooler; unchanged bytes only reload.
-
-`pool_mode = transaction`: agent/daemon client pools collapse onto a small set of
-real Postgres backends. Every pooled consumer connects with `prepare_threshold=None`
-(no server-side prepared statements — psycopg3's `0` would mean prepare on the
-FIRST execution, and two fresh connections preparing the same `_pg3_0` name on one
-backend raise DuplicatePreparedStatement), which is what makes transaction pooling
-safe across the different backends a transaction hands out.
-
-POSIX only (macOS brew / Linux apt `pgbouncer` on PATH).
-"""
+# meiva:note
+# Per-cluster PgBouncer transaction pooler: the shell that observes, runs what
+# `pooler/convergence.py` plans, and stops it.
+#
+# The pooled front door consumers dial past about 50 agents (each agent holds 2 Postgres
+# connections). PgBouncer is the third per-cluster data-plane process, a peer of this
+# cluster's own Postgres and Redis (`cluster_instance.py`), brought up on the cluster's own
+# `pgbouncer` port (a registry-record fact; MEIVA_DB_URL carries it) after schema preparation
+# and group grants whenever MEIVA_PGBOUNCER_ENABLED (on by default: past about 50 agents
+# pooling is the density path). Setting it false is a kill-switch: nothing here runs, converge
+# rewrites MEIVA_DB_URL to the direct Postgres port, and every consumer talks to Postgres
+# directly through the one URL.
+#
+# Auth is always authenticated, whatever the cluster secret
+# (docs/decisions/2026-09-26-internal-data-plane-always-authenticated.md):
+#
+# - **client to pgbouncer**: `auth_type = scram-sha-256` against a `userlist.txt` (0600)
+#   rendered by `base.host.db_authority.delivery.render_userlist`: exactly the delivered write
+#   generation's two logins with their stored SCRAM verifiers, plus the operator admin-console
+#   entry `meiva_pooler_admin` (a userlist-only name, never a PostgreSQL role). No plaintext
+#   password, no owner entry.
+# - **pgbouncer to postgres**: over the owner-only unix socket with SCRAM pass-through. The
+#   userlist verifier equals `pg_authid.rolpassword`, so the client's SCRAM keys authenticate
+#   the backend hop (`local all all scram-sha-256`); the pooler holds no server credential.
+# - **userlist change means restart**: a SIGHUP reload keeps a removed user that already
+#   authenticated and still admits its new sessions, so changed userlist (or ini) bytes restart
+#   the pooler; unchanged bytes only reload.
+#
+# `pool_mode = transaction`: agent and daemon client pools collapse onto a small set of real
+# Postgres backends. Every pooled consumer connects with `prepare_threshold=None` (no
+# server-side prepared statements; psycopg3's `0` would mean prepare on the FIRST execution, and
+# two fresh connections preparing the same `_pg3_0` name on one backend raise
+# DuplicatePreparedStatement), which is what makes transaction pooling safe across the
+# different backends a transaction hands out.
+#
+# POSIX only (macOS brew or Linux apt `pgbouncer`).
+# meiva:link cli/commands/data_plane/docs/data-plane-startup.meiva.okf.md
 
 from __future__ import annotations
 
 import shutil
 import signal
-import subprocess
 import sys
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
 import psutil
 
 from base.cluster import ownership, port_preflight
-from base.cluster.dataplane import pooler
+from base.cluster.dataplane import pooler as pooler_files
 from base.cluster.dataplane.pg_tools import is_macos
 from base.cluster.machine import MachineIdentity
 from base.host.db_authority.delivery import POOLER_ADMIN
-from base.host.proc import process_alive
-from base.native_process.child_env import daemon_process_env
+from base.host.private_storage import write_private_bytes
+from base.host.proc import process_alive, run_bounded
 from base.native_process.os_platform import LockTimeoutError
+from base.native_process.ownership import OwnedProcess
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.data_plane._pooler_stop import OwnedPooler
-from cli.commands.data_plane.cluster_instance import (
-    BIND_WAIT_TIMEOUT_S,
-    pg_socket_dir,
-    wait_for_reachable_bind,
+from cli.commands.data_plane.cluster_instance import wait_for_reachable_bind
+from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_boot
+from cli.commands.data_plane.pooler.convergence import (
+    AnnounceChangedRestart,
+    AnnounceDegradedRestart,
+    AwaitReachableBind,
+    Launch,
+    PoolerObservation,
+    PoolerStep,
+    Reload,
+    StopRunning,
+    WriteFiles,
+    plan_convergence,
 )
-from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_settings
+from cli.commands.data_plane.pooler.identity import anchored_ini, ini_argument
+from cli.commands.data_plane.pooler.ini import IniInputs
+from cli.commands.data_plane.pooler.ini import render_ini as render_ini_text
+from cli.commands.data_plane.pooler.text import (
+    PoolerText,
+    install_command,
+    not_installed_error,
+    not_installed_warning,
+    stale_pidfile,
+)
 
 # meiva:note
-# `default_pool_size` is the real Postgres backend pool per (database, user) pair.
-# The client-side cap (`max_client_conn`) is configuration — MEIVA_POOLER_MAX_CLIENT_CONN —
-# because the client slot budget belongs to the whole fleet's pool maxima, not to this module.
-_DEFAULT_POOL_SIZE = 25
+# How long a restart gives the running pooler's safe shutdown, and a stop-only caller's.
+RESTART_STOP_WAIT_S = 5.0
 
-# libpq/psycopg send these startup parameters; PgBouncer rejects unknown ones unless
-# told to ignore them. Real GUCs (search_path etc.) are deliberately NOT here.
-_IGNORE_STARTUP_PARAMETERS = "extra_float_digits,options"
+# meiva:note
+# How long a freshly launched pooler has to answer on its admin console.
+READY_WAIT_S = 6.0
+
+# meiva:note
+# The pause between two admin-console probes of a pooler that is still starting.
+_READY_POLL_S = 0.1
+
+# meiva:note
+# The bound on `pgbouncer -d` itself: it daemonizes and returns at once.
+_LAUNCH_TIMEOUT_S = 30.0
+
+
+# meiva:note
+# What the rendered ini depends on. `socket_dir` is the directory the running Postgres
+# listens on (the one the admin dial uses), never a recomputed canonical one.
+@dataclass(frozen=True)
+class PoolerShape:
+    pg_port: int
+    listen_port: int
+    db_name: str
+    machine: MachineIdentity
+    max_client_conn: int
+    socket_dir: Path
+
+
+# meiva:note
+# One bring-up of the pooler.
+#
+# `userlist` is the exact `auth_file` and `admin_password` the admin-console credential it
+# carries. `binary` is the resolved pgbouncer path and `daemon_env` the environment the daemon
+# is born with (only process mechanics, never configuration or a credential: the boot pass may
+# have put the gateway login, the write generation and its API token into the launching process,
+# and a daemon would keep them until it restarts). The waits are tuning values: how long the
+# reachable address may take to appear, the running pooler's safe shutdown, and the new
+# pooler's first answer.
+@dataclass(frozen=True)
+class PoolerSpec:
+    shape: PoolerShape
+    userlist: bytes = field(repr=False)
+    admin_password: str = field(repr=False)
+    binary: str
+    daemon_env: Mapping[str, str] = field(repr=False)
+    bind_wait_s: float
+    stop_wait_s: float = RESTART_STOP_WAIT_S
+    ready_wait_s: float = READY_WAIT_S
 
 
 def userlist_path() -> Path:
-    return pooler.pooler_dir() / "userlist.txt"
+    return pooler_files.pooler_dir() / "userlist.txt"
 
 
 def _logfile_path() -> Path:
-    return pooler.pooler_dir() / "pgbouncer.log"
+    return pooler_files.pooler_dir() / "pgbouncer.log"
 
 
-def render_ini(
-    *,
-    pg_port: int,
-    listen_port: int,
-    db_name: str,
-    machine: MachineIdentity,
-    max_client_conn: int,
-) -> str:
-    """The pgbouncer.ini for this cluster's pooler. One [databases] entry mapping the
-    cluster db to the local Postgres over its owner-only unix socket; [pgbouncer]
-    sets transaction pooling, SCRAM client auth against the userlist (always), and
-    loopback + reachable binds (never all interfaces), matching Postgres's posture:
-    the declared reachable address (`port_preflight.bind_addrs`) adds one bind, and
-    the default `localhost` leaves loopback alone.
-
-    The backend socket dir is the one the RUNNING pg actually listens on
-    (`pg_socket_dir`, the exact directory the admin dial uses): `_start_pg` skips a
-    pg that is already up, so across the path-only cutover a pre-cutover pg
-    still serves the old name-keyed dir — rendering the canonical dir there
-    would break every pooled query while admin readiness stayed green.
-
-    Every pooled backend is born with the statement ceiling via `connect_query`,
-    so a query is bounded regardless of which code path the client came through.
-    The pooler drops the libpq `options` startup parameter, and
-    `track_extra_parameters` cannot deliver statement_timeout (only GUC_REPORT
-    parameters Postgres reports to clients can be tracked), so the connect_query
-    SET is the one pooler-side path that reaches the backend. Same value +
-    constant as base/db/__init__.py's client-side SET (imported lazily — this module
-    runs in data-plane bring-up, before any settings/env load is guaranteed).
-
-    `server_reset_query = DISCARD ALL` — one statement, unquoted (pgbouncer
-    1.25.2 runs the value verbatim: a quoted value was a syntax error
-    (2026-09-02 P0, ~18M errors); a multi-statement value is rejected inside
-    the implicit transaction pooling wraps it in (measured 2026-09-02 02:21).
-    `server_reset_query_always = 0` keeps the reset to the SV_ACTIVE
-    window (client vanished mid-transaction) and error returns — clean
-    releases/disconnects never run it (measured 2026-09-03), so a client's own
-    dial/borrow SETs (the statement ceiling) survive between its transactions.
-    always=1 was tried and rejected (405 ruling 2026-09-03, option B): firing
-    after EVERY transaction end, its DISCARD ALL wiped the client's SETs too
-    (borrowers measured statement_timeout=0). Between-transaction pollution is
-    defended client-side (base/db/__init__.py baseline restore per dial/borrow +
-    read-write write posture; 2026-09-02 P0)."""
-    listen_addr = ", ".join(port_preflight.bind_addrs(machine=machine))
-    socket_dir = pg_socket_dir()
+# meiva:note
+# The pgbouncer.ini for this cluster's pooler: the shape's values plus the facts this host
+# gives (the declared reachable address adds one bind, the default `localhost` leaves loopback
+# alone; the file paths of this home). The statement-ceiling statement is the same constant as
+# the client-side SET, imported lazily because this runs in data-plane bring-up, before any
+# settings or env load is guaranteed.
+def render_ini(shape: PoolerShape) -> str:
     from base.db import PG_STATEMENT_TIMEOUT_SET_SQL
 
-    connect_query = f"connect_query='{PG_STATEMENT_TIMEOUT_SET_SQL}'"
-    # One statement, unquoted (verbatim pass-through; rationale in the
-    # docstring above). DISCARD ALL clears the birth ceiling; no re-apply here.
-    server_reset = "server_reset_query = DISCARD ALL"
-    return "\n".join(
-        [
-            "[databases]",
-            # host=<socket dir> routes pgbouncer -> Postgres over the owner-only
-            # unix socket with SCRAM pass-through (no server credential); connect_query
-            # births every pooled backend with the 60s statement ceiling (the
-            # pooler drops the client's `options` startup parameter).
-            f"{db_name} = host={socket_dir} port={pg_port} dbname={db_name} {connect_query}",
-            "",
-            "[pgbouncer]",
-            f"listen_addr = {listen_addr}",
-            f"listen_port = {listen_port}",
-            "auth_type = scram-sha-256",
-            f"auth_file = {userlist_path()}",
-            "pool_mode = transaction",
-            server_reset,
-            # always=0 (SV_ACTIVE-window reset only; rationale in docstring).
-            "server_reset_query_always = 0",
-            f"max_client_conn = {max_client_conn}",
-            f"default_pool_size = {_DEFAULT_POOL_SIZE}",
-            f"ignore_startup_parameters = {_IGNORE_STARTUP_PARAMETERS}",
-            # Admin/stats console (`SHOW POOLS` etc.) for the userlist-only
-            # operator entry; no database role can reach it.
-            f"admin_users = {POOLER_ADMIN}",
-            f"stats_users = {POOLER_ADMIN}",
-            "log_connections = 0",
-            "log_disconnections = 0",
-            f"logfile = {_logfile_path()}",
-            f"pidfile = {pooler.pidfile_path()}",
-            "",
-        ]
+    return render_ini_text(
+        IniInputs(
+            db_name=shape.db_name,
+            pg_port=shape.pg_port,
+            socket_dir=str(shape.socket_dir),
+            listen_addrs=tuple(port_preflight.bind_addrs(machine=shape.machine)),
+            listen_port=shape.listen_port,
+            userlist_path=str(userlist_path()),
+            logfile=str(_logfile_path()),
+            pidfile=str(pooler_files.pidfile_path()),
+            max_client_conn=shape.max_client_conn,
+            admin_user=POOLER_ADMIN,
+            statement_timeout_sql=PG_STATEMENT_TIMEOUT_SET_SQL,
+        )
     )
 
 
-def write_config(
-    *,
-    pg_port: int,
-    listen_port: int,
-    db_name: str,
-    userlist: bytes,
-    machine: MachineIdentity,
-    max_client_conn: int,
-) -> bool:
-    """Write pgbouncer.ini + userlist.txt (0600); True when either file's bytes
-    changed, which requires a pooler restart (a reload never revokes a user)."""
-    from base.host.private_storage import write_private_bytes
+def _desired_files(spec: PoolerSpec) -> tuple[tuple[Path, bytes], ...]:
+    return (
+        (pooler_files.ini_path(), render_ini(spec.shape).encode()),
+        (userlist_path(), spec.userlist),
+    )
 
-    ini = render_ini(
-        pg_port=pg_port,
-        listen_port=listen_port,
-        db_name=db_name,
-        machine=machine,
-        max_client_conn=max_client_conn,
-    ).encode()
-    changed = False
-    for path, body in ((pooler.ini_path(), ini), (userlist_path(), userlist)):
+
+def _stale_files(spec: PoolerSpec) -> tuple[tuple[Path, bytes], ...]:
+    stale: list[tuple[Path, bytes]] = []
+    for path, body in _desired_files(spec):
         try:
             current = path.read_bytes()
         except FileNotFoundError:
             current = None
         if current != body:
-            write_private_bytes(path, body)
-            changed = True
-    return changed
+            stale.append((path, body))
+    return tuple(stale)
 
 
-def pid_is_our_pooler(pid: int) -> bool:
-    """Whether `pid` is really THIS home's pooler, and not a stranger that
-    inherited the number.
+# meiva:note
+# Write pgbouncer.ini and userlist.txt (0600) where their bytes changed; True when either
+# did, which requires a pooler restart (a reload never revokes a user).
+def write_config(spec: PoolerSpec) -> bool:
+    stale = _stale_files(spec)
+    for path, body in stale:
+        write_private_bytes(path, body)
+    return bool(stale)
 
-    A stale pidfile can name a recycled process after a crash or explicit force
-    stop. Validate its executable and exact configuration path before treating
-    it as a candidate; native custody also captures its process birth before
-    any reload or shutdown signal.
 
-    The identity token is the config file the process was started with — the one
-    argument that names a home. It is read back the way the process itself
-    resolved it: the `-d <ini>` argument from its argv, resolved against its own
-    working directory when that argument is relative.
-
-    Both halves are load-bearing, and which one carries the path is a PLATFORM
-    difference rather than a fallback. Measured on both:
-
-        Linux, apt pgbouncer 1.18   argv keeps the absolute ini path;
-                                    cwd stays wherever the launcher stood
-        macOS, brew pgbouncer 1.25  argv is rewritten to a bare `pgbouncer.ini`;
-                                    the process chdir()s into the config dir
-
-    Neither field alone identifies the pooler on both. Resolving one against the
-    other is the single rule that reads both, and it is exactly the resolution
-    pgbouncer performed to find its own config.
-
-    Compared as a resolved path, never as a substring: `~/.meiva` is a prefix of
-    `~/.meiva-preview`, and matching pooler processes by substring is how a
-    co-located cluster's tooling reaches the wrong home — what `pkill -f
-    pgbouncer.ini` did to production on 2026-08-06.
-
-    A process this user cannot introspect counts as NOT ours. A pooler that
-    outlives its stop retains custody."""
-    import psutil
-
+# meiva:note
+# The resolved path of the ini a pgbouncer process was started with: "" when its command line
+# names none (it cannot be this home's, which always starts with `-d <ini>`), None when the
+# process cannot be introspected. An unreadable working directory only matters when the
+# argument is relative.
+def config_of(process: psutil.Process) -> str | None:
     try:
-        proc = psutil.Process(pid)
-        if proc.name() != "pgbouncer":
+        argument = ini_argument(process.cmdline())
+        if argument is None:
+            return ""
+        cwd = process.cwd() if not argument.startswith("/") else "/"
+        return str(Path(anchored_ini(argument, cwd)).resolve())
+    except (psutil.AccessDenied, OSError):
+        return None
+
+
+# meiva:note
+# Whether `pid` is really THIS home's pooler, and not a stranger that inherited the number.
+#
+# A stale pidfile can name a recycled process after a crash or explicit force stop. Validate
+# its executable and exact configuration path before treating it as a candidate; native custody
+# also captures its process birth before any reload or shutdown signal. A process this user
+# cannot introspect counts as NOT ours: a pooler that outlives its stop retains custody.
+def pid_is_our_pooler(pid: int) -> bool:
+    try:
+        process = psutil.Process(pid)
+        if process.name() != "pgbouncer":
             return False
-        argv = proc.cmdline()
-        if "-d" not in argv:
-            return False
-        ini = Path(argv[argv.index("-d") + 1])
-        if not ini.is_absolute():
-            ini = Path(proc.cwd()) / ini
-        return ini.resolve() == pooler.ini_path().resolve()
-    except (psutil.Error, OSError, IndexError):
+        return config_of(process) == str(pooler_files.ini_path().resolve())
+    except (psutil.Error, OSError):
         return False
 
 
+# meiva:note
+# The pid of a live pgbouncer OWNED BY THIS HOME (from its pidfile), or None.
+#
+# Stop uses this for stale-pidfile cleanup before capturing native custody. A pidfile that no
+# longer names our pooler, because the process is gone or the number was since recycled onto
+# someone else, reads as None and is removed, so the next bring-up starts from a clean slate
+# instead of re-deciding against the same dead number. A live stranger is reported.
 def running_pid() -> int | None:
-    """The pid of a live pgbouncer OWNED BY THIS HOME (from its pidfile), or None.
-
-    Stop uses this for stale-pidfile cleanup before capturing native custody.
-    A pidfile that no longer names our pooler — process gone,
-    or the number since recycled onto someone else (`pid_is_our_pooler`) — reads
-    as None and is removed, so the next bring-up starts from a clean slate instead
-    of re-deciding against the same dead number. A live stranger is reported: that
-    line is the one that makes a cross-home pidfile visible before it costs an
-    outage."""
-
-    pidfile = pooler.pidfile_path()
-    if not pidfile.exists():
-        return None
+    pidfile = pooler_files.pidfile_path()
     try:
         pid = int(pidfile.read_text().strip())
-    except (ValueError, OSError):
+    except (FileNotFoundError, ValueError, OSError):
         return None
     if pid_is_our_pooler(pid):
         return pid
     if process_alive(pid):
-        print(
-            f"  · {pidfile} names pid {pid}, which is not this home's pooler "
-            "(recycled pid) — not signalling it; removing the stale pidfile",
-            file=sys.stderr,
-        )
+        print(stale_pidfile(str(pidfile), pid), file=sys.stderr)
     pidfile.unlink(missing_ok=True)
     return None
 
 
 def _accepting_pooler(listen_port: int) -> OwnedPooler | None:
-    owner = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
+    owner = ownership.pooler(pooler_files.ini_path(), pooler_files.pidfile_path())
     if owner is None:
         port_preflight.require_listener(None, listen_port, required=False)
         return None
-    custodian = OwnedPooler(owner, listen_port, pooler.ini_path())
+    custodian = OwnedPooler(owner, listen_port, pooler_files.ini_path())
     custodian.require_accepting()
     return custodian
 
 
-def ensure_pgbouncer(
-    *,
-    pg_port: int,
-    listen_port: int,
-    db_name: str,
-    userlist: bytes,
-    admin_password: str,
-    machine: MachineIdentity,
-    max_client_conn: int,
-) -> int:
-    """Bring up (or reload) this cluster's PgBouncer on `listen_port`, pooling in
-    front of the local Postgres on `pg_port`. Idempotent. Returns 0 on success.
+def binary_installed(binary: str) -> bool:
+    return Path(binary).exists() or shutil.which(binary) is not None
 
-    `userlist` is the exact `auth_file` (`base.host.db_authority.delivery.render_userlist`)
-    and `admin_password` the admin-console credential it carries. Outcomes for a
-    running pooler:
 
-    - **Unchanged + fully bound** — SIGHUP reload, live connections never bounce.
-    - **Changed config or userlist** — RESTARTED, never reloaded: PgBouncer keeps
-      a removed user that already authenticated after a SIGHUP and still admits
-      its new sessions, so only a fresh process revokes it.
-    - **Degraded** (answering on loopback but missing the reachable listener) —
-      restarted: a SIGHUP reload does not retry a listen_addr that failed to bind
-      at startup (verified on pgbouncer 1.25.2). The restart waits (bounded) for
-      the reachable address first, and a stop that did not take is reported.
-    - **Not running** — started fresh.
+def _install_hint() -> str:
+    from base.paths import repo_root
 
-    A restart uses the safe shutdown only; a pooler that will not stop (a client
-    holding a transaction) keeps custody and fails this call rather than being
-    killed underneath an ordinary start.
-
-    Boot-time address race (task #1288): pgbouncer treats a failed bind on one
-    `listen_addr` entry as a WARNING and keeps running on the rest, so a pooler
-    born before the private network assigned the reachable address degrades to
-    loopback-only while a loopback-only probe reads it as healthy. The wait guards
-    ONLY the paths that (re)start a pooler. After any (re)start the pooler must
-    prove it listens on the reachable address too.
-
-    Only called when MEIVA_PGBOUNCER_ENABLED (gated by the caller in
-    `complete_gateway_data_plane`)."""
-    binary = pooler.pgbouncer_bin()
-    if not Path(binary).exists() and shutil.which(binary) is None:
-        # Enabled but pgbouncer is not installed. Fail fast (do NOT silently fall back
-        # to direct — the operator asked for pooling): install it, then retry.
-        how = "brew install pgbouncer" if is_macos() else _apt_provision_command()
-        print(
-            f"  ✗ MEIVA_PGBOUNCER_ENABLED is set but pgbouncer is not installed ({binary!r}). "
-            f"Install it (`{how}`) and retry, or unset MEIVA_PGBOUNCER_ENABLED to run direct.",
-            file=sys.stderr,
-        )
-        return 1
-    custodian = _accepting_pooler(listen_port)
-    changed = write_config(
-        pg_port=pg_port,
-        listen_port=listen_port,
-        db_name=db_name,
-        userlist=userlist,
-        machine=machine,
-        max_client_conn=max_client_conn,
+    return install_command(
+        macos=is_macos(), provision_script=str(repo_root() / "scripts/provision/database.sh")
     )
-    if custodian is not None:
-        owner = custodian.identity
-        pid = owner.pid
-        public = pooler.pgbouncer_public_listener_reachable(
-            listen_port, POOLER_ADMIN, machine=machine
-        )
-        # A running pooler whose files are unchanged and whose public listener
-        # verifies is reloaded, never waited on: a transient blip on the private
-        # network must not hold `meiva start` hostage behind a serving pooler (P1).
-        if public and not changed:
-            process = psutil.Process(pid)
-            if not owner.live():
-                raise RuntimeError("PgBouncer identity changed before reload")
-            process.send_signal(signal.SIGHUP)
-            if not pooler.admin_reachable(listen_port, admin_password):
-                print(
-                    f"  ✗ pgbouncer (127.0.0.1:{listen_port}) refused its admin credential",
-                    file=sys.stderr,
-                )
-                return 1
-            print(f"  ✓ pgbouncer already running (127.0.0.1:{listen_port}), reloaded")
-            return 0
-        if not public and not wait_for_reachable_bind(machine=machine):
-            print(
-                f"  ✗ reachable bind address {machine.host()!r} is not assigned to any "
-                f"local interface after {int(BIND_WAIT_TIMEOUT_S)}s — the degraded "
-                "pgbouncer cannot be restarted into a healthy double bind. On reboot "
-                "this means the private network has not come up yet; retry "
-                "`meiva start --all-services` (or this unit's own service selection) once it is.",
-                file=sys.stderr,
-            )
-            return 1
-        if public:
-            print(
-                "  · pgbouncer configuration or userlist changed — restarting (a reload never revokes)"
-            )
-        else:
-            print(
-                f"  ✗ pgbouncer is NOT listening on the reachable address "
-                f"{machine.host()!r} — it degraded to loopback-only (task #1288) and "
-                "remote agent-runners cannot reach the pooled MEIVA_DB_URL. Reload cannot "
-                "re-bind it; restarting the pooler",
-                file=sys.stderr,
-            )
-        if not custodian.stop(deadline=time.monotonic() + 5.0):
-            print(
-                f"  ✗ could not stop the running pooler (pid {pid}) — it survived the "
-                "graceful stop; custody retained, not starting a second pooler on the same port",
-                file=sys.stderr,
-            )
-            return 1
-    return _launch_pooler(listen_port, admin_password, machine=machine)
 
 
-def _launch_pooler(listen_port: int, admin_password: str, *, machine: MachineIdentity) -> int:
-    if not wait_for_reachable_bind(machine=machine):
-        # Fail fast BEFORE starting: a pooler born now would degrade to loopback-only
-        # and the public MEIVA_DB_URL path would be silently dead (the 2026-08-16
-        # outage shape). The boot retry keeps re-running `meiva start`, so this only
-        # needs to be true once the private network is actually up.
-        print(
-            f"  ✗ reachable bind address {machine.host()!r} is not assigned to any "
-            f"local interface after {int(BIND_WAIT_TIMEOUT_S)}s — pgbouncer would "
-            "silently degrade to loopback-only and every remote agent-runner would "
-            "lose the pooled MEIVA_DB_URL. On reboot this means the private network has "
-            "not come up yet; retry `meiva start --all-services` (or this unit's own service selection) once it is.",
-            file=sys.stderr,
-        )
+@dataclass(frozen=True)
+class _Run:
+    spec: PoolerSpec
+    text: PoolerText
+    custodian: OwnedPooler | None
+
+    def running(self) -> OwnedPooler:
+        if self.custodian is None:
+            raise RuntimeError("the pooler plan acts on a running pooler that was not observed")
+        return self.custodian
+
+
+# meiva:note
+# SIGHUP the pooler birth that was observed. A birth that is gone or replaced since is never
+# signalled: the pid may name a stranger now.
+def reload_pooler(owner: OwnedProcess) -> None:
+    if not owner.send_signal(signal.SIGHUP):
+        raise RuntimeError("PgBouncer identity changed before reload")
+
+
+def _reload(run: _Run) -> int:
+    reload_pooler(run.running().identity)
+    if not pooler_files.admin_reachable(run.spec.shape.listen_port, run.spec.admin_password):
+        print(run.text.admin_refused(), file=sys.stderr)
         return 1
-    result = subprocess.run(
-        [pooler.pgbouncer_bin(), "-d", str(pooler.ini_path())],
-        check=False,
+    print(run.text.reloaded())
+    return 0
+
+
+def _launch(run: _Run) -> int:
+    spec, text = run.spec, run.text
+    result = run_bounded(
+        [spec.binary, "-d", str(pooler_files.ini_path())],
+        timeout=_LAUNCH_TIMEOUT_S,
         capture_output=True,
         text=True,
-        env=daemon_process_env(),
+        env=dict(spec.daemon_env),
     )
     if result.returncode != 0:
-        print(
-            f"  ✗ pgbouncer start failed (rc={result.returncode}); see {_logfile_path()}\n"
-            f"    {result.stderr.strip()}",
-            file=sys.stderr,
-        )
+        print(text.launch_failed(result.returncode, result.stderr), file=sys.stderr)
         return 1
-    # -d daemonizes and returns immediately; wait for the admin console to
-    # authenticate. The caller proves each delivered login's pooled backend.
-    for _ in range(60):
-        if pooler.admin_reachable(listen_port, admin_password):
-            break
-        time.sleep(0.1)
-    else:
-        print(
-            f"  ✗ pgbouncer did not become ready on :{listen_port}; see {_logfile_path()}",
-            file=sys.stderr,
-        )
-        return 1
-    if not pooler.pgbouncer_public_listener_reachable(listen_port, POOLER_ADMIN, machine=machine):
-        # The pooler is up on loopback but NOT on the address consumers dial — the
-        # silent degradation this whole function exists to never ship. Loud failure:
-        # the boot retry / watchdog keeps re-running, and once the private network
-        # is up the next pass restarts the pooler into a healthy double bind.
-        print(
-            f"  ✗ pgbouncer started but is NOT listening on the reachable address "
-            f"{machine.host()!r} — it degraded to loopback-only (see "
-            f"{_logfile_path()}). Every remote agent-runner's pooled MEIVA_DB_URL is "
-            "dead. Retry `meiva start --all-services` (or this unit's own service selection) once the private network is up; the watchdog "
-            "healthcheck will keep re-attempting.",
-            file=sys.stderr,
-        )
+    # meiva:note
+    # `-d` daemonizes and returns at once; wait for the admin console to authenticate. The
+    # caller proves each delivered login's pooled backend.
+    deadline = time.monotonic() + spec.ready_wait_s
+    while not pooler_files.admin_reachable(spec.shape.listen_port, spec.admin_password):
+        left = deadline - time.monotonic()
+        if left <= 0:
+            print(text.not_ready(), file=sys.stderr)
+            return 1
+        time.sleep(min(_READY_POLL_S, left))
+    machine = spec.shape.machine
+    if not pooler_files.pgbouncer_public_listener_reachable(
+        spec.shape.listen_port, POOLER_ADMIN, machine=machine
+    ):
+        # meiva:note
+        # The pooler is up on loopback but NOT on the address consumers dial: the silent
+        # degradation this bring-up exists to never ship. Loud failure; the boot retry and the
+        # watchdog keep re-running, and once the private network is up the next pass restarts
+        # the pooler into a healthy double bind.
+        print(text.degraded_after_launch(), file=sys.stderr)
         return 1
     port_preflight.require_listener(
-        ownership.pooler(pooler.ini_path(), pooler.pidfile_path()), listen_port
+        ownership.pooler(pooler_files.ini_path(), pooler_files.pidfile_path()),
+        spec.shape.listen_port,
     )
-    print(f"  ✓ pgbouncer started (127.0.0.1:{listen_port}, transaction pooling)")
+    print(text.started())
+    return 0
+
+
+def _perform(step: PoolerStep, run: _Run) -> int:
+    spec, text = run.spec, run.text
+    match step:
+        case WriteFiles():
+            write_config(spec)
+        case Reload():
+            return _reload(run)
+        case AwaitReachableBind(context):
+            if not wait_for_reachable_bind(host=text.host, timeout_s=spec.bind_wait_s):
+                print(text.bind_missing(context), file=sys.stderr)
+                return 1
+        case AnnounceChangedRestart():
+            print(text.changed_restart())
+        case AnnounceDegradedRestart():
+            print(text.degraded_restart(), file=sys.stderr)
+        case StopRunning():
+            custodian = run.running()
+            if not custodian.stop(deadline=time.monotonic() + spec.stop_wait_s):
+                print(text.stop_survived(custodian.identity.pid), file=sys.stderr)
+                return 1
+        case Launch():
+            return _launch(run)
+    return 0
+
+
+# meiva:note
+# Bring up (or reload) this cluster's PgBouncer on the shape's `listen_port`, pooling in front
+# of the local Postgres. Idempotent. Returns 0 on success.
+#
+# What happens to a running pooler is decided by `plan_convergence`. A restart uses the safe
+# shutdown only: a pooler that will not stop (a client holding a transaction) keeps custody and
+# fails this call rather than being killed underneath an ordinary start. After any (re)start the
+# pooler must prove it listens on the reachable address too; the wait for that address guards
+# only the paths that (re)start a pooler.
+#
+# A pooler that is not installed fails fast and is never silently replaced by a direct
+# connection: the operator asked for pooling. A listener the pooler's custody cannot account for
+# refuses before any file is written or signal sent.
+#
+# Only called when MEIVA_PGBOUNCER_ENABLED (gated by the caller in
+# `complete_gateway_data_plane`).
+def ensure_pgbouncer(spec: PoolerSpec) -> int:
+    shape = spec.shape
+    if not binary_installed(spec.binary):
+        print(not_installed_error(spec.binary, _install_hint()), file=sys.stderr)
+        return 1
+    custodian = _accepting_pooler(shape.listen_port)
+    public = custodian is not None and pooler_files.pgbouncer_public_listener_reachable(
+        shape.listen_port, POOLER_ADMIN, machine=shape.machine
+    )
+    observation = PoolerObservation(
+        running=custodian is not None,
+        files_changed=bool(_stale_files(spec)),
+        public_listener=public,
+    )
+    text = PoolerText(
+        host=shape.machine.host(),
+        bind_wait_s=spec.bind_wait_s,
+        listen_port=shape.listen_port,
+        logfile=str(_logfile_path()),
+    )
+    run = _Run(spec, text, custodian)
+    for step in plan_convergence(observation):
+        if failure := _perform(step, run):
+            return failure
     return 0
 
 
 PoolerStop = Literal["not-running", "stopped", "forced"]
 
 
+# meiva:note
+# Stop this home's captured pooler; a previous drain is only waited on.
+#
+# `force` escalates a pooler whose safe shutdown did not finish within its bound to SIGKILL;
+# only a caller that owns an already-quiescent, already-revoked data plane passes it. Returns
+# how the stop ended: no pooler of this home was running, the safe shutdown completed, or force
+# escalated.
 def stop_pgbouncer(*, force: bool = False) -> PoolerStop:
-    """Stop this home's captured pooler; a previous drain is only waited on.
-
-    `force` escalates a pooler whose safe shutdown did not finish within its
-    bound to SIGKILL; only a caller that owns an already-quiescent,
-    already-revoked data plane passes it. Returns how the stop ended: no pooler
-    of this home was running, the safe shutdown completed, or force escalated.
-    """
     pid = running_pid()
     if pid is None:
         return "not-running"
-    owner = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
+    owner = ownership.pooler(pooler_files.ini_path(), pooler_files.pidfile_path())
     if owner is None:
         return "not-running"
-    custodian = OwnedPooler.from_config(owner, pooler.ini_path())
-    deadline = time.monotonic() + 5.0
+    custodian = OwnedPooler.from_config(owner, pooler_files.ini_path())
+    deadline = time.monotonic() + RESTART_STOP_WAIT_S
     try:
         if custodian.stop(deadline=deadline):
             return "stopped"
     except (TimeoutError, LockTimeoutError):
         if not force:
             raise
-    # The safe shutdown's bound is spent, so a forced stop goes straight to its
-    # own settle wait; the recorded stop intent is never signalled twice.
+    # meiva:note
+    # The safe shutdown's bound is spent, so a forced stop goes straight to its own settle
+    # wait; the recorded stop intent is never signalled twice.
     if force and custodian.stop(deadline=deadline, force=True):
         return "forced"
     raise RuntimeError("PgBouncer stop incomplete; custody retained")
 
 
+# meiva:note
+# `current` rewritten onto the toggle-matched port, or None when it needs no change.
+#
+# Only a URL carrying the OTHER port of this cluster is rewritten; a placeholder, an empty
+# value or an operator stand-in naming neither port is left alone.
 def _normalized_db_url(
     current: str, *, pg_port: int, pooler_port: int, pooler_enabled: bool
 ) -> str | None:
-    """`current` rewritten onto the toggle-matched port, or None when it needs no change.
-
-    Only a URL carrying the OTHER port of this cluster is rewritten; a placeholder, an empty
-    value or an operator stand-in naming neither port is left alone.
-    """
     from urllib.parse import urlsplit
 
     from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
@@ -527,30 +474,21 @@ def _normalized_db_url(
     return None
 
 
-# meiva:note
-# Ubuntu's own archive carries an older PgBouncer; the pinned build comes from
-# the repository's PGDG provisioner.
-def _apt_provision_command() -> str:
-    from base.paths import repo_root
-
-    return f"sudo bash {repo_root() / 'scripts/provision/database.sh'}"
-
-
 def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
     # meiva:note
-    # MEIVA_DB_URL's port follows MEIVA_PGBOUNCER_ENABLED at URL generation, so this
-    # step rewrites only a URL carrying this cluster's other port; a stand-in URL
-    # naming neither port is left untouched, and a fresh birth already carries the
-    # toggle-matched port.
+    # MEIVA_DB_URL's port follows MEIVA_PGBOUNCER_ENABLED at URL generation, so this step
+    # rewrites only a URL carrying this cluster's other port; a stand-in URL naming neither
+    # port is left untouched, and a fresh birth already carries the toggle-matched port.
     #
-    # A missing pooler binary is reported here and refused by data-plane bring-up;
-    # the start-wide host dependency preflight installs it before converge.
+    # A missing pooler binary is reported here and refused by data-plane bring-up; the
+    # start-wide host dependency preflight installs it before converge.
     # meiva:link cli/commands/data_plane/docs/data-plane-startup.meiva.okf.md
-    converge_pgbouncer(data_plane_config_from_settings(), ctx.meiva_home)
+    converge_pgbouncer(data_plane_config_from_boot(ctx.read_config()), ctx.meiva_home)
 
 
+# meiva:note
+# The converge step's work for `home` under `config` (see `ensure_pgbouncer_step`).
 def converge_pgbouncer(config: DataPlaneConfig, home: Path) -> None:
-    """The converge step's work for `home` under `config` (see `ensure_pgbouncer_step`)."""
     from dotenv import dotenv_values
 
     from base.cluster import get_record
@@ -558,9 +496,10 @@ def converge_pgbouncer(config: DataPlaneConfig, home: Path) -> None:
     from ops.env_audit import EnvWriteAudit
 
     if config.is_remote:
-        # The pooler is a local-instance component; a remote/SaaS plane's URL
-        # is the provider's (its port is not this cluster's), so converge must
-        # neither rewrite it nor preflight the local binary.
+        # meiva:note
+        # The pooler is a local-instance component; a remote/SaaS plane's URL is the
+        # provider's (its port is not this cluster's), so converge must neither rewrite it nor
+        # preflight the local binary.
         return
     rec = get_record(home)
     if rec is None:
@@ -579,8 +518,7 @@ def converge_pgbouncer(config: DataPlaneConfig, home: Path) -> None:
         )
     if not config.pgbouncer_enabled:
         return
-    binary = pooler.pgbouncer_bin()
-    if Path(binary).exists() or shutil.which(binary) is not None:
+    binary = pooler_files.pgbouncer_bin()
+    if binary_installed(binary):
         return
-    how = "brew install pgbouncer" if is_macos() else _apt_provision_command()
-    print(f"  ! pgbouncer enabled but not installed ({binary!r}) — run `{how}`", file=sys.stderr)
+    print(not_installed_warning(binary, _install_hint()), file=sys.stderr)

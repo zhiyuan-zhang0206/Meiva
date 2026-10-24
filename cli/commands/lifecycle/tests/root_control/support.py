@@ -16,6 +16,7 @@ from base.daemon.health import DaemonProbe
 from base.native_process.ownership import OwnedProcess
 from base.paths import root_run_dir
 from base.sessions.tests.scripted_helper import ScriptedHelper
+from cli.commands.data_plane.instance.launch_delivery import LaunchDelivery
 from cli.commands.lifecycle.root_control.launch_plan import RootLaunchInputs
 from services.supervision.roster.service_spec import ServiceSpec
 
@@ -23,6 +24,7 @@ __all__ = [
     "custody_helper",
     "fake_interpreter",
     "git_repo",
+    "launch_delivery",
     "launch_inputs",
     "service",
     "this_process",
@@ -48,13 +50,14 @@ def service(
     )
 
 
+# meiva:note
+# The launch facts of a local data plane in `home`: no environment, no `.env` values.
+def launch_delivery(home: Path) -> LaunchDelivery:
+    return LaunchDelivery(home=home, remote_data_plane=False, environment={}, env_file={})
+
+
 def launch_inputs(home: Path) -> RootLaunchInputs:
-    return RootLaunchInputs(
-        home=home,
-        service_path=str(home / "tools"),
-        remote_data_plane=False,
-        environment={"HOME": str(home)},
-    )
+    return RootLaunchInputs(delivery=launch_delivery(home), service_path=str(home / "tools"))
 
 
 # meiva:note

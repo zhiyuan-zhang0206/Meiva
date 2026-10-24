@@ -1,14 +1,13 @@
-import os
-from functools import partial
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 from psycopg_pool import PoolTimeout
 
 from base import config
+from base.cluster.authority.tests.runner_logins import grant_runner_login
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.host.net.tests.local_http import serve_asgi
@@ -50,14 +49,24 @@ def test_a_runners_first_join_reaches_the_gateway(
     unit_home: Path,
     served_gateway_home: Any,
     gateway_data_plane: None,
+    db_url: str,
 ) -> None:
     del unit_home
     from base.host.db_authority import unit
     from cli.commands.cluster import unit_join
 
     secret = _authenticated(monkeypatch)
+    runner_login = served_gateway_home.roles.runner
+    grant_runner_login(
+        db_url, owner="meiva_citest", login=runner_login.name, password=runner_login.password
+    )
     complete = settings if settings.profile is None else config.Settings(profile=None)
     bootstrap_authority = ConfigAuthority(settings, complete, tmp_path / ".env")
+    # meiva:note
+    # The gateway serves the endpoint its home's `.env` names; the install's login probe
+    # dials it, so it names the suite's Postgres.
+    home_env = bootstrap_authority.read_env_aliases() | {"MEIVA_DB_URL": db_url}
+    (tmp_path / ".env").write_text("".join(f"{key}={value}\n" for key, value in home_env.items()))
     runner = (tmp_path / "runner").resolve()
     runner.mkdir(mode=0o700)
     issued = unit.issue_bundle(
@@ -75,13 +84,12 @@ def test_a_runners_first_join_reaches_the_gateway(
     )
     bundle = tmp_path / "mini.bundle"
     bundle.write_bytes(issued.envelope)
-    monkeypatch.setattr(
-        unit, "install_bundle", partial(unit.install_bundle, probe=lambda _dsn: None)
-    )
-    with gateway_test_client() as client, serve_asgi(client.app) as gateway, patch.dict(os.environ):
-        os.environ[unit.CAPABILITY_KEY_ENV] = issued.transport_key
+    with gateway_test_client() as client, serve_asgi(client.app) as gateway:
         unit_join.join_gateway(
-            {"MEIVA_GATEWAY_URL": gateway, "MEIVA_MACHINE_NAME": "mini"}, runner, str(bundle)
+            {"MEIVA_GATEWAY_URL": gateway, "MEIVA_MACHINE_NAME": "mini"},
+            runner,
+            str(bundle),
+            issued.transport_key,
         )
     installed = unit.require_unit_capability(runner)
     assert installed.api is not None and not bundle.exists()

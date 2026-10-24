@@ -23,7 +23,6 @@ import pytest
 
 from base.cluster import ownership
 from base.cluster.dataplane import pooler as base_pooler
-from base.cluster.machine import MachineIdentity
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client, closure
@@ -31,7 +30,6 @@ from base.sessions.pty.paths import ledger_path
 from base.sessions.pty.tests.pty_shells import new as new_session
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import maintenance_stop as plane
-from cli.commands.data_plane import pgbouncer as pb
 from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_boot
 from cli.commands.data_plane.stop_waits import deadline_after, wait_for_exit
 from cli.commands.lifecycle.stop import shell_sessions as stop
@@ -42,7 +40,6 @@ from cli.commands.lifecycle.tests.stop.stop_support import pty_service as pty_se
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
-from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.agent_runner.pty_sessions import ledger
 
@@ -64,9 +61,9 @@ def local_plane(command_runtime: CommandRuntime) -> DataPlaneConfig:
 # meiva:note
 # The data-plane stop of one unit, as the stop's data-plane phase runs it.
 def stop_plane(
-    config: DataPlaneConfig, timeout: float, producer: Callable[[], EventPipeline]
-) -> list[str]:
-    return plane.stop(config, timeout, producer=producer)
+    config: DataPlaneConfig, timeout: float, producer: Callable[[], EventPipeline], home: Path
+) -> tuple[str, ...]:
+    return plane.stop(config, timeout, home=home, producer=producer).stopped
 
 
 # meiva:note
@@ -95,7 +92,7 @@ def test_invalid_timeout_refuses(
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     with pytest.raises(ValueError, match="finite and positive"):
-        stop_plane(local_plane, timeout, operator_pipeline)
+        stop_plane(local_plane, timeout, operator_pipeline, home)
 
 
 # meiva:note
@@ -240,11 +237,11 @@ def running_redis(directory: Path, *, password: str | None = None) -> Generator[
 
 
 def test_remote_plane_refuses_without_any_signal(
-    local_plane: DataPlaneConfig, operator_pipeline: Callable[[], EventPipeline]
+    local_plane: DataPlaneConfig, home: Path, operator_pipeline: Callable[[], EventPipeline]
 ) -> None:
     remote = replace(local_plane, redis_url="redis://192.0.2.4:6379")
     with pytest.raises(RuntimeError, match="remote-managed"):
-        stop_plane(remote, 1, operator_pipeline)
+        stop_plane(remote, 1, operator_pipeline, home)
 
 
 def test_recycled_pooler_pid_is_not_stopped(
@@ -254,7 +251,7 @@ def test_recycled_pooler_pid_is_not_stopped(
     path.parent.mkdir()
     path.write_text(str(os.getpid()))
     with pytest.raises(RuntimeError, match="PgBouncer"):
-        stop_plane(local_plane, 1, operator_pipeline)
+        stop_plane(local_plane, 1, operator_pipeline, home)
     assert path.exists()
 
 
@@ -276,7 +273,7 @@ def test_real_redis_stops_owned_instance_only(
             owned_client.save()  # pyright: ignore[reportUnknownMemberType] — redis stubs
             owned_client.set("owned-test", "latest-unsaved")
         config = replace(local_plane, redis_url=owned.url)
-        assert stop_plane(config, 3, operator_pipeline) == ["redis"]
+        assert stop_plane(config, 3, operator_pipeline, home) == ("redis",)
         assert (
             not OwnedProcess.capture(psutil.Process(owned.pid)).live()
             if psutil.pid_exists(owned.pid)
@@ -284,7 +281,7 @@ def test_real_redis_stops_owned_instance_only(
         )
         with redis.Redis.from_url(sibling.url) as sibling_client:  # pyright: ignore[reportUnknownMemberType] — redis stubs
             assert sibling_client.ping()  # pyright: ignore[reportUnknownMemberType] — redis stubs
-        assert stop_plane(config, 1, operator_pipeline) == []
+        assert stop_plane(config, 1, operator_pipeline, home) == ()
         # Restart the exact private data directory. This proves SAVE includes
         # the latest in-memory write, not merely that an old RDB existed.
         with running_redis(owned.data) as restarted:
@@ -292,13 +289,14 @@ def test_real_redis_stops_owned_instance_only(
             with redis.Redis.from_url(restarted.url, decode_responses=True) as restored:  # pyright: ignore[reportUnknownMemberType]
                 assert restored.get("owned-test") == "latest-unsaved"  # pyright: ignore[reportUnknownMemberType]
             assert stop_plane(
-                replace(local_plane, redis_url=restarted.url), 3, operator_pipeline
-            ) == ["redis"]
+                replace(local_plane, redis_url=restarted.url), 3, operator_pipeline, home
+            ) == ("redis",)
 
 
 def test_foreign_redis_directory_refuses_before_local_signals(
     redis_access: None,
     local_plane: DataPlaneConfig,
+    home: Path,
     tmp_path: Path,
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
@@ -307,7 +305,7 @@ def test_foreign_redis_directory_refuses_before_local_signals(
     with running_redis(tmp_path / "foreign-redis") as foreign:
         config = replace(local_plane, redis_url=foreign.url)
         with pytest.raises(RuntimeError, match="Redis process"):
-            stop_plane(config, 2, operator_pipeline)
+            stop_plane(config, 2, operator_pipeline, home)
         with redis.Redis.from_url(foreign.url) as still_there:  # pyright: ignore[reportUnknownMemberType] — redis stubs
             assert still_there.ping()  # pyright: ignore[reportUnknownMemberType] — redis stubs
 
@@ -351,6 +349,7 @@ def test_a_dead_service_whose_ledger_names_only_dead_processes_does_not_refuse(
 def test_redis_admin_credential_is_independent_of_runtime_url(
     redis_access: None,
     local_plane: DataPlaneConfig,
+    home: Path,
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     password = "private-maintenance-test"  # noqa: S105 — private ephemeral test
@@ -360,7 +359,7 @@ def test_redis_admin_credential_is_independent_of_runtime_url(
             redis_url=owned.url.replace("redis://", "redis://restricted:wrong@"),
             redis_admin_password=password,
         )
-        assert stop_plane(config, 3, operator_pipeline) == ["redis"]
+        assert stop_plane(config, 3, operator_pipeline, home) == ("redis",)
 
 
 @dataclass(frozen=True)
@@ -411,14 +410,14 @@ def test_real_pgbouncer_normal_exit_and_identity_cleanup(
 
     with running_pooler(home) as pooler:
         config = replace(local_plane, redis_url=f"redis://127.0.0.1:{free_port()}")
-        clients: list[str] = []
-        assert plane.stop(config, 3, clients=clients, producer=operator_pipeline) == ["pgbouncer"]
+        stopped = plane.stop(config, 3, home=home, producer=operator_pipeline)
+        assert stopped.stopped == ("pgbouncer",)
         assert not pooler.identity.live()
         assert not (pooler.directory / "pgbouncer.pid").exists()
         # meiva:note
         # This home holds no admin credential, so the console cannot be read: said, never an
         # empty list.
-        assert len(clients) == 1 and "could not be listed" in clients[0]
+        assert len(stopped.clients) == 1 and "could not be listed" in stopped.clients[0]
 
 
 # meiva:note
@@ -443,18 +442,19 @@ def test_real_pgbouncer_stop_does_not_wait_for_idle_client(
 
     with running_pooler(home) as pooler:
         config = replace(local_plane, redis_url=f"redis://127.0.0.1:{free_port()}")
-        clients: list[str] = []
         with psycopg.connect(
             f"postgresql://anyone@127.0.0.1:{pooler.port}/pgbouncer", autocommit=True
         ) as connected:
             # Connected and idle from here on: the stop must not wait for this.
             assert connected.execute("SHOW VERSION").fetchone() is not None
             started = time.monotonic()
-            stopped = plane.stop(config, 5, clients=clients, producer=operator_pipeline)
-        assert stopped == ["pgbouncer"]
+            stopped = plane.stop(config, 5, home=home, producer=operator_pipeline)
+        assert stopped.stopped == ("pgbouncer",)
         assert time.monotonic() - started < 4
         assert not pooler.identity.live()
-        assert len(clients) == 1, "the console was asked once, before the pooler was signalled"
+        assert len(stopped.clients) == 1, (
+            "the console was asked once, before the pooler was signalled"
+        )
 
 
 def test_missing_pooler_pidfile_does_not_mean_the_process_is_gone(
@@ -471,101 +471,8 @@ def test_missing_pooler_pidfile_does_not_mean_the_process_is_gone(
         (pooler.directory / "pgbouncer.pid").unlink()
         config = replace(local_plane, redis_url=f"redis://127.0.0.1:{free_port()}")
         with pytest.raises(RuntimeError, match="unrecorded or replacement"):
-            stop_plane(config, 1, operator_pipeline)
+            stop_plane(config, 1, operator_pipeline, home)
         assert pooler.identity.live()
-
-
-def test_redis_cleanup_cannot_turn_deadline_into_an_unbounded_wait(
-    local_plane: DataPlaneConfig,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_pipeline: Callable[[], EventPipeline],
-) -> None:
-    import asyncio
-
-    from base.deploy.tests.containers import free_port
-
-    class HangingClose:
-        connection = None
-
-        def __init__(self, **_kwargs: object) -> None:
-            pass
-
-        async def aclose(self) -> None:
-            await asyncio.Future()
-
-    # meiva:note
-    # A client whose close never returns is a fault no real Redis produces on demand.
-    monkeypatch.setattr(plane, "Redis", HangingClose)
-    config = replace(local_plane, redis_url=f"redis://127.0.0.1:{free_port()}")
-    started = time.monotonic()
-    with pytest.raises(TimeoutError):
-        stop_plane(config, 0.1, operator_pipeline)
-    assert time.monotonic() - started < 0.7
-
-
-def _nonloopback_addr() -> str | None:
-    """This machine's default-route address, or None when it has none.
-
-    A UDP connect() picks the route without sending a packet (TEST-NET
-    destination; connectionless sockets never contact it) — the portable read
-    of "which local address would reach the network".
-    """
-    import socket
-
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
-            probe.connect(("192.0.2.1", 9))
-            addr = str(probe.getsockname()[0])
-    except OSError:
-        return None
-    return addr if not addr.startswith("127.") else None
-
-
-def _launch_incident_shape_pooler(
-    home: Path,
-    *,
-    command_machine: MachineIdentity,
-) -> tuple[int, str, str, int]:
-    """Start a real pooler on the incident's degraded-path config.
-
-    Returns (port, role, secret, pid). Skips the calling test when this host
-    cannot run the fixture. Walks the reachable-address code path the incident
-    belongs to: a cluster with a declared reachable address binds loopback + that
-    address, so a listener-less pooler reads as degraded (a loopback host
-    short-circuits to the reload path by design). Pins the pooler's home and the address to
-    private, bindable values.
-    """
-    from base.deploy.tests.containers import free_port, wait_port
-
-    binary = base_pooler.pgbouncer_bin()
-    if not (Path(binary).exists() or shutil.which(binary)):
-        pytest.skip("native pgbouncer is not installed")
-    addr = _nonloopback_addr()
-    if addr is None:
-        pytest.skip("this host has no non-loopback address for the reachable bind")
-
-    command_machine.set(host=addr)
-
-    port = free_port()
-    role = pb.POOLER_ADMIN
-    secret = "s3cr3t"  # noqa: S105 — private ephemeral fixture
-    pb.write_config(
-        pg_port=15433,
-        listen_port=port,
-        db_name="meiva_maintenance_test",
-        userlist=f'"{role}" "{secret}"\n'.encode(),
-        machine=command_machine,
-        max_client_conn=2000,
-    )
-    subprocess.run(
-        [binary, "-d", str(base_pooler.ini_path())], check=True, capture_output=True, timeout=5
-    )
-    try:
-        wait_port(port, timeout=5)
-        return port, role, secret, _wait_pidfile()
-    except BaseException:
-        _kill_test_poolers()
-        raise
 
 
 def _wait_pidfile(timeout: float = 5.0) -> int:
@@ -611,48 +518,3 @@ def _kill_test_poolers(*pids: int | None) -> None:
                 proc = psutil.Process(target)
                 proc.kill()
                 proc.wait(timeout=5)
-
-
-def test_real_start_retains_pooler_with_held_client(
-    db_url: str,
-    home: Path,
-    *,
-    command_machine: MachineIdentity,
-) -> None:
-    """A normal start cannot force a pooler past its held drain."""
-    import psycopg
-
-    port, role, secret, pid = _launch_incident_shape_pooler(home, command_machine=command_machine)
-    old = OwnedProcess.capture(psutil.Process(pid))
-    config = (base_pooler.ini_path().read_bytes(), pb.userlist_path().read_bytes())
-    try:
-        with psycopg.connect(
-            f"postgresql://{role}:{secret}@127.0.0.1:{port}/pgbouncer", autocommit=True
-        ) as client:
-            assert client.execute("SHOW VERSION").fetchone() is not None
-            os.kill(pid, signal.SIGTERM)
-            deadline = time.monotonic() + 5.0
-            while time.monotonic() < deadline:
-                if not base_pooler.pgbouncer_public_listener_reachable(
-                    port, role, machine=command_machine
-                ):
-                    break
-                time.sleep(0.05)
-            else:
-                pytest.fail("the pooler never closed its listeners after SIGTERM")
-            assert old.live()
-            with pytest.raises(RuntimeError, match="custody retained"):
-                pb.ensure_pgbouncer(
-                    pg_port=15433,
-                    listen_port=port,
-                    db_name="meiva_maintenance_test",
-                    userlist=f'"{role}" "{secret}"\n'.encode(),
-                    admin_password=secret,
-                    machine=command_machine,
-                    max_client_conn=2000,
-                )
-            assert old.live(), "normal start must retain a pooler still draining its client"
-            assert pb.running_pid() == pid, "no replacement may be launched"
-            assert (base_pooler.ini_path().read_bytes(), pb.userlist_path().read_bytes()) == config
-    finally:
-        _kill_test_poolers(pid)

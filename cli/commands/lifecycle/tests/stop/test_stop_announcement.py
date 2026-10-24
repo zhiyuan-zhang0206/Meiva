@@ -114,6 +114,7 @@ def test_a_confirmed_stop_announces_after_the_confirm_and_before_the_teardown(
                 operator_pipeline,
                 stdin=io.StringIO("y\n"),
             ),
+            retained_children=[],
         )
     assert rc == 0
     ((announced_at, path, query, authorization),) = gateway.requests
@@ -147,6 +148,7 @@ def test_a_declined_confirm_leaves_the_roster_and_the_unit_untouched(
                 operator_pipeline,
                 stdin=io.StringIO(answer),
             ),
+            retained_children=[],
         )
     assert rc == 0
     assert gateway.requests == [], "no announce"
@@ -165,6 +167,7 @@ def test_a_stop_that_asks_for_confirmation_needs_a_stream_to_read_it_from(
         do_stop(
             stop_request(require_confirmation=True),
             stop_environment(stopping, operator_database, operator_pipeline),
+            retained_children=[],
         )
 
 
@@ -184,6 +187,7 @@ def test_the_stop_proceeds_when_the_announce_cannot_reach_the_gateway(
             stop_environment(
                 pointed_at(stopping, "http://127.0.0.1:1"), operator_database, operator_pipeline
             ),
+            retained_children=[],
         )
     assert rc == 0
     assert ("down", "agent-host") in root.calls, "teardown still ran"
@@ -207,6 +211,7 @@ def test_a_declared_window_reaches_the_gateway_and_the_homes_stand_down_record(
             stop_environment(
                 pointed_at(stopping, gateway.url), operator_database, operator_pipeline
             ),
+            retained_children=[],
         )
     assert rc == 0
     ((_at, _path, query, _auth),) = gateway.requests

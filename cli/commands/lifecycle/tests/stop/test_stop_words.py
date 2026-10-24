@@ -159,6 +159,13 @@ def test_a_stop_that_failed_before_its_first_phase_says_so() -> None:
     assert "phases: before the first phase." in incomplete_report("boom", [], "j")
 
 
+def test_a_stop_that_failed_before_opening_a_journal_points_at_none() -> None:
+    report = incomplete_report("boom", [], None)
+
+    assert report.endswith("to resume.")
+    assert "Status journal" not in report
+
+
 # meiva:note
 # ── retiring the extras ──────────────────────────────────────────────────────
 

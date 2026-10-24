@@ -1,10 +1,19 @@
+# meiva:note
+# A sealed database capability from a gateway home to a runner, on a real single-box cluster.
+#
+# The gateway home is a born cluster (real Postgres behind PgBouncer, a private ledger with an
+# active write generation); the gateway the runner joins is a scripted listener on a loopback
+# port that serves the configuration the real bootstrap builder produces for that home. The
+# bundle `issue-unit` seals is opened by `meiva init --db-capability`, renewed by `install-unit`,
+# and the runner then connects as the generation's login. What each verb refuses and says is
+# asserted in `cli/commands/cluster/tests/unit_capability`.
+
 from __future__ import annotations
 
-import os
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 from urllib.parse import urlsplit
 
 import psycopg
@@ -13,17 +22,17 @@ from dotenv import dotenv_values
 
 from base import config
 from base.cluster.authority.tests.unit_capability_support import HUMAN, MACHINE
-from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.host.db_authority import delivery, unit
-from base.host.env import bootstrap
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
-from base.paths.tests.homes import point_home
-from cli.commands.cluster import unit_join
+from cli.commands.cluster.control import cmd_db_authority_install_unit, cmd_db_authority_issue_unit
+from cli.commands.cluster.tests.gateway_server import Reply, serving
 from cli.commands.data_plane import bringup
+from cli.commands.data_plane.instance.launch_delivery import LaunchDelivery
 from cli.commands.tests import test_single_box as _single_box
 from cli.commands.tests.test_single_box import Born
+from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.start_runtime import HomeSite
@@ -33,19 +42,19 @@ configured = _single_box.configured
 born = _single_box.born
 
 
-def _never_local(*_args: object, **_kwargs: object) -> bool:
-    return False
+# meiva:note
+# The gateway operator's invocation: the born home, the human secret the bundles derive their
+# telemetry token from, and `localhost` as the address runners reach the gateway on. The home
+# serves the gateway through its `.env`, as `meiva init` leaves it.
+def _gateway_operator(command_runtime: CommandRuntime, born: Born) -> CommandRuntime:
+    with (born.home / ".env").open("a") as env_file:
+        env_file.write("MEIVA_MACHINE_SERVE_GATEWAY=true\n")
+    command_runtime.config.set_field("cluster_secret", HUMAN)
+    command_runtime.config.set_field("machine_host", "localhost")
+    return replace(command_runtime, home=born.home)
 
 
-def _serve_on_loopback(monkeypatch: pytest.MonkeyPatch, born: Born) -> ConfigAuthority:
-    point_home(monkeypatch, born.home)
-    monkeypatch.setattr(config.settings.general, "machine_host", "localhost")
-    monkeypatch.setitem(os.environ, "MEIVA_MACHINE_SERVE_GATEWAY", "true")
-    complete = config.settings if config.settings.profile is None else config.Settings(profile=None)
-    return ConfigAuthority(config.settings, complete, born.home / ".env")
-
-
-def _runner_args(bundle: Path) -> Any:
+def _runner_args(bundle: Path, gateway_url: str) -> Any:
     from cli.parsers import build_parser
 
     return build_parser().parse_args(
@@ -56,18 +65,20 @@ def _runner_args(bundle: Path) -> Any:
             "--machine-name",
             MACHINE,
             "--gateway-url",
-            "http://127.0.0.1:1",
+            gateway_url,
             "--db-capability",
             str(bundle),
         ]
     )
 
 
-def _issue_bundle(out: Path, runner: Path, capsys: pytest.CaptureFixture[str]) -> tuple[str, str]:
-    from cli.commands.cluster.control import cmd_db_authority_issue_unit
-
+def _issue_bundle(
+    command: CommandRuntime, out: Path, runner: Path, capsys: pytest.CaptureFixture[str]
+) -> tuple[str, str]:
     assert (
-        cmd_db_authority_issue_unit(machine=MACHINE, home=str(runner), out=str(out), ttl_hours=1)
+        cmd_db_authority_issue_unit(
+            machine=MACHINE, home=str(runner), out=str(out), ttl_hours=1, command=command
+        )
         == 0
     )
     printed = capsys.readouterr().out
@@ -76,81 +87,60 @@ def _issue_bundle(out: Path, runner: Path, capsys: pytest.CaptureFixture[str]) -
     return printed, match.group(1)
 
 
-def _install_on_initialized_unit(bundle: Path, key: str) -> None:
-    from cli.commands.cluster.control import cmd_db_authority_install_unit
-
-    os.environ[unit.CAPABILITY_KEY_ENV] = key
-    assert cmd_db_authority_install_unit(bundle=str(bundle)) == 0
-    assert not bundle.exists() and unit.CAPABILITY_KEY_ENV not in os.environ
-
-
 def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
     born: Born,
+    command_runtime: CommandRuntime,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    bootstrap_authority = _serve_on_loopback(monkeypatch, born)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", HUMAN)
+    command = _gateway_operator(command_runtime, born)
     runner = (tmp_path / "runner").resolve()
     bundle = tmp_path / "mini.bundle"
-    printed, key = _issue_bundle(bundle, runner, capsys)
+    printed, key = _issue_bundle(command, bundle, runner, capsys)
     renewal = tmp_path / "mini-renewal.bundle"
-    _, renewal_key = _issue_bundle(renewal, runner, capsys)
+    _, renewal_key = _issue_bundle(command, renewal, runner, capsys)
     assert "`.venv/bin/meiva init --db-capability <bundle>`" in printed, printed
     assert "`meiva cluster db-authority install-unit <bundle>`" in printed, printed
     assert bundle.stat().st_mode & 0o777 == 0o600
     served = config.bootstrap_config_values(
-        bootstrap_authority,
+        ConfigAuthority.deferred(
+            runtime=command.config.view,
+            build_all_domains=command.config.complete_read_model,
+            env_path=born.home / ".env",
+        ),
         provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
         plugin_cluster_config=plugin_bootstrap_config(),
     )
     assert urlsplit(served["MEIVA_DB_URL"]).password is None
-
     checkout = tmp_path / "checkout"
     checkout.mkdir()
 
-    bearers: list[object] = []
-
-    def fetch(*_a: object, **kwargs: object) -> dict[str, str]:
-        bearers.append(kwargs.get("bearer"))
-        return dict(served)
-
-    monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", fetch)
-    with patch.dict(os.environ):
-        os.environ.pop("MEIVA_MACHINE_SERVE_GATEWAY")
-        os.environ.pop("MEIVA_CLUSTER_SECRET", None)
-        os.environ["MEIVA_HOME"] = str(runner)
-        os.environ[unit.CAPABILITY_KEY_ENV] = key
+    with serving({("GET", "/api/bootstrap"): Reply(body=served)}) as gateway:
         prepare_init_identity(
-            _runner_args(bundle),
+            _runner_args(bundle, gateway.url),
             HomeSite(runner, checkout),
-            caller_host(path=str(tmp_path / "tools")),
+            replace(caller_host(path=str(tmp_path / "tools")), transport_key=key),
         )
-        assert unit.CAPABILITY_KEY_ENV not in os.environ
-        _install_on_initialized_unit(renewal, renewal_key)
-    assert not bundle.exists()
+        assert (
+            cmd_db_authority_install_unit(
+                bundle=str(renewal), transport_key=renewal_key, home=runner
+            )
+            == 0
+        )
+    assert not bundle.exists() and not renewal.exists()
     env = dotenv_values(runner / ".env")
     assert "MEIVA_DB_URL" not in env and unit.CAPABILITY_KEY_ENV not in env
     assert "MEIVA_CLUSTER_SECRET" not in env
 
     capability = unit.require_unit_capability(runner)
-    assert capability.api is not None and bearers == [capability.api.token] * 2
+    assert [seen.headers["authorization"] for seen in gateway.requests] == [
+        f"Bearer {capability.api.token}"
+    ] * 2
     with psycopg.connect(capability.dsn, prepare_threshold=None, connect_timeout=5) as conn:
         assert conn.execute("SELECT current_user").fetchone() == ("meiva_g0_runner",)
         assert conn.execute("SELECT count(*) FROM agents_meta").fetchone() is not None
-    with monkeypatch.context() as scoped:
-        scoped.setenv("MEIVA_HOME", str(runner))
-        scoped.setattr("base.host.env.bootstrap.config_source_is_local", _never_local)
-        assert bringup.db_delivery("runner", remote_data_plane=False) == {
-            "MEIVA_DB_URL": capability.dsn,
-            delivery.GENERATION_ENV: "0",
-        }
-
-
-def test_a_remote_unit_home_holding_the_human_secret_refuses_to_join(tmp_path: Path) -> None:
-    home = (tmp_path / "legacy-runner").resolve()
-    home.mkdir(mode=0o700)
-    values = {"MEIVA_GATEWAY_URL": "http://10.0.0.7:8000", "MEIVA_CLUSTER_SECRET": HUMAN}
-    with pytest.raises(ValueError, match="records the human cluster secret"):
-        unit_join.join_gateway(values, home, None)
+    launch = LaunchDelivery(home=runner, remote_data_plane=False, environment={}, env_file={})
+    assert bringup.db_delivery("runner", delivery=launch) == {
+        "MEIVA_DB_URL": capability.dsn,
+        delivery.GENERATION_ENV: "0",
+    }

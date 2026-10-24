@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -16,6 +17,7 @@ from base.events.contract import EVENTS
 from base.native_process.root_control.ipc import CallerPayload
 from cli.database import OperatorDatabaseFactory
 from cli.database.lifecycle_audit import (
+    AuditUnavailableError,
     lifecycle_audit,
     operator_lifecycle_audit,
     operator_request_recorder,
@@ -24,20 +26,7 @@ from cli.database.lifecycle_audit import (
 )
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-
-
-def caller(operation: str, *, agent_id: str | None = "1818") -> CallerPayload:
-    return {
-        "pid": 4821,
-        "ppid": 4800,
-        "uid": 501,
-        "cwd": "/src",
-        "argv": ["meiva", "stop", "-y", "--token", "<redacted>"],
-        "agent_id": agent_id,
-        "machine": "macmini",
-        "operation_id": operation,
-        "env_keys": ["MEIVA_API_TOKEN"],
-    }
+from cli.database.tests.lifecycle_rows import caller_block
 
 
 # meiva:note
@@ -59,13 +48,11 @@ def refuse_database() -> Any:
 
 
 def recorders(
-    database: DatabaseFactory, caller_block: CallerPayload, head_sha: str | None
+    database: DatabaseFactory, caller: CallerPayload, head_sha: str | None
 ) -> tuple[Callable[[str, Sequence[str]], None], Any]:
     return (
-        operator_request_recorder(
-            database_factory=database, caller=caller_block, head_sha=head_sha
-        ),
-        operator_result_recorder(database_factory=database, caller=caller_block, head_sha=head_sha),
+        operator_request_recorder(database_factory=database, caller=caller, head_sha=head_sha),
+        operator_result_recorder(database_factory=database, caller=caller, head_sha=head_sha),
     )
 
 
@@ -78,7 +65,7 @@ def test_the_request_and_the_result_name_the_same_version(
     operator_database: OperatorDatabaseFactory, db_conn: psycopg.Connection
 ) -> None:
     operation = f"stop@{uuid.uuid4().hex}"
-    request, result = recorders(operator_database, caller(operation), "39d4614c1")
+    request, result = recorders(operator_database, caller_block(operation), "39d4614c1")
 
     with lifecycle_audit(request, result) as command:
         record_lifecycle_request("down", ["gateway", "agent-host"])
@@ -98,7 +85,7 @@ def test_the_record_carries_the_wire_caller_block(
     operator_database: OperatorDatabaseFactory, db_conn: psycopg.Connection
 ) -> None:
     operation = f"stop@{uuid.uuid4().hex}"
-    request, _ = recorders(operator_database, caller(operation), None)
+    request, _ = recorders(operator_database, caller_block(operation), None)
 
     request("down", ["gateway", "frontend"])
 
@@ -118,7 +105,7 @@ def test_a_human_operator_is_recorded_without_an_agent_id(
     operator_database: OperatorDatabaseFactory, db_conn: psycopg.Connection
 ) -> None:
     operation = f"start@{uuid.uuid4().hex}"
-    request, _ = recorders(operator_database, caller(operation, agent_id=None), "sha")
+    request, _ = recorders(operator_database, caller_block(operation, agent_id=None), "sha")
 
     request("up", ["gateway"])
 
@@ -131,7 +118,7 @@ def test_a_failed_command_records_a_failed_outcome(
     operator_database: OperatorDatabaseFactory, db_conn: psycopg.Connection
 ) -> None:
     operation = f"start@{uuid.uuid4().hex}"
-    request, result = recorders(operator_database, caller(operation), "sha")
+    request, result = recorders(operator_database, caller_block(operation), "sha")
 
     with lifecycle_audit(request, result) as command:
         record_lifecycle_request("up", ["gateway"])
@@ -144,7 +131,7 @@ def test_a_command_without_a_request_records_no_result(
     operator_database: OperatorDatabaseFactory, db_conn: psycopg.Connection
 ) -> None:
     operation = f"start@{uuid.uuid4().hex}"
-    _, result = recorders(operator_database, caller(operation), "sha")
+    _, result = recorders(operator_database, caller_block(operation), "sha")
 
     with lifecycle_audit(None, result) as command:
         command.exited(0)
@@ -156,7 +143,7 @@ def test_an_unreachable_database_never_fails_the_command() -> None:
     def refuse() -> Any:
         raise RuntimeError("settings unavailable")
 
-    request, result = recorders(refuse, caller("stop@refused"), "sha")
+    request, result = recorders(refuse, caller_block("stop@refused"), "sha")
 
     with lifecycle_audit(request, result) as command:
         record_lifecycle_request("down", ["gateway"])
@@ -177,14 +164,49 @@ def test_an_operator_command_audits_itself_as_the_process_that_runs_it(
         command.exited(0)
 
     rows = db_conn.execute(
-        "SELECT event_name, attributes->'caller'->>'pid', attributes->>'verb' FROM audit_events "
+        "SELECT event_name, attributes->'caller'->>'pid', attributes->>'verb', "
+        "attributes->'head_sha' FROM audit_events "
         "WHERE event_name IN ('lifecycle_request', 'lifecycle_result') ORDER BY event_name"
     ).fetchall()
-    assert [(name, verb) for name, _pid, verb in rows] == [
+    assert [(name, verb) for name, _pid, verb, _sha in rows] == [
         ("lifecycle_request", "down"),
         ("lifecycle_result", "down"),
     ]
     assert rows[0][1] == str(os.getpid())
+    # meiva:note
+    # This home has no source checkout, which is a null commit and not a refused command.
+    assert [sha for *_rest, sha in rows] == [None, None]
+
+
+# meiva:note
+# A command whose caller cannot be named is refused before it changes anything: it must not run
+# unattributed behind the operator's back. The working directory of this process is removed,
+# which is how a real shell loses it.
+def test_a_command_that_cannot_name_its_caller_is_refused_before_it_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    monkeypatch.chdir(gone)
+    gone.rmdir()
+
+    with (
+        pytest.raises(AuditUnavailableError, match="cannot read the caller block"),
+        operator_lifecycle_audit(database_factory=refuse_database),
+    ):
+        pytest.fail("the command body must not run")
+
+
+def test_a_boot_start_needs_no_caller_even_when_it_cannot_be_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    monkeypatch.chdir(gone)
+    gone.rmdir()
+
+    with operator_lifecycle_audit(database_factory=refuse_database, enabled=False) as command:
+        command.exited(0)
 
 
 def test_the_outcome_is_recorded_once() -> None:

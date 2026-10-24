@@ -6,6 +6,7 @@ import json
 import os
 import socket
 import subprocess
+import sys
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
@@ -18,9 +19,10 @@ from dotenv import dotenv_values
 
 from base import cluster
 from base.deploy.lifecycle import start_serving
-from base.native_process.os_platform import LockTimeoutError, file_lock
+from base.host.net.tests.local_http import closed_port_url
 from cli import init_intent, start_intent
 from cli import start_identity as identity
+from cli.commands.cluster.tests.gateway_server import Reply, serving
 from cli.commands.lifecycle import root_driver
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
@@ -33,6 +35,8 @@ from cli.tests.bootstrap.init_identity import (
     prepare_init_identity,
     repair_env_publication,
 )
+
+_ADMITTED_HOME = Path(__file__).with_name("child_admitted_home.py")
 
 
 @pytest.fixture(autouse=True)
@@ -51,6 +55,7 @@ def inputs(tmp_path: Path) -> identity.IdentityInput:
         checkout,
         frozenset({"gateway", "agent-runner"}),
         {"MEIVA_MACHINE_NAME": "preview"},
+        occupied_ports=frozenset(),
     )
 
 
@@ -329,21 +334,20 @@ def test_config_file_cannot_choose_identity(inputs: identity.IdentityInput, key:
 _RUNNER_ENDPOINT = "postgresql://meiva@remote.invalid/db"
 
 
-_FETCH_BEARERS: list[object] = []
+# meiva:note
+# A gateway that serves the database endpoint only: bootstrap serves no login.
+_BOOTSTRAP = ("GET", "/api/bootstrap")
+_SERVED = Reply(
+    body={"MEIVA_DB_URL": _RUNNER_ENDPOINT, "MEIVA_REDIS_URL": "redis://remote.invalid/0"}
+)
 
 
-def _runner_start(monkeypatch: pytest.MonkeyPatch, *extra: str) -> Any:
-    """A remote runner's first start against a gateway serving the endpoint only."""
-    from base.host.env import bootstrap
-
+# meiva:note
+# A remote runner's first start against the gateway at `gateway_url`.
+def _runner_start(monkeypatch: pytest.MonkeyPatch, gateway_url: str, *extra: str) -> Any:
+    # meiva:note
     # A remote unit joins without the human secret: its capability authenticates.
     monkeypatch.delenv("MEIVA_CLUSTER_SECRET", raising=False)
-
-    def served(*_a: object, **kwargs: object) -> dict[str, str]:
-        _FETCH_BEARERS.append(kwargs.get("bearer"))
-        return {"MEIVA_DB_URL": _RUNNER_ENDPOINT, "MEIVA_REDIS_URL": "redis://remote.invalid/0"}
-
-    monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", served)
     return _args(
         "--serve-agent-runner",
         "--no-serve-gateway",
@@ -352,7 +356,7 @@ def _runner_start(monkeypatch: pytest.MonkeyPatch, *extra: str) -> Any:
         "--machine-host",
         "runner.invalid",
         "--gateway-url",
-        "https://gateway.invalid",
+        gateway_url,
         *extra,
     )
 
@@ -369,37 +373,40 @@ def test_runner_without_a_capability_refuses_before_persisting(
     capability; without one it refuses before any identity is written."""
     from base.host.db_authority import unit
 
-    args = _runner_start(monkeypatch)
-    with pytest.raises(ValueError, match="holds no database capability"):
+    with serving({_BOOTSTRAP: _SERVED}) as served:
+        args = _runner_start(monkeypatch, served.url)
+        with pytest.raises(ValueError, match="holds no database capability"):
+            prepare_init_identity(args, site, caller)
+        assert not (inputs.home / ".env").exists()
+        assert served.requests == []
+        # An installed capability (a bundle the operator carried earlier) admits it.
+        gateway = tmp_path / "gateway"
+        gateway.mkdir(mode=0o700)
+        seed_write_generation(gateway)
+        home = inputs.home.resolve()
+        issued = unit.issue_bundle(
+            gateway.resolve(),
+            unit=unit.UnitIdentity(machine="runner", home=str(home)),
+            endpoint=_RUNNER_ENDPOINT,
+            cluster_secret="gateway-human-secret-" + "g" * 32,
+            ttl_s=60,
+        )
+        unit.install_bundle(
+            home,
+            unit.open_bundle(issued.envelope, issued.transport_key),
+            machine="runner",
+            served_endpoint=_RUNNER_ENDPOINT,
+            probe=lambda _dsn: None,
+        )
         prepare_init_identity(args, site, caller)
-    assert not (inputs.home / ".env").exists()
-    # An installed capability (a bundle the operator carried earlier) admits it.
-    gateway = tmp_path / "gateway"
-    gateway.mkdir(mode=0o700)
-    seed_write_generation(gateway)
-    home = inputs.home.resolve()
-    issued = unit.issue_bundle(
-        gateway.resolve(),
-        unit=unit.UnitIdentity(machine="runner", home=str(home)),
-        endpoint=_RUNNER_ENDPOINT,
-        cluster_secret="gateway-human-secret-" + "g" * 32,
-        ttl_s=60,
-    )
-    unit.install_bundle(
-        home,
-        unit.open_bundle(issued.envelope, issued.transport_key),
-        machine="runner",
-        served_endpoint=_RUNNER_ENDPOINT,
-        probe=lambda _dsn: None,
-    )
-    _FETCH_BEARERS.clear()
-    prepare_init_identity(args, site, caller)
     env = dotenv_values(inputs.home / ".env")
     assert env["MEIVA_MACHINE_HOST"] == "runner.invalid"
     assert "MEIVA_DB_URL" not in env and "MEIVA_REDIS_URL" not in env
     # The fetch authenticated with the capability's API token; no bearer persisted.
     installed = unit.require_unit_capability(home)
-    assert [installed.api.token] == _FETCH_BEARERS
+    assert [seen.headers["authorization"] for seen in served.requests] == [
+        f"Bearer {installed.api.token}"
+    ]
     assert "MEIVA_CLUSTER_SECRET" not in env
     assert cluster.get_record(home) is None
 
@@ -413,8 +420,7 @@ def test_capability_bundle_needs_its_transport_key(
 ) -> None:
     bundle = tmp_path / "unit.bundle"
     bundle.write_text("{}")
-    monkeypatch.delenv("MEIVA_DB_CAPABILITY_KEY", raising=False)
-    args = _runner_start(monkeypatch, "--db-capability", str(bundle))
+    args = _runner_start(monkeypatch, closed_port_url(), "--db-capability", str(bundle))
     with pytest.raises(ValueError, match="MEIVA_DB_CAPABILITY_KEY"):
         prepare_init_identity(args, site, caller)
     assert bundle.exists()
@@ -599,27 +605,31 @@ def test_remote_input_cannot_redirect_libpq_identity(
 
 # meiva:note
 # Admission holds the lifecycle lock while the lifecycle runs, and discards the
-# inherited identity of another home.
-def test_an_admitted_start_holds_the_home_lock_and_enters_the_home(
-    inputs: identity.IdentityInput, site: HomeSite, caller: CallerHost
+# inherited identity of another home. Entering a home rewrites the process's environment, so
+# a child process does it, started in another home with that home's login in its environment.
+def test_an_admitted_home_holds_the_lock_and_enters_the_home(
+    inputs: identity.IdentityInput, site: HomeSite, caller: CallerHost, tmp_path: Path
 ) -> None:
     prepare_init_identity(_single_box(), site, caller)
-    os.environ["MEIVA_DB_URL"] = "postgresql://foreign@foreign.invalid/production"
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
+    env.update(
+        MEIVA_HOME=str(tmp_path / "other-home"),
+        MEIVA_DB_URL="postgresql://foreign@foreign.invalid/production",
+    )
 
-    with start_intent.admitted_start(site) as runtime:
-        assert runtime.code_root == inputs.checkout
-        assert os.environ["MEIVA_HOME"] == str(inputs.home)
-        assert "MEIVA_DB_URL" not in os.environ, "another home's login is not this home's"
-        with (
-            pytest.raises(LockTimeoutError),
-            file_lock(inputs.home / "start-intent.lock", timeout_s=0.05),
-        ):
-            pytest.fail("another lifecycle operation entered during start")
+    # meiva:note
+    # The child is this repository's own fixed probe script, run with the interpreter in
+    # isolated mode.
+    child = subprocess.run(  # noqa: S603
+        [sys.executable, "-I", "-B", str(_ADMITTED_HOME), str(inputs.home)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
 
-    with file_lock(inputs.home / "start-intent.lock", timeout_s=0.05):
-        # meiva:note
-        # released with the start
-        pass
+    assert child.returncode == 0, child.stderr
 
 
 def test_failed_boot_publication_clears_serving_and_refuses_success(
@@ -638,7 +648,7 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
     # The boot unit's manager is the one fault a real resource cannot produce here: the
     # hand-off asks the process's own systemd cgroup.
     monkeypatch.setattr(root_driver, "complete_boot_start", fail)
-    with start_intent.admitted_start(site):
+    with start_intent.admitted_home(inputs.home):
         start_serving.begin_start()
         assert start_serving.state_path().exists()
         with pytest.raises(RuntimeError, match="refused native custody"):

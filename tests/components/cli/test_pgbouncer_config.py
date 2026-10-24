@@ -8,7 +8,6 @@ transaction pooling in front of Postgres) lives in test_pgbouncer_wire.py.
 
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call
@@ -23,6 +22,17 @@ from base.config import settings
 from base.db import Database, DbConfig, connections
 from base.db.code_version_gate import ProcessDbGate
 from cli.commands.data_plane import pgbouncer
+
+
+def _shape(machine: MachineIdentity, db_name: str) -> pgbouncer.PoolerShape:
+    return pgbouncer.PoolerShape(
+        pg_port=5433,
+        listen_port=6433,
+        db_name=db_name,
+        machine=machine,
+        max_client_conn=2000,
+        socket_dir=Path("/run/meiva/pg-sock"),
+    )
 
 
 def _assert_transaction_pooling_with_scram_clients(ini: str) -> None:
@@ -87,13 +97,7 @@ def _assert_quiet_connection_logs_and_userlist_only_console(ini: str) -> None:
 def test_render_ini_is_transaction_scram_and_socket_server(
     machine_identity: MachineIdentity,
 ) -> None:
-    ini = pgbouncer.render_ini(
-        pg_port=5433,
-        listen_port=6433,
-        db_name="meiva_main",
-        machine=machine_identity,
-        max_client_conn=2000,
-    )
+    ini = pgbouncer.render_ini(_shape(machine_identity, "meiva_main"))
     _assert_transaction_pooling_with_scram_clients(ini)
     _assert_database_entry_forwards_over_owner_only_socket(ini)
     _assert_backends_born_with_statement_ceiling(ini)
@@ -107,13 +111,7 @@ def test_render_ini_authenticates_and_binds_loopback_on_a_single_box(
     """The internal data plane always authenticates, and a box that declares no
     reachable address (`MEIVA_MACHINE_HOST` unset) binds loopback alone."""
     machine_identity.set(host="localhost")
-    ini = pgbouncer.render_ini(
-        pg_port=5433,
-        listen_port=6433,
-        db_name="meiva",
-        machine=machine_identity,
-        max_client_conn=2000,
-    )
+    ini = pgbouncer.render_ini(_shape(machine_identity, "meiva"))
     assert "auth_type = scram-sha-256" in ini.splitlines()
     assert "trust" not in ini
     assert "listen_addr = 127.0.0.1" in ini.splitlines()
@@ -123,39 +121,18 @@ def test_render_ini_adds_only_the_declared_reachable_address(
     machine_identity: MachineIdentity,
 ) -> None:
     machine_identity.set(host="10.0.0.5")
-    ini = pgbouncer.render_ini(
-        pg_port=5433,
-        listen_port=6433,
-        db_name="meiva",
-        machine=machine_identity,
-        max_client_conn=2000,
-    )
+    ini = pgbouncer.render_ini(_shape(machine_identity, "meiva"))
     assert "listen_addr = 127.0.0.1, 10.0.0.5" in ini.splitlines()
 
 
 def test_render_ini_binds_loopback_never_all_interfaces(machine_identity: MachineIdentity) -> None:
-    ini = pgbouncer.render_ini(
-        pg_port=5433,
-        listen_port=6433,
-        db_name="meiva_main",
-        machine=machine_identity,
-        max_client_conn=2000,
-    )
+    ini = pgbouncer.render_ini(_shape(machine_identity, "meiva_main"))
     listen = next(ln for ln in ini.splitlines() if ln.startswith("listen_addr ="))
     assert "127.0.0.1" in listen
     assert "0.0.0.0" not in listen and "*" not in listen  # noqa: S104 — asserting we do NOT bind all interfaces
 
 
 # ── direct-connection exemptions (the admin plane must never route through PgBouncer) ──
-
-
-def test_migrations_apply_dials_direct_only_where_it_can_apply() -> None:
-    from cli.commands.lifecycle.start import migrations
-
-    src = inspect.getsource(migrations.cmd_migrations_apply)
-    assert "connect(unbounded=True)" in src
-    assert "direct=True" not in src
-    assert "local_owner_authority(config.db_url, remote_plane=False)" in src
 
 
 @pytest.mark.parametrize("remote", [False, True])

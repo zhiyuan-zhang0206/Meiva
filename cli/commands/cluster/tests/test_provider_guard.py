@@ -1,335 +1,222 @@
+# meiva:note
+# The provider-account guard's readings, against the real things it reads.
+#
+# The provider's balance endpoint is a scripted listener on a loopback port (or a port nobody
+# listens on), the agent table the suite's throwaway Postgres, and the configuration a real
+# command configuration owner. What each check says is decided from values in
+# `test_provider_verdicts.py`; this file proves the shell reads what the verdicts judge, reads
+# nothing for a disabled check, and fails open exactly where the verdicts expect it to.
+
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Callable
 from typing import Any
 
+import psycopg
 import pytest
 from pydantic import SecretStr
 
-from base.agents.context.clients import DatabaseFactory
-from base.config import settings
-from base.db.tests.fakes import patch_database
-from cli.commands.cluster import _provider_guard
+from base.agents.recovery.breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
+from base.db import Database
+from base.host.net.tests.local_http import closed_port_url
+from cli.commands.cluster._provider_guard import (
+    ProviderGuardConfig,
+    fetch_balance,
+    halted_agents_count,
+    provider_guard_checks,
+    provider_guard_config,
+)
+from cli.commands.cluster.plans.provider_verdicts import (
+    BALANCE_CHECK,
+    BLOCKED_AGENTS_CHECK,
+    BalancePayload,
+    BalanceUnreadable,
+)
+from cli.commands.cluster.tests.gateway_server import Reply, serving
+from cli.commands.cluster.tests.health_probe_inputs import live_agent
+from cli.commands.cluster.tests.health_probe_inputs import (
+    unreachable_database as unreachable_database,
+)
+from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
-
-
-def _secret(value: str) -> SecretStr:
-    return SecretStr(value)
-
-
-def _balance_payload(
-    total: str, *, currency: str = "CNY", available: bool = True
-) -> dict[str, Any]:
-    return {
-        "is_available": available,
-        "balance_infos": [{"currency": currency, "total_balance": total}],
-    }
-
-
-def test_balance_at_the_minimum_passes(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(settings.lm, "deepseek_api_key", _secret("sk-test"))
-    monkeypatch.setattr(settings.alerts, "provider_guard_balance_min_cny", 500.0)
-
-    def _fetch(*_args: object, **_kwargs: object) -> dict[str, Any]:
-        return _balance_payload("500.00")
-
-    monkeypatch.setattr(_provider_guard, "fetch_balance", _fetch)
-
-    assert _provider_guard.balance_failure() is None
-    assert capsys.readouterr().err == ""
-
-
-def test_balance_below_minimum_reports_a_stable_message(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(settings.lm, "deepseek_api_key", _secret("sk-test"))
-    monkeypatch.setattr(settings.alerts, "provider_guard_balance_min_cny", 500.0)
-    totals = iter(["100.00", "99.50"])
-
-    def _fetch(*_args: object, **_kwargs: object) -> dict[str, Any]:
-        return _balance_payload(next(totals))
-
-    monkeypatch.setattr(_provider_guard, "fetch_balance", _fetch)
-
-    first = _provider_guard.balance_failure()
-    second = _provider_guard.balance_failure()
-
-    assert first is not None
-    assert first == second
-    assert "MEIVA_PROVIDER_GUARD_BALANCE_MIN_CNY=\u00a5500" in first
-    assert "100.00" not in first and "99.50" not in first
-    err = capsys.readouterr().err
-    assert "100.00" in err and "99.50" in err
-
-
-def test_balance_unavailable_account_fails_even_when_funded(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings.lm, "deepseek_api_key", _secret("sk-test"))
-
-    def _fetch(*_args: object, **_kwargs: object) -> dict[str, Any]:
-        return _balance_payload("9999.00", available=False)
-
-    monkeypatch.setattr(_provider_guard, "fetch_balance", _fetch)
-
-    failure = _provider_guard.balance_failure()
-
-    assert failure is not None
-    assert "is_available=false" in failure
-
-
-def test_balance_without_a_key_skips_without_fetching(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(settings.lm, "deepseek_api_key", None)
-    fetches: list[bool] = []
-
-    def _fetch(*_args: object, **_kwargs: object) -> dict[str, Any]:
-        fetches.append(True)
-        return _balance_payload("0.00")
-
-    monkeypatch.setattr(_provider_guard, "fetch_balance", _fetch)
-
-    assert _provider_guard.balance_failure() is None
-    assert fetches == []
-    assert "DEEPSEEK_API_KEY not configured" in capsys.readouterr().err
-
-
-def test_balance_read_error_is_fail_open(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(settings.lm, "deepseek_api_key", _secret("sk-test"))
-
-    def _fetch(*_args: object, **_kwargs: object) -> dict[str, Any]:
-        raise _provider_guard.BalanceReadError("HTTP 502")
-
-    monkeypatch.setattr(_provider_guard, "fetch_balance", _fetch)
-
-    assert _provider_guard.balance_failure() is None
-    assert "HTTP 502" in capsys.readouterr().err
-
-
-def test_balance_without_a_cny_entry_skips(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(settings.lm, "deepseek_api_key", _secret("sk-test"))
-
-    def _fetch(*_args: object, **_kwargs: object) -> dict[str, Any]:
-        return _balance_payload("100.00", currency="USD")
-
-    monkeypatch.setattr(_provider_guard, "fetch_balance", _fetch)
-
-    assert _provider_guard.balance_failure() is None
-    assert "no CNY balance entry" in capsys.readouterr().err
-
-
-def test_balance_disabled_skips_before_the_read(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.alerts, "provider_guard_balance_enabled", False)
-
-    def _fetch(*_args: object, **_kwargs: object) -> dict[str, Any]:
-        raise AssertionError("a disabled check must not read the provider")
-
-    monkeypatch.setattr(_provider_guard, "fetch_balance", _fetch)
-
-    assert _provider_guard.balance_failure() is None
-
-
-def test_fetch_balance_maps_http_failure_to_a_sanitized_read_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import httpx
-
-    def _get(*_args: object, **_kwargs: object) -> httpx.Response:
-        return httpx.Response(
-            500,
-            text="<html>upstream error</html>",
-            request=httpx.Request("GET", "https://balance.test"),
-        )
-
-    monkeypatch.setattr(httpx, "get", _get)
-
-    with pytest.raises(_provider_guard.BalanceReadError, match="HTTP 500"):
-        _provider_guard.fetch_balance("https://balance.test", "sk-test", 5.0)
-
-
-def test_blocked_agents_at_threshold_reports_a_stable_message(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
-) -> None:
-    monkeypatch.setattr(settings.alerts, "provider_guard_blocked_agents_min", 3)
-    counts = iter([3, 7])
-
-    def _count(_window_hours: float, *, database_factory: DatabaseFactory) -> int | None:
-        return next(counts)
-
-    monkeypatch.setattr(_provider_guard, "halted_agents_count", _count)
-
-    first = _provider_guard.blocked_agents_failure(database_factory=operator_database)
-    second = _provider_guard.blocked_agents_failure(database_factory=operator_database)
-
-    assert first is not None
-    assert first == second
-    assert "MEIVA_PROVIDER_GUARD_BLOCKED_AGENTS_MIN=3" in first
-    err = capsys.readouterr().err
-    assert "3 agent(s)" in err and "7 agent(s)" in err
-
-
-def test_blocked_agents_below_threshold_is_silent(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
-) -> None:
-    monkeypatch.setattr(settings.alerts, "provider_guard_blocked_agents_min", 3)
-
-    def _count(_window_hours: float, *, database_factory: DatabaseFactory) -> int | None:
-        return 2
-
-    monkeypatch.setattr(_provider_guard, "halted_agents_count", _count)
-
-    assert _provider_guard.blocked_agents_failure(database_factory=operator_database) is None
-    assert capsys.readouterr().err == ""
-
-
-def test_blocked_agents_unreadable_table_is_fail_open(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
-) -> None:
-
-    def _count(_window_hours: float, *, database_factory: DatabaseFactory) -> int | None:
-        return None
-
-    monkeypatch.setattr(_provider_guard, "halted_agents_count", _count)
-
-    assert _provider_guard.blocked_agents_failure(database_factory=operator_database) is None
-    assert "agent table unreachable" in capsys.readouterr().err
-
-
-def test_blocked_agents_disabled_skips_before_the_query(
-    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
-) -> None:
-    monkeypatch.setattr(settings.alerts, "provider_guard_blocked_agents_enabled", False)
-
-    def _count(_window_hours: float, *, database_factory: DatabaseFactory) -> int | None:
-        raise AssertionError("a disabled check must not query")
-
-    monkeypatch.setattr(_provider_guard, "halted_agents_count", _count)
-
-    assert _provider_guard.blocked_agents_failure(database_factory=operator_database) is None
-
-
-def test_halted_agents_count_reads_the_recovery_breaker_halt(
-    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
-) -> None:
-    from base.agents.recovery.breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
-
-    queries: list[tuple[str, tuple[object, ...]]] = []
-
-    class _Cursor:
-        def __enter__(self) -> _Cursor:
-            return self
-
-        def __exit__(self, *_args: object) -> None:
-            return None
-
-        def execute(self, query: str, params: tuple[object, ...] = ()) -> None:
-            queries.append((query, params))
-
-        def fetchone(self) -> tuple[int]:
-            return (4,)
-
-    class _Connection:
-        def __enter__(self) -> _Connection:
-            return self
-
-        def __exit__(self, *_args: object) -> None:
-            return None
-
-        def cursor(self) -> _Cursor:
-            return _Cursor()
-
-    patch_database(monkeypatch, connect=_Connection)
-
-    assert _provider_guard.halted_agents_count(24, database_factory=operator_database) == 4
-    query, params = queries[0]
-    assert "permanent_reject_streak >= %s" in query
-    assert "last_turn_fatal_at > now() - make_interval" in query
-    assert params == (HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, 24 * 3600.0)
-
-
-def test_halted_agents_count_db_error_is_fail_open(
-    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
-) -> None:
-
-    def _down(*_args: object, **_kwargs: object) -> object:
-        raise ConnectionError("db down")
-
-    patch_database(monkeypatch, connect=_down)
-
-    assert _provider_guard.halted_agents_count(24, database_factory=operator_database) is None
-
-
-def test_provider_guard_failures_report_balance_before_blocked(
-    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
-) -> None:
-
-    def _balance() -> str:
-        return "balance detail"
-
-    def _blocked(*, database_factory: DatabaseFactory) -> str:
-        return "blocked detail"
-
-    monkeypatch.setattr(_provider_guard, "balance_failure", _balance)
-    monkeypatch.setattr(_provider_guard, "blocked_agents_failure", _blocked)
-
-    assert _provider_guard.provider_guard_failures(database_factory=operator_database) == [
-        ("provider_balance", "FAIL: provider balance \u2014 balance detail"),
-        ("provider_blocked_agents", "FAIL: provider blocked agents \u2014 blocked detail"),
-    ]
-
-    def _fine() -> None:
-        return None
-
-    monkeypatch.setattr(_provider_guard, "balance_failure", _fine)
-    assert _provider_guard.provider_guard_failures(database_factory=operator_database) == [
-        ("provider_blocked_agents", "FAIL: provider blocked agents \u2014 blocked detail"),
-    ]
-
-
-def test_run_provider_guard_reports_the_failing_checks(
-    monkeypatch: pytest.MonkeyPatch, operator_database: Callable[[], Any]
-) -> None:
-    reported: list[tuple[str, str]] = []
-
-    def _failing(*, database_factory: DatabaseFactory) -> list[tuple[str, str]]:
-        return [
-            ("provider_balance", "FAIL: provider balance \u2014 low"),
-            ("provider_blocked_agents", "FAIL: provider blocked agents \u2014 halted"),
-        ]
-
-    monkeypatch.setattr(_provider_guard, "provider_guard_failures", _failing)
-    assert (
-        _provider_guard.run_provider_guard(
-            report=lambda c, m: reported.append((c, m)), database_factory=operator_database
-        )
-        == 2
+from cli.database.tests.command_inputs import command_runtime as command_runtime
+
+_BALANCE = ("GET", "/user/balance")
+_LOW = {"is_available": True, "balance_infos": [{"currency": "CNY", "total_balance": "12.50"}]}
+
+
+def _guard(**changes: Any) -> ProviderGuardConfig:
+    base = ProviderGuardConfig(
+        balance_enabled=True,
+        deepseek_api_key="sk-test",
+        balance_url="http://127.0.0.1:1/user/balance",
+        balance_timeout_s=2.0,
+        balance_min_cny=500.0,
+        blocked_agents_enabled=True,
+        blocked_agents_window_hours=24.0,
+        blocked_agents_min=1,
     )
-    assert reported == [
-        ("provider_balance", "FAIL: provider balance \u2014 low"),
-        ("provider_blocked_agents", "FAIL: provider blocked agents \u2014 halted"),
-    ]
+    return dataclasses.replace(base, **changes)
 
-    def _passing(*, database_factory: DatabaseFactory) -> list[tuple[str, str]]:
-        return []
 
-    monkeypatch.setattr(_provider_guard, "provider_guard_failures", _passing)
-    assert (
-        _provider_guard.run_provider_guard(
-            report=lambda c, m: reported.append((c, m)), database_factory=operator_database
-        )
-        == 0
+def _halt(conn: psycopg.Connection, *, streak: int, hours_ago: float) -> int:
+    agent_id = live_agent(conn)
+    conn.execute(
+        "UPDATE agents_meta SET permanent_reject_streak = %s, "
+        "last_turn_fatal_at = now() - make_interval(secs => %s) WHERE id = %s",
+        (streak, hours_ago * 3600.0, agent_id),
     )
-    assert len(reported) == 2
+    conn.commit()
+    return agent_id
+
+
+def test_the_balance_read_presents_the_key_and_returns_the_payload() -> None:
+    with serving({_BALANCE: Reply(body=_LOW)}) as provider:
+        reading = fetch_balance(f"{provider.url}/user/balance", "sk-test", 2.0)
+
+    assert reading == BalancePayload(_LOW)
+    (seen,) = provider.requests
+    assert seen.headers["authorization"] == "Bearer sk-test"
+    assert seen.headers["accept"] == "application/json"
+
+
+def test_an_http_failure_is_a_sanitized_read_error() -> None:
+    with serving({_BALANCE: Reply(status=500, body="<html>upstream error</html>")}) as provider:
+        reading = fetch_balance(f"{provider.url}/user/balance", "sk-test", 2.0)
+
+    assert reading == BalanceUnreadable("HTTP 500")
+
+
+@pytest.mark.parametrize(
+    ("reply", "reason"),
+    [
+        (Reply(body=[1, 2]), "response is not a JSON object"),
+        (Reply(body=None), "response is not a JSON object"),
+        (Reply(raw=b"<html>not json</html>"), "JSONDecodeError"),
+    ],
+)
+def test_an_answer_that_is_not_a_json_object_is_a_read_error_without_the_body(
+    reply: Reply, reason: str
+) -> None:
+    with serving({_BALANCE: reply}) as provider:
+        reading = fetch_balance(f"{provider.url}/user/balance", "sk-test", 2.0)
+
+    assert reading == BalanceUnreadable(reason)
+
+
+def test_an_unreachable_provider_is_a_read_error_naming_only_the_exception_class() -> None:
+    reading = fetch_balance(f"{closed_port_url()}/user/balance", "sk-secret-key", 2.0)
+
+    assert reading == BalanceUnreadable("ConnectError")
+
+
+def test_only_agents_halted_by_permanent_rejections_inside_the_window_are_counted(
+    db_conn: psycopg.Connection, operator_database: Callable[[], Database]
+) -> None:
+    # meiva:note
+    # `permanent_reject_streak >= HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS` is the recovery
+    # breaker's durable halt flag and `last_turn_fatal_at` bounds it to the active wave.
+    _halt(db_conn, streak=HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, hours_ago=1)
+    _halt(db_conn, streak=HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS + 3, hours_ago=23)
+    _halt(db_conn, streak=HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS - 1, hours_ago=1)
+    _halt(db_conn, streak=HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, hours_ago=30)
+    live_agent(db_conn)
+
+    assert halted_agents_count(24.0, database_factory=operator_database) == 2
+    assert halted_agents_count(48.0, database_factory=operator_database) == 3
+    assert halted_agents_count(0.5, database_factory=operator_database) == 0
+
+
+def test_a_database_that_cannot_be_queried_is_none_never_a_healthy_zero(
+    unreachable_database: Callable[[], Database],
+) -> None:
+    assert halted_agents_count(24.0, database_factory=unreachable_database) is None
+
+
+def test_the_checks_run_balance_first_and_both_report_independently(
+    db_conn: psycopg.Connection, operator_database: Callable[[], Database]
+) -> None:
+    # meiva:note
+    # Balance first (the root cause), blocked agents second; a low balance also reports the
+    # halted agents it caused.
+    _halt(db_conn, streak=2, hours_ago=1)
+    with serving({_BALANCE: Reply(body=_LOW)}) as provider:
+        guard = _guard(balance_url=f"{provider.url}/user/balance")
+        checks = provider_guard_checks(guard, database_factory=operator_database)
+
+    assert [check.check for check in checks] == [BALANCE_CHECK, BLOCKED_AGENTS_CHECK]
+    assert all(check.failure is not None for check in checks)
+
+
+def test_a_disabled_balance_check_reads_nothing_from_the_provider(
+    db_conn: psycopg.Connection, operator_database: Callable[[], Database]
+) -> None:
+    with serving({_BALANCE: Reply(body=_LOW)}) as provider:
+        guard = _guard(balance_enabled=False, balance_url=f"{provider.url}/user/balance")
+        checks = provider_guard_checks(guard, database_factory=operator_database)
+
+    assert [check.check for check in checks] == [BLOCKED_AGENTS_CHECK]
+    assert provider.requests == []
+
+
+def test_a_disabled_blocked_agents_check_is_not_judged_even_with_agents_halted(
+    db_conn: psycopg.Connection, operator_database: Callable[[], Database]
+) -> None:
+    _halt(db_conn, streak=2, hours_ago=1)
+    with serving({_BALANCE: Reply(body=_LOW)}) as provider:
+        guard = _guard(blocked_agents_enabled=False, balance_url=f"{provider.url}/user/balance")
+        checks = provider_guard_checks(guard, database_factory=operator_database)
+
+    assert [check.check for check in checks] == [BALANCE_CHECK]
+
+
+def test_a_host_without_a_key_skips_the_balance_without_dialing_the_provider(
+    db_conn: psycopg.Connection, operator_database: Callable[[], Database]
+) -> None:
+    with serving({_BALANCE: Reply(body=_LOW)}) as provider:
+        guard = _guard(deepseek_api_key=None, balance_url=f"{provider.url}/user/balance")
+        (balance, _blocked) = provider_guard_checks(guard, database_factory=operator_database)
+
+    assert balance.failure is None
+    assert balance.notes == (
+        "  (provider balance check skipped: DEEPSEEK_API_KEY not configured on this host)",
+    )
+    assert provider.requests == []
+
+
+def test_an_unreachable_agent_table_skips_the_blocked_check_and_keeps_the_balance_verdict(
+    unreachable_database: Callable[[], Database],
+) -> None:
+    with serving({_BALANCE: Reply(body=_LOW)}) as provider:
+        guard = _guard(balance_url=f"{provider.url}/user/balance")
+        balance, blocked = provider_guard_checks(guard, database_factory=unreachable_database)
+
+    assert balance.failure is not None
+    assert blocked.failure is None
+    assert blocked.notes == ("  (provider blocked-agents check skipped: agent table unreachable)",)
+
+
+def test_the_guard_is_configured_by_the_commands_own_configuration(
+    command_runtime: CommandRuntime,
+) -> None:
+    config = command_runtime.config
+    config.set_field("provider_guard_balance_min_cny", 123.0)
+    config.set_field("provider_guard_blocked_agents_min", 5)
+    config.set_field("deepseek_api_key", SecretStr(" sk-live "))
+
+    guard = provider_guard_config(config)
+
+    assert guard.balance_min_cny == 123.0 and guard.blocked_agents_min == 5
+    assert guard.deepseek_api_key == "sk-live"
+    assert guard.balance_enabled and guard.blocked_agents_enabled
+    assert "sk-live" not in repr(guard)
+
+
+@pytest.mark.parametrize("secret", [None, SecretStr(""), SecretStr("   ")])
+def test_an_unset_or_blank_key_is_no_key(
+    command_runtime: CommandRuntime, secret: SecretStr | None
+) -> None:
+    command_runtime.config.set_field("deepseek_api_key", secret)
+
+    assert provider_guard_config(command_runtime.config).deepseek_api_key is None

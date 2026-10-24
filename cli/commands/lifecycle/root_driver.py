@@ -4,8 +4,15 @@
 # What a root status means is decided by `root_control` (the typed snapshot, the reconcile,
 # poll and launch plans). This module reads the clock, the control socket and the processes,
 # prints, and executes what those plans return. Callers hand it the home as a value, and a
-# launch the values it reads from settings (`RootLaunchInputs`); nothing here reads the
-# environment or settings itself.
+# launch the values it reads from settings (`RootLaunchInputs`); nothing here reads settings.
+#
+# It is not free of the process environment yet. `managed_service_env` (base) builds the
+# environment of the launched root and of its keeper from the process environment, and is the one
+# ambient read this module triggers. Around it the start and stop shells still reach the
+# process-environment home through base owners that take no home: `start_serving`
+# (`begin_start`, `mark_serving`, `clear_serving`, `state_path`), `launch_failures.record` and
+# `status_journal`. The home those owners resolve and the home handed to this module agree only
+# because both come from the same process environment.
 
 from __future__ import annotations
 
@@ -40,6 +47,7 @@ from base.native_process.root_control.ipc import ResponsePayload
 from base.paths import root_manifests_path, root_run_dir
 from base.sessions.env_forwarding import managed_service_env
 from base.sessions.helperproc import HELPER_PROTOCOLS, helper_wire_ok
+from cli.commands.data_plane.instance.launch_delivery import LaunchDelivery
 from cli.commands.lifecycle.root_control.generation import launch_digest
 from cli.commands.lifecycle.root_control.launch_plan import (
     RootLaunch,
@@ -65,7 +73,12 @@ from cli.commands.lifecycle.root_control.reconcile_plan import (
     plan_resume,
     plan_tree_stop,
 )
-from cli.commands.lifecycle.root_control.snapshot import RootSnapshot, parse_snapshot, root_units
+from cli.commands.lifecycle.root_control.snapshot import (
+    RootSnapshot,
+    SnapshotError,
+    parse_snapshot,
+    root_units,
+)
 from cli.database.lifecycle_audit import record_lifecycle_request
 from cli.start_runtime import StartRuntime
 from services.supervision.roster import service_spec
@@ -104,7 +117,7 @@ class LaunchOutcome(NamedTuple):
     failed: tuple[str, ...]
 
 
-def service_extra_env(spec: ServiceSpec, *, remote_data_plane: bool) -> dict[str, str]:
+def service_extra_env(spec: ServiceSpec, *, delivery: LaunchDelivery) -> dict[str, str]:
     """Bind profile, database login and API token to one service, never its parent."""
     from base.telemetry.lgtm_local import BACKENDS, service_environment
     from cli.commands.data_plane.bringup import api_delivery, db_delivery, runner_db_url
@@ -114,13 +127,13 @@ def service_extra_env(spec: ServiceSpec, *, remote_data_plane: bool) -> dict[str
     if marker is not None:
         extra["MEIVA_PROCESS_PROFILE"] = marker
     cls = service_spec.db_access(spec)
-    delivery = db_delivery(cls, remote_data_plane=remote_data_plane) if cls is not None else {}
-    if delivery:
-        extra.update(delivery)
+    db_env = db_delivery(cls, delivery=delivery) if cls is not None else {}
+    if db_env:
+        extra.update(db_env)
     elif marker == "agent":
-        extra["MEIVA_DB_URL"] = runner_db_url()
+        extra["MEIVA_DB_URL"] = runner_db_url(delivery)
     if (api := service_spec.api_access(spec)) is not None:
-        extra.update(api_delivery(api, remote_data_plane=remote_data_plane))
+        extra.update(api_delivery(api, delivery=delivery))
     if spec.plugin_config is not None:
         from base.host.env.registry import SERVICE_PLUGIN_CONFIG_ENV
         from base.packages.plugins.config_registration import service_config_packet
@@ -160,6 +173,11 @@ def root_client(home: Path, *, timeout: float = 5.0) -> RootClient:
 
 # meiva:note
 # The daemon's validated status snapshot, or None when no root answers (yet).
+#
+# A root that answers with a snapshot the commands cannot read is not "no root": it is a
+# `RootDriverError`, so every shell that already reports a failed root call (a launch, a stop,
+# a restart) reports this one, and the shells that must run on a broken host (`meiva status`,
+# the readiness poll) catch it where they read the snapshot.
 def root_status(client: RootClient) -> RootSnapshot | None:
     try:
         response = client.status()
@@ -167,7 +185,10 @@ def root_status(client: RootClient) -> RootSnapshot | None:
         return None
     if not response["ok"]:
         return None
-    return parse_snapshot(response.get("result"))
+    try:
+        return parse_snapshot(response.get("result"))
+    except SnapshotError as exc:
+        raise RootDriverError(f"meiva-root answered with an unreadable status: {exc}") from exc
 
 
 def _call_ok(response: ResponsePayload, what: str) -> None:
@@ -212,7 +233,7 @@ def tree_manifest(
     repo: Path,
     *,
     roles: MachineRoles,
-    remote_data_plane: bool,
+    delivery: LaunchDelivery,
 ) -> dict[str, object]:
     """Prepare launch inputs without changing any running generation's seed."""
     from services.supervision.meiva_root_glue.manifests import build_manifest
@@ -221,9 +242,7 @@ def tree_manifest(
         capabilities=sorted(roles),
         repo_root=repo,
         specs=roster,
-        environments={
-            s.session: service_extra_env(s, remote_data_plane=remote_data_plane) for s in roster
-        },
+        environments={s.session: service_extra_env(s, delivery=delivery) for s in roster},
     )
 
 
@@ -237,7 +256,7 @@ def launch_manifest(
     env: Mapping[str, str],
     inputs: RootLaunchInputs,
 ) -> dict[str, object]:
-    manifest = tree_manifest(roster, repo, roles=roles, remote_data_plane=inputs.remote_data_plane)
+    manifest = tree_manifest(roster, repo, roles=roles, delivery=inputs.delivery)
     manifest["launch_digest"] = launch_digest(repo, env, home=inputs.home)
     return manifest
 
@@ -544,7 +563,6 @@ def launch_service_tree(
     inputs: RootLaunchInputs,
 ) -> LaunchOutcome:
     home = inputs.home
-    runtime.validate()
     env = managed_service_env(inputs.service_path, environ=inputs.environment)
     with start_trace.phase("launch manifest"):
         manifest = launch_manifest(roster, repo, roles=roles, env=env, inputs=inputs)

@@ -1,0 +1,12 @@
+exports = ["convergence.py", "identity.py", "ini.py", "stop_intent.py", "text.py"]
+
+[uses]
+"text.py" = ["convergence.py"]
+
+[purity]
+"__init__.py" = "strict"
+"convergence.py" = "strict"
+"identity.py" = "strict"
+"ini.py" = "strict"
+"stop_intent.py" = "strict"
+"text.py" = "strict"

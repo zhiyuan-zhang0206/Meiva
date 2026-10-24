@@ -17,10 +17,6 @@ from cli.commands.data_plane import host_dependencies as hd
 _PLATFORMS = {"linux": LINUX_X86, "darwin": DARWIN_ARM64}
 
 
-def _no_install(_repo: Path, _component: str) -> None:
-    return
-
-
 def main() -> int:
     try:
         platform = _PLATFORMS[sys.argv[2]]
@@ -31,14 +27,16 @@ def main() -> int:
         roles=frozenset({"agent-runner"}),
         services=frozenset({"gateway"}),
         data_plane=None,
-        host=host,
+        macos=platform.system == "darwin",
+        is_root=False,
         os_jobs=True,
         permissions_helper=False,
         require_github_pr=False,
         memory_keep_local=False,
         prod_install=True,
     )
-    return hd.ensure_host_dependencies(repo=Path(sys.argv[1]), scope=scope, install=_no_install)
+    probing = hd.Probing(host=host, data_plane=None, toolchain_path="")
+    return hd.ensure_host_dependencies(repo=Path(sys.argv[1]), scope=scope, probing=probing)
 
 
 if __name__ == "__main__":

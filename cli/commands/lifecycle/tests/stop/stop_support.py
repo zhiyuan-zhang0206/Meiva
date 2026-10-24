@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -78,9 +79,90 @@ def stop_runtime(command_runtime: CommandRuntime, home: Path) -> CommandRuntime:
     return replace(command_runtime, home=home, helper=None)
 
 
+REDIS_ADMIN_AUTH = "stop-test-redis-admin"
+
+
+# meiva:note
+# The directory `redis_bin_dir` names: the host's own redis tools, linked under their names.
+def redis_tools(directory: Path) -> Path:
+    directory.mkdir()
+    for tool in ("redis-server", "redis-cli"):
+        found = shutil.which(tool)
+        assert found is not None, "the suite's image installs the redis tools"
+        (directory / tool).symlink_to(found)
+    return directory
+
+
+# meiva:note
+# A real password-protected redis-server on a free port, as a cluster's own instance. With
+# `refuse_shutdown` its SHUTDOWN command is removed, so a stop's `redis-cli shutdown` is refused
+# and the instance keeps answering.
+@contextmanager
+def cluster_redis(directory: Path, *, refuse_shutdown: bool) -> Generator[int]:
+    from base.deploy.tests.containers import free_port, wait_port
+
+    directory.mkdir()
+    port = free_port()
+    argv = [
+        "redis-server",
+        "--port",
+        str(port),
+        "--bind",
+        "127.0.0.1",
+        "--save",
+        "",
+        "--appendonly",
+        "no",
+        "--dir",
+        str(directory),
+        "--requirepass",
+        REDIS_ADMIN_AUTH,
+    ]
+    if refuse_shutdown:
+        argv += ["--rename-command", "SHUTDOWN", ""]
+    process = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        wait_port(port)
+        yield port
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=5)
+
+
+# meiva:note
+# Whether the instance at `port` answers PING as its admin, asked over the wire protocol.
+def redis_answers(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=3) as conn:
+            conn.sendall(f"AUTH {REDIS_ADMIN_AUTH}\r\nPING\r\n".encode())
+            reply = b""
+            while b"+PONG" not in reply:
+                chunk = conn.recv(64)
+                if not chunk:
+                    return False
+                reply += chunk
+            return True
+    except OSError:
+        return False
+
+
+# meiva:note
+# Make this invocation a gateway host whose own data plane is the Redis at `port`.
+def gateway_with_redis(runtime: CommandRuntime, tools: Path, port: int) -> CommandRuntime:
+    runtime.machine.set(role="gateway")
+    config = runtime.config
+    config.set_field("db_url", "postgresql://test@127.0.0.1:12345/test")
+    config.set_field("redis_url", f"redis://127.0.0.1:{port}")
+    config.set_field("redis_admin_password", REDIS_ADMIN_AUTH)
+    config.set_field("redis_bin_dir", str(redis_tools(tools)))
+    return runtime
+
+
+# meiva:note
+# Own fixed-source private sessions until their test and native cleanup finish.
 @contextmanager
 def launched_processes(home: Path) -> Generator[Launcher, None, None]:
-    """Own fixed-source private sessions until their test and native cleanup finish."""
     processes: list[subprocess.Popen[str]] = []
 
     def create(
@@ -125,6 +207,7 @@ def launched_processes(home: Path) -> Generator[Launcher, None, None]:
         yield create
     finally:
         for proc in processes:
+            # meiva:note
             # Test fixture cleanup alone may kill the exact private process group it
             # created, after the assertions prove strict stop left it alive.
             kill_group_if_alive(proc)
@@ -158,10 +241,11 @@ def assert_group_drained(pgid: int, *, timeout_s: float = 5.0) -> None:
         time.sleep(0.02)
 
 
+# meiva:note
+# Wait for this new job's bare output marker; pin its native identities.
 def busy_session(
     home: Path, name: str, source: str, reaper: PtyReaper, *, ready_line: str = "job-ready"
 ) -> tuple[psutil.Process, list[psutil.Process]]:
-    """Wait for this new job's bare output marker; pin its native identities."""
     shell = jobs.create(name, home, source)
     reaper.track_session(name)
     output_until(name, ready_line)
@@ -171,13 +255,15 @@ def busy_session(
     return shell, running
 
 
+# meiva:note
+# The exact identity (pid and birth) of a process a test launched.
 def identity_of(process: subprocess.Popen[str] | subprocess.Popen[bytes]) -> OwnedProcess:
-    """The exact identity (pid and birth) of a process a test launched."""
     return OwnedProcess.capture(psutil.Process(process.pid))
 
 
+# meiva:note
+# A busy session the closure verified gone (its shell is a long-dead identity).
 def closed_session(name: str, left: tuple[tuple[int, str], ...] = ()) -> closure.ClosedSession:
-    """A busy session the closure verified gone (its shell is a long-dead identity)."""
     return closure.ClosedSession(name, OwnedProcess(2_000_000_000, 1.0, None), left)
 
 
@@ -242,7 +328,6 @@ def stop_environment(
         command=runtime,
         database_factory=database_factory,
         producer=producer,
-        retained_children=[],
         stdin=stdin,
     )
     if shell_cleanup_wait_s is None:
