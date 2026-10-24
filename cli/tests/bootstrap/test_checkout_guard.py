@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
+import sys
 from pathlib import Path
 
 import pytest
 
-from base.paths.home import home_checkout_error, resolve_meiva_home
-from cli import preflight
+from base.host.proc import run_bounded
+from base.paths.home import home_checkout_error
 from cli.fleet_update.plan.host_commands import HOME, MEIVA
 
 
@@ -16,11 +18,35 @@ def _home_with_source(tmp_path: Path) -> Path:
 
 
 # meiva:note
-# A home that carries its own source, named by `MEIVA_HOME` as the gate reads it.
-def _operated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    home = _home_with_source(tmp_path)
-    monkeypatch.setenv("MEIVA_HOME", str(home))
-    return home
+# The gate reads the child's own environment; the parent only supplies values at spawn.
+def _gate(
+    argv: list[str], repo: Path, *, user_home: Path, home: Path | None
+) -> tuple[int | None, str]:
+    env = {"HOME": str(user_home), "MEIVA_CONFIG_FETCH": "skip", "PATH": "/usr/bin:/bin"}
+    if home is not None:
+        env["MEIVA_HOME"] = str(home)
+    child = run_bounded(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-m",
+            "cli.tests.guards.checkout_guard_child",
+            str(repo),
+            *argv,
+        ],
+        cwd=user_home,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert child.returncode == 0, child.stderr
+    receipt = json.loads(child.stdout)
+    assert receipt["home"] == str(home if home is not None else user_home / ".meiva")
+    decision: int | None = receipt["decision"]
+    assert decision is None or type(decision) is int
+    return decision, child.stderr
 
 
 def test_a_home_without_source_accepts_any_checkout(tmp_path: Path) -> None:
@@ -49,14 +75,12 @@ def test_a_symlinked_spelling_of_the_same_checkout_is_the_same_checkout(tmp_path
     assert home_checkout_error(alias, home=home) is None
 
 
-def test_the_default_home_is_guarded_when_it_has_a_source(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("MEIVA_HOME", raising=False)
-    (tmp_path / ".meiva" / "source").mkdir(parents=True)
-    assert home_checkout_error(tmp_path / ".meiva" / "source", home=resolve_meiva_home()) is None
-    assert home_checkout_error(tmp_path / "Meiva", home=resolve_meiva_home()) is not None
+def test_the_default_home_is_guarded_when_it_has_a_source(tmp_path: Path) -> None:
+    home = _home_with_source(tmp_path)
+    assert _gate(["status"], home / "source", user_home=tmp_path, home=None) == (None, "")
+    decision, error = _gate(["status"], tmp_path / "Meiva", user_home=tmp_path, home=None)
+    assert decision == 1
+    assert str(home) in error
 
 
 @pytest.mark.parametrize(
@@ -87,45 +111,41 @@ def test_the_default_home_is_guarded_when_it_has_a_source(
     ],
 )
 def test_gate_refuses_every_command_from_a_foreign_checkout(
-    argv: list[str],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+    argv: list[str], tmp_path: Path
 ) -> None:
-    home = _operated_home(tmp_path, monkeypatch)
-    assert preflight.require_own_checkout(argv, tmp_path / "dev") == 1
-    err = capsys.readouterr().err
+    home = _home_with_source(tmp_path)
+    source = home / "source"
+    before = (home.stat().st_mtime_ns, source.stat().st_mtime_ns)
+    decision, err = _gate(argv, tmp_path / "dev", user_home=tmp_path, home=home)
+    assert decision == 1
     assert str(home / "source" / ".venv" / "bin" / "meiva") in err, "run the home's own CLI"
     assert "set MEIVA_HOME" in err, "or name a home of your own"
     assert sorted(path.name for path in home.iterdir()) == ["source"], "nothing may be written"
+    assert list(source.iterdir()) == []
+    assert (home.stat().st_mtime_ns, source.stat().st_mtime_ns) == before
 
 
-def test_gate_does_not_echo_the_argv(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _operated_home(tmp_path, monkeypatch)
+def test_gate_does_not_echo_the_argv(tmp_path: Path) -> None:
+    home = _home_with_source(tmp_path)
     argv = ["config", "set", "DEEPSEEK_API_KEY=sk-not-for-the-terminal"]
-    assert preflight.require_own_checkout(argv, tmp_path / "dev") == 1
-    assert "sk-not-for-the-terminal" not in capsys.readouterr().err
+    decision, error = _gate(argv, tmp_path / "dev", user_home=tmp_path, home=home)
+    assert decision == 1
+    assert "sk-not-for-the-terminal" not in error
 
 
 @pytest.mark.parametrize("argv", [[], ["--help"], ["-h"]])
-def test_gate_passes_bare_meiva_and_a_lone_help_flag(
-    argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _operated_home(tmp_path, monkeypatch)
-    assert preflight.require_own_checkout(argv, tmp_path / "dev") is None
+def test_gate_passes_bare_meiva_and_a_lone_help_flag(argv: list[str], tmp_path: Path) -> None:
+    home = _home_with_source(tmp_path)
+    assert _gate(argv, tmp_path / "dev", user_home=tmp_path, home=home) == (None, "")
 
 
 @pytest.mark.parametrize(
     "argv",
     [["status"], ["stop"], ["start", "--help"], ["config", "set", "A=B"], ["init"], ["start"]],
 )
-def test_gate_passes_everything_for_the_homes_own_checkout(
-    argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    home = _operated_home(tmp_path, monkeypatch)
-    assert preflight.require_own_checkout(argv, home / "source") is None
+def test_gate_passes_everything_for_the_homes_own_checkout(argv: list[str], tmp_path: Path) -> None:
+    home = _home_with_source(tmp_path)
+    assert _gate(argv, home / "source", user_home=tmp_path, home=home) == (None, "")
 
 
 @pytest.mark.parametrize(
@@ -133,10 +153,9 @@ def test_gate_passes_everything_for_the_homes_own_checkout(
     [["status"], ["stop"], ["start", "--help"], ["config", "set", "A=B"], ["init"], ["start"]],
 )
 def test_gate_passes_everything_for_a_home_without_a_source(
-    argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    argv: list[str], tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    assert preflight.require_own_checkout(argv, tmp_path / "dev") is None
+    assert _gate(argv, tmp_path / "dev", user_home=tmp_path, home=tmp_path) == (None, "")
 
 
 def test_the_fleet_updater_runs_the_homes_own_cli_on_every_host() -> None:
