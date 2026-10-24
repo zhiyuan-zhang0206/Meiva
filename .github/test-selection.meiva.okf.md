@@ -13,8 +13,8 @@ tags:
 
 The CI workflow selects an owner-rule backend test subset (direct importers
 plus the owning package's tests) for real pull requests. In `enforce` mode (the default) a SELECTED pull request runs that
-subset as its backend pytest gate; every other selector decision and every
-Trunk merge-tree branch keeps the full suite. In `shadow` mode no PR gates on
+subset as its backend pytest gate whenever its impact is computable; every other
+selector decision (impact unknown) and every Trunk merge-tree branch keeps the full suite. In `shadow` mode no PR gates on
 the subset: the full fan-out gates and the subset plus its comparison report
 run informational beside it. The workflow-level `TEST_SELECTION_MODE` value in
 [ci.yml](workflows/ci.yml) is the single revert switch.
@@ -46,5 +46,5 @@ run informational beside it. The workflow-level `TEST_SELECTION_MODE` value in
 ## Related policy
 
 [docs/conventions/engineering/test-selection.md](../docs/conventions/engineering/test-selection.md) owns the
-selection rules, path classes, static-map limits, duration guard, artifacts, maintenance, and
+selection rules, path classes, static-map limits, duration estimates, artifacts, maintenance, and
 the mode switch.

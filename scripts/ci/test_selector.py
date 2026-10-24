@@ -174,15 +174,6 @@ class Checkout:
     global_files: frozenset[str]  # root-conftest plugin modules and their package inits
 
 
-# meiva:note
-# A subset that would spend more than half of a suite bigger than the subset job's own
-# budget (20 minutes on four workers) is not a subset: on 2026-10-21 a 12,125-test
-# selection reached 89% of that job in 19 minutes. Nine tenths stays as the scale-free rule.
-# meiva:link scripts/ci/docs/duration-refresh.md
-_SUBSET_BUDGET_SHARE = 0.5
-_SUBSET_JOB_SECONDS = 20 * 60 * 4
-
-
 def selection_mode() -> str:
     """The mode CI is running: the ci.yml TEST_SELECTION_MODE value.
 
@@ -455,12 +446,12 @@ def _owner_tests(
     return selected
 
 
-def _too_close_to_full(estimate: float, full_estimate: float) -> bool:
-    if estimate > 0.8 * full_estimate:
-        return True
-    return full_estimate >= _SUBSET_JOB_SECONDS and estimate > _SUBSET_BUDGET_SHARE * full_estimate
-
-
+# meiva:note
+# Only an impact that cannot be computed returns FULL: a queue branch or non-PR event, a global
+# path, an unmapped path, or a deleted path without base facts. A large impact is still
+# SELECTED, because the Trunk merge queue runs the full suite before anything reaches main, so
+# no threshold on the subset's estimated time decides anything. The estimates are reporting.
+# meiva:link docs/conventions/engineering/test-selection.md
 def select_tests(
     changed_files: list[str],
     *,
@@ -491,40 +482,11 @@ def select_tests(
     candidates = _runtime_candidates(classes, checkout, base_ref, full_estimate)
     if isinstance(candidates, SelectionResult):
         return candidates
-    owned, tainted, source_count, diagnostics = candidates
+    candidate_tests, source_count, diagnostics = candidates
     # Tree-scan tests are unreachable through the owner rules; pin them so a
     # SELECTED run keeps the repo-wide gates (task #4183).
-    owned.update(tree_scan_tests(repo_root))
-    tests = tuple(sorted((owned | tainted) & checkout.collectable))
+    tests = tuple(sorted((candidate_tests | tree_scan_tests(repo_root)) & checkout.collectable))
     estimate = estimate_seconds(tests, durations, reference_paths=set(checkout.collectable))
-    no_basis = _no_basis_reason(tests, durations)
-    if no_basis is not None:
-        return _result(
-            "FULL",
-            no_basis,
-            full_estimate=full_estimate,
-            map_source_count=source_count,
-            diagnostics=diagnostics,
-        )
-    if _too_close_to_full(estimate, full_estimate):
-        owned_estimate = estimate_seconds(
-            tuple(sorted(owned & checkout.collectable)),
-            durations,
-            reference_paths=set(checkout.collectable),
-        )
-        # Name the cause: the changed paths' own consumers, or the tests that
-        # must run because their graph holds an input the analysis cannot bound.
-        reason = (
-            "incomplete-impact" if owned_estimate <= 0.8 * full_estimate else "subset-too-close"
-        )
-        return _result(
-            "FULL",
-            reason,
-            est_seconds=estimate,
-            full_estimate=full_estimate,
-            map_source_count=source_count,
-            diagnostics=diagnostics,
-        )
     return _result(
         "SELECTED",
         "owner-tests",
@@ -536,30 +498,17 @@ def select_tests(
     )
 
 
-def _no_basis_reason(tests: tuple[str, ...], durations: dict[str, float]) -> str | None:
-    """Why there is nothing to compare against the 80% guard, or None when there is.
-
-    No tests leaves nothing to run; no timings leave both sums of the guard at zero, which
-    any subset would pass, so a run without the timing cache keeps the full suite."""
-    if not tests:
-        return "no-tests"
-    if not durations:
-        return "no-durations"
-    return None
-
-
+# meiva:note
+# Unions both trees' runtime impact. A test whose dependency graph holds an input the analysis
+# cannot bound may read any changed path, so every subset includes it. The result is the candidate
+# tests (the changed paths' consumers plus those tests), the map size and the visible
+# diagnostics, or the FULL result for a deleted path without base facts.
 def _runtime_candidates(
     classes: dict[str, PathClass],
     checkout: Checkout,
     base_ref: str | None,
     full_estimate: float,
-) -> tuple[set[str], set[str], int, tuple[str, ...]] | SelectionResult:
-    """Union both trees' runtime impact; tests behind an unbounded input always run.
-
-    Returns the changed paths' consumers, the tests whose dependency graph holds
-    an input the analysis cannot bound (they may read any changed path, so every
-    subset includes them), the map size and the visible diagnostics.
-    """
+) -> tuple[set[str], int, tuple[str, ...]] | SelectionResult:
     impact = build_impact(checkout.repo_root, checkout.collectable)
     reverse_map = impact.tests_by_input
     data_changed = any(_is_data_change(path) for path in classes)
@@ -604,7 +553,7 @@ def _runtime_candidates(
                 )
             ),
         )
-    return selected, tainted, len(reverse_map), tuple(sorted(set(diagnostics)))
+    return selected | tainted, len(reverse_map), tuple(sorted(set(diagnostics)))
 
 
 def _is_data_change(path: str) -> bool:

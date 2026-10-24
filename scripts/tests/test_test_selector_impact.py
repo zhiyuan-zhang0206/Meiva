@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 from pathlib import Path
 
@@ -22,12 +21,6 @@ def _repo(root: Path) -> Path:
         root,
         "pyproject.toml",
         '[tool.pytest.ini_options]\ntestpaths = ["tests", "base/**/tests"]\n',
-    )
-    _write(root, "base/unrelated/tests/test_filler.py", "def test_filler(): pass\n")
-    _write(
-        root,
-        ".test_durations",
-        json.dumps({"base/unrelated/tests/test_filler.py::test_filler": 1000}),
     )
     return root
 
@@ -124,9 +117,13 @@ def test_global_plugins_and_local_conftests_are_real_runtime_dependencies(tmp_pa
     _write(root, "base/leaf.py")
     _write(root, "tests/plugin.py", "from base import leaf\n")
     _write(root, "conftest.py", 'pytest_plugins = ["tests.plugin"]\n')
+    _write(root, "base/other/tests/test_other.py", "def test_other(): pass\n")
     result = test_selector.select_tests(["base/leaf.py"], repo_root=root)
-    assert (result.decision, result.reason) == ("FULL", "subset-too-close")
-    assert result.est_seconds == result.full_est_seconds
+    # meiva:note
+    # Only the global plugin reaches this test, and it reaches every test: the impact is the
+    # whole suite, which is still a SELECTED subset (the merge queue is the full backstop).
+    assert (result.decision, result.reason) == ("SELECTED", "owner-tests")
+    assert result.tests == ("base/other/tests/test_other.py",)
     (root / "conftest.py").unlink()
     _write(root, "base/consumer/tests/conftest.py", "from base import leaf\n")
     _write(root, "base/consumer/tests/test_scope.py", "def test_scope(): pass\n")

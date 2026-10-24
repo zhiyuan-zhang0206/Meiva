@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 from pathlib import Path
 
@@ -29,12 +28,6 @@ def _repo(root: Path, source: str = _READER) -> Path:
     _write(root, "pyproject.toml", '[tool.pytest.ini_options]\ntestpaths = ["base/**/tests"]\n')
     _write(root, _TEST, source)
     _write(root, _DOC, "runtime input\n")
-    _write(root, "base/unrelated/tests/test_filler.py", "def test_filler(): pass\n")
-    _write(
-        root,
-        ".test_durations",
-        json.dumps({"base/unrelated/tests/test_filler.py::test_filler": 1000}),
-    )
     return root
 
 
