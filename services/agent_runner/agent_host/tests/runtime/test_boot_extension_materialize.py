@@ -14,6 +14,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.packages.extensions import registry as reg
 from base.telemetry.otlp.trace_config import TraceConfig
+from base.telemetry.otlp.trace_readiness import PROCESS_RECORDING, TraceReadiness
 
 _SKILL_MD = """---
 name: {name}
@@ -108,14 +109,17 @@ def test_process_scope_passes_its_machine_and_home_without_reading_identity(
         disk_watermark=0.9,
         endpoint_explicit=False,
     )
-    calls: list[tuple[MachineIdentity, Path, TraceConfig]] = []
+    calls: list[tuple[MachineIdentity, Path, TraceConfig, TraceReadiness]] = []
 
-    def initialize(*, machine: MachineIdentity, home: Path, config: TraceConfig) -> None:
-        calls.append((machine, home, config))
+    def initialize(
+        *, machine: MachineIdentity, home: Path, config: TraceConfig, readiness: TraceReadiness
+    ) -> None:
+        calls.append((machine, home, config, readiness))
 
     monkeypatch.setattr(tracing, "initialize_tracing", initialize)
     init_process_scope(machine=machine, home=unit_home, trace=trace)
-    assert calls == [(machine, unit_home, trace)]
+    assert calls == [(machine, unit_home, trace, PROCESS_RECORDING)]
+    assert calls[0][3] is PROCESS_RECORDING
 
 
 @pytest.mark.parametrize(

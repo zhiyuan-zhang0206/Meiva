@@ -1,5 +1,2 @@
-[debt.first-party-patch]
-"test_llm_usage.py#monkeypatch.setattr base.telemetry.tracing.is_initialized" = 2
-
-[debt.third-party-patch]
-"test_llm_usage.py#monkeypatch.setattr opentelemetry.trace.get_tracer" = 2
+[uses]
+"test_llm_usage.py" = ["billing_usage_child.py"]

@@ -1,7 +1,6 @@
 exports = ["capture"]
 
 [uses]
-"_lower_exit_child.py" = ["otlp", "test_tracing.py"]
 "otlp" = ["capture"]
 "test_audit_events_record.py" = ["capture"]
 "test_emitter_lifecycle.py" = ["_emitter_lifecycle_child.py"]
@@ -10,17 +9,15 @@ exports = ["capture"]
 "test_pipeline_sink_isolation.py" = ["capture", "otlp"]
 "test_telemetry.py" = ["otlp"]
 "test_telemetry_otlp_gate.py" = ["otlp"]
-"test_tracing.py" = ["otlp"]
-"test_tracing_lifecycle.py" = ["otlp", "test_tracing.py"]
-"tracing" = ["otlp", "test_tracing.py"]
+"test_tracing.py" = ["capture", "otlp"]
+"test_tracing_lifecycle.py" = ["capture", "otlp", "test_tracing.py"]
+"tracing" = ["capture", "otlp", "test_tracing.py"]
 
 [debt.env-patch]
 "test_tracing.py#monkeypatch.delitem os.environ.MEIVA_TELEMETRY_OTLP_ENDPOINT" = 2
 "test_tracing.py#monkeypatch.setenv os.environ.TRACELOOP_TRACE_CONTENT" = 1
-"test_tracing_lifecycle.py#monkeypatch.setenv os.environ.TRACELOOP_TRACE_CONTENT" = 1
 
 [debt.first-party-patch]
-"_lower_exit_child.py#assignment base.telemetry.tracing.arm_tracing" = 1
 "test_audit_events_record.py#monkeypatch.setattr base.telemetry.emit_prepared" = 3
 "test_audit_events_record.py#monkeypatch.setattr base.telemetry.event_id" = 1
 "test_emitter_lifecycle.py#monkeypatch.setattr base.telemetry.delivery.reporting.report_no_pipeline" = 1
@@ -43,14 +40,9 @@ exports = ["capture"]
 "test_tracing.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_endpoint" = 1
 "test_tracing.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.production_identity" = 3
 "test_tracing.py#monkeypatch.setattr base.telemetry.tracing.COLLECTOR_RETRY_INTERVAL_S" = 1
-"test_tracing.py#monkeypatch.setattr base.telemetry.tracing.INIT_RESOLVED_TIMEOUT_S" = 1
 "test_tracing.py#monkeypatch.setattr base.telemetry.tracing.cluster_label" = 1
 "test_tracing.py#monkeypatch.setattr base.telemetry.tracing.disk_usage" = 1
 "test_tracing.py#monkeypatch.setattr base.telemetry.tracing.endpoint_reachable" = 2
-"test_tracing_lifecycle.py#monkeypatch.setattr base.telemetry.otlp.trace_workers.report_no_pipeline" = 2
-"test_tracing_lifecycle.py#monkeypatch.setattr base.telemetry.tracing.INIT_RESOLVED_TIMEOUT_S" = 1
-"test_tracing_lifecycle.py#monkeypatch.setattr base.telemetry.tracing.arm_tracing" = 2
-"test_tracing_lifecycle.py#monkeypatch.setattr base.telemetry.tracing.state" = 1
 
 [debt.patch-raising-false]
 "test_tracing.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.production_identity" = 1
@@ -64,5 +56,4 @@ exports = ["capture"]
 
 [debt.third-party-patch]
 "test_tracing.py#monkeypatch.setattr httpx.post" = 1
-"test_tracing.py#monkeypatch.setattr traceloop.sdk.Traceloop.init" = 11
-"test_tracing_lifecycle.py#monkeypatch.setattr traceloop.sdk.Traceloop.init" = 1
+"test_tracing.py#monkeypatch.setattr traceloop.sdk.Traceloop.init" = 9
