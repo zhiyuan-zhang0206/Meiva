@@ -34,7 +34,6 @@ exports = ["derive.py", "jobs.py", "reader.py", "source.py"]
 "derive.py#base/agents/history/checkpoint.py" = 1
 "derive.py#base/agents/history/hierarchy/units.py" = 1
 "jobs.py#base/agents/history/checkpoint.py" = 1
-"jobs.py#base/agents/history/checkpoint_segment.py" = 1
 "jobs.py#base/db/__init__.py" = 1
 "jobs.py#base/db/transaction.py" = 1
 "nodes.py#base/agents/history/hierarchy/store.py" = 1

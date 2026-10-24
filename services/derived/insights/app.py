@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from functools import partial
 from pathlib import Path
@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from psycopg_pool import ConnectionPool
 
 from base.agents.history.checkpoint_segment import read_checkpoint_segment
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.clock import SYSTEM_TIMERS
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from services.derived.insights.config import InsightsConfig
@@ -28,11 +28,9 @@ def build_app(
     *,
     home: Path,
     catalog: ModelCatalog,
-    timeline_inputs: TimestampPolicy,
-    default_model_reader: Callable[[], str],
 ) -> FastAPI:
     jobs = IndexJobs(
-        partial(index_next, db, inputs=timeline_inputs, read_segment=read_checkpoint_segment)
+        partial(index_next, db, inputs=config.timeline_inputs, read_segment=read_checkpoint_segment)
     )
 
     @asynccontextmanager
@@ -47,16 +45,15 @@ def build_app(
     )
     app.state.db = db
     app.state.db_pool = pool
-    app.state.config = config
+    app.state.insights_config = config
     app.state.catalog = catalog
-    app.state.default_model_reader = default_model_reader
-    app.state.timeline_inputs = timeline_inputs
     app.state.run_timeline_reader = TimelineReader(
         db,
         pool,
-        inputs=timeline_inputs,
+        inputs=config.timeline_inputs,
         jobs=jobs,
         read_segment=read_checkpoint_segment,
+        timers=SYSTEM_TIMERS,
     )
     app.include_router(run_timeline_router.router)
 

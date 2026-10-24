@@ -20,6 +20,7 @@ from base.agents.history.hierarchy.units import (
 from base.agents.history.hierarchy.usage import MessageUsage
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
+from base.clock.tests.manual_timers import ManualTimers
 from base.config import settings
 from base.db import Database
 from services.derived.insights.run_timeline import router
@@ -138,7 +139,12 @@ def read(
             raise AssertionError("a window query must not read a checkpoint")
 
         reader = TimelineReader(
-            world.db, pool, inputs=_TIMELINE_INPUTS, jobs=jobs, read_segment=no_body
+            world.db,
+            pool,
+            inputs=_TIMELINE_INPUTS,
+            jobs=jobs,
+            read_segment=no_body,
+            timers=ManualTimers(),
         )
 
         def snapshot(_agent: int, _snapshot: str | None) -> Snapshot:

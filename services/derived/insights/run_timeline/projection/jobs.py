@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import Literal
 
 from base.agents.history.checkpoint import FullHistory
-from base.agents.history.checkpoint_segment import read_checkpoint_segment
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.db import Database
 from base.db.transaction import write_transaction
@@ -25,7 +24,7 @@ def index_next(
     agent_id: int,
     *,
     inputs: TimestampPolicy,
-    read_segment: Callable[[Database, int, str], FullHistory] = read_checkpoint_segment,
+    read_segment: Callable[[Database, int, str], FullHistory],
 ) -> bool:
     pool = db.pool(min_size=1, max_size=1)
     try:

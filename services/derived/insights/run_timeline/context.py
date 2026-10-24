@@ -11,6 +11,7 @@ from langchain_core.messages import AIMessage
 
 from base.agents.history.context_breakdown import request_breakdown
 from base.agents.history.context_response import context_breakdown_response
+from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.projection.reader import TimelineReader
 from services.derived.insights.run_timeline.schemas import RunTimelineContext
@@ -60,10 +61,9 @@ def get_run_timeline_context(
     local = idx - segment.offset
     history = view.history
     body_start = history.segment_starts[0]
-    breakdown_fn = getattr(
-        request.app.state, "context_breakdown_response", context_breakdown_response
-    )
-    breakdown = breakdown_fn(
+    config: InsightsConfig = request.app.state.insights_config
+    default_model = config.default_model
+    breakdown = context_breakdown_response(
         request.app.state.db_pool,
         agent_id,
         request_breakdown(
@@ -73,7 +73,7 @@ def get_run_timeline_context(
             local - body_start,
         ),
         catalog=request.app.state.catalog,
-        default_model_reader=request.app.state.default_model_reader,
+        default_model_reader=lambda: default_model,
     )
     return RunTimelineContext(
         **breakdown.model_dump(),

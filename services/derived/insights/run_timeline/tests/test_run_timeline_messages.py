@@ -67,8 +67,11 @@ def request(messages: list[BaseMessage]) -> Request:
     state = SimpleNamespace(
         db=cast(Database, object()),
         run_timeline_reader=Views(messages),
-        timeline_inputs=_TIMELINE_INPUTS,
-        config=InsightsConfig(run_timeline_message_text_max=20),
+        insights_config=InsightsConfig(
+            run_timeline_message_text_max=20,
+            default_model="claude-opus-5",
+            timeline_inputs=_TIMELINE_INPUTS,
+        ),
     )
     return cast(Request, SimpleNamespace(app=SimpleNamespace(state=state)))
 

@@ -23,6 +23,7 @@ from base.agents.history.hierarchy.serve import serve_nodes
 from base.agents.history.hierarchy.store import load_nodes
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from base.db import Database
 from services.derived.insights.run_timeline.projection.derive import segment_view
 from services.derived.insights.run_timeline.projection.jobs import IndexJobs, index_next
@@ -61,7 +62,7 @@ class World:
         self.db, self.url = database, url
         self.pool = database.pool(min_size=1, max_size=4)
         self.loads: list[str] = []
-        self.clock = 0.0
+        self.timers = ManualTimers()
         self.version = 0
         self.inputs = TimestampPolicy(
             clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
@@ -77,8 +78,18 @@ class World:
             inputs=self.inputs,
             jobs=self.jobs,
             read_segment=self.read_segment,
-            timer=lambda: self.clock,
+            timers=self.timers,
         )
+
+    # meiva:note
+    # The cache clock in seconds: tests move it forward by assigning a later reading.
+    @property
+    def clock(self) -> float:
+        return self.timers.monotonic()
+
+    @clock.setter
+    def clock(self, reading: float) -> None:
+        self.timers.advance(reading - self.timers.monotonic())
 
     def read_segment(self, db: Database, agent: int, checkpoint: str) -> FullHistory:
         self.loads.append(checkpoint)

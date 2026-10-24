@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items
+from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.projection.reader import TimelineReader
 from services.derived.insights.run_timeline.schemas import (
@@ -85,12 +86,12 @@ def get_run_timeline_messages(
     limit, full, snapshot = options
     if end < start:
         raise HTTPException(status_code=422, detail="end must not be before start")
-    state = request.app.state
-    reader: TimelineReader = state.run_timeline_reader
+    config: InsightsConfig = request.app.state.insights_config
+    reader: TimelineReader = request.app.state.run_timeline_reader
     cut = reader.get(agent_id, snapshot)
     if end >= cut.count:
         raise HTTPException(404, f"message {end} not found: history has {cut.count}")
-    text_max = state.config.run_timeline_message_text_max
+    text_max = config.run_timeline_message_text_max
     stop = min(end, start + limit - 1)
     out: list[RunTimelineMessage] = []
     for segment, view in reader.span(cut, start, stop):
@@ -98,7 +99,7 @@ def get_run_timeline_messages(
         local_stop = min(stop + 1, segment.message_end) - segment.offset
         items, _ = build_timeline_items(
             view.history.messages[local_start:local_stop],
-            inputs=state.timeline_inputs,
+            inputs=config.timeline_inputs,
         )
         by_message: dict[int, list[TimelineItem]] = {}
         for item in items:
