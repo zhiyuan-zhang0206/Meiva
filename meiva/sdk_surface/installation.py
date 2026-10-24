@@ -21,6 +21,7 @@ from typing import Any, Protocol, cast
 from pydantic import BaseModel
 
 from base.agents.sdk.call_policy import SamplingPolicyOwner
+from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
@@ -123,6 +124,7 @@ class Installation:
     authority: ConfigAuthority | None = None
     clock: Clock | None = None
     clients: EventPipelines | None = None
+    external_caller: CallerIdentity | None = None
 
     # meiva:note
     # An installation that holds no plugin surface: only the root values it is given.

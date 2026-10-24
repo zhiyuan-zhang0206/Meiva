@@ -20,6 +20,7 @@ from meiva.sdk_surface.pure.caller.identity_plan import (
 )
 from meiva.sdk_surface.pure.caller.usage_plan import actor_id_refusal, lease_refusal
 
+from .installation import installed
 from .validation import is_launched_child as is_launched_child
 
 
@@ -106,8 +107,6 @@ def require_actor(context: MeivaContext | None = None) -> str:
         RuntimeError: no actor or agent identity is available, or the borrowed
             lease no longer permits this identity.
     """
-    from base.agents.messages.external_caller import external_caller
-
     facts = ActorFacts(
         borrowed_agent_id=validate_external_identity(context),
         context_supplied=context is not None,
@@ -116,7 +115,8 @@ def require_actor(context: MeivaContext | None = None) -> str:
     early = actor_before_external(facts)
     if early is not None:
         return early
-    external = external_caller()
+    installation = installed()
+    external = None if installation is None else installation.external_caller
     decision = actor_after_external(facts, None if external is None else external.source())
     if decision.actor is not None:
         return decision.actor

@@ -32,7 +32,9 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from base.agents.context.identity import AgentIdentity
+from base.agents.messages.external_caller import external_caller
 from base.agents.sdk.call_policy import SamplingPolicyOwner
+from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
@@ -351,6 +353,7 @@ def ensure_plugins_loaded(
             machine=machine,
             context=context,
             clients=clients,
+            caller=external_caller(env=env),
             validate_state=validate_state,
         )
     except BaseException as exc:
@@ -399,7 +402,8 @@ def process_disable_entries() -> tuple[str, ...]:
 # entries applied before any plugin. `config`, `machine` and `clients` are the owners the
 # installation retains, `clock` is the root clock it serves timestamped operations with, `home`
 # the MEIVA_HOME its authority reads `.env` from and `catalog` the model facts it hands to
-# model consumers. `sampling` is the owner of SDK-call sampling the installation retains.
+# model consumers. `sampling` is the owner of SDK-call sampling the installation retains and
+# `caller` the external tool profile the process opted into, parsed once by the facade.
 @dataclass(frozen=True, slots=True)
 class LoadInputs:
     surface: bool
@@ -408,6 +412,7 @@ class LoadInputs:
     machine: MachineIdentity
     clients: ClientSet
     sampling: SamplingPolicyOwner
+    caller: CallerIdentity | None
     clock: Clock
     home: Path
     catalog: ModelCatalog
@@ -424,6 +429,7 @@ def _load_inputs(
     machine: MachineIdentity | None,
     context: MeivaContext | None,
     clients: ClientSet | None,
+    caller: CallerIdentity | None,
     validate_state: StateGate | None,
 ) -> LoadInputs:
     from base import paths
@@ -450,6 +456,7 @@ def _load_inputs(
         machine=machine,
         clients=clients,
         sampling=process_sampling_owner(),
+        caller=caller,
         clock=clock,
         home=paths.meiva_home(),
         catalog=catalog,
@@ -500,6 +507,7 @@ def load_surface(inputs: LoadInputs) -> None:
             clients=inputs.clients,
             sampling=inputs.sampling,
             clock=inputs.clock,
+            external_caller=inputs.caller,
             disabled_entries=inputs.disabled,
             validate_state=inputs.validate_state,
         )

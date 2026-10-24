@@ -206,15 +206,18 @@ def unestablished_identity() -> None:
 
 
 # meiva:note
-# The external tool profile precedes a local context's agent id, but not an explicit one.
+# The external tool profile precedes a local context's agent id, but not an explicit one. The
+# profile is read from the environment once, by the plugin load that builds the installation.
 def external_profile_actor() -> None:
     import json
 
     from base.agents.context import MeivaContext
     from base.agents.context.identity import AgentIdentity
+    from meiva import boot
     from meiva.sdk_surface import agent_identity, process_context
 
     process_context.bind_context(MeivaContext(identity=AgentIdentity(405, True)))
+    boot.ensure_plugins_loaded()
     print(
         json.dumps(
             {
@@ -225,6 +228,24 @@ def external_profile_actor() -> None:
             }
         )
     )
+
+
+# meiva:note
+# A profile the SDK cannot parse is a fault in who is calling: the plugin load that reads it
+# fails and leaves no installation, so no SDK call is ever admitted under a guessed identity.
+def unreadable_external_profile() -> None:
+    import json
+
+    from meiva import boot
+    from meiva.sdk_surface import installation
+
+    try:
+        boot.ensure_plugins_loaded()
+    except ValueError as exc:
+        print(json.dumps({"rejected": True, "installed": installation.installed() is not None}))
+        print(type(exc).__name__)
+    else:
+        print(json.dumps({"rejected": False, "installed": installation.installed() is not None}))
 
 
 SCENARIOS = {
@@ -238,6 +259,7 @@ SCENARIOS = {
     "launched_identity": launched_identity,
     "unestablished_identity": unestablished_identity,
     "external_profile_actor": external_profile_actor,
+    "unreadable_external_profile": unreadable_external_profile,
 }
 
 SCENARIOS[sys.argv[1]](*sys.argv[2:])  # pyright: ignore[reportCallIssue]

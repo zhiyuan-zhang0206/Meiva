@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import replace
 
+from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
@@ -46,6 +47,8 @@ from .installation import EventPipelines, SamplingPolicyOwner
 # The root names the ``sampling`` owner the installation retains and closes. A full load that
 # replaces an installation carries that installation's owner, clients and clock over unless the
 # caller names its own; a first load has nothing to carry, so it refuses to run without an owner.
+# ``external_caller`` is the opt-in external tool profile its root read from the process once;
+# none means the process declared no external caller.
 def load_extensions(
     *,
     surface: bool = False,
@@ -56,6 +59,7 @@ def load_extensions(
     sampling: SamplingPolicyOwner | None = None,
     clock: Clock | None = None,
     clients: EventPipelines | None = None,
+    external_caller: CallerIdentity | None = None,
     disabled_entries: Sequence[str] = (),
     validate_state: StateGate | None = None,
 ) -> LoadedExtensions:
@@ -81,6 +85,7 @@ def load_extensions(
         clients=clients,
         sampling=sampling,
         clock=clock,
+        external_caller=external_caller,
         disabled_entries=disabled_entries,
     )
     return replace(loaded, registry=admitted)

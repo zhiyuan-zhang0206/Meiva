@@ -53,6 +53,7 @@ from typing import assert_never
 from pydantic import BaseModel
 
 from base.agents.sdk.call_policy import SamplingPolicyOwner
+from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
@@ -288,6 +289,7 @@ def install(
     sampling: SamplingPolicyOwner,
     clock: Clock | None = None,
     clients: EventPipelines | None = None,
+    external_caller: CallerIdentity | None = None,
     disabled_entries: Sequence[str] = (),
 ) -> ExtensionRegistry:
     """Install `registry`'s SDK surface into `meiva`; return the registry of the plugins admitted.
@@ -362,6 +364,7 @@ def install(
         authority=authority,
         clock=clock,
         clients=clients,
+        external_caller=external_caller,
     )
     setattr(meiva_module(), SLOT, installation)
     return installation.registry

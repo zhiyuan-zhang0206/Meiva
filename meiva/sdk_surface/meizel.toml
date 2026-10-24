@@ -1,7 +1,7 @@
 exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discovery.py", "extensions.py", "help.py", "injection_check.py", "install.py", "installation.py", "metering.py", "plugins.py", "process_context.py", "pure", "sdk_disable.py", "settings.py", "skill_sources.py", "tests", "validation.py", "wraps.py"]
 
 [uses]
-"agent_identity.py" = ["install.py", "process_context.py", "pure", "validation.py"]
+"agent_identity.py" = ["install.py", "installation.py", "process_context.py", "pure", "validation.py"]
 "attachment_transport.py" = ["process_context.py", "pure", "settings.py", "validation.py"]
 "discovery.py" = ["pure"]
 "extensions.py" = ["install.py", "installation.py"]
@@ -39,7 +39,6 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 
 [debt.impure-edge]
 "agent_identity.py#base/agents/context/__init__.py" = 1
-"agent_identity.py#base/agents/messages/external_caller.py" = 1
 "attachment_transport.py#base/lm/registry.py" = 2
 "extensions.py#base/config/service_read.py" = 1
 "extensions.py#base/packages/plugins/load_report.py" = 2
@@ -54,7 +53,6 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "installation.py#base/agents/sdk/call_policy.py" = 1
 "installation.py#base/config/service_read.py" = 1
 "installation.py#base/packages/plugins/extensions.py" = 1
-"metering.py#base/agents/messages/external_caller.py" = 1
 "metering.py#base/agents/sdk/call_policy.py" = 1
 "metering.py#base/agents/sdk/telemetry.py" = 4
 "process_context.py#base/agents/context/__init__.py" = 1
