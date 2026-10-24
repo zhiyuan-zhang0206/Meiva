@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -20,24 +19,11 @@ def _repo(root: Path) -> Path:
         "pyproject.toml",
         '[tool.pytest.ini_options]\ntestpaths = ["tests", "base/**/tests"]\n',
     )
-    _write(root, "base/unrelated/tests/test_filler.py", "def test_filler(): pass\n")
     _write(root, "base/tests/test_own.py", "def test_own(): pass\n")
     _write(root, "base/leaf.py")
     _write(root, "base/data.json", "{}\n")
     _write(root, "tests/consumer/test_leaf.py", "from base import leaf\n")
     _write(root, "tests/consumer/test_helper.py", "from tests.support import helper\n")
-    _write(
-        root,
-        ".test_durations",
-        json.dumps(
-            {
-                "base/unrelated/tests/test_filler.py::test_filler": 1000,
-                "base/tests/test_own.py::test_own": 1,
-                "tests/consumer/test_leaf.py::test_x": 1,
-                "tests/consumer/test_helper.py::test_x": 1,
-            }
-        ),
-    )
     return root
 
 
@@ -172,10 +158,6 @@ def test_known_readers_of_skills_and_okf_documents_are_pinned(
         "tests/consumer/test_mentions_only.py",
         f'"""Mentions {needle} in prose only."""\n',
     )
-    durations = json.loads((root / ".test_durations").read_text())
-    durations[f"{reader}::test_x"] = 1
-    durations["tests/consumer/test_mentions_only.py::test_x"] = 1
-    _write(root, ".test_durations", json.dumps(durations))
 
     result = _select(root, "base/leaf.py", changed)
     unrelated = _select(root, "base/leaf.py", "base/NOTES.md")

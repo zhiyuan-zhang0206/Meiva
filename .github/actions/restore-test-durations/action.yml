@@ -1,6 +1,6 @@
 name: Restore the test durations
 description: >
-  Restores `.test_durations` (pytest-split timings and the selector's duration guard) from the
+  Restores `.test_durations` (pytest-split timings and the selector's time estimates) from the
   exact cache key the run resolved once in `classify`. An empty key means the run has none and
   carries on without; a key that no longer restores fails the job, because shards that split
   with different timings than their siblings would drop or duplicate tests.

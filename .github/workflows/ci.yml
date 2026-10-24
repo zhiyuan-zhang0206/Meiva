@@ -10,7 +10,8 @@
 # .github/workflows/refresh-test-durations.yml) measures isolated shards and
 # saves the merged timings as an Actions cache, `classify` resolves the newest
 # one once per run, and every shard restores that exact key. A run with no cache
-# degrades with a warning: shards split by test count and the selector keeps FULL.
+# degrades with a warning: shards split by test count and the selector's time estimates
+# are zero (they only report; the selection is the same).
 # There is no self-hosted fleet and no runner provisioner: a hosted runner
 # starts bare, so each job installs its own toolchain inline — uv, Node 22,
 # Postgres 17 + Redis server binaries on PATH (the suite self-provisions
@@ -34,11 +35,14 @@
 # Flaky-marked backend tests run in their own serial job; the parallel shards
 # exclude them with `-m "not flaky"`, mirroring the frontend flaky isolation.
 #
-# TEST SELECTION (TEST_SELECTION_MODE, default enforce): when the runtime-impact
-# selector returns SELECTED for a real PR, backend-selected runs that
-# subset as the backend pytest gate and backend-shard (the 8-way fan-out) is
+# TEST SELECTION (TEST_SELECTION_MODE, default enforce): a real PR runs the selected
+# subset whenever its impact is computable; the Trunk merge queue runs the full suite and
+# is the backstop. When the runtime-impact selector returns SELECTED, backend-selected
+# runs that subset as the backend pytest gate and backend-shard (the 8-way fan-out) is
 # skipped. Every other decision — FULL, SKIP, selector failure — keeps the
-# full fan-out, and Trunk merge-tree branches (trunk-merge/*, trunk-temp/*)
+# full fan-out. FULL means the impact is unknown (a global, unmapped or deleted-path
+# change), never that the subset is large: no size or time threshold decides anything.
+# Trunk merge-tree branches (trunk-merge/*, trunk-temp/*)
 # always choose FULL by the selector's first rule, so branch protection, the
 # coverage gate, and batched-tree safety are untouched by enforcement. In
 # shadow mode nothing gates on the subset: the fan-out gates and the subset
@@ -86,7 +90,9 @@ env:
   # enforcement decision (2026-09-11). enforce (default): a real PR whose
   # selector decision is SELECTED runs its selected backend subset as the
   # backend pytest gate, and the 8-shard fan-out is skipped; every other
-  # decision and every Trunk merge-tree branch keeps the full suite. shadow:
+  # decision and every Trunk merge-tree branch keeps the full suite (FULL means
+  # the impact is unknown or the run is a queue branch, never that the subset is
+  # large: the merge queue is the full-suite backstop). shadow:
   # no PR gates on the subset — the full fan-out gates and the subset plus its
   # comparison report run informational beside it. Set back to "shadow" to
   # restore that behavior; all routing below derives from this one value.
@@ -153,8 +159,8 @@ jobs:
           fetch-depth: 0
 
       # The run's test timings, resolved once here so every shard splits with the same ones.
-      # Without a cache the run goes on (the selector keeps FULL, the shards split by test
-      # count) and a warning says so.
+      # Without a cache the run goes on (the selector's estimates are zero, the shards split
+      # by test count) and a warning says so.
       - name: Resolve the test durations
         id: durations
         uses: ./.github/actions/resolve-test-durations
