@@ -5,4 +5,5 @@
     "test_shell_background.py",
     "test_shell_scan.py",
     "test_shell_ttl.py",
+    "test_validation_shell.py",
 ]

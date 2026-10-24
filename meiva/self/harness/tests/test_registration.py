@@ -7,16 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from meiva.self.harness import HANDLE_ENV
-from meiva.self.harness import attach as meiva_attach
-from meiva.self.harness.attachment import descends_from, open_attachment
 from meiva.self.harness.registration import (
-    FileRegistrationStore,
     HarnessRegistration,
     RegistrationError,
+    decode_registration,
     handle_digest,
-    new_handle,
 )
+from meiva.self.harness.store import FileRegistrationStore, new_handle
 
 
 def registration(handle: str) -> HarnessRegistration:
@@ -57,32 +54,26 @@ def test_a_registration_records_the_digest_not_the_handle(tmp_path: Path) -> Non
 
 
 def test_expiry_is_read_from_an_iso_timestamp() -> None:
-    past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat(timespec="seconds")
-    future = (datetime.now(UTC) + timedelta(minutes=1)).isoformat(timespec="seconds")
+    now = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
+    past = (now - timedelta(minutes=1)).isoformat(timespec="seconds")
+    future = (now + timedelta(minutes=1)).isoformat(timespec="seconds")
     base = registration(new_handle())
-    assert dataclasses.replace(base, expires_at=past).expired() is True
-    assert dataclasses.replace(base, expires_at=future).expired() is False
-    assert dataclasses.replace(base, expires_at=None).expired() is False
+    assert dataclasses.replace(base, expires_at=past).expired(now) is True
+    assert dataclasses.replace(base, expires_at=future).expired(now) is False
+    assert dataclasses.replace(base, expires_at=None).expired(now) is False
 
 
-def test_a_process_descends_from_itself() -> None:
-    assert descends_from(os.getpid()) is True
+def test_a_naive_expiry_is_read_as_utc() -> None:
+    now = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
+    naive = dataclasses.replace(registration(new_handle()), expires_at="2026-10-19T11:59:00")
+    assert naive.expired(now) is True
 
 
-def test_an_unknown_pid_is_not_an_ancestor() -> None:
-    assert descends_from(2**22 + 7) is False
-    assert descends_from(0) is False
-
-
-def test_attach_without_a_handle_says_how_to_get_one() -> None:
-    if HANDLE_ENV in os.environ:
-        pytest.skip("this session exports a harness handle of its own")
-    with pytest.raises(RegistrationError) as caught:
-        meiva_attach()
-    assert "MEIVA_HARNESS_HANDLE" in str(caught.value)
-
-
-def test_attach_with_an_unknown_handle_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(RegistrationError) as caught:
-        open_attachment(new_handle(), store=FileRegistrationStore(tmp_path))
-    assert "matches this handle" in str(caught.value)
+def test_a_document_with_unknown_or_missing_fields_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "41.json"
+    document = dataclasses.asdict(registration(new_handle()))
+    with pytest.raises(RegistrationError, match=r"unknown fields \['surprise'\]"):
+        decode_registration({**document, "surprise": 1}, path)
+    document.pop("machine")
+    with pytest.raises(RegistrationError, match=r"misses \['machine'\]"):
+        decode_registration(document, path)

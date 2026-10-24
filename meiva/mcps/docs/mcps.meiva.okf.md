@@ -19,7 +19,7 @@ registers one or more tools that agents call through `meiva.mcps.<server>.<tool>
 MCP servers run as child processes managed by the shared per-machine MCP
 daemon (`meiva/mcps/_daemon.py`, ops roster session "mcp-daemon"). Tool
 discovery is **lazy, not at startup**: config reloads on every call
-(`_load_config`), and tool lists load on first access (daemon → 24h disk
+(`meiva/mcps/config.py:load_mcp_config`), and tool lists load on first access (daemon → 24h disk
 cache for metadata only) — `servers()` and `meiva.help(meiva.mcps)` prioritize the cache so
 they trigger no connections; the daemon does not prefetch at boot.
 
@@ -36,15 +36,9 @@ at all, replacing the ~63MB per-agent wrapper. `"shared": true` (x) keeps one da
 
 **Context ownership**: the SDK stores one daemon socket client on the bound `MeivaContext` (`meiva/mcps/_clients.py:McpClients`). Closing the context closes that client. No portal, local MCP session or SDK-owned server subprocess is created.
 
-`meiva.boot.process_clients` supplies a narrow timeout
-reader through `ClientSet`'s factory configuration. `McpClients` is still built
-on first use without reading that configuration or starting a transport. Closing the set clears its clients; a later use rebuilds them
-with the same reader. The daemon supplies its own reader to each connection scope.
+`meiva.boot.process_clients` supplies `McpClients` with a narrow timeout reader through `ClientSet`'s factory configuration. `McpClients` is built on first use without reading that configuration or starting a transport; closing the set clears its clients, and a later use rebuilds them with the same reader.
 
-The SDK supplies `mcp_connect_timeout_seconds` to the daemon client on each
-request. The cached client owns its socket, not a settings snapshot: dial and
-response waiting use that request's explicit timeout budget, and a later request
-reads the current configuration again.
+**Structure**: the facade/implementation split of the SDK side and the values-and-shells split of the daemon are in [[meiva/mcps/docs/structure.meiva.okf.md|MCP Facade and Daemon Structure]].
 
 ## See Also
 - [[meiva/skills/docs/skills.meiva.okf.md|Skill System]] — skills vs MCP servers

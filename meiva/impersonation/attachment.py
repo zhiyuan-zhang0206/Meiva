@@ -4,73 +4,68 @@
 # the durable event participant the takeover manifest owns. The kernel
 # (`base.agents.context.external_attachment`) owns the sequence and the failure handling,
 # so a second borrowed identity cannot drift from this one's ordering.
+#
+# `attach` is the facade: it reads the process once (the ambient context, the host and exec-turn
+# facts) and hands `Attachment` explicit inputs. `Attachment` is the shell the kernel drives; the
+# decisions it takes (which lease a call names, whether the lease still fits this machine and
+# version, what the native checkpoint already applied, whether a receipt opens) are the strict
+# functions of `admission.py`, called with the values the shell read.
 # meiva:link meiva/impersonation/docs/attachment-contracts.meiva.okf.md
 
 from __future__ import annotations
 
 import dataclasses
 from collections.abc import Mapping
-from typing import Any, Self, cast
+from dataclasses import dataclass
+from typing import Any, cast
+from uuid import uuid4
 
 from base.agents import impersonation as control
 from base.agents.context import MeivaContext
 from base.agents.context.clients import DatabaseFactory
 from base.agents.context.external_attachment import ExternalAttachment
 from base.agents.context.identity import AgentIdentity, ExternalLease
-from base.clock.configuration import clock_config_from_boot
-from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.config.agent_pins import resolve_agent_config_pins
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.db.config import db_config_from_boot
+from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import PluginConfigView
-from base.native_process.code_version import CodeVersion
 from base.native_process.ownership import process_metadata
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from meiva.boot import (
-    boot_external_process,
+    ExternalBoot,
+    borrow_external_process,
     initialize_context,
+    own_external_process,
     plugin_state_codec,
-    process_clients,
+)
+from meiva.impersonation.admission import (
+    LeaseTarget,
+    applied_version,
+    lease_target,
+    participant_source_key,
+    require_held_version,
 )
 from meiva.sdk_surface import process_context
+from meiva.sdk_surface.installation import config_authority, installed
+from meiva.sdk_surface.pure.caller.attachability import (
+    BoundIdentity,
+    ProcessFacts,
+    refuse_unless_attachable,
+)
 
-__all__ = ["Attachment", "attach"]
-
-
-def _refuse_unless_attachable() -> MeivaContext | None:
-    if process_context.is_host_process():
-        raise RuntimeError("a native agent runtime cannot attach an external controller")
-    bound = process_context.ambient_context()
-    identity = None if bound is None else bound.identity
-    if identity is not None and identity.lease is not None:
-        raise RuntimeError("this process already has an external attachment")
-    if identity is not None and identity.agent_id is not None and identity.owns_loop:
-        raise RuntimeError("a native agent runtime cannot attach an external controller")
-    return bound
+__all__ = ["AttachInputs", "Attachment", "attach"]
 
 
-def _attachment_database(
-    bound: MeivaContext | None, *, config: ConfigBoot | None, machine: MachineIdentity
-) -> DatabaseFactory:
-    if bound is not None:
-        return bound.clients.database
-    if config is None:
-        raise RuntimeError("an independent attachment needs its configuration owner")
-    version = CodeVersion(process_context.loaded_code_image())
-    gate = ProcessDbGate(version=version.get, process="unknown")
-    return lambda: Database(
-        db_config_from_boot(config),
-        gate=gate,
-        direct_url=ClusterDirectUrl(machine.host),
-    )
-
-
-def _agent_codec() -> Any:
-    return plugin_state_codec()
+# meiva:note
+# Everything one attachment needs from the process, resolved by `attach`: the lease it names, the
+# context it borrows (None for an independent attachment) and the boot of the process around it,
+# which holds the clients, clock and configuration an independent attachment owns.
+@dataclass(frozen=True, slots=True)
+class AttachInputs:
+    target: LeaseTarget
+    bound: MeivaContext | None
+    boot: ExternalBoot
 
 
 class _Codec:
@@ -78,22 +73,22 @@ class _Codec:
         self._attachment = attachment
 
     def load_snapshot(self, agent_id: int) -> Any:
-        return _agent_codec().load_snapshot(agent_id, database=self._attachment._database())
+        return plugin_state_codec().load_snapshot(agent_id, database=self._attachment._database())
 
     def plugin_state_schema(self, state: Any) -> Any:
         del state
-        return _agent_codec().plugin_state_schema
+        return plugin_state_codec().plugin_state_schema
 
     def encode_plugin_delta(
         self, update: Mapping[str, Any], state_cls: type[Any]
     ) -> dict[str, str]:
-        return cast("dict[str, str]", _agent_codec().encode_plugin_delta(update, state_cls))
+        return cast("dict[str, str]", plugin_state_codec().encode_plugin_delta(update, state_cls))
 
     def decode_plugin_delta(self, encoded: dict[str, str], state_cls: type[Any]) -> Any:
-        return _agent_codec().decode_plugin_delta(encoded, state_cls)
+        return plugin_state_codec().decode_plugin_delta(encoded, state_cls)
 
     def apply_plugin_delta(self, state: Any, delta: Any) -> None:
-        _agent_codec().apply_plugin_delta(state, delta)
+        plugin_state_codec().apply_plugin_delta(state, delta)
 
 
 class _LeaseIdentity:
@@ -129,50 +124,31 @@ class _LeaseIdentity:
 
 
 class Attachment(ExternalAttachment):
-    def __init__(
-        self, lease_id: str, *, agent_id: int | None = None, session_id: int | None = None
-    ) -> None:
-        if session_id is not None and agent_id is None:
-            raise ValueError("an integer session requires an agent_id")
-        bound = _refuse_unless_attachable()
-        self.lease_id = lease_id
-        self._lease_agent_id = agent_id
-        self._lease_session_id = session_id
+    def __init__(self, inputs: AttachInputs) -> None:
+        self._target = inputs.target
+        self.lease_id = inputs.target.lease_id
         self.config: tuple[Mapping[str, Any], PluginConfigView] | None = None
-        self._machine: MachineIdentity
-        self._database: DatabaseFactory
-        self._clock_factory: Any = None
-        self._event_seal_wait_reader: Any = None
+        self._seal_authority: ConfigAuthority | None = None
         self.agent_id: int = 0
         self.session_id: int = 0
         self._version: int = 0
-        if process_context.in_exec_turn():
-            raise RuntimeError("an exec turn cannot attach an external controller")
         super().__init__(identity=_LeaseIdentity(self), codec=_Codec(self))
-        self.open(bound)
+        self._boot: ExternalBoot = inputs.boot
+        self._machine: MachineIdentity = self._boot.machine
+        self._database: DatabaseFactory = self._boot.database
+        self._own_clients = self._boot.clients
+        self.open(inputs.bound)
 
     def _prepare(self) -> None:
-        bound = self._prior_context
-        boot = boot_external_process(
-            bound,
-            config_factory=ConfigBoot,
-            build_clients=process_clients,
-            machine_reader=machine_from_boot,
-            clock_builder=clock_config_from_boot,
-        )
-        config = boot.config
-        self._boot_config = config
-        self._clock_factory = boot.clock_factory
-        self._machine = boot.machine
-        self._database = boot.database
-        self._own_clients = boot.clients
-        if self._lease_session_id is not None:
+        boot = self._boot
+        target = self._target
+        if target.session_id is not None:
             from base.agents.impersonation.sessions import private_id
 
             self.lease_id = private_id(
                 self._database(),
-                cast(int, self._lease_agent_id),
-                self._lease_session_id,
+                cast(int, target.agent_id),
+                target.session_id,
                 local_machine=self._machine.name(),
             )
         lease = self._lease()
@@ -183,32 +159,24 @@ class Attachment(ExternalAttachment):
         initialize_context(
             process_context.current_context(),
             surface=False,
-            config=config,
-            clock_factory=self._clock_factory,
-            validate_state=_agent_codec().plugin_state_schema,
+            config=boot.config,
+            clients=boot.clients,
+            validate_state=plugin_state_codec().plugin_state_schema,
         )
-        if config is None:
-            from meiva.sdk_surface.settings import config_authority
-
-            authority = config_authority()
-            self._event_seal_wait_reader = lambda: cast(
-                float, authority.service_field_value("impersonation_event_seal_wait_seconds")
-            )
-        else:
-            self._event_seal_wait_reader = lambda: (
-                config.view.general.impersonation_event_seal_wait_seconds
-            )
+        self._seal_authority = config_authority() if boot.config is None else None
 
     def _applied_version(self, state: Any, lease: Mapping[str, Any]) -> int:
         receipt = state.impersonation_applied
-        checkpoint_version = receipt["version"] if receipt.get("lease_id") == self.lease_id else 0
-        return max(lease["applied_version"], checkpoint_version)
+        return applied_version(
+            lease["applied_version"],
+            receipt.get("lease_id"),
+            receipt.get("version", 0),
+            self.lease_id,
+        )
 
     def _resolve_config(
         self, overlay: Mapping[str, Any] | None, birth: Mapping[str, Any] | None
     ) -> None:
-        from meiva.sdk_surface.installation import installed
-
         installation = installed()
         if installation is None:
             raise RuntimeError("the SDK surface was not installed for the attachment")
@@ -249,10 +217,11 @@ class Attachment(ExternalAttachment):
         self._bound = True
 
     def _new_context(self) -> MeivaContext:
-        if self._own_clients is None:
+        clock = self._boot.clock
+        if self._own_clients is None or clock is None:
             raise RuntimeError("an unbound attachment has no owned clients")
         return MeivaContext(
-            clients=self._own_clients, clock_factory=self._clock_factory, machine=self._machine
+            clients=self._own_clients, clock_factory=lambda: clock, machine=self._machine
         )
 
     def capture_local_event(self, event: Any) -> Any:
@@ -261,21 +230,14 @@ class Attachment(ExternalAttachment):
         return capture_local_event(event, gate=self._event_gate)
 
     def _lease(self) -> dict[str, Any]:
-        lease = control.require_active(
+        return control.require_active(
             self._database(), self.lease_id, local_machine=self._machine.name()
         )
-        if lease["machine"] != self._machine.name():
-            raise RuntimeError(f"external SDK must run on agent machine {lease['machine']!r}")
-        return lease
 
     def _validate(self) -> int:
         if self._closed:
             raise RuntimeError("external attachment is closed")
-        lease = self._lease()
-        if lease["delta_version"] != self._version:
-            raise RuntimeError(
-                "another attachment changed plugin state; attach again before acting"
-            )
+        require_held_version(self._lease()["delta_version"], self._version)
         return self.agent_id
 
     def _telemetry_clients(self) -> Any:
@@ -284,18 +246,20 @@ class Attachment(ExternalAttachment):
         return self._own_clients
 
     def _open_event_participant(self) -> None:
-        from uuid import uuid4
-
         from base.agents.impersonation.manifest import (
             LocalCaptureGate,
             LocalParticipant,
-            is_log_native,
             open_local_participant,
         )
+        from base.agents.impersonation.status import is_log_native
 
-        if not is_log_native(self._lease()):
+        source_key = participant_source_key(
+            log_native=is_log_native(self._lease()),
+            pid=process_metadata()["pid"],
+            suffix=uuid4().hex,
+        )
+        if source_key is None:
             return
-        source_key = f"attachment:{process_metadata()['pid']}:{uuid4().hex}"
         db = self._database()
         if open_local_participant(db, self.lease_id, agent_id=self.agent_id, source_key=source_key):
             participant = LocalParticipant(
@@ -307,6 +271,17 @@ class Attachment(ExternalAttachment):
             )
             self._event_gate = LocalCaptureGate(participant)
 
+    def _seal_wait_seconds(self) -> float:
+        config = self._boot.config
+        if config is not None:
+            return config.view.general.impersonation_event_seal_wait_seconds
+        if self._seal_authority is None:
+            raise RuntimeError("the attachment holds no configuration owner for its seal wait")
+        return cast(
+            float,
+            self._seal_authority.service_field_value("impersonation_event_seal_wait_seconds"),
+        )
+
     def _seal_event_participant(self) -> None:
         if self._event_gate is None:
             return
@@ -316,8 +291,7 @@ class Attachment(ExternalAttachment):
         )
 
         drained = close_local_participant_admission(
-            self._event_gate,
-            timeout=self._event_seal_wait_reader(),
+            self._event_gate, timeout=self._seal_wait_seconds()
         )
         if drained:
             seal_local_participant(self._event_gate)
@@ -343,13 +317,35 @@ class Attachment(ExternalAttachment):
     def _unbind_exec_turn(self) -> None:
         process_context.unbind_exec_turn()
 
-    def __enter__(self) -> Self:
-        return super().__enter__()
+
+def _bound_identity(bound: MeivaContext | None) -> BoundIdentity | None:
+    identity = None if bound is None else bound.identity
+    if identity is None:
+        return None
+    return BoundIdentity(
+        has_lease=identity.lease is not None,
+        agent_id=identity.agent_id,
+        owns_loop=identity.owns_loop,
+    )
 
 
 def attach(session_id: int | str, *, agent_id: int | None = None) -> Attachment:
-    if isinstance(session_id, int) and not isinstance(session_id, bool) and agent_id is not None:
-        return Attachment("", agent_id=agent_id, session_id=session_id)
-    if isinstance(session_id, str) and agent_id is None:
-        return Attachment(session_id)
-    raise ValueError("attach requires an agent_id and an integer session_id")
+    target = lease_target(session_id, agent_id)
+    bound = process_context.ambient_context()
+    refuse_unless_attachable(
+        ProcessFacts(
+            is_host=process_context.is_host_process(),
+            in_exec_turn=process_context.in_exec_turn(),
+            bound=_bound_identity(bound),
+        ),
+        subject="an external controller",
+    )
+    boot = (
+        borrow_external_process(bound) if bound is not None else own_external_process(ConfigBoot())
+    )
+    try:
+        return Attachment(AttachInputs(target, bound, boot))
+    except BaseException:
+        if boot.clients is not None:
+            boot.clients.close()
+        raise

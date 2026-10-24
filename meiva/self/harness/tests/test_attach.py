@@ -1,75 +1,74 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
+from collections.abc import Iterator
 from datetime import UTC, datetime
-from types import SimpleNamespace
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from base.agents.context import MeivaContext
+from base.agents.context.identity import AgentIdentity, ExternalLease
+from meiva.sdk_surface import process_context
+from meiva.self.harness.admission import ProcessLineage, descends, require_live_registration
 from meiva.self.harness.attachment import (
-    PROCESS_PROBE,
-    ProcessProbe,
-    refuse_unless_attachable,
-    require_live_registration,
+    attachable_context,
+    process_lineage,
     resolve_registration,
 )
 from meiva.self.harness.registration import (
-    FileRegistrationStore,
     HarnessRegistration,
     RegistrationError,
     handle_digest,
-    new_handle,
 )
+from meiva.self.harness.store import FileRegistrationStore, new_handle
+
+NOW = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
+LINEAGE = ProcessLineage(pid=900, ancestors=frozenset({800, 4242}))
+_SLEEPER = Path(__file__).with_name("sleeper_child.py")
 
 
-def ambient(
-    *, lease: object | None = None, agent_id: int | None = None, owns_loop: bool = False
-) -> Any:
-    identity = SimpleNamespace(lease=lease, agent_id=agent_id, owns_loop=owns_loop)
-    return SimpleNamespace(identity=identity)
+@pytest.fixture
+def unbound_process() -> Iterator[None]:
+    prior = process_context.unbind_context()
+    try:
+        yield
+    finally:
+        process_context.unbind_context()
+        if prior is not None:
+            process_context.bind_context(prior)
 
 
-def probe(*, host: bool = False, bound: Any = None, exec_turn: bool = False) -> ProcessProbe:
-    return ProcessProbe(
-        is_host=lambda: host,
-        ambient=lambda: bound,
-        in_exec_turn=lambda: exec_turn,
-    )
+@pytest.mark.usefixtures("unbound_process")
+def test_an_unbound_plain_process_has_no_context_to_reuse() -> None:
+    assert attachable_context() is None
 
 
-def test_a_plain_process_may_attach() -> None:
-    assert refuse_unless_attachable(probe()) is None
-
-
-def test_a_native_runtime_may_not_attach() -> None:
-    with pytest.raises(RuntimeError, match="native agent runtime"):
-        refuse_unless_attachable(probe(host=True))
-
-
-def test_a_process_that_owns_its_loop_may_not_attach() -> None:
-    with pytest.raises(RuntimeError, match="native agent runtime"):
-        refuse_unless_attachable(probe(bound=ambient(agent_id=41, owns_loop=True)))
-
-
-def test_an_already_attached_process_may_not_attach_again() -> None:
-    with pytest.raises(RuntimeError, match="already has an external attachment"):
-        refuse_unless_attachable(probe(bound=ambient(lease=object())))
-
-
-def test_an_exec_turn_may_not_attach() -> None:
-    with pytest.raises(RuntimeError, match="exec turn"):
-        refuse_unless_attachable(probe(exec_turn=True))
-
-
+@pytest.mark.usefixtures("unbound_process")
 def test_a_bound_context_is_returned_for_reuse() -> None:
-    bound = ambient()
-    assert refuse_unless_attachable(probe(bound=bound)) is bound
+    bound = MeivaContext()
+    process_context.bind_context(bound)
+    assert attachable_context() is bound
 
 
-def test_an_unknown_handle_finds_no_registration(tmp_path: Any) -> None:
-    store = FileRegistrationStore(tmp_path)
-    assert store.find_by_handle(new_handle()) is None
+@pytest.mark.usefixtures("unbound_process")
+def test_a_bound_native_loop_is_refused() -> None:
+    process_context.bind_context(MeivaContext(identity=AgentIdentity(agent_id=41, owns_loop=True)))
+    with pytest.raises(RuntimeError, match="native agent runtime"):
+        attachable_context()
+
+
+@pytest.mark.usefixtures("unbound_process")
+def test_a_bound_borrowed_identity_is_refused() -> None:
+    lease = ExternalLease(agent_id=41, validate=lambda: 41, config=lambda: None)
+    process_context.bind_context(
+        MeivaContext(identity=AgentIdentity(agent_id=None, owns_loop=True, lease=lease))
+    )
+    with pytest.raises(RuntimeError, match="already has an external attachment"):
+        attachable_context()
 
 
 def row(**overrides: Any) -> HarnessRegistration:
@@ -78,7 +77,7 @@ def row(**overrides: Any) -> HarnessRegistration:
         "harness": "deepseek",
         "external_session_id": "session-1",
         "machine": "ubuntu",
-        "controller_pid": os.getpid(),
+        "controller_pid": 4242,
         "handle_sha256": handle_digest("hx_test"),
         "created_at": "2026-10-19T00:00:00+00:00",
     }
@@ -86,79 +85,102 @@ def row(**overrides: Any) -> HarnessRegistration:
     return HarnessRegistration(**values)
 
 
+def admit(registration: HarnessRegistration, **overrides: Any) -> HarnessRegistration:
+    arguments: dict[str, Any] = {"machine": "ubuntu", "lineage": LINEAGE, "now": NOW}
+    arguments.update(overrides)
+    return require_live_registration(registration, **arguments)
+
+
 def test_a_live_registration_passes() -> None:
     registration = row()
-    assert (
-        require_live_registration(registration, machine="ubuntu", descends=lambda _pid: True)
-        is registration
-    )
+    assert admit(registration) is registration
 
 
 def test_a_detached_registration_is_refused() -> None:
     with pytest.raises(RegistrationError, match="is closed"):
-        require_live_registration(
-            row(status="closed"), machine="ubuntu", descends=lambda _pid: True
-        )
+        admit(row(status="closed"))
 
 
 def test_an_expired_registration_is_refused() -> None:
-    expired = row(expires_at="2026-10-18T00:00:00+00:00")
     with pytest.raises(RegistrationError, match="expired at"):
-        require_live_registration(expired, machine="ubuntu", descends=lambda _pid: True)
+        admit(row(expires_at="2026-10-18T00:00:00+00:00"))
 
 
 def test_expiry_is_judged_at_the_supplied_instant() -> None:
     registration = row(expires_at="2026-10-19T12:00:00+00:00")
     before = datetime(2026, 10, 19, 11, 0, tzinfo=UTC)
     after = datetime(2026, 10, 19, 13, 0, tzinfo=UTC)
-    assert require_live_registration(
-        registration, machine="ubuntu", descends=lambda _pid: True, now=before
-    )
+    assert admit(registration, now=before)
     with pytest.raises(RegistrationError, match="expired at"):
-        require_live_registration(
-            registration, machine="ubuntu", descends=lambda _pid: True, now=after
-        )
+        admit(registration, now=after)
 
 
 def test_another_machines_registration_is_refused() -> None:
     with pytest.raises(RegistrationError, match="belongs to machine 'macmini'"):
-        require_live_registration(
-            row(machine="macmini"), machine="ubuntu", descends=lambda _pid: True
-        )
+        admit(row(machine="macmini"))
 
 
 def test_a_process_outside_the_controller_tree_is_refused() -> None:
-    registration = row(controller_pid=4242)
     with pytest.raises(RegistrationError, match="does not descend"):
-        require_live_registration(registration, machine="ubuntu", descends=lambda _pid: False)
+        admit(row(controller_pid=1234))
 
 
-def test_the_ancestry_check_receives_the_recorded_controller_pid() -> None:
-    seen: list[int] = []
-
-    def descends(pid: int) -> bool:
-        seen.append(pid)
-        return True
-
-    require_live_registration(row(controller_pid=4242), machine="ubuntu", descends=descends)
-    assert seen == [4242]
+def test_the_controller_itself_is_admitted() -> None:
+    assert admit(row(controller_pid=LINEAGE.pid))
 
 
-def test_a_handle_issued_for_another_agent_is_refused(tmp_path: Any) -> None:
+@pytest.mark.parametrize(
+    ("controller_pid", "expected"),
+    [(900, True), (800, True), (4242, True), (1234, False), (0, False), (-1, False)],
+)
+def test_descent_is_the_process_itself_or_one_of_its_ancestors(
+    controller_pid: int, expected: bool
+) -> None:
+    assert descends(controller_pid, LINEAGE) is expected
+
+
+def test_the_real_lineage_of_this_process_contains_its_parent() -> None:
+    lineage = process_lineage(os.getpid())
+    assert lineage.pid == os.getpid()
+    assert os.getppid() in lineage.ancestors
+    assert descends(os.getpid(), lineage)
+    assert descends(os.getppid(), lineage)
+    assert not descends(2**22 + 7, lineage)
+
+
+def test_an_unknown_process_has_no_ancestors() -> None:
+    assert process_lineage(2**22 + 7).ancestors == frozenset()
+
+
+# meiva:note
+# The child only sleeps (`sleeper_child.py`); `sys.executable` is the test's own interpreter and the argv is
+# fixed, so the subprocess call carries no shell and no caller input.
+def test_a_child_process_descends_from_the_process_that_started_it() -> None:
+    child = subprocess.Popen([sys.executable, str(_SLEEPER)])  # noqa: S603
+    try:
+        lineage = process_lineage(child.pid)
+        assert descends(os.getpid(), lineage)
+        assert not descends(child.pid + 1, lineage)
+    finally:
+        child.kill()
+        child.wait()
+
+
+def test_a_handle_issued_for_another_agent_is_refused(tmp_path: Path) -> None:
     store = FileRegistrationStore(tmp_path)
     store.save(row(handle_sha256=handle_digest("hx_mine")))
     with pytest.raises(RegistrationError, match="belongs to agent 41, not 42"):
         resolve_registration("hx_mine", agent_id=42, store=store)
 
 
-def test_a_handle_issued_for_another_session_is_refused(tmp_path: Any) -> None:
+def test_a_handle_issued_for_another_session_is_refused(tmp_path: Path) -> None:
     store = FileRegistrationStore(tmp_path)
     store.save(row(handle_sha256=handle_digest("hx_mine")))
     with pytest.raises(RegistrationError, match="another external session"):
         resolve_registration("hx_mine", session_id="session-2", store=store)
 
 
-def test_a_matching_handle_agent_and_session_resolve_the_row(tmp_path: Any) -> None:
+def test_a_matching_handle_agent_and_session_resolve_the_row(tmp_path: Path) -> None:
     store = FileRegistrationStore(tmp_path)
     saved = row(handle_sha256=handle_digest("hx_mine"))
     store.save(saved)
@@ -166,12 +188,13 @@ def test_a_matching_handle_agent_and_session_resolve_the_row(tmp_path: Any) -> N
     assert resolved == saved
 
 
-def test_a_handle_alone_resolves_without_naming_the_agent(tmp_path: Any) -> None:
+def test_a_handle_alone_resolves_without_naming_the_agent(tmp_path: Path) -> None:
     store = FileRegistrationStore(tmp_path)
     saved = row(handle_sha256=handle_digest("hx_mine"))
     store.save(saved)
     assert resolve_registration("hx_mine", store=store) == saved
 
 
-def test_default_process_probe_ambient_does_not_recurse_when_unbound() -> None:
-    assert PROCESS_PROBE.ambient() is None
+def test_an_unknown_handle_finds_no_registration(tmp_path: Path) -> None:
+    with pytest.raises(RegistrationError, match="matches this handle"):
+        resolve_registration(new_handle(), store=FileRegistrationStore(tmp_path))

@@ -1,5 +1,3 @@
-import json
-from collections.abc import Iterator
 from typing import Any
 from uuid import uuid4
 
@@ -7,10 +5,14 @@ import httpx
 import pytest
 
 from meiva import agents, gateway_client
-from meiva.gateway_client import use_client
+from meiva.tests.fixtures.gateway_wire import GatewayWire
+from meiva.tests.fixtures.gateway_wire import bound_wire as bound_wire
+from meiva.tests.fixtures.gateway_wire import gateway_stub as gateway_stub
+from meiva.tests.fixtures.gateway_wire import wire as wire
 
 PRIOR = uuid4()
 ATTEMPT = uuid4()
+RETRY_PATH = "/api/keyed/v1/agents/42/retry-launch"
 
 
 def receipt(**changes: Any) -> dict[str, Any]:
@@ -26,18 +28,9 @@ def receipt(**changes: Any) -> dict[str, Any]:
 
 
 @pytest.fixture
-def requests() -> Iterator[list[httpx.Request]]:
-    calls: list[httpx.Request] = []
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        return httpx.Response(200, json=receipt())
-
-    with (
-        httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        use_client(http),
-    ):
-        yield calls
+def requests(bound_wire: GatewayWire) -> GatewayWire:
+    bound_wire.stub.reply("POST", RETRY_PATH, receipt())
+    return bound_wire
 
 
 def submit(**changes: Any) -> int:
@@ -48,15 +41,15 @@ def submit(**changes: Any) -> int:
     return agents.retry_launch(42, **(arguments | changes))
 
 
-def test_sdk_uses_fixed_path_key_and_observed_body(requests: list[httpx.Request]) -> None:
+def test_sdk_uses_fixed_path_key_and_observed_body(requests: GatewayWire) -> None:
     assert submit() == 42
     assert submit(expected_prior_attempt_id=str(PRIOR)) == 42
-    assert len(requests) == 2
-    for request in requests:
-        assert request.url.path == "/api/keyed/v1/agents/42/retry-launch"
-        assert request.headers["Idempotency-Key"] == "retry-intent"
-        assert request.headers["Idempotency-Scope"] == "principal-v1"
-        assert json.loads(request.content) == {"expected_prior_attempt_id": str(PRIOR)}
+    assert len(requests.sent) == 2
+    for sent in requests.sent:
+        assert sent.path == RETRY_PATH
+        assert sent.headers["Idempotency-Key"] == "retry-intent"
+        assert sent.headers["Idempotency-Scope"] == "principal-v1"
+        assert sent.body == {"expected_prior_attempt_id": str(PRIOR)}
 
 
 @pytest.mark.parametrize("boundary", [agents.retry_launch, gateway_client.retry_launch])
@@ -75,7 +68,7 @@ def test_sdk_uses_fixed_path_key_and_observed_body(requests: list[httpx.Request]
     ],
 )
 def test_invalid_admission_has_no_http(
-    requests: list[httpx.Request], boundary: Any, changes: dict[str, Any]
+    requests: GatewayWire, boundary: Any, changes: dict[str, Any]
 ) -> None:
     args = {
         "idempotency_key": "retry-intent",
@@ -83,59 +76,36 @@ def test_invalid_admission_has_no_http(
     }
     with pytest.raises((TypeError, ValueError)):
         boundary(42, **(args | changes))
-    assert requests == []
+    assert requests.sent == []
 
 
 @pytest.mark.parametrize("agent_id", [True, 0, -1, 2**63])
-def test_guarded_client_refuses_invalid_agent_ids(
-    requests: list[httpx.Request], agent_id: int
-) -> None:
+def test_guarded_client_refuses_invalid_agent_ids(requests: GatewayWire, agent_id: int) -> None:
     with pytest.raises((TypeError, ValueError)):
         gateway_client.retry_launch(
             agent_id,
             idempotency_key="intent",
             expected_prior_attempt_id=PRIOR,
         )
-    assert requests == []
+    assert requests.sent == []
 
 
 @pytest.mark.parametrize("status", [404, 409, 500])
-def test_http_failure_never_downgrades_or_retries(status: int) -> None:
-    calls: list[httpx.Request] = []
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        return httpx.Response(status, json={"detail": "refused"})
-
-    with (
-        httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        use_client(http),
-        pytest.raises(httpx.HTTPStatusError),
-    ):
+def test_http_failure_never_downgrades_or_retries(requests: GatewayWire, status: int) -> None:
+    requests.stub.reply("POST", RETRY_PATH, {"detail": "refused"}, status=status)
+    with pytest.raises(httpx.HTTPStatusError):
         submit()
-    assert len(calls) == 1
-    assert calls[0].url.path == "/api/keyed/v1/agents/42/retry-launch"
+    [sent] = requests.sent
+    assert sent.path == RETRY_PATH
 
 
-@pytest.mark.usefixtures("retry_waits")
-def test_response_loss_is_retried_with_the_same_identity() -> None:
-    calls: list[httpx.Request] = []
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        if len(calls) == 1:
-            raise httpx.ReadTimeout("accepted response lost", request=request)
-        return httpx.Response(200, json=receipt())
-
-    with (
-        httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        use_client(http),
-    ):
-        assert submit() == 42
-    assert len(calls) == 2
-    assert calls[0].url == calls[1].url
-    assert calls[0].headers == calls[1].headers
-    assert calls[0].content == calls[1].content
+def test_response_loss_is_retried_with_the_same_identity(requests: GatewayWire) -> None:
+    requests.fail(httpx.ReadTimeout, delivered=True)
+    assert submit() == 42
+    first, second = requests.sent
+    assert first.path == second.path
+    assert first.headers == second.headers
+    assert first.body == second.body
 
 
 @pytest.mark.parametrize(
@@ -152,20 +122,13 @@ def test_response_loss_is_retried_with_the_same_identity() -> None:
         {k: v for k, v in receipt().items() if k != "accepted"},
     ],
 )
-def test_malformed_acceptance_cannot_report_success(bad: dict[str, Any]) -> None:
-    calls: list[httpx.Request] = []
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        return httpx.Response(200, json=bad)
-
-    with (
-        httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        use_client(http),
-        pytest.raises(ValueError),
-    ):
+def test_malformed_acceptance_cannot_report_success(
+    requests: GatewayWire, bad: dict[str, Any]
+) -> None:
+    requests.stub.reply("POST", RETRY_PATH, bad)
+    with pytest.raises(ValueError):
         submit()
-    assert len(calls) == 1
+    assert len(requests.sent) == 1
 
 
 @pytest.mark.parametrize("boundary", [agents.retry_launch, gateway_client.retry_launch])
@@ -174,11 +137,11 @@ def test_malformed_acceptance_cannot_report_success(bad: dict[str, Any]) -> None
     [{}, {"idempotency_key": "intent"}, {"expected_prior_attempt_id": PRIOR}],
 )
 def test_missing_retry_identity_has_no_http(
-    requests: list[httpx.Request], boundary: Any, arguments: dict[str, Any]
+    requests: GatewayWire, boundary: Any, arguments: dict[str, Any]
 ) -> None:
     with pytest.raises(TypeError):
         boundary(42, **arguments)
-    assert requests == []
+    assert requests.sent == []
 
 
 @pytest.mark.parametrize(
@@ -190,17 +153,11 @@ def test_missing_retry_identity_has_no_http(
         {"last_launch_attempt_id": "invalid"},
     ],
 )
-def test_missing_or_invalid_observation_cannot_authorize_a_retry(observed: dict[str, Any]) -> None:
-    calls: list[httpx.Request] = []
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        return httpx.Response(200, json=observed)
-
-    with (
-        httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(handle)) as http,
-        use_client(http),
-        pytest.raises((TypeError, ValueError)),
-    ):
+def test_missing_or_invalid_observation_cannot_authorize_a_retry(
+    bound_wire: GatewayWire, observed: dict[str, Any]
+) -> None:
+    bound_wire.stub.reply("GET", "/api/agents/42", observed)
+    with pytest.raises((TypeError, ValueError)):
         agents.get_launch_attempt(42)
-    assert len(calls) == 1 and calls[0].method == "GET"
+    [sent] = bound_wire.sent
+    assert sent.method == "GET"

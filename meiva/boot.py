@@ -3,13 +3,13 @@
 # A bare non-agent import leaves context unbound and does not import database, Redis,
 # HTTP or model connection stacks. Process clients retain their supplied configuration
 # and build connections only on first use; installation clients outlive an attachment,
-# while bound calls retain the attachment's own producer. A reload must preserve the
+# while bound calls retain the attachment's own clients. A reload must preserve the
 # first-loaded code image and process-context slots instead of relabeling or clearing
 # already-running code.
 #
 # Booting an external process is the same work whoever borrowed the identity: read
 # the launch environment, resolve the machine, build the database factory, and
-# (only when nothing is bound yet) own a client set. The clock factory comes from
+# (only when nothing is bound yet) own a client set. The clock comes from
 # here too because an independent attachment has no process clock to inherit. The
 # takeover and the harness differ in *what proves the identity*; they must not
 # differ in how the process around it is built, or a fix to one boot path silently
@@ -23,32 +23,45 @@ from __future__ import annotations
 
 import atexit
 import os
-from collections.abc import Callable
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Any, cast
+from pathlib import Path
+from typing import Any
 
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from base.agents.context.identity import AgentIdentity
 from base.clock import SYSTEM_TIMERS, Clock
-from base.clock.configuration import ClockConfig, clock_config_from_boot
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.loading import StateGate
 from meiva.mcps import McpClients
 from meiva.sdk_surface import meiva_module, process_context
 from meiva.sdk_surface.process_context import ContextOutsideProcessError
+from meiva.sdk_surface.pure.load_plan import (
+    IdentityFacts,
+    LaunchFacts,
+    LoadFacts,
+    LoadStep,
+    MissingNameFacts,
+    MissingNameStep,
+    launched_process,
+    plan_load,
+    plan_missing_name,
+)
 
 
-def _redis(*, url_reader: Callable[[], str]) -> object:
+def _redis(url: str) -> object:
     import redis as redis_lib
 
     from base.events.live.redis_client import RESILIENCE_KWARGS
 
-    url = url_reader()
     if not url:
         raise RuntimeError(
             "MEIVA_REDIS_URL not set — Redis ops should not be called in container mode"
@@ -67,7 +80,7 @@ def _gateway_url(config: ConfigBoot) -> str:
     return gateway_api_base(config.view.gateway.gateway_url)
 
 
-def _gateway(url: str, *, config: ConfigBoot, timeout_reader: Callable[[], float]) -> Any:
+def _gateway(url: str, *, config: ConfigBoot) -> Any:
     import httpx
 
     from base.cluster.machine import gateway_bearer
@@ -78,7 +91,7 @@ def _gateway(url: str, *, config: ConfigBoot, timeout_reader: Callable[[], float
     bearer = gateway_bearer(gateway_access_from_boot(config))
     return httpx.Client(
         base_url=url,
-        timeout=httpx.Timeout(timeout_reader()),
+        timeout=httpx.Timeout(config.view.gateway.gateway_client_http_timeout_seconds),
         headers=bearer_header(bearer),
         transport=transport_for_url(url),
     )
@@ -117,65 +130,51 @@ def database_factory(*, config: ConfigBoot, machine: MachineIdentity) -> Databas
     return database
 
 
+# meiva:note
+# The clients one SDK process owner builds from its prepared configuration. Nothing connects at
+# construction: every connection, the event pipeline and the MCP client set build on first use,
+# reading `config` then. `machine` defaults to the identity derived from the same `config`; a
+# root that already shares an identity with its logger and event pipeline passes it. `database`
+# and `gateway_url` override the derived defaults for a root that holds its own.
 def process_clients(
     *,
+    config: ConfigBoot,
+    machine: MachineIdentity | None = None,
     gateway_url: str | None = None,
     database: DatabaseFactory | None = None,
-    mcp_timeout_seconds: Callable[[], float] | None = None,
-    config: ConfigBoot | None = None,
-    machine: MachineIdentity | None = None,
 ) -> ClientSet:
-    owner = config if config is not None else ConfigBoot()
-    identity = machine if machine is not None else machine_from_boot(owner)
-
-    def read_config() -> ConfigBoot:
-        if config is None:
-            owner.read_process_environment()
-        return owner
-
-    timeout_reader = (
-        mcp_timeout_seconds
-        if mcp_timeout_seconds is not None
-        else lambda: read_config().view.sandbox.mcp_connect_timeout_seconds
+    identity = machine if machine is not None else machine_from_boot(config)
+    make_database = (
+        database if database is not None else database_factory(config=config, machine=identity)
     )
 
     def pipeline() -> Any:
         from base.paths.home import resolve_meiva_home
         from base.telemetry import build_pipeline
 
-        read_config()
         return build_pipeline(database=make_database, machine=identity, home=resolve_meiva_home())
 
-    database_builder = (
-        database if database is not None else database_factory(config=owner, machine=identity)
-    )
+    def mcp_clients() -> McpClients:
+        from base.paths import mcp_daemon_shared_socket
+        from base.paths.home import resolve_meiva_home
 
-    def default_database() -> Any:
-        read_config()
-        return database_builder()
-
-    make_database = database if database is not None else default_database
+        return McpClients(
+            Path(mcp_daemon_shared_socket(resolve_meiva_home())),
+            lambda: config.view.sandbox.mcp_connect_timeout_seconds,
+        )
 
     return ClientSet(
-        gateway_url=gateway_url if gateway_url is not None else lambda: _gateway_url(read_config()),
+        gateway_url=gateway_url if gateway_url is not None else lambda: _gateway_url(config),
         database=make_database,
         pipeline_factory=pipeline,
-        redis=lambda: _redis(url_reader=lambda: read_config().view.data_plane.redis_url),
-        gateway=lambda url: _gateway(
-            url,
-            config=read_config(),
-            timeout_reader=lambda: read_config().view.gateway.gateway_client_http_timeout_seconds,
-        ),
+        redis=lambda: _redis(config.view.data_plane.redis_url),
+        gateway=lambda url: _gateway(url, config=config),
         factories={
-            McpClients: lambda: McpClients(timeout_reader),
+            McpClients: mcp_clients,
             GatewayTransportInputs: lambda: GatewayTransportInputs(
-                max_retries_reader=lambda: read_config().view.gateway.gateway_client_max_retries,
-                retry_delay_reader=lambda: (
-                    read_config().view.gateway.gateway_client_retry_delay_seconds
-                ),
-                memory_deadline_reader=lambda: (
-                    read_config().view.services.memory_search_deadline_seconds
-                ),
+                max_retries_reader=lambda: config.view.gateway.gateway_client_max_retries,
+                retry_delay_reader=lambda: config.view.gateway.gateway_client_retry_delay_seconds,
+                memory_deadline_reader=lambda: config.view.services.memory_search_deadline_seconds,
             ),
         },
     )
@@ -184,37 +183,34 @@ def process_clients(
 def context_from_description(
     description: dict[str, Any],
     *,
+    config: ConfigBoot,
     original_incarnation: RuntimeIncarnation | None = None,
-    config: ConfigBoot | None = None,
 ) -> MeivaContext:
-    owner = config if config is not None else ConfigBoot()
-    if config is None:
-        owner.read_process_environment()
-    machine = machine_from_boot(owner)
+    machine = machine_from_boot(config)
     return MeivaContext.from_description(
         description,
         clients=process_clients(
-            gateway_url=description["gateway_url"], config=owner, machine=machine
+            gateway_url=description["gateway_url"], config=config, machine=machine
         ),
         machine=machine,
         original_incarnation=original_incarnation,
     )
 
 
-def has_launched_identity() -> bool:
-    return "MEIVA_AGENT_ID" in os.environ
+def launch_agent_id(env: Mapping[str, str]) -> int | None:
+    raw = env.get("MEIVA_AGENT_ID")
+    return None if raw is None else int(raw)
 
 
-def launched_context(*, config: ConfigBoot | None = None) -> MeivaContext | None:
-    raw = os.environ.get("MEIVA_AGENT_ID")
-    if raw is None:
+def launched_context(*, env: Mapping[str, str], config: ConfigBoot) -> MeivaContext | None:
+    agent_id = launch_agent_id(env)
+    if agent_id is None:
         return None
-    if config is None:
-        config = ConfigBoot()
-    config.read_process_environment()
+    if not config.prepared:
+        config.read_process_environment()
     machine = machine_from_boot(config)
     return MeivaContext(
-        identity=AgentIdentity(agent_id=int(raw), owns_loop=False),
+        identity=AgentIdentity(agent_id=agent_id, owns_loop=False),
         clients=process_clients(config=config, machine=machine),
         machine=machine,
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
@@ -225,102 +221,231 @@ def _door_import_complete() -> bool:
     return bool(meiva_module().__dict__.get("_init_complete", False))
 
 
+def _identity_facts(context: MeivaContext | None) -> IdentityFacts | None:
+    identity = None if context is None else context.identity
+    if identity is None:
+        return None
+    return IdentityFacts(
+        has_agent_id=identity.agent_id is not None, owns_loop=bool(identity.owns_loop)
+    )
+
+
+def _launch_facts(context: MeivaContext | None, env: Mapping[str, str]) -> LaunchFacts:
+    return LaunchFacts(
+        host=process_context.is_host_process(),
+        context_bound=context is not None,
+        identity=_identity_facts(context),
+        env_has_agent_id="MEIVA_AGENT_ID" in env,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _SlotFacts:
+    installed: bool
+    faces: bool
+    attempted: bool
+    failed: bool
+
+
+def _slot_facts() -> _SlotFacts:
+    from meiva.sdk_surface.installation import Loading, installed, slot
+
+    current = installed()
+    holder = slot()
+    return _SlotFacts(
+        installed=current is not None,
+        faces=current is not None and current.faces,
+        attempted=isinstance(holder, Loading),
+        failed=isinstance(holder, Loading) and holder.failure is not None,
+    )
+
+
+# meiva:note
+# Idempotently load the plugin surface of this process; the facade `meiva.ensure_plugins_loaded`
+# forwards here. This is the place that reads the process: the installation slot, the bound
+# context and the launch environment become `LoadFacts`, `plan_load` chooses the step, and the
+# shell below resolves the owners a surface load needs (`LoadInputs`) only when the plan is a
+# load. A `clients` set the caller supplies is the one the installation meters through; none
+# supplied means the installation builds its own cold set and closes it at interpreter exit,
+# so an attachment's shorter-lived clients are never borrowed.
 def ensure_plugins_loaded(
     *,
     surface: bool = True,
     config: ConfigBoot | None = None,
-    clock_factory: Callable[[], Clock] | None = None,
-    producer: Callable[[], Any] | None = None,
     machine: MachineIdentity | None = None,
     context: MeivaContext | None = None,
+    clients: ClientSet | None = None,
     validate_state: StateGate | None = None,
 ) -> None:
+    from meiva.sdk_surface import install as _sdk_install
+
     if context is not None:
         process_context.bind_context(context)
     else:
         context = process_context.bound_context()
-    from meiva.sdk_surface import install as _sdk_install
-    from meiva.sdk_surface import sdk_disable
-    from meiva.sdk_surface.installation import installed
-
-    _sdk_install.raise_load_failure()
-    installation = installed()
-    if installation is not None and (surface or installation.faces):
+    env = os.environ
+    state = _slot_facts()
+    plan = plan_load(
+        LoadFacts(
+            surface=surface,
+            installed=state.installed,
+            faces=state.faces,
+            attempted=state.attempted,
+            failed=state.failed,
+            config_supplied=config is not None,
+            context_bound=context is not None,
+            launched=launched_process(_launch_facts(context, env)),
+        )
+    )
+    if plan.step is LoadStep.RAISE_FAILURE:
+        _sdk_install.raise_load_failure()
+    elif plan.step is LoadStep.BIND_CATALOG:
         _bind_installed_catalog(context)
-        return
-    if _sdk_install.load_attempted():
-        return
-    if installation is None and config is None and context is None and is_launched_process():
-        context, config = _prepare_launched_context()
-    if context is not None:
-        clock_factory = clock_factory or context.clock_factory
-        machine = machine if machine is not None else context.machine
-    if installation is None:
-        sdk_disable.apply_entries(sdk_disable.env_entries())
-    _sdk_install.mark_load_attempt()
-    _load_plugin_stages(
-        upgrade_faces=installation is not None,
+    elif plan.step is LoadStep.UPGRADE_FACES:
+        _sdk_install.mark_load_attempt()
+        upgrade_faces()
+        _bind_installed_catalog(context)
+    elif plan.step is LoadStep.LOAD_SURFACE:
+        if plan.prepare_launched:
+            context, config = _prepare_launched_context(env)
+        disabled = process_disable_entries()
+        _apply_disable(disabled)
+        _sdk_install.mark_load_attempt()
+        try:
+            inputs = _load_inputs(
+                surface=surface,
+                disabled=disabled,
+                config=config,
+                machine=machine,
+                context=context,
+                clients=clients,
+                validate_state=validate_state,
+            )
+        except BaseException as exc:
+            _sdk_install.mark_load_failed(exc)
+            raise
+        load_surface(inputs)
+        _bind_installed_catalog(inputs.context)
+
+
+# meiva:note
+# The SDK-disable entries this process's environment names. A root that loads plugins itself
+# (the agent host) asks here so the surface it installs honors the same `MEIVA_SDK_DISABLE`
+# a launched child does.
+def process_disable_entries() -> tuple[str, ...]:
+    from meiva.sdk_surface import sdk_disable
+
+    return tuple(sdk_disable.env_entries(os.environ))
+
+
+# meiva:note
+# Everything one surface load reads, resolved by its caller. `disabled` are the SDK-disable
+# entries applied before any plugin. `config`, `machine` and `clients` are the owners the
+# installation retains, `clock` is the root clock it serves timestamped operations with, `home`
+# the MEIVA_HOME its authority reads `.env` from and `catalog` the model facts it hands to
+# model consumers.
+@dataclass(frozen=True, slots=True)
+class LoadInputs:
+    surface: bool
+    disabled: tuple[str, ...]
+    config: ConfigBoot
+    machine: MachineIdentity
+    clients: ClientSet
+    clock: Clock
+    home: Path
+    catalog: ModelCatalog
+    provider_keys: ProviderKeys
+    context: MeivaContext | None
+    validate_state: StateGate | None
+
+
+def _load_inputs(
+    *,
+    surface: bool,
+    disabled: tuple[str, ...],
+    config: ConfigBoot | None,
+    machine: MachineIdentity | None,
+    context: MeivaContext | None,
+    clients: ClientSet | None,
+    validate_state: StateGate | None,
+) -> LoadInputs:
+    from base import paths
+    from base.lm.factory import process_provider_keys
+    from base.packages.plugin_providers import build_model_catalog
+
+    if config is None:
+        config = ConfigBoot()
+        config.read_process_environment()
+    if machine is None:
+        machine = _context_machine(context) or machine_from_boot(config)
+    if clients is None:
+        clients = process_clients(config=config, machine=machine)
+        atexit.register(clients.close)
+    if context is not None and context.clock_factory is not None:
+        clock = context.require_clock()
+    else:
+        clock = Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
+    catalog = build_model_catalog()
+    return LoadInputs(
         surface=surface,
+        disabled=disabled,
         config=config,
-        clock_factory=clock_factory,
         machine=machine,
-        producer=producer,
+        clients=clients,
+        clock=clock,
+        home=paths.meiva_home(),
+        catalog=catalog,
+        provider_keys=process_provider_keys(catalog),
+        context=context,
         validate_state=validate_state,
     )
-    _bind_installed_catalog(context)
 
 
-def _load_plugin_stages(
-    *,
-    upgrade_faces: bool,
-    surface: bool,
-    config: ConfigBoot | None,
-    clock_factory: Callable[[], Clock] | None,
-    machine: MachineIdentity | None,
-    producer: Callable[[], Any] | None,
-    validate_state: StateGate | None,
-) -> None:
+def _context_machine(context: MeivaContext | None) -> MachineIdentity | None:
+    return None if context is None else context.machine
+
+
+def _apply_disable(entries: tuple[str, ...]) -> None:
+    from meiva.sdk_surface import sdk_disable
+
+    sdk_disable.apply_entries(list(entries))
+
+
+def upgrade_faces() -> None:
     from base.packages.plugins.loading.faces import load_agent_faces
+    from meiva.sdk_surface import install as _sdk_install
+
+    try:
+        load_agent_faces()
+        _sdk_install.mark_faces_loaded()
+    except BaseException as exc:
+        _sdk_install.mark_load_failed(exc)
+        raise
+
+
+def load_surface(inputs: LoadInputs) -> None:
+    from base.config.service_read import ConfigAuthority
     from meiva.sdk_surface import install as _sdk_install
     from meiva.sdk_surface.extensions import load_extensions
 
     try:
-        if upgrade_faces:
-            load_agent_faces()
+        authority = ConfigAuthority.deferred(
+            runtime=inputs.config.view,
+            build_all_domains=inputs.config.complete_read_model,
+            env_path=inputs.home / ".env",
+        )
+        load_extensions(
+            surface=inputs.surface,
+            catalog=inputs.catalog,
+            provider_keys=inputs.provider_keys,
+            authority=authority,
+            clients=inputs.clients,
+            clock=inputs.clock,
+            disabled_entries=inputs.disabled,
+            validate_state=inputs.validate_state,
+        )
+        if not inputs.surface:
             _sdk_install.mark_faces_loaded()
-        else:
-            from base import paths
-            from base.config.service_read import ConfigAuthority
-            from base.lm.factory import process_provider_keys
-            from base.packages.plugin_providers import build_model_catalog
-
-            if config is None:
-                config = ConfigBoot()
-                config.read_process_environment()
-            import atexit
-
-            if producer is None:
-                clients = process_clients(config=config, machine=machine)
-                atexit.register(clients.close)
-                producer = clients.event_pipeline
-            authority = ConfigAuthority.deferred(
-                runtime=config.view,
-                build_all_domains=config.complete_read_model,
-                env_path=paths.meiva_home() / ".env",
-            )
-            catalog = build_model_catalog()
-            load_extensions(
-                surface=surface,
-                catalog=catalog,
-                provider_keys=process_provider_keys(catalog),
-                authority=authority,
-                producer=producer,
-                clock_factory=clock_factory
-                or (lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)),
-                validate_state=validate_state,
-            )
-            if not surface:
-                _sdk_install.mark_faces_loaded()
     except BaseException as exc:
         _sdk_install.mark_load_failed(exc)
         raise
@@ -330,18 +455,16 @@ def initialize_context(
     context: MeivaContext,
     *,
     surface: bool = True,
-    config: ConfigBoot | None = None,
-    clock_factory: Callable[[], Clock] | None = None,
-    producer: Callable[[], Any] | None = None,
+    config: ConfigBoot | None,
+    clients: ClientSet | None,
     validate_state: StateGate | None = None,
 ) -> None:
     ensure_plugins_loaded(
         context=context,
         surface=surface,
         config=config,
-        clock_factory=clock_factory or context.clock_factory,
         machine=context.machine,
-        producer=producer,
+        clients=clients,
         validate_state=validate_state,
     )
 
@@ -358,9 +481,9 @@ def _bind_installed_catalog(context: MeivaContext | None) -> None:
             process_context.bind_context(replace(context, catalog=catalog))
 
 
-def _prepare_launched_context() -> tuple[MeivaContext, ConfigBoot]:
+def _prepare_launched_context(env: Mapping[str, str]) -> tuple[MeivaContext, ConfigBoot]:
     config = ConfigBoot()
-    context = launched_context(config=config)
+    context = launched_context(env=env, config=config)
     if context is None:
         raise RuntimeError("launched process identity disappeared during SDK initialization")
 
@@ -370,38 +493,41 @@ def _prepare_launched_context() -> tuple[MeivaContext, ConfigBoot]:
 
 
 def is_launched_process() -> bool:
-    if process_context.is_host_process():
-        return False
-    bound = process_context.bound_context()
-    if bound is not None:
-        identity = bound.identity
-        return identity is not None and identity.agent_id is not None and not identity.owns_loop
-    return has_launched_identity()
+    return launched_process(_launch_facts(process_context.bound_context(), os.environ))
 
 
 def maybe_load_plugins_for_missing(name: str) -> bool:
-    if name.startswith("_") or not _door_import_complete():
-        return False
-    from meiva.sdk_surface import install as _sdk_install
-    from meiva.sdk_surface.installation import installed
-
-    _sdk_install.raise_load_failure()
-    if installed() is not None or _sdk_install.load_attempted():
-        return False
     from meiva.sdk_surface import agent_identity
+    from meiva.sdk_surface import install as _sdk_install
 
-    launched_child = agent_identity.is_launched_child()
-    if installed() is not None:
-        return True
-    if not launched_child:
-        return False
-    ensure_plugins_loaded()
-    return installed() is not None
+    def facts(*, launched_child: bool | None) -> MissingNameFacts:
+        state = _slot_facts()
+        return MissingNameFacts(
+            private=name.startswith("_"),
+            entry_complete=_door_import_complete(),
+            failed=state.failed,
+            installed=state.installed,
+            attempted=state.attempted,
+            launched_child=launched_child,
+        )
+
+    step = plan_missing_name(facts(launched_child=None))
+    if step is MissingNameStep.RAISE_FAILURE:
+        _sdk_install.raise_load_failure()
+    if step is MissingNameStep.ASK_LAUNCHED:
+        step = plan_missing_name(facts(launched_child=agent_identity.is_launched_child()))
+    if step is MissingNameStep.LOAD:
+        ensure_plugins_loaded()
+        return _slot_facts().installed
+    return step is MissingNameStep.LOADED
 
 
 def bind_launched_context() -> MeivaContext | None:
-
-    launched = launched_context()
+    env = os.environ
+    if launch_agent_id(env) is None:
+        return None
+    config = ConfigBoot()
+    launched = launched_context(env=env, config=config)
     if launched is None:
         return None
     process_context.bind_context(launched)
@@ -464,46 +590,40 @@ def record_harness_failure(exc: BaseException) -> None:
     logger.warning(f"harness identity attachment failed: {exc}")
 
 
+# meiva:note
+# What an external process needs before it can act as an agent: the machine, a database factory,
+# and, only when the process owns its roots, the configuration, the clients and a clock. A
+# process that borrows a bound context holds none of those three; the context supplies its own.
 @dataclass(frozen=True, slots=True)
 class ExternalBoot:
     config: ConfigBoot | None
     machine: MachineIdentity
     database: DatabaseFactory
     clients: ClientSet | None
-    clock_factory: Callable[[], Clock]
+    clock: Clock | None
 
 
-def boot_external_process(
-    bound: MeivaContext | None,
-    *,
-    config_factory: Callable[[], ConfigBoot] = ConfigBoot,
-    build_clients: Callable[..., ClientSet] = process_clients,
-    machine_reader: Callable[[ConfigBoot], MachineIdentity] = machine_from_boot,
-    clock_builder: Callable[[ConfigBoot], ClockConfig] = clock_config_from_boot,
-) -> ExternalBoot:
-    config = None if bound is not None else config_factory()
-    if config is not None:
+def borrow_external_process(bound: MeivaContext) -> ExternalBoot:
+    return ExternalBoot(
+        config=None,
+        machine=bound.require_machine(),
+        database=bound.clients.database,
+        clients=None,
+        clock=None,
+    )
+
+
+def own_external_process(config: ConfigBoot) -> ExternalBoot:
+    if not config.prepared:
         config.read_process_environment()
-    clock_factory: Callable[[], Clock] = (
-        bound.require_clock
-        if bound is not None
-        else (lambda: Clock(clock_builder(cast("ConfigBoot", config)), timers=SYSTEM_TIMERS))
-    )
-    machine = (
-        bound.require_machine() if bound is not None else machine_reader(cast("ConfigBoot", config))
-    )
-    database = _external_database_factory(bound, config=config, machine=machine)
-    clients = (
-        None
-        if bound is not None
-        else build_clients(database=database, config=config, machine=machine)
-    )
+    machine = machine_from_boot(config)
+    database = database_factory(config=config, machine=machine)
     return ExternalBoot(
         config=config,
         machine=machine,
         database=database,
-        clients=clients,
-        clock_factory=clock_factory,
+        clients=process_clients(config=config, machine=machine, database=database),
+        clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
     )
 
 
@@ -511,25 +631,3 @@ def plugin_state_codec() -> Any:
     from base.agents.context.external_attachment import plugin_state_codec as _codec
 
     return _codec
-
-
-def _external_database_factory(
-    bound: MeivaContext | None, *, config: ConfigBoot | None, machine: MachineIdentity
-) -> DatabaseFactory:
-    if bound is not None:
-        return bound.clients.database
-    if config is None:
-        raise RuntimeError("an independent attachment needs its configuration owner")
-    from base.cluster.dataplane.direct_url import ClusterDirectUrl
-    from base.db import Database
-    from base.db.code_version_gate import ProcessDbGate
-    from base.db.config import db_config_from_boot
-    from base.native_process.code_version import CodeVersion
-
-    version = CodeVersion(process_context.loaded_code_image())
-    gate = ProcessDbGate(version=version.get, process="unknown")
-    return lambda: Database(
-        db_config_from_boot(config),
-        gate=gate,
-        direct_url=ClusterDirectUrl(machine.host),
-    )

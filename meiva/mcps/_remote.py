@@ -16,7 +16,6 @@ import socket
 import threading
 import time
 from contextlib import suppress
-from pathlib import Path
 from typing import Any
 
 from meiva.mcps.config import MCPCallError, MCPConnectError, ToolInfo
@@ -54,7 +53,9 @@ class RemoteMCPClient:
         self._sock = sock
         return sock
 
-    def _request(self, method: str, params: dict[str, Any], *, timeout_seconds: float) -> Any:
+    def _request(
+        self, method: str, params: dict[str, Any], *, timeout_seconds: float, agent_id: int | None
+    ) -> Any:
         with self._lock:
             self._req_id += 1
             req_id = self._req_id
@@ -68,7 +69,7 @@ class RemoteMCPClient:
                         # (and could forward it to any gated server): one
                         # connection = one agent, and the identity rides on
                         # every request so the service can gate per agent.
-                        "agent_id": _current_agent_id(),
+                        "agent_id": agent_id,
                     },
                     ensure_ascii=False,
                 )
@@ -137,8 +138,12 @@ class RemoteMCPClient:
                 if parsed.get("id") == req_id:
                     return parsed
 
-    def list_tools(self, server: str, *, timeout_seconds: float) -> list[ToolInfo]:
-        result = self._request("list_tools", {"server": server}, timeout_seconds=timeout_seconds)
+    def list_tools(
+        self, server: str, *, timeout_seconds: float, agent_id: int | None
+    ) -> list[ToolInfo]:
+        result = self._request(
+            "list_tools", {"server": server}, timeout_seconds=timeout_seconds, agent_id=agent_id
+        )
         return [
             {
                 "name": t["name"],
@@ -149,7 +154,13 @@ class RemoteMCPClient:
         ]
 
     def call_tool(
-        self, server: str, tool: str, args: dict[str, Any], *, timeout_seconds: float
+        self,
+        server: str,
+        tool: str,
+        args: dict[str, Any],
+        *,
+        timeout_seconds: float,
+        agent_id: int | None,
     ) -> dict[str, Any]:
         return self._request(
             "call_tool",
@@ -159,38 +170,10 @@ class RemoteMCPClient:
                 "args": args,
             },
             timeout_seconds=timeout_seconds,
+            agent_id=agent_id,
         )
-
-
-def _current_agent_id() -> int | None:
-    """The explicit SDK process identity, validating any borrowed lease on use."""
-    from meiva.sdk_surface import agent_identity
-
-    return agent_identity.agent_id()
 
 
 def connect_remote(socket_path: str) -> RemoteMCPClient:
     """A client of the MCP daemon listening on `socket_path` (it dials on its first request)."""
     return RemoteMCPClient(socket_path)
-
-
-def socket_path_for() -> str:
-    """Filesystem path of the shared MCP daemon socket — the client side of the
-    convention. The daemon is a per-machine service (one for all agents;
-    sessions isolated per connection). Thin alias of
-    `base.paths.mcp_daemon_shared_socket`, the single source of truth (moved
-    to base/ so the agent kernel's daemon can import it without going through
-    this SDK-disable-able module)."""
-    from base.paths import mcp_daemon_shared_socket, meiva_home
-
-    return mcp_daemon_shared_socket(meiva_home())
-
-
-def daemon_socket_path() -> str | None:
-    """This process's machine MCP socket path, or None when absent.
-
-    Presence does not prove liveness. An absent or stale socket fails the
-    request; callers never fall back to a local server.
-    """
-    path = socket_path_for()
-    return path if Path(path).exists() else None

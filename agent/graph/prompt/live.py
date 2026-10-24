@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from types import ModuleType, SimpleNamespace
 
-from base.host.env.agent_slices import Prompt
+from base.host.env.agent_slices import AgentSlices, Prompt
 from base.lm.catalog import ModelCatalog
 from base.packages.skills.tree import Skill
 
@@ -29,6 +29,17 @@ class LiveSdk:
     view: SkillView
     mcp_servers: tuple[McpServer, ...]
     plugin_expansions: tuple[str, ...]
+
+
+# meiva:note
+# Everything a framework system-prompt section can decide on, handed to every section the same
+# way: the frozen agent configuration, the model catalog and the live SDK reads. A section takes
+# the bundle and ignores the parts it has no use for.
+@dataclass(frozen=True)
+class SectionInputs:
+    slices: AgentSlices
+    catalog: ModelCatalog
+    live: LiveSdk
 
 
 def effective_sdk_disable(configured: Sequence[str]) -> tuple[str, ...]:

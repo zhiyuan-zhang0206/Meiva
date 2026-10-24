@@ -39,7 +39,11 @@ The public signature, declaration order and external-plugin migration contract l
 
 `FRAMEWORK_SECTIONS` registers the Conduct group first and the Capabilities group
 last; the Capabilities group lives in `capabilities.py` and is registered by
-`system_prompt` so the render order stays the reading order. Each section's
+`system_prompt` so the render order stays the reading order. Every framework
+section takes the same frozen `SectionInputs` (`agent/graph/prompt/live.py:SectionInputs`:
+the agent slices, the model catalog and the `LiveSdk` read) and ignores the parts
+it does not need, so a registered section can never be called with the wrong
+shape. Plugin sections keep their declared `(slices, catalog=...)` contract. Each section's
 wording and toggle: [[agent/graph/docs/system-prompt/framework-sections.meiva.okf.md|framework built-in sections]].
 
 ### Capability index freshness

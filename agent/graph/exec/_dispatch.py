@@ -17,9 +17,9 @@ from ._result import (
     ExecCrashed,
     ExecDone,
     ExecLifecycle,
+    ExecLifecycleKind,
     ExecResult,
     ExecTimedOut,
-    LifecycleKind,
 )
 
 SYSTEM_HALT_NOTE = (
@@ -118,7 +118,7 @@ def _crash_facts(result: ExecCrashed) -> CrashFacts:
 # as "(no output)", which would assert the code ran (P0 #2100), so it says what happened.
 def plan_dispatch(result: ExecResult) -> DispatchPlan:
     match result:
-        case ExecLifecycle(output=output, kind=LifecycleKind.SYSTEM_HALT):
+        case ExecLifecycle(output=output, kind=ExecLifecycleKind.SYSTEM_HALT):
             separator = "" if not output or output.endswith("\n") else "\n"
             return DispatchPlan(
                 DispatchKind.COMPACT,

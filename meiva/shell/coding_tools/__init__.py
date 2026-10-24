@@ -9,9 +9,7 @@ impersonates the launching agent. The ``meiva-guide.external-agents`` skill's
 """
 
 import argparse
-from collections.abc import Callable
-
-from base.sessions.provenance import DispatchProvenance
+import datetime as dt
 
 _PRIORITIES = ("P0", "P1", "P2", "P3")
 
@@ -58,32 +56,29 @@ def owner_terminated(agent_id: int) -> bool:
 
 
 # meiva:note
-# A missing --why is a usage error: the reason is the one field the launcher cannot derive, and a
-# worker without it cannot judge whether the work fits. Takeover launches get the three-line form
-# because they create no task or work file. The builder is a parameter so a test supplies its own
-# instead of patching the agent directory.
+# A missing --why is a usage error: the reason is the one field the launcher cannot derive, and a worker without it cannot judge whether the work fits. Takeover launches get the three-line form because they create no task or work file. The facts of who dispatched the launch are read from the cluster here, once; the block itself is a pure function of them.
 def require_lineage(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
     *,
     takeover: bool = False,
-    build: Callable[..., DispatchProvenance] | None = None,
 ) -> str:
     from base.sessions import provenance as provenance_block
 
-    from ._common import build_dispatch_provenance
+    from ._common import read_dispatch_facts
+    from .plans.lineage import dispatch_provenance, lineage_error
 
-    collect = build or build_dispatch_provenance
     why = (args.why or "").strip()
-    if not why:
-        parser.error("--why is required: one line saying why this work is delegated")
-    if args.for_task is None and (args.task_label is not None or args.priority is not None):
-        parser.error("--task-label/--priority require --for-task")
-    block = collect(
+    error = lineage_error(why, args.for_task, args.task_label, args.priority)
+    if error is not None:
+        parser.error(error)
+    block = dispatch_provenance(
+        read_dispatch_facts(),
         for_task=args.for_task,
         why=why,
         task_label=args.task_label,
         priority=args.priority,
+        now=dt.datetime.now(dt.UTC),
     )
     return provenance_block.render_takeover(block) if takeover else provenance_block.render(block)
 

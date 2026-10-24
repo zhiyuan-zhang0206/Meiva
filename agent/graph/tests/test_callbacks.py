@@ -267,7 +267,7 @@ async def test_finish_flushes_remaining_code_and_publishes_llm_done(live_events:
     # block, so the first tool call's code block_idx=0, buf dict key aligns with 0.
     handler._args_bufs[0] = '{"code":"x"}'
 
-    handler.finish()
+    handler.finish(0.0)
 
     _flush(handler)
     events = await live_events.typed()
@@ -278,13 +278,58 @@ async def test_finish_flushes_remaining_code_and_publishes_llm_done(live_events:
     ]
 
 
+# meiva:note
+# Wrote-code-for-X-seconds is the first code fragment to the last one, measured off the arrival
+# times the caller passes.
+async def test_code_ms_runs_from_the_first_fragment_to_the_last_one(live_events: LiveEvents):
+    pub = live_events.publisher
+    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX, turn_progress=TurnProgress())
+
+    _process(handler, _tool_args_chunk('{"code":"a'), 100.0)
+    _process(handler, _tool_args_chunk("b"), 102.5)
+
+    assert handler.code_ms_by_block == {0: 2500}
+
+
+# meiva:note
+# The code remainder finish() flushes reaches the frontend at the flush, not when the last chunk
+# arrived: the shell passes the flush time and the block's last stamp follows it.
+async def test_finish_stamps_the_code_remainder_it_flushes_with_the_flush_time(
+    live_events: LiveEvents,
+):
+    pub = live_events.publisher
+    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX, turn_progress=TurnProgress())
+
+    _process(handler, _tool_args_chunk('{"code":"a'), 100.0)
+    handler._args_bufs[0] = '{"code":"ab"}'
+    handler.finish(104.5)
+
+    assert handler.code_ms_by_block == {0: 4500}
+
+
+# meiva:note
+# Thinking stamps come only from chunk arrivals: finish() at a later flush time does not stretch a
+# thinking duration.
+async def test_finish_leaves_thinking_durations_at_the_chunk_arrival_times(
+    live_events: LiveEvents,
+):
+    pub = live_events.publisher
+    handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX, turn_progress=TurnProgress())
+
+    _process(handler, _thinking_chunk("a"), 100.0)
+    _process(handler, _thinking_chunk("b"), 101.0)
+    handler.finish(109.0)
+
+    assert handler.reasoning_ms_by_block == {0: 1000}
+
+
 async def test_finish_publishes_llm_done_even_when_no_code(live_events: LiveEvents):
     """No tool_call (text-only / reasoning-only / no output) should still publish LLMDone."""
     pub = live_events.publisher
     handler = RedisStreamHandler(pub, agent_id=42, msg_idx=MSG_IDX, turn_progress=TurnProgress())
 
     _process(handler, _text_chunk("just chatting"))
-    handler.finish()
+    handler.finish(0.0)
 
     _flush(handler)
     events = await live_events.typed()

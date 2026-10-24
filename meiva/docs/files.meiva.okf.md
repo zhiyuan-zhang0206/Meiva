@@ -21,7 +21,7 @@ Persistent file operation interface for agents. Relative paths resolve to the ag
 - `glob(pattern='*') → list[Path]` — glob matching (supports `**` recursion).
 
 ## Constraints
-- Relative paths resolve to the agent's workspace (each agent independent)
+- Relative paths resolve to the agent's workspace (each agent independent), or to `$HOME` before an identity is bound; `meiva/files.py:workspace_base` is the one owner of that base, so a caller that resolves many paths reads it once and passes it down
 - `edit()` does not allow fuzzy matching — `old` must be exact
 - Does not operate on directories (`delete` only deletes files)
 

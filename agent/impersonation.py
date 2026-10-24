@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
-from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
@@ -88,9 +87,6 @@ from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import workspaces_root
 
-AgentGraph = CompiledStateGraph[
-    _state.BaseAgentState, MeivaContext, _state.BaseAgentState, _state.BaseAgentState
-]
 RELAY_WAIT = RelayWait()
 
 
@@ -120,8 +116,14 @@ def lease_phase(session: dict[str, Any] | None) -> LeasePhase | None:
             return LeasePhase.ACCEPTED
         case ImpersonationStatus.ACTIVE:
             return LeasePhase.ACTIVE
-        case _:
+        case (
+            ImpersonationStatus.RELEASED
+            | ImpersonationStatus.REJECTED
+            | ImpersonationStatus.EXPIRED
+        ):
             return LeasePhase.ENDED
+        case unknown:
+            raise ValueError(f"unknown impersonation lease status: {unknown!r}")
 
 
 async def native_status(
@@ -222,7 +224,7 @@ def protect_native_hooks(
 
 
 async def _activate_accepted(
-    graph: AgentGraph,
+    graph: _handoff.AgentGraph,
     db: Database,
     bus: EventBus,
     session: dict[str, Any],
@@ -245,11 +247,9 @@ async def _activate_accepted(
 
 
 # meiva:note
-# Apply each unapplied plugin delta exactly once, recording its receipt. LangGraph types
-# the compiled graph's checkpointer with unknown generics, so the flush receives it
-# through the structural `object` the flush helper accepts.
+# Apply each unapplied plugin delta exactly once, recording its receipt.
 async def apply_plugin_deltas(
-    graph: AgentGraph,
+    graph: _handoff.AgentGraph,
     db: Database,
     session: dict[str, Any],
     agent_id: int,
@@ -272,7 +272,7 @@ async def apply_plugin_deltas(
             )
             receipt = {"lease_id": session["id"], "version": step.version}
             await graph.aupdate_state(config, {**delta, "impersonation_applied": receipt})
-            await _handoff.flush_checkpoint(graph.checkpointer, agent_id)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+            await _handoff.flush_graph_checkpoint(graph, agent_id)
         await asyncio.to_thread(mark_plugin_applied, db, session["id"], step.version, incarnation)
 
 
@@ -286,7 +286,7 @@ def handoff_owed(session: dict[str, Any] | None) -> bool:
 
 
 async def settle_checkpoint(
-    graph: AgentGraph,
+    graph: _handoff.AgentGraph,
     db: Database,
     bus: EventBus,
     agent_id: int,

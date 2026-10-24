@@ -34,7 +34,7 @@ from typing import NamedTuple
 from langchain_core.messages import AnyMessage, HumanMessage
 
 from agent.graph.recall.conversation_query import build_conversation_query
-from agent.graph.recall.memory_note import qualifying, render_note_text
+from agent.graph.recall.memory_note import SearchHit, qualifying, render_note_text
 from agent.messages import NoteTag, system_note_message
 from base.agents.context import MeivaContext
 from base.agents.context.gateway_client import memory_search as memory_client
@@ -160,7 +160,7 @@ async def passive_memory_recall(
     search_ms = round((time.monotonic() - search_started) * 1000)
 
     picked = qualifying(
-        results,
+        [SearchHit(item.path, item.description, item.score, item.chunk) for item in results],
         threshold=memory.memory_recall_inject_threshold,
         limit=memory.memory_recall_inject_max,
         present={item.path for item in results if (memory_root / item.path).is_file()},

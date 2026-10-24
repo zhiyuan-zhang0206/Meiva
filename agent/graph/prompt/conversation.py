@@ -1,9 +1,9 @@
 # meiva:note
 # Core reply routing, language, and milestone progress rules in `user_reply_section` remain active across every `COMMUNICATION_STYLE_SECTIONS` setting (`off`, `oriented`, `concise`, `silent`). Whenever the first turn on a human request calls `execute_code`, it must include a brief substantive opening reply before the first tool call; intermediate turns call `execute_code` with no assistant text unless a milestone is reached. `COMMUNICATION_STYLE_SECTIONS` keys match the non-`off` `agent_communication_style` Literal members so an unknown style raises at render time.
-from base.host.env.agent_slices import AgentSlices
+from .live import SectionInputs
 
 
-def user_reply_section(_slices: AgentSlices) -> str:
+def user_reply_section(_inputs: SectionInputs) -> str:
     return (
         "# Responding to human requests\n\n"
         "Reply in ordinary assistant text in this conversation. Text alongside a "
@@ -110,7 +110,7 @@ _SILENT_BODY = (
 )
 
 
-def harness_user_reply_section(_slices: AgentSlices) -> str:
+def harness_user_reply_section(_inputs: SectionInputs) -> str:
     return (
         "# Responding to human requests\n\n"
         "Reply in ordinary assistant text in this conversation. Text alongside a "

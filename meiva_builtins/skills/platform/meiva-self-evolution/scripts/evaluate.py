@@ -171,9 +171,15 @@ def poll(state: dict[str, Any], *, database: Database) -> dict[str, list[int]]:
     Call each turn until `pending` is empty, then `gather`, using the same
     caller-supplied Database."""
     ids = [r["eval_agent_id"] for r in state["runs"]]
-    status = _status_of(ids, database=database)
-    done = [i for i in ids if status.get(i) in DONE_STATUSES]
-    pending = [i for i in ids if i not in done]
+    return split_progress(ids, _status_of(ids, database=database))
+
+
+# meiva:note
+# Which eval agents are finished and which still run, from the statuses read for them: an agent
+# with no status row counts as still pending.
+def split_progress(run_ids: list[int], statuses: dict[int, str]) -> dict[str, list[int]]:
+    done = [i for i in run_ids if statuses.get(i) in DONE_STATUSES]
+    pending = [i for i in run_ids if i not in done]
     return {"done": done, "pending": pending}
 
 
@@ -212,12 +218,33 @@ def gather(state: dict[str, Any], *, database: Database) -> dict[str, Any]:
     are excluded from the mean and `n`.
     """
     progress = poll(state, database=database)
+    records = {
+        run["eval_agent_id"]: collect_one(
+            run["eval_agent_id"],
+            database=database,
+            leak_paths=_leak_paths(run["eval_agent_id"]),
+        )
+        for run in state["runs"]
+        if run["eval_agent_id"] in progress["done"]
+    }
+    return assemble_report(state, progress["pending"], records)
+
+
+# meiva:note
+# The report over the records collected for the finished eval agents (`records`, by eval agent
+# id; the runs without a record are not reported on). Each replay is verified against its
+# original tool profile and scored; one that never ran, used side-effect tools, diverged, abstained
+# or touched a leak surface stays in `per_task` and `invalid` and is left out of the mean and `n`.
+# The records are not changed.
+def assemble_report(
+    state: dict[str, Any], pending: list[int], records: dict[int, dict[str, Any]]
+) -> dict[str, Any]:
     per_task: list[dict[str, Any]] = []
     for run in state["runs"]:
-        if run["eval_agent_id"] not in progress["done"]:
-            continue
         eval_agent_id = run["eval_agent_id"]
-        rec = collect_one(eval_agent_id, database=database, leak_paths=_leak_paths(eval_agent_id))
+        if eval_agent_id not in records:
+            continue
+        rec = dict(records[eval_agent_id])
         if not (rec.get("task_prompt") or "").strip():
             rec["task_prompt"] = task_prompt_of(rec)
         replay_ok, replay_reason = verify_replay(
@@ -250,7 +277,7 @@ def gather(state: dict[str, Any], *, database: Database) -> dict[str, Any]:
         "per_task": per_task,
         "invalid": invalid,
         "invalidated": sum(task["invalidated"] for task in per_task),
-        "pending": progress["pending"],
+        "pending": pending,
         "skipped": state["skipped"],
     }
 

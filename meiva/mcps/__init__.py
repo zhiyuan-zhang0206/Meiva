@@ -1,19 +1,9 @@
 """Tools exposed by external MCP servers. Call `meiva.mcps.<server>.<tool>(...)`
 with the tool's named arguments."""
 
-# Package door. This `__init__` IS the agent-facing `meiva.mcps` namespace — its
-# docstring above is what `meiva.help()` shows, so the package notes live in this
-# comment. The `_`-private submodules are the MCP plumbing behind it:
-#   _remote     client of the per-machine MCP daemon socket (the call path here)
-#   _oauth      OAuth 2.1 client + token storage for remote (`url`) servers
-#   _daemon     the shared per-machine daemon process
-#               (`python -m meiva.mcps._daemon`, ops roster session "mcp-daemon")
-#   _browser    the daemon's in-process line client for the browser-mcp service
-#   _computer   the daemon's in-process line client for the computer-mcp service
-# Every submodule is private on purpose: `meiva.mcps.<name>` resolves to an MCP
-# server proxy, so a public submodule would shadow the server of the same name.
-# For the same reason the server configuration (`meiva.mcps.config`, imported by
-# cli/ and ops/) stays outside this package.
+# meiva:note
+# Package door. This `__init__` IS the agent-facing `meiva.mcps` namespace, its docstring above is what `meiva.help()` shows, so the package notes live in this comment. It is the facade: it reads the bound context and hands plain values to the `_`-private submodules behind it (see meiva/mcps/docs/structure.meiva.okf.md). `_tools` holds the proxies and the call funnel; `_clients` and `_remote` are the client of the per-machine MCP daemon socket; `_oauth` is the OAuth 2.1 client and token storage for remote (`url`) servers; `_daemon` is the shared per-machine daemon process (`python -m meiva.mcps._daemon`, ops roster session "mcp-daemon") with `_policy`, `_plan`, `_startup` and `_wire` as its strict decision modules and `_guards` as its socket and process effects; `_browser` and `_computer` are the daemon's in-process line clients for the browser-mcp and computer-mcp services. Every submodule is private on purpose: `meiva.mcps.<name>` resolves to an MCP server proxy, so a public submodule would shadow the server of the same name. For the same reason the server configuration (`meiva.mcps.config`, imported by cli/ and ops/) stays outside this package.
+# meiva:link meiva/mcps/docs/structure.meiva.okf.md
 
 from __future__ import annotations
 
@@ -46,7 +36,7 @@ from meiva.mcps.config import (
 from meiva.mcps.config import (
     ToolInfo as ToolInfo,
 )
-from meiva.sdk_surface import agent_identity, process_context
+from meiva.sdk_surface import process_context
 from meiva.sdk_surface.validation import coerce_str
 
 # The module whose `call_raw` every tool call funnels through, text form and `raw` form alike.
@@ -62,20 +52,16 @@ def _cache_dir() -> Path:
     return meiva_home() / "mcp_cache"
 
 
-def _validate_identity() -> None:
-    """The external-identity check made before a tool call."""
-    agent_identity.validate_external_identity()
-
-
+# meiva:note
+# What this process's tools run against, read from the bound context once: its daemon client (dialed on the first request; the SDK never starts servers), the timeout in force now, the disk cache and the context's agent identity. A proxy keeps the source it was created with, so a changed timeout reaches the next proxy.
 def _source() -> _tools.ToolSource:
-    """What this process's tools run against: the bound context's daemon client (built on first
-    use; the SDK never starts servers), its live timeout and the disk cache."""
-    clients = process_context.current_context().clients.get(McpClients)
+    context = process_context.current_context()
+    clients = context.clients.get(McpClients)
     return _tools.ToolSource(
-        remote=clients.remote,
-        timeout_seconds=clients.timeout_seconds,
-        cache=_tools.DiskCache(_cache_dir),
-        validate_identity=_validate_identity,
+        remote=clients,
+        timeout_seconds=clients.timeout_seconds(),
+        cache=_tools.DiskCache(_cache_dir()),
+        identity=context.identity,
     )
 
 

@@ -1,15 +1,18 @@
 """`meiva.settings` exposes registered plugin configs as attributes."""
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
-from base.packages.plugin_config_images import DiskPluginConfigImages, PluginConfigOwner
+from base.packages.plugin_config_images import PluginConfigOwner
 from base.packages.plugins.config_face import disk_image_path
 from base.packages.plugins.config_registration import (
     bind_plugin_config,
 )
+from meiva.sdk_surface.installation import Installation
+from meiva.sdk_surface.tests.installation_holder import held_installation
 
 
 class _FixtureConfig(BaseModel):
@@ -19,27 +22,11 @@ class _FixtureConfig(BaseModel):
 
 
 @pytest.fixture
-def isolated_registry(monkeypatch: pytest.MonkeyPatch, unit_home: Path) -> dict[str, BaseModel]:
+def isolated_registry() -> Iterator[dict[str, BaseModel]]:
     """The SDK reads its current installation's own config bindings."""
-    import meiva
-    from base.packages.plugins.extensions import EMPTY
-    from meiva.sdk_surface.installation import Installation
-
     configs: dict[str, BaseModel] = {}
-    installation = Installation(
-        registry=EMPTY,
-        config_images=DiskPluginConfigImages(unit_home),
-        expansions=(),
-        wrap_layers={},
-        skill_providers=(),
-        metered=(),
-        disabled=frozenset(),
-        faces=False,
-        undo=(),
-        configs=configs,
-    )
-    monkeypatch.setattr(meiva, "__plugin_installation__", installation, raising=False)
-    return configs
+    with held_installation(Installation.bare(configs=configs)):
+        yield configs
 
 
 def test_meiva_settings_plugins_attribute_access(

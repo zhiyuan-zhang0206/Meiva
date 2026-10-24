@@ -6,6 +6,7 @@ A mitigation, not a boundary: a clean result means "no known pattern
 matched", not "safe".
 """
 
+from dataclasses import dataclass
 from typing import Any, cast
 
 from base.agents.messages import injection_scan
@@ -26,6 +27,83 @@ _FINDINGS_CHANNEL = "security_findings"
 _MODEL_TRIGGER = "instructions aimed at an AI reader"
 
 
+# meiva:note
+# What a finding needs to reach the agent, read once by the caller: whether scanning is enabled,
+# whether an exec turn is running, and that turn's state update (the dict a finding is appended
+# to; meaningful only when `in_turn`). The implementation below works on this value only.
+@dataclass(frozen=True)
+class FindingDelivery:
+    enabled: bool
+    in_turn: bool
+    update: object
+
+    # meiva:note
+    # True when a finding recorded now would reach the agent, so a caller can skip a paid check
+    # whose verdict would be dropped.
+    @property
+    def active(self) -> bool:
+        return self.enabled and self.in_turn
+
+
+# meiva:note
+# The facade read: this process's scan setting and exec-turn state update, as a value.
+def current_delivery() -> FindingDelivery:
+    from meiva.sdk_surface.settings import agent_setting
+
+    enabled = agent_setting("security_scan_enabled")
+    in_turn = process_context.in_exec_turn()
+    return FindingDelivery(
+        enabled=enabled,
+        in_turn=in_turn,
+        update=process_context.get_state_update() if in_turn else None,
+    )
+
+
+# meiva:note
+# Append one finding to the exec turn's state update, the delta the exec child returns and the
+# exec node commits through the channel's reducer. A disabled scan records nothing; outside an
+# exec turn there is no state update to carry the finding, so it is dropped with a logged
+# warning; an update that is no longer a dict is an error.
+def deliver_finding(delivery: FindingDelivery, source: str, triggers: list[str]) -> None:
+    if not delivery.enabled:
+        return
+
+    if not delivery.in_turn:
+        logger.warning(
+            "prompt-injection finding from {} ({}) not delivered: scan_content ran outside an "
+            "exec turn, which has no state update to carry it",
+            source,
+            ", ".join(triggers),
+        )
+        return
+    update = delivery.update
+    if not isinstance(update, dict):
+        raise TypeError(
+            f"meiva.state_update must stay a dict, got {type(update).__name__} (security finding)"
+        )
+    state = cast("dict[str, Any]", update)
+    state[_FINDINGS_CHANNEL] = [
+        *state.get(_FINDINGS_CHANNEL, []),
+        SecurityFindingEntry(source=source, triggers=triggers),
+    ]
+
+
+# meiva:note
+# Deliver the finding of a model's judgement that `source`'s content is aimed at an AI reader;
+# `score` is the model's probability for that verdict.
+def deliver_model_finding(delivery: FindingDelivery, source: str, score: float) -> None:
+    deliver_finding(delivery, source, [f"{_MODEL_TRIGGER} (model score {score:.2f})"])
+
+
+# meiva:note
+# Scan `content` and deliver any finding through `delivery`; the content is returned unchanged.
+def scan_to(delivery: FindingDelivery, content: str, source: str) -> str:
+    hits = injection_scan.triggers(content)
+    if hits:
+        deliver_finding(delivery, source, hits)
+    return content
+
+
 def record_finding(source: str, triggers: list[str]) -> None:
     """Hand one security finding to the exec turn's state update.
 
@@ -41,52 +119,7 @@ def record_finding(source: str, triggers: list[str]) -> None:
     the log (the agent host's claim-side inbound scan uses
     `injection_scan.scan_inbound_content`, whose caller owns the finding).
     """
-    from meiva.sdk_surface.settings import agent_setting
-
-    if not agent_setting("security_scan_enabled"):
-        return
-
-    if not process_context.in_exec_turn():
-        logger.warning(
-            "prompt-injection finding from {} ({}) not delivered: scan_content ran outside an "
-            "exec turn, which has no state update to carry it",
-            source,
-            ", ".join(triggers),
-        )
-        return
-    update = process_context.get_state_update()
-    if not isinstance(update, dict):
-        raise TypeError(
-            f"meiva.state_update must stay a dict, got {type(update).__name__} (security finding)"
-        )
-    state = cast("dict[str, Any]", update)
-    state[_FINDINGS_CHANNEL] = [
-        *state.get(_FINDINGS_CHANNEL, []),
-        SecurityFindingEntry(source=source, triggers=triggers),
-    ]
-
-
-def finding_delivery_active() -> bool:
-    """True when a finding recorded now would reach the agent: scanning is
-    enabled and an exec turn is running.
-
-    Lets a caller skip a paid check whose verdict `record_finding` would drop.
-    """
-    from meiva.sdk_surface.settings import agent_setting
-
-    if not agent_setting("security_scan_enabled"):
-        return False
-
-    return process_context.in_exec_turn()
-
-
-def record_model_finding(source: str, score: float) -> None:
-    """Record that a model judged `source`'s content to be aimed at an AI reader.
-
-    `score` is the model's probability for that verdict. Delivered like any rule
-    finding: a SECURITY system note after the tool result, content untouched.
-    """
-    record_finding(source, [f"{_MODEL_TRIGGER} (model score {score:.2f})"])
+    deliver_finding(current_delivery(), source, triggers)
 
 
 def scan_content(content: str, source: str = "unknown") -> str:

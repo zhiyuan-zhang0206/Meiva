@@ -10,6 +10,15 @@ from __future__ import annotations
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from meiva.sdk_surface import process_context
+from meiva.sdk_surface.pure.caller.identity_plan import (
+    ActorFacts,
+    actor_after_external,
+    actor_before_external,
+    attributed_agent_id,
+    caller_facts,
+    self_action_refusal,
+)
+from meiva.sdk_surface.pure.caller.usage_plan import actor_id_refusal, lease_refusal
 
 from .validation import is_launched_child as is_launched_child
 
@@ -34,11 +43,7 @@ def agent_id(context: MeivaContext | None = None) -> int | None:
     instead of falling back. Returns `None` when no source provides an identity;
     callers that tolerate this pre-bootstrap state must check for it explicitly.
     """
-    external = validate_external_identity(context)
-    if external is not None:
-        return external
-    identity = _bound(context)
-    return None if identity is None else identity.agent_id
+    return attributed_agent_id(validate_external_identity(context), caller_facts(_bound(context)))
 
 
 def require_agent_id(context: MeivaContext | None = None) -> int:
@@ -74,14 +79,13 @@ def require_lease_free_agent_id() -> int:
     serializable authority. Remote compound acceptance cannot revalidate it
     after its own transaction lock wait. This guard makes no server ACL claim.
     """
-    identity = _bound()
-    if identity is not None and identity.lease is not None:
-        raise ValueError("strong task assignment does not support a borrowed lease")
+    refused = lease_refusal(caller_facts(_bound()))
+    if refused is not None:
+        raise ValueError(refused)
     actor = require_agent_id()
-    if isinstance(actor, bool) or not isinstance(actor, int):
-        raise TypeError("actor agent id must be an integer")
-    if actor <= 0:
-        raise ValueError("actor agent id must be positive")
+    invalid = actor_id_refusal(actor)
+    if invalid is not None:
+        raise invalid[0](invalid[1])
     return actor
 
 
@@ -102,33 +106,29 @@ def require_actor(context: MeivaContext | None = None) -> str:
         RuntimeError: no actor or agent identity is available, or the borrowed
             lease no longer permits this identity.
     """
-    borrowed = validate_external_identity(context)
-    if borrowed is not None:
-        return f"agent:{borrowed}"
-    identity = _bound(context)
-    if context is not None and identity is not None:
-        if identity.actor is not None:
-            return identity.actor
-        if identity.agent_id is not None:
-            return f"agent:{identity.agent_id}"
     from base.agents.messages.external_caller import external_caller
 
+    facts = ActorFacts(
+        borrowed_agent_id=validate_external_identity(context),
+        context_supplied=context is not None,
+        identity=caller_facts(_bound(context)),
+    )
+    early = actor_before_external(facts)
+    if early is not None:
+        return early
     external = external_caller()
-    if external is not None:
-        return external.source()
-    if identity is not None and identity.actor is not None:
-        return identity.actor
-    if identity is None and context is None:
+    decision = actor_after_external(facts, None if external is None else external.source())
+    if decision.actor is not None:
+        return decision.actor
+    if decision.recheck_load_failure:
         from meiva.sdk_surface import install as sdk_install
 
         sdk_install.raise_load_failure()
-    if identity is None or identity.agent_id is None:
-        raise RuntimeError(
-            "this process has no established actor or agent identity — "
-            "meiva.agents.spawn / send_message / resurrect need one "
-            "(a bootstrapped agent process, or a context with an actor for a system principal)"
-        )
-    return f"agent:{identity.agent_id}"
+    raise RuntimeError(
+        "this process has no established actor or agent identity — "
+        "meiva.agents.spawn / send_message / resurrect need one "
+        "(a bootstrapped agent process, or a context with an actor for a system principal)"
+    )
 
 
 def assert_self_action(action: str) -> None:
@@ -143,14 +143,6 @@ def assert_self_action(action: str) -> None:
         RuntimeError: this process does not own the agent turn loop (a launched
             background script), or has no established identity.
     """
-    identity = _bound()
-    if identity is not None and not identity.owns_loop:
-        raise RuntimeError(
-            f"meiva.self.{action}() can only be called from inside an agent process, "
-            f"not from a background script launched by one"
-        )
-    if identity is None or identity.agent_id is None:
-        raise RuntimeError(
-            f"meiva.self.{action}() needs an established agent identity; this process "
-            f"never ran the agent bootstrap (agent id is unset)"
-        )
+    refused = self_action_refusal(caller_facts(_bound()), action)
+    if refused is not None:
+        raise RuntimeError(refused)

@@ -18,7 +18,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Overwrite
 
 from agent.graph.exec.node import exec_node_impl
-from agent.graph.exec.process import SubprocessExecProcess
+from agent.graph.exec.process import SubprocessExecProcess, read_parent_facts
 from agent.graph.hooks.framework import framework_hooks
 from agent.hooks.security import deliver_security_findings
 from agent.state import AgentState, build_agent_state
@@ -27,7 +27,7 @@ from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag, read_meiva_kwargs
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.clock import Clock
-from base.config.tests.configuration import defaults
+from base.config.tests.configuration import defaults, snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -129,7 +129,7 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
             agent=AgentSlices.resolve(default_reader=defaults(agent__security_scan_enabled=True)),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
-            clients=process_clients(),
+            clients=process_clients(config=snapshot_process_config()),
             identity=AgentIdentity(agent_id=1042, owns_loop=True),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
@@ -155,7 +155,9 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
 
     builder: Any = StateGraph(AgentState, context_schema=MeivaContext)
     builder.add_node(
-        "exec", partial(exec_node_impl, process=SubprocessExecProcess()), input_schema=AgentState
+        "exec",
+        partial(exec_node_impl, process=SubprocessExecProcess(read_parent_facts())),
+        input_schema=AgentState,
     )
     builder.add_node("after_exec", after_exec)
     builder.add_edge(START, "exec")

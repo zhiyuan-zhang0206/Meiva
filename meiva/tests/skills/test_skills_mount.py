@@ -3,13 +3,11 @@ from pathlib import Path
 import pytest
 
 import meiva.skills as skills_mod
-from base.packages.extensions import install_registry
 from base.packages.skills.tree import SkillNameCollision, identifier, target
 from meiva.sdk_surface import skill_sources
 from meiva.skills.skill_proxies import Namespace, SkillProxy
 from meiva.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
-from meiva.tests.skills._skills_helpers import overlay_all_enabled as overlay_all_enabled
-from meiva.tests.skills._skills_helpers import write_skill
+from meiva.tests.skills._skills_helpers import track, track_present, write_skill
 
 pytestmark = pytest.mark.usefixtures("unit_home")
 
@@ -122,7 +120,7 @@ def test_mount_hash_dedup_preserves_second_unique_skill(tmp_path: Path) -> None:
 
 
 def test_mount_hash_dedup_same_content_across_mount_calls_in_scan_tree(
-    fake_skills_dir: Path, tmp_path: Path, monkeypatch
+    fake_skills_dir: Path, tmp_path: Path
 ) -> None:
     content = "---\nname: dup-skill\ndescription: Same everywhere\n---\n\n# Dup\n"
 
@@ -154,6 +152,7 @@ def _redundant_skill_structure(root: Path) -> None:
         "---\nname: sub-skill\ndescription: A sub skill\n---\n\n# Sub\n",
         encoding="utf-8",
     )
+    track_present()
 
 
 def test_auto_promote_same_named_child_to_root(db_url: str, fake_skills_dir: Path) -> None:
@@ -209,6 +208,7 @@ def test_auto_promote_does_not_override_existing_root_skill(
         "---\nname: sources\ndescription: Redundant child\n---\n\n# Child\n",
         encoding="utf-8",
     )
+    track_present()
 
     node = skills_mod.sources
     assert isinstance(node, Namespace)
@@ -227,6 +227,7 @@ def test_auto_promote_deep_nesting(fake_skills_dir: Path) -> None:
         "---\nname: c\ndescription: Sibling\n---\n\n# C\n",
         encoding="utf-8",
     )
+    track_present()
 
     b_node = skills_mod.a.b
     assert isinstance(b_node, Namespace)
@@ -285,19 +286,15 @@ def test_legacy_underscore_namespace_dir_still_loads(fake_skills_dir: Path) -> N
     assert skills_mod.web_ai.console.name == "console"
 
 
-def test_registry_gate_matches_across_the_dash_underscore_fold(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    write_skill(fake_skills_dir, "meiva-goal", "name: meiva-goal\ndescription: d")
-    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"meiva-goal"})
+def test_registry_gate_matches_across_the_dash_underscore_fold(fake_skills_dir: Path) -> None:
+    write_skill(fake_skills_dir, "meiva_goal", "name: meiva-goal\ndescription: d", tracked=False)
+    track("meiva-goal")
     assert [identifier(s) for s in skills_mod.names()] == ["meiva-goal"]
 
 
-def test_registry_gate_still_hides_an_unlisted_skill(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    write_skill(fake_skills_dir, "meiva-goal", "name: meiva-goal\ndescription: d")
-    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"something-else"})
+def test_registry_gate_still_hides_an_unlisted_skill(fake_skills_dir: Path) -> None:
+    write_skill(fake_skills_dir, "meiva-goal", "name: meiva-goal\ndescription: d", tracked=False)
+    track("something-else")
     assert skills_mod.names() == []
 
 
@@ -339,21 +336,17 @@ def test_a_provider_root_may_still_override_a_same_named_skill(
         assert skill["description"] == "project-local"
 
 
-def test_index_gate_folds_dash_underscore(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_index_gate_folds_dash_underscore(fake_skills_dir: Path) -> None:
     (fake_skills_dir / "foo_bar").mkdir()
     (fake_skills_dir / "foo_bar" / "INDEX.md").write_text("namespace doc", encoding="utf-8")
-    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"foo-bar"})
+    track("foo-bar")
     assert skills_mod.foo_bar.__doc__ == "namespace doc"
 
 
-def test_index_gate_still_hides_unlisted_dirs(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    write_skill(fake_skills_dir, "foo_bar", "name: foo-bar\ndescription: s")
+def test_index_gate_still_hides_unlisted_dirs(fake_skills_dir: Path) -> None:
+    write_skill(fake_skills_dir, "foo_bar", "name: foo-bar\ndescription: s", tracked=False)
     (fake_skills_dir / "foo_bar" / "INDEX.md").write_text("namespace doc", encoding="utf-8")
-    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"something-else"})
+    track("something-else")
     assert skills_mod.names() == []
 
 
@@ -375,22 +368,16 @@ def test_root_skill_md_still_loads(fake_skills_dir: Path) -> None:
     assert [s["name"] for s in skills_mod.names()] == ["rss", "root-skill"]
 
 
-def test_frontmatter_name_not_folding_to_dir_is_refused(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_frontmatter_name_not_folding_to_dir_is_refused(fake_skills_dir: Path) -> None:
     write_skill(fake_skills_dir, "page-ocr", "name: page\ndescription: read page")
-    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"page-ocr"})
     from base.packages.skills.names import SkillIdentityMismatch
 
     with pytest.raises(SkillIdentityMismatch):
         skills_mod.names()
 
 
-def test_namespaced_subskill_folds_against_its_leaf_dir(
-    fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_namespaced_subskill_folds_against_its_leaf_dir(fake_skills_dir: Path) -> None:
     (fake_skills_dir / "web_ai").mkdir()
     write_skill(fake_skills_dir / "web_ai", "console", "name: console\ndescription: d")
-    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"web_ai"})
     (skill,) = skills_mod.names()
     assert identifier(skill) == "web-ai:console"

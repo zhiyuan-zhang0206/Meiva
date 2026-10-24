@@ -10,11 +10,16 @@ fourth member, 'off', which is a gate like any other and renders nothing.
 """
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 import pytest
 
+from agent.graph.prompt.live import LiveSdk, SectionInputs
+from agent.graph.prompt.skill_selection import SkillView
 from agent.graph.prompt.system_prompt import (
+    FRAMEWORK_SECTIONS,
+    HARNESS_FRAMEWORK_SECTIONS,
     INVEST_IN_THE_FUTURE_SECTION,
     agent_workspace_pointer,
     align_before_action_section,
@@ -40,11 +45,31 @@ def _slices(**changes: Any) -> AgentSlices:
     return AgentSlices.resolve(default_reader=defaults(**changes))
 
 
+def _inputs(**changes: Any) -> SectionInputs:
+    live = LiveSdk(SkillView(("*",), (), (), ()), (), ())
+    return SectionInputs(_slices(**changes), build_model_catalog(), live)
+
+
+@pytest.mark.parametrize(
+    "sections",
+    [FRAMEWORK_SECTIONS, HARNESS_FRAMEWORK_SECTIONS],
+    ids=["framework", "harness"],
+)
+def test_every_registered_section_renders_from_the_same_inputs(
+    sections: tuple[Callable[[SectionInputs], str], ...],
+) -> None:
+    inputs = _inputs()
+
+    rendered = [section(inputs) for section in sections]
+
+    assert all(isinstance(text, str) for text in rendered)
+    assert len(rendered) == len(sections) >= 15
+    assert any(text for text in rendered)
+
+
 def test_alignment_preserves_authorized_work_and_optional_methods() -> None:
 
-    rendered = align_before_action_section(
-        _slices(agent__prompt_align_before_action_enabled=True), catalog=build_model_catalog()
-    )
+    rendered = align_before_action_section(_inputs(agent__prompt_align_before_action_enabled=True))
 
     assert "outcome, cost, autonomy, or authority" in rendered
     assert "choose routine methods within the authorized scope yourself" in rendered
@@ -61,9 +86,7 @@ def test_alignment_preserves_authorized_work_and_optional_methods() -> None:
 )
 def test_invest_in_the_future_section_gating(enabled: bool, expect_section: bool):
 
-    rendered = invest_in_the_future_section(
-        _slices(agent__prompt_invest_future_enabled=enabled), catalog=build_model_catalog()
-    )
+    rendered = invest_in_the_future_section(_inputs(agent__prompt_invest_future_enabled=enabled))
 
     if expect_section:
         assert "# Invest in the future" in rendered
@@ -74,27 +97,21 @@ def test_invest_in_the_future_section_gating(enabled: bool, expect_section: bool
 def test_invest_in_the_future_section_is_verbatim():
     """The user-approved future-signal guidance is intentionally byte-exact."""
 
-    rendered = invest_in_the_future_section(
-        _slices(agent__prompt_invest_future_enabled=True), catalog=build_model_catalog()
-    )
+    rendered = invest_in_the_future_section(_inputs(agent__prompt_invest_future_enabled=True))
 
     assert rendered == INVEST_IN_THE_FUTURE_SECTION
 
 
 def test_invest_in_the_future_section_defaults_to_on():
 
-    rendered = invest_in_the_future_section(
-        _slices(agent__prompt_invest_future_enabled=None), catalog=build_model_catalog()
-    )
+    rendered = invest_in_the_future_section(_inputs(agent__prompt_invest_future_enabled=None))
 
     assert rendered == INVEST_IN_THE_FUTURE_SECTION
 
 
 def test_invest_in_the_future_section_has_no_platform_words_or_numeric_thresholds():
 
-    rendered = invest_in_the_future_section(
-        _slices(agent__prompt_invest_future_enabled=True), catalog=build_model_catalog()
-    )
+    rendered = invest_in_the_future_section(_inputs(agent__prompt_invest_future_enabled=True))
 
     assert re.search(r"\d", rendered) is None
     assert all(
@@ -105,9 +122,7 @@ def test_invest_in_the_future_section_has_no_platform_words_or_numeric_threshold
 
 def test_invest_in_the_future_section_never_filters_out_a_signal():
 
-    rendered = invest_in_the_future_section(
-        _slices(agent__prompt_invest_future_enabled=True), catalog=build_model_catalog()
-    )
+    rendered = invest_in_the_future_section(_inputs(agent__prompt_invest_future_enabled=True))
 
     assert all(
         sentence not in rendered
@@ -155,9 +170,7 @@ def test_invest_in_the_future_section_absent_from_full_prompt_when_off():
 )
 def test_temporal_awareness_section_gating(enabled: bool, expect_section: bool):
 
-    rendered = temporal_awareness_section(
-        _slices(agent__prompt_temporal_awareness_enabled=enabled), catalog=build_model_catalog()
-    )
+    rendered = temporal_awareness_section(_inputs(agent__prompt_temporal_awareness_enabled=enabled))
 
     if expect_section:
         assert "Temporal awareness" in rendered
@@ -174,9 +187,7 @@ def test_temporal_awareness_section_gating(enabled: bool, expect_section: bool):
 )
 def test_keep_it_simple_section_gating(enabled: bool, expect_section: bool):
 
-    rendered = keep_it_simple_section(
-        _slices(agent__prompt_keep_it_simple_enabled=enabled), catalog=build_model_catalog()
-    )
+    rendered = keep_it_simple_section(_inputs(agent__prompt_keep_it_simple_enabled=enabled))
 
     if expect_section:
         assert "Keep It Simple" in rendered
@@ -186,9 +197,7 @@ def test_keep_it_simple_section_gating(enabled: bool, expect_section: bool):
 
 def test_keep_it_simple_section_carries_meta_principle():
 
-    rendered = keep_it_simple_section(
-        _slices(agent__prompt_keep_it_simple_enabled=True), catalog=build_model_catalog()
-    )
+    rendered = keep_it_simple_section(_inputs(agent__prompt_keep_it_simple_enabled=True))
 
     assert "Keep It Simple" in rendered
     assert "looks cheaper" in rendered and "conceptually simpler" in rendered
@@ -216,7 +225,7 @@ def test_codeact_section_defaults_to_on():
 )
 def test_codeact_section_gating(enabled: bool, expect_section: bool):
 
-    rendered = codeact_section(_slices(agent__prompt_codeact_enabled=enabled))
+    rendered = codeact_section(_inputs(agent__prompt_codeact_enabled=enabled))
 
     if expect_section:
         assert "CodeAct" in rendered
@@ -229,7 +238,7 @@ def test_codeact_section_urges_batching():
     known operations together, branches folded into one script, and the
     absence of an intermediate result to inspect as the condition for batching."""
 
-    rendered = codeact_section(_slices(agent__prompt_codeact_enabled=True))
+    rendered = codeact_section(_inputs(agent__prompt_codeact_enabled=True))
 
     assert "execute_code" in rendered
     assert "Read independent files together" in rendered
@@ -268,9 +277,7 @@ def test_codeact_section_absent_from_full_prompt_when_off():
 
 def test_temporal_awareness_invokes_ai_capability_timescale():
 
-    rendered = temporal_awareness_section(
-        _slices(agent__prompt_temporal_awareness_enabled=True), catalog=build_model_catalog()
-    )
+    rendered = temporal_awareness_section(_inputs(agent__prompt_temporal_awareness_enabled=True))
 
     assert "meiva.skills.meiva_workflow.capability_timescale" in rendered
     assert "scheduling, estimating, or judging the feasibility" in rendered
@@ -285,9 +292,7 @@ def test_temporal_awareness_invokes_ai_capability_timescale():
 )
 def test_ui_delivery_section_gating(enabled: bool, expect_section: bool):
 
-    rendered = ui_delivery_section(
-        _slices(agent__prompt_ui_delivery_enabled=enabled), catalog=build_model_catalog()
-    )
+    rendered = ui_delivery_section(_inputs(agent__prompt_ui_delivery_enabled=enabled))
 
     if expect_section:
         assert "Deliver through the UI" in rendered
@@ -302,9 +307,7 @@ def test_ui_delivery_section_prefers_ui_over_file_paths():
     handoff. It names NO concrete SDK entry points: the rule is the stable
     part, function signatures are not, so the section must stay example-free."""
 
-    rendered = ui_delivery_section(
-        _slices(agent__prompt_ui_delivery_enabled=True), catalog=build_model_catalog()
-    )
+    rendered = ui_delivery_section(_inputs(agent__prompt_ui_delivery_enabled=True))
 
     assert "through the UI" in rendered
     assert "telling the user its path" in rendered
@@ -319,9 +322,7 @@ def test_ui_delivery_section_prefers_ui_over_file_paths():
 def test_communication_style_only_renders_optional_narration(style: str) -> None:
     """Reply routing has one unconditional owner, independent from narration."""
 
-    rendered = communication_style_section(
-        _slices(agent__agent_communication_style=style), catalog=build_model_catalog()
-    )
+    rendered = communication_style_section(_inputs(agent__agent_communication_style=style))
 
     assert rendered.startswith("# ")
     assert "`meiva.ui.notify`" in rendered
@@ -331,9 +332,7 @@ def test_communication_style_only_renders_optional_narration(style: str) -> None
 def test_oriented_style_keeps_the_user_oriented() -> None:
     """Explicit live pairing allows substantive checkpoints, not a tool log."""
 
-    rendered = communication_style_section(
-        _slices(agent__agent_communication_style="oriented"), catalog=build_model_catalog()
-    )
+    rendered = communication_style_section(_inputs(agent__agent_communication_style="oriented"))
 
     assert rendered.startswith("# Keeping the user oriented")
     assert "This agent is configured for live pairing" in rendered
@@ -347,9 +346,7 @@ def test_silent_style_asks_for_no_narration_and_a_closing_report() -> None:
     """Silent means quiet *while working* plus one standalone report at the end —
     not silence about the outcome. Blockers still interrupt immediately."""
 
-    rendered = communication_style_section(
-        _slices(agent__agent_communication_style="silent"), catalog=build_model_catalog()
-    )
+    rendered = communication_style_section(_inputs(agent__agent_communication_style="silent"))
 
     assert "Work without narrating" in rendered
     assert "one complete report" in rendered
@@ -363,9 +360,7 @@ def test_concise_style_speaks_only_at_milestones() -> None:
     """Between milestones the agent works without commenting — and neither of
     the other two styles' guidance leaks in."""
 
-    rendered = communication_style_section(
-        _slices(agent__agent_communication_style="concise"), catalog=build_model_catalog()
-    )
+    rendered = communication_style_section(_inputs(agent__agent_communication_style="concise"))
 
     assert "Speak at milestones" in rendered
     assert "Keeping the user oriented" not in rendered
@@ -393,9 +388,7 @@ def test_every_narrating_style_renders_a_distinct_section() -> None:
 def test_off_style_omits_the_section_entirely() -> None:
     """Off omits optional narration while the core reply policy stays active."""
 
-    rendered = communication_style_section(
-        _slices(agent__agent_communication_style="off"), catalog=build_model_catalog()
-    )
+    rendered = communication_style_section(_inputs(agent__agent_communication_style="off"))
 
     assert rendered == ""
 
@@ -427,8 +420,7 @@ def test_off_style_is_absent_from_the_full_system_prompt() -> None:
 def test_user_tone_section_gating(enabled: bool, expect_section: bool) -> None:
 
     rendered = user_tone_section(
-        _slices(agent__prompt_user_tone_enabled=enabled, lm__llm_model="deepseek-v4-pro"),
-        catalog=build_model_catalog(),
+        _inputs(agent__prompt_user_tone_enabled=enabled, lm__llm_model="deepseek-v4-pro")
     )
 
     if expect_section:
@@ -440,8 +432,7 @@ def test_user_tone_section_gating(enabled: bool, expect_section: bool) -> None:
 def test_user_tone_defaults_on_for_non_claude() -> None:
 
     assert user_tone_section(
-        _slices(agent__prompt_user_tone_enabled=None, lm__llm_model="deepseek-v4-pro"),
-        catalog=build_model_catalog(),
+        _inputs(agent__prompt_user_tone_enabled=None, lm__llm_model="deepseek-v4-pro")
     ).startswith("# Communicating with the user\n\n")
 
 
@@ -459,8 +450,7 @@ def test_user_tone_uses_strong_gemini_variant() -> None:
     )
 
     rendered = user_tone_section(
-        _slices(agent__prompt_user_tone_enabled=None, lm__llm_model=gemini_id),
-        catalog=build_model_catalog(),
+        _inputs(agent__prompt_user_tone_enabled=None, lm__llm_model=gemini_id)
     )
 
     assert rendered.startswith("# Communicating with the user\n\n")
@@ -472,8 +462,7 @@ def test_user_tone_defaults_off_for_claude() -> None:
 
     assert (
         user_tone_section(
-            _slices(agent__prompt_user_tone_enabled=None, lm__llm_model="claude-sonnet-5"),
-            catalog=build_model_catalog(),
+            _inputs(agent__prompt_user_tone_enabled=None, lm__llm_model="claude-sonnet-5")
         )
         == ""
     )
@@ -482,8 +471,7 @@ def test_user_tone_defaults_off_for_claude() -> None:
 def test_user_tone_claude_variant_requires_explicit_enablement() -> None:
 
     rendered = user_tone_section(
-        _slices(agent__prompt_user_tone_enabled=True, lm__llm_model="claude-sonnet-5"),
-        catalog=build_model_catalog(),
+        _inputs(agent__prompt_user_tone_enabled=True, lm__llm_model="claude-sonnet-5")
     )
 
     assert "lecturing" in rendered
@@ -494,16 +482,14 @@ def test_user_tone_claude_variant_requires_explicit_enablement() -> None:
 def test_user_tone_unknown_model_uses_light_variant() -> None:
 
     assert "State conclusions and judgments directly" in user_tone_section(
-        _slices(agent__prompt_user_tone_enabled=True, lm__llm_model="unknown-model-v1"),
-        catalog=build_model_catalog(),
+        _inputs(agent__prompt_user_tone_enabled=True, lm__llm_model="unknown-model-v1")
     )
 
 
 def test_user_tone_section_stays_semantic_not_api_specific() -> None:
 
     rendered = user_tone_section(
-        _slices(agent__prompt_user_tone_enabled=True, lm__llm_model="deepseek-v4-pro"),
-        catalog=build_model_catalog(),
+        _inputs(agent__prompt_user_tone_enabled=True, lm__llm_model="deepseek-v4-pro")
     )
 
     assert "meiva.ui." not in rendered
@@ -596,8 +582,7 @@ _CROSS_MACHINE_DELEGATION_SENTENCE = (
 def test_cross_machine_delegation_section_gating(enabled: bool, expect_section: bool):
 
     rendered = cross_machine_delegation_section(
-        _slices(agent__prompt_cross_machine_delegation_enabled=enabled),
-        catalog=build_model_catalog(),
+        _inputs(agent__prompt_cross_machine_delegation_enabled=enabled)
     )
 
     if expect_section:
@@ -611,7 +596,7 @@ def test_cross_machine_delegation_section_is_verbatim():
     change anywhere in the sentence fails this test on purpose."""
 
     rendered = cross_machine_delegation_section(
-        _slices(agent__prompt_cross_machine_delegation_enabled=True), catalog=build_model_catalog()
+        _inputs(agent__prompt_cross_machine_delegation_enabled=True)
     )
 
     assert rendered == _CROSS_MACHINE_DELEGATION_SENTENCE
@@ -625,7 +610,7 @@ def test_cross_machine_delegation_section_names_no_api_detail():
     prompt sections describe semantics, not call syntax)."""
 
     rendered = cross_machine_delegation_section(
-        _slices(agent__prompt_cross_machine_delegation_enabled=True), catalog=build_model_catalog()
+        _inputs(agent__prompt_cross_machine_delegation_enabled=True)
     )
 
     assert "spawn(" not in rendered

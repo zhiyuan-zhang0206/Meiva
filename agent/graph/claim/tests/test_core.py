@@ -31,6 +31,7 @@ from base.packages.tests.model_catalog import AddModels
 from base.paths import meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from meiva.sdk_surface.installation import Installation
+from meiva.sdk_surface.tests.installation_holder import held_installation
 from meiva.tests.fixtures.pin_agent import pin_agent
 
 
@@ -105,7 +106,6 @@ class TestTerminate:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
@@ -329,7 +329,6 @@ class TestRestart:
         redis_url: str,
         db_conn: psycopg.Connection,
         add_models: AddModels,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
@@ -353,7 +352,6 @@ class TestRestart:
             },
         )
         model_installation = replace(model_installation, catalog=model_catalog)
-        monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
         pin_agent(
             spawn_agent(
                 catalog=model_catalog,
@@ -362,7 +360,7 @@ class TestRestart:
                 machine=machine_identity,
             )
         )
-        with pytest.raises(meiva.self.AgentRestart):
+        with held_installation(model_installation), pytest.raises(meiva.self.AgentRestart):
             meiva.self.restart(config_overlay={"llm_model": model})
         with db_conn.cursor() as cur:
             cur.execute(
@@ -390,7 +388,6 @@ class TestPauseHeartbeat:
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,

@@ -10,14 +10,14 @@ recorder sits outermost over plugin wraps, and wrap layers stack in plugin order
 from __future__ import annotations
 
 import inspect
+import json
 import os
 import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 from pydantic import BaseModel
@@ -25,12 +25,14 @@ from pydantic import BaseModel
 import meiva
 from base.agents.context.clients import ClientSet
 from base.agents.sdk import call_policy
+from base.host.proc import run_bounded
+from base.packages.plugin_config_contracts import PluginConfigImages
 from base.packages.plugin_config_images import (
     DiskPluginConfigImages,
     PluginConfigChangedError,
     PluginConfigOwner,
 )
-from base.packages.plugins import flags, load_report
+from base.packages.plugins import flags
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
@@ -42,59 +44,68 @@ from base.packages.plugins.plugin_errors import DuplicateRegistration
 from base.paths.home import resolve_meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
-from meiva.sdk_surface import install, metering, process_context, sdk_disable, skill_sources, wraps
-from meiva.sdk_surface import plugins as sdk_plugins
+from meiva.sdk_surface import install, metering, process_context, skill_sources, wraps
 from meiva.sdk_surface.installation import installed
 from meiva.sdk_surface.plugins import (
-    FrameworkNamespaceConflictError,
     InvalidNamespaceNameError,
     PluginNamespaceConflictError,
 )
-from meiva.sdk_surface.sdk_disable import DisabledSDKModule
+
+InstallSurface = Callable[..., ExtensionRegistry]
+
+_DISABLED_CHILD = Path(__file__).with_name("child_install_disabled.py")
 
 
 @pytest.fixture(autouse=True)
-def _surface(monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents) -> Iterator[None]:
+def _surface(emitted_events: EmittedEvents) -> Iterator[None]:
     """Start from no installation and bare callables, and leave no installation behind."""
     assert installed() is None
-
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     prior = meiva.context
     clients = ClientSet(pipeline_factory=emitted_events.producer)
-    with patch.dict(os.environ):
-        process_context.bind_context(replace(prior, clients=clients))
+    process_context.bind_context(replace(prior, clients=clients))
+    try:
+        yield
+    finally:
         try:
-            yield
+            install.uninstall()
         finally:
             try:
-                install.uninstall()
+                clients.close()
             finally:
-                try:
-                    clients.close()
-                finally:
-                    process_context.bind_context(prior)
+                process_context.bind_context(prior)
 
 
 @pytest.fixture
-def load_failures(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, BaseException]]:
+def load_failures() -> list[tuple[str, BaseException]]:
     """Every plugin load failure the install reports, as (plugin, exception)."""
-    failures: list[tuple[str, BaseException]] = []
+    return []
 
-    def spy(name: str, exc: BaseException) -> None:
-        failures.append((name, exc))
 
-    monkeypatch.setattr(load_report, "report_plugin_load_failure", spy)
-    return failures
+@pytest.fixture
+def install_surface(load_failures: list[tuple[str, BaseException]]) -> Iterator[InstallSurface]:
+    """The real installer, given a valid sampling owner and a reporter that collects failures."""
+    sampling = call_policy.SamplingPolicyOwner(reader=call_policy.SamplingPolicy)
+
+    def collect(name: str, exc: BaseException) -> None:
+        load_failures.append((name, exc))
+
+    def install_registry(
+        registry: ExtensionRegistry, *, config_images: PluginConfigImages | None = None
+    ) -> ExtensionRegistry:
+        images = config_images or DiskPluginConfigImages(resolve_meiva_home())
+        return install.install(registry, collect, config_images=images, sampling=sampling)
+
+    yield install_registry
+    sampling.close()
 
 
 def _registry(*plugins: tuple[str, PluginContributions]) -> ExtensionRegistry:
     return ExtensionRegistry(plugins)
 
 
-def test_plugin_overlay_publishes_a_new_owned_image(unit_home: Path) -> None:
+def test_plugin_overlay_publishes_a_new_owned_image(
+    unit_home: Path, install_surface: InstallSurface
+) -> None:
     from pydantic import BaseModel, ConfigDict, Field
 
     from meiva.sdk_surface import settings as sdk_settings
@@ -104,7 +115,7 @@ def test_plugin_overlay_publishes_a_new_owned_image(unit_home: Path) -> None:
         marker: str = Field(default="disk", json_schema_extra={"per_agent": True})
 
     images = DiskPluginConfigImages(unit_home)
-    install.install(
+    install_surface(
         _registry(("owned", PluginContributions(config=Config))),
         config_images=images,
     )
@@ -207,7 +218,7 @@ def _assert_wraps_and_roots(root: Path) -> None:
 
 
 def test_a_one_plugin_install_is_fully_removed_by_uninstall(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, install_surface: InstallSurface
 ) -> None:
     root = tmp_path / "skills"
     root.mkdir()
@@ -231,7 +242,7 @@ def test_a_one_plugin_install_is_fully_removed_by_uninstall(
         )
     )
 
-    admitted = install.install(registry, config_images=DiskPluginConfigImages(resolve_meiva_home()))
+    admitted = install_surface(registry)
 
     assert admitted == registry
     installation = installed()
@@ -256,24 +267,21 @@ def test_uninstall_without_an_installation_is_a_no_op() -> None:
     _assert_surface_unchanged(before)
 
 
-def test_installing_twice_raises_until_uninstall() -> None:
+def test_installing_twice_raises_until_uninstall(install_surface: InstallSurface) -> None:
     registry = _registry(
         ("demo", PluginContributions(sdk_namespaces=(SdkNamespace("install_ns", _namespace()),)))
     )
-    install.install(registry, config_images=DiskPluginConfigImages(resolve_meiva_home()))
+    install_surface(registry)
 
     with pytest.raises(RuntimeError, match="already installed"):
-        install.install(_registry(), config_images=DiskPluginConfigImages(resolve_meiva_home()))
+        install_surface(_registry())
 
     installation = installed()
     assert installation is not None and installation.registry == registry
     assert hasattr(meiva, "install_ns")
 
     install.uninstall()
-    assert (
-        install.install(_registry(), config_images=DiskPluginConfigImages(resolve_meiva_home()))
-        == _registry()
-    )
+    assert install_surface(_registry()) == _registry()
 
 
 # ── a plugin the install refuses ───────────────────────────────────────────────
@@ -281,6 +289,7 @@ def test_installing_twice_raises_until_uninstall() -> None:
 
 def test_a_second_plugin_declaring_a_taken_namespace_is_refused_and_the_first_stays(
     load_failures: list[tuple[str, BaseException]],
+    install_surface: InstallSurface,
 ) -> None:
     first_ns, second_ns = _namespace(ping=_ping), _namespace(ping=_extra)
     first = PluginContributions(sdk_namespaces=(SdkNamespace("install_ns", first_ns),))
@@ -289,10 +298,7 @@ def test_a_second_plugin_declaring_a_taken_namespace_is_refused_and_the_first_st
         sdk_members=(SdkMember("self", "second_member", _extra),),
     )
 
-    admitted = install.install(
-        _registry(("first", first), ("second", second)),
-        config_images=DiskPluginConfigImages(resolve_meiva_home()),
-    )
+    admitted = install_surface(_registry(("first", first), ("second", second)))
 
     assert [name for name, _c in admitted.plugins] == ["first"]
     [(name, exc)] = load_failures
@@ -337,7 +343,10 @@ def _declaring(failing: str) -> PluginContributions:
     ],
 )
 def test_a_plugin_whose_later_piece_fails_is_rolled_back_whole(
-    load_failures: list[tuple[str, BaseException]], failing: str, error: type[BaseException]
+    load_failures: list[tuple[str, BaseException]],
+    failing: str,
+    error: type[BaseException],
+    install_surface: InstallSurface,
 ) -> None:
     good = PluginContributions(
         sdk_namespaces=(SdkNamespace("good_ns", _namespace(ping=_ping), expand=True),),
@@ -345,10 +354,7 @@ def test_a_plugin_whose_later_piece_fails_is_rolled_back_whole(
     )
     before = _surface_snapshot()
 
-    admitted = install.install(
-        _registry(("bad", _declaring(failing)), ("good", good)),
-        config_images=DiskPluginConfigImages(resolve_meiva_home()),
-    )
+    admitted = install_surface(_registry(("bad", _declaring(failing)), ("good", good)))
 
     [(name, exc)] = load_failures
     assert name == "bad"
@@ -369,33 +375,30 @@ def test_a_plugin_whose_later_piece_fails_is_rolled_back_whole(
     _assert_surface_unchanged(before)
 
 
+# meiva:note
+# A namespace the SDK-disable machinery stubbed out is framework-owned: the plugin that declares
+# it is refused and the sentinel is not clobbered. The disable swaps a `sys.modules` entry for
+# the life of the interpreter, so the scenario runs in a real child.
 def test_a_namespace_disabled_by_the_sdk_disable_sentinel_refuses_the_plugin(
-    load_failures: list[tuple[str, BaseException]],
+    unit_home: Path,
 ) -> None:
-    with patch.dict(sys.modules):
-        sdk_disable.apply_entries(["disabled_ns"])
-        sentinel = sys.modules["meiva.disabled_ns"]
-        assert isinstance(sentinel, DisabledSDKModule)
-        admitted = install.install(
-            _registry(
-                (
-                    "wants_disabled",
-                    PluginContributions(
-                        sdk_namespaces=(SdkNamespace("disabled_ns", _namespace(ping=_ping)),)
-                    ),
-                )
-            ),
-            config_images=DiskPluginConfigImages(resolve_meiva_home()),
-        )
+    result = run_bounded(
+        [sys.executable, "-I", str(_DISABLED_CHILD)],
+        env={**os.environ, "MEIVA_HOME": str(unit_home)},
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
 
-        [(name, exc)] = load_failures
-        assert name == "wants_disabled"
-        assert isinstance(exc, FrameworkNamespaceConflictError)
-        assert "MEIVA_SDK_DISABLE" in str(exc)
-        assert admitted.plugins == ()
-        # The sentinel the disable machinery put there is not clobbered.
-        assert sys.modules["meiva.disabled_ns"] is sentinel
-        assert not hasattr(meiva, "disabled_ns")
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout.strip().splitlines()[-1]) == {
+        "plugin": "wants_disabled",
+        "failure": "FrameworkNamespaceConflictError",
+        "mentions_disable": True,
+        "admitted": [],
+        "sentinel_kept": True,
+        "namespace_absent": True,
+    }
 
 
 # ── the recorder, wrap layering, views ─────────────────────────────────────────
@@ -403,6 +406,7 @@ def test_a_namespace_disabled_by_the_sdk_disable_sentinel_refuses_the_plugin(
 
 def test_the_recorder_is_outermost_over_plugin_wraps_and_gone_after_uninstall(
     emitted_events: EmittedEvents,
+    install_surface: InstallSurface,
 ) -> None:
     original_read = meiva.files.read
     registry = _registry(
@@ -418,7 +422,7 @@ def test_the_recorder_is_outermost_over_plugin_wraps_and_gone_after_uninstall(
         )
     )
 
-    install.install(registry, config_images=DiskPluginConfigImages(resolve_meiva_home()))
+    install_surface(registry)
 
     ping = meiva.install_ns.ping  # type: ignore[attr-defined]
     assert metering.is_recorder(ping)  # the recorder is the outermost layer
@@ -437,7 +441,7 @@ def test_the_recorder_is_outermost_over_plugin_wraps_and_gone_after_uninstall(
     assert wraps.wrappers() == {}
 
 
-def test_wrap_layers_stack_in_plugin_order_later_outermost() -> None:
+def test_wrap_layers_stack_in_plugin_order_later_outermost(install_surface: InstallSurface) -> None:
     wrapper_a, wrapper_b, wrapper_c = _tag("a"), _tag("b"), _tag("c")
     registry = _registry(
         (
@@ -458,7 +462,7 @@ def test_wrap_layers_stack_in_plugin_order_later_outermost() -> None:
         ),
     )
 
-    install.install(registry, config_images=DiskPluginConfigImages(resolve_meiva_home()))
+    install_surface(registry)
 
     assert meiva.install_ns.ping() == "c(b(a(pong)))"  # type: ignore[attr-defined]
     # The curated `meiva.extend` views report the same chain, innermost first.
@@ -475,8 +479,10 @@ def test_wrap_layers_stack_in_plugin_order_later_outermost() -> None:
     assert "install_ns.ping" not in meiva.extend.wrappers()
 
 
-def test_expansions_reflect_namespaces_marked_expand_and_declared_paths_in_registry_order() -> None:
-    install.install(
+def test_expansions_reflect_namespaces_marked_expand_and_declared_paths_in_registry_order(
+    install_surface: InstallSurface,
+) -> None:
+    install_surface(
         _registry(
             (
                 "alpha",
@@ -495,8 +501,7 @@ def test_expansions_reflect_namespaces_marked_expand_and_declared_paths_in_regis
                     sdk_expansions=("files",),
                 ),
             ),
-        ),
-        config_images=DiskPluginConfigImages(resolve_meiva_home()),
+        )
     )
 
     # Per plugin: its expanded namespaces, then its explicit paths; a namespace not marked
@@ -508,13 +513,12 @@ def test_expansions_reflect_namespaces_marked_expand_and_declared_paths_in_regis
     assert install.expansions() == ()
 
 
-def test_install_keeps_core_dependencies_in_the_admitted_declaration() -> None:
+def test_install_keeps_core_dependencies_in_the_admitted_declaration(
+    install_surface: InstallSurface,
+) -> None:
     contribution = PluginContributions(flags=("general.message_timestamps",))
 
-    admitted = install.install(
-        _registry(("declared", contribution)),
-        config_images=DiskPluginConfigImages(resolve_meiva_home()),
-    )
+    admitted = install_surface(_registry(("declared", contribution)))
 
     assert admitted.plugins == (("declared", contribution),)
     installation = installed()
@@ -525,7 +529,7 @@ def test_install_keeps_core_dependencies_in_the_admitted_declaration() -> None:
 
 @pytest.mark.parametrize("key", ["bogus.x", "data_plane.db_url"])
 def test_invalid_core_dependency_rolls_back_the_plugin(
-    load_failures: list[tuple[str, BaseException]], key: str
+    load_failures: list[tuple[str, BaseException]], key: str, install_surface: InstallSurface
 ) -> None:
     bad = PluginContributions(
         sdk_namespaces=(SdkNamespace("failed_ns", _namespace()),),
@@ -533,10 +537,7 @@ def test_invalid_core_dependency_rolls_back_the_plugin(
     )
     good = PluginContributions(sdk_namespaces=(SdkNamespace("good_ns", _namespace()),))
 
-    admitted = install.install(
-        _registry(("bad", bad), ("good", good)),
-        config_images=DiskPluginConfigImages(resolve_meiva_home()),
-    )
+    admitted = install_surface(_registry(("bad", bad), ("good", good)))
 
     assert admitted.plugins == (("good", good),)
     [(name, error)] = load_failures
@@ -577,6 +578,7 @@ class FailingImages(DiskPluginConfigImages):
 def test_unknown_binding_failure_rolls_back_every_plugin_and_propagates_identity(
     load_failures: list[tuple[str, BaseException]],
     error: BaseException,
+    install_surface: InstallSurface,
 ) -> None:
     from pydantic import BaseModel
 
@@ -593,7 +595,7 @@ def test_unknown_binding_failure_rolls_back_every_plugin_and_propagates_identity
     later = PluginContributions(sdk_namespaces=(SdkNamespace("later_ns", _namespace()),))
 
     with pytest.raises(type(error)) as caught:
-        install.install(
+        install_surface(
             _registry(("prior", prior), ("failed", failing), ("later", later)),
             config_images=FailingImages(resolve_meiva_home(), error),
         )
@@ -606,48 +608,43 @@ def test_unknown_binding_failure_rolls_back_every_plugin_and_propagates_identity
     assert not hasattr(meiva, "later_ns")
 
 
+# meiva:note
+# Rollback attempts every undo even when one fails, and a cleanup failure is never success. The
+# cleanup fault is real: the failed plugin's namespace is a module whose attribute removal
+# refuses, so the member undo raises while the namespace undos behind it must still run. With a
+# typed refusal as the primary the cleanup failure is fatal; with an unknown primary failure it
+# rides on the original error as a note.
+class _StubbornModule(ModuleType):
+    def __init__(self, name: str, failure: BaseException) -> None:
+        super().__init__(name)
+        self.__dict__["__all_for_meiva__"] = []
+        self.__dict__["_failure"] = failure
+
+    def __delattr__(self, name: str) -> None:
+        if name == "failed_member":
+            raise self.__dict__["_failure"]
+        super().__delattr__(name)
+
+
 @pytest.mark.parametrize("refused", [False, True], ids=["unknown-primary", "typed-refusal"])
+@pytest.mark.parametrize(
+    "cleanup",
+    [OSError("member cleanup failed"), KeyboardInterrupt("member cleanup interrupted")],
+    ids=["os-error", "cancellation"],
+)
 def test_rollback_attempts_all_undos_and_cleanup_failure_is_never_success(
-    monkeypatch: pytest.MonkeyPatch,
     load_failures: list[tuple[str, BaseException]],
+    install_surface: InstallSurface,
     refused: bool,
+    cleanup: BaseException,
 ) -> None:
     from pydantic import BaseModel
 
     primary = RuntimeError("original bind failure")
-    cleanup = OSError("member cleanup failed")
-    cancelled = KeyboardInterrupt("namespace cleanup interrupted")
-    calls: list[str] = []
-    install_member = sdk_plugins.install_member
-    install_namespace = sdk_plugins.install_namespace
-
-    def member(*args: Any, **kwargs: Any) -> Callable[[], None]:
-        undo = install_member(*args, **kwargs)
-
-        def undo_member() -> None:
-            undo()
-            calls.append("member")
-            raise cleanup
-
-        return undo_member
-
-    def namespace(plugin: str, *args: Any, **kwargs: Any) -> Callable[[], None]:
-        undo = install_namespace(plugin, *args, **kwargs)
-
-        def undo_namespace() -> None:
-            undo()
-            calls.append(plugin)
-            if plugin == "failed":
-                raise cancelled
-
-        return undo_namespace
-
-    monkeypatch.setattr(sdk_plugins, "install_member", member)
-    monkeypatch.setattr(sdk_plugins, "install_namespace", namespace)
     before = _surface_snapshot()
     failing = PluginContributions(
-        sdk_namespaces=(SdkNamespace("failed_ns", _namespace()),),
-        sdk_members=(SdkMember("self", "failed_member", _extra),),
+        sdk_namespaces=(SdkNamespace("failed_ns", _StubbornModule("failed_ns", cleanup)),),
+        sdk_members=(SdkMember("failed_ns", "failed_member", _extra),),
         flags=("not_a_flag",) if refused else (),
         config=None if refused else BaseModel,
     )
@@ -656,17 +653,16 @@ def test_rollback_attempts_all_undos_and_cleanup_failure_is_never_success(
     expected = cleanup if refused else primary
 
     with pytest.raises(type(expected)) as caught:
-        install.install(
+        install_surface(
             _registry(("prior", prior), ("failed", failing), ("later", later)),
             config_images=FailingImages(resolve_meiva_home(), primary),
         )
 
     assert caught.value is expected
-    assert calls == ["member", "failed", "prior"]
-    notes = "\n".join(caught.value.__notes__)
-    assert "namespace cleanup interrupted" in notes
     if not refused:
-        assert "member cleanup failed" in notes
+        assert any("member cleanup" in note for note in caught.value.__notes__)
     assert load_failures == []
     assert installed() is None
     _assert_surface_unchanged(before)
+    assert not hasattr(meiva, "failed_ns") and not hasattr(meiva, "prior_ns")
+    assert not hasattr(meiva, "later_ns")

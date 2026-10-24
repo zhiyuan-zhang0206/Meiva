@@ -1,24 +1,76 @@
-"""Launch plumbing both coding-tool launchers share: workspace paths, a new
-owner generation, owner-record status and cancel."""
-
+# meiva:note
+# Launch plumbing both coding-tool launchers share: workspace paths, the facts a launch reads from the process, a new owner generation, owner-record status and cancel.
 from __future__ import annotations
 
-import argparse
-import datetime as dt
 import sys
-import uuid
-from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, GatewayUnavailable
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.log import logger
+from base.paths import meiva_home, workspace_dir
 from base.sessions import coding_session_owner, tool_capabilities
 from base.sessions import provenance as provenance_block
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 from meiva import agents
 from meiva.sdk_surface import agent_identity
 from meiva.shell import sessions
+from meiva.shell.coding_tools.plans.lineage import DispatchFacts
+from meiva.shell.session_env import SessionHost
+from meiva.shell.sessions import ShellSessions
+
+# meiva:note
+# The lines asked of a capture whose screen alone matters: the service ignores them when `scrollback=False`.
+VISIBLE_SCREEN_LINES = 200
+
+
+# meiva:note
+# A session that ended: `reason` is what the refusal said.
+@dataclass(frozen=True)
+class SessionGone:
+    reason: str
+
+
+# meiva:note
+# The visible screen of a session, or `SessionGone` when it has ended. A session that ends while it is being read answers with the backend's own failure instead of the id refusal, so a failure of the backend counts as the session's end only when the session is no longer listed; otherwise it is the backend's failure and propagates.
+def capture_screen(shell: ShellSessions, session_id: int) -> str | SessionGone:
+    try:
+        return shell.capture(session_id, VISIBLE_SCREEN_LINES, scrollback=False)
+    except ValueError as exc:
+        return SessionGone(str(exc))
+    except RuntimeError as exc:
+        if session_id in shell.list():
+            raise
+        return SessionGone(str(exc))
+
+
+# meiva:note
+# What a launch reads from the process, once: the calling agent's shell sessions, the home whose Claude and Codex files it touches, the cluster home its owner records live under, the directory a new session starts in (the agent's workspace), and the machine facts a new session starts from.
+@dataclass(frozen=True)
+class LaunchSite:
+    shell: ShellSessions
+    home: Path
+    cluster: Path
+    session_cwd: Path
+    host: SessionHost
+
+    def open_session(self, name: str, ttl: float) -> int:
+        session_id, _full = self.shell.create(name, cwd=self.session_cwd, ttl=ttl, host=self.host)
+        return session_id
+
+
+# meiva:note
+# The launch site of this process. It raises when the process has no agent identity: a launch is an agent's.
+def launch_site() -> LaunchSite:
+    shell = sessions.shell_sessions()
+    return LaunchSite(
+        shell=shell,
+        home=Path.home(),
+        cluster=meiva_home(),
+        session_cwd=workspace_dir(shell.agent_id),
+        host=sessions.session_host(),
+    )
 
 
 def resolve_dir(dir_path: str) -> Path:
@@ -36,16 +88,6 @@ def resolve_file(workspace: Path, raw: str) -> Path:
     return path.resolve() if path.is_absolute() else (workspace / path).resolve()
 
 
-def session_uuid(value: str) -> str:
-    """Parse a ``--resume`` argument: the tool session id a launch printed (a UUID)."""
-    try:
-        return str(uuid.UUID(value))
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            f"{value!r} is not a session id; pass the UUID the launch printed"
-        ) from exc
-
-
 def init_file(path: Path, initial: str) -> None:
     """Create the file with ``initial`` if absent, including parent directories."""
     if path.exists():
@@ -55,110 +97,27 @@ def init_file(path: Path, initial: str) -> None:
 
 
 # meiva:note
-# An already-rendered dispatch block leads the message, so the worker reads who dispatched it before
-# the contract and the two file paths. A takeover never reaches this function: its briefing carries
-# the three-line form and creates no files.
-def worker_bootstrap(
-    contract: Path,
-    workspace: Path,
-    tasks_file: Path,
-    work_file: Path,
-    *,
-    resumed: bool = False,
-    provenance: str | None = None,
-) -> str:
-    """The supervised worker's first message: the contract and both file paths.
-
-    A resumed session (``resumed``) is told it was interrupted and continues
-    from its own history instead of starting over.
-    """
-    interrupted = (
-        "This session was interrupted (its shell was closed) and has been resumed with "
-        "its history. "
-        if resumed
-        else ""
-    )
-    return (f"{provenance}\n\n" if provenance else "") + (
-        f"{interrupted}Read the collaboration contract at {contract} and follow it. "
-        f"Your workspace is {workspace}. "
-        f"Your task file (read-only for you) is {tasks_file}. "
-        f"Your work file (yours to write, STATUS + log) is {work_file}. "
-        + (
-            "Re-read the task file and your work file, then continue from where you stopped."
-            if resumed
-            else "Now read the task file and start working."
-        )
-    )
-
-
-# meiva:note
-# Only the agent directory is queried, through the same gateway client the launch already uses for
-# owner liveness; a failure there degrades the block to an unknown dispatcher instead of blocking
-# the launch. The three sources are parameters so a test passes its own instead of patching the SDK.
-def build_dispatch_provenance(
-    *,
-    for_task: int | None,
-    why: str,
-    task_label: str | None = None,
-    priority: str | None = None,
-    now: dt.datetime | None = None,
-    agent_id: Callable[[], int] | None = None,
-    ancestors: Callable[[int], list[agents.Neighbor]] | None = None,
-    directory: Callable[..., agents.AgentDirectoryPage] | None = None,
-) -> provenance_block.DispatchProvenance:
-    read_agent_id = agent_id or agent_identity.require_agent_id
-    read_ancestors = ancestors or agents.get_ancestors
-    read_directory = directory or agents.list_agents
+# Only the agent directory is queried, through the same gateway client the launch already uses for owner liveness; a failure there degrades the block to less lineage instead of blocking the launch. A lookup that failed is None in the facts. Without an agent identity there is nothing to look up.
+def read_dispatch_facts() -> DispatchFacts:
     parent_id: int | None = None
     try:
-        parent_id = read_agent_id()
+        parent_id = agent_identity.require_agent_id()
     except Exception:
         logger.opt(exception=True).warning("dispatch provenance: no agent identity")
-
-    chain: tuple[str, ...] = ()
-    label: str | None = None
-    if parent_id is not None:
-        chain = _spawn_chain(parent_id, read_ancestors)
-        label = _agent_label(parent_id, read_directory)
-    return provenance_block.DispatchProvenance(
-        parent_agent_id=parent_id,
-        parent_label=label,
-        spawn_chain=chain,
-        dispatched_at=now or dt.datetime.now(dt.UTC),
-        why=why,
-        task_id=for_task,
-        task_label=task_label,
-        priority=priority,
-    )
-
-
-def _spawn_chain(
-    agent_id: int, read_ancestors: Callable[[int], list[agents.Neighbor]]
-) -> tuple[str, ...]:
+    if parent_id is None:
+        return DispatchFacts(parent_agent_id=None, ancestor_ids=None, directory=None)
+    ancestor_ids: tuple[int, ...] | None = None
     try:
-        ancestors = read_ancestors(agent_id)
+        ancestor_ids = tuple(neighbor.agent_id for neighbor in agents.get_ancestors(parent_id))
     except Exception:
         logger.opt(exception=True).warning("dispatch provenance: ancestor lookup failed")
-        return ()
-    chain = [*(str(neighbor.agent_id) for neighbor in reversed(ancestors)), str(agent_id)]
-    return tuple(chain[-5:])
-
-
-# meiva:note
-# A missing label is not an error: the directory may not know the agent yet, and the block still
-# names it by id. Only the id is load-bearing.
-def _agent_label(
-    agent_id: int, read_directory: Callable[..., agents.AgentDirectoryPage]
-) -> str | None:
+    directory: tuple[tuple[int, str | None], ...] | None = None
     try:
-        page = read_directory(scope="all", query=str(agent_id), limit=5)
+        page = agents.list_agents(scope="all", query=str(parent_id), limit=5)
+        directory = tuple((row.agent_id, row.label) for row in page.agents)
     except Exception:
         logger.opt(exception=True).warning("dispatch provenance: agent lookup failed")
-        return None
-    for row in page.agents:
-        if row.agent_id == agent_id:
-            return row.label
-    return None
+    return DispatchFacts(parent_agent_id=parent_id, ancestor_ids=ancestor_ids, directory=directory)
 
 
 # meiva:note
@@ -210,10 +169,10 @@ def owner_terminated(agent_id: int) -> bool:
         return False
 
 
-def kill_session_after_failed_launch(session_id: int) -> None:
+def kill_session_after_failed_launch(shell: ShellSessions, session_id: int) -> None:
     """Reclaim the PTY of a launch that is already failing; the launch's own error stays primary."""
     try:
-        sessions.kill(session_id)
+        shell.kill(session_id)
     except Exception:
         logger.opt(exception=True).warning(
             "reclaiming shell session {} after a failed coding-session launch failed; "
@@ -241,6 +200,7 @@ def terminate_generation_after_failed_launch(
 def new_generation(
     key: coding_session_owner.CodingSessionKey,
     *,
+    owner_agent_id: int,
     tasks_file: Path | None,
     work_file: Path | None,
     ttl_seconds: float,
@@ -248,7 +208,7 @@ def new_generation(
     """A fresh generation of our own; dead siblings under ``key`` are reclaimed first."""
     return coding_session_owner.launch_generation(
         key,
-        owner_agent_id=agent_identity.require_agent_id(),
+        owner_agent_id=owner_agent_id,
         tasks_file=tasks_file,
         work_file=work_file,
         ttl_seconds=ttl_seconds,
@@ -257,12 +217,40 @@ def new_generation(
     )
 
 
-OwnerPrinter = Callable[[coding_session_owner.CodingSessionOwner], None]
+# meiva:note
+# The fields of an owner record each tool's `--status` and `--cancel` print, in order, after `status=`.
+_OWNER_FIELDS: dict[str, tuple[str, ...]] = {
+    "claude": (
+        "generation",
+        "owner_agent_id",
+        "session_id",
+        "session_name",
+        "state_dir",
+        "tasks_file",
+        "work_file",
+    ),
+    "codex": (
+        "generation",
+        "owner_agent_id",
+        "session_id",
+        "session_name",
+        "supervisor_session_id",
+        "supervisor_session_name",
+        "tasks_file",
+        "work_file",
+    ),
+}
 
 
-def cancel(
-    key: coding_session_owner.CodingSessionKey, generation: str, print_owner: OwnerPrinter
-) -> int:
+def print_owner(owner: coding_session_owner.CodingSessionOwner, tool: str) -> None:
+    print(f"status={owner.status}")
+    for name in _OWNER_FIELDS[tool]:
+        value = getattr(owner, name)
+        if value is not None:
+            print(f"{name}={value}")
+
+
+def cancel(key: coding_session_owner.CodingSessionKey, generation: str) -> int:
     """Stop and terminalize exactly ``generation``; a stale token is refused."""
     stopped = coding_session_owner.terminate_generation(
         key, generation, reason="explicit-cancel", writer=AtomicWriter(SYSTEM_FS)
@@ -270,22 +258,16 @@ def cancel(
     if not stopped:
         print(f"cancel refused: no generation {generation} is recorded here", file=sys.stderr)
         return 1
-    print_owner(coding_session_owner.read(key, generation))
+    print_owner(coding_session_owner.read(key, generation), key.tool)
     return 0
 
 
 # meiva:note
-# `--status` answers what the next launch would do, so it forwards the same execution-path request the
-# launch would receive: a refusal has to be visible in the preview and in its exit code, not only
-# once an operator has already asked for the launch.
-def status(
-    key: coding_session_owner.CodingSessionKey,
-    print_owner: OwnerPrinter,
-    *,
-    mode: str = "auto",
-    force: bool = False,
-    report: Callable[..., tuple[str, int]] = capability_report,
-) -> int:
+# `--status` answers what the next launch would do, so it reports the capability decision the same
+# execution-path request would get (`capability`: the report line and its exit code): a refusal has to
+# be visible in the preview and in its exit code, not only once an operator has already asked for the
+# launch.
+def status(key: coding_session_owner.CodingSessionKey, *, capability: tuple[str, int]) -> int:
     """Print every generation recorded for the workspace; exit 1 when one is invalid."""
     owners = coding_session_owner.list_generations(key)
     if not owners:
@@ -293,10 +275,10 @@ def status(
     for index, owner in enumerate(owners):
         if index:
             print()
-        print_owner(owner)
+        print_owner(owner, key.tool)
         if owner.error:
             print(f"error={owner.error}", file=sys.stderr)
-    line, refusal = report(key.tool, mode=mode, force=force)
+    line, refusal = capability
     if line:
         print(line)
     if refusal:

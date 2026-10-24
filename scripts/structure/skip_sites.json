@@ -60,14 +60,8 @@
     "skip(f'{shell} is not installed')",
     "skip(f'{shell} is not installed')"
   ],
-  "meiva/self/harness/tests/test_registration.py": [
-    "skip('this session exports a harness handle of its own')"
-  ],
   "meiva/tests/namespaces/sdk_surface/test_help_profile.py": [
     "skip('no model declares a help doc style yet')"
-  ],
-  "meiva/tests/namespaces/self/test_attach_import.py": [
-    "skip(\"a real harness registration already owns this probe's agent id\")"
   ],
   "meiva/tests/test_files.py": [
     "skipif(os.geteuid() == 0)"

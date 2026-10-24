@@ -18,12 +18,18 @@ handoff document alone: `import meiva` in a bare interpreter fails, because ever
 
 | Step | What it does |
 |---|---|
-| refuse | a host runtime, an already-attached process and an exec turn are refused |
+| refuse | `meiva/sdk_surface/pure/caller/attachability.py`: a host runtime, an already-attached process and an exec turn are refused, the same rule a takeover attach follows |
 | look up | the handle resolves to one registration row; the plain value never touches disk |
 | boot | config, machine, database, client set and clock come from `meiva/boot.py` |
-| prove | the row is attached and unexpired, the machine matches, the caller descends from the controller pid |
+| prove | `require_live_registration`: the row is attached and unexpired at `now`, the machine matches, the caller's lineage holds the controller pid |
 | bind | a borrowed `ExternalLease` on the ambient context, pipeline and SDK state initialized |
 | close | flush the plugin delta, seal events, deliver telemetry, detach |
+
+The decisions are strict functions of values in `admission.py` (with the row's value shape
+in `registration.py`); `attachment.py` and `store.py` are the shells. Each SDK call re-reads
+the lineage (`process_lineage(pid)`) and the instant and hands them over as values.
+`open_attachment(handle)` takes its row from `default_store()`; `resolve_registration`
+requires its store.
 
 `meiva.attach()` is the public entry: with no argument it reads
 `MEIVA_HARNESS_HANDLE`, attaches once and returns the attachment. Every session's
@@ -35,13 +41,9 @@ bootstrap file in the child's workspace.
 
 ## The registration row
 
-**No writer lives in this tree.** This package reads and validates a registration
-row; nothing here writes one, so a machine without the wiring piece answers
-`attach()` with `no harness session matches this handle`. The writer is the
-bridge's half of the seam: it creates one row per started session, hands the
-handle to the child, and retires the row when the session ends. Until that half
-is connected, the end-to-end path is only as complete as the test that fabricates
-a row itself.
+**No writer lives in this tree.** This package reads and validates a registration row; the
+bridge writes it (one row per started session, retired when the session ends), so a machine
+without that wiring answers `attach()` with `no harness session matches this handle`.
 
 `FileRegistrationStore` owns the file format under
 `$MEIVA_HOME/harness/registrations/`: the agent id, the harness name, the
@@ -79,17 +81,14 @@ document cannot do it either, so the SDK makes the attachment itself — on the
 | `meiva.self.AGENT_ID`, every `meiva.agents` call | `agent_identity._bound()` |
 | a plugin namespace (`meiva.tasks`, …) | `boot.maybe_load_plugins_for_missing` |
 
-Attaching replays the agent's plugin-state snapshot through the codec, and that
-opens the database. Doing it at import would make every provider tool call that
-merely imports the SDK open a connection — a probe, a syntax check, a turn with
-nothing to record. Importing `meiva` therefore stays what it is in every other
-process, and the handle decides nothing until an identity is asked for, which
-also keeps the SDK's import budget (#3816) intact.
+Attaching replays the agent's plugin-state snapshot through the codec, and that opens
+the database. Doing it at import would make every provider tool call that merely imports
+the SDK open a connection, so importing `meiva` stays what it is in every other process
+and keeps the SDK's import budget (#3816) intact.
 
-File and shell calls reach the same read when they resolve a path against the
-agent's workspace, and that is correct: a relative path belongs to that
-workspace, not to the operator's `$HOME`. What they do *not* do is fail when the
-borrow fails — see below.
+File and shell calls reach the same read when they resolve a path against the agent's
+workspace (a relative path belongs to that workspace, not to `$HOME`), but they do not
+fail when the borrow fails.
 
 A failed attachment is recorded, not raised:
 
@@ -135,8 +134,6 @@ process when its role is complete.
 
 ## Why not MCP, and why not a sidecar
 
-MCP would add a process, a tool description and a second interaction model for a
-capability the harness already has through the SDK; a sidecar bridge adds a
-service, an auth scheme and its own version surface. The kernel gives the harness
-the calls a native agent makes, with the same telemetry, from one implementation
-with two entry points.
+MCP would add a process and a second interaction model for what the SDK already gives
+a harness; a sidecar adds a service, an auth scheme and its own version surface. The kernel
+offers the calls a native agent makes, with the same telemetry, from one implementation.

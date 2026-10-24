@@ -1,43 +1,14 @@
-import os
+# meiva:note
+# The external CLI of the exit-delivery test: `child_external_cli.py <sample file> <lease id>` is a
+# fresh interpreter that attaches to the real lease the test created, reads the sample file through
+# the SDK once and exits. It replaces nothing: the lease, the agent's checkpoint and the machine are
+# the rows and the environment the parent test prepared.
+# meiva:link meiva/impersonation/docs/attachment.meiva.okf.md
+
 import sys
-from pathlib import Path
-from typing import Any
 
 import meiva
-from agent.state import build_agent_state, plugin_state_schema
-from base.agents.context.external_attachment import plugin_state_codec
-from base.packages.plugins.loading.registry import build_registry
 from meiva import impersonation
-from meiva.impersonation import attachment as attachment_module
 
-SAMPLE = sys.argv[1]
-LEASE: dict[str, Any] = {
-    "id": "lease",
-    "session_id": 0,
-    "agent_id": 424242,
-    "machine": "external-cli-probe",
-    "status": "active",
-    "delta_version": 0,
-    "applied_version": 0,
-    "plugin_delta": [],
-    "event_delivery_protocol_version": None,
-}
-
-
-def require_active(_db: Any, _lease_id: Any, *, local_machine: str) -> dict[str, Any]:
-    assert local_machine == "external-cli-probe"
-    return dict(LEASE)
-
-
-def load_snapshot(_agent_id: Any, **_kwargs: Any) -> tuple[Any, dict[str, Any], None]:
-    state: Any = build_agent_state(build_registry(validate_state=plugin_state_schema))()
-    state.meiva_code__cwd = str(Path(SAMPLE).parent)
-    return state, {}, None
-
-
-attachment_module.control.require_active = require_active
-os.environ["MEIVA_MACHINE_NAME"] = "external-cli-probe"
-plugin_state_codec.load_snapshot = load_snapshot
-
-with impersonation.attach("lease"):
-    assert meiva.files.read(SAMPLE) == "tail event"
+with impersonation.attach(sys.argv[2]):
+    assert meiva.files.read(sys.argv[1]) == "tail event"

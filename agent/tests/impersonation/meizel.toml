@@ -1,9 +1,7 @@
-exports = ["external_attachment.py"]
+exports = ["external", "lease_support.py"]
 
 [uses]
-"test_external_database_owner.py" = ["child_undelivered_login.py", "external_attachment.py"]
-"test_external_machine_owner.py" = ["external_attachment.py"]
-"test_external_mcp_lease.py" = ["external_attachment.py"]
+"external" = ["lease_support.py"]
 "handoff_inputs.py" = ["lease_support.py"]
 "lease_support.py" = ["relay_stub.py"]
 "test_impersonation.py" = ["handoff_inputs.py", "lease_support.py"]
@@ -12,30 +10,3 @@ exports = ["external_attachment.py"]
 "test_impersonation_transport_integration.py" = ["handoff_inputs.py"]
 "test_relay_establishment.py" = ["lease_support.py"]
 "test_relay_supervision.py" = ["lease_support.py"]
-"test_sdk_entry_without_declaration.py" = ["external_attachment.py"]
-
-[debt.env-patch]
-"test_external_database_owner.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
-"test_external_database_owner.py#patch.dict os.environ" = 4
-"test_external_machine_owner.py#patch.dict os.environ" = 2
-
-[debt.first-party-patch]
-"external_attachment.py#monkeypatch.setattr base.agents.context.external_attachment.plugin_state_codec.load_snapshot" = 1
-"external_attachment.py#monkeypatch.setattr base.agents.impersonation.manifest.open_local_participant" = 1
-"external_attachment.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
-"external_attachment.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
-"external_attachment.py#monkeypatch.setattr meiva.ensure_plugins_loaded" = 1
-"external_attachment.py#monkeypatch.setattr meiva.impersonation.attachment.control.merge_plugin_delta" = 1
-"external_attachment.py#monkeypatch.setattr meiva.impersonation.attachment.control.require_active" = 1
-"test_external_database_owner.py#monkeypatch.setattr base.agents.impersonation.manifest.close_local_participant_admission" = 1
-"test_external_database_owner.py#monkeypatch.setattr base.agents.impersonation.manifest.open_local_participant" = 1
-"test_external_database_owner.py#monkeypatch.setattr base.db.code_version_gate.ProcessDbGate.min_read_due" = 1
-"test_external_database_owner.py#monkeypatch.setattr base.db.code_version_gate.time.monotonic" = 1
-"test_external_database_owner.py#monkeypatch.setattr base.db.connections.psycopg.connect" = 1
-"test_external_database_owner.py#monkeypatch.setattr meiva.impersonation.attachment.ConfigBoot" = 1
-"test_external_database_owner.py#monkeypatch.setattr meiva.impersonation.attachment.control.require_active" = 1
-"test_external_database_owner.py#monkeypatch.setattr meiva.impersonation.attachment.process_clients" = 1
-
-[debt.unresolved-patch]
-"test_external_database_owner.py#monkeypatch.setattr prior.clients.database" = 1
-"test_external_database_owner.py#monkeypatch.setattr result.close" = 1

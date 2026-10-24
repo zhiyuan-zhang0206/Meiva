@@ -14,13 +14,16 @@ highest probability decides.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
+from typing import Any, Protocol
 
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import DecisionError, YesNo, estimate_tokens, question_text
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.log import logger
+
+from .pure.media.injection_plan import CheckStep, check_text, plan_check, split_for_model
 
 _QUESTION_ID = "page_addresses_ai"
 
@@ -53,41 +56,9 @@ QUESTION = YesNo(
 # Tokens held back from each chunk on top of the question: `estimate_tokens` is the
 # pre-flight estimate, not the provider's count, so the chunks must clear it with room.
 _CHUNK_MARGIN_TOKENS = 512
-_MAX_URL_CHARS = 200
 # Labels the usage rows of the check's requests, apart from the summary calls of the same tool.
 _USAGE_KIND = "web_fetch_injection_check"
 _USAGE_SOURCE = "web.fetch"
-
-
-def split_for_model(text: str, max_tokens: int) -> list[str]:
-    """Split `text` into consecutive pieces of at most `max_tokens` by `estimate_tokens`.
-
-    A cut falls on a line break when one exists in the last fifth of the piece, otherwise
-    mid-line. The pieces joined give back `text`.
-    """
-    if max_tokens < 1:
-        raise ValueError(f"max_tokens must be at least 1, got {max_tokens}")
-    # estimate_tokens = ceil(ascii / 4) + non-ascii, so in quarter-token units an ASCII
-    # character costs 1 and any other character 4.
-    limit = max_tokens * 4
-    pieces: list[str] = []
-    start = 0
-    while start < len(text):
-        used = 0
-        end = start
-        while end < len(text):
-            cost = 1 if ord(text[end]) < 128 else 4
-            if used + cost > limit:
-                break
-            used += cost
-            end += 1
-        if end < len(text):
-            newline = text.rfind("\n", start + (end - start) * 4 // 5, end)
-            if newline > start:
-                end = newline + 1
-        pieces.append(text[start:end])
-        start = end
-    return pieces
 
 
 async def _chunk_probability(
@@ -148,67 +119,101 @@ async def page_probability(
     return max(answers) if answers else None
 
 
-def begin_check(
-    url: str,
-    title: str,
-    content: str,
+# meiva:note
+# The values one page check runs on, read once by the caller: the three service fields, the
+# catalog the model is looked up in, the agent the usage rows are billed to, and whether a
+# finding has anywhere to go (an agent turn is running).
+@dataclass(frozen=True, slots=True)
+class InjectionCheckInputs:
+    enabled: bool
+    model: str
+    threshold: float
+    catalog: ModelCatalog
+    keys: ProviderKeys
+    agent_id: int | None
+    delivery_active: bool
+
+
+# meiva:note
+# The service-field read the check needs of a configuration authority; a
+# `base.config.service_read.ConfigAuthority` satisfies it.
+class ServiceFields(Protocol):
+    def service_field_value(self, name: str, /) -> Any: ...
+
+
+def injection_check_inputs(
+    authority: ServiceFields,
+    catalog: ModelCatalog,
     *,
-    delivery_active: Callable[[], bool],
-    record: Callable[[str, float], None],
-) -> Callable[[], None]:
-    """Start judging a fetched page; the returned `finish` waits and records the finding.
+    keys: ProviderKeys,
+    agent_id: int | None,
+    delivery_active: bool,
+) -> InjectionCheckInputs:
+    return InjectionCheckInputs(
+        enabled=bool(authority.service_field_value("web_fetch_injection_check_enabled")),
+        model=authority.service_field_value("web_fetch_injection_model"),
+        threshold=authority.service_field_value("web_fetch_injection_threshold"),
+        catalog=catalog,
+        keys=keys,
+        agent_id=agent_id,
+        delivery_active=delivery_active,
+    )
 
-    The judgement runs in a worker thread beside the caller's own work, so it adds no
-    round trip to the fetch. `finish` joins it and, when the page likely addresses an AI
-    reader, records the finding from the caller's thread. It does nothing unless the check
-    is enabled, security scanning is on and an agent turn is running (outside one a finding
-    has nowhere to go); then no model call is made and `finish` is a no-op.
 
-    Raises:
-        ValueError: the configured model is not a decision model of the catalog. Raised here,
-            before any work starts.
-    """
-    from meiva.sdk_surface import agent_identity
-    from meiva.sdk_surface.settings import config_authority, model_catalog, provider_keys
+# meiva:note
+# A page check in flight. `finish` joins the worker and returns the highest chunk probability
+# (None when no chunk produced an answer, or when no check was started); it never records
+# anything, so the caller decides what a verdict means for its own result.
+class PendingCheck:
+    def __init__(
+        self, judged: Future[float | None] | None, worker: ThreadPoolExecutor | None
+    ) -> None:
+        self._judged = judged
+        self._worker = worker
 
-    def nothing() -> None:
-        return None
+    def finish(self) -> float | None:
+        if self._judged is None or self._worker is None:
+            return None
+        try:
+            return self._judged.result()
+        finally:
+            self._worker.shutdown(wait=True)
 
-    authority = config_authority()
-    if not authority.service_field_value("web_fetch_injection_check_enabled"):
-        return nothing
-    if not delivery_active():
-        return nothing
-    text = f"{title}\n\n{content}" if title else content
-    if not text.strip():
-        return nothing
 
-    model = authority.service_field_value("web_fetch_injection_model")
-    catalog = model_catalog()
-    if model not in catalog.decision_models:
+# meiva:note
+# Start judging a fetched page. The judgement runs in a worker thread beside the caller's own
+# work, so it adds no round trip to the fetch. The returned check does nothing unless the check
+# is enabled, a finding has somewhere to go and the page has text; then no model call is made.
+# A configured model that is not a decision model of the catalog raises ValueError here, before
+# any work starts.
+def begin_check(
+    url: str, title: str, content: str, *, inputs: InjectionCheckInputs
+) -> PendingCheck:
+    text = check_text(title, content)
+    step = plan_check(
+        enabled=inputs.enabled,
+        delivery_active=inputs.delivery_active,
+        text=text,
+        model=inputs.model,
+        decision_models=inputs.catalog.decision_models,
+    )
+    if step is CheckStep.SKIP:
+        return PendingCheck(None, None)
+    if step is CheckStep.UNKNOWN_MODEL:
         raise ValueError(
-            f"web_fetch_injection_model {model!r} is not a decision model; available: "
-            + ", ".join(sorted(catalog.decision_models))
+            f"web_fetch_injection_model {inputs.model!r} is not a decision model; available: "
+            + ", ".join(sorted(inputs.catalog.decision_models))
         )
-    threshold = authority.service_field_value("web_fetch_injection_threshold")
-    agent_id = agent_identity.agent_id()
-    # Everything the worker needs is resolved above, in the caller's thread.
     worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="injection-check")
     judged = worker.submit(
         asyncio.run,
         page_probability(
-            model, text, catalog=catalog, keys=provider_keys(), url=url, for_agent_id=agent_id
+            inputs.model,
+            text,
+            catalog=inputs.catalog,
+            keys=inputs.keys,
+            url=url,
+            for_agent_id=inputs.agent_id,
         ),
     )
-
-    def finish() -> None:
-        try:
-            probability = judged.result()
-        finally:
-            worker.shutdown(wait=True)
-        if probability is not None and probability >= threshold:
-            # The finding's source names the page; whitespace is collapsed so a URL cannot
-            # add lines.
-            record(f"web.fetch ({' '.join(url.split())[:_MAX_URL_CHARS]})", probability)
-
-    return finish
+    return PendingCheck(judged, worker)

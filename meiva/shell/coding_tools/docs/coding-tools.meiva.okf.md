@@ -50,17 +50,34 @@ skill directory, whose `references/` holds the collaboration contract and whose
 - `antigravity` — the Antigravity (`agy`) launcher. Opens `agy chat -a <workspace>`
   in a persistent PTY, exports `ANTIGRAVITY_CONVERSATION_ID`, and sends either
   the file-driven collaboration contract or the inline `--prompt`.
-- `_claude_checks` — Claude-specific checks:
-  - UI readiness and the missing-executable and signed-out markers;
-  - bracketed-paste delivery (#4364);
-  - start-receipt verification from the session transcript.
-- `_first_run` — presets Claude Code's first-run dialogs so an unattended spawn
-  never parks on one.
-- `_common` — shared by the launchers:
-  - workspace path resolution;
-  - a new owner generation for each launch, after the workspace's dead ones are
-    reclaimed;
-  - owner-record status (every generation of the workspace) and cancel.
+- `_claude_checks` — the Claude launch's waits: the panel wait (`wait_for_ready`: the
+  panel must look ready twice, a settle apart) and delivery of the first message through
+  the composer's paste path (#4364).
+- `_first_run` — the files side of Claude Code's first-run presets and workspace trust:
+  reads the file, backs it up under a caller-given stamp, publishes the merged document
+  atomically and keeps its permission bits. An unparsable file is backed up and refused,
+  never overwritten.
+- `_common` — shared by the launchers: workspace path resolution; `LaunchSite`, the facts a
+  launch reads from the process once (the agent's shell sessions, the home, the cluster
+  home, the directory a new session starts in, the machine facts); a new owner generation
+  for each launch, after the workspace's dead ones are reclaimed; owner-record status
+  (every generation of the workspace) and cancel; and the lineage facts read from the
+  cluster.
+- `plans/` — the decisions as pure functions over values, declared strict: what a captured
+  Claude screen means and how a first message is pasted (`claude_screen`), the Claude
+  launch line and plan (`claude_launch`), what a Codex screen means (`codex_screen`), the
+  first-run and trust file plans (`first_run`), the checked launch request and the
+  messages composed from it (`launch_request`), who dispatched a launch (`lineage`) and
+  the launch loops' pacing (`pacing`).
+
+## Shells and tests
+
+The launchers are shells over a `LaunchSite`: they type the plan's lines into real
+sessions, wait with the pacing a caller gives (short ones in tests, the launch's own
+constants otherwise) and reclaim every session they opened when a step fails. Tests run
+them against a real pty-sessions service and stand-in `claude` and `codex` programs
+installed through the test home's `.bash_profile` (`tests/fake_tools.py`), so the
+developer's own programs never run; the pure plans are tested by value.
 
 ## Key dependencies
 - [[meiva/shell/docs/shell.meiva.okf.md|meiva.shell]] — the session primitives every launch drives

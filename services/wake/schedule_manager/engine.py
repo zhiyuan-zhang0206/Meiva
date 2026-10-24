@@ -43,20 +43,19 @@ import sys
 import threading
 import time
 import traceback
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
-from typing import Any
 
 from loguru import logger
 
 import base.host.proc
-import meiva
-from base.clock import Clock
+from base.agents.context.clients import ClientSet
+from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
+from meiva import boot
 from services.wake.schedule_manager.guard_admission import (
     Admission,
     Frame,
@@ -90,8 +89,8 @@ from services.wake.schedule_manager.stall_policy import (
 @dataclass(frozen=True)
 class PluginInputs:
     config: ConfigBoot
-    clock_factory: Callable[[], Clock]
-    producer: Callable[[], Any]
+    machine: MachineIdentity
+    clients: ClientSet
 
 
 # meiva:note
@@ -424,10 +423,10 @@ def run_python_script(
     runner_argv = sys.argv
     sys.argv = [str(script_path)]
     try:
-        meiva.ensure_plugins_loaded(
+        boot.ensure_plugins_loaded(
             config=root.plugins.config,
-            clock_factory=root.plugins.clock_factory,
-            producer=root.plugins.producer,
+            machine=root.plugins.machine,
+            clients=root.plugins.clients,
         )
         runpy.run_path(
             str(script_path),
