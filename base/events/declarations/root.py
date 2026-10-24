@@ -94,6 +94,17 @@ class RootUnitBreakerClosed(TypedDict):
     detail: str
 
 
+# meiva:note
+# One report per stop record: an explicit operator stop left the unit down past the
+# alarm age, so the fact that nobody came back is itself the signal. `caller` is the
+# recorded asking process, "unknown" when the record predates caller capture (#5611).
+class RootUnitOperatorStopUnattended(TypedDict):
+    unit: str
+    held_h: float
+    caller: str
+    stopped_at: float
+
+
 class RootUnitNotRevivable(TypedDict):
     """A unit has no automatic restart authority for its observed failure.
 
@@ -498,6 +509,13 @@ EVENTS: dict[str, EventSpec] = {
         "circuit breaker is open, so only the backoff ladder's capped cadence or a "
         "recovered database replaces it (task #5315)",
         payload=RootUnitBreakerOpen,
+        tier="anomaly",
+    ),
+    "root_unit_operator_stop_unattended": telemetry_event(
+        "root_unit_operator_stop_unattended",
+        "an explicit operator stop left a unit down past the alarm age — the stop is "
+        "policy, but no owner came back for it (task #5611)",
+        payload=RootUnitOperatorStopUnattended,
         tier="anomaly",
     ),
     "root_unit_breaker_closed": telemetry_event(

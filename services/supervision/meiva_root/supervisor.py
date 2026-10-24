@@ -458,6 +458,9 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
             intent_running=runtime.intent is UnitIntent.RUNNING,
             restart_failed=runtime.restart_failed,
             last_error=runtime.last_error,
+            intent_source=runtime.intent_source,
+            intent_since=runtime.intent_since,
+            intent_caller=runtime.intent_caller,
         )
 
     async def dispatch(self, request: RequestPayload) -> ResponsePayload:
@@ -500,6 +503,10 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         runtime.intent = intent
         runtime.intent_source = source
         runtime.intent_caller = caller
+        # meiva:note
+        # Stamp the intent's age where the intent is set: a stop's age is what
+        # decides whether it still counts as a deliberate, owned action (#5611).
+        runtime.intent_since = time()
         self._write_record(runtime)
 
     def _write_record(self, runtime: UnitRuntime) -> None:
@@ -523,6 +530,8 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         runtime.intent = merged.intent
         runtime.intent_source = merged.source
         runtime.restart_failed = merged.restart_failed
+        runtime.intent_caller = None if record is None else record.caller
+        runtime.intent_since = time() if record is None else record.updated_at
         if record is None or (
             record.intent,
             record.source,

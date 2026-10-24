@@ -317,6 +317,9 @@ class _NoRevival:
     def unit_failure_facts(self, unit_id: str) -> UnitFailureFacts:
         raise AssertionError(f"unexpected failure facts lookup for {unit_id}")
 
+    def operator_stop_facts(self, unit_id: str) -> None:
+        return None
+
 
 class _Health(HealthMonitor):
     def __init__(self) -> None:

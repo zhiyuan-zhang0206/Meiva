@@ -46,6 +46,16 @@ class Generation:
     exited: asyncio.Event = field(default_factory=asyncio.Event)
 
 
+# meiva:note
+# An explicit operator stop: when it was recorded, and who recorded it. The stop
+# is policy, not failure — but nothing owns it afterwards, so the age and the
+# caller are the only things that can make an unattended stop visible (#5611).
+@dataclass(frozen=True, slots=True)
+class OperatorStopFacts:
+    since: float
+    caller: CallerFacts | None
+
+
 @dataclass(slots=True)
 class UnitRuntime:
     """Mutable per-unit state owned by the supervisor.
@@ -61,6 +71,9 @@ class UnitRuntime:
     intent_source: IntentSource = IntentSource.SELECTION
     restart_failed: RestartFailure | None = None
     intent_caller: CallerFacts | None = None
+    # meiva:note
+    # When the current intent was recorded (wall clock), None before any record.
+    intent_since: float | None = None
     state: UnitState = UnitState.STOPPED
     generation: Generation | None = None
     restart_count: int = 0
