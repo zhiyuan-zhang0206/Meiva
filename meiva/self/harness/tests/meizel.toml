@@ -1,5 +1,5 @@
 exports = []
 
 [uses]
-"test_attach.py" = []
+"test_attach.py" = ["sleeper_child.py"]
 "test_registration.py" = []

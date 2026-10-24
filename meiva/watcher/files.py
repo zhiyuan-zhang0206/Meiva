@@ -7,14 +7,11 @@ id, the live session ids), so a test passes a `tmp_path` and a set of ids.
 from __future__ import annotations
 
 import hashlib
-import logging
 import re
 from collections.abc import Collection
 from pathlib import Path
 
 __all__ = ["prune_stale", "watchers_dir"]
-
-logger = logging.getLogger(__name__)
 
 
 def watchers_dir(home: Path, tmp_root: Path, agent_id: int) -> Path:
@@ -50,37 +47,23 @@ _BOOT_FILE_RE = re.compile(r"^watcher_(\d+)_boot\.py$")
 _LAUNCH_FILE_RE = re.compile(r"^watcher_(\d+)_launch\.sh$")
 
 
-def prune_stale(keep: Path, alive: Collection[int] | None) -> None:
-    """Delete generated watcher files whose watcher SESSION no longer exists,
-    except the pair about to be written.
-
-    A watcher reads its script + bootstrap exactly once, at launch — but
-    launch is asynchronous: `spawn.run` sends the command into a fresh session
-    whose shell takes a moment to come up, so the files must stay on disk
-    until the child has actually started. Deleting every old pair at every
-    launch (the previous behavior) could delete a sibling's not-yet-read
-    files when watchers are created back-to-back, making that sibling's
-    python start fail with "can't open file ... _boot.py" (observed
-    2026-08-08/09: watcher_0_boot.py / watcher_3_boot.py — Bug A, task
-    #1116). So prune only what is provably dead: a pair whose session id is
-    not in the live session list. A running watcher's pair stays on disk (a
-    few KB) and is pruned once its session closes; a hard-killed watcher's
-    pair is pruned once its session is gone too. If the session list is
-    unavailable, delete nothing — a stale file is harmless, a not-yet-read
-    one is fatal. Files that do not match the generated-name patterns are
-    left alone.
-    """
-    if alive is None:
-        logger.warning(
-            "[watcher] listing live sessions failed; skipping the prune of stale watcher files"
-        )
-        return  # conservative: no session info, no pruning
-    d = keep.parent
+# meiva:note
+# Delete generated watcher files in `directory` whose watcher SESSION no longer exists.
+#
+# A watcher reads its script + bootstrap exactly once, at launch - but launch is asynchronous:
+# `spawn.run` sends the command into a fresh session whose shell takes a moment to come up, so
+# the files must stay on disk until the child has actually started. Deleting every old pair at
+# every launch (the previous behavior) could delete a sibling's not-yet-read files when watchers
+# are created back-to-back, making that sibling's python start fail with "can't open file ...
+# _boot.py" (observed 2026-08-08/09: watcher_0_boot.py / watcher_3_boot.py - Bug A, task #1116).
+# So prune only what is provably dead: a pair whose session id is not in the live session list.
+# A running watcher's pair stays on disk (a few KB) and is pruned once its session closes; a
+# hard-killed watcher's pair is pruned once its session is gone too. Files that do not match the
+# generated-name patterns are left alone.
+def prune_stale(directory: Path, alive: Collection[int]) -> None:
     for pat in (_SCRIPT_FILE_RE, _BOOT_FILE_RE, _LAUNCH_FILE_RE):
-        for f in d.iterdir():
-            if f == keep or not pat.match(f.name):
-                continue
+        for f in directory.iterdir():
             m = pat.match(f.name)
-            if m and int(m.group(1)) in alive:
-                continue  # that watcher's session still exists — possibly still launching
+            if m is None or int(m.group(1)) in alive:
+                continue
             f.unlink(missing_ok=True)

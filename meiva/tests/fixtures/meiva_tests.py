@@ -40,19 +40,18 @@ _WORKER_NUM = int(re.sub(r"\D", "", os.environ.get("PYTEST_XDIST_WORKER", "")) o
 _TEST_AGENT_BASE = 900_000 + _WORKER_NUM * 10
 
 
-def ensure_agents_meta_row(agent_id: int | None = None) -> None:
-    """Ensure agents_meta has a row for the current agent (shell.sessions.new() reads session_index).
-
-    Resets session_index to 0 so each test starts from a clean slate.
-    For non-local agents (e.g. 999) seeds the agents row first (FK constraint).
-
-    Refuses to run against the production database (bare name "meiva") —
-    this fixture must only touch a cluster-scoped test database ("meiva_<cluster>").
-    """
+# meiva:note
+# Ensure agents_meta has a row for `agent_id` (shell.sessions.new() reads session_index).
+#
+# Resets session_index to 0 so each test starts from a clean slate. For non-local agents (e.g.
+# 999) seeds the agents row first (FK constraint).
+#
+# Refuses to run against the production database (bare name "meiva") — this fixture must only
+# touch a cluster-scoped test database ("meiva_<cluster>").
+def ensure_agents_meta_row(agent_id: int, *, db_url: str) -> None:
     import psycopg
 
     from base.db.test_db_guard import assert_test_db_url
-    from meiva.sdk_surface.settings import DB_URL
 
     # Guard: refuse to write to anything but a throwaway test database. This
     # fixture writes synthetic agent rows (spawner="test", high-range IDs) that
@@ -60,20 +59,19 @@ def ensure_agents_meta_row(agent_id: int | None = None) -> None:
     # ids 900002-900010 into the production agents table. The rule lives in
     # base/db/test_db_guard.py (single source of truth, shared with the
     # session-start guard in tests/fixtures/provisioning.py).
-    assert_test_db_url(str(DB_URL), context="ensure_agents_meta_row")
+    assert_test_db_url(db_url, context="ensure_agents_meta_row")
 
-    aid = agent_id if agent_id is not None else meiva.self.AGENT_ID
-    with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
+    with psycopg.connect(db_url) as conn, conn.cursor() as cur:
         # Non-local agents may lack an agents row (agents_meta.id → agents.id FK)
         cur.execute(
             "INSERT INTO agents (id) VALUES (%s) ON CONFLICT (id) DO NOTHING",
-            (aid,),
+            (agent_id,),
         )
         cur.execute(
             "INSERT INTO agents_meta (id, spawner, status, session_index) "
             "VALUES (%s, 'test', 'running', 0) "
             "ON CONFLICT (id) DO UPDATE SET session_index = 0",
-            (aid,),
+            (agent_id,),
         )
         conn.commit()
 
@@ -129,5 +127,7 @@ def _agent_row(_isolated_agent: None, db_conn: object) -> int:
     counter at 0 so each test has a deterministic, independent starting point.
     Returns the agent id in use.
     """
-    ensure_agents_meta_row()
+    from meiva.sdk_surface.settings import DB_URL
+
+    ensure_agents_meta_row(meiva.self.AGENT_ID, db_url=str(DB_URL))
     return meiva.self.AGENT_ID

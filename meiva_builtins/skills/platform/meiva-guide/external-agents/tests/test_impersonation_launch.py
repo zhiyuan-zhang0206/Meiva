@@ -3,7 +3,6 @@
 import importlib.util
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -71,42 +70,6 @@ def test_codex_launcher_wires_one_explicit_shared_app_server(tmp_path: Path) -> 
     assert "CODEX_HOME" not in server and "check_for_update_on_startup=false" in server
     assert f"--remote {endpoint} --dangerously-bypass-approvals-and-sandbox" in tui
     assert tui.startswith("clear && ")
-
-
-def test_app_server_wait_accepts_a_bound_socket() -> None:
-    import shutil
-    import socket as socket_module
-    import tempfile
-    import threading
-
-    short_dir = Path(tempfile.mkdtemp(prefix="meiva-f1-", dir=tempfile.gettempdir()))
-    path = short_dir / "probe.sock"
-    listener = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
-    listener.bind(str(path))
-    listener.listen(1)
-    accepted: list[bool] = []
-
-    def accept_once() -> None:
-        connection, _ = listener.accept()
-        accepted.append(True)
-        connection.close()
-
-    thread = threading.Thread(target=accept_once, daemon=True)
-    thread.start()
-    try:
-        codex.wait_for_app_server(f"unix://{path}", timeout=5.0)
-    finally:
-        thread.join(timeout=5)
-        listener.close()
-        shutil.rmtree(short_dir, ignore_errors=True)
-    assert accepted == [True]
-
-
-def test_app_server_wait_fails_loudly_when_absent(tmp_path: Path) -> None:
-    log_path = tmp_path / "app-server.log"
-    with pytest.raises(RuntimeError, match="did not become ready") as excinfo:
-        codex.wait_for_app_server(f"unix://{tmp_path}/missing.sock", timeout=0.4, log_path=log_path)
-    assert str(log_path) in str(excinfo.value)
 
 
 def _pump_pane(master: int, seconds: float, buf: bytearray) -> None:
@@ -205,7 +168,7 @@ def test_app_server_command_executes_in_an_interactive_bash(tmp_path: Path) -> N
 
 @pytest.mark.parametrize("provider", ["codex", "claude", "dsh", "antigravity"])
 def test_launch_rejects_missing_workspace_without_creating_it(
-    provider: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    provider: str, tmp_path: Path
 ) -> None:
     spec = importlib.util.spec_from_file_location(
         f"takeover_spawn_{provider}", _SKILL_DIR / "scripts" / f"spawn_{provider}.py"
@@ -214,9 +177,8 @@ def test_launch_rejects_missing_workspace_without_creating_it(
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     target = tmp_path / "must-not-be-created"
-    monkeypatch.setattr(sys, "argv", [f"spawn_{provider}.py", str(target), "--prompt", "hi"])
     with pytest.raises(SystemExit):
-        module.main()
+        module.main([str(target), "--prompt", "hi"])
     assert not target.exists()
 
 

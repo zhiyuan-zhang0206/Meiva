@@ -27,7 +27,7 @@ from .conversation import (
     user_reply_section,
 )
 from .live import (
-    LiveSdk,
+    SectionInputs,
     discover_all_namespaces,
     read_live_sdk,
     render_expanded_reference,
@@ -35,15 +35,15 @@ from .live import (
 from .sdk_scope import expand_plan
 
 
-def _resolved(setting: str, slices: AgentSlices, catalog: ModelCatalog) -> Any:
+def _resolved(setting: str, inputs: SectionInputs) -> Any:
 
     from base.lm.registry import resolve_setting
 
     return resolve_setting(
         setting,
-        model=slices.brain.llm_model,
-        models=catalog.models,
-        explicit=slices.read("agent", setting),
+        model=inputs.slices.brain.llm_model,
+        models=inputs.catalog.models,
+        explicit=inputs.slices.read("agent", setting),
     )
 
 
@@ -68,27 +68,27 @@ def effective_sdk_expand(
     return list(plan.paths)
 
 
-def sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog, live: LiveSdk) -> str:
+def sdk_expand_section(inputs: SectionInputs) -> str:
 
     wanted = effective_sdk_expand(
-        slices.read("agent", "sdk_expand_in_system_prompt"),
-        disabled=live.view.disabled,
-        plugin_expansions=live.plugin_expansions,
+        inputs.slices.read("agent", "sdk_expand_in_system_prompt"),
+        disabled=inputs.live.view.disabled,
+        plugin_expansions=inputs.live.plugin_expansions,
     )
     if not wanted:
         return ""
     return render_expanded_reference(
         wanted,
-        disabled=live.view.disabled,
-        model=slices.brain.llm_model,
-        catalog=catalog,
+        disabled=inputs.live.view.disabled,
+        model=inputs.slices.brain.llm_model,
+        catalog=inputs.catalog,
         report=True,
     )
 
 
-def _prefer_sdk_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def _prefer_sdk_section(inputs: SectionInputs) -> str:
 
-    if not _resolved("prompt_prefer_sdk_enabled", slices, catalog):
+    if not _resolved("prompt_prefer_sdk_enabled", inputs):
         return ""
     return (
         "# Prefer your SDK\n\n"
@@ -97,9 +97,9 @@ def _prefer_sdk_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     )
 
 
-def keep_it_simple_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def keep_it_simple_section(inputs: SectionInputs) -> str:
 
-    if not _resolved("prompt_keep_it_simple_enabled", slices, catalog):
+    if not _resolved("prompt_keep_it_simple_enabled", inputs):
         return ""
     return (
         "# Keep It Simple\n\n"
@@ -113,9 +113,9 @@ def keep_it_simple_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str
     )
 
 
-def communication_style_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def communication_style_section(inputs: SectionInputs) -> str:
 
-    style = _resolved("agent_communication_style", slices, catalog)
+    style = _resolved("agent_communication_style", inputs)
     if style == "off":
         return ""
     return COMMUNICATION_STYLE_SECTIONS[style]
@@ -127,17 +127,17 @@ _VERY_LIGHT_USER_TONE = "Be honest and direct, and keep honesty from turning int
 _USER_TONE_SECTIONS = {"gemini": _STRONG_USER_TONE, "claude": _VERY_LIGHT_USER_TONE}
 
 
-def user_tone_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def user_tone_section(inputs: SectionInputs) -> str:
 
-    if not _resolved("prompt_user_tone_enabled", slices, catalog):
+    if not _resolved("prompt_user_tone_enabled", inputs):
         return ""
-    spec = catalog.models.get(slices.brain.llm_model)
+    spec = inputs.catalog.models.get(inputs.slices.brain.llm_model)
     return f"# Communicating with the user\n\n{_USER_TONE_SECTIONS.get(spec.provider if spec is not None else '', _LIGHT_USER_TONE)}"
 
 
-def _output_conciseness_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def _output_conciseness_section(inputs: SectionInputs) -> str:
 
-    if not _resolved("prompt_output_conciseness_enabled", slices, catalog):
+    if not _resolved("prompt_output_conciseness_enabled", inputs):
         return ""
     return (
         "# Output shape\n\n"
@@ -152,9 +152,9 @@ def _output_conciseness_section(slices: AgentSlices, *, catalog: ModelCatalog) -
     )
 
 
-def ui_delivery_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def ui_delivery_section(inputs: SectionInputs) -> str:
 
-    if not _resolved("prompt_ui_delivery_enabled", slices, catalog):
+    if not _resolved("prompt_ui_delivery_enabled", inputs):
         return ""
     return (
         "# Deliver through the UI\n\n"
@@ -168,9 +168,9 @@ def ui_delivery_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     )
 
 
-def _outcome_reporting_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def _outcome_reporting_section(inputs: SectionInputs) -> str:
 
-    if not _resolved("prompt_outcome_reporting_enabled", slices, catalog):
+    if not _resolved("prompt_outcome_reporting_enabled", inputs):
         return ""
     return (
         "# Reporting honestly\n\n"
@@ -181,9 +181,9 @@ def _outcome_reporting_section(slices: AgentSlices, *, catalog: ModelCatalog) ->
     )
 
 
-def _action_caution_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def _action_caution_section(inputs: SectionInputs) -> str:
 
-    if not _resolved("prompt_action_caution_enabled", slices, catalog):
+    if not _resolved("prompt_action_caution_enabled", inputs):
         return ""
     return (
         "# Before irreversible or outward-facing actions\n\n"
@@ -196,9 +196,9 @@ def _action_caution_section(slices: AgentSlices, *, catalog: ModelCatalog) -> st
     )
 
 
-def align_before_action_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def align_before_action_section(inputs: SectionInputs) -> str:
 
-    if not _resolved("prompt_align_before_action_enabled", slices, catalog):
+    if not _resolved("prompt_align_before_action_enabled", inputs):
         return ""
     return (
         "# Aligning before you commit to a direction\n\n"
@@ -248,12 +248,12 @@ _STEP_PARALLEL = (
 )
 
 
-def delegation_check_section(slices: AgentSlices, *, catalog: ModelCatalog, live: LiveSdk) -> str:
+def delegation_check_section(inputs: SectionInputs) -> str:
 
-    if not _resolved("prompt_delegation_check_enabled", slices, catalog):
+    if not _resolved("prompt_delegation_check_enabled", inputs):
         return ""
     steps: list[str] = []
-    if not capability_index_is_empty(live.view, live.mcp_servers):
+    if not capability_index_is_empty(inputs.live.view, inputs.live.mcp_servers):
         steps.append(_STEP_SKILL_INDEX)
     steps.append(_STEP_NEIGHBORS)
     steps.append(_STEP_TOOLS)
@@ -274,16 +274,16 @@ _CROSS_MACHINE_DELEGATION_HINT = (
 )
 
 
-def cross_machine_delegation_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def cross_machine_delegation_section(inputs: SectionInputs) -> str:
 
-    if not _resolved("prompt_cross_machine_delegation_enabled", slices, catalog):
+    if not _resolved("prompt_cross_machine_delegation_enabled", inputs):
         return ""
     return _CROSS_MACHINE_DELEGATION_HINT
 
 
-def _file_driven_work_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def _file_driven_work_section(inputs: SectionInputs) -> str:
 
-    if not _resolved("prompt_file_driven_work_enabled", slices, catalog):
+    if not _resolved("prompt_file_driven_work_enabled", inputs):
         return ""
     return (
         "# File-driven workflow for complex tasks\n\n"
@@ -306,9 +306,9 @@ def _file_driven_work_section(slices: AgentSlices, *, catalog: ModelCatalog) -> 
     )
 
 
-def temporal_awareness_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def temporal_awareness_section(inputs: SectionInputs) -> str:
 
-    if not _resolved("prompt_temporal_awareness_enabled", slices, catalog):
+    if not _resolved("prompt_temporal_awareness_enabled", inputs):
         return ""
     return (
         "# Temporal awareness\n\n"
@@ -347,9 +347,9 @@ INVEST_IN_THE_FUTURE_SECTION = (
 )
 
 
-def invest_in_the_future_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
+def invest_in_the_future_section(inputs: SectionInputs) -> str:
 
-    if not _resolved("prompt_invest_future_enabled", slices, catalog):
+    if not _resolved("prompt_invest_future_enabled", inputs):
         return ""
     return INVEST_IN_THE_FUTURE_SECTION
 
@@ -393,7 +393,7 @@ def agent_workspace_pointer(slices: AgentSlices, *, agent_id: int | None) -> str
     )
 
 
-def _long_running_operation_section(_slices: AgentSlices) -> str:
+def _long_running_operation_section(_inputs: SectionInputs) -> str:
 
     return (
         "# Efficient long-running operation\n\n"
@@ -424,7 +424,7 @@ def _long_running_operation_section(_slices: AgentSlices) -> str:
     )
 
 
-FRAMEWORK_SECTIONS: tuple[Callable[..., str], ...] = (
+FRAMEWORK_SECTIONS: tuple[Callable[[SectionInputs], str], ...] = (
     sdk_expand_section,
     _prefer_sdk_section,
     codeact_section,
@@ -446,46 +446,17 @@ FRAMEWORK_SECTIONS: tuple[Callable[..., str], ...] = (
 )
 
 
-_CATALOG_SECTIONS = (
-    _prefer_sdk_section,
-    keep_it_simple_section,
-    communication_style_section,
-    user_tone_section,
-    _output_conciseness_section,
-    ui_delivery_section,
-    _outcome_reporting_section,
-    _action_caution_section,
-    align_before_action_section,
-    cross_machine_delegation_section,
-    _file_driven_work_section,
-    temporal_awareness_section,
-    invest_in_the_future_section,
-)
-
-
-def _render_section(
-    section_fn: Callable[..., str], slices: AgentSlices, catalog: ModelCatalog, live: LiveSdk
-) -> str:
-    if section_fn in _LIVE_SECTIONS:
-        return section_fn(slices, catalog=catalog, live=live)
-    if section_fn in _CATALOG_SECTIONS:
-        return section_fn(slices, catalog=catalog)
-    return section_fn(slices)
-
-
 def _framework_parts(
-    sections: tuple[Callable[..., str], ...],
-    slices: AgentSlices,
+    sections: tuple[Callable[[SectionInputs], str], ...],
+    inputs: SectionInputs,
     *,
     agent_id: int | None,
-    catalog: ModelCatalog,
-    live: LiveSdk,
 ) -> list[str]:
-    if agent_id is not None and slices.read("agent", "workspace_in_system_prompt"):
+    if agent_id is not None and inputs.slices.read("agent", "workspace_in_system_prompt"):
         workspace_dir(agent_id)
-    rendered = [_render_section(fn, slices, catalog, live) for fn in sections]
-    rendered.append(agent_workspace_pointer(slices, agent_id=agent_id))
-    rendered.append(capabilities_section(live.view, live.mcp_servers))
+    rendered = [section(inputs) for section in sections]
+    rendered.append(agent_workspace_pointer(inputs.slices, agent_id=agent_id))
+    rendered.append(capabilities_section(inputs.live.view, inputs.live.mcp_servers))
     return [part for part in rendered if part]
 
 
@@ -546,10 +517,8 @@ def build_system_prompt(
     parts.extend(
         _framework_parts(
             FRAMEWORK_SECTIONS,
-            slices,
+            SectionInputs(slices, catalog, read_live_sdk(slices.prompt)),
             agent_id=agent_id,
-            catalog=catalog,
-            live=read_live_sdk(slices.prompt),
         )
     )
     parts.extend(_plugin_parts(extensions, slices, catalog, excluded=frozenset()))
@@ -573,13 +542,16 @@ HARNESS_DEFAULT_SDK_EXPANSIONS: tuple[str, ...] = ("self",)
 HARNESS_EXCLUDED_PLUGIN_SECTIONS: frozenset[str] = frozenset({"coding_tools_section"})
 
 
-def harness_sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog, live: LiveSdk) -> str:
+def harness_sdk_expand_section(inputs: SectionInputs) -> str:
     wanted = [
         path
         for path in effective_sdk_expand(
-            (*HARNESS_DEFAULT_SDK_EXPANSIONS, *slices.read("agent", "sdk_expand_in_system_prompt")),
-            disabled=live.view.disabled,
-            plugin_expansions=live.plugin_expansions,
+            (
+                *HARNESS_DEFAULT_SDK_EXPANSIONS,
+                *inputs.slices.read("agent", "sdk_expand_in_system_prompt"),
+            ),
+            disabled=inputs.live.view.disabled,
+            plugin_expansions=inputs.live.plugin_expansions,
         )
         if path.split(".", 1)[0] not in HARNESS_NATIVE_OVERLAP_NAMESPACES
     ]
@@ -587,16 +559,14 @@ def harness_sdk_expand_section(slices: AgentSlices, *, catalog: ModelCatalog, li
         return ""
     return render_expanded_reference(
         wanted,
-        disabled=live.view.disabled,
-        model=slices.brain.llm_model,
-        catalog=catalog,
+        disabled=inputs.live.view.disabled,
+        model=inputs.slices.brain.llm_model,
+        catalog=inputs.catalog,
         report=False,
     )
 
 
-_LIVE_SECTIONS = (sdk_expand_section, harness_sdk_expand_section, delegation_check_section)
-
-HARNESS_FRAMEWORK_SECTIONS: tuple[Callable[..., str], ...] = (
+HARNESS_FRAMEWORK_SECTIONS: tuple[Callable[[SectionInputs], str], ...] = (
     harness_sdk_expand_section,
     keep_it_simple_section,
     harness_user_reply_section,
@@ -625,10 +595,8 @@ def build_harness_system_prompt(
 ) -> str:
     parts = _framework_parts(
         HARNESS_FRAMEWORK_SECTIONS,
-        slices,
+        SectionInputs(slices, catalog, read_live_sdk(slices.prompt)),
         agent_id=agent_id,
-        catalog=catalog,
-        live=read_live_sdk(slices.prompt),
     )
     parts.extend(
         _plugin_parts(extensions, slices, catalog, excluded=HARNESS_EXCLUDED_PLUGIN_SECTIONS)

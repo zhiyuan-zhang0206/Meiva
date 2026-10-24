@@ -12,12 +12,13 @@ from collections.abc import AsyncIterator
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 
 import meiva.mcps._computer as computer_mod
 from meiva.mcps._computer import connect_computer_direct
+from meiva.mcps.tests.line_streams import leftover_socket
+from meiva.mcps.tests.line_streams import short_dir as short_dir
 
 
 class FakeServer:
@@ -120,34 +121,29 @@ async def test_daemon_error_surfaces(session_and_server: tuple[Any, FakeServer])
         await session.call_tool("click", {"x": 1})
 
 
-@pytest.mark.parametrize("failure", [FileNotFoundError, ConnectionRefusedError])
+@pytest.mark.parametrize("failure", ["missing", "refused"])
 async def test_dial_computer_exhaustion_has_no_trailing_sleep(
-    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float], failure: type[OSError]
+    retry_waits: list[float], short_dir: Path, failure: str
 ) -> None:
-    calls = 0
-
-    async def fail(*, path: str, limit: int) -> None:
-        nonlocal calls
-        calls += 1
-        assert (path, limit) == ("test.sock", computer_mod.LINE_LIMIT)
-        raise failure("offline")
-
-    monkeypatch.setattr(computer_mod.asyncio, "open_unix_connection", fail)
+    sock = str(
+        short_dir / "absent.sock"
+        if failure == "missing"
+        else leftover_socket(short_dir / "dead.sock")
+    )
     with pytest.raises(ConnectionError) as error:
-        await computer_mod.dial_computer_mcp("test.sock")
-    assert str(error.value) == "computer-mcp daemon not reachable at test.sock: offline"
+        await computer_mod.dial_computer_mcp(sock)
+    assert str(error.value).startswith(f"computer-mcp daemon not reachable at {sock}: ")
     assert error.value.__context__ is None
-    assert calls == 10
     assert retry_waits == [0.5] * 9
 
 
+# meiva:note
+# A path below a regular file fails with NotADirectoryError, which is no cold-start race.
 async def test_dial_computer_non_retryable_error_passes_through(
-    monkeypatch: pytest.MonkeyPatch,
+    retry_waits: list[float], short_dir: Path
 ) -> None:
-    failure = PermissionError("forbidden")
-    call = AsyncMock(side_effect=failure)
-    monkeypatch.setattr(computer_mod.asyncio, "open_unix_connection", call)
-    with pytest.raises(PermissionError) as error:
-        await computer_mod.dial_computer_mcp("test.sock")
-    assert error.value is failure
-    assert call.await_count == 1
+    a_file = short_dir / "plain"
+    a_file.write_text("x")
+    with pytest.raises(NotADirectoryError):
+        await computer_mod.dial_computer_mcp(str(a_file / "svc.sock"))
+    assert retry_waits == []

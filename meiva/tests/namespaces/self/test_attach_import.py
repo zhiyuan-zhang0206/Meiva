@@ -21,12 +21,8 @@ from typing import Any
 
 import pytest
 
-from meiva.self.harness.registration import (
-    HarnessRegistration,
-    default_store,
-    handle_digest,
-    new_handle,
-)
+from meiva.self.harness.registration import HarnessRegistration, handle_digest
+from meiva.self.harness.store import FileRegistrationStore, new_handle
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -60,11 +56,13 @@ def marker(tmp_path: Path) -> Path:
 # The probe runs a fixed argv from this file; `sys.executable` is the test's own
 # interpreter, so the subprocess call carries no shell and no caller input.
 # meiva:link meiva/self/harness/docs/harness-attach.meiva.okf.md
-def _run_probe(marker: Path, handle: str | None = None) -> dict[str, Any]:
+def _run_probe(marker: Path, handle: str | None = None, home: Path | None = None) -> dict[str, Any]:
     env = {key: value for key, value in os.environ.items() if key not in _CLEAN_ENV_STRIP}
     env.pop("MEIVA_HARNESS_HANDLE", None)
     if handle is not None:
         env["MEIVA_HARNESS_HANDLE"] = handle
+    if home is not None:
+        env["MEIVA_HOME"] = str(home)
     proc = subprocess.run(  # noqa: S603
         [sys.executable, "-I", "-B", "-X", "utf8", str(_PROBE), str(_REPO_ROOT), str(marker)],
         cwd=_REPO_ROOT,
@@ -103,15 +101,19 @@ def test_a_dead_session_keeps_what_needs_no_identity(marker: Path) -> None:
     assert report["agent_id"]["message"] == report["agent_id_again"]["message"]
 
 
-def test_a_live_registration_attaches_on_the_first_identity_read(marker: Path) -> None:
-    store = default_store()
-    agent_id = 4242
-    if store.load(agent_id) is not None:
-        pytest.skip("a real harness registration already owns this probe's agent id")
+def test_a_live_registration_attaches_on_the_first_identity_read(
+    marker: Path, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".env").write_text(
+        (Path(os.environ["MEIVA_HOME"]) / ".env").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    store = FileRegistrationStore(home / "harness" / "registrations")
     handle = new_handle()
     store.save(
         HarnessRegistration(
-            agent_id=agent_id,
+            agent_id=4242,
             harness="deepseek",
             external_session_id="sess-first-read",
             machine=os.environ.get("MEIVA_MACHINE_NAME", "probe-machine"),
@@ -121,11 +123,17 @@ def test_a_live_registration_attaches_on_the_first_identity_read(marker: Path) -
             expires_at=(datetime.now(UTC) + timedelta(minutes=10)).isoformat(),
         )
     )
-    try:
-        report = _run_probe(marker, handle=handle)
-    finally:
-        store.delete(agent_id)
+
+    report = _run_probe(marker, handle=handle, home=home)
 
     assert report["has_tasks_at_import"] is False, "import must not replay the state snapshot"
     assert "error" not in report["agent_id"] or report["agent_id"]["error"] == "HarnessAttachError"
     assert "error" not in report["tasks"] or report["tasks"]["error"] == "HarnessAttachError"
+    assert "no harness session matches" not in report["agent_id"].get("message", "")
+
+
+def test_attach_without_a_handle_says_how_to_get_one(marker: Path) -> None:
+    report = _run_probe(marker)
+
+    assert report["attach"]["error"] == "RegistrationError"
+    assert "MEIVA_HARNESS_HANDLE" in report["attach"]["message"]

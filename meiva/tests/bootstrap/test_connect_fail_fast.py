@@ -27,14 +27,16 @@ import socket
 import threading
 import time
 from collections.abc import Callable, Generator
-from typing import Any
+from typing import cast
 
 import psycopg
 import pytest
+import redis
 
-from base.config import settings
+from base.agents.context.clients import ClientSet
+from base.config.tests.configuration import snapshot_process_config
 from base.db import PG_KEEPALIVE_KWARGS
-from base.db.code_version_gate import ProcessDbGate
+from meiva.boot import process_clients
 
 # The control test waits this long and asserts a bare connect is STILL pending;
 # the fail-fast tests assert they finished inside it. Comfortably above
@@ -148,98 +150,48 @@ def test_assert_schema_current_fails_fast(silent_peer_url: str) -> None:
     _assert_fails_fast(lambda: assert_schema_current(silent_peer_url))
 
 
-def test_meiva_db_connect_fails_fast(
-    silent_peer_url: str, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+# meiva:note
+# The process clients of a configuration that names `db_url` as the cluster database.
+def _clients_for(db_url: str) -> ClientSet:
+    config = snapshot_process_config()
+    config.set_field("db_url", db_url)
+    return process_clients(config=config)
+
+
+def test_meiva_db_connect_fails_fast(silent_peer_url: str) -> None:
     """`meiva.DB` is dialled from inside the agent's exec sandbox — an unbounded
     connect freezes the agent's tool call, not just a daemon's boot."""
-    from base.agents.context.clients import ClientSet
-    from base.db import Database
-
-    monkeypatch.setattr(settings.data_plane, "db_url", silent_peer_url)
-    _assert_fails_fast(
-        ClientSet(database=lambda: Database.from_settings(gate=database_gate))._connect_sql
-    )  # pyright: ignore[reportUnknownArgumentType]
+    clients = _clients_for(silent_peer_url)
+    try:
+        _assert_fails_fast(lambda: clients.sql.execute("SELECT 1"))
+    finally:
+        clients.close()
 
 
-def _record_connect_kwargs(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """Replace `psycopg.connect` with a spy that records its kwargs and raises.
-
-    Only the test's own thread is recorded: the patch sits on the process-wide
-    `psycopg.connect`, and a dial from another thread sharing the xdist worker
-    must not enter `seen` (2026-10-03 shard8 flake).
-
-    Used for the call sites whose *behaviour* is impractical to drive here
-    (allocation needs an agent identity in `agents_meta`; the TTL dials and
-    `meiva.DB` need a live database). The behaviour is already proven above by
-    the black-hole tests — this pins that the site hands libpq the same
-    kwargs, which is the whole mechanism.
-    """
-    seen: dict[str, Any] = {}
-    owner = threading.current_thread()
-
-    def spy(_conninfo: str = "", **kwargs: Any) -> psycopg.Connection:
-        if threading.current_thread() is owner:
-            seen.update(kwargs)
-        raise psycopg.OperationalError("spy: connection not attempted")
-
-    monkeypatch.setattr(psycopg, "connect", spy)
-    return seen
-
-
-def test_shell_session_index_passes_the_resilience_kwargs(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Configuration pin, not a behavioural assertion: `meiva.shell.sessions.new()`'s
-    session-index allocation hands libpq `PG_KEEPALIVE_KWARGS` and never
-    prepares (`prepare_threshold=None`)."""
-    import meiva.sdk_surface.agent_identity
-    from meiva.shell.sessions import shell_sessions
-
-    monkeypatch.setattr(meiva.sdk_surface.agent_identity, "agent_id", lambda: 1)
-    handle = shell_sessions()
-    seen = _record_connect_kwargs(monkeypatch)
-    with pytest.raises(psycopg.OperationalError):
-        handle._next_session_index_from_db()
-    assert seen.items() >= {**PG_KEEPALIVE_KWARGS, "prepare_threshold": None}.items()
-
-
-def test_meiva_db_connect_never_prepares(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
+def test_meiva_db_connect_never_prepares(db_url: str) -> None:
     """`meiva.DB` lives for the whole process and dials the pooled front door —
     a server-side prepared statement made on one pgbouncer backend does not
     exist on the next (2026-09-21 watcher wedge on `_pg3_0`), so the dial must
     never prepare."""
-    from base.agents.context.clients import ClientSet
-    from base.db import Database
-
-    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://meiva:x@127.0.0.1:1/meiva")
-    seen = _record_connect_kwargs(monkeypatch)
-    with pytest.raises(psycopg.OperationalError):
-        ClientSet(database=lambda: Database.from_settings(gate=database_gate))._connect_sql()
-    assert seen["prepare_threshold"] is None
+    clients = _clients_for(db_url)
+    try:
+        assert clients.sql.prepare_threshold is None
+    finally:
+        clients.close()
 
 
-def test_shell_session_ttl_sites_never_prepare(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Configuration pin: every TTL bookkeeping dial in `meiva.shell.sessions`
-    (`_record_ttl`, `_read_expiry_row`, `_apply_renewal`) hands libpq
-    `prepare_threshold=None` — the module dials the pooled front door
-    everywhere."""
-    from datetime import UTC, datetime
+def test_connect_redis_applies_resilience_kwargs() -> None:
+    config = snapshot_process_config()
+    config.set_field("redis_url", "redis://127.0.0.1:1/0")
+    clients = process_clients(config=config)
+    try:
+        kw = cast(redis.Redis, clients.redis._get()).connection_pool.connection_kwargs
+    finally:
+        clients.close()
 
-    import meiva.sdk_surface.agent_identity
-    from meiva.shell.sessions import shell_sessions
-
-    monkeypatch.setattr(meiva.sdk_surface.agent_identity, "agent_id", lambda: 1)
-    handle = shell_sessions()
-    dials: list[Callable[[], object]] = [
-        lambda: handle.record_ttl(1, 60.0),
-        lambda: handle._read_expiry_row(2),
-        lambda: handle._apply_renewal(2, 60.0, datetime.now(UTC)),
-    ]
-    for dial in dials:
-        seen = _record_connect_kwargs(monkeypatch)
-        with pytest.raises(RuntimeError):
-            dial()
-        assert seen["prepare_threshold"] is None
+    assert kw["decode_responses"] is True
+    assert kw["socket_keepalive"] is True
+    assert kw["socket_connect_timeout"] == 5.0
+    assert kw["health_check_interval"] == 30
+    assert "socket_keepalive_options" in kw
+    assert kw["socket_timeout"] == 10.0

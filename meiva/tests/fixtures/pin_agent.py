@@ -52,7 +52,7 @@ def pin_agent(
             machine=machine if machine is not None else (None if bound is None else bound.machine),
             clients=clients
             if clients is not None
-            else (bound.clients if bound else process_clients()),
+            else (bound.clients if bound else process_clients(config=snapshot_process_config())),
             clock_factory=(
                 clock_factory
                 if clock_factory is not None

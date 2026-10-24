@@ -37,9 +37,8 @@
 
 import asyncio
 import contextlib
-from collections.abc import AsyncGenerator, Coroutine
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
 
 from psycopg_pool import AsyncConnectionPool
 
@@ -109,10 +108,10 @@ class _OwnedWatch:
         self.late = False
         self.retained_at = 0.0
 
-    async def run(self, body: Coroutine[Any, Any, None]) -> None:
+    async def run(self, pool: AsyncConnectionPool, poll_s: float) -> None:
         cancelled = False
         try:
-            await body
+            await watch_for_interrupt(pool, self.event, self.agent_id, self.stop, poll_s=poll_s)
         except asyncio.CancelledError:
             cancelled = True
             raise
@@ -176,51 +175,15 @@ class _OwnedWatch:
 
 
 # meiva:note
-# Runs `body` as the watcher of one invocation, owned by the hosted service. On body exit
+# RAII watch for a durable interrupt (cancel/terminate) on this agent, owned by the hosted
+# service. Yields the event the node races its work against. With `pool` None (container/eval, no
+# inbound queue) the event never fires and the wrapped action runs uninterruptibly. On exit
 # (completion, exception or cancel) the watcher is stopped and cancelled; if it does not unwind
 # within `exit_timeout_s`, its original service keeps the task through stop/join before pool
 # close. An unknown in-flight failure reaches the caller; a late failure is reported immediately
-# and raised by that service at stop/join, without cancelling sibling agents. `body` is built by
-# the caller from the same `event` and `stop`, so a watcher that fails or wedges differently from
-# the database poll is a coroutine the caller supplies, not a patched name.
-# meiva:link agent/graph/docs/interrupt-ownership.meiva.okf.md
-@asynccontextmanager
-async def owned_watch(
-    resources: HostedTurnResources,
-    agent_id: int,
-    event: InterruptEvent,
-    stop: asyncio.Event,
-    body: Coroutine[Any, Any, None],
-    *,
-    exit_timeout_s: float,
-) -> AsyncGenerator[InterruptEvent]:
-    owned = _OwnedWatch(resources, agent_id, event, stop, exit_timeout_s)
-    watcher = resources.require_service().watch(
-        owned.run(body), name=f"interrupt-watcher-{agent_id}"
-    )
-    primary: BaseException | None = None
-    try:
-        yield event
-    except BaseException as error:
-        primary = error
-        raise
-    finally:
-        try:
-            await owned.finish(watcher, primary)
-        finally:
-            # meiva:note
-            # A watcher cancelled before its first step never reaches the body it was handed;
-            # closing an unstarted or finished coroutine is a no-op, and a retained watcher that
-            # is still running keeps its body.
-            if watcher.done():
-                body.close()
-
-
-# meiva:note
-# RAII watch for a durable interrupt (cancel/terminate) on this agent. Yields the event the node
-# races its work against. With `pool` None (container/eval, no inbound queue) the event never
-# fires and the wrapped action runs uninterruptibly. `poll_s` and `exit_timeout_s` are tuning
-# constants: production keeps their defaults, a test passes small values.
+# and raised by that service at stop/join, without cancelling sibling agents. `poll_s` and
+# `exit_timeout_s` are tuning constants: production keeps their defaults, a test passes small
+# values.
 # meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
 @asynccontextmanager
 async def subscribe_interrupt(
@@ -237,8 +200,14 @@ async def subscribe_interrupt(
         return
     if resources is None:
         raise RuntimeError("a database interrupt watcher requires its explicit service resources")
-    resources.require_service()
-    stop = asyncio.Event()
-    body = watch_for_interrupt(pool, event, agent_id, stop, poll_s=poll_s)
-    async with owned_watch(resources, agent_id, event, stop, body, exit_timeout_s=exit_timeout_s):
+    service = resources.require_service()
+    owned = _OwnedWatch(resources, agent_id, event, asyncio.Event(), exit_timeout_s)
+    watcher = service.watch(owned.run(pool, poll_s), name=f"interrupt-watcher-{agent_id}")
+    primary: BaseException | None = None
+    try:
         yield event
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        await owned.finish(watcher, primary)

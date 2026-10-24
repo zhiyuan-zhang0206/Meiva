@@ -17,7 +17,7 @@ from typing import Any
 def zero_record_exit() -> list[str]:
     import agent.execution.child as exec_child  # the module under test
 
-    exec_child.finalize_telemetry()  # the zero-record exit path
+    exec_child.finalize_telemetry(clients=None)  # the zero-record exit path
 
     watched = ("base.telemetry", "base.telemetry.otlp.telemetry_otlp")
     return sorted(

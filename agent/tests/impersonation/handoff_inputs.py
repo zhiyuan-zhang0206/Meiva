@@ -21,21 +21,20 @@ from agent import impersonation
 from agent import state as states
 from agent.graph.claim.node import claim_node
 from agent.graph.exec.node import exec_node
-from agent.graph.exec.process import ParentFacts, SubprocessExecProcess
+from agent.graph.exec.process import SubprocessExecProcess, read_parent_facts
 from agent.impersonation import protect_native_hooks, settle_checkpoint
 from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.hosted import admit_hosted_runtime
-from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.takeover.relay import RelayWait, TakeoverHost
-from agent.tests.impersonation.lease_support import relay_program
+from agent.tests.impersonation.lease_support import (
+    FlushFaultSaver,
+    flush_fault_saver,
+    relay_program,
+)
 from base.agents import impersonation as leases
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
-from base.agents.history.checkpoint_postgres_walks import (
-    HistoryAsyncPostgresSaver as AsyncPostgresSaver,
-)
-from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.impersonation.notes import HandoffNotes
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.inbox.insert import insert_inbound_message
@@ -59,7 +58,6 @@ from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 __all__ = [
     "HandoffState",
-    "RunnerExecProcess",
     "WakeLog",
     "assert_death_cause_note",
     "assert_end_note_and_handoff_document",
@@ -72,12 +70,13 @@ __all__ = [
     "deliver_peers_and_ack_first",
     "end_external_session",
     "executor_acks_says_and_releases",
-    "failing_flush",
     "handoff_clients",
     "handoff_notes",
     "inbound_wakes",
+    "local_exec_process",
     "prepare_graph",
     "resume_native",
+    "runner_exec_process",
     "stop_takeover_with_exhausted_ack",
     "stop_takeover_with_lost_relay",
     "takeover_host",
@@ -128,21 +127,6 @@ class WakeLog:
 
 
 @contextmanager
-def failing_flush(saver: object, error: OSError) -> Generator[None]:
-    attributes = vars(saver)
-    real = attributes["_meiva_nstep_flush"]
-
-    async def fail(_thread_id: str) -> None:
-        raise error
-
-    attributes["_meiva_nstep_flush"] = fail
-    try:
-        yield
-    finally:
-        attributes["_meiva_nstep_flush"] = real
-
-
-@contextmanager
 def inbound_wakes(event_bus: EventBus, agent_id: int) -> Generator[WakeLog]:
     with (
         event_bus.sync_redis(decode_responses=True) as redis,
@@ -165,27 +149,29 @@ class HandoffState(BaseModel):
 # meiva:note
 # An exec process whose children connect to the database as the runner login: the child
 # environment is the parent's facts with the runner URL, so no process environment changes.
-class RunnerExecProcess(SubprocessExecProcess):
-    def __init__(self, runner_db_url: str) -> None:
-        self._runner_db_url = runner_db_url
+def runner_exec_process(runner_db_url: str) -> SubprocessExecProcess:
+    facts = read_parent_facts()
+    return SubprocessExecProcess(
+        replace(facts, environ={**facts.environ, "MEIVA_DB_URL": runner_db_url})
+    )
 
-    def parent_facts(self) -> ParentFacts:
-        facts = super().parent_facts()
-        return replace(facts, environ={**facts.environ, "MEIVA_DB_URL": self._runner_db_url})
+
+def local_exec_process() -> SubprocessExecProcess:
+    return SubprocessExecProcess(read_parent_facts())
 
 
 async def prepare_graph(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     *,
-    exec_process: SubprocessExecProcess | None = None,
+    exec_process: SubprocessExecProcess,
     config_authority: ConfigAuthority,
     clients: ClientSet,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
 ) -> tuple[
     Any,
-    AsyncPostgresSaver,
+    FlushFaultSaver,
     MeivaContext,
     RunnableConfig,
     dict[str, Any],
@@ -231,10 +217,7 @@ async def prepare_graph(
     async def before_llm(*_args: Any) -> Command[Any]:
         return Command(goto="llm")
 
-    saver = AsyncPostgresSaver(aops_pool)
-    await saver.setup()
-    wrap_saver_writes_with_nstep_interval(saver, 100)
-    wrap_saver_reads_with_delta_reconstruction(saver)
+    saver = await flush_fault_saver(aops_pool)
     builder: Any = StateGraph(state_cls, context_schema=MeivaContext)
     builder.add_node("claim", claim_node, destinations=("before_llm", "__end__", "claim"))
     builder.add_node(
@@ -243,7 +226,7 @@ async def prepare_graph(
     builder.add_node("llm", model, destinations=("exec", "claim"))
     builder.add_node(
         "exec",
-        partial(exec_node, process=exec_process or SubprocessExecProcess()),
+        partial(exec_node, process=exec_process),
         destinations=("after_exec",),
     )
 

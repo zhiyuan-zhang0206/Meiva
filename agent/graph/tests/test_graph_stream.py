@@ -26,7 +26,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import LlmLedger, exec_node, llm_node
 from agent.graph.exec.output import overflow_dir
-from agent.graph.exec.process import SubprocessExecProcess
+from agent.graph.exec.process import SubprocessExecProcess, read_parent_facts
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
@@ -34,7 +34,7 @@ from base.agents.tests.units import spawn_agent
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
-from base.config.tests.configuration import defaults
+from base.config.tests.configuration import defaults, snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -76,7 +76,7 @@ def _make_runtime(
         agent=AgentSlices.resolve(default_reader=defaults(**(config_defaults or {}))),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
-        clients=process_clients(),
+        clients=process_clients(config=snapshot_process_config()),
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
@@ -454,7 +454,7 @@ async def test_exec_node_publishes_exec_start_and_output(
             database_gate=database_gate,
         ),
         config,
-        process=SubprocessExecProcess(),
+        process=SubprocessExecProcess(read_parent_facts()),
     )
 
     events = await live_events.typed()
@@ -486,7 +486,7 @@ async def test_exec_node_output_uses_wrap_code_output_envelope(
         state,
         _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate),
         config,
-        process=SubprocessExecProcess(),
+        process=SubprocessExecProcess(read_parent_facts()),
     )
 
     assert isinstance(result, Command)
@@ -531,7 +531,7 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
         ),
         runtime,
         config,
-        process=SubprocessExecProcess(),
+        process=SubprocessExecProcess(read_parent_facts()),
     )
     prior_output = first.update["messages"][0]
     directory = overflow_dir(7)
@@ -543,7 +543,9 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
         ],
         halted=False,
     )
-    result = await exec_node(state, runtime, config, process=SubprocessExecProcess())
+    result = await exec_node(
+        state, runtime, config, process=SubprocessExecProcess(read_parent_facts())
+    )
 
     assert new_body in result.update["messages"][0].content  # pyright: ignore[reportUnknownMemberType]
     assert archive.read_text() == old_body

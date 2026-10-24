@@ -2,8 +2,8 @@ from typing import Any, cast
 
 
 def _assert_runtime_resources_cold(context: Any, installation: Any) -> None:
-    assert installation.producer is not None
-    bare = installation.producer.__self__
+    bare = installation.clients
+    assert bare is not None
     assert bare is not context.clients
     for clients in (context.clients, bare):
         assert clients._sql is None
@@ -47,13 +47,11 @@ def _record_boot_reads() -> list[Any]:
 def _assert_shared_boot(context: Any, installation: Any, reads: list[Any]) -> None:
     assert not installation.faces
     assert context.catalog is installation.catalog
-    assert context.clock_factory is installation.clock_factory
+    assert installation.clock is not None
     assert len(reads) == 1, reads
     boot = reads[0]
     boot.set_field("timezone", "Asia/Tokyo")
     assert context.require_clock().authoritative_timezone == "Asia/Tokyo"
-    assert installation.clock_factory is not None
-    assert installation.clock_factory().authoritative_timezone == "Asia/Tokyo"
 
 
 def launched_imports_share_boot() -> None:

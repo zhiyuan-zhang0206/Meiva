@@ -15,7 +15,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from agent.graph.exec._child_boundary import ParentFacts
-from agent.graph.exec._result import LifecycleKind
+from agent.graph.exec._result import ExecLifecycleKind
 from agent.graph.exec._subprocess import run_in_subprocess
 from agent.graph.exec.node import (
     ExecCancelled,
@@ -474,7 +474,7 @@ async def test_subprocess_self_terminate_lifecycle_and_inbound(
     )
 
     assert isinstance(result, ExecLifecycle)
-    assert result.kind is LifecycleKind.TERMINATION
+    assert result.kind is ExecLifecycleKind.TERMINATION
     _content, kind, source = _self_inbound_row()
     assert kind == "terminate"
     assert source == "self"
@@ -492,7 +492,7 @@ async def test_subprocess_self_restart_lifecycle_and_inbound(
     )
 
     assert isinstance(result, ExecLifecycle)
-    assert result.kind is LifecycleKind.RESTART
+    assert result.kind is ExecLifecycleKind.RESTART
     _content, kind, source = _self_inbound_row()
     assert kind == "restart"
     assert source == "self"
@@ -510,7 +510,7 @@ async def test_subprocess_self_compact_lifecycle_and_inbound(
     )
 
     assert isinstance(result, ExecLifecycle)
-    assert result.kind is LifecycleKind.SYSTEM_HALT
+    assert result.kind is ExecLifecycleKind.SYSTEM_HALT
     content, kind, _source = _self_inbound_row()
     assert kind == "compact_summary"
     assert content == "audit e2e summary"

@@ -7,11 +7,12 @@ from dataclasses import replace
 
 import pytest
 
-import meiva
 import meiva.self as self_mod
 from base.agents.context import MeivaContext
 from base.cluster.machine import MachineIdentity, MachineNameMissing
+from meiva.sdk_surface import install as sdk_install
 from meiva.sdk_surface import process_context
+from meiva.sdk_surface.installation import installed
 
 
 @pytest.fixture
@@ -54,8 +55,7 @@ def test_machine_spec_tuple_empty_when_no_description() -> None:
 
 
 @pytest.mark.usefixtures("restore_context")
-def test_machine_reads_require_a_context(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MEIVA_AGENT_ID", raising=False)
+def test_machine_reads_require_a_context() -> None:
     process_context.unbind_context()
     with pytest.raises(AttributeError, match="context"):
         _ = self_mod.MACHINE_SPEC
@@ -69,10 +69,10 @@ def test_partial_context_has_no_machine_fallback() -> None:
 
 
 @pytest.mark.usefixtures("restore_context")
-def test_no_agent_machine_owner_stays_lazy_and_independent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_no_agent_machine_owner_stays_lazy_and_independent() -> None:
     reads: list[str] = []
+    installation_before = installed()
+    load_attempted_before = sdk_install.load_attempted()
 
     def name() -> str:
         reads.append("name")
@@ -85,7 +85,6 @@ def test_no_agent_machine_owner_stays_lazy_and_independent(
     def forbidden() -> object:
         pytest.fail("a machine read must not resolve clients or plugins")
 
-    monkeypatch.setattr(meiva, "ensure_plugins_loaded", forbidden)
     machine = MachineIdentity(
         name=name,
         description=description,
@@ -103,6 +102,8 @@ def test_no_agent_machine_owner_stays_lazy_and_independent(
     process_context.bind_context(replace(context, machine=_machine("other", None)))
     assert self_mod.MACHINE_SPEC == ("other", "")
     assert machine.name() == "explicit"
+    assert installed() is installation_before
+    assert sdk_install.load_attempted() is load_attempted_before
 
 
 @pytest.mark.usefixtures("restore_context")

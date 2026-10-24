@@ -30,6 +30,7 @@ from agent.execution.protocol import (
     ResultPayload,
     make_request_path,
     make_result_path,
+    read_result,
     write_request,
 )
 from base.agents.context import MeivaContext
@@ -42,8 +43,8 @@ from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from ._child_boundary import (
     ChildLaunch,
     ParentFacts,
+    payload_without_envelope,
     plan_child_launch,
-    read_result_envelope,
     result_from_payload,
 )
 from ._guard import inspection_refusal, violation_refusal
@@ -75,6 +76,23 @@ def _editable_guard_failure(parent: ParentFacts) -> ExecCrashed | None:
     except Exception as exc:
         return inspection_refusal(exc)
     return violation_refusal(violations)
+
+
+# meiva:note
+# The child's result envelope as `(payload, error)`. A missing envelope has no payload and no
+# error unless the exit code explains it (`payload_without_envelope`): the caller classifies
+# from its own flags (SIGKILL, watchdog, the agent's own os._exit). A malformed envelope
+# (version drift, unknown kind, oversized) is a protocol violation, so it comes back as an
+# `error` string and the caller surfaces a crash outcome instead of guessing "done".
+def read_result_envelope(
+    result_path: Path, returncode: int | None
+) -> tuple[ResultPayload | None, str | None]:
+    if not result_path.exists():
+        return payload_without_envelope(returncode), None
+    try:
+        return read_result(result_path), None
+    except BaseException as exc:
+        return None, f"exec result envelope could not be decoded: {exc}"
 
 
 # meiva:note

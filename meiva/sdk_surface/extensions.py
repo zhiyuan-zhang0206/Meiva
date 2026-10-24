@@ -11,7 +11,7 @@ can supply.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Sequence
 from dataclasses import replace
 
 from base.clock import Clock
@@ -23,6 +23,7 @@ from base.packages.plugins.loading import StateGate
 from base.packages.plugins.loading.faces import LoadedExtensions, import_faces
 
 from . import install as sdk_install
+from .installation import EventPipelines
 
 
 # meiva:note
@@ -49,18 +50,19 @@ def load_extensions(
     catalog: ModelCatalog | None = None,
     provider_keys: ProviderKeys | None = None,
     authority: ConfigAuthority | None = None,
-    clock_factory: Callable[[], Clock] | None = None,
-    producer: Callable[[], object] | None = None,
+    clock: Clock | None = None,
+    clients: EventPipelines | None = None,
+    disabled_entries: Sequence[str] = (),
     validate_state: StateGate | None = None,
 ) -> LoadedExtensions:
     previous = sdk_install.uninstall() if not surface else None
     sampling = None
     if previous is not None:
         sampling = previous.sampling
-        if producer is None:
-            producer = previous.producer
-        if clock_factory is None:
-            clock_factory = previous.clock_factory
+        if clients is None:
+            clients = previous.clients
+        if clock is None:
+            clock = previous.clock
 
     loaded = import_faces(surface=surface, report=report, validate_state=validate_state)
     admitted = sdk_install.install(
@@ -70,8 +72,9 @@ def load_extensions(
         catalog=catalog,
         provider_keys=provider_keys,
         authority=authority,
-        producer=producer,
+        clients=clients,
         sampling=sampling,
-        clock_factory=clock_factory,
+        clock=clock,
+        disabled_entries=disabled_entries,
     )
     return replace(loaded, registry=admitted)

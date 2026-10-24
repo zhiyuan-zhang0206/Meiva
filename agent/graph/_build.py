@@ -57,7 +57,7 @@ from ._init_context import init_context_node
 from .claim.harness_turn import harness_turn_node
 from .claim.node import claim_node
 from .exec.node import ExecGoto, exec_node
-from .exec.process import SubprocessExecProcess
+from .exec.process import SubprocessExecProcess, read_parent_facts
 from .llm.goto import LlmGoto
 from .llm.node import llm_node
 
@@ -137,7 +137,7 @@ def build_graph(
     # What the llm node remembers per agent between tries and turns belongs to this graph: one
     # ledger per compiled graph, so two graphs in one process never share failure counts.
     ledger = LlmLedger()
-    process = SubprocessExecProcess()
+    process = SubprocessExecProcess(read_parent_facts())
 
     async def execute(
         state: BaseAgentState, runtime: Runtime[MeivaContext], config: RunnableConfig

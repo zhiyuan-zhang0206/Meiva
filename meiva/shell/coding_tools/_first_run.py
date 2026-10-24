@@ -9,115 +9,91 @@ import json
 import os
 import stat
 import tempfile
-import time
 from pathlib import Path
-from typing import cast
+
+from base.host.atomic_io import write_text_atomic
+from meiva.shell.coding_tools.plans.first_run import (
+    CONFIG_PRESET,
+    SETTINGS_PRESET,
+    FilePlan,
+    plan_preset,
+    plan_trust,
+)
 
 
-def _preset_json_file(path: Path, updates: dict[str, object], *, label: str) -> None:
-    """Back up, merge ``updates`` into a JSON file, atomically; see preset_claude_first_run.
-
-    Existing keys are preserved verbatim; a satisfied update makes the call a
-    no-op; an unparsable file is backed up and raises (fail fast - overlaying
-    it would destroy the owner's config).
-    """
-    try:
-        raw = path.read_text(encoding="utf-8")
-        loaded: object = json.loads(raw) if raw.strip() else {}
-    except FileNotFoundError:
-        loaded = None
-    except json.JSONDecodeError as exc:
-        _backup_before_write(path)
-        raise RuntimeError(
-            f"{label} is not valid JSON ({exc}); left as-is with a backup taken. "
-            "Fix or remove it, then relaunch."
-        ) from exc
-    if loaded is not None and not isinstance(loaded, dict):
-        _backup_before_write(path)
-        raise RuntimeError(f"{label} is not a JSON object; left as-is with a backup taken.")
-    data: dict[str, object] | None = cast(dict[str, object], loaded) if loaded is not None else None
-    if data is not None and all(_preset_satisfied(data.get(k), v) for k, v in updates.items()):
-        print(f"(already preset: {label})")
-        return
-    if data is None:
-        data = {}
-    if path.exists():
-        _backup_before_write(path)
-    data.update(updates)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    _write_json_atomic(path, data)
-    print(f"+ preset: {label}")
-
-
-def _preset_satisfied(current: object, desired: object) -> bool:
-    """True when `current` already carries the desired preset value."""
-    if isinstance(desired, bool):
-        return current is desired
-    if isinstance(desired, int):
-        return (
-            isinstance(current, (int, float))
-            and not isinstance(current, bool)
-            and current >= desired
-        )
-    return current == desired
-
-
-def _backup_before_write(path: Path) -> Path:
-    """Copy `path` to a uniquely named sibling backup; same-second callers never collide."""
-    fd, raw_backup = tempfile.mkstemp(
-        dir=path.parent, prefix=f"{path.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}-"
-    )
+# meiva:note
+# Copy `path` to a uniquely named sibling backup; same-second callers never collide, whatever `stamp` they share.
+def _backup_before_write(path: Path, stamp: str) -> Path:
+    fd, raw_backup = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.bak-{stamp}-")
     os.close(fd)
     backup = Path(raw_backup)
     backup.write_bytes(path.read_bytes())
     return backup
 
 
+# meiva:note
+# Publish `data` at `path` through a unique temporary file and an atomic replace, so two concurrent writers in the same second cannot collide; an existing file keeps its permission bits.
 def _write_json_atomic(path: Path, data: dict[str, object]) -> None:
-    """Publish `data` at `path` through a mkstemp-unique tmp file + atomic replace.
-
-    A unique tmp name means two concurrent presets in the same second cannot
-    collide; an existing file keeps its permission bits.
-    """
     mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else None
-    fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    tmp = Path(raw_tmp)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_text_atomic(
+        path, json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", mode=mode
+    )
+
+
+def _read(path: Path) -> str | None:
     try:
-        if mode is not None:
-            os.fchmod(fd, mode)
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            stream.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
-        tmp.replace(path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
 
 
-def preset_claude_first_run(home: Path | None = None) -> None:
-    """Preset Claude Code's first-run dialogs so an unattended spawn never parks on one.
+# meiva:note
+# Run one file plan: refuse (after a backup) raises its problem, keep prints `kept`, write backs an existing file up when `backup` is set and publishes the merged document.
+def _apply(
+    plan: FilePlan, path: Path, stamp: str, *, backup: bool, kept: str, written: str
+) -> None:
+    if plan.action == "refuse":
+        _backup_before_write(path, stamp)
+        raise RuntimeError(plan.problem)
+    if plan.action == "keep":
+        print(kept)
+        return
+    if backup and path.exists():
+        _backup_before_write(path, stamp)
+    _write_json_atomic(path, plan.data)
+    print(written)
 
-    Two dialogs break a non-interactive spawn on a fresh HOME: the
-    bypass-permissions confirmation (>=2.1.274 defaults to No/exit, so a blind
-    Enter kills the session) and the fullscreen upsell. Both answers persist in
-    files, so presetting them is enough:
 
-    - ``~/.claude/settings.json``: ``skipDangerousModePermissionPrompt: true``
-      ("whether the user has accepted the bypass permissions mode dialog").
-    - ``~/.claude.json``: ``fullscreenUpsellSeenCount: 3`` - 2.1.278 shows the
-      upsell while this is below its threshold of 3 (bundle: ``<x8e``, x8e=3).
-
-    Each file is backed up before its first change, a second call is a no-op,
-    and an unparsable file is backed up and raises instead of being
-    overwritten. One line per file: ``+ preset`` / ``(already preset``.
-    """
-    home = Path.home() if home is None else home
-    _preset_json_file(
-        home / ".claude" / "settings.json",
-        {"skipDangerousModePermissionPrompt": True},
-        label="~/.claude/settings.json",
+# meiva:note
+# Mark `workspace` trusted in `<home>/.claude.json`. An unparsable file is backed up and raises instead of being overwritten.
+def pretrust(home: Path, workspace: Path, stamp: str) -> None:
+    path = home / ".claude.json"
+    key = workspace.as_posix()
+    plan = plan_trust(_read(path), key, "~/.claude.json")
+    _apply(
+        plan,
+        path,
+        stamp,
+        backup=False,
+        kept=f"(already trusted: {key})",
+        written=f"+ trusted: {key}",
     )
-    _preset_json_file(
-        home / ".claude.json",
-        {"fullscreenUpsellSeenCount": 3},
-        label="~/.claude.json",
-    )
+
+
+# meiva:note
+# Preset Claude Code's first-run dialogs so an unattended spawn never parks on one: `~/.claude/settings.json` and `~/.claude.json` under `home`. Each file is backed up (under `stamp`) before its first change, a second call is a no-op, and an unparsable file is backed up and raises instead of being overwritten. One line per file: `+ preset` / `(already preset`.
+def preset_claude_first_run(home: Path, stamp: str) -> None:
+    for relative, updates, label in (
+        (Path(".claude") / "settings.json", SETTINGS_PRESET, "~/.claude/settings.json"),
+        (Path(".claude.json"), CONFIG_PRESET, "~/.claude.json"),
+    ):
+        path = home / relative
+        _apply(
+            plan_preset(_read(path), updates, label),
+            path,
+            stamp,
+            backup=True,
+            kept=f"(already preset: {label})",
+            written=f"+ preset: {label}",
+        )

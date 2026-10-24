@@ -1,47 +1,34 @@
-"""Build the `SpawnDeps` of this process: its agent, directories, sessions and clock."""
+# meiva:note
+# Build the `SpawnDeps` of this process: its agent, directories, sessions and live session ids.
 
 from __future__ import annotations
 
-import datetime
-import logging
 import sys
 import tempfile
 from pathlib import Path
 
 from base.host.env.dotenv_boot import watcher_runner_env
-from base.paths import meiva_home
+from base.paths import meiva_home, workspace_dir
 from meiva.sdk_surface import agent_identity
-from meiva.shell import background
-from meiva.shell import sessions as sessions
+from meiva.shell.background import cli_path
+from meiva.shell.sessions import open_sessions, session_host
 from meiva.watcher import files
 from meiva.watcher.spawn import SpawnDeps
 
 __all__ = ["spawn_deps"]
 
-logger = logging.getLogger(__name__)
 
-
-def _live_session_ids() -> set[int] | None:
-    """The ids of the live shell sessions, or None when the list is unavailable."""
-    try:
-        return set(sessions.list())
-    except Exception:
-        logger.warning("[watcher] listing live sessions failed", exc_info=True)
-        return None
-
-
-def spawn_deps(*, watchers_dir: Path | None = None) -> SpawnDeps:
-    """The deps for a spawn by the bound agent; `watchers_dir` replaces the default directory."""
+def spawn_deps() -> SpawnDeps:
     agent_id = agent_identity.require_agent_id()
+    shell = open_sessions(agent_id)
     return SpawnDeps(
         agent_id=agent_id,
-        watchers_dir=watchers_dir
-        if watchers_dir is not None
-        else files.watchers_dir(meiva_home(), Path(tempfile.gettempdir()), agent_id),
-        sessions=sessions,
-        background=background,
-        live_session_ids=_live_session_ids,
+        watchers_dir=files.watchers_dir(meiva_home(), Path(tempfile.gettempdir()), agent_id),
+        shell=shell,
+        host=session_host(),
+        workspace=workspace_dir(agent_id),
+        cli=cli_path(),
+        live_session_ids=frozenset(shell.list()),
         runner_env=watcher_runner_env(),
         python=sys.executable,
-        now=lambda: datetime.datetime.now(datetime.UTC),
     )
