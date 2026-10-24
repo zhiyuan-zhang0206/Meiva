@@ -131,7 +131,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `hook_timing` | hook-runner pass — per-hook wall durations, attributing a slow before_llm / before_exec node to its hooks from events alone | noise | hook_ms | — | events | — |
 | `last_msg` | last-message check | noise | — | — | events | — |
 | `pty_transcript` | a pty session's transcript append failed (full disk, closed fd); the session keeps running with an incomplete transcript | anomaly | — | — | events | — |
-| `status_change` | agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name | noise | from, to | — | events | — |
+| `status_change` | agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name | noise | from, to, unapplied_handoff_receipt | — | events | — |
 | `inbound_consumed_unknown` | a claimed inbound was consumed without knowing whether its work ran (host crash / aborted turn); the row is marked in its payload and is never redelivered — this event is the only record of what was lost | anomaly | inbound_id, kind, age_s, content_preview | — | events | ✓ |
 | `delivery_stalled` | delivery backlog | anomaly | inbound_id, age_s | — | events | ✓ |
 | `exec` | execute_code succeeded | observation | body, ok, duration_seconds | — | events | ✓ |
@@ -189,6 +189,14 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `host_turn_stall_uncancellable` | a stalled invocation that had been cancelled for the bounded unwind window REFUSED to unwind (blocked where asyncio cannot interrupt it — a C call). The host cannot fix this in-process: it signals a daemon restart so the supervisor recovers the turn from its checkpoint | anomaly | — | — | events | — |
 | `host_turn_corpse_marked` | a hosted turn crashed and the row was stamped with the corpse marker (last_turn_fatal_at) — the reaper terminates it once the grace window elapses unless a completed turn clears the mark first | anomaly | — | — | events | — |
 | `corpse_stamp_failed` | the corpse marker stamp failed after a hosted turn crash — the row keeps looking alive until a later stamp or a completed turn; the reaper cannot see this death | anomaly | — | — | events | — |
+| `hosted_handoff_settle_retry` | a held-path handoff settle failed inside the wake and is being retried there; carries attempt, delay_s and error_class | noise | — | — | events | — |
+| `hosted_handoff_settle_failed` | the held-path handoff settle exhausted its retry budget: the row is marked crash-dead and settled to idling so the heartbeat's narrow exception or the reaper can reach it; carries budget_s and error_class | anomaly | — | — | events | — |
+| `hosted_handoff_settle_raced` | a held-path settle failed after its receipt had already landed (the write commits in a thread, the failure lands on a later await); the row is NOT marked and the wake reports success | anomaly | — | — | events | — |
+| `hosted_handoff_settle_read_failed` | the read that decides whether a landed receipt survived a failed settle could not answer; the wake fails closed because a read failure is not evidence either way | anomaly | — | — | events | — |
+| `hosted_settle_failed` | settling a crash-marked row to idling failed after a failed held-path settle — the row stays running and the reaper cannot see it | anomaly | — | — | events | — |
+| `hosted_turn_corpse_marker_cleared` | a crash marker was cleared by the wake that settled the row's receipt (no ended lease of the row owes one any more) | noise | — | — | events | — |
+| `hosted_turn_corpse_clear_failed` | clearing the crash marker after a landed receipt failed — the marker stays until a completed turn clears it | anomaly | — | — | events | — |
+| `hosted_handoff_marker_cleared_while_ineligible` | a marker was cleared on a row the heartbeat will not pick up (a permanent reject streak or a heartbeat paused past now), so no automatic path re-checks it; carries permanent_reject_streak and heartbeat_paused | anomaly | — | — | events | — |
 | `corpse_reaper_terminated` | the corpse reaper terminated crash-marked idling rows past the grace window (termination_source='reaper') | anomaly | — | — | events | — |
 | `corpse_reaper_failed` | the beat's corpse reap pass failed — retried on the next beat; leases of healthy rows are unaffected (renewal runs first) | anomaly | — | — | events | — |
 | `corpse_reaper_publish_failed` | a reaped corpse's frontend snapshot publish failed — best-effort; the durable terminated flip already committed | noise | — | — | events | — |
