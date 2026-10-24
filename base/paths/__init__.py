@@ -226,10 +226,11 @@ def harness_registrations_dir() -> Path:
     return meiva_home() / "harness" / "registrations"
 
 
+# meiva:note
+# Per-unit exec-subprocess scratch dir (`<home>/run/exec`) — request /
+# result envelopes for one execute_code run each (agent/execution/protocol.py),
+# pruned per agent subdir. Pure: the writer of an envelope creates it.
 def exec_run_dir(home: Path) -> Path:
-    """Per-unit exec-subprocess scratch dir (`<home>/run/exec`) — request /
-    result envelopes for one execute_code run each (agent/graph/exec/protocol.py),
-    pruned per agent subdir. Pure: the writer of an envelope creates it."""
     return run_dir(home) / "exec"
 
 

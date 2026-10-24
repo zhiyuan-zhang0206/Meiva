@@ -97,7 +97,7 @@ def _arm_watchdog(timeout_s: float) -> None:
 def pop_overlay_env() -> tuple[dict[str, object] | None, dict[str, object] | None]:
     import json as _json
 
-    from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
+    from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 
     maps: dict[str, dict[str, object] | None] = {}
     for env_name in (AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV):

@@ -27,6 +27,7 @@ from base.cluster.dataplane.pg_throwaway_base import (
     format_bytes,
     select_throwaway_base,
 )
+from base.cluster.dataplane.pg_tools import has_pg_tool as has_pg_tool
 from base.cluster.dataplane.pg_tools import pg_tool, throwaway_postgres
 from base.config import ConfigBoot
 from base.db import Database, connect_url
