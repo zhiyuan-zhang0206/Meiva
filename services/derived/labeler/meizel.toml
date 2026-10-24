@@ -1,10 +1,11 @@
 exports = ["daemon.py", "labeler.py", "tests"]
 
 [uses]
-"daemon.py" = ["config.py", "labeler.py"]
-"labeler.py" = ["config.py"]
-"tests" = ["config.py", "daemon.py", "labeler.py"]
+"daemon.py" = ["config.py", "label_rules.py", "labeler.py"]
+"labeler.py" = ["config.py", "label_rules.py"]
+"tests" = ["config.py", "daemon.py", "label_rules.py", "labeler.py"]
 
 [purity]
 "__init__.py" = "strict"
 "config.py" = "strict"
+"label_rules.py" = "strict"
