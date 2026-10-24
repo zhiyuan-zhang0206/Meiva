@@ -7,3 +7,6 @@ exports = ["endpoints.py", "health.py", "health_schema.py", "http_transport.py",
 
 [purity]
 "__init__.py" = "strict"
+
+[state]
+"endpoints.py" = ["endpoints"]

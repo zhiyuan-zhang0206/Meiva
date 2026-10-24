@@ -56,14 +56,15 @@ three or more, so a new package is declared in one place or the check says where
   `clock_lattice.py` keeps lattice-vocabulary timing constants in the
   clock-lattice family modules or as aliases of a registered clock.
 - `state/` — dependency injection rules: `ambient_state/` (Rule 9, module-level
-  state read to decide and free-floating background work, with the library
-  handle ratchet; see [[meizel/docs/ambient-state.meiva.okf.md|ambient state]]),
+  state read to decide and free-floating background work; see
+  [[meizel/docs/ambient-state.meiva.okf.md|ambient state]]),
   `machine_role.py` (Rule 3, the retired ambient machine-role reader),
-  `no_os_environ.py` (runtime config goes through `Settings`) and
+  `no_os_environ.py` (a test does not set a variable `Settings` models) and
   `turn_scoped_config.py` (no per-agent config through a process global). The two
   config rules take the application's config registry as an injected argument;
   their launchers in `scripts/lint/` bind it, because `meizel` imports no
-  application package.
+  application package. Where production code reads the world is `ambient-read` in
+  `check` ([[meizel/docs/checker/ambient.meiva.okf.md|ambient reads]]).
 - `language/` — restrictions on how Python is written:
   `type_checking.py` (no `if TYPE_CHECKING:` import folding outside a listed
   file), `path_imports.py` (code under `meiva_builtins/` reaches other code

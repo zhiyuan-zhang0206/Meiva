@@ -30,23 +30,21 @@ python -m meizel bootstrap --out <dir>
 python -m meizel roles list <role>... | check | write
 ```
 
-`--repo <root>` selects another checkout; `--jobs N` sets parser processes. Exit codes: 0 clean, 1 violations, 2 the tool could not run.
+`--repo <root>` selects another checkout; `--jobs N` sets parser processes. Exit codes: 0 clean, 1 violations, 2 the tool failed.
 
 ## Commands
 
 - `check` is the gate over the whole graph; `paths` narrow what is reported.
   Each diagnostic gives `file:line`, the fact edge, the judging directory `L`,
-  and the manifest line to add or public door to use. `check --changed files...`
-  judges only those files.
+  and the manifest line to add or public door to use. `check --changed files...` judges only those files.
 - `debt` manages recorded violations, a per-directory baseline that may only
   shrink: [[meizel/docs/checker/debt.meiva.okf.md|recorded debt]].
 - `explain` shows graph edges and bounded [[meizel/docs/checker/explain.meiva.okf.md|Python source evidence]].
 - `sync --prune` drops stale declarations; `sync --declare` writes the legal new
   dependencies of the changed files: [[meizel/docs/checker/sync.meiva.okf.md|keeping manifests current]].
 - `bootstrap --out DIR` writes one `meizel.toml` per directory under `DIR` from
-  current fact edges (preserving non-edge tables), plus `DIR/report.json` with
-  edge counts, strongly connected components, witness facts, and violation counts
-  by code without modifying the repository.
+  current fact edges (non-edge tables kept) and a `report.json` of edge counts,
+  components, witness facts and violation counts; the repository is untouched.
 
 ## Fact edges
 
@@ -54,7 +52,7 @@ python -m meizel roles list <role>... | check | write
   against the importing file's directory. `from pkg import name` targets the
   submodule `name` when `pkg/name.py` or `pkg/name/` exists, otherwise
   `pkg/__init__.py` with `name` recorded as a used name. Resolution follows
-  `pythonpath = ["."]`: a dotted name maps to a tracked path, directories
+  `pythonpath = ["."]`: a dotted name maps to a tracked path; directories
   without `__init__.py` are namespace packages.
 - Attribute use on an imported module (`mod.name`, `pkg.sub.name`), through any
   submodule chain.
@@ -83,8 +81,8 @@ For a fact edge `f -> t`, `L` is the deepest directory containing both; `cf` and
    fixture requested from another file has a public name.
 
 Local graphs are acyclic. A test's use of a fixture from an ancestor
-`conftest.py` is contained in the tree and needs no declaration. Importing
-`a.b.c` initialises `a` and `a.b`; that is loading and creates no edge.
+`conftest.py` needs no declaration. Importing `a.b.c` initialises `a` and `a.b`;
+that is loading and creates no edge.
 
 ## Restricted Python
 
@@ -105,8 +103,7 @@ Reading `sys.modules` is not restricted. A file that owns a dynamic load declare
 ```
 
 Each entry becomes a fact edge from the file to the directory, judged by the
-same rule; the file is then exempt from the restricted-form errors. A loading
-file should do only the loading.
+same rule; the file is then exempt from the restricted-form errors. A loading file does only the loading.
 
 A file that runs code from outside the repository (user scripts, agent code, a
 module named by operator configuration) declares it under `[external]` with a reason:
@@ -127,28 +124,27 @@ Plugin and schedule-script discovery is `[external]`, never `[loads]`.
 
 `meizel.toml` keys are `purity` / `[purity]` ([[meizel/docs/checker/purity.meiva.okf.md|purity]]),
 `exports` (list), `[uses]` ([[meizel/docs/checker/narrowing.meiva.okf.md|narrowed endpoints]]), `[loads]` and `[external]`
-(sites in [[meizel/docs/checker/policy.meiva.okf.md|the policy file]]) and
-`[debt.<code>]`. Names are direct children; `meizel.toml` does not count toward the
-directory budget. A directory without a manifest has no local edges and exports its door.
+(sites in [[meizel/docs/checker/policy.meiva.okf.md|the policy file]]), `[state]` and `[roots]`
+([[meizel/docs/checker/ambient.meiva.okf.md|ambient reads]]) and `[debt.<code>]`. Names are
+direct children; `meizel.toml` does not count toward the directory budget. A directory without
+a manifest has no local edges and exports its door.
 
 ## When it fails
 
 Diagnostic codes: `undeclared-edge`, `not-exported`, `private-module`, `private-name`,
 `cycle-edge`, `restricted-python`, the patch codes and `missing-patch-target` ([[meizel/docs/checker/patching.meiva.okf.md|patching]]),
 the 15 purity and bounded-container codes ([[meizel/docs/checker/purity.meiva.okf.md|purity]]),
-`unresolved-import`, `unlisted-allowance`,
+`ambient-read`, `stale-root`, `unresolved-import`, `unlisted-allowance`,
 `stale-load`, `stale-external`, `policy-syntax`, `debt-paid`, and the manifest codes
 (`manifest-` + syntax, unknown-key, unknown-child, duplicate, self-edge, cycle, export-private,
-stale-edge, debt, roles). An undeclared edge that would close a cycle says so; the way out is
-a public door or injection.
+stale-edge, debt, roles). An undeclared edge that would close a cycle says so; the way out is a public door or injection.
 
 ## Layout
 
 `cli.py` parses commands; `analysis.py` assembles universe, scans, manifests and
-diagnostics; `universe.py` reads git; `scan.py`, `scopes.py` and `fixtures.py`
-extract facts from one file; `manifest.py` validates manifests; `rule.py`
-projects and judges; `graphs.py` holds components and cycles; `explain.py`,
-`sync.py`, `bootstrap.py` and the debt files implement the other commands.
-Tests build throwaway git repositories in `tests/`.
+diagnostics; `universe.py` reads git; `scan.py`, `patching.py`, `ambient.py`, `scopes.py` and
+`fixtures.py` extract facts from one file; `manifest.py` validates manifests; `rule.py`
+projects and judges; `graphs.py` holds components and cycles; `explain.py`, `sync.py`,
+`bootstrap.py` and the debt files implement the other commands.
 
 Parent: [[meizel/docs/meizel.meiva.okf.md|meizel]].

@@ -28,6 +28,15 @@ def _rewrite_entry(lines: list[str], start: int, end: int, drop: set[str]) -> li
 
 
 _EXTERNAL_ENTRY = re.compile(r"""^\s*("[^"]*"|'[^']*'|[\w.-]+)\s*=\s*["']""")
+_KEYED_ENTRY = re.compile(r"""^\s*("[^"]*"|'[^']*'|[\w.-]+)\s*=""")
+
+
+# meiva:note
+# The `key = ...` line of a section whose entries each take one line.
+def _keyed_line(section: str, line: str) -> re.Match[str] | None:
+    if section in {"state", "roots"}:
+        return _KEYED_ENTRY.match(line)
+    return _EXTERNAL_ENTRY.match(line) if section in {"external", "purity"} else None
 
 
 def remove_entries(text: str, removals: dict[str, dict[str, set[str]]]) -> str:
@@ -40,7 +49,7 @@ def remove_entries(text: str, removals: dict[str, dict[str, set[str]]]) -> str:
         header = HEADER.match(lines[index])
         if header:
             section = header.group(1)
-        reason = _EXTERNAL_ENTRY.match(lines[index]) if section in {"external", "purity"} else None
+        reason = _keyed_line(section, lines[index])
         if reason and unquote(reason.group(1)) in removals.get(section, {}):
             index += 1
             continue

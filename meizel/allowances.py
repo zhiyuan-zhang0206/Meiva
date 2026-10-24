@@ -16,6 +16,7 @@ NAMES = "names"  # a list of names
 
 # rule -> section -> shape. A rule listed in `PER_NAME` has one reasons table per name it governs.
 RULES: dict[str, dict[str, str]] = {
+    "ambient": {"settings": NAMES, "db": NAMES, "endpoints": NAMES, "bus": NAMES},
     "ambient-state": {
         "sink-callees": NAMES,
         "sink-callee-suffixes": NAMES,
@@ -25,11 +26,6 @@ RULES: dict[str, dict[str, str]] = {
         "skill-script-patterns": NAMES,
         "config-modules": NAMES,
         "config-readers": NAMES,
-        "db-modules": NAMES,
-        "db-primitives": NAMES,
-        "db-handles": NAMES,
-        "bus-handles": NAMES,
-        "endpoint-handles": NAMES,
         "sink-facades": REASONS,
         "pure-repo-callees": REASONS,
         "sites": REASONS,

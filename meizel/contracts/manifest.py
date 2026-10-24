@@ -18,13 +18,15 @@ from meizel.contracts.debt import (
     total,
 )
 from meizel.graph.graphs import cycle_through, strongly_connected, unneeded_back_edges
-from meizel.graph.model import Code, Diagnostic
+from meizel.graph.model import AmbientKind, Code, Diagnostic
 from meizel.graph.universe import MANIFEST, Universe, is_private_module
 from meizel.roles import check_table
 
 __all__ = [
+    "HELD_KINDS",
     "PURITY_LEVELS",
     "Manifest",
+    "Root",
     "effective_purity",
     "first",
     "load_manifests",
@@ -33,7 +35,20 @@ __all__ = [
 ]
 
 PURITY_LEVELS = ("none", "strict-to-be", "strict")
-_TOP_KEYS = ("exports", "uses", "loads", "external", "roles", "purity", TABLE_KEY)
+_TOP_KEYS = (
+    "exports",
+    "uses",
+    "loads",
+    "external",
+    "roles",
+    "purity",
+    "state",
+    "roots",
+    TABLE_KEY,
+)
+# meiva:note
+# The kinds a repository holds itself: only these can be declared under `[state]`.
+HELD_KINDS = (AmbientKind.SETTINGS, AmbientKind.DB, AmbientKind.ENDPOINTS, AmbientKind.BUS)
 _EdgeReader = Callable[[str, tuple[str, ...], int], tuple[str, ...]]
 
 
@@ -51,6 +66,14 @@ def within(path: str, prefix: str) -> bool:
     return path == prefix or path.startswith(f"{prefix}/")
 
 
+# meiva:note
+# A file that may read the ambient world: the kinds it may acquire and, optionally, why.
+@dataclass(frozen=True, slots=True)
+class Root:
+    kinds: tuple[AmbientKind, ...]
+    why: str = ""
+
+
 @dataclass(frozen=True, slots=True)
 class Manifest:
     directory: str
@@ -61,6 +84,10 @@ class Manifest:
     roles: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
     purity_default: str | None = None
     purity: dict[str, str] = field(default_factory=dict[str, str])
+    state: dict[str, tuple[AmbientKind, ...]] = field(
+        default_factory=dict[str, tuple[AmbientKind, ...]]
+    )
+    roots: dict[str, Root] = field(default_factory=dict[str, Root])
     debt: DebtTable = field(default_factory=dict[Code, dict[str, int]])
     back: frozenset[tuple[str, str]] = frozenset()
     dangling: list[tuple[str, str | None, str | None]] = field(
@@ -144,6 +171,8 @@ class _Reader:
         self.roles: dict[str, tuple[str, ...]] = {}
         self.purity_default: str | None = None
         self.purity: dict[str, str] = {}
+        self.state: dict[str, tuple[AmbientKind, ...]] = {}
+        self.roots: dict[str, Root] = {}
         self.debt: DebtTable = {}
         self.back: frozenset[tuple[str, str]] = frozenset()
         self.dangling: list[tuple[str, str | None, str | None]] = []
@@ -200,6 +229,10 @@ class _Reader:
             self.read_roles(document["roles"])
         if "purity" in document:
             self.read_purity(document["purity"])
+        if "state" in document:
+            self.state = self.read_state(document["state"])
+        if "roots" in document:
+            self.roots = self.read_roots(document["roots"])
         if TABLE_KEY in document:
             line = self.manifest.line_of(TABLE_KEY)
             self.debt = parse_debt(
@@ -215,6 +248,8 @@ class _Reader:
             roles=self.roles,
             purity_default=self.purity_default,
             purity=self.purity,
+            state=self.state,
+            roots=self.roots,
             debt=self.debt,
             back=self.back,
             dangling=self.dangling,
@@ -278,6 +313,94 @@ class _Reader:
             else:
                 result[key] = reason.strip()
         return result
+
+    # meiva:note
+    # A Python file directly in this directory; deeper ones belong to their own manifest.
+    def python_child(self, section: str, key: str, line: int) -> bool:
+        if not key.endswith(".py") or "/" in key:
+            self.report(
+                line,
+                Code.MANIFEST_CHILD,
+                f"[{section}] key {key!r} must be a Python file directly in this directory; "
+                "declare a deeper one in its own directory's manifest",
+            )
+            return False
+        if self.child(key, f"[{section}]", line):
+            return True
+        self.dangling.append((section, key, None))
+        return False
+
+    # meiva:note
+    # A non-empty list of kind names, each one of `allowed`.
+    def kinds(
+        self, value: object, where: str, line: int, allowed: tuple[AmbientKind, ...]
+    ) -> tuple[AmbientKind, ...]:
+        names = self.names(value, where, line)
+        valid = {kind.value: kind for kind in allowed}
+        unknown = [name for name in names if name not in valid]
+        if unknown or not names:
+            self.report(
+                line,
+                Code.MANIFEST_SYNTAX,
+                f"{where} must list kinds from {', '.join(valid)}"
+                + (f"; unknown: {', '.join(unknown)}" if unknown else ""),
+            )
+            return ()
+        return tuple(valid[name] for name in names)
+
+    # meiva:note
+    # `[state]`: files that hold process state the repository itself keeps, by kind.
+    def read_state(self, table: object) -> dict[str, tuple[AmbientKind, ...]]:
+        if not isinstance(table, dict):
+            self.report(
+                self.manifest.line_of("state"), Code.MANIFEST_SYNTAX, "[state] must be a table"
+            )
+            return {}
+        result: dict[str, tuple[AmbientKind, ...]] = {}
+        for key, value in cast("dict[str, object]", table).items():
+            line = self.manifest.line_of(key)
+            if self.python_child("state", key, line):
+                kinds = self.kinds(value, f"[state] {key!r}", line, HELD_KINDS)
+                if kinds:
+                    result[key] = kinds
+        return result
+
+    # meiva:note
+    # `[roots]`: files that may read the ambient world, each with the kinds it may read.
+    def read_roots(self, table: object) -> dict[str, Root]:
+        if not isinstance(table, dict):
+            self.report(
+                self.manifest.line_of("roots"), Code.MANIFEST_SYNTAX, "[roots] must be a table"
+            )
+            return {}
+        result: dict[str, Root] = {}
+        for key, value in cast("dict[str, object]", table).items():
+            line = self.manifest.line_of(key)
+            if self.python_child("roots", key, line):
+                root = self.read_root(key, value, line)
+                if root is not None:
+                    result[key] = root
+        return result
+
+    # meiva:note
+    # One `[roots]` value: a list of kinds, or a table with `kinds` and a `why`.
+    def read_root(self, key: str, value: object, line: int) -> Root | None:
+        where = f"[roots] {key!r}"
+        if not isinstance(value, dict):
+            kinds = self.kinds(value, where, line, tuple(AmbientKind))
+            return Root(kinds) if kinds else None
+        fields = cast("dict[str, object]", value)
+        unknown = sorted(set(fields) - {"kinds", "why"})
+        why = fields.get("why", "")
+        if unknown or not isinstance(why, str) or not why.strip():
+            self.report(
+                line,
+                Code.MANIFEST_SYNTAX,
+                f'{where} is `{{ kinds = [...], why = "..." }}` with a non-empty why',
+            )
+            return None
+        kinds = self.kinds(fields.get("kinds"), where, line, tuple(AmbientKind))
+        return Root(kinds, why.strip()) if kinds else None
 
     def read_purity(self, value: object) -> None:
         line = self.manifest.line_of("purity")
