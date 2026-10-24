@@ -7,7 +7,6 @@ rather than in either of them.
 """
 
 import logging
-from collections.abc import Callable
 from typing import Any
 
 from psycopg_pool import ConnectionPool
@@ -80,7 +79,7 @@ def resolve_agent_model(
     agent_id: int,
     *,
     catalog: ModelCatalog,
-    default_model_reader: Callable[[], str],
+    default_model: str,
 ) -> str:
     """The agent's effective LLM model: its per-agent overlay, else the cluster default
     (the caller's live default), resolved through any withdrawal fallback so callers judge the model
@@ -91,7 +90,7 @@ def resolve_agent_model(
         row = cur.fetchone()
     overlay = row[0] if row and row[0] else None
     model = overlay.get("llm_model") if overlay else None
-    return resolve_available_model(model or default_model_reader(), models=catalog.models)
+    return resolve_available_model(model or default_model, models=catalog.models)
 
 
 def _to_context_section(node: SectionNode) -> ContextSection:
@@ -109,13 +108,11 @@ def context_breakdown_response(
     breakdown: RequestBreakdown,
     *,
     catalog: ModelCatalog,
-    default_model_reader: Callable[[], str],
+    default_model: str,
 ) -> ContextBreakdownResponse:
     """`breakdown` (one LLM request's input) with the agent's resolved window and compaction
     thresholds; the thresholds are 0 when the agent's model has no known window."""
-    model = resolve_agent_model(
-        pool, agent_id, catalog=catalog, default_model_reader=default_model_reader
-    )
+    model = resolve_agent_model(pool, agent_id, catalog=catalog, default_model=default_model)
     overrides = read_agent_overrides(pool, agent_id)
     max_input_tokens = soft_compact_tokens = hard_compact_tokens = 0
     try:

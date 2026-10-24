@@ -8,7 +8,6 @@
 "test_sampling_atexit.py" = ["child_sampling_atexit.py", "child_sampling_atexit_uninstalled.py"]
 
 [debt.first-party-patch]
-"child_sampling_atexit.py#assignment base.agents.sdk.call_policy.read_policy" = 1
 "test_impersonation_capture_rebinding.py#monkeypatch.setattr base.agents.impersonation.manifest.append_source_event" = 1
 "test_log_agent_attribution.py#monkeypatch.setattr base.log.process.init_done" = 2
 "test_log_agent_attribution.py#patch.object base.log.process.add_file_sink" = 2

@@ -9,10 +9,10 @@ import asyncio
 import json
 import sys
 
-from base.agents.sdk import call_policy
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from meiva.sdk_surface import metering
 
-owner = call_policy.SamplingPolicyOwner(reader=call_policy.SamplingPolicy)
+owner = fixed_sampling_owner()
 executed: list[str] = []
 
 

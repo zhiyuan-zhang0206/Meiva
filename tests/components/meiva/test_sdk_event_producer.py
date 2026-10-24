@@ -10,6 +10,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.sdk import call_policy
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -21,7 +22,7 @@ from meiva.sdk_surface import metering, process_context
 
 @pytest.fixture
 def sampling() -> Iterator[call_policy.SamplingPolicyOwner]:
-    owner = call_policy.SamplingPolicyOwner(reader=call_policy.SamplingPolicy)
+    owner = fixed_sampling_owner()
     yield owner
     owner.close()
 
@@ -75,7 +76,9 @@ def test_sampled_out_call_does_not_construct_a_producer(bare_context: None) -> N
     def sampled_policy() -> call_policy.SamplingPolicy:
         return call_policy.SamplingPolicy(sampling_enabled=True, sample_every=1_000_000_000)
 
-    owner = call_policy.SamplingPolicyOwner(reader=sampled_policy)
+    owner = call_policy.SamplingPolicyOwner(
+        initial=call_policy.SamplingPolicy(), fetch=sampled_policy
+    )
     # meiva:note
     # the first read starts the refresh that installs the sampled-out policy
     owner.read()

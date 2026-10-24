@@ -489,7 +489,7 @@ async def close_process_owners(
             if host is None and clients is not None:
                 cleanup.callback(clients.close)
             if installation is not None:
-                cleanup.callback(installation.sampling.close)
+                cleanup.callback(installation.require_sampling().close)
             if health is not None:
                 cleanup.push_async_callback(stop_health_server, health)
             cleanup.push_async_callback(_close_ownership_beat, beat, beat_tasks)

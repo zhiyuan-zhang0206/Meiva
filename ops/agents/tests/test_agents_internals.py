@@ -276,19 +276,19 @@ class TestSpawnAgent:
             db_conn,
             default_model_agent,
             catalog=model_catalog,
-            default_model_reader=lambda: "claude-sonnet-5",
+            default_model="claude-sonnet-5",
         )
         text_only_snapshot = select_one(
             db_conn,
             text_only_agent,
             catalog=model_catalog,
-            default_model_reader=lambda: "claude-sonnet-5",
+            default_model="claude-sonnet-5",
         )
         withdrawn_snapshot = select_one(
             db_conn,
             withdrawn_vision_agent,
             catalog=model_catalog,
-            default_model_reader=lambda: "claude-sonnet-5",
+            default_model="claude-sonnet-5",
         )
 
         assert default_snapshot is not None
@@ -331,13 +331,13 @@ class TestSpawnAgent:
             db_conn,
             born_vision,
             catalog=model_catalog,
-            default_model_reader=lambda: "glm-5.3",
+            default_model="glm-5.3",
         )
         text = select_one(
             db_conn,
             born_text,
             catalog=model_catalog,
-            default_model_reader=lambda: "glm-5.3",
+            default_model="glm-5.3",
         )
 
         assert vision is not None and vision.supports_vision is True

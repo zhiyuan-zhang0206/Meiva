@@ -22,7 +22,7 @@ def clock_scope() -> Iterator[None]:
     finally:
         current = install.uninstall()
         if current is not None:
-            current.sampling.close()
+            current.require_sampling().close()
         if prior is not None:
             install.install(
                 prior.registry,

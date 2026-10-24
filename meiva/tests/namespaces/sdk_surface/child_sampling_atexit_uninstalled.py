@@ -8,7 +8,7 @@ install.install(ExtensionRegistry(()), config_images=DiskPluginConfigImages(reso
 installation = installed()
 assert installation is not None
 install.uninstall()
-installation.sampling.error = (
+installation.require_sampling().error = (
     ValueError("a removed surface must not close at interpreter exit"),
     None,
 )

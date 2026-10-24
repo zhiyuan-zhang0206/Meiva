@@ -51,7 +51,7 @@ from types import MappingProxyType
 
 from pydantic import BaseModel
 
-from base.agents.sdk.call_policy import SamplingPolicyOwner
+from base.agents.sdk.call_policy import SamplingPolicyOwner, process_sampling_owner
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
@@ -293,7 +293,7 @@ def install(
     from . import metering, sdk_disable
 
     prior = slot()
-    sampling_owner = sampling if sampling is not None else SamplingPolicyOwner()
+    sampling_owner = sampling if sampling is not None else process_sampling_owner()
     setattr(meiva_module(), SLOT, LOADING)
     build = _Build()
     admitted: list[tuple[str, PluginContributions]] = []
@@ -382,7 +382,8 @@ def uninstall() -> Installation | None:
         # in flight; a failed attempt stays un-retried), a fresh install overwrites it.
         return None
     # meiva:link meiva/docs/sdk-surface/install-lifetime.meiva.okf.md
-    atexit.unregister(installation.sampling.close)
+    if installation.sampling is not None:
+        atexit.unregister(installation.sampling.close)
     setattr(meiva_module(), SLOT, None)
     _run(list(installation.undo), None)
     return installation

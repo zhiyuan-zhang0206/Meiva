@@ -12,6 +12,7 @@ import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
+from base.host.env.agent_env import AGENT_ID_ENV
 from meiva.shell.background_plan import Notice, notified_line
 
 __all__ = [
@@ -184,7 +185,7 @@ def build_boot(script_path: Path, watchdog_secs: float | None, agent_id: int) ->
         "import threading\n"
         "import time\n"
         "\n"
-        f'os.environ["MEIVA_AGENT_ID"] = "{agent_id}"\n'
+        f'os.environ["{AGENT_ID_ENV}"] = "{agent_id}"\n'
         f'os.environ["MEIVA_PROCESS_PROFILE"] = "agent"\n'
         "\n"
         "_parent_pid = os.getppid()\n"

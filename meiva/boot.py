@@ -37,6 +37,7 @@ from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.host.env.agent_env import AGENT_ID_ENV
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -198,7 +199,7 @@ def context_from_description(
 
 
 def launch_agent_id(env: Mapping[str, str]) -> int | None:
-    raw = env.get("MEIVA_AGENT_ID")
+    raw = env.get(AGENT_ID_ENV)
     return None if raw is None else int(raw)
 
 
@@ -235,7 +236,7 @@ def _launch_facts(context: MeivaContext | None, env: Mapping[str, str]) -> Launc
         host=process_context.is_host_process(),
         context_bound=context is not None,
         identity=_identity_facts(context),
-        env_has_agent_id="MEIVA_AGENT_ID" in env,
+        env_has_agent_id=AGENT_ID_ENV in env,
     )
 
 

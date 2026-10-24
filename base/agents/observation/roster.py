@@ -7,7 +7,6 @@ History uses descending-ID keyset pages; no implicit list-all operation exists.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -148,14 +147,12 @@ LIVE_SQL = sql.SQL("""
 """).format(columns=sql.SQL(_CARD_COLUMNS), source=sql.SQL(_CARD_FROM))
 
 
-def _card(
-    data: dict[str, Any], *, catalog: ModelCatalog | None, default_model_reader: Callable[[], str]
-) -> AgentCard:
+def _card(data: dict[str, Any], *, catalog: ModelCatalog | None, default_model: str) -> AgentCard:
     data["supports_vision"] = agent_supports_vision(
         data.pop("config_overlay"),
         data.pop("birth_config"),
         catalog=catalog,
-        default_model_reader=default_model_reader,
+        default_model=default_model,
     )
     probe = data.pop("machine_probe_at")
     host_online = data.pop("agent_host_online")
@@ -182,7 +179,7 @@ def select_roster(
     conn: psycopg.Connection[Any],
     *,
     catalog: ModelCatalog | None,
-    default_model_reader: Callable[[], str],
+    default_model: str,
 ) -> AgentRoster:
     """Read live cards and their ancestor closure from the same database snapshot."""
     with conn.cursor() as cur:
@@ -191,10 +188,7 @@ def select_roster(
     if row is None:
         raise RuntimeError("roster aggregate did not return a row")
     return AgentRoster(
-        agents=[
-            _card(data, catalog=catalog, default_model_reader=default_model_reader)
-            for data in row[0]
-        ],
+        agents=[_card(data, catalog=catalog, default_model=default_model) for data in row[0]],
         ancestors=[AgentLineage.model_validate(data) for data in row[1]],
     )
 
@@ -207,7 +201,7 @@ def list_directory(
     query: str = "",
     before_id: int | None = None,
     limit: int = 100,
-    default_model_reader: Callable[[], str],
+    default_model: str,
 ) -> AgentDirectoryPage:
     """Read one bounded page; search matches a label substring or exact numeric ID."""
     if not 1 <= limit <= 200:
@@ -255,10 +249,7 @@ def list_directory(
     with conn.cursor() as cur:
         cur.execute(statement, params)
         rows = cur.fetchall()
-    agents = [
-        _card(row[0], catalog=catalog, default_model_reader=default_model_reader)
-        for row in rows[:limit]
-    ]
+    agents = [_card(row[0], catalog=catalog, default_model=default_model) for row in rows[:limit]]
     return AgentDirectoryPage(
         agents=agents,
         next_cursor=agents[-1].agent_id if len(rows) > limit else None,
