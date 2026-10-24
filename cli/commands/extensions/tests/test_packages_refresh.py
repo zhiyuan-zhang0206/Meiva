@@ -36,10 +36,6 @@ def refresh_config() -> ConfigBoot:
     return owner
 
 
-def _allow_os_jobs(**_kwargs: object) -> bool:
-    return True
-
-
 @pytest.fixture(autouse=True)
 def _hermetic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
     """Restore real boot delivery as well as the scratch home."""
@@ -463,7 +459,7 @@ def test_refresh_records_error_and_backs_off_when_offline(
     assert (reg.load().channels["core"].last_result or "").startswith("error")
 
     # the job retries only after the backoff: same run parameters, not due now
-    monkeypatch.setattr(refresh, "os_jobs_enabled", _allow_os_jobs)
+    refresh_config.set_field("os_jobs_enabled", True)
     report = run_refresh(config=refresh_config, repo=core_repo, from_job=True)
     assert report.ran and report.items == ()
     assert report.counts.get("skipped_not_due") == 2
@@ -518,7 +514,7 @@ def test_from_job_gates(
     report = run_refresh(config=refresh_config, repo=core_repo, from_job=True)
     assert not report.ran and "OS jobs disabled" in (report.skip_reason or "")
 
-    monkeypatch.setattr(refresh, "os_jobs_enabled", _allow_os_jobs)
+    refresh_config.set_field("os_jobs_enabled", True)
     monkeypatch.setattr(refresh_config.view.packages, "refresh_enabled", False)
     report = run_refresh(config=refresh_config, repo=core_repo, from_job=True)
     assert not report.ran and "refresh disabled" in (report.skip_reason or "")

@@ -15,10 +15,11 @@ from langchain_core.messages import HumanMessage
 
 from agent.db import ClaimedInbound
 from agent.messages import inbound_message
-from base.agents.messages.envelope import EnvelopeReadInputs, inbound_head, inbound_tail
+from base.agents.messages.envelope import inbound_head, inbound_tail
 from base.agents.messages.inbound_images import parse_upload_url
 from base.agents.messages.injection_scan import scan_inbound_content
 from base.agents.messages.security_finding import SecurityFindingEntry
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.upload_delivery.paths import UploadClient, fetch_upload_b64
 from base.log import logger
 
@@ -27,7 +28,7 @@ def build_chat_inbound(
     item: ClaimedInbound,
     *,
     read_security_enabled: Callable[[], bool],
-    envelope_inputs: EnvelopeReadInputs,
+    envelope_inputs: TimestampPolicy,
     expand_command: Callable[[str], str],
     gateway: Callable[[], UploadClient],
 ) -> tuple[HumanMessage, SecurityFindingEntry | None]:

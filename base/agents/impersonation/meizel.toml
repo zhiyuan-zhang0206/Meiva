@@ -1,4 +1,4 @@
-exports = ["delivery.py", "event_signals.py", "history.py", "host_transport.py", "maintenance.py", "manifest.py", "notes.py", "relay.py", "replacement.py", "sessions.py", "status.py", "terminal_notices.py", "tests", "wake.py"]
+exports = ["delivery.py", "event_signals.py", "history.py", "host_transport.py", "maintenance.py", "manifest.py", "relay.py", "replacement.py", "sessions.py", "status.py", "terminal_notices.py", "tests", "wake.py"]
 
 [uses]
 "__init__.py" = ["_store.py", "history.py", "manifest.py", "relay.py", "status.py", "wake.py"]
@@ -17,5 +17,4 @@ exports = ["delivery.py", "event_signals.py", "history.py", "host_transport.py",
 "wake.py" = ["status.py"]
 
 [purity]
-"notes.py" = "strict"
 "status.py" = "strict"

@@ -1,12 +1,14 @@
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items
-from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.messages.kwargs import MeivaMsgType, NoteTag
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
 from base.config import settings
 
-_INPUTS = TimelineReadInputs(Clock.from_settings, lambda: settings.general.message_timestamps)
+_INPUTS = TimestampPolicy(
+    clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
+)
 
 
 def _render(*messages: BaseMessage) -> list[TimelineItem]:

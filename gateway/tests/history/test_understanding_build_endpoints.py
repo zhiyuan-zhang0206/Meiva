@@ -513,8 +513,8 @@ def test_each_gateway_reads_its_own_config() -> None:
 
     assert (timeline_read(first).default_limit, timeline_read(second).default_limit) == (11, 29)
     assert (
-        timeline_read(first).rendering.timestamps_enabled(),
-        timeline_read(second).rendering.timestamps_enabled(),
+        timeline_read(first).rendering.timestamps_enabled,
+        timeline_read(second).rendering.timestamps_enabled,
     ) == (False, True)
     assert (
         understanding_read(first, authority).default_model,

@@ -24,7 +24,6 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from base.agents.messages.envelope import (
-    EnvelopeReadInputs,
     inbound_body,
     inbound_head,
     inbound_tail,
@@ -32,6 +31,7 @@ from base.agents.messages.envelope import (
     validate_source,
     wrap_inbound,
 )
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config import settings
 from base.lm.system_note import unwrap_system_note, wrap_system_note
@@ -58,8 +58,8 @@ def _make_clock(*, weekday: bool = False, now: Callable[[], datetime] = _fixed_n
     )
 
 
-_ENVELOPE_INPUTS = EnvelopeReadInputs(_make_clock, lambda: True)
-_NO_TIMESTAMPS_INPUTS = EnvelopeReadInputs(_make_clock, lambda: False)
+_ENVELOPE_INPUTS = TimestampPolicy(clock=_make_clock(), timestamps_enabled=True)
+_NO_TIMESTAMPS_INPUTS = TimestampPolicy(clock=_make_clock(), timestamps_enabled=False)
 
 
 def _note(body: str) -> str:
@@ -391,7 +391,7 @@ class TestWeekdayFlag:
         # within +-11h of UTC, so this exercises the %a slot regardless of
         # the configured timezone.
         created = datetime(2026, 6, 21, 10, 30, 0, tzinfo=UTC)
-        inputs = EnvelopeReadInputs(lambda: _make_clock(weekday=weekday), lambda: True)
+        inputs = TimestampPolicy(clock=_make_clock(weekday=weekday), timestamps_enabled=True)
         return wrap_inbound("hi", "user", created_at=created, inputs=inputs)
 
     def test_weekday_on(self) -> None:
@@ -427,9 +427,9 @@ class TestWeekdayFlag:
         from datetime import datetime
 
         for weekday in (True, False):
-            inputs = EnvelopeReadInputs(
-                lambda w=weekday: _make_clock(weekday=w, now=lambda: datetime.now(UTC)),
-                lambda: True,
+            inputs = TimestampPolicy(
+                clock=_make_clock(weekday=weekday, now=lambda: datetime.now(UTC)),
+                timestamps_enabled=True,
             )
             day = r"[A-Z][a-z]{2} " if weekday else ""
             shape = rf"^\[\d{{4}}-\d{{2}}-\d{{2}} {day}\d{{2}}:\d{{2}}:\d{{2}}\]$"

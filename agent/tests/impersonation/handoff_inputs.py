@@ -36,9 +36,9 @@ from base.agents.history.checkpoint_postgres_walks import (
     HistoryAsyncPostgresSaver as AsyncPostgresSaver,
 )
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
-from base.agents.impersonation.notes import HandoffNotes
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.inbox.insert import insert_inbound_message
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
@@ -93,9 +93,9 @@ def handoff_clients(machine_identity: MachineIdentity) -> Iterator[ClientSet]:
         clients.close()
 
 
-def handoff_notes() -> HandoffNotes:
+def handoff_notes() -> TimestampPolicy:
     clock = Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS)
-    return HandoffNotes(lambda: clock, lambda: False)
+    return TimestampPolicy(clock=clock, timestamps_enabled=False)
 
 
 def takeover_host(tmp_path: Path, machine: MachineIdentity) -> TakeoverHost:

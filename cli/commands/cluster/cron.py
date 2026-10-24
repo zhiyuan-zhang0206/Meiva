@@ -20,14 +20,14 @@ from base.host.system.hostport import Host
 # meiva:note
 # Register the OS cron job for the cluster health probe.
 #
-# Delegates to `base.host.system.cron.register_os_cron`, which takes its gate as a reader; the
-# value `os_jobs_enabled` was read once by the composition root. Idempotent: re-running
+# Delegates to `base.host.system.cron.register_os_cron`, which takes its gate as a value: the
+# `os_jobs_enabled` the composition root read once. Idempotent: re-running
 # updates the interval and reloads the job. A refusal exits 1 with the reason.
 def cmd_cron_register(
     *, os_jobs_enabled: bool, host: Host, interval_s: int = DEFAULT_INTERVAL_SECONDS
 ) -> int:
     try:
-        register_os_cron(interval_s=interval_s, enabled_reader=lambda: os_jobs_enabled, host=host)
+        register_os_cron(interval_s=interval_s, enabled=os_jobs_enabled, host=host)
     except RuntimeError as e:
         print(f"  * {e}")
         return 1

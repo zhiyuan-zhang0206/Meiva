@@ -14,7 +14,7 @@ from agent.state import BaseAgentState
 from agent.turn.runloop import PendingTurnFailure, publish_turn_failure, settle_turn_failure
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import MeivaContext
-from base.agents.impersonation.notes import HandoffNotes
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -45,7 +45,7 @@ class HandoffSettlement:
     db: Database
     bus: EventBus
     relays: RelaySupervision
-    notes: HandoffNotes
+    notes: TimestampPolicy
     local_machine: str
 
 

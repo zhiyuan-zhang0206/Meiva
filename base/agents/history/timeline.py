@@ -11,7 +11,6 @@ from langchain_core.messages import (
     ToolCall,
 )
 
-from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.history.timeline_item import TimelineItem as TimelineItem
 from base.agents.impersonation.history import ImpersonationMetadata
 from base.agents.messages.kwargs import (
@@ -21,6 +20,7 @@ from base.agents.messages.kwargs import (
     kwargs_read_time,
     read_meiva_kwargs,
 )
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.sdk.telemetry import SdkCall, sdk_calls_by_tool_call_id
 from base.lm.content import message_addl_kwargs, message_content
 from base.lm.system_note import unwrap_system_note
@@ -86,7 +86,7 @@ def _inbound_text(content: str | list[str | dict[str, Any]]) -> str:
 def build_timeline_items(
     messages: Sequence[BaseMessage],
     *,
-    inputs: TimelineReadInputs,
+    inputs: TimestampPolicy,
     start: int = 0,
     segment_prefix: str = "",
 ) -> tuple[list[TimelineItem], int]:
@@ -136,7 +136,7 @@ def _message_items(
     msg_idx: int,
     kwargs: MeivaMessageKwargs,
     sdk_by_id: dict[str, Any],
-    inputs: TimelineReadInputs,
+    inputs: TimestampPolicy,
 ) -> list[TimelineItem]:
     raw_content = message_content(msg)
     content = raw_content if isinstance(raw_content, str) else str(raw_content)
@@ -314,9 +314,9 @@ def _compact_item(
     created_at: str | None,
     compact_id: str | None = None,
     *,
-    inputs: TimelineReadInputs,
+    inputs: TimestampPolicy,
 ) -> TimelineItem:
-    ts = f" {inputs.clock_factory().now_timestamp()}" if inputs.timestamps_enabled() else ""
+    ts = f" {inputs.clock.now_timestamp()}" if inputs.timestamps_enabled else ""
     label = "Compact summary" if kind == "inbound_compact_summary" else "Compact request"
     return TimelineItem(
         item_id=f"{msg_idx}.0",

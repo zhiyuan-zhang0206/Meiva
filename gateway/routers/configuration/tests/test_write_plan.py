@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from base.api_contracts.config import ConfigWriteResult
 from base.config.admin.editing import ConfigPatchPlan
+from base.config.env_changed import EnvChangedError
 from base.config.service_read import ConfigAuthority
 from base.host.env.config_lite_table import FIELD_DOMAINS
 from base.packages.plugin_config_admin import panel_metadata
@@ -74,8 +75,8 @@ def test_candidate_errors_are_a_400_listing_each() -> None:
     )
 
 
-def test_only_the_stale_env_message_is_a_conflict() -> None:
-    stale = write_plan.stale_env_conflict(RuntimeError(write_plan.STALE_ENV_MESSAGE))
+def test_only_a_changed_env_is_a_conflict() -> None:
+    stale = write_plan.stale_env_conflict(EnvChangedError())
     assert stale == HttpFailure(409, "config changed concurrently; retry the request")
     assert write_plan.stale_env_conflict(RuntimeError("disk full")) is None
 

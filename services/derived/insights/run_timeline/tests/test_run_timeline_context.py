@@ -22,7 +22,7 @@ from base.agents.history.hierarchy.units import (
 )
 from base.agents.history.hierarchy.usage import MessageUsage
 from base.agents.history.message_tokens import MessageTokens
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
 from base.config import settings
 from base.db import Database
@@ -32,8 +32,8 @@ from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.projection.derive import segment_view
 from services.derived.insights.run_timeline.tokens import BlockContext, BlockContexts
 
-_TIMELINE_INPUTS = TimelineReadInputs(
-    Clock.from_settings, lambda: settings.general.message_timestamps
+_TIMELINE_INPUTS = TimestampPolicy(
+    clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
 
 T0 = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)

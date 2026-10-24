@@ -39,9 +39,9 @@ def _register_all(crontab: FakeCrontab) -> None:
     host = _linux(crontab)
     assert cron.register_linux(300, host=host) == 0
     assert logs_job.register_linux(host=host) == 0
-    assert packages_job.register_linux(tick_reader=lambda: 900, host=host) == 0
+    assert packages_job.register_linux(tick_seconds=900, host=host) == 0
     assert pr_flow_job.register_linux(host=host) == 0
-    assert walg_job.register_linux(backup_hour_reader=lambda: 3, host=host) == 0
+    assert walg_job.register_linux(backup_hour=3, host=host) == 0
 
 
 def test_register_leaves_exactly_one_line_per_job(crontab: FakeCrontab) -> None:

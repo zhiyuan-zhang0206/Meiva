@@ -1,4 +1,4 @@
-exports = ["fake_commands.py", "fake_crontab.py"]
+exports = ["fake_commands.py", "fake_crontab.py", "scripted_frames.py"]
 
 [uses]
 "test_autostart.py" = ["fake_commands.py"]
@@ -6,7 +6,7 @@ exports = ["fake_commands.py", "fake_crontab.py"]
 "test_cron.py" = ["fake_commands.py"]
 "test_fake_commands.py" = ["fake_commands.py"]
 "test_hostport.py" = ["fake_commands.py"]
-"test_job_readers.py" = ["fake_commands.py", "fake_crontab.py"]
+"test_job_gates.py" = ["fake_commands.py", "fake_crontab.py"]
 "test_logs_job.py" = ["fake_commands.py", "fake_crontab.py"]
 "test_macos_firewall.py" = ["fake_commands.py"]
 "test_os_job_markers.py" = ["fake_commands.py", "fake_crontab.py"]
@@ -14,6 +14,7 @@ exports = ["fake_commands.py", "fake_crontab.py"]
 "test_pr_flow_job.py" = ["fake_commands.py", "fake_crontab.py"]
 "test_probes.py" = ["fake_commands.py"]
 "test_system_backend.py" = ["fake_commands.py"]
+"test_thread_frames.py" = ["scripted_frames.py"]
 "test_walg_job.py" = ["fake_commands.py", "fake_crontab.py"]
 
 [debt.env-patch]
@@ -21,7 +22,7 @@ exports = ["fake_commands.py", "fake_crontab.py"]
 "test_autostart.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_cron.py#monkeypatch.setenv os.environ.HOME" = 2
 "test_cron.py#monkeypatch.setenv os.environ.XPC_SERVICE_NAME" = 4
-"test_job_readers.py#monkeypatch.setenv os.environ.HOME" = 1
+"test_job_gates.py#monkeypatch.setenv os.environ.HOME" = 1
 "test_logs_job.py#monkeypatch.setenv os.environ.HOME" = 1
 "test_packages_job.py#monkeypatch.setenv os.environ.HOME" = 1
 "test_pr_flow_job.py#monkeypatch.setenv os.environ.HOME" = 1
@@ -49,11 +50,11 @@ exports = ["fake_commands.py", "fake_crontab.py"]
 "test_cron.py#monkeypatch.setattr base.host.system.cron.meiva_binary_path" = 4
 "test_cron.py#monkeypatch.setattr base.host.system.cron.register_macos" = 1
 "test_cron.py#monkeypatch.setattr base.paths.repo_root" = 3
-"test_job_readers.py#monkeypatch.setattr base.host.system.cron.job_home" = 1
-"test_job_readers.py#monkeypatch.setattr base.host.system.cron.launchd_path_env" = 1
-"test_job_readers.py#monkeypatch.setattr base.host.system.cron.meiva_binary_path" = 1
-"test_job_readers.py#monkeypatch.setattr base.host.system.cron.owns_os_jobs" = 4
-"test_job_readers.py#monkeypatch.setattr base.host.system.cron.register_platform_job" = 1
+"test_job_gates.py#monkeypatch.setattr base.host.system.cron.job_home" = 1
+"test_job_gates.py#monkeypatch.setattr base.host.system.cron.launchd_path_env" = 1
+"test_job_gates.py#monkeypatch.setattr base.host.system.cron.meiva_binary_path" = 1
+"test_job_gates.py#monkeypatch.setattr base.host.system.cron.owns_os_jobs" = 4
+"test_job_gates.py#monkeypatch.setattr base.host.system.cron.register_platform_job" = 1
 "test_logs_job.py#monkeypatch.setattr base.host.system.cron.job_home" = 1
 "test_logs_job.py#monkeypatch.setattr base.host.system.cron.launchd_path_env" = 1
 "test_logs_job.py#monkeypatch.setattr base.host.system.cron.meiva_binary_path" = 1

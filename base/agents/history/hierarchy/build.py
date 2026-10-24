@@ -43,7 +43,7 @@ from base.agents.history.checkpoint import FullHistory
 from base.agents.history.hierarchy.chunk_plan import plan_replay, segment_requests
 from base.agents.history.hierarchy.chunks import uncovered
 from base.agents.history.hierarchy.sessions import Session, has_matter
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.db.transaction import write_transaction
 from base.lm.pricing import PriceBook, quote
 
@@ -113,7 +113,7 @@ def plan_jobs(
     covered: Sequence[tuple[int, int]],
     *,
     threshold: int,
-    timeline_inputs: TimelineReadInputs,
+    timeline_inputs: TimestampPolicy,
 ) -> list[PlannedJob]:
     """The jobs that describe what the chosen sessions' level-1 nodes do not yet cover, oldest first.
 

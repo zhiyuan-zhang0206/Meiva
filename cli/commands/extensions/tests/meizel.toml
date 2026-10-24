@@ -27,7 +27,6 @@
 "test_mcp_install.py#monkeypatch.setattr cli.commands.extensions.mcp.uv_sync" = 1
 "test_packages_refresh.py#monkeypatch.setattr base.paths.repo_root" = 1
 "test_packages_refresh.py#monkeypatch.setattr cli.commands.extensions.packages.refresh.ConfigBoot" = 1
-"test_packages_refresh.py#monkeypatch.setattr cli.commands.extensions.packages.refresh.os_jobs_enabled" = 2
 "test_packages_refresh.py#monkeypatch.setattr cli.commands.extensions.packages.refresh.run_bounded" = 2
 "test_plugins_enable_disable.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_plugins_enable_disable.py#monkeypatch.setattr base.paths.plugins_dir" = 1

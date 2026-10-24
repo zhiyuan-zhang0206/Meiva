@@ -28,8 +28,8 @@ from base.agents.history.checkpoint import (
     load_checkpoint_messages_segment,
 )
 from base.agents.history.timeline import TimelineItem, build_timeline_items, tail_window
-from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.history.timeline_item import hydrate
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.db import Database, agent_exists
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.history.configuration import request_timeline_read
@@ -222,7 +222,7 @@ def load_current_messages(db: Database, agent_id: int) -> list[BaseMessage]:
 
 
 def load_current_timeline_items(
-    db: Database, agent_id: int, *, inputs: TimelineReadInputs
+    db: Database, agent_id: int, *, inputs: TimestampPolicy
 ) -> list[TimelineItem]:
     messages = load_current_messages(db, agent_id)
     items, _ = build_timeline_items(messages, inputs=inputs)

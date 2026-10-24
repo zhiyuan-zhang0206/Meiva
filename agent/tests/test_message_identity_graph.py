@@ -14,13 +14,13 @@ from agent.hooks import merge_result
 from agent.messages.guard import guarded_add_messages, guarded_delta_reducer
 from agent.state import BaseAgentState
 from base.agents.history.timeline import build_timeline_items
-from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.agents.messages.identity import normalize_stored_message_ids
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
 from base.config import settings
 
-_TIMELINE_INPUTS = TimelineReadInputs(
-    Clock.from_settings, lambda: settings.general.message_timestamps
+_TIMELINE_INPUTS = TimestampPolicy(
+    clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
 
 

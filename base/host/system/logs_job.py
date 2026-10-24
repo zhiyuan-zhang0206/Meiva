@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import shlex
 import sys
-from collections.abc import Callable
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -125,9 +124,9 @@ def unregister_linux(*, host: Host) -> int:
     )
 
 
-def register_logs_job(*, enabled_reader: Callable[[], bool], host: Host) -> None:
+def register_logs_job(*, enabled: bool, host: Host) -> None:
     """Register the daily logs-maintenance job."""
-    if not base.host.system.cron.os_jobs_enabled(enabled_reader=enabled_reader):
+    if not enabled:
         base.host.system.cron.skip_os_job("logs-maintenance")
         return
     if not base.host.system.cron.owns_os_jobs("logs-maintenance"):

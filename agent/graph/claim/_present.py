@@ -11,7 +11,6 @@ from langchain_core.messages import BaseMessage
 
 from base.agents.context import MeivaContext
 from base.agents.history.timeline import build_timeline_items, tail_window
-from base.agents.history.timeline_inputs import TimelineReadInputs
 from base.events.live.projection import InboundCommitted, TimelineSnapshot
 
 
@@ -53,9 +52,7 @@ def publish_end_timeline_snapshot(
     combined = list(state.messages) + new_msgs
     items, msg_count = build_timeline_items(
         combined,
-        inputs=TimelineReadInputs(
-            ctx.require_clock, lambda: ctx.require_agent().read("general", "message_timestamps")
-        ),
+        inputs=ctx.timestamp_policy(),
     )
     window, _ = tail_window(items, ctx.require_agent().read("display", "timeline_default_limit"))
     # No system-prompt special-casing: this end-of-life snapshot is a rare

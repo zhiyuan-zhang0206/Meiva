@@ -13,10 +13,10 @@ as the first new system note.
 The introduction, takeover, and closing notes include their creation time in
 the agent-visible text when message timestamps are enabled, using the same
 instant as their timeline metadata. Existing receipts retain their original
-notes and timestamps across retries. The process owner supplies `HandoffNotes`
-from `base.agents.impersonation.notes`, the shared input contract for controllers
-and native graph execution, with a clock factory and a live timestamp-policy
-reader. The shell reads it once per note-writing operation into a `NoteStamp` (the
+notes and timestamps across retries. The process owner supplies a `TimestampPolicy`
+from `base.agents.messages.timestamp_policy`, the shared input contract for controllers
+and native graph execution, holding the clock and the timestamp switch as values built
+for the operation. The shell turns it once per note-writing operation into a `NoteStamp` (the
 creation instant and the display prefix) and `agent/takeover/notes.py` builds the
 note drafts as values, which the shell renders into messages. Constructing the inputs
 reads neither input; a write that finds its receipt already in the checkpoint reads

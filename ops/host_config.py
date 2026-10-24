@@ -17,6 +17,7 @@ from typing import Any
 from base.config import field_domain, runtime_config, settings
 from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.admin.editing import coerce_config_scalar, field_editable, split_reducer_patch
+from base.config.env_changed import EnvChangedError
 from base.config.service_read import ConfigAuthority
 from base.host import config_validators
 from base.host.env.dotenv_file import process_env_file
@@ -174,9 +175,7 @@ def _apply_patch(
                 expected_digest=candidate.expected_digest,
                 audit=EnvWriteAudit(site="ops_config_write", actor=actor, trace_id=trace_id),
             )
-        except RuntimeError as exc:
-            if str(exc) != ".env changed before owned runtime-config write":
-                raise
+        except EnvChangedError:
             applied = False
             for field in set(writes) | removals:
                 results[field] = FieldWriteResult(

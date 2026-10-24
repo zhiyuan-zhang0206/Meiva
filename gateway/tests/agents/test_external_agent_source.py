@@ -21,7 +21,8 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import claim_inbound_batch
 from agent.graph.claim._chat_inbound import build_chat_inbound
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
-from base.agents.messages.envelope import EnvelopeReadInputs, validate_source
+from base.agents.messages.envelope import validate_source
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.idempotency import keyed_headers
 from base.clock import Clock
 from base.cluster.machine import MachineIdentity
@@ -34,7 +35,7 @@ from base.packages.composer_commands import CommandCatalog
 from gateway.tests.agents.gateway_auth import without_credentials
 from gateway.tests.auth.gateway_config import gateway_test_client
 
-_ENVELOPE_INPUTS = EnvelopeReadInputs(Clock.from_settings, lambda: False)
+_ENVELOPE_INPUTS = TimestampPolicy(clock=Clock.from_settings(), timestamps_enabled=False)
 _SECRET = "external-agent-source-secret"  # noqa: S105 -- isolated test credential
 _EXTERNAL = "external_agent:claude_code:run-7"
 

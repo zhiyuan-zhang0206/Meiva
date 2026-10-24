@@ -22,9 +22,9 @@ from agent.takeover.notes import (
 )
 from base.agents.impersonation import OPEN, lock_lease, require_native
 from base.agents.impersonation.history import export_handoff, metadata
-from base.agents.impersonation.notes import HandoffNotes
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.messages.kwargs import NoteTag
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -44,8 +44,8 @@ def note_stamp(clock: Clock, *, timestamps: bool) -> NoteStamp:
     return NoteStamp(created_at, f"{clock.format_timestamp(created_at)} " if timestamps else "")
 
 
-def read_note_stamp(notes: HandoffNotes) -> NoteStamp:
-    return note_stamp(notes.clock_factory(), timestamps=notes.timestamps_enabled())
+def note_stamp_of(notes: TimestampPolicy) -> NoteStamp:
+    return note_stamp(notes.clock, timestamps=notes.timestamps_enabled)
 
 
 def _render(draft: NoteDraft, session: dict[str, Any] | None = None) -> HumanMessage:
@@ -80,7 +80,9 @@ def start_update(
     }
 
 
-async def ensure_start_marker(graph: Any, session: dict[str, Any], *, notes: HandoffNotes) -> None:
+async def ensure_start_marker(
+    graph: Any, session: dict[str, Any], *, notes: TimestampPolicy
+) -> None:
     """Repair a crash between accepting the request and saving its timeline anchor."""
     config = {"configurable": {"thread_id": str(session["agent_id"])}}
     snapshot = await graph.aget_state(config)
@@ -88,7 +90,7 @@ async def ensure_start_marker(graph: Any, session: dict[str, Any], *, notes: Han
     update = start_update(
         session,
         introduced=introduced,
-        stamp=read_note_stamp(notes),
+        stamp=note_stamp_of(notes),
         existing_ids={message.id for message in snapshot.values.get("messages", [])},
     )
     if update["messages"] or not introduced:
@@ -160,7 +162,7 @@ async def deliver_handoff(
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,
     *,
-    notes: HandoffNotes,
+    notes: TimestampPolicy,
     workspace: Path,
     reason: str | None = None,
 ) -> None:
@@ -189,9 +191,7 @@ async def deliver_handoff(
     ref = SessionRef.of(session)
     receipt = handoff_receipt(ref)
     if snapshot.values.get("impersonation_handoff_id") != receipt:
-        draft = handoff_draft(
-            ref, read_note_stamp(notes), summary=summary, path=path, reason=reason
-        )
+        draft = handoff_draft(ref, note_stamp_of(notes), summary=summary, path=path, reason=reason)
         await graph.aupdate_state(
             config,
             {

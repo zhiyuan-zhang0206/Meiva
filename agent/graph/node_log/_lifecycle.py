@@ -9,7 +9,7 @@ from typing import Any
 from langchain_core.messages import BaseMessage
 
 from base.agents.history.timeline import build_timeline_items, tail_window
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.observation.turn_progress import TurnProgress
 from base.events.live.projection import TimelineSnapshot
 from base.events.live.publisher import AgentEventPublisher
@@ -77,7 +77,7 @@ async def node_lifecycle(
     agent_id: int,
     turn_progress: TurnProgress,
     stall: StallConfig,
-    timeline_inputs: TimelineReadInputs,
+    timeline_inputs: TimestampPolicy,
     timeline_limit: int,
     full_window: bool = False,
 ) -> AsyncGenerator[None]:

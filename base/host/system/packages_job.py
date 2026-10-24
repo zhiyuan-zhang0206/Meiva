@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import shlex
 import sys
-from collections.abc import Callable
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -42,11 +41,7 @@ def _shell_command(*, host: Host) -> str:
     return f"{meiva} packages refresh --from-job"
 
 
-def _tick_seconds(*, tick_reader: Callable[[], int]) -> int:
-    return tick_reader()
-
-
-def launchd_plist_content(*, tick_reader: Callable[[], int], host: Host) -> str:
+def launchd_plist_content(*, tick_seconds: int, host: Host) -> str:
     log_file = _log_file()
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -63,7 +58,7 @@ def launchd_plist_content(*, tick_reader: Callable[[], int], host: Host) -> str:
     </array>
 {base.host.system.cron.launchd_env_block(host=host)}
     <key>StartInterval</key>
-    <integer>{_tick_seconds(tick_reader=tick_reader)}</integer>
+    <integer>{tick_seconds}</integer>
     <key>RunAtLoad</key>
     <false/>
     <key>StandardOutPath</key>
@@ -75,7 +70,7 @@ def launchd_plist_content(*, tick_reader: Callable[[], int], host: Host) -> str:
 """
 
 
-def register_macos(*, tick_reader: Callable[[], int], host: Host) -> int:
+def register_macos(*, tick_seconds: int, host: Host) -> int:
     """Rewrite and reload the refresh LaunchAgent."""
     label = _LABEL
     plist_path = launchd_plist_path()
@@ -83,14 +78,12 @@ def register_macos(*, tick_reader: Callable[[], int], host: Host) -> int:
     log_file = _log_file()
     log_file.parent.mkdir(parents=True, exist_ok=True)
     plist_path.write_text(
-        launchd_plist_content(tick_reader=tick_reader, host=host), encoding="utf-8"
+        launchd_plist_content(tick_seconds=tick_seconds, host=host), encoding="utf-8"
     )
 
     if base.host.system.cron.reload_launchd_job(label, plist_path, host=host) != 0:
         return 1
-    logger.info(
-        "launchd job '{}' loaded (every {}s)", label, _tick_seconds(tick_reader=tick_reader)
-    )
+    logger.info("launchd job '{}' loaded (every {}s)", label, tick_seconds)
     return 0
 
 
@@ -99,7 +92,7 @@ def unregister_macos(*, host: Host) -> int:
     return 0 if retired else 1
 
 
-def register_linux(*, tick_reader: Callable[[], int], host: Host) -> int:
+def register_linux(*, tick_seconds: int, host: Host) -> int:
     """Replace the refresh line in the user crontab.
 
     Lines are matched by the marker as a substring.
@@ -115,7 +108,7 @@ def register_linux(*, tick_reader: Callable[[], int], host: Host) -> int:
         return missing_rc
 
     marker = _CRON_MARKER
-    minutes = max(1, _tick_seconds(tick_reader=tick_reader) // 60)
+    minutes = max(1, tick_seconds // 60)
     log_file = _log_file()
     log_file.parent.mkdir(parents=True, exist_ok=True)
     entry = (
@@ -143,9 +136,9 @@ def unregister_linux(*, host: Host) -> int:
 
 def register_packages_job(
     *,
-    enabled_reader: Callable[[], bool],
-    refresh_enabled_reader: Callable[[], bool],
-    tick_reader: Callable[[], int],
+    enabled: bool,
+    refresh_enabled: bool,
+    tick_seconds: int,
     host: Host,
 ) -> None:
     """Register the recurring refresh pass (idempotent).
@@ -158,20 +151,20 @@ def register_packages_job(
     the default home (`owns_os_jobs`) or the refresh channel itself is off — the converge step is the only caller, so a disabled switch
     simply leaves no job behind on machines that never registered one.
     """
-    if not base.host.system.cron.os_jobs_enabled(enabled_reader=enabled_reader):
+    if not enabled:
         base.host.system.cron.skip_os_job("packages refresh")
         return
     if not base.host.system.cron.owns_os_jobs("packages refresh"):
         return
-    if not refresh_enabled_reader():
+    if not refresh_enabled:
         logger.info(
             "packages refresh disabled (MEIVA_PACKAGES_REFRESH_ENABLED=false) — not registering"
         )
         return
     base.host.system.cron.register_platform_job(
         "packages-refresh",
-        macos=lambda: register_macos(tick_reader=tick_reader, host=host),
-        linux=lambda: register_linux(tick_reader=tick_reader, host=host),
+        macos=lambda: register_macos(tick_seconds=tick_seconds, host=host),
+        linux=lambda: register_linux(tick_seconds=tick_seconds, host=host),
         host=host,
     )
 

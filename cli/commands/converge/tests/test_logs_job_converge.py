@@ -31,7 +31,7 @@ def test_converge_registers_logs_maintenance(
 
     calls: list[str] = []
 
-    def register(*, enabled_reader: object, host: Host) -> None:
+    def register(*, enabled: bool, host: Host) -> None:
         calls.append("register")
 
     monkeypatch.setattr(job, "register_logs_job", register)

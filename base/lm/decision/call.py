@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Mapping
+from typing import Protocol
 
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import (
@@ -34,6 +35,26 @@ from base.lm.usage import log_usage_fields
 
 DEFAULT_TIMEOUT_S = 30.0
 _EPSILON = 1e-9
+
+
+# meiva:note
+# The shape of `decide`, for a caller that is handed the decision call instead of importing it:
+# the real `decide` satisfies it, and `base.lm.tests.scripted_calls.ScriptedDecide` is its test double.
+class DecideCall(Protocol):
+    async def __call__(
+        self,
+        model: str,
+        state: str,
+        questions: Mapping[str, Question],
+        *,
+        catalog: ModelCatalog,
+        keys: ProviderKeys,
+        usage_kind: str,
+        source: str | None = None,
+        for_agent_id: int | None = None,
+        timeout: float | None = DEFAULT_TIMEOUT_S,
+        transport: AsyncTransport | None = None,
+    ) -> Mapping[str, Decision]: ...
 
 
 # meiva:note

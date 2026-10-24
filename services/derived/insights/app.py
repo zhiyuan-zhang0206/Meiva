@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from psycopg_pool import ConnectionPool
 
 from base.agents.history.checkpoint_segment import read_checkpoint_segment
-from base.agents.history.timeline_inputs import TimelineReadInputs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from services.derived.insights.config import InsightsConfig
@@ -28,7 +28,7 @@ def build_app(
     *,
     home: Path,
     catalog: ModelCatalog,
-    timeline_inputs: TimelineReadInputs,
+    timeline_inputs: TimestampPolicy,
     default_model_reader: Callable[[], str],
 ) -> FastAPI:
     jobs = IndexJobs(

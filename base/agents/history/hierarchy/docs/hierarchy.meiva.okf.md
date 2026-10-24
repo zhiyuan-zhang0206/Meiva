@@ -54,10 +54,9 @@ How much runs at once, and how rate limits are met:
 
 ## Rendering policy ownership
 
-Timeline rendering requires `TimelineReadInputs` from the producer: a live clock
-factory and timestamp-policy reader. Constructing the inputs performs no reads.
-Each compact item reads the flag first and obtains a clock only when enabled;
-other items do not read either input. The tail-window limit has its own required
+Timeline rendering requires a `TimestampPolicy` from the producer: the clock and the
+timestamp switch as values, built by the producer for the unit of work. Compact items
+follow the switch; other items carry no stamp. The tail-window limit has its own required
 live reader and is evaluated only at the existing window-selection points.
 
 Hierarchy `read_times`, `divide_units`, chunk generation, matter filtering, and

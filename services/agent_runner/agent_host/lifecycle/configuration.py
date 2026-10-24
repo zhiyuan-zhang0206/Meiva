@@ -9,7 +9,7 @@ from typing import Any
 from base import paths
 from base.agents.context.clients import ClientSet
 from base.agents.history.hierarchy.group_consumer import UnderstandingReadInputs
-from base.agents.impersonation.notes import HandoffNotes
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
@@ -52,9 +52,9 @@ def host_policy(config: ConfigBoot, *, keys: ProviderKeys) -> HostPolicy:
         llm_override=lambda: config.view.lm.llm_override,
         default_reader=lambda domain, field: getattr(getattr(config.view, domain), field),
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
-        handoff_notes=HandoffNotes(
-            clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
-            timestamps_enabled=lambda: config.view.general.message_timestamps,
+        handoff_notes=TimestampPolicy(
+            clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+            timestamps_enabled=config.view.general.message_timestamps,
         ),
         harness_registration_ttl_seconds=lambda: (
             config.view.daemon.harness_registration_ttl_seconds

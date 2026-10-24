@@ -42,7 +42,6 @@ what actually covers it.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -55,7 +54,6 @@ from base.host.system.cron import (
     bootout_launchd_job,
     launchd_env_block,
     meiva_binary_path,
-    os_jobs_enabled,
     owns_os_jobs,
     register_platform_job,
     skip_os_job,
@@ -176,9 +174,7 @@ def unregister_linux(*, host: Host) -> int:
     return 0
 
 
-def register_autostart(
-    *, services: frozenset[str], enabled_reader: Callable[[], bool], host: Host
-) -> None:
+def register_autostart(*, services: frozenset[str], enabled: bool, host: Host) -> None:
     # meiva:note
     # Register the host's boot-time autostart job for exactly `services`.
     #
@@ -187,12 +183,12 @@ def register_autostart(
     # boot job is never removed implicitly (`meiva cluster destroy` retires it).
     # Idempotent. On macOS the plist is written but not loaded into the running
     # session (see module docstring); it takes effect on the next reboot.
-    # A no-op when ``os_jobs_enabled()`` is off (the test suite) or when this
+    # A no-op when ``enabled`` is off (the test suite) or when this
     # process's home is not the default home (``owns_os_jobs``).
     #
     # Raises:
     #     RuntimeError: on registration failure.
-    if not os_jobs_enabled(enabled_reader=enabled_reader):
+    if not enabled:
         skip_os_job("autostart")
         return
     if not owns_os_jobs("autostart"):

@@ -118,6 +118,7 @@ async def test_error_visible_after_cutoff_allows_immediate_new_chat(
         db=database,
         catalog=model_catalog,
         agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
+        clock_factory=configured_policy().clock_factory,
         original_incarnation=incarnation,
     )
     received: list[Error] = []

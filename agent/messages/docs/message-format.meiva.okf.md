@@ -28,12 +28,10 @@ Message formats exchanged between agent, LLM, users, and other agents. `agent/me
 
 ### Inbound timestamp ownership
 
-`base.agents.messages.envelope.EnvelopeReadInputs` carries the producer's live
-clock factory and timestamp-policy reader. `inbound_head` and `wrap_inbound`
-require those inputs; construction reads neither. User and agent headers read
-the display flag first and obtain a clock only when timestamps are enabled.
-System and asserted-caller headers return before either reader. Arrival-time
-formatting and source validation keep their existing order.
+`base.agents.messages.timestamp_policy.TimestampPolicy` carries the producer's clock
+and timestamp switch as values. `inbound_head` and `wrap_inbound` require it. User
+and agent headers follow the switch; system and asserted-caller headers carry no
+stamp. Arrival-time formatting and source validation keep their existing order.
 
 ### NoteTag Enum
 - Marks the source and nature of the message
