@@ -27,8 +27,9 @@ from typing import TextIO
 
 from loguru import logger
 
-from base.host.env.harness_binaries import harness_unit_path
 from base.host.system.hostport import Host
+from base.host.system.job_readings import read_launchd_path, read_meiva_binary
+from base.host.system.job_values import LAUNCHD_LABEL_PREFIX, cron_environment, launchd_environment
 from base.native_process.os_platform import (
     crontab_lock,
     descends_from_launchd_job,
@@ -44,7 +45,6 @@ _TOOL_TIMEOUT_S = 30.0
 # launchd labels are `com.meiva.<job>` (health-probe, autostart, logs-maintenance,
 # packages-refresh, pr-flow): the host runs one cluster, so a label names a job,
 # not a home. Only the default home registers or removes them (`owns_os_jobs`).
-LAUNCHD_LABEL_PREFIX = "com.meiva"
 
 # Crontab marker of the health-probe line. Lines are matched by substring.
 _CRON_MARKER = "# meiva-health-probe"
@@ -85,9 +85,16 @@ def skip_os_job(kind: str) -> None:
 # `bootout` the host's real job. Both directions are gated, removal included,
 # unlike the `enabled` switch, which gates registration only.
 def owns_os_jobs(kind: str) -> bool:
-    from base.paths.home import is_default_home, resolve_meiva_home
+    from base.paths.home import resolve_meiva_home
 
-    home = resolve_meiva_home()
+    return owns_os_job_home(kind, home=resolve_meiva_home())
+
+
+# meiva:note
+# Protect the scheduler namespace using the command root's captured home.
+def owns_os_job_home(kind: str, *, home: Path) -> bool:
+    from base.paths.home import is_default_home
+
     if is_default_home(home):
         return True
     logger.info("{} is not the default home: leaving the {} OS job alone", home, kind)
@@ -268,12 +275,7 @@ def meiva_binary_path(*, host: Host) -> str:
     """
     from base.paths import repo_root
 
-    scripts = repo_root() / ".venv" / "bin"
-    candidate = scripts / "meiva"
-    if candidate.exists():
-        return str(candidate)
-
-    return host.which("meiva") or str(candidate)
+    return read_meiva_binary(repo_root(), host=host)
 
 
 def job_home() -> str:
@@ -301,15 +303,11 @@ def launchd_env_block(
     decide whether the job needs replacing
     cannot afford a fragment that reshuffles between runs.
     """
-    entries = {"MEIVA_HOME": job_home(), "PATH": launchd_path_env(host=host), **(extra or {})}
-    return (
-        f"{indent}<key>EnvironmentVariables</key>\n"
-        f"{indent}<dict>\n"
-        + "".join(
-            f"{indent}    <key>{key}</key>\n{indent}    <string>{value}</string>\n"
-            for key, value in entries.items()
-        )
-        + f"{indent}</dict>"
+    return launchd_environment(
+        home=Path(job_home()),
+        path_env=launchd_path_env(host=host),
+        indent=indent,
+        extra=tuple((extra or {}).items()),
     )
 
 
@@ -319,7 +317,7 @@ def cron_env_prefix() -> str:
     so a leading assignment scopes to that command alone; a bare `MEIVA_HOME=`
     line would instead apply to the whole file, including a co-located cluster's
     entries)."""
-    return f"MEIVA_HOME={job_home()} "
+    return cron_environment(Path(job_home()))
 
 
 def launchd_path_env(*, host: Host) -> str:
@@ -337,18 +335,7 @@ def launchd_path_env(*, host: Host) -> str:
     needed, so this is not cosmetic.
     """
 
-    meiva_dir = str(Path(meiva_binary_path(host=host)).parent)  # ~/.local/bin or venv/bin
-    brew = host.which("brew")
-    brew_dirs = [str(Path(brew).parent)] if brew else ["/opt/homebrew/bin", "/usr/local/bin"]
-    # meiva:note
-    # The harness CLIs live where a login shell finds them, not where launchd does:
-    # `claude` and `agy` install into ~/.local/bin, which this PATH used to omit, so
-    # every external harness failed to start from a launchd-hosted runner (#5491).
-    # The builder below appends them and refuses a PATH that somehow misses one.
-    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
-    return harness_unit_path(
-        leading=[meiva_dir, *brew_dirs], home=Path.home(), what="the launchd job PATH"
-    )
+    return read_launchd_path(meiva_binary_path(host=host), user_home=Path.home(), host=host)
 
 
 _HEALTH_PROBE_LABEL = f"{LAUNCHD_LABEL_PREFIX}.health-probe"

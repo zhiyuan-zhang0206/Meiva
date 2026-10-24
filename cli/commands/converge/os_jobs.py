@@ -20,7 +20,12 @@ rather than leaving the cluster silently unsupervised.
 
 from __future__ import annotations
 
+from base.host.system.job_values import JobRoots
 from cli.commands.converge.spec import ConvergeCtx
+
+
+def _job_roots(ctx: ConvergeCtx) -> JobRoots:
+    return JobRoots(home=ctx.meiva_home, repo=ctx.repo, user_home=ctx.session.user_home)
 
 
 def ensure_health_probe_cron(ctx: ConvergeCtx) -> None:
@@ -40,7 +45,9 @@ def ensure_logs_maintenance(ctx: ConvergeCtx) -> None:
     """Register daily rotation followed by retention."""
     from base.host.system.logs_job import register_logs_job
 
-    register_logs_job(enabled=ctx.read_config().view.general.os_jobs_enabled, host=ctx.host)
+    register_logs_job(
+        enabled=ctx.read_config().view.general.os_jobs_enabled, roots=_job_roots(ctx), host=ctx.host
+    )
 
 
 # meiva:note
@@ -49,11 +56,12 @@ def ensure_logs_maintenance(ctx: ConvergeCtx) -> None:
 # its own ownership check at the physical-write boundary; its command rechecks both switches.
 def ensure_packages_refresh_job(ctx: ConvergeCtx) -> None:
     from base.host.system import cron
-    from base.host.system.packages_job import RefreshSchedule, register_packages_job
+    from base.host.system.packages_content import RefreshSchedule
+    from base.host.system.packages_job import register_packages_job
 
     view = ctx.read_config().view
     jobs_enabled = view.general.os_jobs_enabled
-    if jobs_enabled and not cron.owns_os_jobs("packages refresh"):
+    if jobs_enabled and not cron.owns_os_job_home("packages refresh", home=ctx.meiva_home):
         return
     refresh_enabled = view.packages.refresh_enabled if jobs_enabled else False
     register_packages_job(
@@ -64,6 +72,7 @@ def ensure_packages_refresh_job(ctx: ConvergeCtx) -> None:
         )
         if jobs_enabled
         else None,
+        roots=_job_roots(ctx),
         host=ctx.host,
     )
     # A registration failure propagates so converge fails fast.
@@ -83,6 +92,7 @@ def ensure_pr_flow_job(ctx: ConvergeCtx) -> None:
     register_pr_flow_job(
         enabled=ctx.read_config().view.general.os_jobs_enabled,
         production=production_identity(machine=ctx.machine, home=ctx.meiva_home),
+        roots=_job_roots(ctx),
         host=ctx.host,
     )
 
@@ -98,7 +108,7 @@ def ensure_walg_job(ctx: ConvergeCtx) -> None:
     from base.host.system import cron
     from base.host.system.walg_job import register_walg_job, unregister_walg_job
 
-    if not cron.owns_os_jobs("WAL-G tick"):
+    if not cron.owns_os_job_home("WAL-G tick", home=ctx.meiva_home):
         return
     if ctx.read_config().view.walg.walg_config_file is not None:
         view = ctx.read_config().view
@@ -106,6 +116,7 @@ def ensure_walg_job(ctx: ConvergeCtx) -> None:
         register_walg_job(
             enabled=jobs_enabled,
             backup_hour=view.services.backup_hour if jobs_enabled else None,
+            roots=_job_roots(ctx),
             host=ctx.host,
         )
     else:

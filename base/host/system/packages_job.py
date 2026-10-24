@@ -12,92 +12,49 @@ POSIX surfaces the run's output in `$MEIVA_HOME/logs/packages-refresh.log`
 
 from __future__ import annotations
 
-import shlex
 import sys
-from dataclasses import dataclass
 from pathlib import Path
-from xml.sax.saxutils import escape
 
 from loguru import logger
 
 import base.host.system.cron
+from base.host.system import packages_content as content
 from base.host.system.hostport import Host
-
-_CRON_MARKER = "# meiva-packages-refresh"
-
-
-_LABEL = f"{base.host.system.cron.LAUNCHD_LABEL_PREFIX}.packages-refresh"
+from base.host.system.job_readings import read_launchd_path, read_meiva_binary
+from base.host.system.job_values import JobPaths, JobRoots, plist_path
 
 
 def launchd_plist_path() -> Path:
-    return Path.home() / "Library" / "LaunchAgents" / f"{_LABEL}.plist"
+    return plist_path(content.LABEL, user_home=Path.home())
 
 
-def _log_file() -> Path:
-    return Path(base.host.system.cron.job_home()) / "logs" / "packages-refresh.log"
-
-
-def _shell_command(*, host: Host) -> str:
-    meiva = shlex.quote(base.host.system.cron.meiva_binary_path(host=host))
-    return f"{meiva} packages refresh --from-job"
-
-
-def launchd_plist_content(*, tick_seconds: int, host: Host) -> str:
-    log_file = _log_file()
-    return f"""<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>{_LABEL}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/bin/sh</string>
-        <string>-c</string>
-        <string>{escape(_shell_command(host=host))}</string>
-    </array>
-{base.host.system.cron.launchd_env_block(host=host)}
-    <key>StartInterval</key>
-    <integer>{tick_seconds}</integer>
-    <key>RunAtLoad</key>
-    <false/>
-    <key>StandardOutPath</key>
-    <string>{log_file}</string>
-    <key>StandardErrorPath</key>
-    <string>{log_file}</string>
-</dict>
-</plist>
-"""
-
-
-def register_macos(*, tick_seconds: int, host: Host) -> int:
-    """Rewrite and reload the refresh LaunchAgent."""
-    label = _LABEL
-    plist_path = launchd_plist_path()
-    plist_path.parent.mkdir(parents=True, exist_ok=True)
-    log_file = _log_file()
+def register_macos(*, tick_seconds: int, roots: JobRoots, host: Host) -> int:
+    paths = JobPaths(roots, read_meiva_binary(roots.repo, host=host))
+    path_env = read_launchd_path(paths.meiva, user_home=roots.user_home, host=host)
+    label = content.LABEL
+    destination = plist_path(content.LABEL, user_home=roots.user_home)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    log_file = content.log_path(roots)
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    plist_path.write_text(
-        launchd_plist_content(tick_seconds=tick_seconds, host=host), encoding="utf-8"
+    destination.write_text(
+        content.launchd_plist_content(tick_seconds=tick_seconds, paths=paths, path_env=path_env),
+        encoding="utf-8",
     )
 
-    if base.host.system.cron.reload_launchd_job(label, plist_path, host=host) != 0:
+    if base.host.system.cron.reload_launchd_job(label, destination, host=host) != 0:
         return 1
     logger.info("launchd job '{}' loaded (every {}s)", label, tick_seconds)
     return 0
 
 
 def unregister_macos(*, host: Host) -> int:
-    retired = base.host.system.cron.remove_launchd_job(_LABEL, launchd_plist_path(), host=host)
+    retired = base.host.system.cron.remove_launchd_job(
+        content.LABEL, launchd_plist_path(), host=host
+    )
     return 0 if retired else 1
 
 
-def register_linux(*, tick_seconds: int, host: Host) -> int:
-    """Replace the refresh line in the user crontab.
-
-    Lines are matched by the marker as a substring.
-    """
+def register_linux(*, tick_seconds: int, roots: JobRoots, host: Host) -> int:
     missing_rc = base.host.system.cron.require_crontab(
         "  * packages refresh: crontab not installed; the recurring refresh "
         "pass cannot be registered",
@@ -108,15 +65,13 @@ def register_linux(*, tick_seconds: int, host: Host) -> int:
     if missing_rc is not None:
         return missing_rc
 
-    marker = _CRON_MARKER
-    minutes = max(1, tick_seconds // 60)
-    log_file = _log_file()
+    paths = JobPaths(roots, read_meiva_binary(roots.repo, host=host))
+
+    marker = content.MARKER
+    log_file = content.log_path(roots)
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    entry = (
-        f"*/{minutes} * * * * {base.host.system.cron.cron_env_prefix()}"
-        f"/bin/sh -c {shlex.quote(_shell_command(host=host))} "
-        f">> {shlex.quote(str(log_file))} 2>&1  {marker}"
-    )
+    entry = content.cron_entry(paths, tick_seconds=tick_seconds)
+
     if base.host.system.cron.replace_crontab_entry(
         marker,
         entry,
@@ -131,28 +86,8 @@ def register_linux(*, tick_seconds: int, host: Host) -> int:
 
 def unregister_linux(*, host: Host) -> int:
     return base.host.system.cron.remove_crontab_entry(
-        _CRON_MARKER, write_failure_rc=1, on_removed=None, host=host
+        content.MARKER, write_failure_rc=1, on_removed=None, host=host
     )
-
-
-# meiva:note
-# The refresh policy a registration needs: whether the channel is switched on and the tick it runs.
-#
-# The root reads it only for an enabled job in the owning home. A disabled channel has no tick;
-# its early exit must not read or validate a scheduler interval it will never use.
-@dataclass(frozen=True)
-class RefreshSchedule:
-    refresh_enabled: bool
-    tick_seconds: int | None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.refresh_enabled, bool):
-            raise TypeError("the packages refresh switch must be a boolean")
-        tick = self.tick_seconds
-        if (tick is None and self.refresh_enabled) or (
-            tick is not None and (not isinstance(tick, int) or isinstance(tick, bool) or tick <= 0)
-        ):
-            raise ValueError("registering the packages refresh job needs a positive tick")
 
 
 # meiva:note
@@ -160,13 +95,15 @@ class RefreshSchedule:
 #
 # The owning home needs `schedule` only when enabled, and its tick only for an enabled channel.
 # Skipped when OS jobs are off (`MEIVA_OS_JOBS_ENABLED`), when this home is not
-# the default home (`owns_os_jobs`) or the refresh channel itself is off — the converge step is the only caller, so a disabled switch
+# the default home (`owns_os_job_home`) or the refresh channel itself is off — the converge step is the only caller, so a disabled switch
 # simply leaves no job behind on machines that never registered one.
-def register_packages_job(*, enabled: bool, schedule: RefreshSchedule | None, host: Host) -> None:
+def register_packages_job(
+    *, enabled: bool, schedule: content.RefreshSchedule | None, roots: JobRoots, host: Host
+) -> None:
     if not enabled:
         base.host.system.cron.skip_os_job("packages refresh")
         return
-    if not base.host.system.cron.owns_os_jobs("packages refresh"):
+    if not base.host.system.cron.owns_os_job_home("packages refresh", home=roots.home):
         return
     if schedule is None:
         raise ValueError("registering the packages refresh job needs its schedule")
@@ -180,15 +117,13 @@ def register_packages_job(*, enabled: bool, schedule: RefreshSchedule | None, ho
         raise ValueError("registering the packages refresh job needs its tick")
     base.host.system.cron.register_platform_job(
         "packages-refresh",
-        macos=lambda: register_macos(tick_seconds=tick_seconds, host=host),
-        linux=lambda: register_linux(tick_seconds=tick_seconds, host=host),
+        macos=lambda: register_macos(tick_seconds=tick_seconds, roots=roots, host=host),
+        linux=lambda: register_linux(tick_seconds=tick_seconds, roots=roots, host=host),
         host=host,
     )
 
 
 def unregister_packages_job(*, host: Host) -> None:
-    """Remove the recurring refresh pass; safe when none is registered, and a no-op
-    outside the default home."""
     if not base.host.system.cron.owns_os_jobs("packages refresh"):
         return
     base.host.system.cron.unregister_platform_job(

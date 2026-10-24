@@ -19,11 +19,13 @@ from base import paths
 from base.config import settings
 from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job, walg_job
 from base.host.system.hostport import Host
+from base.host.system.job_values import JobRoots
+from base.host.system.packages_content import RefreshSchedule
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 
 
-def _allow_pr_flow(*, production: bool, host: Host) -> None:
+def _allow_pr_flow(*, production: bool, roots: JobRoots, host: Host) -> None:
     """Credentials are present; registration still applies its home and switch gates."""
     _ = production
 
@@ -101,7 +103,7 @@ _REGISTERS = [
         partial(
             packages_job.register_packages_job,
             enabled=settings.general.os_jobs_enabled,
-            schedule=packages_job.RefreshSchedule(
+            schedule=RefreshSchedule(
                 refresh_enabled=settings.packages.refresh_enabled,
                 tick_seconds=settings.packages.refresh_tick_seconds,
             ),
@@ -144,7 +146,20 @@ def test_registration_never_reaches_the_backend_when_gated(
     _exploding_platform(monkeypatch)
     assert callable(call)
     if isinstance(call, partial) and call.func is pr_flow_job.register_pr_flow_job:
-        call(production=True, host=fake_host())
+        call(
+            production=True,
+            roots=JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home),
+            host=fake_host(),
+        )
+    elif isinstance(call, partial) and call.func in (
+        logs_job.register_logs_job,
+        packages_job.register_packages_job,
+        walg_job.register_walg_job,
+    ):
+        call(
+            roots=JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home),
+            host=fake_host(),
+        )
     else:
         call(host=fake_host())  # no AssertionError == the gate held
 
@@ -162,19 +177,28 @@ def test_registration_dispatches_when_enabled(
         enabled=settings.general.os_jobs_enabled,
         host=fake_host(),
     )
-    logs_job.register_logs_job(enabled=settings.general.os_jobs_enabled, host=fake_host())
-    packages_job.register_packages_job(
+    logs_job.register_logs_job(
+        roots=JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home),
         enabled=settings.general.os_jobs_enabled,
-        schedule=packages_job.RefreshSchedule(
+        host=fake_host(),
+    )
+    packages_job.register_packages_job(
+        roots=JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home),
+        enabled=settings.general.os_jobs_enabled,
+        schedule=RefreshSchedule(
             refresh_enabled=settings.packages.refresh_enabled,
             tick_seconds=settings.packages.refresh_tick_seconds,
         ),
         host=fake_host(),
     )
     pr_flow_job.register_pr_flow_job(
-        enabled=settings.general.os_jobs_enabled, production=True, host=fake_host()
+        roots=JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home),
+        enabled=settings.general.os_jobs_enabled,
+        production=True,
+        host=fake_host(),
     )
     walg_job.register_walg_job(
+        roots=JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home),
         enabled=settings.general.os_jobs_enabled,
         backup_hour=settings.services.backup_hour,
         host=fake_host(),
@@ -227,7 +251,20 @@ def test_a_scratch_home_registers_nothing(
     monkeypatch.setattr(pr_flow_job, "credential_blocker", _allow_pr_flow)
     assert callable(call)
     if isinstance(call, partial) and call.func is pr_flow_job.register_pr_flow_job:
-        call(production=True, host=fake_host())
+        call(
+            production=True,
+            roots=JobRoots(home=unit_home, repo=unit_home, user_home=unit_home),
+            host=fake_host(),
+        )
+    elif isinstance(call, partial) and call.func in (
+        logs_job.register_logs_job,
+        packages_job.register_packages_job,
+        walg_job.register_walg_job,
+    ):
+        call(
+            roots=JobRoots(home=unit_home, repo=unit_home, user_home=unit_home),
+            host=fake_host(),
+        )
     else:
         call(host=fake_host())  # no AssertionError == nothing reached the scheduler
 

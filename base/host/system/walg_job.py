@@ -18,105 +18,52 @@ stdout/stderr; the crontab line redirects).
 
 from __future__ import annotations
 
-import shlex
 import sys
 from pathlib import Path
-from xml.sax.saxutils import escape
 
 from loguru import logger
 
 import base.host.system.cron
+from base.host.system import walg_content as content
 from base.host.system.hostport import Host
-
-_CRON_MARKER = "# meiva-walg"
-_HOURS_AFTER_LOGICAL_BACKUP = 3
-MINUTE = 25
-
-_LABEL = f"{base.host.system.cron.LAUNCHD_LABEL_PREFIX}.walg"
-
-
-def hour(*, backup_hour: int) -> int:
-    return (backup_hour + _HOURS_AFTER_LOGICAL_BACKUP) % 24
+from base.host.system.job_readings import read_launchd_path, read_meiva_binary
+from base.host.system.job_values import JobPaths, JobRoots, plist_path
 
 
 def launchd_plist_path() -> Path:
-    return Path.home() / "Library" / "LaunchAgents" / f"{_LABEL}.plist"
+    return plist_path(content.LABEL, user_home=Path.home())
 
 
-def _log_file() -> Path:
-    return Path(base.host.system.cron.job_home()) / "logs" / "walg.log"
-
-
-def _shell_command(*, host: Host) -> str:
-    meiva = shlex.quote(base.host.system.cron.meiva_binary_path(host=host))
-    return f"{meiva} backup walg run"
-
-
-def launchd_plist_content(*, backup_hour: int, host: Host) -> str:
-    log_file = _log_file()
-    return f"""<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>{_LABEL}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/bin/sh</string>
-        <string>-c</string>
-        <string>{escape(_shell_command(host=host))}</string>
-    </array>
-{base.host.system.cron.launchd_env_block(host=host)}
-    <key>StartCalendarInterval</key>
-    <dict>
-            <key>Hour</key>
-            <integer>{hour(backup_hour=backup_hour)}</integer>
-            <key>Minute</key>
-            <integer>{MINUTE}</integer>
-    </dict>
-    <key>RunAtLoad</key>
-    <false/>
-    <key>StandardOutPath</key>
-    <string>{log_file}</string>
-    <key>StandardErrorPath</key>
-    <string>{log_file}</string>
-</dict>
-</plist>
-"""
-
-
-def register_macos(*, backup_hour: int, host: Host) -> int:
-    """Rewrite and reload the daily LaunchAgent."""
-    plist_path = launchd_plist_path()
-    plist_path.parent.mkdir(parents=True, exist_ok=True)
-    _log_file().parent.mkdir(parents=True, exist_ok=True)
-    plist_path.write_text(
-        launchd_plist_content(backup_hour=backup_hour, host=host), encoding="utf-8"
+def register_macos(*, backup_hour: int, roots: JobRoots, host: Host) -> int:
+    paths = JobPaths(roots, read_meiva_binary(roots.repo, host=host))
+    path_env = read_launchd_path(paths.meiva, user_home=roots.user_home, host=host)
+    destination = plist_path(content.LABEL, user_home=roots.user_home)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    content.log_path(roots).parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        content.launchd_plist_content(backup_hour=backup_hour, paths=paths, path_env=path_env),
+        encoding="utf-8",
     )
 
-    if base.host.system.cron.reload_launchd_job(_LABEL, plist_path, host=host) != 0:
+    if base.host.system.cron.reload_launchd_job(content.LABEL, destination, host=host) != 0:
         return 1
     logger.info(
         "launchd job '{}' loaded (daily at {:02d}:{:02d})",
-        _LABEL,
-        hour(backup_hour=backup_hour),
-        MINUTE,
+        content.LABEL,
+        content.hour(backup_hour=backup_hour),
+        content.MINUTE,
     )
     return 0
 
 
 def unregister_macos(*, host: Host) -> int:
-    retired = base.host.system.cron.remove_launchd_job(_LABEL, launchd_plist_path(), host=host)
+    retired = base.host.system.cron.remove_launchd_job(
+        content.LABEL, launchd_plist_path(), host=host
+    )
     return 0 if retired else 1
 
 
-def register_linux(*, backup_hour: int, host: Host) -> int:
-    """Replace the WAL-G tick line in the user crontab.
-
-    Lines are matched by the marker as a substring, so a line with a suffix after
-    the marker is replaced in place.
-    """
+def register_linux(*, backup_hour: int, roots: JobRoots, host: Host) -> int:
     missing_rc = base.host.system.cron.require_crontab(
         "  * WAL-G backup: crontab not installed; the daily tick cannot be registered",
         missing_returncode=1,
@@ -126,28 +73,27 @@ def register_linux(*, backup_hour: int, host: Host) -> int:
     if missing_rc is not None:
         return missing_rc
 
-    log_file = _log_file()
+    paths = JobPaths(roots, read_meiva_binary(roots.repo, host=host))
+
+    log_file = content.log_path(roots)
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    entry = (
-        f"{MINUTE} {hour(backup_hour=backup_hour)} * * * {base.host.system.cron.cron_env_prefix()}"
-        f"/bin/sh -c {shlex.quote(_shell_command(host=host))} "
-        f">> {shlex.quote(str(log_file))} 2>&1  {_CRON_MARKER}"
-    )
+    entry = content.cron_entry(paths, backup_hour=backup_hour)
+
     if base.host.system.cron.replace_crontab_entry(
-        _CRON_MARKER,
+        content.MARKER,
         entry,
         skip_phrase="WAL-G tick registration",
         update_failure=lambda err: print(f"  * crontab update failed: {err}", file=sys.stderr),  # noqa: T201
         host=host,
     ):
         return 1
-    logger.info("crontab WAL-G tick entry added ({})", _CRON_MARKER)
+    logger.info("crontab WAL-G tick entry added ({})", content.MARKER)
     return 0
 
 
 def unregister_linux(*, host: Host) -> int:
     return base.host.system.cron.remove_crontab_entry(
-        _CRON_MARKER, write_failure_rc=1, on_removed=None, host=host
+        content.MARKER, write_failure_rc=1, on_removed=None, host=host
     )
 
 
@@ -158,28 +104,28 @@ def unregister_linux(*, host: Host) -> int:
 # keeps the three-hour offset from the logical dump.
 #
 # Skipped when OS jobs are off (`MEIVA_OS_JOBS_ENABLED`) or this home is not the
-# default home (`owns_os_jobs`). Whether WAL-G is switched on is the converge
+# default home (`owns_os_job_home`). Whether WAL-G is switched on is the converge
 # step's decision (`ensure_walg_job`), not this registrar's.
-def register_walg_job(*, enabled: bool, backup_hour: int | None, host: Host) -> None:
+def register_walg_job(
+    *, enabled: bool, backup_hour: int | None, roots: JobRoots, host: Host
+) -> None:
     if not enabled:
         base.host.system.cron.skip_os_job("WAL-G tick")
         return
-    if not base.host.system.cron.owns_os_jobs("WAL-G tick"):
+    if not base.host.system.cron.owns_os_job_home("WAL-G tick", home=roots.home):
         return
     if backup_hour is None:
         raise ValueError("registering the WAL-G tick needs the backup hour")
     hour_of_dump = backup_hour
     base.host.system.cron.register_platform_job(
         "WAL-G tick",
-        macos=lambda: register_macos(backup_hour=hour_of_dump, host=host),
-        linux=lambda: register_linux(backup_hour=hour_of_dump, host=host),
+        macos=lambda: register_macos(backup_hour=hour_of_dump, roots=roots, host=host),
+        linux=lambda: register_linux(backup_hour=hour_of_dump, roots=roots, host=host),
         host=host,
     )
 
 
 def unregister_walg_job(*, host: Host) -> None:
-    """Remove the daily WAL-G tick; safe when none is registered, and a no-op
-    outside the default home."""
     if not base.host.system.cron.owns_os_jobs("WAL-G tick"):
         return
     base.host.system.cron.unregister_platform_job(

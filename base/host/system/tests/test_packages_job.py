@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from base.host.system import cron
+from base.host.system import packages_content as definition
 from base.host.system import packages_job as job
 from base.host.system.hostport import Host
+from base.host.system.job_values import JobRoots
 from base.host.system.tests.fake_commands import (
     DARWIN_ARM64,
     LINUX_X86,
@@ -23,14 +25,6 @@ from base.host.system.tests.fake_crontab import FakeCrontab
 _UID = 501
 
 
-def _meiva(*, host: Host) -> str:
-    return "/work tree/.venv/bin/meiva"
-
-
-def _path(*, host: Host) -> str:
-    return "/work tree/.venv/bin:/usr/bin"
-
-
 _NOT_LOADED = Reply(returncode=113, stderr="Could not find service")
 
 
@@ -41,11 +35,17 @@ def _launchctl(**replies: Reply) -> tuple[FakeCommands, Host]:
     for verb, reply in replies.items():
         commands.on(["launchctl", verb], reply, repeat=True)
     commands.on("launchctl", Reply(), repeat=True)
-    return commands, fake_host(commands, platform=DARWIN_ARM64, uid=_UID)
+    return commands, fake_host(
+        commands, platform=DARWIN_ARM64, uid=_UID, programs={"meiva": "/work tree/.venv/bin/meiva"}
+    )
 
 
 def _linux(crontab: FakeCrontab) -> Host:
-    return fake_host(crontab, platform=LINUX_X86, programs={"crontab": "/usr/bin/crontab"})
+    return fake_host(
+        crontab,
+        platform=LINUX_X86,
+        programs={"crontab": "/usr/bin/crontab", "meiva": "/work tree/.venv/bin/meiva"},
+    )
 
 
 def _recorder(calls: list[str], label: str) -> Callable[..., None]:
@@ -65,33 +65,17 @@ def _refuse(message: str) -> Callable[..., None]:
 @pytest.fixture(autouse=True)
 def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(cron, "meiva_binary_path", _meiva)
-    monkeypatch.setattr(cron, "job_home", lambda: str(tmp_path / ".meiva"))
-    monkeypatch.setattr(cron, "launchd_path_env", _path)
 
 
-def test_launchd_plist_runs_the_refresh_pass_on_the_tick(tmp_path: Path) -> None:
-    content = job.launchd_plist_content(tick_seconds=900, host=fake_host(platform=DARWIN_ARM64))
-    root = ET.fromstring(content)  # noqa: S314 — self-generated plist
-    values = [element.text for element in root.findall("./dict/array/string")]
-    command = values[2]
-
-    assert "<string>com.meiva.packages-refresh</string>" in content
-    assert values[0:2] == ["/bin/sh", "-c"]
-    assert command is not None
-    assert "'/work tree/.venv/bin/meiva' packages refresh --from-job" in command
-    assert "<key>StartInterval</key>\n    <integer>900</integer>" in content
-    assert "<key>RunAtLoad</key>\n    <false/>" in content
-    assert f"{tmp_path}/.meiva/logs/packages-refresh.log" in content
-
-
-def test_macos_reregistration_rewrites_and_reloads_idempotently() -> None:
+def test_macos_reregistration_rewrites_and_reloads_idempotently(
+    job_roots: JobRoots,
+) -> None:
     commands, host = _launchctl()
 
-    assert job.register_macos(tick_seconds=900, host=host) == 0
+    assert job.register_macos(roots=job_roots, tick_seconds=900, host=host) == 0
     plist = job.launchd_plist_path()
     first = plist.read_text(encoding="utf-8")
-    assert job.register_macos(tick_seconds=900, host=host) == 0
+    assert job.register_macos(roots=job_roots, tick_seconds=900, host=host) == 0
 
     assert plist.read_text(encoding="utf-8") == first
     assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == [
@@ -102,12 +86,14 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently() -> None:
     ]
 
 
-def test_linux_registration_replaces_only_its_own_lines(tmp_path: Path) -> None:
+def test_linux_registration_replaces_only_its_own_lines(
+    job_roots: JobRoots, tmp_path: Path
+) -> None:
     other = "40 4 * * * /x/meiva logs rotate  # meiva-logs-maintenance"
     old = "*/15 * * * * /old/meiva packages refresh --from-job  # meiva-packages-refresh"
     crontab = FakeCrontab(f"{other}\n\n{old}\n{old}\n")
 
-    assert job.register_linux(tick_seconds=900, host=_linux(crontab)) == 0
+    assert job.register_linux(roots=job_roots, tick_seconds=900, host=_linux(crontab)) == 0
     body = crontab.writes[-1]
     assert other in body
     assert f"{other}\n\n" in body
@@ -118,8 +104,17 @@ def test_linux_registration_replaces_only_its_own_lines(tmp_path: Path) -> None:
     assert str(tmp_path / ".meiva" / "logs" / "packages-refresh.log") in body
 
 
-def test_linux_crontab_failures_and_empty_table(capsys: pytest.CaptureFixture[str]) -> None:
-    assert job.register_linux(tick_seconds=900, host=fake_host(platform=LINUX_X86)) == 1
+def test_linux_crontab_failures_and_empty_table(
+    job_roots: JobRoots, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert (
+        job.register_linux(
+            roots=job_roots,
+            tick_seconds=900,
+            host=fake_host(platform=LINUX_X86),
+        )
+        == 1
+    )
     assert capsys.readouterr().err == (
         "  * packages refresh: crontab not installed; the recurring refresh "
         "pass cannot be registered\n"
@@ -129,7 +124,7 @@ def test_linux_crontab_failures_and_empty_table(capsys: pytest.CaptureFixture[st
     crontab.read_returncode = 1
     crontab.read_stderr = "permission denied"
     host = _linux(crontab)
-    assert job.register_linux(tick_seconds=900, host=host) == 1
+    assert job.register_linux(roots=job_roots, tick_seconds=900, host=host) == 1
     assert crontab.writes == []
     assert capsys.readouterr().err == (
         "  * crontab -l failed (permission denied); "
@@ -137,7 +132,7 @@ def test_linux_crontab_failures_and_empty_table(capsys: pytest.CaptureFixture[st
     )
 
     crontab.read_stderr = "no crontab for user"
-    assert job.register_linux(tick_seconds=900, host=host) == 0
+    assert job.register_linux(roots=job_roots, tick_seconds=900, host=host) == 0
     assert (
         len(crontab.writes),
         crontab.writes[0].startswith("*/15 * * * * "),
@@ -155,13 +150,14 @@ def test_linux_crontab_failures_and_empty_table(capsys: pytest.CaptureFixture[st
 
     crontab.table = crontab.writes[0]
     crontab.write_failure = "write denied"
-    assert job.register_linux(tick_seconds=900, host=host) == 1
+    assert job.register_linux(roots=job_roots, tick_seconds=900, host=host) == 1
     assert capsys.readouterr().err == "  * crontab update failed: write denied\n"
     assert job.unregister_linux(host=host) == 1
     assert len(crontab.writes) == 2
 
 
 def test_macos_bootstrap_failure_and_repeated_unregister(
+    job_roots: JobRoots,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     errors: list[tuple[object, ...]] = []
@@ -171,7 +167,7 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
 
     commands, host = _launchctl(bootstrap=Reply(stderr="denied", returncode=1))
     monkeypatch.setattr(job.logger, "error", record_error)
-    assert job.register_macos(tick_seconds=900, host=host) == 1
+    assert job.register_macos(roots=job_roots, tick_seconds=900, host=host) == 1
     assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == ["bootout", "bootstrap"]
     assert errors == [
         ("launchctl bootstrap failed for {}: {}", "com.meiva.packages-refresh", "denied")
@@ -190,7 +186,7 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
     ]
 
 
-def test_register_is_gated_by_os_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_register_is_gated_by_os_jobs(job_roots: JobRoots, monkeypatch: pytest.MonkeyPatch) -> None:
     skipped: list[str] = []
     monkeypatch.setattr(cron, "skip_os_job", skipped.append)
     monkeypatch.setattr(
@@ -200,6 +196,7 @@ def test_register_is_gated_by_os_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     job.register_packages_job(
+        roots=job_roots,
         enabled=False,
         schedule=None,
         host=fake_host(),
@@ -208,7 +205,7 @@ def test_register_is_gated_by_os_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_register_is_skipped_when_refresh_disabled(
-    default_home: Path, monkeypatch: pytest.MonkeyPatch
+    job_roots: JobRoots, default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         cron,
@@ -217,14 +214,15 @@ def test_register_is_skipped_when_refresh_disabled(
     )
 
     job.register_packages_job(
+        roots=replace(job_roots, home=default_home / ".meiva", user_home=default_home),
         enabled=True,
-        schedule=job.RefreshSchedule(refresh_enabled=False, tick_seconds=900),
+        schedule=definition.RefreshSchedule(refresh_enabled=False, tick_seconds=900),
         host=fake_host(),
     )
 
 
 def test_register_dispatches_to_the_platform(
-    default_home: Path, monkeypatch: pytest.MonkeyPatch
+    job_roots: JobRoots, default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[str] = []
 
@@ -234,8 +232,9 @@ def test_register_dispatches_to_the_platform(
     monkeypatch.setattr(cron, "register_platform_job", register)
 
     job.register_packages_job(
+        roots=replace(job_roots, home=default_home / ".meiva", user_home=default_home),
         enabled=True,
-        schedule=job.RefreshSchedule(refresh_enabled=True, tick_seconds=900),
+        schedule=definition.RefreshSchedule(refresh_enabled=True, tick_seconds=900),
         host=fake_host(),
     )
     assert calls == ["register packages-refresh"]
