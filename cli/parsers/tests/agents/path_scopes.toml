@@ -3,6 +3,7 @@
 "cli.database.tests.cli_tests" = [
     "test_impersonation.py",
     "test_impersonation_bridge_parsers.py",
+    "test_impersonation_parsing.py",
     "test_impersonation_usage.py",
 ]
 "meiva.tests.fixtures.sdk" = [

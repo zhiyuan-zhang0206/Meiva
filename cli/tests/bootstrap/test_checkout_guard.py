@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 from base.paths.home import home_checkout_error, resolve_meiva_home
-from cli import fleet_update, preflight
+from cli import preflight
+from cli.fleet_update.plan.host_commands import HOME, MEIVA
 
 
 def _home_with_source(tmp_path: Path) -> Path:
@@ -139,5 +140,5 @@ def test_gate_passes_everything_for_a_home_without_a_source(
 
 
 def test_the_fleet_updater_runs_the_homes_own_cli_on_every_host() -> None:
-    assert 'S="$H/source"' in fleet_update.HOME
-    assert fleet_update.MEIVA == 'MEIVA_HOME="$H" "$S/.venv/bin/meiva"'
+    assert 'S="$H/source"' in HOME
+    assert MEIVA == 'MEIVA_HOME="$H" "$S/.venv/bin/meiva"'

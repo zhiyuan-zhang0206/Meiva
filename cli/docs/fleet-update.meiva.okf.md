@@ -17,10 +17,10 @@ this node owns the code-side order, and the window's guards are
 [[cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md]].
 The halves are idempotent: after a failure, fix the cause and rerun the failed
 half. `run` accepts both halves' options, requires `--new`, uses one log and
-stops at the first failure; a failed `down` never enters `up`. Its failure
-message names the half to rerun. A failed `up` does not require repeating `down`.
-The module imports no application code — it must run from a bare
-operator checkout, whatever generation the cluster runs.
+stops at the first failure; a failed `down` never enters `up`. A failed `up`
+does not require repeating `down`. The package imports no application code, so
+it runs from a bare operator checkout, whatever generation the cluster runs; its
+shape is [[cli/fleet_update/docs/structure.meiva.okf.md]].
 
 ## Every choice is an explicit argument
 
@@ -102,11 +102,11 @@ or starting hosts.
 id = "complete-update"
 kind = "invariant"
 statement = "run requires a target and every lifecycle choice as an explicit argument (a missing or conflicting one exits 2, all listed at once, before any host is touched), forwards the stop and start choices verbatim to each host (--keep-infra/--stop-infra to the gateway's stop only), and executes down then up in one log; a failure stops at its phase, names that half for recovery and never rolls back or retries; a failed down never starts a host, and --dry-run previews both halves without their effects."
-code = ["cli/fleet_update.py:main", "cli/fleet_update.py:down"]
-tests = ["cli/tests/fleet_update/test_fleet_update.py::test_runners_stop_first_and_start_last", "cli/tests/fleet_update/test_fleet_update.py::test_run_does_not_start_after_a_failed_down", "cli/tests/fleet_update/test_fleet_update.py::test_run_reports_up_failure_without_repeating_down", "cli/tests/fleet_update/test_fleet_update.py::test_run_dry_run_plans_both_halves_without_mutation", "cli/tests/fleet_update/test_fleet_update.py::test_run_uses_one_log_and_accepts_both_halves_options", "cli/tests/fleet_update/test_fleet_update.py::test_run_requires_a_target_before_contacting_hosts", "cli/tests/fleet_update/test_fleet_update.py::test_the_operators_arguments_are_spliced_verbatim_into_each_hosts_stop_and_start", "cli/tests/fleet_update/test_fleet_update.py::test_missing_choices_are_all_listed_at_once_and_no_host_is_touched"]
+code = ["cli/fleet_update/__init__.py:main", "cli/fleet_update/down.py:down"]
+tests = ["cli/tests/fleet_update/test_fleet_update.py::test_runners_stop_first_and_start_last", "cli/tests/fleet_update/test_fleet_update.py::test_run_does_not_start_after_a_failed_down", "cli/tests/fleet_update/test_fleet_update.py::test_run_reports_up_failure_without_repeating_down", "cli/tests/fleet_update/test_fleet_update.py::test_run_dry_run_plans_both_halves_without_mutation", "cli/tests/fleet_update/test_fleet_update.py::test_run_uses_one_log_and_accepts_both_halves_options", "cli/tests/fleet_update/test_fleet_update.py::test_run_requires_a_target_before_contacting_hosts", "cli/tests/fleet_update/test_fleet_update_choices.py::test_the_operators_arguments_are_spliced_verbatim_into_each_hosts_stop_and_start", "cli/tests/fleet_update/test_fleet_update_choices.py::test_missing_choices_are_all_listed_at_once_and_no_host_is_touched"]
 ```
 
-Runners stop first and start last — the gateway stops after every runner and starts before every runner; NEW is fetched on every host before any stop; the switch follows the stops; the drift checks run last and every one runs, so a red never skips the smoke or the refresh; the first failure ends the half with no rollback (refusals exit 2, failures exit 1).
+The gateway stops after every runner and starts before any runner; NEW is fetched on every host before any stop; the switch follows the stops; the drift checks run last and every one runs, so a red never skips the smoke or the refresh; the first failure ends the half with no rollback (refusals exit 2, failures exit 1).
 
 Before up completes: every listed machine is online on the roster with checkout and running code on one commit — re-read on the poll interval until --roster-timeout; a listed host is matched by the machine name it reports, a name with no row fails, unlisted machines are reported and never block; the gateway has smoke-tested each listed agent-runner; and every host ran meiva packages refresh, which replaces a differing local copy and never forces.
 

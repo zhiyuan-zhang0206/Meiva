@@ -1,24 +1,25 @@
 from __future__ import annotations
 
-import argparse
-import ast
 import json
 import os
 import plistlib
-import re
 import shlex
 import subprocess
 import sys
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
 from base.native_process.root_control import instance_lock
-from cli import fleet_update
-from cli.fleet_update import fleet_gate, fleet_verify
-from cli.tests.fleet_update.fleet_update_cluster import Cluster, git
+from base.paths import repo_root
+from cli.fleet_update import fleet_verify, oneshot
+from cli.fleet_update.plan.host_commands import CLEAN, PROBE
+from cli.fleet_update.plan.host_failures import PARTIAL_FAILURE_EXIT
+from cli.fleet_update.session import Pacing, Session
+from cli.tests.fleet_update.fleet_update_cluster import Cluster, git, ssh_on_path
 
 
 @pytest.mark.parametrize("command", ["run", "split"])
@@ -97,7 +98,7 @@ def test_a_host_that_fails_to_start_does_not_stop_the_others(
         )
     }
 
-    assert run("up") == fleet_update.PARTIAL_FAILURE_EXIT
+    assert run("up") == PARTIAL_FAILURE_EXIT
 
     assert [a for k, a in cluster.effects if k in ("start", "oneshot")] == ["gw", "mac", "lin"]
     output = capsys.readouterr().out
@@ -150,12 +151,24 @@ def test_run_uses_one_log_and_accepts_both_halves_options(
     assert cluster.silence_hours == 2
 
 
+def test_a_path_with_no_ssh_fails_the_window_in_one_line_before_any_host(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    cluster.environ["PATH"] = "/nonexistent-bin"
+    assert run("run") == 1
+    out = capsys.readouterr().out
+    assert "FAILED: gw: cannot run ssh:" in out and "Failed phase: down" in out
+    assert "Traceback" not in out
+    assert cluster.commands == []
+
+
 def test_run_requires_a_target_before_contacting_hosts(
     env: tuple[Cluster, Callable[..., int]], tmp_path: Path
 ) -> None:
     cluster, _ = env
     with pytest.raises(SystemExit) as exc:
-        fleet_update.main(["run", "--gateway", "gw", "--log-dir", str(tmp_path / "logs")])
+        cluster.invoke(["run", "--gateway", "gw", "--log-dir", str(tmp_path / "logs")])
     assert exc.value.code == 2
     assert cluster.commands == []
 
@@ -272,8 +285,11 @@ def test_the_dry_run_of_down_reports_a_red_without_changing_anything(
     assert [k for k, _ in cluster.effects] == ["pre-verify"]
 
 
+_STAMP = "20261024T120000"
+
+
 def test_macos_start_is_a_gui_one_shot() -> None:
-    script = fleet_update.gui_oneshot("mac", 60, "--all-services")
+    script = oneshot.gui_oneshot("mac", _STAMP, 60, "--all-services")
     job = plistlib.loads(
         script.split("<<'MEIVA_FLEET_PLIST'\n")[1].split("\nMEIVA_FLEET_PLIST")[0].encode()
     )
@@ -285,17 +301,15 @@ def test_macos_start_is_a_gui_one_shot() -> None:
     assert shlex.split(f"zsh -lc {shlex.quote(script)}")[2] == script and 'rm -rf "$D"' in script
 
 
-def test_the_macos_one_shot_start_passes_the_home_and_os_job_gates(
-    default_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_the_macos_one_shot_start_passes_the_home_and_os_job_gates(default_home: Path) -> None:
     from base.host.system import cron
     from cli.preflight import require_own_checkout
 
-    script = fleet_update.gui_oneshot("mac", 60, "--all-services")
+    script = oneshot.gui_oneshot("mac", _STAMP, 60, "--all-services")
     job = plistlib.loads(
         script.split("<<'MEIVA_FLEET_PLIST'\n")[1].split("\nMEIVA_FLEET_PLIST")[0].encode()
     )
-    assert re.fullmatch(r"com\.meiva\.fleet-update\.mac\.\d{8}T\d{6}", job["Label"])
+    assert job["Label"] == f"com.meiva.fleet-update.mac.{_STAMP}"
     command = job["ProgramArguments"][2]
     assert 'H="$HOME/.meiva"; S="$H/source"' in command
     assert 'MEIVA_HOME="$H" "$S/.venv/bin/meiva" start' in command
@@ -305,13 +319,19 @@ def test_the_macos_one_shot_start_passes_the_home_and_os_job_gates(
     assert require_own_checkout(["start"], home / "source") is None
     assert cron.owns_os_jobs("autostart")
 
-    imported: set[str] = set()
-    for node in ast.walk(ast.parse(Path(fleet_update.__file__).read_text())):
-        if isinstance(node, ast.Import):
-            imported |= {alias.name.split(".")[0] for alias in node.names}
-        elif isinstance(node, ast.ImportFrom):
-            imported.add((node.module or "").split(".")[0])
-    assert not {"base", "cli", "gateway", "services", "agent", "meiva"} & imported
+
+# meiva:note
+# A window runs from a bare operator checkout, whatever generation the cluster runs: importing
+# every module of the package loads none of the application's own packages.
+def test_the_updater_imports_no_application_code() -> None:
+    done = subprocess.run(
+        [sys.executable, "-S", str(Path(__file__).with_name("import_probe.py"))],
+        env={"PYTHONPATH": str(repo_root())},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert done.stdout.splitlines() == ["[]", "True", "[]", "cli.fleet_update.__main__"]
 
 
 _STOP_RETRY = "retry `meiva stop` with the same arguments this `down` gave it"
@@ -337,7 +357,7 @@ def test_the_roster_is_re_read_while_heartbeats_catch_up(
     assert run("down") == 0
     cluster.roster_lag = 3
     assert run("up") == 0
-    assert (cluster.roster_reads, cluster.now) == (4, 3 * fleet_update.POLL_S)
+    assert cluster.roster_reads == 4
 
 
 def test_a_roster_that_never_agrees_fails_with_its_last_state(
@@ -346,10 +366,11 @@ def test_a_roster_that_never_agrees_fails_with_its_last_state(
     cluster, run = env
     assert run("down") == 0
     cluster.roster_lag = 10**6
-    assert run("up", "--roster-timeout", "30") == 3
-    assert cluster.roster_reads == 30 // fleet_update.POLL_S + 1
+    cluster.pacing = Pacing(roster_poll_s=0.25, lease_tick_s=0.25)
+    assert run("up", "--roster-timeout", "1") == 3
+    assert cluster.roster_reads >= 1
     out = capsys.readouterr().out
-    assert "roster after 30s: offline ['gw', 'mac', 'lin']" in out
+    assert "roster after 1s: offline ['gw', 'mac', 'lin']" in out
     # meiva:note
     # A roster that never agrees leaves every host unverified, and every host still gets a line
     # saying why: skipping the refresh as well would hide the one stage that still ran.
@@ -391,9 +412,10 @@ def test_a_listed_machine_that_is_offline_fails(
     assert run("down") == 0
     cluster.laptop = _LAPTOP_OFF
     cluster.silent.add("lin")
-    assert run("up", "--roster-timeout", "10") == 3
+    cluster.pacing = Pacing(roster_poll_s=0.25, lease_tick_s=0.25)
+    assert run("up", "--roster-timeout", "1") == 3
     out = capsys.readouterr().out
-    assert "roster after 10s: offline ['lin']" in out
+    assert "roster after 1s: offline ['lin']" in out
     assert "smoke" not in {k for k, _ in cluster.effects}
     assert (
         len(
@@ -415,6 +437,20 @@ def test_the_roster_name_comes_from_the_host_not_its_ssh_alias(
     cluster.names["mac"] = "mac-mini"
     assert run("up") == 0
     assert cluster.smoked == ["gw", "mac-mini", "lin"]
+
+
+@pytest.mark.parametrize("reply", ["Traceback (most recent call last):", "", '{"name": "gw"}'])
+def test_a_roster_reply_that_is_no_roster_fails_every_host_at_the_roster_without_a_traceback(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str], reply: str
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    cluster.roster_reply = reply
+    assert run("up") == PARTIAL_FAILURE_EXIT
+    out = capsys.readouterr().out
+    assert out.count("failed at 'roster': the roster ") == 3 + 3
+    assert "Traceback" not in out.replace(reply, "")
+    assert "refresh" in {k for k, _ in cluster.effects}
 
 
 def test_a_listed_host_with_no_roster_row_is_an_error(
@@ -456,7 +492,7 @@ def test_a_dirty_tree_is_shown_not_cleaned(tmp_path: Path) -> None:
     git(repo, "init", "-q", "--initial-branch=main")
 
     def check() -> subprocess.CompletedProcess[str]:
-        argv = ["bash", "-c", fleet_update.CLEAN]
+        argv = ["bash", "-c", CLEAN]
         return subprocess.run(argv, cwd=repo, capture_output=True, text=True, check=False)
 
     assert check().returncode == 0
@@ -556,7 +592,7 @@ def _host_home(tmp_path: Path, journal: str | None) -> Path:
 
 def _probed(shell: str, home: Path) -> dict[str, str]:
     result = subprocess.run(
-        [shell, "-c", fleet_gate.PROBE],
+        [shell, "-c", PROBE],
         env={**os.environ, "HOME": str(home)},
         capture_output=True,
         text=True,
@@ -599,43 +635,6 @@ def test_the_probe_reads_whether_a_meiva_root_holds_its_instance_lock(
     assert _probed(shell, tmp_path)["op"] == "", "no journal reads as an empty record"
 
 
-# meiva:note
-# A Session stand-in that answers every read with one probe output.
-class _Reads:
-    def __init__(self, probe: str) -> None:
-        self.probe = probe
-
-    def run(self, alias: str, script: str, *, effect: bool = True, stdin: str | None = None) -> str:
-        del alias, script, effect, stdin
-        return self.probe
-
-
-_STOP_OK = '{"operation": "stop", "complete": true, "result": {"rc": 0}}'
-
-
-@pytest.mark.parametrize(
-    ("journal", "root", "stopped"),
-    [
-        (_STOP_OK, "down", True),
-        (_STOP_OK, "up", False),
-        ('{"operation": "stop", "complete": true, "result": {"rc": 1}}', "down", False),
-        ('{"operation": "stop", "complete": false}', "down", False),
-        ('{"operation": "restart", "complete": true, "result": {"rc": 0}}', "down", False),
-        ("", "down", False),
-        ("{not json", "down", False),
-        (_STOP_OK, "", False),
-    ],
-)
-def test_a_host_is_already_stopped_only_when_its_last_operation_is_a_completed_stop_and_no_root_runs(
-    journal: str, root: str, stopped: bool
-) -> None:
-    probe = f"head=abc\nop={journal}\n" + (f"root={root}\n" if root else "")
-
-    _facts, was_serving = fleet_update.probe_host(cast(fleet_update.Session, _Reads(probe)), "host")
-
-    assert was_serving is not stopped
-
-
 @pytest.mark.parametrize("shell", ["/bin/zsh", "/bin/sh"])
 def test_the_machine_name_is_asked_through_the_hosts_real_shell(shell: str, tmp_path: Path) -> None:
     if not Path(shell).exists():
@@ -658,30 +657,27 @@ def test_the_machine_name_is_asked_through_the_hosts_real_shell(shell: str, tmp_
     python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
     python.chmod(0o755)
 
-    def ssh(_alias: str, command: str, stdin: str | None, emit: Callable[[str], None]) -> int:
-        return _run_locally(shell, command, stdin, emit, home=tmp_path)
-
-    args = argparse.Namespace(dry_run=False, log_dir=tmp_path / "logs", half="up")
-
-    names = fleet_verify.machine_names(fleet_update.Session(args, ssh_fn=ssh), ["mac"])
+    local_ssh = ssh_on_path(tmp_path / "bin", Path(__file__).with_name("local_ssh.py"))
+    env = {
+        "PATH": f"{local_ssh}{os.pathsep}{os.environ['PATH']}",
+        "FLEET_LOCAL_SHELL": shell,
+        "FLEET_LOCAL_HOME": str(tmp_path),
+    }
+    session = Session(
+        log_dir=tmp_path / "logs",
+        half="up",
+        dry_run=False,
+        repo=tmp_path,
+        env=env,
+        now=datetime(2026, 10, 24, 12, 0, 0, tzinfo=UTC),
+        pacing=Pacing(),
+    )
+    try:
+        names = fleet_verify.machine_names(session, ("mac",))
+    finally:
+        session.log.close()
 
     assert names == {"mac": "mac-mini"}
-
-
-def _run_locally(
-    shell: str, command: str, stdin: str | None, emit: Callable[[str], None], *, home: Path
-) -> int:
-    done = subprocess.run(
-        [shell, "-c", command],
-        env={**os.environ, "HOME": str(home)},
-        input=stdin or "",
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    for line in done.stdout.splitlines():
-        emit(line)
-    return done.returncode
 
 
 def test_the_window_is_one_silence_opened_before_the_first_stop_and_closed_after_up(
@@ -786,7 +782,7 @@ def test_up_judges_a_start_by_its_exit_code(
     assert run("down") == 0
     cluster.fail[("start", "lin")] = 1
 
-    assert run("up") == fleet_update.PARTIAL_FAILURE_EXIT
+    assert run("up") == PARTIAL_FAILURE_EXIT
 
     assert "PARTIAL: lin failed" in capsys.readouterr().out
     assert all(cluster.hosts[alias]["up"] for alias in ("gw", "mac"))

@@ -1,42 +1,18 @@
 exports = ["health_port_guard.py", "test_single_box.py"]
 
 [uses]
+"test_service_probe_ports.py" = ["roster_probe_child.py"]
 "test_unit_capability_commands.py" = ["test_single_box.py"]
 
 [debt.env-patch]
-"test_plugins_update_retired_image.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_single_box.py#monkeypatch.delitem os.environ" = 1
 "test_single_box.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_single_box.py#monkeypatch.setitem os.environ" = 1
 "test_single_box.py#monkeypatch.setitem os.environ.MEIVA_DB_URL" = 1
 "test_single_box.py#patch.dict os.environ" = 1
-"test_unit_capability_commands.py#monkeypatch.setitem os.environ.MEIVA_MACHINE_SERVE_GATEWAY" = 1
 
 [debt.first-party-patch]
 "health_port_guard.py#monkeypatch.setattr cli.commands.probe.occupied_health_ports" = 1
-"test_commands_register.py#monkeypatch.setattr base.cluster.machines.register_self" = 5
-"test_commands_register.py#monkeypatch.setattr base.deploy.schema.migrations.assert_schema_current" = 1
-"test_external_skills.py#monkeypatch.setattr cli.commands.extensions.external_skills.Path.home" = 1
-"test_frontend_deps.py#monkeypatch.setattr base.sessions.env_forwarding.os.environ" = 1
-"test_frontend_deps.py#monkeypatch.setattr cli.commands._repo.subprocess.run" = 2
-"test_gateway_preflight_budget.py#monkeypatch.setattr cli.commands._repo.probe_gateway_once" = 1
-"test_gateway_preflight_budget.py#monkeypatch.setattr cli.commands._repo.time" = 1
-"test_plugins_update_retired_image.py#monkeypatch.setattr base.paths.meiva_home" = 1
-"test_plugins_update_retired_image.py#monkeypatch.setattr base.paths.plugins_dir" = 1
-"test_plugins_update_retired_image.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1
-"test_repo_browser_gate.py#monkeypatch.setattr base.config.settings.services.browser_enabled" = 6
-"test_repo_browser_gate.py#monkeypatch.setattr base.config.settings.services.permissions_helper_enabled" = 4
-"test_repo_browser_gate.py#monkeypatch.setattr services.supervision.roster.spec.browser_incapability" = 6
-"test_repo_browser_gate.py#monkeypatch.setattr services.supervision.roster.spec.permissions_helper_incapability" = 4
-"test_repo_heartbeat_gate.py#monkeypatch.setattr base.config.settings.daemon.heartbeat_enabled" = 5
-"test_service_probe_ports.py#monkeypatch.setattr base.config.settings.gateway.gateway_port" = 1
-"test_service_probe_ports.py#monkeypatch.setattr base.config.settings.services.app_port" = 4
-"test_service_probe_ports.py#monkeypatch.setattr base.config.settings.services.browser_enabled" = 1
-"test_service_probe_ports.py#monkeypatch.setattr base.config.settings.services.frontend_healthcheck_url" = 4
-"test_service_probe_ports.py#monkeypatch.setattr base.config.settings.services.gateway_health_url" = 1
-"test_service_probe_ports.py#monkeypatch.setattr base.config.settings.services.memory_search_port" = 1
-"test_unit_capability_commands.py#monkeypatch.setattr base.config.settings.general.machine_host" = 1
-
 [debt.test-subclass-override]
 "test_permissions_cmd.py#subclass services.desktop.permissions_helper.onboarding.GateService.check" = 1
 "test_permissions_cmd.py#subclass services.desktop.permissions_helper.onboarding.GateService.defer" = 1

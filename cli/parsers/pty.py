@@ -6,19 +6,19 @@ import argparse
 def _h_pty_freeze(args: argparse.Namespace) -> int:
     from cli.commands.agents.pty import cmd_pty_freeze
 
-    return cmd_pty_freeze(holder=args.holder, reason=args.reason)
+    return cmd_pty_freeze(holder=args.holder, reason=args.reason, home=args.runtime.home)
 
 
-def _h_pty_status(_args: argparse.Namespace) -> int:
+def _h_pty_status(args: argparse.Namespace) -> int:
     from cli.commands.agents.pty import cmd_pty_status
 
-    return cmd_pty_status()
+    return cmd_pty_status(home=args.runtime.home)
 
 
 def _h_pty_resume(args: argparse.Namespace) -> int:
     from cli.commands.agents.pty import cmd_pty_resume
 
-    return cmd_pty_resume(generation=args.generation)
+    return cmd_pty_resume(generation=args.generation, home=args.runtime.home)
 
 
 def add_pty_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

@@ -8,9 +8,7 @@ from typing import Any
 
 import pytest
 
-import base.config as config_facade
 from base.agents.context.clients import DatabaseFactory
-from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.dataplane import pg_runtime, runtime_binaries
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
@@ -94,7 +92,7 @@ def test_start_converge_accepts_installed_pg17_where_no_artifact_exists(
                 user_home=installed.parent, login_shell="/bin/zsh", interactive=False
             ),
             services=frozenset(),
-            timers=ManualTimers(),
+            timers=command_runtime.timers,
         )
     )
     assert pg_runtime.pg_tool("postgres") == installed / "postgres"
@@ -128,7 +126,7 @@ def test_remote_managed_gateway_does_not_require_local_server_or_extension(
             host=fake_host(),
             session=UserSession(user_home=tmp_path, login_shell="/bin/zsh", interactive=False),
             services=frozenset(),
-            timers=ManualTimers(),
+            timers=command_runtime.timers,
         )
     )
 
@@ -138,12 +136,11 @@ def test_pg_admission_uses_each_owners_live_remote_verdict(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: DatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_runtime: CommandRuntime,
 ) -> None:
     calls: list[str] = []
     monkeypatch.setattr(pg_runtime, "ensure_pg_runtime", lambda: calls.append("local"))
-    monkeypatch.setattr(
-        config_facade.settings.data_plane, "db_url", "postgresql://ambient@192.0.2.20/other"
-    )
     local, remote = ConfigBoot(), ConfigBoot()
     contexts: list[ConvergeCtx] = []
     for config, host in ((local, "127.0.0.1"), (remote, "192.0.2.10")):
@@ -162,7 +159,7 @@ def test_pg_admission_uses_each_owners_live_remote_verdict(
                 host=fake_host(),
                 session=UserSession(user_home=tmp_path, login_shell="/bin/zsh", interactive=False),
                 services=frozenset(),
-                timers=ManualTimers(),
+                timers=command_runtime.timers,
             )
         )
     ensure_pg_binaries_step(contexts[0])

@@ -1,101 +1,98 @@
+# meiva:note
+# The relay's delivery methods against the hosts they deliver into: a Codex app server on a unix
+# socket, an Antigravity language server on a loopback port, and the stdout a controller session
+# reads. Binding and delivering are exercised together, as the relay does.
+
 from __future__ import annotations
 
-import subprocess
+import io
+import json
+from pathlib import Path
 from uuid import UUID
 
 import pytest
 
-from base.host import proc
-from cli.commands.agents import impersonation_adapters as adapters
+from base.agents.impersonation.host_transport import AntigravityServer, write_antigravity_endpoint
+from cli.commands.agents.impersonation_adapters import (
+    AntigravitySend,
+    ClaudeStdout,
+    CodexSteer,
+    DshStdout,
+    bind_adapter,
+    deliver,
+    notifies_terminal,
+)
+from cli.commands.agents.relay.destination import (
+    AntigravityConversation,
+    ClaudeSession,
+    CodexThread,
+    DshSession,
+)
+from cli.commands.agents.tests.loopback_hosts import (
+    CodexHome,
+    antigravity_server,
+    codex_app_server,
+)
+from cli.commands.agents.tests.loopback_hosts import codex_home as codex_home
 
-THREAD_ID = UUID("b9d32d0d-bd27-40fc-83e8-692769b21523")
+THREAD = UUID("b9d32d0d-bd27-40fc-83e8-692769b21523")
+CSRF = "recorded-csrf"
+ROTATED = "rotated"
+PUSH = "Meiva push with literal $(no-shell) and `no-shell`"
 
 
 def test_codex_requires_a_control_endpoint_without_queueing(
-    monkeypatch: pytest.MonkeyPatch,
+    codex_home: CodexHome,
 ) -> None:
-    from base.agents.impersonation import host_transport
-
-    monkeypatch.setattr(host_transport, "default_control_endpoint", lambda: None)
     with pytest.raises(RuntimeError, match=r"Steer.*--codex-remote"):
-        adapters.resolve_adapter("codex", str(THREAD_ID))
+        bind_adapter(CodexThread(THREAD, None), codex_home=codex_home.home, stdout=io.StringIO())
 
 
-@pytest.mark.parametrize("failure", ["ActiveTurnNotSteerable", "TimeoutError", "unknown thread"])
-def test_codex_refusal_never_falls_back_to_pending(
-    monkeypatch: pytest.MonkeyPatch, failure: str
-) -> None:
-    from unittest.mock import Mock
-
-    queued = Mock(return_value=subprocess.CompletedProcess([], 0))
-    monkeypatch.setattr(proc, "run_bounded", queued)
-
-    def refuse(_thread_id: str, _message: str, *, endpoint: str) -> str:
-        return failure
-
-    monkeypatch.setattr(adapters, "live_submit", refuse)
-    adapter = adapters.resolve_adapter(
-        "codex", str(THREAD_ID), codex_remote="unix:///tmp/meiva-codex.sock"
-    )
-    with pytest.raises(RuntimeError, match="Steer delivery failed"):
-        adapter.send("push")
-    queued.assert_not_called()
-
-
-@pytest.mark.parametrize("explicit", [True, False])
+@pytest.mark.parametrize("remote", ["explicit", "default", "bare-unix"])
 def test_codex_emitter_delivers_literal_input_to_the_owning_server(
-    monkeypatch: pytest.MonkeyPatch, explicit: bool
+    remote: str, codex_home: CodexHome
 ) -> None:
-    from base.agents.impersonation import host_transport
-
-    attempts: list[tuple[str, str, str]] = []
-    endpoint = "unix:///tmp/meiva-codex.sock"
-    message = "Meiva push with literal $(no-shell) and `no-shell`"
-
-    def delivered_live(thread_id: str, text: str, *, endpoint: str) -> None:
-        attempts.append((thread_id, text, endpoint))
-
-    monkeypatch.setattr(host_transport, "default_control_endpoint", lambda: endpoint)
-    monkeypatch.setattr(adapters, "live_submit", delivered_live)
-    adapters.resolve_adapter(
-        "codex", str(THREAD_ID), codex_remote=endpoint if explicit else None
-    ).send(message)
-    assert attempts == [(str(THREAD_ID), message, endpoint)]
+    with codex_app_server(codex_home.socket, [True]) as host:
+        recorded = {"explicit": host.endpoint, "default": None, "bare-unix": "unix://"}[remote]
+        adapter = bind_adapter(
+            CodexThread(THREAD, recorded), codex_home=codex_home.home, stdout=io.StringIO()
+        )
+        assert adapter == CodexSteer(THREAD, host.endpoint)
+        deliver(adapter, PUSH)
+    assert host.turns == [(str(THREAD), PUSH)]
 
 
-@pytest.mark.parametrize("provider", ["claude", "dsh", "antigravity"])
-def test_controller_adapter_rejects_codex_remote(provider: str) -> None:
-    with pytest.raises(ValueError, match="--codex-remote"):
-        adapters.resolve_adapter(provider, None, codex_remote="unix:///tmp/codex.sock")
+@pytest.mark.parametrize("failure", ["refused", "unreachable"])
+def test_codex_refusal_never_falls_back_to_pending(failure: str, codex_home: CodexHome) -> None:
+    adapter = CodexSteer(THREAD, f"unix://{codex_home.socket}")
+    if failure == "unreachable":
+        with pytest.raises(RuntimeError, match="Steer delivery failed"):
+            deliver(adapter, "push")
+        return
+    refusal = pytest.raises(RuntimeError, match=r"Steer delivery failed.*ActiveTurnNotSteerable")
+    with codex_app_server(codex_home.socket, [False]) as host, refusal:
+        deliver(adapter, "push")
+    assert host.texts == ["push"]
 
 
-@pytest.mark.parametrize(
-    "provider,thread_id",
-    [
-        ("codex", None),
-        ("antigravity", None),
-        ("claude", "thread"),
-        ("dsh", "thread"),
-        ("?", None),
-    ],
-)
-def test_host_target_must_be_explicit(provider: str, thread_id: str | None) -> None:
-    with pytest.raises(ValueError):
-        adapters.resolve_adapter(provider, thread_id)
+@pytest.mark.parametrize("session", [ClaudeSession(), DshSession()])
+def test_controller_session_adapters_need_no_destination_probe(
+    session: ClaudeSession | DshSession,
+) -> None:
+    stream = io.StringIO()
+    expected = ClaudeStdout(stream) if isinstance(session, ClaudeSession) else DshStdout(stream)
+    assert bind_adapter(session, codex_home=None, stdout=stream) == expected
 
 
-@pytest.mark.parametrize("provider", ["claude", "dsh"])
+@pytest.mark.parametrize("kind", [ClaudeStdout, DshStdout])
 def test_controller_adapter_keeps_multiline_unicode_envelopes(
-    provider: str, capsys: pytest.CaptureFixture[str]
+    kind: type[ClaudeStdout] | type[DshStdout],
 ) -> None:
-    import json
-
+    stream = io.StringIO()
     message = 'Meiva message agent=42\n[id=7] kind=chat\nquoted "text" and café'
-    adapter = adapters.resolve_adapter(provider, None)
-    assert adapter.notify_terminal
-    adapter.send(message)
-    output = capsys.readouterr().out
-    if provider == "dsh":
+    deliver(kind(stream), message)
+    output = stream.getvalue()
+    if kind is DshStdout:
         assert len(output.splitlines()) == 1
         assert json.loads(output) == message
     else:
@@ -103,56 +100,65 @@ def test_controller_adapter_keeps_multiline_unicode_envelopes(
 
 
 def test_codex_terminal_notice_is_left_to_the_native_host() -> None:
-    adapter = adapters.resolve_adapter(
-        "codex", str(THREAD_ID), codex_remote="unix:///tmp/meiva-codex.sock"
+    server = AntigravityServer(address="127.0.0.1:1", csrf_token=CSRF)
+    stream = io.StringIO()
+    assert notifies_terminal(ClaudeStdout(stream)) is True
+    assert notifies_terminal(DshStdout(stream)) is True
+    assert notifies_terminal(CodexSteer(THREAD, "unix:///x.sock")) is False
+    assert notifies_terminal(AntigravitySend(THREAD, server)) is False
+
+
+def test_antigravity_readiness_passes_for_a_resolvable_language_server(
+    tmp_path: Path,
+) -> None:
+    server = AntigravityServer(address="127.0.0.1:59901", csrf_token=CSRF)
+    record = write_antigravity_endpoint(server, thread_id=str(THREAD), home=tmp_path)
+    adapter = bind_adapter(
+        AntigravityConversation(THREAD, str(record)), codex_home=None, stdout=io.StringIO()
     )
-    assert not adapter.notify_terminal
-    ag = adapters.resolve_adapter("antigravity", str(THREAD_ID))
-    assert not ag.notify_terminal
+    assert adapter == AntigravitySend(THREAD, server)
 
 
-def test_antigravity_readiness_resolves_the_language_server() -> None:
-    calls: list[str] = []
-
-    def missing() -> object:
-        calls.append("discover")
-        raise RuntimeError(
-            "No running Antigravity language_server with an HTTP Connect endpoint"
-            " was found on this machine"
+def test_antigravity_readiness_resolves_the_language_server(
+    tmp_path: Path,
+) -> None:
+    absent = tmp_path / "absent.json"
+    with pytest.raises(RuntimeError, match=f"endpoint record is missing at {absent}"):
+        bind_adapter(
+            AntigravityConversation(THREAD, str(absent)), codex_home=None, stdout=io.StringIO()
         )
-
-    adapter = adapters.resolve_adapter("antigravity", str(THREAD_ID), discover=missing)
-    with pytest.raises(RuntimeError, match="No running Antigravity language_server"):
-        adapter.ready()
-    assert calls == ["discover"]
-
-
-def test_antigravity_readiness_passes_for_a_resolvable_language_server() -> None:
-    adapter = adapters.resolve_adapter("antigravity", str(THREAD_ID), discover=object)
-    assert adapter.ready() is None
-
-
-def test_controller_session_adapters_need_no_destination_probe() -> None:
-    assert adapters.resolve_adapter("claude", None).ready() is None
-    assert adapters.resolve_adapter("dsh", None).ready() is None
 
 
 def test_antigravity_destination_resolves_once_and_every_push_reuses_it(
-    unused_tcp_port: int,
+    tmp_path: Path,
 ) -> None:
-    from base.agents.impersonation.host_transport import AntigravityServer
+    with antigravity_server() as host:
+        server = AntigravityServer(address=host.address, csrf_token=CSRF)
+        record = write_antigravity_endpoint(server, thread_id=str(THREAD), home=tmp_path)
+        adapter = bind_adapter(
+            AntigravityConversation(THREAD, str(record)), codex_home=None, stdout=io.StringIO()
+        )
+        # meiva:note
+        # The record is read once, at binding: replacing it later does not move the relay.
+        write_antigravity_endpoint(
+            AntigravityServer(address="127.0.0.1:1", csrf_token=ROTATED),
+            thread_id=str(THREAD),
+            home=tmp_path,
+        )
+        for push in ("first", "second"):
+            deliver(adapter, push)
+    assert [(p.path, p.csrf_token, p.body) for p in host.posts] == [
+        (
+            "/exa.language_server_pb.LanguageServerService/SendAgentMessage",
+            CSRF,
+            {"recipient": str(THREAD), "content": push},
+        )
+        for push in ("first", "second")
+    ]
 
-    recorded = "recorded"
-    resolved = AntigravityServer(address=f"127.0.0.1:{unused_tcp_port}", csrf_token=recorded)
-    lookups: list[str] = []
 
-    def discover() -> object:
-        lookups.append("resolve")
-        return resolved
-
-    adapter = adapters.resolve_adapter("antigravity", str(THREAD_ID), discover=discover)
-    assert adapter.ready() is None
+def test_an_antigravity_server_that_is_gone_fails_the_push_loudly(unused_tcp_port: int) -> None:
+    gone = AntigravityServer(address=f"127.0.0.1:{unused_tcp_port}", csrf_token=CSRF)
     for _ in range(2):
         with pytest.raises(RuntimeError, match="Antigravity SendAgentMessage delivery failed"):
-            adapter.send("push")
-    assert lookups == ["resolve"]
+            deliver(AntigravitySend(THREAD, gone), "push")

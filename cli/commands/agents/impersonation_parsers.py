@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import math
-import os
 import sys
 from functools import partial
 
@@ -42,69 +41,56 @@ def _nonempty(value: str) -> str:
     return value
 
 
-def _relay_spec_problem(
-    provider: str,
-    thread_id: str | None,
-    codex_remote: str | None,
-    *,
-    allow_env_thread_id: bool = False,
-) -> str | None:
-    """CLI-boundary mirror of `base.agents.impersonation._store.validate_relay_spec`.
-
-    Fails before any command code runs (usage error); the shared validator
-    stays in place as the server-side defense.
-    """
-    if provider == "codex":
-        if not thread_id:
-            return (
-                "the codex relay needs --thread-id — the existing Codex session UUID "
-                "it delivers into (optionally with a --codex-remote unix:// or ws:// endpoint)"
-            )
-        if codex_remote is not None and not codex_remote.startswith(("unix://", "ws://")):
-            return "codex remote must be a unix:// or ws:// endpoint"
-    elif provider == "antigravity":
-        if codex_remote is not None:
-            return "the antigravity relay does not use --codex-remote"
-        env_thread = (
-            (os.environ.get("ANTIGRAVITY_CONVERSATION_ID") or "").strip()
-            if allow_env_thread_id
-            else ""
-        )
-        if not thread_id and not env_thread:
-            return (
-                "the antigravity relay needs --thread-id (or ANTIGRAVITY_CONVERSATION_ID "
-                "in the environment) — the existing Antigravity conversation UUID it delivers into"
-            )
-    elif thread_id is not None or codex_remote is not None:
-        return f"the {provider} relay routes to its owner; drop --thread-id/--codex-remote"
-    return None
-
-
 def _h_impersonate(args: argparse.Namespace) -> int:
-    from cli.commands.agents.impersonation import cmd_impersonate
+    from cli.commands.agents.impersonation import ImpersonationEnv, cmd_impersonate
+    from cli.commands.agents.relay.destination import relay_spec_problem
 
+    env = ImpersonationEnv.from_environ(args.runtime.config.process_environment())
     problem: str | None = None
     if args.impersonation_cmd == "request":
-        problem = _relay_spec_problem(
+        problem = relay_spec_problem(
             args.relay_provider,
             args.relay_thread_id,
             args.relay_codex_remote,
-            allow_env_thread_id=True,
+            env_thread_id=env.antigravity_conversation,
         )
     if problem is not None:
         print(f"meiva: {problem}", file=sys.stderr)
         return 2
-    return cmd_impersonate(args, database_factory=args.database_factory)
+    return cmd_impersonate(args, database_factory=args.database_factory, env=env)
 
 
 def _h_impersonate_relay(args: argparse.Namespace) -> int:
-    from cli.commands.agents.impersonation_relay import cmd_relay
+    from cli.commands.agents.impersonation import ImpersonationEnv, relay_token
+    from cli.commands.agents.impersonation_relay import RelayInputs, cmd_relay
+    from cli.commands.agents.relay.destination import relay_spec_problem
 
-    problem = _relay_spec_problem(args.provider, args.thread_id, args.codex_remote)
+    problem = relay_spec_problem(
+        args.provider, args.thread_id, args.codex_remote, env_thread_id=None
+    )
     if problem is not None:
         print(f"meiva: {problem}", file=sys.stderr)
         return 2
-    return cmd_relay(args, database_factory=args.database_factory, machine=args.runtime.machine)
+    env = ImpersonationEnv.from_environ(args.runtime.config.process_environment())
+    try:
+        token = relay_token(
+            token_stdin=args.token_stdin, stdin=args.runtime.terminal.stdin, env=env
+        )
+    except ValueError as exc:
+        print(f"Impersonation relay stopped: {exc}", file=sys.stderr)
+        return 1
+    inputs = RelayInputs(
+        token=token,
+        redis_url=args.runtime.config.view.data_plane.redis_url,
+        codex_home=env.codex_home,
+        stdout=args.runtime.terminal.stdout,
+    )
+    return cmd_relay(
+        args,
+        inputs=inputs,
+        database_factory=args.database_factory,
+        machine=args.runtime.machine,
+    )
 
 
 def _add_send_parser(commands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

@@ -1,180 +1,151 @@
+# meiva:note
+# `meiva memory search` and `meiva memory refresh`, end to end against a real listener.
+#
+# The gateway is the scripted HTTP server of the cluster command tests, on a loopback port that
+# the verbs dial through their real transport and real headers. What the verb sent is read from
+# what the server received and what it printed from the captured streams. The request body and
+# the rendering are decided in `plans/memory_search.py` and asserted in
+# `plans/tests/test_memory_search.py`; the shell proves it dials the right endpoint with the
+# gateway credential, echoes a refusal's text, maps the answer to an exit status and prints
+# what the plan renders, and the handler test starts from the parsed command line and the
+# command's own configuration, so the wiring from `meiva memory search` to the dial is covered.
+
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
-from typing import Any
 
 import httpx
 import pytest
 
-from base.cluster.machine.tests.gateway_stubs import (
-    gateway_api_base_stub,
-    gateway_auth_headers_stub,
-)
+from base.host.net.tests.local_http import closed_port_url
 from cli import parsers as _parsers
-from cli.commands.extensions import memory as _memory
+from cli.commands.cluster.tests.gateway_server import SECRET, Reply, access_to, serving
+from cli.commands.extensions.memory import cmd_memory_refresh, cmd_memory_search
 from cli.commands.extensions.parsers import mcp as _mcp
+from cli.database.runtime import CommandRuntime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
+
+_SEARCH = ("POST", "/api/memory/search")
+_REFRESH = ("POST", "/api/memory/refresh")
+_ALPHA = {
+    "path": "projects/alpha.md",
+    "tags": ["project", "active"],
+    "description": "Alpha context",
+    "score": 0.91,
+    "chunk": "Alpha is the active project.",
+}
 
 
-class _FakeResp:
-    def __init__(self, payload: object, status_code: int = 200) -> None:
-        self._payload = payload
-        self.status_code = status_code
-        self.text = json.dumps(payload)
-
-    def raise_for_status(self) -> None:
-        if self.status_code >= 400:
-            request = httpx.Request("POST", "http://gw:8000/api/memory/search")
-            response = httpx.Response(self.status_code, request=request, text=self.text)
-            raise httpx.HTTPStatusError(
-                f"HTTP {self.status_code}", request=request, response=response
-            )
-
-    def json(self) -> object:
-        return self._payload
-
-
-_API_BASE = gateway_api_base_stub("http://gw:8000")
-_AUTH_HEADERS = gateway_auth_headers_stub({"Authorization": "Bearer secret"})
-
-
-def _make_post(
-    payload: object, *, status_code: int = 200
-) -> tuple[dict[str, Any], Callable[..., _FakeResp]]:
-    seen: dict[str, Any] = {}
-
-    def fake_post(url: str, **kwargs: Any) -> _FakeResp:
-        seen["url"] = url
-        seen.update(kwargs)
-        return _FakeResp(payload, status_code=status_code)
-
-    return seen, fake_post
-
-
-def _run_search(
-    query: str,
-    *,
-    limit: int,
-    json_output: bool,
-    post_fn: Callable[..., _FakeResp],
-) -> int:
-    return _memory.cmd_memory_search(
-        query,
-        limit=limit,
-        json_output=json_output,
-        api_base_fn=_API_BASE,
-        auth_headers_fn=_AUTH_HEADERS,
-        post_fn=post_fn,
-    )
-
-
-def test_memory_search_posts_authenticated_query_and_renders_table(
+def test_a_search_posts_the_query_with_the_gateway_credential_and_prints_the_table(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    results: list[dict[str, object]] = [
-        {
-            "path": "projects/alpha.md",
-            "tags": ["project", "active"],
-            "description": "Alpha context",
-            "score": 0.91,
-            "chunk": "Alpha is the active project.",
-        },
-        {"path": "notes/empty.md", "tags": [], "description": "", "score": 0.5, "chunk": ""},
-    ]
-    seen, post_fn = _make_post(
-        {
-            "paths": ["projects/alpha.md", "notes/empty.md"],
-            "results": results,
-        },
-    )
+    with serving(
+        {_SEARCH: Reply(body={"paths": [_ALPHA["path"]], "results": [_ALPHA]})}
+    ) as gateway:
+        rc = cmd_memory_search("alpha", limit=7, json_output=False, access=access_to(gateway.url))
 
-    assert _run_search("alpha", limit=7, json_output=False, post_fn=post_fn) == 0
-    assert seen["url"] == "http://gw:8000/api/memory/search"
-    assert seen["json"] == {"query": "alpha", "k": 7, "purpose": "search"}
-    assert seen["headers"] == {"Authorization": "Bearer secret"}
+    assert rc == 0
+    (seen,) = gateway.requests
+    assert seen.target == "/api/memory/search"
+    assert seen.body == {"query": "alpha", "k": 7, "purpose": "search"}
+    assert seen.headers["authorization"] == f"Bearer {SECRET}"
     assert capsys.readouterr().out.splitlines() == [
         "score  path               tags             description",
         "0.91   projects/alpha.md  project, active  Alpha context",
-        "0.50   notes/empty.md                      ",
     ]
 
 
-def test_memory_search_json_emits_results_shape_and_preserves_nulls(
+def test_json_output_prints_the_results_list_as_one_line(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    results: list[dict[str, object]] = [
-        {"path": "relative/note.md", "tags": None, "description": None, "score": 0.8, "chunk": "x"},
-        {"path": "relative/empty.md", "tags": [], "description": "", "score": 0.1, "chunk": "y"},
-    ]
-    _seen, post_fn = _make_post(
-        {"paths": [row["path"] for row in results], "results": results},
-    )
+    with serving({_SEARCH: Reply(body={"results": [_ALPHA]})}) as gateway:
+        rc = cmd_memory_search("alpha", limit=5, json_output=True, access=access_to(gateway.url))
 
-    assert _run_search("edge cases", limit=5, json_output=True, post_fn=post_fn) == 0
-    assert json.loads(capsys.readouterr().out) == results
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == [_ALPHA]
 
 
-def test_memory_search_human_output_renders_null_metadata_as_empty(
+def test_a_search_that_matches_nothing_prints_the_header_and_succeeds(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    _seen, post_fn = _make_post(
-        {
-            "paths": ["relative/note.md"],
-            "results": [
-                {
-                    "path": "relative/note.md",
-                    "tags": None,
-                    "description": None,
-                    "score": 0.25,
-                    "chunk": "x",
-                },
-            ],
-        },
-    )
+    with serving({_SEARCH: Reply(body={"results": []})}) as gateway:
+        rc = cmd_memory_search("nothing", limit=5, json_output=False, access=access_to(gateway.url))
 
-    assert _run_search("edge cases", limit=5, json_output=False, post_fn=post_fn) == 0
-    assert capsys.readouterr().out.splitlines() == [
-        "score  path              tags  description",
-        "0.25   relative/note.md        ",
-    ]
+    assert rc == 0
+    assert capsys.readouterr().out.splitlines() == ["score  path  tags  description"]
 
 
 @pytest.mark.parametrize(
-    ("status_code", "payload", "diagnostic"),
+    ("status", "payload", "diagnostic"),
     [
         (401, {"detail": "invalid cluster secret"}, "invalid cluster secret"),
         (422, {"detail": "query is invalid"}, "query is invalid"),
         (503, {"reason": "memory index unavailable"}, "memory index unavailable"),
     ],
 )
-def test_memory_search_surfaces_gateway_error_detail(
-    capsys: pytest.CaptureFixture[str],
-    status_code: int,
-    payload: object,
-    diagnostic: str,
+def test_a_refusal_echoes_the_gateways_text_and_raises(
+    capsys: pytest.CaptureFixture[str], status: int, payload: object, diagnostic: str
 ) -> None:
-    _seen, post_fn = _make_post(payload, status_code=status_code)
+    with (
+        serving({_SEARCH: Reply(status=status, body=payload)}) as gateway,
+        pytest.raises(httpx.HTTPStatusError) as refused,
+    ):
+        cmd_memory_search("alpha", limit=5, json_output=False, access=access_to(gateway.url))
 
-    with pytest.raises(httpx.HTTPStatusError):
-        _run_search("alpha", limit=5, json_output=False, post_fn=post_fn)
-
+    assert refused.value.response.status_code == status
     assert diagnostic in capsys.readouterr().err
 
 
-def test_memory_search_parser_defaults_and_forwards_flags() -> None:
-    calls: list[tuple[str, int, bool]] = []
+def test_a_refresh_posts_to_the_gateway_and_reports_its_status(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with serving({_REFRESH: Reply(body={"status": "queued"})}) as gateway:
+        rc = cmd_memory_refresh(access=access_to(gateway.url))
 
-    def search(query: str, *, limit: int, json_output: bool) -> int:
-        calls.append((query, limit, json_output))
-        return 0
+    assert rc == 0
+    assert [seen.target for seen in gateway.requests] == ["/api/memory/refresh"]
+    assert capsys.readouterr().out.splitlines() == [
+        "refreshing memory index...",
+        "  index refreshed: queued",
+    ]
 
+
+def test_a_refresh_the_gateway_cannot_be_reached_for_exits_1(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exited:
+        cmd_memory_refresh(access=access_to(closed_port_url()))
+
+    assert exited.value.code == 1
+    assert "refresh failed" in capsys.readouterr().err
+
+
+def test_memory_search_parser_defaults_and_flags() -> None:
     args = _parsers.parse_args(["memory", "search", "alpha"])
     assert args.func is _mcp.h_memory_search
-    assert _mcp.h_memory_search(args, search_fn=search) == 0
+    assert (args.query, args.limit, args.json) == ("alpha", 5, False)
     exact_query = "  beta\tgamma  "
     args = _parsers.parse_args(["memory", "search", exact_query, "--limit", "9", "--json"])
-    assert _mcp.h_memory_search(args, search_fn=search) == 0
-    assert calls == [("alpha", 5, False), (exact_query, 9, True)]
+    assert (args.query, args.limit, args.json) == (exact_query, 9, True)
+
+
+def test_memory_search_handler_searches_the_gateway_the_command_configuration_names(
+    command_runtime: CommandRuntime, capsys: pytest.CaptureFixture[str]
+) -> None:
+    exact_query = "  beta\tgamma  "
+    hit = {"path": "a.md", "tags": None, "description": None, "score": 0.5, "chunk": "x"}
+    args = _parsers.parse_args(["memory", "search", exact_query, "--limit", "9", "--json"])
+    with serving({("POST", "/api/memory/search"): Reply(body={"results": [hit]})}) as gateway:
+        command_runtime.config.set_field("gateway_url", gateway.url)
+        command_runtime.config.set_field("cluster_secret", SECRET)
+        args.runtime = command_runtime
+
+        assert _mcp.h_memory_search(args) == 0
+
+    (seen,) = gateway.requests
+    assert seen.body == {"query": exact_query, "k": 9, "purpose": "search"}
+    assert seen.headers["authorization"] == f"Bearer {SECRET}"
+    assert json.loads(capsys.readouterr().out) == [hit]
 
 
 @pytest.mark.parametrize("query", ["", "   ", "\t", "\n"])

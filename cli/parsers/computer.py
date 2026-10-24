@@ -11,9 +11,9 @@ import argparse
 
 
 def _h_computer_release(args: argparse.Namespace) -> int:
-    from cli.commands.agents.computer import h_computer_release
+    from cli.commands.agents.computer import cmd_computer_release
 
-    return h_computer_release(args)
+    return cmd_computer_release(home=args.runtime.home)
 
 
 def add_computer_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

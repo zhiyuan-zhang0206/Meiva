@@ -1,32 +1,46 @@
-"""Agent control CLI: ordinary send, terminate, cancel, restart and resurrection."""
+# meiva:note
+# Agent control CLI: ordinary send, terminate, cancel, restart and resurrection.
+#
+# Every verb is a thin client over the gateway's /api/agents surface, and takes the
+# `GatewayAccess` its handler built from the invocation's configuration.
 
 from __future__ import annotations
 
+import json
+import os
+import sys
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import httpx
 from pydantic import BaseModel
 
+from base.agents.messages.delivery.retry import network_errors, retryable_response
+from base.agents.messages.envelope import validate_source
 from base.api_contracts.agent_contract import ShellSessionKillTiming
 from base.api_contracts.idempotency import keyed_headers
+from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
+from base.host.net import http_dial
+from base.host.net.resilience import ExponentialBackoff, Policy, retry
+from ops.rpc_schemas import CancelAgentResponse, CompactAgentResponse
 
 _TIMEOUT_S = 15.0
 
 
+# meiva:note
+# A provenance requirement failed; the CLI reports it instead of a traceback.
+#
+# Raised where an explicit ``--source`` value is missing on a requiring verb or is
+# malformed. Per-command CLI handlers catch it, print the message, and exit 2; the command
+# layer itself keeps raising so callers and tests see one honest contract.
 class ProvenanceError(ValueError):
-    """A provenance requirement failed; the CLI reports it instead of a traceback.
-
-    Raised where an explicit ``--source`` value is missing on a requiring verb
-    or is malformed. Per-command CLI handlers catch it,
-    print the message, and exit 2; the command layer itself keeps raising so
-    callers and tests see one honest contract.
-    """
+    pass
 
 
+# meiva:note
+# Validate one explicit source value (the CLI parse layer runs first).
 def _validated_source_arg(source: str) -> str:
-    """Validate one explicit source value (the CLI parse layer runs first)."""
-    from base.agents.messages.envelope import validate_source
-
     try:
         validate_source(source)
     except ValueError as exc:
@@ -34,41 +48,51 @@ def _validated_source_arg(source: str) -> str:
     return source
 
 
+# meiva:note
+# Explicit provenance only: the environment never supplies or vetoes it.
+#
+# User ruling 2026-09-20: CLI parameters are explicit; the opt-in MEIVA_CALLER_IDENTITY
+# profile (still consumed by SDK-side stamping, see
+# ``meiva.sdk_surface.agent_identity.require_actor``) no longer compensates an omitted
+# ``--source``.
 def _explicit_caller(source: str | None, *, field: str = "source") -> dict[str, str]:
-    """Explicit provenance only — the environment never supplies or vetoes it.
-
-    User ruling 2026-09-20: CLI parameters are explicit; the opt-in
-    MEIVA_CALLER_IDENTITY profile (still consumed by SDK-side stamping, see
-    ``meiva.sdk_surface.agent_identity.require_actor``) no longer compensates an omitted ``--source``.
-    """
     if source is None:
         return {}
     return {field: _validated_source_arg(source)}
 
 
+# meiva:note
+# The small subset rendered by ``meiva agents ls``.
 class _AgentListItem(BaseModel):
-    """The small subset rendered by ``meiva agents ls``."""
-
     agent_id: int
     status: str
     machine: str
     label: str | None
 
 
-def cmd_agents_ls(
-    *, scope: str = "live", query: str = "", before_id: int | None = None, limit: int = 100
-) -> int:
-    """Render one agent directory page and its continuation cursor."""
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
-    from base.host.net.http_dial import get as dial_get
+def _api(access: GatewayAccess, path: str) -> str:
+    return f"{gateway_api_base(access.gateway_url)}/api/{path}"
 
-    access = gateway_access_from_settings()  # ambient: C
-    url = f"{gateway_api_base(access.gateway_url)}/api/agents"
+
+# meiva:note
+# Render one agent directory page and its continuation cursor.
+def cmd_agents_ls(
+    access: GatewayAccess,
+    *,
+    scope: str = "live",
+    query: str = "",
+    before_id: int | None = None,
+    limit: int = 100,
+) -> int:
     params: dict[str, str | int] = {"scope": scope, "query": query, "limit": limit}
     if before_id is not None:
         params["before_id"] = before_id
-    resp = dial_get(url, params=params, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
+    resp = http_dial.get(
+        _api(access, "agents"),
+        params=params,
+        timeout=_TIMEOUT_S,
+        headers=gateway_auth_headers(access),
+    )
     resp.raise_for_status()
     page = resp.json()
     rows = [_AgentListItem.model_validate(r) for r in page["agents"]]
@@ -92,10 +116,10 @@ def cmd_agents_ls(
     return 0
 
 
-# How much of a --tail-file is appended to the message: its last _TAIL_LINES
-# lines, read from at most the last _TAIL_BYTES bytes (decoded with
-# errors="replace" so a mid-character cut cannot break the POST). Fixed — a
-# caller who needs more reads the file itself.
+# meiva:note
+# How much of a --tail-file is appended to the message: its last _TAIL_LINES lines, read
+# from at most the last _TAIL_BYTES bytes (decoded with errors="replace" so a mid-character
+# cut cannot break the POST). Fixed — a caller who needs more reads the file itself.
 _TAIL_LINES = 3
 _TAIL_BYTES = 2048
 
@@ -112,19 +136,27 @@ _SEND_SOURCE_GUIDE = (
 )
 
 
+# meiva:note
+# The send path's provenance: explicit only, never environment-compensated.
+#
+# The CLI enforces `--source` at the argparse layer; this guard covers programmatic callers
+# — no path may send without an explicit, valid source (user ruling 2026-09-20: explicit
+# parameters only).
 def _explicit_send_source(source: str | None) -> str:
-    """The send path's provenance: explicit only, never environment-compensated.
-
-    The CLI enforces `--source` at the argparse layer; this guard covers
-    programmatic callers — no path may send without an explicit, valid source
-    (user ruling 2026-09-20: explicit parameters only).
-    """
     if source is None:
         raise ProvenanceError(_SEND_SOURCE_GUIDE)
     return _validated_source_arg(source)
 
 
+# meiva:note
+# Send chat with explicit provenance, optional output tail and finite retries.
+#
+# A call retries transient transport and known transient HTTP responses with one idempotency
+# key. Final errors are exposed. Normal delivery can wake a terminated target on its home
+# machine. No sender journal or later background delivery is created. argparse enforces
+# --source for the CLI; the guard covers programmatic callers.
 def cmd_agents_send(
+    access: GatewayAccess,
     agent_id: int,
     content: str,
     source: str | None,
@@ -132,34 +164,22 @@ def cmd_agents_send(
     *,
     completion: bool = False,
 ) -> int:
-    """Send chat with explicit provenance, optional output tail and finite retries.
-
-    A call retries transient transport and known transient HTTP responses with one
-    idempotency key. Final errors are exposed. Normal delivery can wake a terminated
-    target on its home machine. No sender journal or later background delivery is
-    created."""
-    # argparse enforces --source for the CLI; the guard covers programmatic callers.
     source = _explicit_send_source(source)
     status = send_agent_message(
-        agent_id,
-        content,
-        source=source,
-        tail_file=tail_file,
-        completion=completion,
+        access, agent_id, content, source=source, tail_file=tail_file, completion=completion
     )
     print(f"  ✓ agent {agent_id} send: {status}")
     return 0
 
 
+# meiva:note
+# `content` with the last `_TAIL_LINES` lines of `tail_file` appended (or why it is
+# unavailable).
+#
+# Delivering the notice is the primary contract; the tail is a rider. An unreadable tail
+# file must not abort the POST — the failure is surfaced inside the delivered message
+# instead, so the agent still learns its command finished and sees why the tail is missing.
 def _with_tail(content: str, tail_file: str) -> str:
-    """`content` with the last `_TAIL_LINES` lines of `tail_file` appended (or why it is unavailable)."""
-    import os
-    from pathlib import Path
-
-    # Delivering the notice is the primary contract; the tail is a rider.
-    # An unreadable tail file must not abort the POST — the failure is
-    # surfaced inside the delivered message instead, so the agent still
-    # learns its command finished and sees why the tail is missing.
     try:
         with Path(tail_file).open("rb") as f:
             f.seek(0, os.SEEK_END)
@@ -172,7 +192,35 @@ def _with_tail(content: str, tail_file: str) -> str:
     return content
 
 
+# meiva:note
+# A transient gateway answer worth another attempt; the last one is the answer the caller
+# sees, so it carries the response.
+class _TransientReplyError(Exception):
+    def __init__(self, response: httpx.Response) -> None:
+        super().__init__(f"transient gateway reply {response.status_code}")
+        self.response = response
+
+
+# meiva:note
+# One idempotency key covers every attempt, so a retry after an ambiguous failure cannot
+# deliver twice. Waits are 0.5s then 1s; a final transport failure is re-raised as it came.
+def _is_transient(error: Exception) -> bool:
+    return isinstance(error, (_TransientReplyError, *network_errors()))
+
+
+_SEND_POLICY = Policy(
+    max_attempts=3,
+    backoff=ExponentialBackoff(base=0.5, factor=2.0),
+    jitter="none",
+    classify=_is_transient,
+    respect_retry_after=False,
+)
+
+
+# meiva:note
+# Deliver with bounded same-key retries and expose the final failure.
 def send_agent_message(
+    access: GatewayAccess,
     agent_id: int,
     content: str,
     *,
@@ -180,85 +228,66 @@ def send_agent_message(
     tail_file: str | None = None,
     completion: bool = False,
 ) -> str:
-    """Deliver with bounded same-key retries and expose the final failure."""
-    import sys
-    import time
-
-    from base.agents.messages.delivery.retry import network_errors, retryable_response
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
-    from base.host.net.http_dial import post as dial_post
-
     if tail_file is not None:
         content = _with_tail(content, tail_file)
-    access = gateway_access_from_settings()  # ambient: C
     headers = {**gateway_auth_headers(access), **keyed_headers(str(uuid4()))}
     body = {
         "content": content,
         "source": source,
         **({"completion_notice": True} if completion else {}),
     }
-    url = f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/messages"
-    for attempt in range(3):
-        try:
-            response = dial_post(url, json=body, timeout=_TIMEOUT_S, headers=headers)
-        except network_errors():
-            if attempt == 2:
-                raise
-        else:
-            if not retryable_response(response) or attempt == 2:
-                if response.status_code >= 400:
-                    print(response.text, file=sys.stderr)
-                response.raise_for_status()
-                return str(response.json().get("status"))
-        time.sleep(0.5 * (2**attempt))
-    raise AssertionError("bounded message delivery exhausted without an outcome")
+    url = _api(access, f"agents/{agent_id}/messages")
+
+    def attempt() -> httpx.Response:
+        response = http_dial.post(url, json=body, timeout=_TIMEOUT_S, headers=headers)
+        if retryable_response(response):
+            raise _TransientReplyError(response)
+        return response
+
+    try:
+        response = retry(_SEND_POLICY)(attempt)
+    except _TransientReplyError as last:
+        response = last.response
+    if response.status_code >= 400:
+        print(response.text, file=sys.stderr)
+    response.raise_for_status()
+    return str(response.json().get("status"))
 
 
 # meiva:note
 # `meiva agents cancel <id>` — POST /api/agents/{id}/cancel.
 #
-#     Cancels the agent's running turn; the agent stays alive and idles. The
-#     status line says `cancelled` or `not_running` (there was no turn to cancel).
-def cmd_agents_cancel(agent_id: int) -> int:
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
-    from base.host.net.http_dial import post as dial_post
-    from ops.rpc_schemas import CancelAgentResponse
-
-    access = gateway_access_from_settings()  # ambient: C
-    url = f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/cancel"
-    resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
+# Cancels the agent's running turn; the agent stays alive and idles. The status line says
+# `cancelled` or `not_running` (there was no turn to cancel).
+def cmd_agents_cancel(access: GatewayAccess, agent_id: int) -> int:
+    resp = http_dial.post(
+        _api(access, f"agents/{agent_id}/cancel"),
+        timeout=_TIMEOUT_S,
+        headers=gateway_auth_headers(access),
+    )
     resp.raise_for_status()
     answer = CancelAgentResponse.model_validate(resp.json())
     print(f"  ✓ agent {agent_id} cancel: {answer.status.value}")
     return 0
 
 
+# meiva:note
+# `meiva agents restart <id> [--config JSON]` — POST /api/agents/{id}/restart.
+#
+# The agent exits after its current turn and a fresh process is respawned attached to the
+# same agent_id (history preserved). `--config` merges a per-agent overlay before the
+# restart. A dead agent returns `already_terminated` — use `resurrect` instead.
 def cmd_agents_restart(
+    access: GatewayAccess,
     agent_id: int,
     config_json: str | None = None,
     *,
     source: str | None = None,
 ) -> int:
-    """`meiva agents restart <id> [--config JSON]` — POST /api/agents/{id}/restart.
-
-    The agent exits after its current turn and a fresh process is respawned
-    attached to the same agent_id (history preserved). `--config` merges a
-    per-agent overlay before the restart. A dead agent returns
-    `already_terminated` — use `resurrect` instead."""
-    import json
-    import sys
-
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
-    from base.host.net.http_dial import post as dial_post
-
-    access = gateway_access_from_settings()  # ambient: C
-    url = f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/restart"
+    url = _api(access, f"agents/{agent_id}/restart")
     caller = _explicit_caller(source)
     if config_json is None:
-        resp = dial_post(
+        resp = http_dial.post(
             url,
             **({"json": caller} if caller else {}),
             timeout=_TIMEOUT_S,
@@ -273,7 +302,7 @@ def cmd_agents_restart(
         if not isinstance(config_overlay, dict):
             print("config must be a JSON object", file=sys.stderr)
             return 1
-        resp = dial_post(
+        resp = http_dial.post(
             url,
             json={"config_overlay": config_overlay, **caller},
             timeout=_TIMEOUT_S,
@@ -284,21 +313,15 @@ def cmd_agents_restart(
     return 0
 
 
-def cmd_agents_resurrect(agent_id: int, *, source: str | None = None) -> int:
-    """`meiva agents resurrect <id>` — POST /api/agents/{id}/resurrect.
-
-    Brings a terminated agent back: a fresh process is respawned attached to the
-    same agent_id (history preserved). An already-running agent returns
-    `already_alive`."""
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
-    from base.host.net.http_dial import post as dial_post
-
-    access = gateway_access_from_settings()  # ambient: C
-    url = f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/resurrect"
+# meiva:note
+# `meiva agents resurrect <id>` — POST /api/agents/{id}/resurrect.
+#
+# Brings a terminated agent back: a fresh process is respawned attached to the same agent_id
+# (history preserved). An already-running agent returns `already_alive`.
+def cmd_agents_resurrect(access: GatewayAccess, agent_id: int, *, source: str | None = None) -> int:
     caller = _explicit_caller(source, field="resurrected_by")
-    resp = dial_post(
-        url,
+    resp = http_dial.post(
+        _api(access, f"agents/{agent_id}/resurrect"),
         **({"json": caller} if caller else {}),
         timeout=_TIMEOUT_S,
         headers=gateway_auth_headers(access),
@@ -308,30 +331,26 @@ def cmd_agents_resurrect(agent_id: int, *, source: str | None = None) -> int:
     return 0
 
 
+# meiva:note
+# Shared POST for `terminate` (graceful) and `kill` (force) — both hit
+# POST /api/agents/{id}/terminate, differing only in the `force` flag.
+#
+# An explicit source is forwarded unchanged; the environment is never consulted (user ruling
+# 2026-09-20). Omitting it claims no provenance and leaves the server default in place.
+# `kill_all_shell_sessions` is sent only when set; the output reports what the kill did, so
+# it is verifiable from the output alone.
 def _terminate(
+    access: GatewayAccess,
     agent_id: int,
     *,
     force: bool,
     source: str | None = None,
     kill_all_shell_sessions: bool = False,
 ) -> int:
-    """Shared POST for `terminate` (graceful) and `kill` (force) — both hit
-    POST /api/agents/{id}/terminate, differing only in the `force` flag. An
-    explicit source is forwarded unchanged; the environment is never consulted
-    (user ruling 2026-09-20). Omitting it claims no provenance and
-    leaves the server default in place.
-    `kill_all_shell_sessions` is sent only when set; the output reports what
-    the kill did, so it is verifiable from the output alone."""
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
-    from base.host.net.http_dial import post as dial_post
-
     verb = "kill" if force else "terminate"
-    access = gateway_access_from_settings()  # ambient: C
-    url = f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/terminate"
     kill_flag = {"kill_all_shell_sessions": True} if kill_all_shell_sessions else {}
-    resp = dial_post(
-        url,
+    resp = http_dial.post(
+        _api(access, f"agents/{agent_id}/terminate"),
         json={"force": force, **kill_flag, **_explicit_caller(source)},
         timeout=_TIMEOUT_S,
         headers=gateway_auth_headers(access),
@@ -343,11 +362,12 @@ def _terminate(
     return 0
 
 
+# meiva:note
+# Render the response's shell-session kill report for the status line.
+#
+# A requested kill answered without a report came from a version that does not know the
+# option: nothing was killed, and the output says so.
 def _shell_sessions_suffix(shell: dict[str, Any] | None, *, requested: bool) -> str:
-    """Render the response's shell-session kill report for the status line.
-
-    A requested kill answered without a report came from a version that does
-    not know the option: nothing was killed, and the output says so."""
     if shell is None:
         return " — shell sessions NOT killed (its runner predates the option)" if requested else ""
     when = ShellSessionKillTiming(shell["when"])
@@ -359,48 +379,65 @@ def _shell_sessions_suffix(shell: dict[str, Any] | None, *, requested: bool) -> 
     return f" — killed {len(killed)} shell session(s): {', '.join(str(i) for i in killed)}"
 
 
+# meiva:note
+# `meiva agents terminate <id>` — graceful stop: the agent exits after processing its
+# current turn.
+#
+# For an agent wedged mid-turn (a hung step) that cannot reach the graceful exit, use
+# `kill`. A terminated agent is resurrected by any new message, including its own shells' and
+# watchers' messages. With `--kill-all-shell-sessions` every shell session it owns on its
+# home machine is killed too, silently: right before the termination applies (after the
+# agent's last step), or right away when it is already terminated.
 def cmd_agents_terminate(
-    agent_id: int, *, source: str | None = None, kill_all_shell_sessions: bool = False
+    access: GatewayAccess,
+    agent_id: int,
+    *,
+    source: str | None = None,
+    kill_all_shell_sessions: bool = False,
 ) -> int:
-    """`meiva agents terminate <id>` — graceful stop: the agent exits after
-    processing its current turn. For an agent wedged mid-turn (a hung step) that
-    cannot reach the graceful exit, use `kill`. A terminated agent is resurrected
-    by any new message, including its own shells' and watchers' messages. With
-    `--kill-all-shell-sessions` every shell session it owns on its home machine
-    is killed too, silently: right before the termination applies (after the
-    agent's last step), or right away when it is already terminated."""
     return _terminate(
-        agent_id, force=False, source=source, kill_all_shell_sessions=kill_all_shell_sessions
+        access,
+        agent_id,
+        force=False,
+        source=source,
+        kill_all_shell_sessions=kill_all_shell_sessions,
     )
 
 
+# meiva:note
+# `meiva agents kill <id>` — request forceful interruption.
+#
+# Hosted work may return enqueued while it drains; this is acceptance, not observed exit. The
+# response acknowledges the host lifecycle request; completion is asynchronous.
+# `--kill-all-shell-sessions` also kills every shell session the agent owns on its home
+# machine, right away (see `terminate`). A kill supersedes an earlier graceful terminate's
+# request, so pass the option here too if still wanted.
 def cmd_agents_kill(
-    agent_id: int, *, source: str | None = None, kill_all_shell_sessions: bool = False
+    access: GatewayAccess,
+    agent_id: int,
+    *,
+    source: str | None = None,
+    kill_all_shell_sessions: bool = False,
 ) -> int:
-    """`meiva agents kill <id>` — request forceful interruption. Hosted work may
-    return enqueued while it drains; this is acceptance, not observed exit.
-    The response acknowledges the host lifecycle request; completion is asynchronous.
-    `--kill-all-shell-sessions` also kills every shell session the agent owns on
-    its home machine, right away (see `terminate`). A kill supersedes an earlier
-    graceful terminate's request, so pass the option here too if still wanted."""
     return _terminate(
-        agent_id, force=True, source=source, kill_all_shell_sessions=kill_all_shell_sessions
+        access,
+        agent_id,
+        force=True,
+        source=source,
+        kill_all_shell_sessions=kill_all_shell_sessions,
     )
 
 
 # meiva:note
 # `meiva agents compact <id>` — POST /api/agents/{id}/compact.
 #
-#     Queues a compact request; the agent summarizes its history at its next turn.
-def cmd_agents_compact(agent_id: int) -> int:
-    from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
-    from base.host.net.http_dial import post as dial_post
-    from ops.rpc_schemas import CompactAgentResponse
-
-    access = gateway_access_from_settings()  # ambient: C
-    url = f"{gateway_api_base(access.gateway_url)}/api/agents/{agent_id}/compact"
-    resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
+# Queues a compact request; the agent summarizes its history at its next turn.
+def cmd_agents_compact(access: GatewayAccess, agent_id: int) -> int:
+    resp = http_dial.post(
+        _api(access, f"agents/{agent_id}/compact"),
+        timeout=_TIMEOUT_S,
+        headers=gateway_auth_headers(access),
+    )
     resp.raise_for_status()
     queued = CompactAgentResponse.model_validate(resp.json())
     print(f"  ✓ agent {agent_id} compact requested: inbound {queued.inbound_id}")

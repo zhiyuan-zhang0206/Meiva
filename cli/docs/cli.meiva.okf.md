@@ -10,8 +10,9 @@ tags:
 
 # CLI
 
-`cli.parsers` owns settings-free syntax. `parse_args` preserves argparse
-defaults, help and error exits without dispatch; `build_parser` composes handler
+`cli.parsers` owns settings-free syntax. `parse_args` takes the argv the entry
+names (it never reads `sys.argv`) and preserves argparse defaults, help and error
+exits without dispatch; `build_parser` composes handler
 bindings; `command_options` gives doc checks command-scoped long options and
 aliases. Parsing preserves caller-owned children. Agents/notices
 and impersonation builders live in `cli.commands.agents`, extensions in

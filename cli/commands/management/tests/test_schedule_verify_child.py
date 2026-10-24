@@ -2,20 +2,19 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from base.cluster.machine import GatewayAccess
 from base.telemetry import EventPipeline
 from cli.commands.management import schedules_verify as _verify
+from cli.commands.management.schedules_verify import CheckFile, RowsFromFile
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
-
-def _no_gateway() -> GatewayAccess:
-    raise AssertionError("the gateway must not be dialed")
+_NOW = datetime(2026, 10, 24, 12, 0, 0, tzinfo=UTC)
 
 
 _OLD_HIERARCHY = """\
@@ -118,7 +117,7 @@ def test_check_file_prints_the_call_signature_verdict(
     stale.write_text(_OLD_HIERARCHY, encoding="utf-8")
     assert (
         _verify.cmd_schedules_verify(
-            check_file=str(stale), producer=operator_pipeline, access=_no_gateway
+            source=CheckFile(str(stale)), notify=True, now=_NOW, producer=operator_pipeline
         )
         == 1
     )
@@ -126,23 +125,17 @@ def test_check_file_prints_the_call_signature_verdict(
 
 
 def test_the_sweep_checks_agent_written_rows_like_built_in_ones(
+    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
-    rows = [(1, "built-in", _NEW_HIERARCHY), (9, "agent-made-poller", _OLD_HIERARCHY)]
-
-    def no_alert(**_kwargs: object) -> None:
-        return None
-
-    ports = _verify.VerifyPorts(
-        read_rows=lambda: rows, check_script=_verify.check_script, report=no_alert
+    rows = tmp_path / "rows.json"
+    rows.write_text(
+        json.dumps([[1, "built-in", _NEW_HIERARCHY], [9, "agent-made-poller", _OLD_HIERARCHY]])
     )
     assert (
         _verify.cmd_schedules_verify(
-            notify=False,
-            ports=ports,
-            producer=operator_pipeline,
-            access=_no_gateway,
+            source=RowsFromFile(str(rows)), notify=False, now=_NOW, producer=operator_pipeline
         )
         == 1
     )
@@ -266,7 +259,7 @@ def test_check_file_prints_the_undefined_name_verdict(
     stale.write_text("from base.config import settings\nroot = base.__file__\n", encoding="utf-8")
     assert (
         _verify.cmd_schedules_verify(
-            check_file=str(stale), producer=operator_pipeline, access=_no_gateway
+            source=CheckFile(str(stale)), notify=True, now=_NOW, producer=operator_pipeline
         )
         == 1
     )

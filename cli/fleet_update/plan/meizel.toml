@@ -1,0 +1,28 @@
+exports = ["gateway_commands.py", "helper_gate.py", "host_commands.py", "host_failures.py", "host_probe.py", "journal.py", "lease_announcement.py", "old_target.py", "recovery.py", "redaction.py", "roster.py", "silence_replies.py", "stop_wave.py", "stored_schedules.py", "verify_steps.py", "wave_order.py"]
+
+[uses]
+"gateway_commands.py" = ["host_commands.py"]
+"host_probe.py" = ["journal.py"]
+"recovery.py" = ["journal.py"]
+"silence_replies.py" = ["host_commands.py"]
+"stop_wave.py" = ["wave_order.py"]
+"verify_steps.py" = ["roster.py"]
+
+[purity]
+"__init__.py" = "strict"
+"gateway_commands.py" = "strict"
+"helper_gate.py" = "strict"
+"host_commands.py" = "strict"
+"host_failures.py" = "strict"
+"host_probe.py" = "strict"
+"journal.py" = "strict"
+"lease_announcement.py" = "strict"
+"old_target.py" = "strict"
+"recovery.py" = "strict"
+"redaction.py" = "strict"
+"roster.py" = "strict"
+"silence_replies.py" = "strict"
+"stop_wave.py" = "strict"
+"stored_schedules.py" = "strict"
+"verify_steps.py" = "strict"
+"wave_order.py" = "strict"

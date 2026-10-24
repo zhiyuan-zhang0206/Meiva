@@ -1,26 +1,29 @@
-"""`meiva mcp install/uninstall/upgrade` — out-of-core MCP package lifecycle.
-
-Sources are local dirs (used in place) and local `file://` git repos (cloned +
-moved). `unit_home` isolates ~/.meiva. `uv_sync` is monkeypatched in the bulk of
-tests so the venv build is deterministic + offline; one test exercises the real
-`uv sync` on a zero-dependency package.
-"""
+# meiva:note
+# `meiva mcp install/uninstall/upgrade` — out-of-core MCP package lifecycle.
+#
+# Sources are local dirs (used in place) and local `file://` git repos (cloned + moved).
+# `unit_home` isolates ~/.meiva. The bulk of the tests build the venv with a stand-in `uv` program
+# (`uv_support.py`) so the build is deterministic and offline; two tests run the real `uv sync` on
+# a zero-dependency package.
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from base.host.system.tests.fake_commands import fake_host
 from base.packages.extensions import install_registry as reg
-from cli.commands.extensions import mcp
 from cli.commands.extensions.mcp import (
+    UvBuild,
     cmd_mcp_install,
     cmd_mcp_list,
     cmd_mcp_uninstall,
     cmd_mcp_upgrade,
 )
+from cli.commands.extensions.tests.support.uv_support import fake_uv_build, real_uv_build
 from meiva.mcps.config import installed_mcp_dir, load_mcp_config
 
 
@@ -65,91 +68,80 @@ def _make_mcp_git_repo(root: Path, name: str = "acme") -> str:
 
 
 @pytest.fixture
-def fake_uv_sync(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub `uv_sync` to drop a fake `.venv/bin/python` — no real resolve."""
-
-    def _fake(pkg_dir: Path) -> None:
-        venv_bin = pkg_dir / ".venv" / "bin"
-        venv_bin.mkdir(parents=True, exist_ok=True)
-        py = venv_bin / "python"
-        py.write_text("#!/bin/sh\n", encoding="utf-8")
-        py.chmod(0o755)
-
-    monkeypatch.setattr(mcp, "uv_sync", _fake)
+def uv(tmp_path: Path) -> UvBuild:
+    return fake_uv_build(tmp_path / "bin")
 
 
 # ─── install ─────────────────────────────────────────────────────────────
 
 
 def test_install_from_local_path_records_and_surfaces(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None
+    unit_home: Path, tmp_path: Path, uv: UvBuild
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
-    assert cmd_mcp_install(str(pkg), None, None) == 0
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 0
 
     r = reg.get("acme")
     assert r is not None and r.type == "mcp" and r.origin == "user" and r.enabled
     dest = unit_home / "mcps" / "acme"
     assert (dest / ".mcp.json").is_file()
-    assert (dest / ".venv" / "bin" / "python").exists()  # uv_sync ran
-    # local source is copied, never moved
+    assert (dest / ".venv" / "bin" / "python").exists()
     assert (pkg / ".mcp.json").is_file()
-    # surfaces in the merged config with the relative direct-launch command + cwd
     cfg = load_mcp_config()
     assert cfg["acme"]["command"] == ".venv/bin/python"
     assert installed_mcp_dir("acme") == dest
 
 
 def test_install_from_git_moves_and_strips_git(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None
+    unit_home: Path, tmp_path: Path, uv: UvBuild
 ) -> None:
     url = _make_mcp_git_repo(tmp_path)
-    assert cmd_mcp_install(url, None, None) == 0
+    assert cmd_mcp_install(url, None, None, uv=uv) == 0
     dest = unit_home / "mcps" / "acme"
     assert (dest / ".mcp.json").is_file()
     assert not (dest / ".git").exists()
     assert "acme" in load_mcp_config()
 
 
-def test_install_with_path_subdir(unit_home: Path, tmp_path: Path, fake_uv_sync: None) -> None:
+def test_install_with_path_subdir(unit_home: Path, tmp_path: Path, uv: UvBuild) -> None:
     root = tmp_path / "monorepo"
     _make_mcp_package(root / "packages", "acme")  # -> packages/acme-src
-    assert cmd_mcp_install(str(root), None, "packages/acme-src") == 0
+    assert cmd_mcp_install(str(root), None, "packages/acme-src", uv=uv) == 0
     assert reg.get("acme") is not None
     assert (unit_home / "mcps" / "acme").is_dir()
 
 
-def test_install_rejects_duplicate(unit_home: Path, tmp_path: Path, fake_uv_sync: None) -> None:
+def test_install_rejects_duplicate(unit_home: Path, tmp_path: Path, uv: UvBuild) -> None:
     pkg = _make_mcp_package(tmp_path)
-    assert cmd_mcp_install(str(pkg), None, None) == 0
-    assert cmd_mcp_install(str(pkg), None, None) == 1
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 0
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 1
 
 
 def test_install_rejects_builtin_collision(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture
 ) -> None:
     pkg = _make_mcp_package(tmp_path, "chrome")
-    assert cmd_mcp_install(str(pkg), None, None) == 1
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 1
     assert "built-in" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.get("chrome") is None
 
 
 def test_install_rejects_no_mcp_json_or_pyproject(
-    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture, uv: UvBuild
 ) -> None:
     """A directory without .mcp.json or pyproject.toml is rejected."""
     plain = tmp_path / "plain"
     plain.mkdir()
     (plain / "readme.txt").write_text("hi", encoding="utf-8")
-    assert cmd_mcp_install(str(plain), None, None) == 1
+    assert cmd_mcp_install(str(plain), None, None, uv=uv) == 1
     assert "no .mcp.json or pyproject.toml" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_install_rejects_multi_server_package(
-    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture, uv: UvBuild
 ) -> None:
     pkg = _make_mcp_package(tmp_path, "acme", servers=["acme", "acme2"])
-    assert cmd_mcp_install(str(pkg), None, None) == 1
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 1
     assert "exactly one server" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -180,13 +172,11 @@ def _make_pyproject_only_package(root: Path, name: str = "widget") -> Path:
     return pkg
 
 
-def test_install_auto_detects_from_pyproject(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None
-) -> None:
+def test_install_auto_detects_from_pyproject(unit_home: Path, tmp_path: Path, uv: UvBuild) -> None:
     """When .mcp.json is absent, auto-detect name + module from pyproject.toml
     and __main__.py, generate .mcp.json, and install."""
     pkg = _make_pyproject_only_package(tmp_path, "widget")
-    assert cmd_mcp_install(str(pkg), None, None) == 0
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 0
 
     # Server name derived from pyproject name (stripped "meiva-mcp-" prefix)
     r = reg.get("widget")
@@ -205,7 +195,7 @@ def test_install_auto_detects_from_pyproject(
 
 
 def test_install_auto_detect_falls_back_to_single_package(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None
+    unit_home: Path, tmp_path: Path, uv: UvBuild
 ) -> None:
     """Without __main__.py, detect a single top-level Python package."""
     pkg = tmp_path / "fallback-src"
@@ -223,12 +213,12 @@ def test_install_auto_detect_falls_back_to_single_package(
     mod = pkg / "fallback_mcp"
     mod.mkdir()
     (mod / "__init__.py").write_text("", encoding="utf-8")
-    assert cmd_mcp_install(str(pkg), None, None) == 0
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 0
     assert reg.get("fallback") is not None
 
 
 def test_install_auto_detect_rejects_bare_pyproject(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture
 ) -> None:
     """A pyproject.toml without a detectable module succeeds with fallback."""
     pkg = tmp_path / "bare-src"
@@ -247,7 +237,7 @@ def test_install_auto_detect_rejects_bare_pyproject(
     # back to "bare", but the module dir doesn't exist.  uv sync would still
     # succeed, but the server won't start.  Install succeeds anyway (we
     # don't verify the module exists on disk — that's a runtime concern).
-    assert cmd_mcp_install(str(pkg), None, None) == 0
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 0
     assert reg.get("bare") is not None
 
 
@@ -263,10 +253,10 @@ def _landed_env(unit_home: Path, name: str = "acme") -> dict:
 
 
 def test_install_env_injected_into_landed_copy(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None
+    unit_home: Path, tmp_path: Path, uv: UvBuild
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
-    assert cmd_mcp_install(str(pkg), None, None, [f"TOKEN={_FAKE_TOKEN}", "MODE=live"]) == 0
+    assert cmd_mcp_install(str(pkg), None, None, [f"TOKEN={_FAKE_TOKEN}", "MODE=live"], uv=uv) == 0
     env = _landed_env(unit_home)
     assert env["TOKEN"] == _FAKE_TOKEN and env["MODE"] == "live"
     # the source package is untouched — secrets never flow back into the source
@@ -277,33 +267,31 @@ def test_install_env_injected_into_landed_copy(
 
 
 def test_install_env_overrides_package_default(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None
+    unit_home: Path, tmp_path: Path, uv: UvBuild
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
     # package ships a default env key; --env wins
     data = json.loads((pkg / ".mcp.json").read_text(encoding="utf-8"))
     data["mcpServers"]["acme"]["env"] = {"MODE": "default", "KEEP": "yes"}
     (pkg / ".mcp.json").write_text(json.dumps(data), encoding="utf-8")
-    assert cmd_mcp_install(str(pkg), None, None, ["MODE=live"]) == 0
+    assert cmd_mcp_install(str(pkg), None, None, ["MODE=live"], uv=uv) == 0
     env = _landed_env(unit_home)
     assert env["MODE"] == "live" and env["KEEP"] == "yes"
 
 
 def test_install_rejects_bad_env_pair(
-    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture, uv: UvBuild
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
-    assert cmd_mcp_install(str(pkg), None, None, ["NOEQUALS"]) == 1
+    assert cmd_mcp_install(str(pkg), None, None, ["NOEQUALS"], uv=uv) == 1
     assert "KEY=VALUE" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_upgrade_preserves_injected_env(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None
-) -> None:
+def test_upgrade_preserves_injected_env(unit_home: Path, tmp_path: Path, uv: UvBuild) -> None:
     """An upgrade must never silently drop a server's token: the source ships no
     secret, so the landed copy's env is carried across the re-land."""
     pkg = _make_mcp_package(tmp_path, desc="v1")
-    cmd_mcp_install(str(pkg), None, None, [f"TOKEN={_FAKE_TOKEN}"])
+    cmd_mcp_install(str(pkg), None, None, [f"TOKEN={_FAKE_TOKEN}"], uv=uv)
     (pkg / ".mcp.json").write_text(
         json.dumps(
             {
@@ -318,20 +306,20 @@ def test_upgrade_preserves_injected_env(
         ),
         encoding="utf-8",
     )
-    assert cmd_mcp_upgrade("acme") == 0
+    assert cmd_mcp_upgrade("acme", uv=uv) == 0
     assert load_mcp_config()["acme"]["description"] == "v2"  # code/config refreshed
     assert _landed_env(unit_home)["TOKEN"] == _FAKE_TOKEN  # secret survived
 
 
 def test_upgrade_refuses_when_the_landed_env_cannot_be_read(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None, capsys: pytest.CaptureFixture[str]
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture[str]
 ) -> None:
     pkg = _make_mcp_package(tmp_path, desc="v1")
-    assert cmd_mcp_install(str(pkg), None, None, [f"TOKEN={_FAKE_TOKEN}"]) == 0
+    assert cmd_mcp_install(str(pkg), None, None, [f"TOKEN={_FAKE_TOKEN}"], uv=uv) == 0
     landed = unit_home / "mcps" / "acme" / ".mcp.json"
     landed.write_text("{not json", encoding="utf-8")
 
-    assert cmd_mcp_upgrade("acme") == 1
+    assert cmd_mcp_upgrade("acme", uv=uv) == 1
     err = capsys.readouterr().err
     assert "refusing to re-land" in err
     assert landed.read_text(encoding="utf-8") == "{not json"
@@ -341,18 +329,18 @@ def test_upgrade_refuses_when_the_landed_env_cannot_be_read(
 
 
 def test_list_flags_installed_origin(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture
 ) -> None:
-    cmd_mcp_install(str(_make_mcp_package(tmp_path)), None, None)
+    cmd_mcp_install(str(_make_mcp_package(tmp_path)), None, None, uv=uv)
     assert cmd_mcp_list() == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "acme" in out and "installed" in out
 
 
 def test_uninstall_removes_dir_registry_and_config(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None
+    unit_home: Path, tmp_path: Path, uv: UvBuild
 ) -> None:
-    cmd_mcp_install(str(_make_mcp_package(tmp_path)), None, None)
+    cmd_mcp_install(str(_make_mcp_package(tmp_path)), None, None, uv=uv)
     assert cmd_mcp_uninstall("acme") == 0
     assert reg.get("acme") is None
     assert not (unit_home / "mcps" / "acme").exists()
@@ -364,9 +352,9 @@ def test_uninstall_rejects_non_mcp(unit_home: Path, capsys: pytest.CaptureFixtur
     assert "not an installed MCP package" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_upgrade_refetches_from_source(unit_home: Path, tmp_path: Path, fake_uv_sync: None) -> None:
+def test_upgrade_refetches_from_source(unit_home: Path, tmp_path: Path, uv: UvBuild) -> None:
     pkg = _make_mcp_package(tmp_path, desc="v1")
-    cmd_mcp_install(str(pkg), None, None)
+    cmd_mcp_install(str(pkg), None, None, uv=uv)
     # mutate the local source's .mcp.json, then upgrade
     (pkg / ".mcp.json").write_text(
         json.dumps(
@@ -382,36 +370,84 @@ def test_upgrade_refetches_from_source(unit_home: Path, tmp_path: Path, fake_uv_
         ),
         encoding="utf-8",
     )
-    assert cmd_mcp_upgrade("acme") == 0
+    assert cmd_mcp_upgrade("acme", uv=uv) == 0
     assert load_mcp_config()["acme"]["description"] == "v2"
 
 
-def test_upgrade_rejects_non_mcp(unit_home: Path, capsys: pytest.CaptureFixture) -> None:
-    assert cmd_mcp_upgrade("nope") == 1
+def test_upgrade_rejects_non_mcp(
+    unit_home: Path, capsys: pytest.CaptureFixture, uv: UvBuild
+) -> None:
+    assert cmd_mcp_upgrade("nope", uv=uv) == 1
 
 
-# ─── real uv sync (integration; zero-dependency package, no network) ──────
+def test_a_failed_build_removes_the_landed_copy_and_registers_nothing(
+    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pkg = _make_mcp_package(tmp_path)
+    failing = fake_uv_build(tmp_path / "bin", fail_with="No solution found when resolving")
+
+    assert cmd_mcp_install(str(pkg), None, None, uv=failing) == 1
+
+    assert "uv sync failed: No solution found when resolving" in capsys.readouterr().err
+    assert not (unit_home / "mcps" / "acme").exists()
+    assert reg.get("acme") is None
+
+
+def test_a_host_without_uv_fails_the_build_by_name(
+    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pkg = _make_mcp_package(tmp_path)
+    without_uv = UvBuild(host=fake_host(), caller_environ={})
+
+    assert cmd_mcp_install(str(pkg), None, None, uv=without_uv) == 1
+
+    assert "uv sync failed: `uv` is not on PATH" in capsys.readouterr().err
+    assert not (unit_home / "mcps" / "acme").exists()
+
+
+def test_a_failed_upgrade_build_is_reported(
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pkg = _make_mcp_package(tmp_path)
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 0
+    failing = fake_uv_build(tmp_path / "bin2", fail_with="network unreachable")
+
+    assert cmd_mcp_upgrade("acme", uv=failing) == 1
+
+    assert "[meiva mcp upgrade] uv sync failed: network unreachable" in capsys.readouterr().err
+
+
+# meiva:note
+# Ambient UV_FROZEN/UV_LOCKED (a CI job exports them for its own repo) must not block an MCP
+# package's first venv build, which has no lockfile of its own. The build runs a child process
+# that logs what it was started with: the caller's other variables arrive, those two do not.
+def test_the_build_does_not_hand_uv_the_callers_lock_policy(
+    unit_home: Path, tmp_path: Path
+) -> None:
+    log = tmp_path / "uv.log"
+    build = fake_uv_build(tmp_path / "bin", log=log, UV_FROZEN="1", UV_LOCKED="1", KEPT="yes")
+
+    assert cmd_mcp_install(str(_make_mcp_package(tmp_path)), None, None, uv=build) == 0
+
+    assert log.read_text() == "frozen=unset locked=unset\n"
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv not on PATH")
 def test_install_real_uv_sync_builds_venv(unit_home: Path, tmp_path: Path) -> None:
     pkg = _make_mcp_package(tmp_path, "echoreal", module="echoreal")
-    assert cmd_mcp_install(str(pkg), None, None) == 0
+    assert cmd_mcp_install(str(pkg), None, None, uv=real_uv_build(dict(os.environ))) == 0
     dest = unit_home / "mcps" / "echoreal"
     assert (dest / ".venv" / "bin" / "python").exists()
     assert "echoreal" in load_mcp_config()
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv not on PATH")
-def test_install_ignores_ambient_lock_policy(
-    unit_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_ignores_ambient_lock_policy(unit_home: Path, tmp_path: Path) -> None:
     """Ambient UV_FROZEN/UV_LOCKED (a CI job exports them for its own repo)
     must not block an MCP package's first venv build, which has no lockfile."""
-    monkeypatch.setenv("UV_FROZEN", "1")
-    monkeypatch.setenv("UV_LOCKED", "1")
     pkg = _make_mcp_package(tmp_path, "ambient", module="ambient_mcp")
-    assert cmd_mcp_install(str(pkg), None, None) == 0
+    caller = {**os.environ, "UV_FROZEN": "1", "UV_LOCKED": "1"}
+    assert cmd_mcp_install(str(pkg), None, None, uv=real_uv_build(caller)) == 0
     dest = unit_home / "mcps" / "ambient"
     assert (dest / ".venv" / "bin" / "python").exists()
     assert (dest / "uv.lock").is_file()  # the build was free to create its own lock
@@ -430,20 +466,22 @@ def test_acquire_dead_local_path_raises_clear_error(tmp_path: Path) -> None:
         acquire_source(str(dead), None)
 
 
-def test_upgrade_dead_source_reports_and_fails(unit_home: Path, tmp_path: Path) -> None:
+def test_upgrade_dead_source_reports_and_fails(
+    unit_home: Path, tmp_path: Path, uv: UvBuild
+) -> None:
     """`meiva mcp upgrade` of a package whose local source dir was deleted (the
     worktree-removal case) prints the recorded-source problem, exit 1."""
     pkg = _make_mcp_package(tmp_path, "orphan", module="orphan_mcp")
-    assert cmd_mcp_install(str(pkg), None, None) == 0
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 0
     shutil.rmtree(pkg)  # the source dir vanishes (like a deleted worktree)
-    assert cmd_mcp_upgrade("orphan") == 1
+    assert cmd_mcp_upgrade("orphan", uv=uv) == 1
 
 
-def test_mcp_list_flags_dead_source(unit_home: Path, tmp_path: Path, capsys) -> None:
+def test_mcp_list_flags_dead_source(unit_home: Path, tmp_path: Path, capsys, uv: UvBuild) -> None:
     """`meiva mcp list` warns that a recorded local source is gone, so the
     operator sees the upgradeability problem before an upgrade fails."""
     pkg = _make_mcp_package(tmp_path, "orphan2", module="orphan2_mcp")
-    assert cmd_mcp_install(str(pkg), None, None) == 0
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 0
     shutil.rmtree(pkg)
     assert cmd_mcp_list() == 0
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]

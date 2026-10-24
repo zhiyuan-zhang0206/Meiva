@@ -35,7 +35,9 @@ from cli.commands.converge.plans.firewall_report import (
 )
 
 
-def cmd_firewall_status(*, home: Path, machine: MachineIdentity, host: Host) -> int:
+def cmd_firewall_status(
+    *, home: Path, user_home: Path, machine: MachineIdentity, host: Host
+) -> int:
     """`meiva firewall status` — audit the host and diff the manifest (read-only)."""
     from cli.commands import _repo
 
@@ -53,16 +55,16 @@ def cmd_firewall_status(*, home: Path, machine: MachineIdentity, host: Host) -> 
         return 1
     print(
         fw.render_manifest_status(
-            rules, machine_name=configured_machine_name(machine), host=host, user_home=Path.home()
+            rules, machine_name=configured_machine_name(machine), host=host, user_home=user_home
         )
     )
-    stale = tuple(str(path) for path in fw.stale_manifest_rules(rules, user_home=Path.home()))
+    stale = tuple(str(path) for path in fw.stale_manifest_rules(rules, user_home=user_home))
     for line in status_tail_lines(stale, sudo_grant=fw.sudo_grant_installed(host=host)):
         print(line)
     return 0
 
 
-def cmd_firewall_sync(*, home: Path, machine: MachineIdentity, host: Host) -> int:
+def cmd_firewall_sync(*, home: Path, user_home: Path, machine: MachineIdentity, host: Host) -> int:
     """`meiva firewall sync` — apply the manifest now (repair + prune).
 
     Mutates directly first. On older macOS it retries with `sudo -n`; if both
@@ -81,7 +83,7 @@ def cmd_firewall_sync(*, home: Path, machine: MachineIdentity, host: Host) -> in
             f"  ! firewall: could not read the allow list from {fw.SOCKETFILTERFW}", file=sys.stderr
         )
         return 1
-    outcome = sync_allowlist(audit, rules, machine=machine, host=host, user_home=Path.home())
+    outcome = sync_allowlist(audit, rules, machine=machine, host=host, user_home=user_home)
     for line in sync_summary_lines(
         tuple(str(path) for path in outcome.pruned),
         tuple(str(path) for path in outcome.repair.allowed),

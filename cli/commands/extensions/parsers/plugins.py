@@ -37,6 +37,7 @@ def _h_plugins_update(_args: argparse.Namespace) -> int:
 
 def _h_plugins_install(args: argparse.Namespace) -> int:
     from cli.commands.extensions.plugins import cmd_plugins_install
+    from cli.commands.extensions.skills_sync import source_binding
 
     return cmd_plugins_install(
         args.url,
@@ -45,6 +46,9 @@ def _h_plugins_install(args: argparse.Namespace) -> int:
         accept_risk=args.accept_risk,
         gateway=_extension_gateway(args),
         machine=args.runtime.machine,
+        binding=source_binding(
+            args.runtime.session.user_home, args.runtime.config.process_environment()
+        ),
     )
 
 
@@ -64,9 +68,10 @@ def _h_plugins_inspect(args: argparse.Namespace) -> int:
     # Imported from its own module rather than the `cli.commands` package: the
     # catalog reaches into the agent layer, and routing it through the package
     # export would pull `agent` into every other CLI verb's import.
+    from agent.extensions.catalog import build_catalog
     from cli.commands.extensions.plugins_inspect import cmd_plugins_inspect
 
-    return cmd_plugins_inspect(args.name)
+    return cmd_plugins_inspect(args.name, catalog=build_catalog())
 
 
 def _h_plugins_verify(_args: argparse.Namespace) -> int:
@@ -78,17 +83,31 @@ def _h_plugins_verify(_args: argparse.Namespace) -> int:
 
 def _h_plugins_upgrade(args: argparse.Namespace) -> int:
     from cli.commands.extensions.plugins import cmd_plugins_upgrade
+    from cli.commands.extensions.skills_sync import source_binding
 
-    return cmd_plugins_upgrade(args.name)
+    return cmd_plugins_upgrade(
+        args.name,
+        binding=source_binding(
+            args.runtime.session.user_home, args.runtime.config.process_environment()
+        ),
+    )
 
 
 def _h_skill_update(args: argparse.Namespace) -> int:
     from base.config import ConfigBoot
     from cli.commands.extensions.skill import cmd_skill_update
+    from cli.commands.extensions.skills_sync import source_binding
 
     config = ConfigBoot()
     config.read_process_environment()
-    return cmd_skill_update(args.names, config=config)
+    return cmd_skill_update(
+        args.names,
+        config=config,
+        repo=args.runtime.checkout,
+        binding=source_binding(
+            args.runtime.session.user_home, args.runtime.config.process_environment()
+        ),
+    )
 
 
 def _h_skill_upgrade(args: argparse.Namespace) -> int:

@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 import pytest
 
-from cli import fleet_update
+from base.paths import repo_root
 from cli.tests.fleet_update.fleet_update_cluster import Cluster
 
 Env = tuple[Cluster, Callable[..., int]]
@@ -64,9 +64,7 @@ def test_the_tracked_table_is_keyed_by_ssh_alias() -> None:
     # The gate looks each host up by the alias the window names (`mba`), never by the machine
     # name that host boots into (`macbook-air`): a table keyed by the other name tells every
     # window that the host has no baseline, so the two names must not drift apart again.
-    table = json.loads(
-        (fleet_update.REPO / "deploy" / "fleet" / "helper-identities.json").read_text()
-    )
+    table = json.loads((repo_root() / "deploy" / "fleet" / "helper-identities.json").read_text())
     assert set(table) == {"mba", "macmini", "company-air", "company-mini"}
 
 

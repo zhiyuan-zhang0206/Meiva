@@ -1,0 +1,6 @@
+exports = ["relay_inputs.py"]
+
+[uses]
+"test_relay_inbox.py" = ["relay_inputs.py"]
+"test_relay_push_text.py" = ["relay_inputs.py"]
+"test_relay_steps.py" = ["relay_inputs.py"]

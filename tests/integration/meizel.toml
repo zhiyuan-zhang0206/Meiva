@@ -3,7 +3,6 @@
 
 [debt.first-party-patch]
 "test_impersonation_notifications.py#monkeypatch.setattr base.db.Database.write_transaction" = 1
-"test_impersonation_notifications.py#monkeypatch.setattr cli.commands.agents.impersonation.relay_token_from_env" = 1
 
 [debt.restricted-python]
 "test_schedule_runner_cleanup.py#python -c" = 1

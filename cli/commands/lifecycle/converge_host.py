@@ -112,9 +112,13 @@ def _ensure_plugin_config_images(ctx: ConvergeCtx) -> None:
 def _converge_skills_step(ctx: ConvergeCtx) -> None:
     """Sync repo + plugin skills into `$MEIVA_HOME/skills/` — the single dir the
     skill scanner loads (see `cli/commands/extensions/skills_sync.py`)."""
-    from cli.commands.extensions.skills_sync import converge_skills
+    from cli.commands.extensions.skills_sync import converge_skills, source_binding
 
-    result = converge_skills(ctx.repo, ctx.meiva_home)
+    result = converge_skills(
+        ctx.repo,
+        ctx.meiva_home,
+        source_binding(ctx.session.user_home, ctx.config.process_environment()),
+    )
     for kind, names in (
         ("copied", result.copied),
         ("updated", result.updated),
@@ -708,7 +712,7 @@ def cmd_converge(
     skills_root = skills_dir(command.home)
     adopt_local_extensions(
         database_factory=database_factory,
-        machine_name=command.machine.name,
+        machine=command.machine,
         skills_root=skills_root,
     )
     materialize_cluster_extensions(database_factory=database_factory, skills_root=skills_root)

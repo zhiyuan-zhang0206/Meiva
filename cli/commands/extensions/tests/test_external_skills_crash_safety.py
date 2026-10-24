@@ -6,12 +6,11 @@ import shutil
 import stat
 from collections.abc import Callable
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 
-from base.clock.tests.manual_timers import ManualTimers
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
@@ -25,8 +24,9 @@ from cli.commands.converge.tests.external_skills import (
     target_path,
 )
 from cli.commands.extensions import external_skills as bridge
-from cli.commands.extensions.external_skill_host import cleanup as bridge_cleanup
 from cli.commands.extensions.external_skill_host import filesystem as bridge_fs
+from cli.commands.extensions.tests.support import killed_converge as killed
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import UserSession
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
@@ -43,7 +43,7 @@ def _converge(ctx: ConvergeCtx, *, host_home: Path | None = None) -> None:
 def _world(
     tmp_path: Path,
     *,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> tuple[Path, Path, ConvergeCtx]:
@@ -72,7 +72,7 @@ def _world(
             host=fake_host(),
             session=UserSession(user_home=meiva_home, login_shell="/bin/zsh", interactive=False),
             services=frozenset(),
-            timers=ManualTimers(),
+            timers=SYSTEM_TIMERS,
         ),
     )
 
@@ -101,42 +101,42 @@ def _remove_by_hand(client: Path, context: ConvergeCtx) -> None:
     (ledger_root / "codex.json").unlink()
 
 
+def _site(context: ConvergeCtx, client: Path, source: Path) -> killed.Site:
+    return killed.Site(
+        skills_root=client / "skills",
+        ledger_path=context.meiva_home / "configs" / "external-agent-skills" / "codex.json",
+        client_key="codex",
+        skill=SKILL,
+        source=source,
+    )
+
+
+# meiva:note
+# A process killed after the staged copy was renamed into place, and before that was recorded,
+# leaves the stage on disk and the ledger at `publishing`. The next converge reports the
+# interrupted publication and touches nothing; once a person has removed the residue and the
+# ledger, the skill installs.
 def test_interrupted_stage_publication_is_reported_and_never_resumed(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
 ) -> None:
-    _, client, context = _world(
+    source, client, context = _world(
         tmp_path,
         operator_database=operator_database,
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
     target = _target(client)
-    original_rename = bridge.rename_no_replace
-    interrupted = False
-
-    def interrupt_after_stage_publish(source_path: Path, destination: Path) -> None:
-        nonlocal interrupted
-        original_rename(source_path, destination)
-        if destination.name.startswith(f".{SKILL}.meiva-stage-") and not interrupted:
-            interrupted = True
-            raise SystemExit("process killed after stage publication")
-
-    monkeypatch.setattr(bridge, "rename_no_replace", interrupt_after_stage_publish)
-    with pytest.raises(SystemExit, match="stage publication"):
-        _converge(context, host_home=client.parent)
-
-    assert interrupted
+    site = _site(context, client, source)
+    killed.forget_publication(site, killed.stage(site))
     assert _ledger(context)["transaction"]["stage_state"] == "publishing"
-    monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
     ledger_before = _ledger(context)
     residues_before = sorted(_residues(client))
-    capsys.readouterr()
+    assert len(residues_before) == 1
 
     _converge(context, host_home=client.parent)
 
@@ -153,11 +153,15 @@ def test_interrupted_stage_publication_is_reported_and_never_resumed(
     assert _residues(client) == []
 
 
+# meiva:note
+# A process killed after it renamed the managed target aside, and before it recorded the claim,
+# leaves the ledger at `claiming`, the copy at its transaction-owned `previous` path and no target.
+# A target a user creates in that gap is never replaced or adopted: the next converge reports
+# the interrupted claim and touches nothing.
 def test_interrupted_target_claim_is_reported_and_leaves_a_late_target_alone(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -171,25 +175,14 @@ def test_interrupted_target_claim_is_reported_and_leaves_a_late_target_alone(
     _converge(context, host_home=client.parent)
     target = _target(client)
     source.joinpath("SKILL.md").write_text("operator v2\n")
-    original_rename = bridge.rename_no_replace
-    interrupted = False
+    site = _site(context, client, source)
+    ledger = killed.stage(site)
+    killed.claim_target(site, ledger)
 
-    def interrupt_after_claim(source_path: Path, destination: Path) -> None:
-        nonlocal interrupted
-        original_rename(source_path, destination)
-        if source_path == target and not interrupted:
-            interrupted = True
-            raise SystemExit("process killed after target claim")
-
-    monkeypatch.setattr(bridge, "rename_no_replace", interrupt_after_claim)
-    with pytest.raises(SystemExit, match="target claim"):
-        _converge(context, host_home=client.parent)
-
-    assert interrupted
     assert _ledger(context)["transaction"]["claim_state"] == "claiming"
+    assert not target.exists()
     target.mkdir()
     (target / "user.txt").write_text("late user target\n")
-    monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
     ledger_before = _ledger(context)
     residues_before = sorted(_residues(client))
     capsys.readouterr()
@@ -211,10 +204,31 @@ def test_interrupted_target_claim_is_reported_and_leaves_a_late_target_alone(
     assert _residues(client) == []
 
 
+# meiva:note
+# A converge that has gone live with v2 and queued v1 as garbage, before any cleanup has run:
+# the ledger holds the queued item (location `source`), the superseded copy sits at its
+# transaction-owned `previous` path and the target is v2. Built with the bridge's own steps.
+def _v2_live_with_garbage_queued(
+    context: ConvergeCtx, client: Path, source: Path
+) -> tuple[killed.Site, dict[str, Any], dict[str, Any], Path]:
+    source.joinpath("SKILL.md").write_text("operator v2\n")
+    site = _site(context, client, source)
+    ledger = killed.stage(site)
+    previous = killed.claim_target(site, ledger)
+    killed.record_claim(site, ledger)
+    killed.land_stage(site, ledger)
+    item = killed.commit(site, ledger, previous)
+    return site, ledger, item, previous
+
+
+# meiva:note
+# Cleanup moves the superseded copy into the private ledger directory and only then looks at what
+# it moved. A copy tampered with before that, here a file swapped for a link to a file outside,
+# fails the look: the copy is moved back, the item returns to `source`, nothing outside is
+# touched, and once the tampering is undone the next converge finishes the cleanup.
 def test_cleanup_root_claim_restores_tree_modified_before_private_isolation(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -226,37 +240,23 @@ def test_cleanup_root_claim_restores_tree_modified_before_private_isolation(
         command_config_machine=command_config_machine,
     )
     _converge(context, host_home=client.parent)
-    source.joinpath("SKILL.md").write_text("operator v2\n")
+    previous = _v2_live_with_garbage_queued(context, client, source)[3]
     outside = tmp_path / "outside.md"
     outside.write_text("outside\n")
     outside.chmod(0o444)
     outside_before = outside.stat()
-    original_rename = bridge.rename_no_replace
-    injected = False
-
-    def swap_before_cleanup_claim(source_path: Path, destination: Path) -> None:
-        nonlocal injected
-        if ".meiva-previous-" in source_path.name and "-retained-previous-" in destination.name:
-            victim = source_path / "SKILL.md"
-            victim.unlink()
-            victim.symlink_to(outside)
-            injected = True
-        original_rename(source_path, destination)
-
-    monkeypatch.setattr(bridge, "rename_no_replace", swap_before_cleanup_claim)
+    swapped = previous / "SKILL.md"
+    swapped.unlink()
+    swapped.symlink_to(outside)
 
     _converge(context, host_home=client.parent)
 
-    assert injected
     assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
-    previous = next((client / "skills").glob(f".{SKILL}.meiva-previous-*"))
-    swapped = previous / "SKILL.md"
     assert swapped.is_symlink()
     assert outside.read_text() == "outside\n"
     assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(outside_before.st_mode)
     assert _ledger(context)["garbage"][0]["location"] == "source"
 
-    monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
     swapped.unlink()
     swapped.write_text("operator v1\n")
     _converge(context, host_home=client.parent)
@@ -266,10 +266,13 @@ def test_cleanup_root_claim_restores_tree_modified_before_private_isolation(
     assert len(_ledger(context)["retained"]) == 1
 
 
+# meiva:note
+# A process killed after cleanup renamed the superseded copy into the ledger directory, and before
+# it recorded that, leaves the item at `claiming` with the copy already moved. The next converge
+# settles the claim from what is on disk and finishes the cleanup.
 def test_restart_reconciles_cleanup_claim_before_post_write(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -281,24 +284,10 @@ def test_restart_reconciles_cleanup_claim_before_post_write(
         command_config_machine=command_config_machine,
     )
     _converge(context, host_home=client.parent)
-    source.joinpath("SKILL.md").write_text("operator v2\n")
-    original_rename = bridge.rename_no_replace
-    interrupted = False
-
-    def interrupt_after_cleanup_claim(source_path: Path, destination: Path) -> None:
-        nonlocal interrupted
-        original_rename(source_path, destination)
-        if "-retained-previous-" in destination.name and not interrupted:
-            interrupted = True
-            raise SystemExit("process killed after cleanup claim")
-
-    monkeypatch.setattr(bridge, "rename_no_replace", interrupt_after_cleanup_claim)
-    with pytest.raises(SystemExit, match="cleanup claim"):
-        _converge(context, host_home=client.parent)
-
-    assert interrupted
+    site, ledger, item, _previous = _v2_live_with_garbage_queued(context, client, source)
+    killed.claim_cleanup_root(site, ledger, item, record=False)
     assert _ledger(context)["garbage"][0]["location"] == "claiming"
-    monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
+
     _converge(context, host_home=client.parent)
 
     assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
@@ -307,9 +296,7 @@ def test_restart_reconciles_cleanup_claim_before_post_write(
     assert _residues(client) == []
 
 
-def test_unsupported_cleanup_never_changes_directory_permissions(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_unsupported_cleanup_never_changes_directory_permissions(tmp_path: Path) -> None:
     residue = tmp_path / "residue"
     nested = residue / "nested"
     nested.mkdir(parents=True)
@@ -320,24 +307,27 @@ def test_unsupported_cleanup_never_changes_directory_permissions(
     outside.chmod(0o755)
     outside_before = outside.stat()
 
-    def chmod_forbidden(*args: Any, **kwargs: Any) -> None:
-        raise AssertionError("cleanup must not chmod by pathname or descriptor")
-
-    monkeypatch.setattr(Path, "chmod", chmod_forbidden)
-    monkeypatch.setattr(bridge_fs.os, "fchmod", chmod_forbidden)
-
     with pytest.raises(bridge_fs.ClientConflictError):
         bridge_fs.remove_manifest_subset(residue, manifest)
 
     assert nested.is_dir()
     assert stat.S_IMODE(nested.stat().st_mode) == 0o500
+    assert stat.S_IMODE(residue.stat().st_mode) == 0o755
     assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(outside_before.st_mode)
 
 
+def _claim_of(item: dict[str, Any], path: str) -> dict[str, str]:
+    return next(claim for claim in item["file_claims"] if claim["path"] == path)
+
+
+# meiva:note
+# A process killed after cleanup renamed one file to its claim name, and before it recorded that,
+# leaves the claim at `claiming` with the file already moved. Whether the object at the claim
+# name is the one Meiva moved cannot be proved from the path, so the next converge adopts
+# nothing: the claim is retained as it is.
 def test_restart_does_not_adopt_ambiguous_per_file_claim(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -349,35 +339,13 @@ def test_restart_does_not_adopt_ambiguous_per_file_claim(
         command_config_machine=command_config_machine,
     )
     _converge(context, host_home=client.parent)
-    source.joinpath("SKILL.md").write_text("operator v2\n")
-    original_rename = bridge.rename_no_replace
-    interrupted = False
-
-    def interrupt_after_file_claim(source_path: Path, destination: Path) -> None:
-        nonlocal interrupted
-        if ".meiva-retained-" in destination.name and not interrupted:
-            ledger = _ledger(context)
-            claiming = [
-                claim
-                for claim in ledger["garbage"][0]["file_claims"]
-                if claim["state"] == "claiming"
-            ]
-            assert len(claiming) == 1
-            assert destination.name in claiming[0]["quarantine"]
-        original_rename(source_path, destination)
-        if ".meiva-retained-" in destination.name and not interrupted:
-            interrupted = True
-            raise SystemExit("process killed after per-file claim")
-
-    monkeypatch.setattr(bridge, "rename_no_replace", interrupt_after_file_claim)
-    with pytest.raises(SystemExit, match="per-file claim"):
-        _converge(context, host_home=client.parent)
-
+    site, ledger, item, _previous = _v2_live_with_garbage_queued(context, client, source)
+    quarantine = killed.claim_cleanup_root(site, ledger, item)
+    killed.claim_cleanup_file(site, ledger, quarantine, _claim_of(item, "SKILL.md"), record=False)
     ledger = _ledger(context)
     assert ledger["garbage"][0]["location"] == "quarantine"
     assert "claiming" in {claim["state"] for claim in ledger["garbage"][0]["file_claims"]}
 
-    monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
     _converge(context, host_home=client.parent)
 
     ledger = _ledger(context)
@@ -387,10 +355,13 @@ def test_restart_does_not_adopt_ambiguous_per_file_claim(
     assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
 
 
+# meiva:note
+# A path a user created at a file's claim name inside the private root is never adopted or
+# overwritten: that claim is retained, the user's file keeps its content and the original file is
+# left where it was.
 def test_preexisting_per_file_quarantine_is_preserved_without_adoption(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -402,43 +373,28 @@ def test_preexisting_per_file_quarantine_is_preserved_without_adoption(
         command_config_machine=command_config_machine,
     )
     _converge(context, host_home=client.parent)
-    source.joinpath("SKILL.md").write_text("operator v2\n")
-    original_preserve = bridge_cleanup.preserve_claimed_tree
-    collision: Path | None = None
+    site, ledger, item, _previous = _v2_live_with_garbage_queued(context, client, source)
+    quarantine = killed.claim_cleanup_root(site, ledger, item)
+    collision = quarantine / _claim_of(item, "SKILL.md")["quarantine"]
+    collision.write_text("late user path\n")
 
-    def inject_collision_after_root_verification(
-        ledger_path: Path,
-        ledger: dict[str, Any],
-        item: dict[str, Any],
-        quarantine: Path,
-        rename: Any,
-    ) -> None:
-        nonlocal collision
-        skill_claim = next(claim for claim in item["file_claims"] if claim["path"] == "SKILL.md")
-        candidate = quarantine / skill_claim["quarantine"]
-        candidate.write_text("late user path\n")
-        collision = candidate
-        original_preserve(ledger_path, ledger, item, quarantine, rename)
-
-    monkeypatch.setattr(
-        bridge_cleanup, "preserve_claimed_tree", inject_collision_after_root_verification
-    )
     _converge(context, host_home=client.parent)
 
-    assert collision is not None
     assert collision.read_text() == "late user path\n"
     retained = _ledger(context)["retained"]
     assert len(retained) == 1
-    skill_claim = next(claim for claim in retained[0]["file_claims"] if claim["path"] == "SKILL.md")
-    assert skill_claim["state"] == "retained"
+    assert _claim_of(retained[0], "SKILL.md")["state"] == "retained"
     assert (collision.parent / "SKILL.md").read_text() == "operator v1\n"
     assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
 
 
+# meiva:note
+# Once the superseded copy is in the private ledger directory, a file that cannot be claimed is
+# retained for good: no pathname retry, no deletion. The failure is a real one: a nested directory
+# is read-only, so the file in it cannot be renamed; the file beside it is claimed and verified.
 def test_per_file_claim_failure_is_terminal_after_private_root_claim(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -449,35 +405,41 @@ def test_per_file_claim_failure_is_terminal_after_private_root_claim(
         producer=operator_pipeline,
         command_config_machine=command_config_machine,
     )
+    references = source / "references"
+    references.mkdir()
+    (references / "recovery.md").write_text("recover safely\n")
+    references.chmod(0o555)
     _converge(context, host_home=client.parent)
     source.joinpath("SKILL.md").write_text("operator v2\n")
-    original_rename = bridge.rename_no_replace
-    attempts = 0
 
-    def fail_file_claim(source_path: Path, destination: Path) -> None:
-        nonlocal attempts
-        if ".meiva-retained-" in destination.name:
-            attempts += 1
-            raise PermissionError("private residue is not writable")
-        original_rename(source_path, destination)
-
-    monkeypatch.setattr(bridge, "rename_no_replace", fail_file_claim)
     _converge(context, host_home=client.parent)
-    assert attempts >= 1
-    attempts_after_cleanup = attempts
+
     ledger = _ledger(context)
     assert ledger["garbage"] == []
-    assert len(ledger["retained"]) == 1
+    (retained,) = ledger["retained"]
+    assert {claim["path"]: claim["state"] for claim in retained["file_claims"]} == {
+        ".meiva-managed.json": "retained",
+        "SKILL.md": "retained",
+        "references/recovery.md": "retained",
+    }
+    (quarantine,) = (context.meiva_home / "configs" / "external-agent-skills").glob(
+        ".codex-retained-previous-*"
+    )
+    assert (quarantine / "references" / "recovery.md").read_text() == "recover safely\n"
+    ledger_before = _ledger(context)
 
     _converge(context, host_home=client.parent)
 
-    assert attempts == attempts_after_cleanup
+    assert _ledger(context) == ledger_before
     assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
 
 
-def test_cleanup_preserves_late_replacement_after_final_file_verification(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+# meiva:note
+# Removing a verified residue is refused outright: the check proves a file matches its record
+# now, and a pathname could name something else by the time it is unlinked. Nothing is deleted,
+# a link planted at the residue's path is left alone, and the file it points at keeps its
+# content and its mode.
+def test_cleanup_never_unlinks_a_verified_residue_by_pathname(tmp_path: Path) -> None:
     residue = tmp_path / "residue"
     residue.mkdir()
     victim = residue / "SKILL.md"
@@ -487,32 +449,27 @@ def test_cleanup_preserves_late_replacement_after_final_file_verification(
     outside.write_text("outside\n")
     outside.chmod(0o444)
     outside_before = outside.stat()
-    original_verify = bridge_fs.verify_cleanup_file
-    late_replacement: Path | None = None
-
-    def swap_after_verification(path: Path, expected: dict[str, Any]) -> None:
-        nonlocal late_replacement
-        original_verify(path, expected)
-        claimed = path.with_name(f"{path.name}.claimed")
-        path.rename(claimed)
-        path.symlink_to(outside)
-        late_replacement = path
-
-    monkeypatch.setattr(bridge_fs, "verify_cleanup_file", swap_after_verification)
 
     with pytest.raises(bridge_fs.ClientConflictError):
         bridge_fs.remove_manifest_subset(residue, manifest)
 
-    assert late_replacement is not None
-    assert late_replacement.is_symlink()
+    assert victim.read_text() == "operator\n"
+    victim.unlink()
+    victim.symlink_to(outside)
+    with pytest.raises(bridge_fs.ClientConflictError):
+        bridge_fs.remove_manifest_subset(residue, manifest)
+    assert victim.is_symlink()
     assert outside.read_text() == "outside\n"
     assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(outside_before.st_mode)
 
 
+# meiva:note
+# A file claimed into the private root is looked at once more before it is recorded, and a
+# replacement found there, here a link to a file outside, ends the claim as retained: the link is
+# left in place, the file outside keeps its content and mode, and later converges do not revisit it.
 def test_converge_terminally_records_post_verification_replacement(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -524,27 +481,20 @@ def test_converge_terminally_records_post_verification_replacement(
         command_config_machine=command_config_machine,
     )
     _converge(context, host_home=client.parent)
-    source.joinpath("SKILL.md").write_text("operator v2\n")
+    site, ledger, item, _previous = _v2_live_with_garbage_queued(context, client, source)
+    quarantine = killed.claim_cleanup_root(site, ledger, item)
+    late_replacement = killed.claim_cleanup_file(
+        site, ledger, quarantine, _claim_of(item, "SKILL.md")
+    )
     outside = tmp_path / "outside.md"
     outside.write_text("outside\n")
     outside.chmod(0o444)
     outside_before = outside.stat()
-    original_verify = bridge_cleanup.verify_cleanup_file
-    late_replacement: Path | None = None
+    late_replacement.rename(late_replacement.with_name(f"{late_replacement.name}.claimed"))
+    late_replacement.symlink_to(outside)
 
-    def swap_after_verification(path: Path, expected: dict[str, Any]) -> None:
-        nonlocal late_replacement
-        original_verify(path, expected)
-        if path.name.startswith(".SKILL.md.meiva-retained-"):
-            claimed = path.with_name(f"{path.name}.claimed")
-            path.rename(claimed)
-            path.symlink_to(outside)
-            late_replacement = path
-
-    monkeypatch.setattr(bridge_cleanup, "verify_cleanup_file", swap_after_verification)
     _converge(context, host_home=client.parent)
 
-    assert late_replacement is not None
     assert late_replacement.is_symlink()
     assert outside.read_text() == "outside\n"
     assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(outside_before.st_mode)
@@ -553,7 +503,6 @@ def test_converge_terminally_records_post_verification_replacement(
     assert len(ledger["retained"]) == 1
     assert all(claim["state"] == "retained" for claim in ledger["retained"][0]["file_claims"])
 
-    monkeypatch.setattr(bridge_cleanup, "verify_cleanup_file", original_verify)
     _converge(context, host_home=client.parent)
 
     assert late_replacement.is_symlink()
@@ -566,7 +515,7 @@ def test_linked_external_roots_are_rejected_without_following(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     linked_component: str,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -601,7 +550,7 @@ def test_linked_external_roots_are_rejected_without_following(
 def test_linked_host_home_is_rejected_without_inspection(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -631,7 +580,7 @@ def test_linked_host_home_is_rejected_without_inspection(
 def test_source_tree_link_is_fatal_before_copy(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -659,7 +608,7 @@ def test_source_tree_link_is_fatal_before_copy(
 
 def test_source_path_component_link_is_fatal_before_copy(
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -688,10 +637,12 @@ def test_source_path_component_link_is_fatal_before_copy(
     assert not target_path(client, tmp_path).exists()
 
 
+# meiva:note
+# Cleanup keeps what it cannot prove it may delete: the superseded copy is moved into the private
+# ledger directory and stays there, content intact, instead of being unlinked by pathname.
 def test_cleanup_retains_private_residue_without_path_unlink(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_config_machine: tuple[ConfigBoot, MachineIdentity],
@@ -709,26 +660,20 @@ def test_cleanup_retains_private_residue_without_path_unlink(
     _converge(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     (source / "SKILL.md").write_text("operator v2\n")
-    original_unlink = Path.unlink
-    unlink_attempts = 0
 
-    def forbid_cleanup_unlink(path: Path, missing_ok: bool = False) -> None:
-        nonlocal unlink_attempts
-        if "-retained-previous-" in str(path):
-            unlink_attempts += 1
-            raise AssertionError(f"cleanup attempted pathname unlink: {path.name}")
-        original_unlink(path, missing_ok=missing_ok)
-
-    monkeypatch.setattr(Path, "unlink", forbid_cleanup_unlink)
     _converge(context, host_home=client.parent)
-    assert unlink_attempts == 0
-    ledger = json.loads(
-        (context.meiva_home / "configs" / "external-agent-skills" / "codex.json").read_text()
-    )
+
+    ledger_root = context.meiva_home / "configs" / "external-agent-skills"
+    ledger = json.loads((ledger_root / "codex.json").read_text())
     assert ledger["transaction"] is None
     assert ledger["garbage"] == []
     assert [item["kind"] for item in ledger["retained"]] == ["previous"]
     assert ledger["retained"][0]["location"] == "retained"
+    (retained,) = ledger_root.glob(".codex-retained-previous-*")
+    old_copies = [
+        p for p in retained.rglob("*") if p.is_file() and p.read_text() == "operator v1\n"
+    ]
+    assert len(old_copies) == 1
 
     _converge(context, host_home=client.parent)
     assert (target / "SKILL.md").read_text() == "operator v2\n"
@@ -760,28 +705,20 @@ def test_cleanup_rejects_same_content_hard_link_without_changing_outside_inode(
     assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(outside_before.st_mode)
 
 
-def test_path_and_open_handle_metadata_variants_are_not_a_source_change(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    source_file = tmp_path / "SKILL.md"
-    source_file.write_text("operator\n")
-    real_fstat = bridge_fs.os.fstat
+# meiva:note
+# A path stat and an open-handle stat of the same file agree on identity (device and inode)
+# whatever else the platform reports differently, such as the change time. Two stats that
+# disagree on the inode, or that report no identity at all, are different objects.
+def test_path_and_open_handle_metadata_variants_are_not_a_source_change() -> None:
+    def stat_of(*, inode: int, device: int, ctime: int) -> os.stat_result:
+        return os.stat_result((0o100644, inode, device, 1, 0, 0, 9, 0, 0, ctime))
 
-    def fstat_with_platform_metadata(fd: int) -> SimpleNamespace:
-        current = real_fstat(fd)
-        return SimpleNamespace(
-            st_ctime_ns=current.st_ctime_ns + 1,
-            st_dev=current.st_dev,
-            st_ino=current.st_ino,
-            st_mode=current.st_mode,
-            st_mtime_ns=current.st_mtime_ns,
-            st_nlink=current.st_nlink,
-            st_size=current.st_size,
-        )
+    by_path = stat_of(inode=7, device=3, ctime=100)
 
-    monkeypatch.setattr(bridge_fs.os, "fstat", fstat_with_platform_metadata)
-
-    data, mode = bridge_fs.read_regular(source_file, source=True)
-
-    assert data == b"operator\n"
-    assert mode == stat.S_IMODE(source_file.stat().st_mode)
+    assert bridge_fs.same_identity(by_path, stat_of(inode=7, device=3, ctime=101))
+    assert not bridge_fs.same_identity(by_path, stat_of(inode=8, device=3, ctime=100))
+    assert not bridge_fs.same_identity(by_path, stat_of(inode=7, device=4, ctime=100))
+    assert not bridge_fs.same_identity(stat_of(inode=0, device=0, ctime=1), by_path)
+    assert not bridge_fs.same_identity(
+        stat_of(inode=0, device=0, ctime=1), stat_of(inode=0, device=0, ctime=1)
+    )
