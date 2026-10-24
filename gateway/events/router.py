@@ -54,7 +54,7 @@ from gateway.events.events_plan import (
     plan_events,
 )
 from gateway.events.schemas import EventRow, EventsMeta, EventsResponse
-from gateway.http.config import GatewayConfig, runtime_view
+from gateway.http.config import GatewayConfig, gateway_config
 
 router = APIRouter()
 
@@ -206,7 +206,7 @@ def get_events(
                 with_total=with_total,
             ),
             now=now,
-            default_limit=runtime_view(request).display.events_default_limit,
+            default_limit=gateway_config(request).display.events_default_limit,
         )
     except InvalidEventsQueryError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

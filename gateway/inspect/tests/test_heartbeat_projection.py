@@ -5,6 +5,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from typing import cast
+
+import pytest
 
 from base.api_contracts.agent_contract import AgentStatus
 from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState, plan_heartbeat
@@ -65,6 +68,11 @@ def test_a_running_or_terminated_agent_is_never_checked_in_on() -> None:
     for status in (AgentStatus.RUNNING, AgentStatus.TERMINATED):
         plan = plan_heartbeat(replace(IDLE, status=status, pending_inbound=True), CADENCE)
         assert (plan.next_at, plan.paused_until, plan.heartbeat_pending) == (None, None, False)
+
+
+def test_a_status_outside_the_lifecycle_is_not_read_as_not_idling() -> None:
+    with pytest.raises(AssertionError):
+        plan_heartbeat(replace(IDLE, status=cast(AgentStatus, "paused")), CADENCE)
 
 
 def test_the_inspector_block_carries_the_interval_and_the_last_pause() -> None:

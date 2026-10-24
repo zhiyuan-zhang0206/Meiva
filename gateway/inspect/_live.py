@@ -9,7 +9,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.observation.evidence import AgentObservation, observation
 from base.agents.observation.snapshot import OpenNotice
-from base.api_contracts.agent_contract import Harness, LivenessState
+from base.api_contracts.agent_contract import AgentStatus, Harness, LivenessState
 from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState, plan_heartbeat
 from gateway.inspect.schemas import HeartbeatInfo, HeartbeatLastPause
 from services.wake.heartbeat import STALE_PENDING_S
@@ -23,7 +23,7 @@ class InspectDbRows(NamedTuple):
     # it anyway, so the panel projects next_at instead of heartbeat_pending.
 
     machine: str
-    status: Any
+    status: AgentStatus
     last_active_at: Any
     last_heartbeat_at: Any
     spawned_at: Any
@@ -68,7 +68,7 @@ def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
             overlay["llm_model"] = row[11]
         return InspectDbRows(
             machine=row[1],
-            status=row[2],
+            status=AgentStatus(row[2]),
             last_active_at=row[3],
             last_heartbeat_at=row[4],
             spawned_at=row[5],

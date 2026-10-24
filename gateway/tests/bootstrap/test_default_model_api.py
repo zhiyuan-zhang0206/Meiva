@@ -114,6 +114,7 @@ class TestGet:
 
 
 class TestPut:
+    @pytest.mark.usefixtures("gateway_local_runner")
     def test_picker_preflight_and_birth_use_the_cluster_default(
         self, db_conn: psycopg.Connection
     ) -> None:

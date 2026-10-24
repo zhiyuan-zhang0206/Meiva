@@ -9,10 +9,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, assert_never
 
 __all__ = [
     "UPDATABLE",
+    "ControlAction",
     "ControlPlan",
     "LogsSource",
     "capture_window",
@@ -30,6 +31,7 @@ UPDATABLE = ("name", "description", "script", "command", "enabled")
 _MIN_CAPTURE_LINES = 200
 
 LogsSource = Literal["live", "transcript", "last_error", "none"]
+ControlAction = Literal["start", "stop", "restart"]
 
 
 # meiva:note
@@ -68,15 +70,24 @@ def edit_needs_sync(changed: Mapping[str, object], *, enabled: bool) -> bool:
 
 
 # meiva:note
-# What `action` ('start', 'stop' or 'restart') does to a schedule in its current state.
-def control_plan(action: str, *, enabled: bool, status: str) -> ControlPlan:
-    wanted = action != "stop"
-    if action == "restart" and not enabled:
-        return ControlPlan(
-            refusal="schedule is disabled; start it instead of restarting",
-            enabled=enabled,
-            needs_sync=False,
-        )
+# What `action` does to a schedule in its current state. The three actions are the whole type: a
+# value outside them fails at once instead of being read as a start.
+def control_plan(action: ControlAction, *, enabled: bool, status: str) -> ControlPlan:
+    match action:
+        case "start":
+            wanted = True
+        case "stop":
+            wanted = False
+        case "restart":
+            if not enabled:
+                return ControlPlan(
+                    refusal="schedule is disabled; start it instead of restarting",
+                    enabled=enabled,
+                    needs_sync=False,
+                )
+            wanted = True
+        case _:
+            assert_never(action)
     needs_sync = (
         action == "restart" or enabled != wanted or (wanted and status in ("completed", "error"))
     )

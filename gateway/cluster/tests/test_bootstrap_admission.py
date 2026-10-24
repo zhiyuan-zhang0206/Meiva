@@ -3,6 +3,7 @@
 import json
 import time
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -23,7 +24,7 @@ from base.host.net.auth import bearer_header
 from base.host.net.tests.local_http import serve_asgi
 from base.lm.catalog import ModelCatalog
 from gateway.cluster.bootstrap import router
-from gateway.http.config import GatewayConfig
+from gateway.http.config import placeholder_config
 
 _SECRET = "bootstrap-admission-test"  # noqa: S105 — isolated test credential
 _TURN_LIMIT = "MEIVA_HOST_MAX_CONCURRENT_TURNS"
@@ -90,16 +91,11 @@ def gateway_client(
     app.state.config_authority = served_authority
     app.state.catalog = model_catalog
     app.state.gateway_process = SimpleNamespace(home=gateway_home)
-    app.state.gateway_config = GatewayConfig(
+    app.state.gateway_config = replace(
+        placeholder_config(),
         cluster_secret=_SECRET,
-        session_ttl_seconds=3600,
-        mcp_endpoint_enabled=False,
-        allowed_origins=(),
-        browser_origin="",
-        session_cookie_secure=False,
         memory_root=gateway_home / "memory",
         upload_home=gateway_home,
-        human_auth="required",
     )
     app.include_router(router)
     with TestClient(app) as client:

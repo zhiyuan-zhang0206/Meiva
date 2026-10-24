@@ -11,25 +11,20 @@ from fastapi import APIRouter, FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
-from base.config.tests.configuration import snapshot_process_config
 from base.db import create_agent
 from base.events.live.bus import EventBus, EventBusConfig
-from gateway.http.config import GatewayConfig, gateway_config_from_boot
+from gateway.http.config import PageSettings
 from gateway.routers.page_serving import pages
-from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.auth.gateway_config import (
+    GatewayTestClient,
+    gateway_test_client,
+    gateway_test_config,
+)
 from gateway.tests.support.db_faults.insert_fault import failing_insert
 
 SECRET = "page-receipt-test-secret"  # noqa: S105 -- isolated credential fixture
 HEADERS = {"Idempotency-Key": "intent", "Idempotency-Scope": "principal-v1"}
 BODY = {"name": "report", "port": 8801, "host": "127.0.0.1", "ttl_seconds": 60}
-
-
-# meiva:note
-# The test gateway's HTTP policy with `changes` applied.
-def _gateway_config(**changes: object) -> GatewayConfig:
-    return replace(
-        gateway_config_from_boot(snapshot_process_config()), human_auth="required", **changes
-    )
 
 
 @pytest.fixture
@@ -146,13 +141,22 @@ def test_registration_replay_cannot_close_later_page(
     first = client.post(_path(agent), json=BODY, headers=HEADERS)
     later = client.post(_path(agent), json={**BODY, "port": 8802}, headers=_key("new"))
     assert later.status_code == 201 and later.json()["id"] != first.json()["id"]
-    client.app.state.gateway_process.config.set_field("page_default_ttl_seconds", 1)
-    client.app.state.gateway_process.config.set_field("gateway_url", "http://changed.invalid")
+    changed = replace(
+        client.app.state.gateway_config,
+        pages=PageSettings(gateway_url="http://changed.invalid", default_ttl_seconds=1),
+    )
 
     # meiva:note
-    # Replaying a historical acceptance must not publish obsolete events: a publish raises.
-    client.app.state.bus = _unreachable_bus(client)
-    replay = client.post(_path(agent), json=BODY, headers=HEADERS)
+    # Replaying a historical acceptance must not publish obsolete events: a publish raises. The
+    # replay runs on an app whose page settings differ from the accepting one's, and still
+    # answers what was accepted.
+    with gateway_test_client(
+        process=client.app.state.gateway_process,
+        config=changed,
+        headers={"Authorization": f"Bearer {SECRET}"},
+    ) as replaying:
+        replaying.app.state.bus = _unreachable_bus(replaying)
+        replay = replaying.post(_path(agent), json=BODY, headers=HEADERS)
     assert replay.status_code == 201 and replay.json() == first.json()
     assert db_conn.execute("SELECT id FROM agent_pages WHERE closed_at IS NULL").fetchall() == [
         (later.json()["id"],)
@@ -274,7 +278,6 @@ def test_failure_before_receipt_rolls_back_replacement(
 def test_revoked_auth_cannot_replay(client: GatewayTestClient, db_conn: psycopg.Connection) -> None:
     agent = _agent(db_conn)
     assert client.post(_path(agent), json=BODY, headers=HEADERS).status_code == 201
-    client.app.state.gateway_process.config.set_field("cluster_secret", "different-secret")
     with gateway_test_client(
         process=client.app.state.gateway_process,
         config=replace(client.app.state.gateway_config, cluster_secret="different-secret"),  # noqa: S106 -- isolated test credential
@@ -414,7 +417,7 @@ def test_host_validation_reuses_single_borrowed_connection(db_conn: psycopg.Conn
     # A guarded receipt lookup already owns the only backend. Validation must
     # share it rather than exhaust a pool with a nested connection request.
     with gateway_test_client(
-        config=_gateway_config(db_pool_max_size=1, cluster_secret=SECRET),
+        config=gateway_test_config(db_pool_max_size=1, cluster_secret=SECRET),
         headers={"Authorization": f"Bearer {SECRET}"},
     ) as one_connection:
         result = one_connection.post(

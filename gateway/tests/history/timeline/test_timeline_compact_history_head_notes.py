@@ -6,7 +6,10 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from base.config import settings
 from base.db import create_agent
-from gateway.tests.auth.gateway_config import GatewayTestClient
+from gateway.tests.auth.gateway_config import (
+    GatewayTestClient,
+    reconfigure,
+)
 from gateway.tests.history.test_timeline import CompactHistoryCases
 from gateway.tests.history.test_timeline import test_client as test_client
 from gateway.tests.support.checkpoints.unreadable import put_unreadable_head
@@ -34,7 +37,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="1",
         )
-        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
+        reconfigure(test_client, timeline_compact_history=-1)
 
         response = test_client.get(
             f"/api/agents/{tid}/timeline",
@@ -61,7 +64,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="3",
         )
-        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
+        reconfigure(test_client, timeline_compact_history=-1)
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline",
@@ -97,7 +100,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             self._current(standing_note, AIMessage(content="current item")),
             version="2",
         )
-        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = 1
+        reconfigure(test_client, timeline_compact_history=1)
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline", params={"before": "2.0", "limit": 50}
@@ -146,7 +149,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             self._current(AIMessage(content="current item")),
             version="2",
         )
-        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
+        reconfigure(test_client, timeline_compact_history=-1)
 
         url = f"/api/agents/{tid}/timeline"
         params = {"before": f"s1.{checkpoint_id}.1.0", "limit": 50}
@@ -302,7 +305,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             ],
             version="2",
         )
-        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = 1
+        reconfigure(test_client, timeline_compact_history=1)
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline", params={"before": "7.0", "limit": 50}
@@ -364,7 +367,7 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             ],
             version="3",
         )
-        test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
+        reconfigure(test_client, timeline_compact_history=-1)
 
         page = test_client.get(
             f"/api/agents/{tid}/timeline",

@@ -19,8 +19,7 @@ from fastapi.testclient import TestClient
 from base import config
 from base.host.net.auth import bearer_header, cookie_name
 from gateway.http.auth.session_store import LOGIN_TICKET_TTL_SECONDS
-from gateway.tests.agents.gateway_auth import disable_default_gateway_credentials
-from gateway.tests.auth.gateway_config import gateway_config_fields, gateway_test_client
+from gateway.tests.auth.gateway_config import anonymous_gateway_client, gateway_config_fields
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 _ISSUE = "/api/auth/login-ticket"
@@ -28,9 +27,8 @@ _REDEEM = "/api/auth/login-ticket/redeem"
 
 
 @pytest.fixture(autouse=True)
-def patch_secret(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def patch_secret() -> Iterator[None]:
     """A known secret and anonymous clients: each test says what credential it presents."""
-    disable_default_gateway_credentials(monkeypatch)
     with gateway_config_fields(cluster_secret=_SECRET):
         yield
 
@@ -50,7 +48,7 @@ def _cookie_headers(value: str) -> dict[str, str]:
 
 
 def test_issuing_needs_a_credential() -> None:
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         anonymous = client.post(_ISSUE)
         wrong = client.post(_ISSUE, headers=bearer_header("not-the-secret"))
     assert anonymous.status_code == 401
@@ -58,7 +56,7 @@ def test_issuing_needs_a_credential() -> None:
 
 
 def test_a_ticket_is_short_lived_and_not_cacheable(db_conn: psycopg.Connection) -> None:
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         response = client.post(_ISSUE, headers=bearer_header(_SECRET))
     assert response.status_code == 200
     body = response.json()
@@ -75,7 +73,7 @@ def test_a_ticket_is_short_lived_and_not_cacheable(db_conn: psycopg.Connection) 
 
 
 def test_redeeming_sets_the_same_session_cookie_a_login_sets() -> None:
-    with gateway_test_client(fields={"session_ttl_seconds": 456}) as client:
+    with anonymous_gateway_client(fields={"session_ttl_seconds": 456}) as client:
         ticket = _issue(client)
         redeemed = _redeem(client, ticket)
         logged_in = client.post("/api/auth/login", json={"password": _SECRET})
@@ -92,7 +90,7 @@ def test_redeeming_sets_the_same_session_cookie_a_login_sets() -> None:
 
 
 def test_the_redeemed_cookie_authenticates_and_no_cookie_does_not() -> None:
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         ticket = _issue(client)
         cookie = _redeem(client, ticket).cookies[cookie_name()]
         client.cookies.clear()
@@ -107,7 +105,7 @@ def test_the_redeemed_cookie_authenticates_and_no_cookie_does_not() -> None:
 
 
 def test_a_ticket_opens_exactly_one_session() -> None:
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         ticket = _issue(client)
         first = _redeem(client, ticket)
         client.cookies.clear()
@@ -120,7 +118,7 @@ def test_a_ticket_opens_exactly_one_session() -> None:
 
 
 def test_an_expired_ticket_is_refused(db_conn: psycopg.Connection) -> None:
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         ticket = _issue(client)
         with db_conn.cursor() as cur:
             cur.execute(
@@ -138,7 +136,7 @@ def test_an_expired_ticket_is_refused(db_conn: psycopg.Connection) -> None:
 def test_a_ticket_is_not_a_session_cookie() -> None:
     """The ticket row is a valid, live `web_sessions` id until it is spent, and
     presenting it as the session cookie must still authenticate nothing."""
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         ticket = _issue(client)
         agents = client.get("/api/agents", headers=_cookie_headers(ticket))
         check = client.get("/api/auth/check", headers=_cookie_headers(ticket))
@@ -152,7 +150,7 @@ def test_a_ticket_is_not_a_session_cookie() -> None:
 
 
 def test_a_session_cookie_is_not_a_ticket() -> None:
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         cookie = client.post("/api/auth/login", json={"password": _SECRET}).cookies[cookie_name()]
         client.cookies.clear()
         response = _redeem(client, cookie)
@@ -175,25 +173,25 @@ def test_a_session_cookie_is_not_a_ticket() -> None:
     ],
 )
 def test_malformed_and_unknown_tickets_get_the_same_refusal(ticket: str) -> None:
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         response = _redeem(client, ticket)
     assert response.status_code == 401
     assert response.json()["code"] == "invalid_login_ticket"
 
 
 def test_a_missing_ticket_field_is_a_refusal_not_a_validation_error() -> None:
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         response = client.post(_REDEEM, json={})
     assert response.status_code == 401
     assert response.json()["code"] == "invalid_login_ticket"
 
 
 def test_a_ticket_dies_with_the_credential_that_issued_it() -> None:
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         ticket = _issue(client)
-    with gateway_test_client(cluster_secret="rotated-" + "r" * 40) as rotated_client:
+    with anonymous_gateway_client(cluster_secret="rotated-" + "r" * 40) as rotated_client:
         response = _redeem(rotated_client, ticket)
-    with gateway_test_client(cluster_secret=_SECRET) as restored_client:
+    with anonymous_gateway_client(cluster_secret=_SECRET) as restored_client:
         after_restore = _redeem(restored_client, ticket)
 
     assert response.status_code == 401
@@ -201,7 +199,7 @@ def test_a_ticket_dies_with_the_credential_that_issued_it() -> None:
 
 
 def test_a_session_the_ticket_opened_can_issue_the_next_ticket() -> None:
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         cookie = _redeem(client, _issue(client)).cookies[cookie_name()]
         client.cookies.clear()
         issued = client.post(_ISSUE, headers=_cookie_headers(cookie))
@@ -209,7 +207,7 @@ def test_a_session_the_ticket_opened_can_issue_the_next_ticket() -> None:
 
 
 def test_failed_redemptions_lock_the_ip_like_failed_logins() -> None:
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         for _ in range(config.settings.gateway.login_max_failures):
             assert _redeem(client, "garbage").status_code == 401
         locked = _redeem(client, "garbage")

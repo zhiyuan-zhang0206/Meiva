@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import time
 from collections.abc import Iterator
-from pathlib import Path
+from dataclasses import replace
 
 import psycopg
 import pytest
@@ -17,10 +17,9 @@ from base.host.net.auth import (
     bearer_header,
     cookie_name,
 )
-from gateway.http.config import GatewayConfig
+from gateway.http.config import placeholder_config
 from gateway.http.middleware.cors import cors_allowed_origins
-from gateway.tests.agents.gateway_auth import disable_default_gateway_credentials
-from gateway.tests.auth.gateway_config import gateway_config_fields, gateway_test_client
+from gateway.tests.auth.gateway_config import anonymous_gateway_client, gateway_config_fields
 
 SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
@@ -39,16 +38,8 @@ def request_with_origin(
     allowed_origins: tuple[str, ...] = ("https://allowed.example",),
 ) -> Request:
     standin = FastAPI()
-    standin.state.gateway_config = GatewayConfig(
-        cluster_secret=SECRET,
-        session_ttl_seconds=3600,
-        mcp_endpoint_enabled=False,
-        allowed_origins=allowed_origins,
-        browser_origin="",
-        session_cookie_secure=False,
-        human_auth="required",
-        memory_root=Path("/nonexistent/memory"),
-        upload_home=Path("/nonexistent/home"),
+    standin.state.gateway_config = replace(
+        placeholder_config(), cluster_secret=SECRET, allowed_origins=allowed_origins
     )
     return Request(
         {
@@ -77,13 +68,12 @@ def legacy_hmac_cookie() -> str:
 
 
 @pytest.fixture(autouse=True)
-def patch_secret(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def patch_secret() -> Iterator[None]:
     """Run every test in this module against a known secret.
 
     This module tests authentication itself, so its clients are anonymous: they
     do not carry the suite's default bearer and present only what a test gives them.
     """
-    disable_default_gateway_credentials(monkeypatch)
     with gateway_config_fields(cluster_secret=SECRET):
         yield
 
@@ -226,7 +216,7 @@ def test_cors_allowed_origins_use_explicit_list_verbatim() -> None:
 
 
 def test_health_no_auth_returns_200() -> None:
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         resp = client.get("/api/health")
     assert resp.status_code == 200
 
@@ -234,7 +224,7 @@ def test_health_no_auth_returns_200() -> None:
 def test_auth_login_no_auth_allowed() -> None:
     """Login endpoint must be accessible without auth so the browser can
     obtain a session cookie."""
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         resp = client.post("/api/auth/login", json={"password": SECRET})
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
@@ -242,7 +232,7 @@ def test_auth_login_no_auth_allowed() -> None:
 
 def test_auth_check_no_auth_allowed() -> None:
     """Check endpoint returns false, not 401, when no cookie present."""
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         resp = client.get("/api/auth/check")
     assert resp.status_code == 200
     assert resp.json()["authenticated"] is False
@@ -252,19 +242,19 @@ def test_auth_check_no_auth_allowed() -> None:
 
 
 def test_login_wrong_password_returns_401() -> None:
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         resp = client.post("/api/auth/login", json={"password": "wrong"})
     assert resp.status_code == 401
 
 
 def test_login_empty_password_returns_401() -> None:
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         resp = client.post("/api/auth/login", json={"password": ""})
     assert resp.status_code == 401
 
 
 def test_login_creates_current_server_side_session() -> None:
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         token = login(client, user_agent="session-list-test")
         resp = client.get("/api/auth/sessions")
 
@@ -281,7 +271,7 @@ def test_login_creates_current_server_side_session() -> None:
 def test_sessions_list_masks_non_current_ids() -> None:
     """Only the request's current session keeps its full id; other rows show
     the final 8 characters (the suffix the revoke endpoint accepts)."""
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         current = login(client)
         client.cookies.clear()
         other = login(client, user_agent="other-browser")
@@ -298,7 +288,7 @@ def test_sessions_list_masks_non_current_ids() -> None:
 
 def test_sessions_list_labels_managed_browser_sessions() -> None:
     """The managed-browser daemon's login UA marks its session rows."""
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         login(client, user_agent="meiva-managed-browser")
         client.cookies.clear()
         login(client, user_agent="test-browser")
@@ -313,7 +303,7 @@ def test_sessions_list_labels_managed_browser_sessions() -> None:
 
 def test_revoke_endpoint_accepts_masked_suffix() -> None:
     """The sessions list shows masked ids; revoking one must still work."""
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         current = login(client)
         client.cookies.clear()
         target = login(client)
@@ -332,7 +322,7 @@ def test_revoke_endpoint_accepts_masked_suffix() -> None:
 def test_revoke_endpoint_refuses_ambiguous_suffix(db_conn: psycopg.Connection) -> None:
     """A suffix shared by more than one active session is refused, not revoked
     wholesale."""
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         login(client)
         with db_conn.cursor() as cur:
             cur.executemany(
@@ -348,7 +338,7 @@ def test_revoke_endpoint_refuses_ambiguous_suffix(db_conn: psycopg.Connection) -
 
 def test_revoke_endpoint_short_suffix_returns_404() -> None:
     """Shorter-than-masked inputs are neither full ids nor valid suffixes."""
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         login(client)
         response = client.post("/api/auth/sessions/abcdefg/revoke")
 
@@ -358,7 +348,7 @@ def test_revoke_endpoint_short_suffix_returns_404() -> None:
 def test_revoke_endpoint_refuses_current_session_by_suffix() -> None:
     """The current session's own masked suffix must not bypass the logout-only
     guard: it 404s and the session stays valid (QA nit1 regression)."""
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         current = login(client)
         response = client.post(f"/api/auth/sessions/{current[-8:]}/revoke")
         check = client.get("/api/auth/check")
@@ -372,7 +362,7 @@ def test_revoke_endpoint_ambiguous_suffix_excludes_current_session(
 ) -> None:
     """The current session is filtered out of suffix matches BEFORE ambiguity
     is judged: current + two others sharing a suffix still 409s on the two."""
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         current = login(client)
         suffix = current[-8:]
         with db_conn.cursor() as cur:
@@ -394,7 +384,7 @@ def test_revoke_endpoint_rejects_longer_than_masked_suffix(
 ) -> None:
     """Only the exact 8-character masked form falls back to suffix matching; a
     longer non-full-id string must not revoke by suffix (QA nit2 regression)."""
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         login(client)
         with db_conn.cursor() as cur:
             cur.execute(
@@ -413,7 +403,7 @@ def test_revoke_endpoint_rejects_longer_than_masked_suffix(
 
 
 def test_login_sets_cookie_flags_and_configured_ttl() -> None:
-    with gateway_test_client(fields={"session_ttl_seconds": 123}) as client:
+    with anonymous_gateway_client(fields={"session_ttl_seconds": 123}) as client:
         resp = client.post("/api/auth/login", json={"password": SECRET})
 
     set_cookie = resp.headers["Set-Cookie"]
@@ -425,14 +415,14 @@ def test_login_sets_cookie_flags_and_configured_ttl() -> None:
 
 
 def test_login_cookie_secure_derives_from_gateway_url() -> None:
-    with gateway_test_client(fields={"gateway_url": "https://gateway.example:8000"}) as client:
+    with anonymous_gateway_client(fields={"gateway_url": "https://gateway.example:8000"}) as client:
         resp = client.post("/api/auth/login", json={"password": SECRET})
 
     assert "; Secure" in resp.headers["Set-Cookie"]
 
 
 def test_https_browser_entry_login_preserves_authenticated_cookie() -> None:
-    with gateway_test_client(
+    with anonymous_gateway_client(
         base_url="https://console.example",
         fields={
             "browser_origin": "https://console.example",
@@ -452,7 +442,7 @@ def test_https_browser_entry_login_preserves_authenticated_cookie() -> None:
 
 
 def test_login_cookie_not_secure_for_http_gateway() -> None:
-    with gateway_test_client(
+    with anonymous_gateway_client(
         fields={
             "session_cookie_secure": None,
             "gateway_url": "http://gateway.example:8000",
@@ -464,7 +454,7 @@ def test_login_cookie_not_secure_for_http_gateway() -> None:
 
 
 def test_login_cookie_secure_when_policy_explicitly_enabled() -> None:
-    with gateway_test_client(
+    with anonymous_gateway_client(
         fields={
             "session_cookie_secure": True,
             "gateway_url": "http://gateway.example:8000",
@@ -476,7 +466,7 @@ def test_login_cookie_secure_when_policy_explicitly_enabled() -> None:
 
 
 def test_login_cookie_secure_for_https_gateway() -> None:
-    with gateway_test_client(
+    with anonymous_gateway_client(
         fields={
             "session_cookie_secure": None,
             "gateway_url": "https://gateway.example:8000",
@@ -489,7 +479,7 @@ def test_login_cookie_secure_for_https_gateway() -> None:
 
 def test_login_with_username_succeeds() -> None:
     """Username is accepted for Chrome password-manager compat but not validated."""
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         resp = client.post(
             "/api/auth/login",
             json={"username": "admin", "password": SECRET},
@@ -500,7 +490,7 @@ def test_login_with_username_succeeds() -> None:
 
 def test_login_with_wrong_password_but_username_fails() -> None:
     """Only password is checked — username is cosmetic."""
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         resp = client.post(
             "/api/auth/login",
             json={"username": "admin", "password": "wrong"},
@@ -509,7 +499,7 @@ def test_login_with_wrong_password_but_username_fails() -> None:
 
 
 def test_logout_revokes_server_side_and_clears_cookie() -> None:
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         token = login(client)
         assert client.get("/api/agents").status_code == 200
         resp = client.post("/api/auth/logout")
@@ -522,7 +512,7 @@ def test_logout_revokes_server_side_and_clears_cookie() -> None:
 
 
 def test_check_returns_true_with_valid_cookie() -> None:
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         token = login(client)
         resp = client.get("/api/auth/check", headers=session_cookie(token))
     assert resp.status_code == 200
@@ -530,7 +520,7 @@ def test_check_returns_true_with_valid_cookie() -> None:
 
 
 def test_check_returns_false_with_invalid_cookie() -> None:
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         resp = client.get(
             "/api/auth/check",
             headers=session_cookie("garbage-token"),
@@ -547,7 +537,7 @@ def test_check_returns_false_with_expired_cookie(db_conn: psycopg.Connection) ->
         )
     db_conn.commit()
 
-    with gateway_test_client() as client:
+    with anonymous_gateway_client() as client:
         resp = client.get(
             "/api/auth/check",
             headers=session_cookie("expired-session"),

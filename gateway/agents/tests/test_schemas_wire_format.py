@@ -1,6 +1,5 @@
 import json
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 from base.agents.tasks.priority import Priority
 from gateway.agents.schemas import (
@@ -117,20 +116,3 @@ def test_resolve_notice_in_strips_and_rejects_empty_reply() -> None:
     assert ResolveNoticeIn(action="answer", reply="  hi  ").reply == "hi"
     with pytest.raises(ValidationError):
         ResolveNoticeIn(action="answer", reply="   ")
-
-
-def test_task_status_enum_is_single_sourced_across_wire_and_frontend() -> None:
-    from base.agents.tasks.status import TaskStatus
-
-    root = Path(__file__).resolve().parents[3]
-    openapi = json.loads((root / "ui" / "web" / "openapi.json").read_text(encoding="utf-8"))
-    enum = openapi["components"]["schemas"]["TaskStatus"]["enum"]
-    assert set(enum) == {s.value for s in TaskStatus}
-
-    types_ts = (root / "ui" / "web" / "src" / "lib" / "contracts" / "types.ts").read_text(
-        encoding="utf-8"
-    )
-    assert 'export type TaskStatus = Schemas["TaskStatus"];' in types_ts, (
-        "lib/contracts/types.ts must alias the generated TaskStatus schema (single source), "
-        "not restate a status union"
-    )

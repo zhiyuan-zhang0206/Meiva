@@ -172,6 +172,7 @@ def test_unexpected_programming_failure_is_not_silently_graded(
 
 @pytest.mark.parametrize("kind", ["invalid-migration-layout", "unavailable"])
 def test_gateway_roster_row_preserves_degraded_schema_status(kind: SchemaMismatchKind) -> None:
+    from gateway.cluster.roster.roster_probe import probed_facts
     from gateway.cluster.roster.roster_rows import RosterRowSpec, reported_status
 
     diagnosis = SchemaMismatchStatus(kind=kind, machine="gateway", detail="schema evidence failed")
@@ -192,7 +193,7 @@ def test_gateway_roster_row_preserves_degraded_schema_status(kind: SchemaMismatc
             description=None,
             stopped_at=None,
         ),
-        response,
+        probed_facts(response),
         observed_at=None,
     )
     assert row.online is True

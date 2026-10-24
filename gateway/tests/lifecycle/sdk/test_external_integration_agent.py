@@ -1,5 +1,4 @@
 import importlib.util
-from dataclasses import replace
 from pathlib import Path
 from typing import Annotated, Any, cast
 from uuid import uuid4
@@ -22,6 +21,7 @@ from base.agents.context.external_attachment.plugin_state_codec import (
 )
 from base.agents.impersonation import history
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
+from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
 from base.config import settings
@@ -31,7 +31,7 @@ from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from meiva import impersonation
-from meiva.sdk_surface import agent_identity, process_context
+from meiva.sdk_surface import agent_identity, install, process_context
 from meiva.sdk_surface.installation import Installation
 from meiva.tests.fixtures.pin_agent import pin_agent
 
@@ -58,11 +58,10 @@ def native_checkpoint(
     )
 
     # meiva:note
-    # Two retained patches, both for the integration plugin that exists only in this test:
+    # One retained patch, for the integration plugin that exists only in this test:
     # `load_snapshot` rediscovers plugins from disk through `build_registry` (needs base: it
-    # should read the installed registry), and the SDK's installation is the one process-wide
-    # slot on the `meiva` module; the real installer would also turn on usage metering, whose
-    # sampling policy is fetched from a gateway bootstrap.
+    # should read the installed registry). The SDK installation itself is the real installer's:
+    # a sampling owner with a fixed policy keeps usage metering from fetching one.
     def build_registry(*, validate_state: object = None) -> ExtensionRegistry:
         return registry
 
@@ -71,8 +70,18 @@ def native_checkpoint(
     process_context.unbind_exec_turn()
     request.addfinalizer(process_context.unbind_exec_turn)
 
-    installation = replace(model_installation, registry=registry, faces=True)
-    monkeypatch.setattr(meiva, "__plugin_installation__", installation, raising=False)
+    sampling = SamplingPolicyOwner(reader=SamplingPolicy)
+    install.install(
+        registry,
+        config_images=model_installation.config_images,
+        catalog=model_installation.catalog,
+        provider_keys=model_installation.provider_keys,
+        authority=model_installation.authority,
+        sampling=sampling,
+    )
+    install.mark_faces_loaded()
+    request.addfinalizer(sampling.close)
+    request.addfinalizer(install.uninstall)
 
     handle = state_module.PluginStateHandle(IntegrationPlugin, "integration")
     state_module.build_agent_state(registry)

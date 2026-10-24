@@ -2,6 +2,7 @@ exports = ["liveness_snapshot.py", "roster_plan.py", "roster_probe.py", "roster_
 
 [uses]
 "roster_plan.py" = ["liveness_snapshot.py", "roster_rows.py"]
+"roster_probe.py" = ["roster_rows.py"]
 "snapshots.py" = ["liveness_snapshot.py", "roster_rows.py"]
 
 [purity]

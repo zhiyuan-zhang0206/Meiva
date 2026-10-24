@@ -9,18 +9,30 @@ from fastapi import HTTPException
 
 from base.db import Database
 from gateway.cluster.ops_dispatch import dispatch_op
-from gateway.tests.support.runner_ops.ops_stub import completed, failed, refused, runner_ops
+from gateway.tests.support.runner_ops.ops_stub import (
+    OpsCall,
+    OpsReply,
+    completed,
+    failed,
+    refused,
+    runner_ops,
+)
+
+
+# meiva:note
+# A runner that answers with the payload it was sent, so the result shows what arrived.
+def _echo(call: OpsCall) -> OpsReply:
+    return completed({"ok": 1, "received": call.payload})
 
 
 @pytest.mark.asyncio
 async def test_a_completed_op_returns_its_result(
     db_conn: psycopg.Connection, database: Database
 ) -> None:
-    with runner_ops(db_conn, "runner-a", {"status_probe": completed({"ok": 1})}) as runner:
+    with runner_ops(db_conn, "runner-a", {"status_probe": _echo}):
         result = await dispatch_op(database, "runner-a", "status_probe", {"x": 2})
 
-    assert result == {"ok": 1}
-    assert runner.payloads("status_probe") == [{"x": 2}]
+    assert result == {"ok": 1, "received": {"x": 2}}
 
 
 @pytest.mark.asyncio

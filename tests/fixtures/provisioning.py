@@ -16,7 +16,6 @@ import pytest_asyncio
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from gateway.tests.agents.gateway_auth import install_default_gateway_credentials
 from tests._os_jobs import host_meiva_os_jobs
 from tests._test_env_file import rewrite_line as _rewrite_test_env_file_line
 from tests.fixtures.env_bootstrap import (
@@ -213,14 +212,6 @@ _PER_TEST_TRUNCATE_TABLES = (
     "resource_creation_receipts",
     "page_operation_receipts",
 )
-
-
-@pytest.fixture(autouse=True)
-def _default_gateway_credentials(
-    monkeypatch: pytest.MonkeyPatch, pytestconfig: pytest.Config
-) -> None:
-    if not static_mode(pytestconfig):
-        install_default_gateway_credentials(monkeypatch)
 
 
 @pytest.fixture

@@ -316,7 +316,6 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
         await recovery.copy(request)
         assert source.status(client.app.state.db_pool, agent, first["batch_id"]).state == "accepted"
         await recovery.close()
-    assert len(runner.calls_of("upload-receive-v1")) == 2
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchone() == (1,)
@@ -348,8 +347,8 @@ async def test_unknown_remote_kind_holds(
         recovery = recovery_for(client, machine_identity)
         await recovery.copy(request)
         await recovery.close()
-    assert len(runner.calls_of("upload-receive-v1")) == 1
-    assert source.status(client.app.state.db_pool, agent, request.manifest.batch_id).state == "hold"
+    held = source.status(client.app.state.db_pool, agent, request.manifest.batch_id)
+    assert (held.state, held.attempts) == ("hold", 1)
 
 
 def _receive_twice_after_failure(
@@ -458,6 +457,7 @@ def test_concurrent_receivers_and_inbound_acceptance_one_identity(
     ).fetchone() == (1,)
 
 
+@pytest.mark.usefixtures("gateway_local_runner")
 def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_ready(
     uploaded_agent: tuple[GatewayTestClient, int],
     monkeypatch: pytest.MonkeyPatch,

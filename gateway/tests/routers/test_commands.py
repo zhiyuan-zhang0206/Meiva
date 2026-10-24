@@ -14,6 +14,7 @@ from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.support.runner_ops.ops_stub import (
     OpsReply,
     completed,
+    expecting,
     failed,
     refused,
     runner_ops,
@@ -61,13 +62,14 @@ def test_endpoint_agent_view_dispatches_to_agents_machine(db_conn: psycopg.Conne
     )
 
     with (
-        runner_ops(db_conn, "runner-a", {"agent_skill_view": view}) as runner,
+        runner_ops(
+            db_conn, "runner-a", {"agent_skill_view": expecting({"agent_id": agent_id}, view)}
+        ),
         gateway_test_client() as client,
     ):
         resp = client.get(f"/api/commands?agent_id={agent_id}")
     assert resp.status_code == 200, resp.text
     assert resp.json() == [{"name": "project", "description": "d", "instruction_hint": "h"}]
-    assert runner.payloads("agent_skill_view") == [{"agent_id": agent_id}]
 
 
 @pytest.mark.parametrize(

@@ -23,7 +23,7 @@ from base.telemetry.metrics.aggregate import (
     fetch_aggregate,
 )
 from gateway.events.schemas import AgentMetricsItem, AgentMetricsReport, MetricsMeta, MetricsReport
-from gateway.http.config import runtime_view
+from gateway.http.config import gateway_config
 
 router = APIRouter()
 
@@ -51,7 +51,7 @@ def get_metrics(
     widened by the W9 events-table switch (it was agent-kernel lines only
     before); audit events are excluded."""
     if days is None:
-        days = int(runtime_view(request).display.metrics_default_window_days)
+        days = int(gateway_config(request).display.metrics_default_window_days)
     try:
         with request.app.state.db_pool.connection() as conn:
             conn.execute(_READ_TIMEOUT)
@@ -79,7 +79,7 @@ def get_metrics_agents(
     and the count covers every telemetry/log event in the window (all
     processes), the W9-widened scope documented on `get_metrics`."""
     if days is None:
-        days = int(runtime_view(request).display.metrics_default_window_days)
+        days = int(gateway_config(request).display.metrics_default_window_days)
     try:
         with request.app.state.db_pool.connection() as conn:
             conn.execute(_READ_TIMEOUT)

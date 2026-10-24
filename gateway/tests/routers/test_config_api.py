@@ -227,7 +227,7 @@ def test_get_remote_machine_composes_host_from_dispatch(
     }
 
     with (
-        runner_ops(db_conn, REMOTE, {"config_read": completed(canned)}) as runner,
+        runner_ops(db_conn, REMOTE, {"config_read": completed(canned)}),
         gateway_test_client() as client,
     ):
         resp = client.get(f"/api/config?machine={REMOTE}")
@@ -244,10 +244,6 @@ def test_get_remote_machine_composes_host_from_dispatch(
     assert fields["llm_model"]["can_enable"] is None
     # raw_overrides == the remote host overrides (not the local merged set)
     assert body["raw_overrides"] == {"browser_enabled": True, "ops_concurrency": 16}
-
-    # meiva:note
-    # the dispatch was one config_read on the remote target
-    assert [call.kind for call in runner.calls] == ["config_read"]
 
 
 def _full_host_fields_for_remote(

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import psycopg
+import pytest
 
 from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
+
+pytestmark = pytest.mark.usefixtures("gateway_local_runner")
 
 
 def _checkpoint(conn: psycopg.Connection, agent_id: int) -> str:

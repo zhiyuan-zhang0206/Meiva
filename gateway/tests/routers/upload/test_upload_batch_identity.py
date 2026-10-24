@@ -15,6 +15,7 @@ from gateway.tests.auth.gateway_config import (
     spawn_via_http,
 )
 from gateway.tests.support.db_faults.update_fault import failing_update
+from gateway.tests.support.runner_ops.ops_stub import RunnerOps
 
 
 def _headers(key: str) -> dict[str, str]:
@@ -38,7 +39,7 @@ def _post(
 
 @pytest.fixture
 def uploaded_agent(
-    db_conn: psycopg.Connection, tmp_path: Path
+    db_conn: psycopg.Connection, gateway_local_runner: RunnerOps, tmp_path: Path
 ) -> Iterator[tuple[GatewayTestClient, int]]:
     with gateway_test_client(config=gateway_test_config(upload_home=tmp_path)) as client:
         agent = spawn_via_http(client, {}).json()["id"]

@@ -24,6 +24,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.cluster.rate_limit import LoginRateLimitConfig
 from gateway.http.config import gateway_config_from_boot
 from gateway.tests.auth.gateway_config import (
+    GatewayTestClient,
     gateway_config_fields,
     gateway_test_app,
     gateway_test_client,
@@ -127,7 +128,7 @@ def test_lockout_is_per_ip(*, machine_identity: MachineIdentity) -> None:
             attacker.post("/api/auth/login", json={"password": "wrong-password"}).status_code == 429
         )
         # A different IP in the same lifespan keeps an independent counter.
-        other = TestClient(attacker.app, client=("203.0.113.8", 40000))
+        other = GatewayTestClient(attacker.app, client=("203.0.113.8", 40000))
         resp = other.post("/api/auth/login", json={"password": _SECRET})
         assert resp.status_code == 200
         assert (

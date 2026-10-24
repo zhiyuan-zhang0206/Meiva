@@ -4,8 +4,9 @@
 # The vector index is a service on a port of its own that answers `POST /search` the way
 # `services/derived/memory_search` does; the notes are files on disk; the gateway app is the
 # real one. Two outbound calls reach paid provider endpoints that are module constants, so each
-# is one fake: the embedding of the query and the decision model's relevance verdict. They are
-# installed once, by the `rig` fixture, and the tests steer them through plain attributes.
+# is one fake: the embedding of the query and the decision model's relevance verdict. The
+# embedder is the app's `memory_embedder`; the verdict is installed by the `rig` fixture; the
+# tests steer both through plain attributes.
 
 from __future__ import annotations
 
@@ -14,8 +15,8 @@ import json
 import threading
 import time
 from collections.abc import Generator
-from contextlib import AbstractContextManager
-from dataclasses import dataclass, field, replace
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -26,20 +27,20 @@ import pytest
 from fastapi import FastAPI
 
 from base.cluster.machine import MachineIdentity
-from base.config.tests.configuration import snapshot_process_config
 from base.host.db_authority.api import AcceptanceCache
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
-from gateway.http.config import GatewayConfig, gateway_config_from_boot
+from gateway.http.config import GatewayConfig
+from gateway.routers.memory_api import memory as memory_router
 from gateway.tests.agents.gateway_auth import gateway_credentials
 from gateway.tests.auth.gateway_config import (
     GatewayTestClient,
     gateway_test_app,
     gateway_test_client,
+    gateway_test_config,
 )
 from services.derived.memory_indexer import rerank
 from services.derived.memory_indexer.backends.base import ChunkHit
-from services.derived.memory_indexer.embeddings import factory
 from services.derived.memory_indexer.embeddings.base import EmbeddingProvider
 
 __all__ = [
@@ -63,9 +64,9 @@ def hit(path: Path, idx: int = 0, kind: str = "body") -> ChunkHit:
 
 
 # meiva:note
-# The test gateway's HTTP policy with the memory pool at `root`.
-def memory_config(root: Path) -> GatewayConfig:
-    return replace(gateway_config_from_boot(snapshot_process_config()), memory_root=root)
+# The test gateway's HTTP policy with the memory pool at `root` and configuration `fields` applied.
+def memory_config(root: Path, **fields: Any) -> GatewayConfig:
+    return gateway_test_config(fields, memory_root=root)
 
 
 # meiva:note
@@ -212,10 +213,22 @@ class SearchRig:
 
     # meiva:note
     # A running gateway whose memory pool is `root`, searching this rig's service.
-    def client(self, root: Path | None = None) -> AbstractContextManager[GatewayTestClient]:
-        return gateway_test_client(
-            config=None if root is None else memory_config(root), fields=self.fields
-        )
+    @contextmanager
+    def client(self, root: Path | None = None) -> Generator[GatewayTestClient]:
+        with gateway_test_client(
+            config=None if root is None else memory_config(root, **self.fields),
+            fields=self.fields,
+        ) as client:
+            client.app.state.memory_embedder = self.embedder_for(client.app.state.gateway_config)
+            yield client
+
+    # meiva:note
+    # The embedder a search uses: this rig's fake, or, once `real` is set, the real provider
+    # built from the app's own config and catalog.
+    def embedder_for(self, config: GatewayConfig) -> EmbeddingProvider:
+        if self.embedder.real:
+            return memory_router.build_embedder(config.memory_search, self.catalog)
+        return cast(EmbeddingProvider, self.embedder)
 
     # meiva:note
     # The gateway app without its lifespan (an ASGI transport does not run one), with the
@@ -223,11 +236,14 @@ class SearchRig:
     # (a semaphore binds to the loop of its first contended acquire, and each async test
     # has its own).
     def asgi_app(self, root: Path, *, permits: int) -> FastAPI:
-        app = gateway_test_app(machine=self.machine, config=memory_config(root), fields=self.fields)
+        app = gateway_test_app(
+            machine=self.machine, config=memory_config(root, **self.fields), fields=self.fields
+        )
         acceptance: AcceptanceCache = {}
         app.state.machine_token_acceptance = acceptance
         app.state.db = app.state.gateway_process.database()
         app.state.catalog = self.catalog
+        app.state.memory_embedder = self.embedder_for(app.state.gateway_config)
         app.state.machine = self.machine
         app.state.memory_search_gate = asyncio.Semaphore(permits)
         return app
@@ -252,14 +268,6 @@ def rig(
     service = SearchService()
     judge = Judge()
     embedder = FakeEmbedder()
-    real_get_provider = factory.get_provider
-
-    def get_provider(name: str, **kwargs: Any) -> EmbeddingProvider:
-        if embedder.real:
-            return real_get_provider(name, **kwargs)
-        return cast(EmbeddingProvider, embedder)
-
-    monkeypatch.setattr(factory, "get_provider", get_provider)
     monkeypatch.setattr(rerank, "ask_relevance", judge)
     try:
         yield SearchRig(

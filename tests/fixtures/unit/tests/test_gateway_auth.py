@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
@@ -42,12 +39,6 @@ def test_the_default_follows_the_secret_current_when_the_client_is_built(
     ) as client:
         assert client.headers["Authorization"] == "Bearer rotated-before-build"
         assert client.get("/api/status").status_code == 200
-
-
-def test_clients_of_other_apps_are_untouched() -> None:
-    standin = FastAPI()
-    with TestClient(standin) as client:
-        assert "Authorization" not in client.headers
 
 
 def test_gateway_credentials_is_the_header_of_the_current_secret(

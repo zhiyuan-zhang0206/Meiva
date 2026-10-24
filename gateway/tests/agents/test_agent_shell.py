@@ -9,7 +9,9 @@ from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.support.runner_ops.ops_stub import (
     OpsCall,
     OpsReply,
+    Responder,
     completed,
+    expecting,
     failed,
     refused,
     runner_ops,
@@ -39,6 +41,12 @@ def _capture(call: OpsCall) -> OpsReply:
     )
 
 
+# meiva:note
+# The capture answer, given only to a request that carries exactly `forwarded`.
+def _expecting_capture(forwarded: dict[str, int]) -> Responder:
+    return expecting(forwarded, _capture(OpsCall("shell_capture", forwarded, None)))
+
+
 def test_shell_unknown_agent_404(db_conn: psycopg.Connection) -> None:
     db_conn.commit()
     with gateway_test_client() as client:
@@ -64,8 +72,9 @@ def test_shell_capture_success(db_conn: psycopg.Connection) -> None:
     aid = _insert_agent(db_conn, machine="runner-a")
     db_conn.commit()
 
+    forwarded = {"agent_id": aid, "session_id": 3, "lines": 200}
     with (
-        runner_ops(db_conn, "runner-a", {"shell_capture": _capture}) as runner,
+        runner_ops(db_conn, "runner-a", {"shell_capture": _expecting_capture(forwarded)}),
         gateway_test_client() as client,
     ):
         resp = client.get(f"/api/agents/{aid}/shell/3")
@@ -81,35 +90,32 @@ def test_shell_capture_success(db_conn: psycopg.Connection) -> None:
         "renewals": 0,
         "last_renewed_at": None,
     }
-    assert [(call.kind, call.payload) for call in runner.calls] == [
-        ("shell_capture", {"agent_id": aid, "session_id": 3, "lines": 200})
-    ]
 
 
 def test_shell_capture_custom_lines_forwarded(db_conn: psycopg.Connection) -> None:
     aid = _insert_agent(db_conn, machine="runner-a")
     db_conn.commit()
 
+    forwarded = {"agent_id": aid, "session_id": 1, "lines": 500}
     with (
-        runner_ops(db_conn, "runner-a", {"shell_capture": _capture}) as runner,
+        runner_ops(db_conn, "runner-a", {"shell_capture": _expecting_capture(forwarded)}),
         gateway_test_client() as client,
     ):
         resp = client.get(f"/api/agents/{aid}/shell/1?lines=500")
     assert resp.status_code == 200
-    assert runner.payloads("shell_capture") == [{"agent_id": aid, "session_id": 1, "lines": 500}]
 
 
 def test_shell_capture_default_lines_follow_display_config(db_conn: psycopg.Connection) -> None:
     aid = _insert_agent(db_conn, machine="runner-a")
     db_conn.commit()
 
+    forwarded = {"agent_id": aid, "session_id": 1, "lines": 137}
     with (
-        runner_ops(db_conn, "runner-a", {"shell_capture": _capture}) as runner,
+        runner_ops(db_conn, "runner-a", {"shell_capture": _expecting_capture(forwarded)}),
         gateway_test_client(fields={"shell_capture_default_lines": 137}) as client,
     ):
         resp = client.get(f"/api/agents/{aid}/shell/1")
     assert resp.status_code == 200
-    assert runner.payloads("shell_capture") == [{"agent_id": aid, "session_id": 1, "lines": 137}]
 
 
 def test_shell_capture_carries_created_at_and_ttl_deadline(db_conn: psycopg.Connection) -> None:

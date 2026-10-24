@@ -18,7 +18,6 @@ from pathlib import Path
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from base.api_contracts.idempotency import keyed_headers
 from base.events.live.bus import EventBus
@@ -220,7 +219,7 @@ def test_postcommit_error_response_preserves_receipt_and_same_key_recovery(
     body = {"content": "one logical message", "source": "user"}
     # The fixture already owns the real app lifespan. This client only
     # observes the HTTP error body instead of re-raising server exceptions.
-    observer = TestClient(client.app, raise_server_exceptions=False)
+    observer = GatewayTestClient(client.app, raise_server_exceptions=False)
     with ExitStack() as broken:
         broken.callback(observer.close)
         _break_the_tail(step, client, db_conn, broken)

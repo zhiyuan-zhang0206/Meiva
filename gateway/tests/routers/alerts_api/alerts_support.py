@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, cast
 
 import psycopg
 import pytest
@@ -10,9 +11,11 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from base.config import settings
+from base.events.live.bus import EventBus
 from base.telemetry.alerts.native import load_native_group, stamp_native_sent
 from gateway.alerts import router as alerts_router
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from ops.alerts import ALERTS_CHANNEL
 
 
 def native_sender(callback: Callable[[str], bool]) -> Callable[[int], bool]:
@@ -85,11 +88,39 @@ def ingest(
 
 # meiva:note
 # The gateway app with the webhook token set (loopback trust off) and IM fan-out enabled.
+#
+# `cluster_secret` pins the app's cluster secret; `client_options` reach the test client (the
+# address a request appears to come from, for example).
 @contextmanager
-def alerts_client() -> Generator[GatewayTestClient]:
+def alerts_client(
+    *, cluster_secret: str | None = None, **client_options: Any
+) -> Generator[GatewayTestClient]:
     fields = {"webhook_token": SecretStr("test-token"), "im_notify_enabled": True}
-    with gateway_test_client(fields=fields) as c:
+    with gateway_test_client(fields=fields, cluster_secret=cluster_secret, **client_options) as c:
         yield c
+
+
+# meiva:note
+# Every alert row published on the alerts channel while the block runs, decoded.
+#
+# A real subscriber on the test's Redis: the ingest publishes through its own bus, the frame
+# travels the channel, and the list fills when the block ends.
+@contextmanager
+def alert_frames(bus: EventBus) -> Generator[list[dict[str, Any]]]:
+    frames: list[dict[str, Any]] = []
+    client = bus.sync_redis(decode_responses=True)
+    subscription = cast("Any", client).pubsub()
+    try:
+        subscription.subscribe(ALERTS_CHANNEL)
+        confirmation = subscription.get_message(timeout=2.0)
+        assert confirmation is not None and confirmation["type"] == "subscribe"
+        yield frames
+        while (message := subscription.get_message(timeout=0.5)) is not None:
+            if message["type"] == "message":
+                frames.append(json.loads(str(message["data"])))
+    finally:
+        subscription.close()
+        client.close()
 
 
 @pytest.fixture
