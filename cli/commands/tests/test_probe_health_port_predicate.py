@@ -4,14 +4,14 @@ from dataclasses import replace
 
 from base.daemon.health import DaemonProbe
 from cli.commands.probe import occupied_health_ports
-from services.supervision import roster
+from services.supervision.roster import composition
 from services.supervision.roster.service_spec import ServiceSpec
 
 _NOT_DAEMON_PORTS = ("gateway", "browser", "frontend", "memory-search", "otel-collector")
 
 
 def _by_session() -> dict[str, ServiceSpec]:
-    return {s.session: s for s in roster.build_services()}
+    return {s.session: s for s in composition.build_services()}
 
 
 def _reports_foreign_occupant(spec: ServiceSpec) -> bool:
@@ -24,7 +24,7 @@ def _url_suffix_rule(spec: ServiceSpec) -> bool:
 
 
 def test_the_preflight_covers_exactly_the_entries_the_url_suffix_covered() -> None:
-    for spec in roster.build_services():
+    for spec in composition.build_services():
         assert _reports_foreign_occupant(spec) == _url_suffix_rule(spec), spec.session
 
 

@@ -13,7 +13,7 @@ Groupings of background services running on machines whose capabilities set incl
 `services/docs/gateway_side/` is a **capability grouping, not a directory of code** — there is no `services/gateway_side/` package. Each daemon's code lives in a domain group under `services/<group>/<name>/` (groups: `wake`, `upkeep`, `derived`, `entrypoints`, `backup`, ...); which side it runs on is a `ServiceSpec.capabilities` attribute, which cuts across the filesystem and cannot be expressed by co-location. This node and its children are the index layer for that attribute, the same way the domain roots under `docs/` are the index layer for the whole graph. Do not "fix" it by moving the capability split into the code tree — that deletes the only place the capability split is represented in the hierarchy.
 
 ## Service List
-Source of truth = services in `build_services()` of `services/supervision/roster/__init__.py` whose `ServiceSpec.capabilities` include `gateway` (the `GATEWAY` / `BOTH` groups), including plugin-declared entries folded in via `services.supervision.roster.plugin_services.plugin_services()` — this table is the **merged roster**'s gateway-side view.
+Source of truth = services in `build_services()` of `services/supervision/roster/composition.py` whose `ServiceSpec.capabilities` include `gateway` (the `GATEWAY` / `BOTH` groups), including plugin-declared entries folded in via `services.supervision.roster.plugin_services.plugin_services()` — this table is the **merged roster**'s gateway-side view.
 
 | Service | Responsibility | File |
 |---------|----------------|------|

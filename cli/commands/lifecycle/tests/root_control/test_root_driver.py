@@ -43,6 +43,7 @@ from cli.commands.lifecycle.tests.root_control.support import (
 from cli.commands.lifecycle.tests.runtime_at import runtime_at
 from cli.commands.lifecycle.tests.scripted_root import UnitRow, scripted_root
 from services.supervision.meiva_root.manifest import UnitManifest
+from services.supervision.roster import composition
 from services.supervision.roster.service_spec import ServiceSpec
 
 pytestmark = pytest.mark.real_service_readiness_gate
@@ -461,12 +462,11 @@ def test_collector_config_bytes_change_the_live_unit_generation(
     unit_home: Path, tmp_path: Path
 ) -> None:
     from base.paths import otel_collector_config
-    from services.supervision import roster
 
     config = otel_collector_config(unit_home)
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text("receivers: {otlp: {}}\n")
-    collector = next(s for s in roster.build_services() if s.session == "otel-collector")
+    collector = next(s for s in composition.build_services() if s.session == "otel-collector")
 
     before = driver.unit_digests(
         driver.tree_manifest(

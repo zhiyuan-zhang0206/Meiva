@@ -34,7 +34,7 @@ from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.supervision.meiva_root_glue import manifests
-from services.supervision.roster import build_services
+from services.supervision.roster.composition import build_services
 
 __all__ = [
     "emitted_events",

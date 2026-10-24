@@ -1,22 +1,22 @@
-"""meiva_fleet — ops service declarations (the plugin's `build_services()` hook).
-
-A plugin that runs its own long-lived gateway/agent-runner daemon declares it
-here instead of hardcoding a ServiceSpec into the core `services/supervision/roster/__init__.py`: a
-plugin ships a `services.py` exposing ``services() -> tuple[ServiceSpec, ...]``,
-and `services.supervision.roster.plugin_services.plugin_services()` discovers + folds it into the single
-`build_services()` roster (so watchdog keepalive / `meiva start` / `meiva status`
-all still derive from one place). Discovery keys on this plugin's code being
-PRESENT on the machine, not the agent-facing enable-state — the
-on/off is the host-owned `task_maintenance_enabled` plugin config gate below. See
-`docs/decisions/extensions/plugins/2026-07-19-plugin-registered-services.md`.
-
-This module is deliberately light: it imports only the ops service contract and
-roster probe helper plus `base` — never `plugin.py` or the fleet
-domain code — so the ops/CLI/watchdog process that discovers it does not pull the
-agent kernel in. `services()` is a function (not a module constant) so probe
-ports derived from settings / monkeypatched endpoints are read at use-time,
-matching `build_services()`'s use-time contract.
-"""
+# meiva:note
+# meiva_fleet — ops service declarations (the plugin's `build_services()` hook).
+#
+# A plugin that runs its own long-lived gateway/agent-runner daemon declares it
+# here instead of hardcoding a ServiceSpec into the core `services/supervision/roster/composition.py`: a
+# plugin ships a `services.py` exposing ``services() -> tuple[ServiceSpec, ...]``,
+# and `services.supervision.roster.plugin_services.plugin_services()` discovers + folds it into the single
+# `build_services()` roster (so watchdog keepalive / `meiva start` / `meiva status`
+# all still derive from one place). Discovery keys on this plugin's code being
+# PRESENT on the machine, not the agent-facing enable-state — the
+# on/off is the host-owned `task_maintenance_enabled` plugin config gate below. See
+# `docs/decisions/extensions/plugins/2026-07-19-plugin-registered-services.md`.
+#
+# This module is deliberately light: it imports only the ops service contract and
+# roster probe helper plus `base` — never `plugin.py` or the fleet
+# domain code — so the ops/CLI/watchdog process that discovers it does not pull the
+# agent kernel in. `services()` is a function (not a module constant) so probe
+# ports derived from settings / monkeypatched endpoints are read at use-time,
+# matching `build_services()`'s use-time contract.
 
 from __future__ import annotations
 
