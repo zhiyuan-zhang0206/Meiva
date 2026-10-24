@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from meiva_builtins.skills.tests.skill_script import load_skill_script
@@ -33,5 +34,7 @@ def test_delta_average_ignores_unavailable_skills() -> None:
             {"skill": "empty", "dimensions": [], "n": 0, "unavailable": True},
         ],
         failure_clusters=[],
+        now=datetime(2026, 10, 24, 9, 30, tzinfo=UTC),
     )
     assert data["overall_delta"] == "+0.100"
+    assert data["generated_at"] == "2026-10-24 09:30 UTC"

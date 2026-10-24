@@ -25,6 +25,7 @@ import argparse
 import json
 import re
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +47,7 @@ def _slug(text: str, *, max_len: int = 40) -> str:
     return slug or "query"
 
 
-def _to_row(r: dict[str, Any]) -> dict[str, Any]:
+def _to_row(r: Mapping[str, Any]) -> dict[str, Any]:
     """Map one `webchat.ask_many` row to the console result row the agent reads.
 
     A setup-failure row (carrying `error`) becomes an `ok: False` row. A completed
@@ -89,8 +90,10 @@ def _render_markdown(prompt: str, results: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _save(prompt: str, results: list[dict[str, Any]]) -> Path:
-    outdir = webchat.downloads_root("console") / f"{webchat.now_stamp()}-{_slug(prompt)}"
+def _save(prompt: str, results: list[dict[str, Any]], places: webchat.Places) -> Path:
+    outdir = (
+        webchat.downloads_root("console", places=places) / f"{webchat.now_stamp()}-{_slug(prompt)}"
+    )
     outdir.mkdir(parents=True, exist_ok=True)
     (outdir / "answers.md").write_text(_render_markdown(prompt, results), encoding="utf-8")
     (outdir / "result.json").write_text(
@@ -185,8 +188,13 @@ def _note_kept_tabs(results: list[dict[str, Any]]) -> None:
         print(f"[console] left {len(kept)} tab(s) open: {', '.join(kept)}", file=sys.stderr)
 
 
-def main() -> None:
-    args = _build_parser().parse_args()
+def main(
+    argv: Sequence[str],
+    *,
+    places: webchat.Places,
+    pace: webchat.Pacing = webchat.STANDARD_PACE,
+) -> None:
+    args = _build_parser().parse_args(argv)
     continue_url = _continue_url(args)
 
     prompt = _read_prompt(args.prompt)
@@ -194,16 +202,16 @@ def main() -> None:
         sys.exit("empty prompt")
     models = _models_of(args.models, single=continue_url is not None)
     specs = [
-        {"name": m, "prompt": prompt, "file": args.file, "conversation_url": continue_url}
+        webchat.AskSpec(name=m, prompt=prompt, file=args.file, conversation_url=continue_url)
         for m in models
     ]
     # Login check happens inside open_chat() (called by ask_many for fresh chats):
     # when no composer is found, it detects login walls and attempts auto-login
     # via "Continue with Google".  A login failure becomes an error row in the
     # result — one model's sign-in wall never sinks the others.
-    rows = webchat.ask_many(specs, timeout=args.timeout, keep_tab=args.keep_tab)
+    rows = webchat.ask_many(specs, timeout=args.timeout, keep_tab=args.keep_tab, pace=pace)
     results = [_to_row(r) for r in rows]
-    outdir = _save(prompt, results)
+    outdir = _save(prompt, results, places)
 
     if args.keep_tab:
         _note_kept_tabs(results)
@@ -222,4 +230,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:], places=webchat.system_places())

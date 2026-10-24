@@ -9,39 +9,37 @@ import psycopg
 import pytest
 
 from base.db import Database
-from base.db.tests.fakes import patch_database
 from meiva_builtins.skills.tests.skill_script import load_skill_script
 
+world = load_skill_script("platform", "meiva-self-evolution", "tests", "collection_world.py")
+record_mod = load_skill_script("platform", "meiva-self-evolution", "scripts", "record.py")
+window_mod = load_skill_script("platform", "meiva-self-evolution", "scripts", "events_window.py")
 
-def test_build_record_adds_leak_audit_only_for_eval_collection(
-    collect_mod: Any, tmp_path: Path, database: Database
-) -> None:
+
+def test_build_record_adds_leak_audit_only_for_eval_collection(tmp_path: Path) -> None:
     """Weekly collection remains unchanged; eval collection records invalidating reads."""
-    paths = collect_mod.LeakPaths(
+    paths = record_mod.LeakPaths(
         memory_pool=str(tmp_path / "memory"),
         self_evolution=str(tmp_path / "self_evolution"),
         workspaces_root=str(tmp_path / "workspaces"),
         agent_workspace=str(tmp_path / "workspaces" / "1"),
     )
-    weekly = collect_mod.build_record(
-        database=database,
-        agent_id=1,
-        week="2026-W99",
-        events=[("code", {"body": f"open('{paths.self_evolution}/reports/result.md')"})],
-        log_events=[],
-        inbounds=[],
-        meta=("user", "completed", "done"),
-    )
-    audited = collect_mod.build_record(
-        database=database,
-        agent_id=1,
-        week="2026-W99",
-        events=[("code", {"body": f"open('{paths.self_evolution}/reports/result.md')"})],
-        log_events=[],
-        inbounds=[],
-        meta=("user", "completed", "done"),
-        leak_paths=paths,
-    )
+    values: dict[str, Any] = {
+        "agent_id": 1,
+        "week": "2026-W99",
+        "events": (("code", {"body": f"open('{paths.self_evolution}/reports/result.md')"}),),
+        "log_events": (),
+        "inbounds": (),
+        "meta": record_mod.AgentMeta("user", "completed", "done"),
+        "transcript": (),
+        "skills_touched": (),
+    }
+    values["events"] = record_mod.event_facts(values["events"])
+    values["log_events"] = tuple(name for name, _ in values["log_events"])
+    values["inbounds"] = record_mod.inbound_facts(values["inbounds"])
+    values["transcript"] = record_mod.transcript_facts(values["transcript"])
+    weekly = record_mod.build_record(record_mod.RunInputs(**values))
+    audited = record_mod.build_record(record_mod.RunInputs(**values, leak_paths=paths))
 
     assert "leak_audit" not in weekly
     assert "invalidated" not in weekly
@@ -86,63 +84,36 @@ def test_test_label_ids_excludes_direct_children_of_test_orchestrators(
     assert ids == {9010, 9011}
 
 
+# meiva:note
+# collect_with_counts() returns the records plus the pre-record counts the daily sentinel keys on: distinct window agents seen, TEST- drops, missing-lifecycle drops (QA review of PR #698).
 def test_collect_with_counts_keeps_records_and_reports_filters(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, database: Database
+    collect_mod: Any, db_conn: psycopg.Connection, database: Database
 ) -> None:
-    """collect_with_counts() returns the same records as collect() plus the
-    pre-record counts the daily sentinel keys on: distinct window agents
-    seen, TEST- drops, missing-lifecycle drops (QA review of PR #698)."""
-    rows: list[dict[str, object]] = [
-        {"agent_id": 1, "event_name": "turn_end", "attributes": {}},
-        {"agent_id": 2, "event_name": "turn_end", "attributes": {}},
-        {"agent_id": 3, "event_name": "turn_end", "attributes": {}},
-        {"agent_id": 4, "event_name": "turn_end", "attributes": {}},
-    ]
+    rows = [world.event_row(i, world.ts_after(i), agent_id=i) for i in (1, 2, 3, 4)]
+    with db_conn.cursor() as cur:
+        world.insert_agent(cur, 1)
+        world.insert_agent(cur, 2, label="TEST-bench-on-t1")
+        world.insert_agent(cur, 3)
+    db_conn.commit()
+    window = window_mod.Window(world.ts_after(0), world.ts_after(100))
 
-    def _fetch(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
-        return rows
+    with world.serve_events(rows) as server:
+        gateway = world.grant(server.url)
+        records, counts = collect_mod.collect_with_counts(
+            window, "2026-08-26", database=database, gateway=gateway
+        )
 
-    def _no_inbounds(*_args: object, **_kwargs: object) -> dict[int, Any]:
-        return {}
+        assert counts == {"seen": 4, "excluded_test": 1, "skipped_meta": 1}
+        assert [r["agent_id"] for r in records] == [1, 3]
 
-    def _meta_for(*_args: object, **_kwargs: object) -> dict[int, tuple[str, str, str]]:
-        return dict.fromkeys((1, 2, 3), ("user", "completed", "done"))
+        # include_test opts the TEST- spawns back in for measurement runs.
+        records_all, counts_all = collect_mod.collect_with_counts(
+            window, "2026-08-26", database=database, gateway=gateway, include_test=True
+        )
 
-    def _test_ids(*_args: object, **_kwargs: object) -> set[int]:
-        return {2}
-
-    monkeypatch.setattr(collect_mod, "_fetch_events_window", _fetch)
-    monkeypatch.setattr(collect_mod, "_inbounds_by_agent", _no_inbounds)
-    monkeypatch.setattr(collect_mod, "_meta_by_agent", _meta_for)
-    monkeypatch.setattr(collect_mod, "_test_label_ids", _test_ids)
-
-    # collect() uses `with connect() as conn`, which closes the connection
-    # at block exit (psycopg 3 context-manager semantics) — give each call a
-    # fresh connection like the real pipeline gets.
-    def _fresh_conn() -> psycopg.Connection:
-        return psycopg.connect(collect_mod.settings.data_plane.db_url)
-
-    patch_database(monkeypatch, connect=_fresh_conn)
-
-    def _fake_build_record(agent_id: int, *_args: object, **_kwargs: object) -> dict[str, object]:
-        return {"agent_id": agent_id, "label": "ok"}
-
-    monkeypatch.setattr(collect_mod, "build_record", _fake_build_record)
-
-    records, counts = collect_mod.collect_with_counts(1, "2026-08-26", database=database)
-
-    assert counts == {"seen": 4, "excluded_test": 1, "skipped_meta": 1}
-    assert [r["agent_id"] for r in records] == [1, 3]
-
-    # include_test opts the TEST- spawns back in for measurement runs.
-    records_all, counts_all = collect_mod.collect_with_counts(
-        1, "2026-08-26", database=database, include_test=True
-    )
     assert counts_all == {"seen": 4, "excluded_test": 0, "skipped_meta": 1}
     assert [r["agent_id"] for r in records_all] == [1, 2, 3]
-
-    # The plain collect() wrapper stays records-only for existing callers.
-    assert collect_mod.collect(1, "2026-08-26", database=database) == records
+    assert {r["week"] for r in records_all} == {"2026-08-26"}
 
 
 @pytest.fixture(scope="module")

@@ -1,1 +1,8 @@
 exports = ["feed.py"]
+
+[purity]
+"gmail_auth.py" = "strict"
+"gmail_compose.py" = "strict"
+"gmail_headers.py" = "strict"
+"gmail_queries.py" = "strict"
+"gmail_wire.py" = "strict"

@@ -1,4 +1,4 @@
-exports = ["agent_tests.py", "claim", "scripted_model.py"]
+exports = ["agent_tests.py", "claim", "impersonation", "scripted_model.py"]
 
 [uses]
 "claim" = ["agent_tests.py", "scripted_model.py"]

@@ -1,0 +1,6 @@
+exports = ["feed.py"]
+
+[purity]
+"yt_plan.py" = "strict"
+"yt_post.py" = "strict"
+"yt_wire.py" = "strict"

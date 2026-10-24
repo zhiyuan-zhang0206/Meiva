@@ -1,115 +1,82 @@
-"""
-DOM helpers for the web-ai driver: page-list id parsing, JS predicate
-builders, and click-by-visible-text (accessibility-tree matching).
-
-Split out of webchat.py (2026-08-07, Task #1011) so the driver entry stays
-under the 800-line hard ceiling.
-"""
-
+# meiva:note
+# The driver's click-by-visible-text and click-to-download controls: the accessibility tree is read through the chrome MCP, matched by `_pages.find_clickable`, and the match is clicked with a real input event. Text matching survives a redesign that only renames classes or data attributes, which CSS selectors do not.
 from __future__ import annotations
 
-import json
-import re
+import shutil
 import time
+from collections.abc import Sequence
 from pathlib import Path
+
+from _landing import DownloadEntry, download_settled, newest_new_download
+from _pacing import STANDARD_PACE, Pacing
+from _pages import Clickable, find_clickable
 
 import meiva
 
-_SELECTED_RE = re.compile(r"^\s*(\d+):.*\[selected\]\s*$", re.MULTILINE)
+
+# meiva:note
+# The first rendered control whose accessible name matches one of `texts` (see `_pages.find_clickable` for the matching rules), or None.
+def resolve_clickable(texts: Sequence[str]) -> Clickable | None:
+    return find_clickable(meiva.mcps.chrome.take_snapshot(), texts)
 
 
-def _selected_page_id(listing: str) -> int | None:
-    """The numeric page id of the `[selected]` tab in a page-list dump, or None.
-
-    new_page / list_pages render `  <id>: <url> [selected]` for the active tab;
-    that id is what close_tab feeds back. None when no line is marked (format
-    drift) -- callers treat that as "nothing safe to close" and leave tabs be.
-    """
-    m = _SELECTED_RE.search(listing)
-    return int(m.group(1)) if m else None
-
-
-def _any_present_js(selectors: list[str]) -> str:
-    arr = json.dumps(selectors)
-    return f"() => {{ for (const s of {arr}) {{ if (document.querySelector(s)) return true; }} return false; }}"
-
-
-# --------------------------------------------------------------------------- #
-# Generic page control matched by VISIBLE TEXT — for a button that has no stable
-# selector (a "Deep Research" toggle, a "Start research" plan button). Text
-# matching survives a redesign that only renames classes / data-attrs.
-# --------------------------------------------------------------------------- #
-
-
-# Roles a click target may carry in the rendered accessibility tree.
-_CLICKABLE_ROLES = "button|menuitem|menuitemradio|menuitemcheckbox|link|radio|option|tab"
-_SNAPSHOT_NODE_RE = re.compile(rf'uid=(\S+)\s+(?:{_CLICKABLE_ROLES})\b[^"\n]*"([^"]+)"')
-
-
-def _resolve_clickable(texts: list[str]) -> tuple[str, str] | None:
-    """(uid, label) of the first rendered control whose accessible name matches
-    one of `texts`, case-insensitively. Exact pass over EVERY text before any
-    substring pass: an early broad text must not substring-steal the match from
-    a later text's exact hit ("Start" grabbing the "Start dictation" mic button
-    while "Start research" sits right there). The substring pass requires a
-    short label, guarding against a huge container that merely contains the
-    word."""
-
-    snapshot = meiva.mcps.chrome.take_snapshot()
-    nodes = [(uid, label.strip()) for uid, label in _SNAPSHOT_NODE_RE.findall(snapshot)]
-    wants = [t.lower() for t in texts]
-    hit = next((n for w in wants for n in nodes if n[1].lower() == w), None)
+# meiva:note
+# Click the first rendered control that matches one of `texts` and return its label, or None when nothing matched (the caller decides whether that is fatal). The click dispatches a real input event, NOT element.click(), which several of these apps' menus ignore (no synthetic-event handler on the trigger).
+def click_by_text(texts: Sequence[str]) -> str | None:
+    hit = resolve_clickable(texts)
     if hit is None:
-        hit = next(
-            (n for w in wants for n in nodes if w in n[1].lower() and len(n[1]) < 60),
-            None,
-        )
-    return hit
+        return None
+    meiva.mcps.chrome.click(uid=hit.uid)
+    return hit.label
 
 
+# meiva:note
+# The finished-looking files of `downloads` with one of `suffixes`; a file that vanishes between the listing and its stat is skipped.
+def _entries(downloads: Path, suffixes: Sequence[str]) -> list[DownloadEntry]:
+    found: list[DownloadEntry] = []
+    for path in downloads.iterdir():
+        if path.suffix not in suffixes:
+            continue
+        try:
+            info = path.stat()
+        except FileNotFoundError:
+            continue
+        found.append(DownloadEntry(path.name, info.st_mtime, info.st_size))
+    return found
+
+
+# meiva:note
+# The size of `path`, or None when the file is gone.
+def _size(path: Path) -> int | None:
+    try:
+        return path.stat().st_size
+    except FileNotFoundError:
+        return None
+
+
+# meiva:note
+# Click a control that triggers a browser download and collect the landed file from `downloads` into `dest` (the full target path). The browser carries the session auth that a bare fetch of the asset URL does not. Returns None when the control was not found or no file landed in time; an in-flight download sits at .crdownload, so a suffix filter only sees completed files.
 def download_by_click(
-    texts: list[str], *, dest: Path, suffixes: tuple[str, ...], timeout: float = 60.0
+    texts: Sequence[str],
+    *,
+    dest: Path,
+    suffixes: Sequence[str],
+    downloads: Path,
+    timeout: float = 60.0,
+    pace: Pacing = STANDARD_PACE,
 ) -> Path | None:
-    """Click a control that triggers a browser download and collect the landed
-    file from the system Downloads folder into `dest` (the full target path).
-    The browser carries the session auth that a bare fetch of the asset URL
-    does not. Returns None when the control wasn't found or no file landed in
-    time (an in-flight download sits at .crdownload, so a suffix glob only
-    sees completed files)."""
-    import shutil
-
-    downloads = Path.home() / "Downloads"
-    before = {p.name for p in downloads.iterdir() if p.suffix in suffixes}
+    before = {entry.name for entry in _entries(downloads, suffixes)}
     if not click_by_text(texts):
         return None
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        time.sleep(1.0)
-        fresh = [p for p in downloads.iterdir() if p.suffix in suffixes and p.name not in before]
-        if not fresh:
+        time.sleep(pace.download_poll)
+        newest = newest_new_download(before, _entries(downloads, suffixes))
+        if newest is None:
             continue
-        newest = max(fresh, key=lambda p: p.stat().st_mtime)
-        size = newest.stat().st_size
-        time.sleep(1.0)
-        if size > 0 and newest.exists() and newest.stat().st_size == size:
+        time.sleep(pace.download_recheck)
+        if download_settled(newest.size, _size(downloads / newest.name)):
             dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(newest), dest)
+            shutil.move(str(downloads / newest.name), dest)
             return dest
     return None
-
-
-def click_by_text(texts: list[str]) -> str | None:
-    """Click the first rendered control whose accessible name matches one of
-    `texts` (see `_resolve_clickable` for the matching rules). Returns the
-    matched label, or None if nothing matched (caller decides whether that is
-    fatal).
-
-    Matching walks the rendered accessibility tree and clicking dispatches a
-    real input event — NOT element.click(), which several of these apps'
-    menus ignore (no synthetic-event handler on the trigger)."""
-
-    hit = _resolve_clickable(texts)
-    if hit is None:
-        return None
-    meiva.mcps.chrome.click(uid=hit[0])
-    return hit[1]

@@ -1,27 +1,34 @@
-"""Window-scoped inbound collection for the self-evolution daily scan.
-
-Regression lock for 2026-08-13: ``_inbounds_by_agent`` fetched every inbound
-message an agent ever received (no time filter), so ``corrections`` /
-``peer_feedback`` accumulated lifetime history into each day's record — the
-whole fleet was flagged fumbled every day (1336 "peer feedback" messages
-across 70 runs on a day when agents were fine). It now fetches the collection
-window plus each agent's first-ever chat message (the task prompt, which may
-predate the window for long-running agents).
-"""
+# meiva:note
+# Window-scoped inbound collection for the self-evolution daily scan.
+#
+# Regression lock for 2026-08-13: ``_inbounds_by_agent`` fetched every inbound message an agent ever received (no time filter), so ``corrections`` / ``peer_feedback`` accumulated lifetime history into each day's record — the whole fleet was flagged fumbled every day (1336 "peer feedback" messages across 70 runs on a day when agents were fine). It now fetches the collection window plus each agent's first-ever chat message (the task prompt, which may predate the window for long-running agents).
+#
+# The events side of the collection runs against a real listener on port 0 (`collection_world.serve_events`), the database side against the throwaway Postgres, and the checkpoint reads against checkpoints written to it.
 
 import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, cast
 
 import httpx
 import psycopg
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
+from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.types.json import Jsonb
 
+from base.cluster.machine import GatewayApiBaseMissing
 from base.config import settings
 from base.db import Database
+from base.host.net.tests.local_http import closed_port_url
+from base.host.proc import run_bounded
 from meiva_builtins.skills.tests.skill_script import load_skill_script
+
+world = load_skill_script("platform", "meiva-self-evolution", "tests", "collection_world.py")
+record_mod = load_skill_script("platform", "meiva-self-evolution", "scripts", "record.py")
+window_mod = load_skill_script("platform", "meiva-self-evolution", "scripts", "events_window.py")
+_REPO = Path(__file__).parents[5]
 
 
 @pytest.fixture(scope="module")
@@ -30,30 +37,30 @@ def collect_mod() -> Any:
     return load_skill_script("platform", "meiva-self-evolution", "scripts", "collect.py")
 
 
-def _insert_agent(cur: psycopg.Cursor, agent_id: int, spawner: str = "user") -> None:
-    cur.execute(
-        "INSERT INTO agents (id, label) VALUES (%s, %s)",
-        (agent_id, f"test-agent-{agent_id}"),
-    )
-    cur.execute(
-        "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, %s, 'idling')",
-        (agent_id, spawner),
-    )
-
-
-def _insert_inbound(
-    cur: psycopg.Cursor, agent_id: int, source: str, content: str, age: str
-) -> None:
-    cur.execute(
-        "INSERT INTO inbound_messages (agent_id, source, content, kind, created_at) "
-        "VALUES (%s, %s, %s, 'chat', now() - %s::interval)",
-        (agent_id, source, content, age),
-    )
-
-
 def _fetch(collect_mod: Any, cur: psycopg.Cursor, agent_ids: list[int]) -> Any:
     now = datetime.now(UTC)
     return collect_mod._inbounds_by_agent(cur, agent_ids, now - timedelta(days=1), now)
+
+
+# meiva:note
+# A record built from the empty case of every input, overridden by `fields`.
+def _record(**fields: Any) -> dict[str, Any]:
+    values: dict[str, Any] = {
+        "agent_id": 1,
+        "week": "2026-W99",
+        "events": (),
+        "log_events": (),
+        "inbounds": (),
+        "meta": record_mod.AgentMeta("user", "completed", "done"),
+        "transcript": (),
+        "skills_touched": (),
+    }
+    values.update(fields)
+    values["events"] = record_mod.event_facts(values["events"])
+    values["log_events"] = tuple(name for name, _ in values["log_events"])
+    values["inbounds"] = record_mod.inbound_facts(values["inbounds"])
+    values["transcript"] = record_mod.transcript_facts(values["transcript"])
+    return cast(dict[str, Any], record_mod.build_record(record_mod.RunInputs(**values)))
 
 
 def test_old_history_collapses_to_task_prompt(
@@ -62,13 +69,13 @@ def test_old_history_collapses_to_task_prompt(
     """Only the first-ever message survives from outside the window — not the
     whole lifetime of corrections / peer pings."""
     with db_conn.cursor() as cur:
-        _insert_agent(cur, 1)
-        _insert_agent(cur, 2)
-        _insert_inbound(cur, 1, "user", "task prompt", "10 days")
-        _insert_inbound(cur, 1, "user", "old correction \u9519\u4e86", "8 days")
-        _insert_inbound(cur, 1, "user", "window follow-up", "1 hour")
-        _insert_inbound(cur, 2, "user", "task prompt 2", "30 days")
-        _insert_inbound(cur, 2, "agent:99", "old peer ping \u522b\u5fd8\u4e86", "29 days")
+        world.insert_agent(cur, 1)
+        world.insert_agent(cur, 2)
+        world.insert_inbound(cur, 1, "user", "task prompt", "10 days")
+        world.insert_inbound(cur, 1, "user", "old correction \u9519\u4e86", "8 days")
+        world.insert_inbound(cur, 1, "user", "window follow-up", "1 hour")
+        world.insert_inbound(cur, 2, "user", "task prompt 2", "30 days")
+        world.insert_inbound(cur, 2, "agent:99", "old peer ping \u522b\u5fd8\u4e86", "29 days")
     db_conn.commit()
 
     with db_conn.cursor() as cur:
@@ -79,33 +86,22 @@ def test_old_history_collapses_to_task_prompt(
 
 
 def test_fresh_worker_uses_in_window_spawner_prompt(
-    collect_mod: Any,
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
+    collect_mod: Any, db_conn: psycopg.Connection, database: Database
 ) -> None:
     """A worker's recent spawn brief is its only task prompt."""
-
-    def _empty_transcript(_agent_id: int, *, database: Database) -> list[dict[str, str]]:
-        return []
-
-    monkeypatch.setattr(collect_mod, "_transcript", _empty_transcript)
     with db_conn.cursor() as cur:
-        _insert_agent(cur, 9)
-        _insert_inbound(cur, 9, "agent:1", "fresh spawn brief", "2 hours")
+        world.insert_agent(cur, 9)
+        world.insert_inbound(cur, 9, "agent:1", "fresh spawn brief", "2 hours")
     db_conn.commit()
 
     with db_conn.cursor() as cur:
         inbounds = _fetch(collect_mod, cur, [9])
 
-    rec = collect_mod.build_record(
-        database=database,
+    rec = _record(
         agent_id=9,
         week="2026-08-30",
-        events=[],
-        log_events=[],
-        inbounds=inbounds[9],
-        meta=("agent:1", "completed", "delivered"),
+        inbounds=tuple(inbounds[9]),
+        meta=record_mod.AgentMeta("agent:1", "completed", "delivered"),
     )
 
     assert rec["task_prompt"] == "fresh spawn brief"
@@ -115,9 +111,9 @@ def test_first_ever_inside_window_not_duplicated(
     collect_mod: Any, db_conn: psycopg.Connection
 ) -> None:
     with db_conn.cursor() as cur:
-        _insert_agent(cur, 3)
-        _insert_inbound(cur, 3, "user", "spawn prompt", "2 hours")
-        _insert_inbound(cur, 3, "user", "follow-up", "1 hour")
+        world.insert_agent(cur, 3)
+        world.insert_inbound(cur, 3, "user", "spawn prompt", "2 hours")
+        world.insert_inbound(cur, 3, "user", "follow-up", "1 hour")
     db_conn.commit()
 
     with db_conn.cursor() as cur:
@@ -132,16 +128,16 @@ def test_inbounds_mark_same_instruction_sent_to_multiple_agents_as_broadcast(
     """Fan-out instructions are fleet-scoped, not per-agent corrections."""
     with db_conn.cursor() as cur:
         for agent_id in (5, 6):
-            _insert_agent(cur, agent_id)
-            _insert_inbound(cur, agent_id, "user", f"task prompt {agent_id}", "2 days")
-            _insert_inbound(
+            world.insert_agent(cur, agent_id)
+            world.insert_inbound(cur, agent_id, "user", f"task prompt {agent_id}", "2 days")
+            world.insert_inbound(
                 cur,
                 agent_id,
                 "user",
                 "wrong: pause all work until resumed",
                 "1 hour",
             )
-        _insert_inbound(cur, 5, "user", "wrong: use the requested path", "30 minutes")
+        world.insert_inbound(cur, 5, "user", "wrong: use the requested path", "30 minutes")
     db_conn.commit()
 
     with db_conn.cursor() as cur:
@@ -155,7 +151,7 @@ def test_inbounds_mark_same_instruction_sent_to_multiple_agents_as_broadcast(
 
 def test_agent_without_inbounds_absent(collect_mod: Any, db_conn: psycopg.Connection) -> None:
     with db_conn.cursor() as cur:
-        _insert_agent(cur, 4)
+        world.insert_agent(cur, 4)
     db_conn.commit()
 
     with db_conn.cursor() as cur:
@@ -164,27 +160,54 @@ def test_agent_without_inbounds_absent(collect_mod: Any, db_conn: psycopg.Connec
     assert out.get(4, []) == []
 
 
+def _put_checkpoint(thread_id: str, messages: list[Any]) -> None:
+    checkpoint = empty_checkpoint()
+    checkpoint["channel_values"] = {"messages": messages}
+    checkpoint["channel_versions"] = {"messages": "1", "__start__": "1"}
+    with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
+        saver.setup()
+        saver.put(
+            config={"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            checkpoint=checkpoint,
+            metadata=cast(CheckpointMetadata, {"source": "input", "step": 1, "parents": {}}),
+            new_versions={"messages": "1"},
+        )
+
+
 def test_transcript_uses_full_checkpoint_loader(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, database: Database
+    collect_mod: Any, db_conn: psycopg.Connection, database: Database
 ) -> None:
-    called: dict[str, object] = {}
-
-    def _load(_db: object, agent_id: int) -> list[HumanMessage]:
-        called["agent_id"] = agent_id
-        called["database"] = _db
-        return [HumanMessage(content="complete history")]
-
-    record_mod = sys.modules[collect_mod._transcript.__module__]
-    monkeypatch.setattr(record_mod, "load_checkpoint_messages_full", _load)
+    _put_checkpoint("42", [HumanMessage(content="complete history"), AIMessage(content="done")])
 
     assert collect_mod._transcript(42, database=database) == [
-        {"type": "human", "content": "complete history"}
+        {"type": "human", "content": "complete history"},
+        {"type": "ai", "content": "done"},
     ]
-    assert called == {"agent_id": 42, "database": database}
+    assert collect_mod._transcript(43, database=database) == []
 
 
-def test_subprocess_call_count_counts_raw_calls_and_textual_mentions(collect_mod: Any) -> None:
+# meiva:note
+# A checkpoint that cannot be deserialized must not fail the whole scan, but it must not pass silently either: the warning names the agent.
+def test_unreadable_checkpoint_leaves_an_empty_transcript_and_says_so(
+    collect_mod: Any,
+    db_conn: psycopg.Connection,
+    database: Database,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _put_checkpoint("44", [HumanMessage(content="unreadable")])
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE checkpoint_blobs SET blob = '\\x00' WHERE thread_id = '44'")
+    db_conn.commit()
+
+    assert collect_mod._transcript(44, database=database) == []
+    assert "warning: agent 44: checkpoint unreadable" in capsys.readouterr().out
+
+
+def test_subprocess_call_count_counts_raw_calls_and_textual_mentions() -> None:
     """The metric intentionally regex-scans code bodies rather than parsing Python."""
+    window_records = load_skill_script(
+        "platform", "meiva-self-evolution", "scripts", "window_records.py"
+    )
     events = [
         (
             "code",
@@ -197,7 +220,7 @@ subprocess.check_call(["d"])
 subprocess.call(["e"])
 # subprocess.run(["comment"])
 """subprocess.Popen(["docstring"])"""
-example = "subprocess.check_output([\"literal\"])"
+example = "subprocess.check_output([\\"literal\\"])"
 asyncio.create_subprocess_exec("not-counted")
 subprocess.getoutput("not-counted")
 '''
@@ -206,362 +229,220 @@ subprocess.getoutput("not-counted")
         ("turn_end", {"body": 'subprocess.call(["not-code"])'}),
     ]
 
-    assert collect_mod._subprocess_call_count(events) == 8
-    docstring = collect_mod._subprocess_call_count.__doc__
-    assert docstring is not None
-    assert "comments, docstrings, and string literals" in docstring
-    assert "asyncio.create_subprocess_*" in docstring
-    assert "subprocess.getoutput" in docstring
+    assert window_records.subprocess_call_count(record_mod.event_facts(events)) == 8
 
 
-# ── Loki fetcher tests (mocked httpx) ─────────────────────────────────────
+def _read(
+    collect_mod: Any,
+    server: Any,
+    *,
+    category: str = "telemetry",
+    seconds: float = 7200,
+    agent_id: int | None = None,
+    gateway: Any = None,
+) -> list[dict[str, Any]]:
+    window = window_mod.Window(world.ts_after(0), world.ts_after(seconds))
+    return cast(
+        list[dict[str, Any]],
+        collect_mod.fetch_events_window(
+            category,
+            window,
+            gateway=gateway if gateway is not None else world.grant(server.url),
+            agent_id=agent_id,
+        ),
+    )
 
 
-class _FakeResp:
-    def __init__(self, payload: dict[str, object]) -> None:
-        self._payload = payload
-
-    def raise_for_status(self) -> None:
-        return None
-
-    def json(self) -> dict[str, object]:
-        return self._payload
-
-
-class _ErrResp(_FakeResp):
-    def raise_for_status(self) -> None:
-        raise httpx.HTTPStatusError(
-            "boom", request=httpx.Request("GET", "http://x"), response=httpx.Response(500)
-        )
-
-
-class _FakeClient:
-    """Canned /api/events server: filters by (category, agent_id, ts window),
-    pages newest-first like the real API, records every request."""
-
-    def __init__(self, rows: list[dict[str, object]], *, error: bool = False) -> None:
-        self.rows = rows
-        self.error = error
-        self.requests: list[tuple[str, dict[str, object], dict[str, object]]] = []
-        self.client_kwargs: dict[str, Any] = {}
-
-    def __enter__(self) -> "_FakeClient":
-        return self
-
-    def __exit__(self, *exc: object) -> bool:
-        return False
-
-    def get(
-        self,
-        url: str,
-        *,
-        params: dict[str, object] | None = None,
-        headers: dict[str, object] | None = None,
-        timeout: object = None,
-    ) -> _FakeResp:
-        p = dict(params or {})
-        h = dict(headers or {})
-        self.requests.append((url, p, h))
-        if self.error:
-            return _ErrResp({})
-        cat = p.get("category")
-        aid = p.get("agent_id")
-        frm_raw, to_raw = p.get("from"), p.get("to")
-        frm = frm_raw.isoformat() if isinstance(frm_raw, datetime) else str(frm_raw)
-        to = to_raw.isoformat() if isinstance(to_raw, datetime) else str(to_raw)
-        matching = [
-            r
-            for r in self.rows
-            if r["category"] == cat
-            and (aid is None or r["agent_id"] == aid)
-            and frm <= str(r["ts"]) <= to
-        ]
-        total = len(matching)
-        offset = int(cast(Any, p.get("offset", 0)))
-        limit = int(cast(Any, p.get("limit", 1000)))
-        page = sorted(matching, key=lambda r: str(r["ts"]), reverse=True)[offset : offset + limit]
-        # 2026-08-18 contract: meta.total is opt-in (with_total=1) and the
-        # gateway shed the count aggregation — collect paging must not depend
-        # on it, so the fake omits `total` entirely. has_more drives bisection.
-        return _FakeResp(
-            {
-                "items": page,
-                "meta": {"has_more": offset + len(page) < total},
-            }
-        )
-
-
-def _row(i: int, ts: datetime, category: str = "telemetry", agent_id: int = 7) -> dict[str, object]:
-    return {
-        "id": i,
-        "ts": ts.isoformat(),
-        "agent_id": agent_id,
-        "category": category,
-        "event_name": "turn_end",
-        "attributes": {"i": i},
-    }
-
-
-_BASE = datetime.fromisoformat("2026-08-13T00:00:00+00:00")
-
-
-def _ts_after(seconds: float) -> datetime:
-    return _BASE + timedelta(seconds=seconds)
-
-
-def _patch_client(collect_mod: Any, monkeypatch: pytest.MonkeyPatch, client: Any) -> None:
-    def factory(**kwargs: Any) -> Any:
-        client.client_kwargs = kwargs
-        return client
-
-    monkeypatch.setattr(collect_mod.httpx, "Client", factory)
-
-
-def test_fetch_slices_and_orders_oldest_first(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_fetch_slices_and_orders_oldest_first(collect_mod: Any) -> None:
     # 2500 rows > single-page budget -> binary-search time; one offset=0 query per slice
-    rows = [_row(i, _ts_after(i * 2)) for i in range(2500)]
-    client = _FakeClient(rows)
-    _patch_client(collect_mod, monkeypatch, client)
-
-    out = collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(7200))
+    rows = [world.event_row(i, world.ts_after(i * 2)) for i in range(2500)]
+    with world.serve_events(rows) as server:
+        out = _read(collect_mod, server)
 
     assert len(out) == 2500
     tss = [str(r["ts"]) for r in out]
     assert tss == sorted(tss)
     # No offset pagination: every request is offset=0 limit=1000 (Loki offset pagination times out / drops data)
-    for _, p, _h in client.requests:
-        assert p["offset"] == 0
-        assert p["limit"] == 1000
+    assert server.requests
+    for request in server.requests:
+        assert request.params["offset"] == "0"
+        assert request.params["limit"] == "1000"
 
 
-def test_fetch_bisects_oversized_slices_without_loss(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_fetch_bisects_oversized_slices_without_loss(collect_mod: Any) -> None:
     # 9000 rows across a 5-hour window -> over the 4000-row budget -> must split via binary search
-    rows = [_row(i, _ts_after(i * 2)) for i in range(9000)]
-    client = _FakeClient(rows)
-    _patch_client(collect_mod, monkeypatch, client)
-
-    out = collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(18000))
+    rows = [world.event_row(i, world.ts_after(i * 2)) for i in range(9000)]
+    with world.serve_events(rows) as server:
+        out = _read(collect_mod, server, seconds=18000)
 
     assert len(out) == 9000
     assert len({r["id"] for r in out}) == 9000
-    for _, p, _h in client.requests:
-        assert p["offset"] == 0
-        assert p["limit"] == 1000
+    for request in server.requests:
+        assert request.params["offset"] == "0"
+        assert request.params["limit"] == "1000"
 
 
-def test_fetch_dedups_inclusive_slice_boundaries(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_fetch_dedups_inclusive_slice_boundaries(collect_mod: Any) -> None:
     # Boundary rows (exactly at the bisection midpoint) are included by both adjacent slices (window includes both ends) -> dedupe by id
-    boundary = _row(999, _ts_after(1800))  # window midpoint = bisection cut, both ends include it
-    rows = [_row(i, _ts_after(i * 2)) for i in range(2500)] + [boundary]
-    client = _FakeClient(rows)
-    _patch_client(collect_mod, monkeypatch, client)
-
-    out = collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
+    boundary = world.event_row(999, world.ts_after(1800))
+    rows = [world.event_row(i, world.ts_after(i * 2)) for i in range(2500)] + [boundary]
+    with world.serve_events(rows) as server:
+        out = _read(collect_mod, server, seconds=3600)
 
     ids = [r["id"] for r in out]
     assert len(ids) == len(set(ids))
     assert ids.count(999) == 1
 
 
-def test_fetch_passes_agent_filter_and_bearer_auth(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
-    monkeypatch.delenv("MEIVA_API_TOKEN", raising=False)
-    client = _FakeClient([])
-    _patch_client(collect_mod, monkeypatch, client)
+def test_fetch_passes_agent_filter_and_bearer_auth(collect_mod: Any) -> None:
+    with world.serve_events([]) as server:
+        _read(collect_mod, server, category="audit", seconds=3600, agent_id=42)
 
-    collect_mod._fetch_events_window("audit", _ts_after(0), _ts_after(3600), agent_id=42)
-
-    assert client.requests
-    for _, p, h in client.requests:
-        assert p["agent_id"] == 42
-        assert p["category"] == "audit"
-        assert h == {"Authorization": "Bearer test-secret"}
+    assert server.requests
+    for request in server.requests:
+        assert request.params["agent_id"] == "42"
+        assert request.params["category"] == "audit"
+        assert request.headers["authorization"] == "Bearer test-secret"
 
 
-def test_fetch_raises_on_http_error(collect_mod: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _FakeClient([], error=True)
-    _patch_client(collect_mod, monkeypatch, client)
+def test_fetch_raises_on_http_error(collect_mod: Any) -> None:
+    with (
+        world.serve_events([], script=[world.Scripted(500)]) as server,
+        pytest.raises(httpx.HTTPStatusError),
+    ):
+        _read(collect_mod, server, seconds=3600)
 
-    with pytest.raises(httpx.HTTPStatusError):
-        collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
 
-
-def test_fetch_requests_are_count_free(collect_mod: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_requests_are_count_free(collect_mod: Any) -> None:
     """2026-08-18 contract lock: /api/events meta.total is opt-in behind
     with_total=1 because the count aggregation is exactly the Loki load the
     gateway shed. Paging decisions use has_more; no request may ask for the
     count (a re-introduced with_total=1 would silently re-add that load)."""
-    rows = [_row(i, _ts_after(i * 2)) for i in range(2500)]
-    client = _FakeClient(rows)
-    _patch_client(collect_mod, monkeypatch, client)
+    rows = [world.event_row(i, world.ts_after(i * 2)) for i in range(2500)]
+    with world.serve_events(rows) as server:
+        _read(collect_mod, server)
 
-    collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(7200))
+    assert server.requests
+    for request in server.requests:
+        assert "with_total" not in request.params
 
-    assert client.requests
-    for _, p, _h in client.requests:
-        assert "with_total" not in p
+
+# meiva:note
+# The gateway URL is a required value: an unset one fails before any request instead of falling back to a guessed local address.
+def test_fetch_requires_a_gateway_url(collect_mod: Any) -> None:
+    window = window_mod.Window(world.ts_after(0), world.ts_after(3600))
+    with pytest.raises(GatewayApiBaseMissing):
+        collect_mod.fetch_events_window("audit", window, gateway=world.grant(""))
+
+
+# meiva:note
+# 2026-09-12 regression: httpx honored the env proxy for cluster-internal reads (a no_proxy form it does not match), so /api/events went to a local forward proxy and came back 502 while the gateway was healthy. The client must ignore the proxy variables, like ops/cluster/rpc.py. The child gets only the environment written here: a proxy that refuses connections, and nothing that excuses 127.0.0.1 from it.
+def test_fetch_client_disables_env_proxy(tmp_path: Path) -> None:
+    rows = [world.event_row(1, world.ts_after(10), category="audit")]
+    with world.serve_events(rows) as server:
+        dead_proxy = closed_port_url()
+        completed = run_bounded(
+            [
+                sys.executable,
+                "meiva_builtins/skills/platform/meiva-self-evolution/tests/events_proxy_child.py",
+                server.url,
+            ],
+            cwd=_REPO,
+            env={
+                "HTTP_PROXY": dead_proxy,
+                "http_proxy": dead_proxy,
+                "PATH": "/usr/bin:/bin",
+                "MEIVA_HOME": str(tmp_path / "home"),
+                "PYTHONPATH": str(_REPO),
+            },
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "1"
+    assert len(server.requests) == 1
 
 
 # ── retry budget + failure diagnostics (Task #3126) ────────────────────────
 
 
-class _Status:
-    """Scripted error reply: HTTP status + response headers + body."""
-
-    def __init__(self, code: int, *, headers: dict[str, str] | None = None, body: str = "") -> None:
-        self.code = code
-        self.headers = headers or {}
-        self.body = body
-
-
-class _ScriptedClient:
-    """Scripted /api/events server for retry tests — one outcome per request.
-
-    An outcome is "ok" (the canned success payload), a `_Status` (a real
-    httpx.Response, so raise_for_status carries the status/headers/body a
-    real reply would), or an Exception instance (raised from `get` — a
-    transport failure). Running past the script raises, so an unexpected
-    extra request is a loud test failure.
-    """
-
-    def __init__(self, outcomes: list[object], payload: dict[str, object] | None = None) -> None:
-        self.outcomes = list(outcomes)
-        self.payload = payload or {"items": [], "meta": {"has_more": False}}
-        self.calls = 0
-        self.client_kwargs: dict[str, Any] = {}
-
-    def __enter__(self) -> "_ScriptedClient":
-        return self
-
-    def __exit__(self, *exc: object) -> bool:
-        return False
-
-    def get(
-        self,
-        url: str,
-        *,
-        params: dict[str, object] | None = None,
-        headers: dict[str, object] | None = None,
-        timeout: object = None,
-    ) -> Any:
-        assert self.calls < len(self.outcomes), "unexpected extra /api/events request"
-        outcome = self.outcomes[self.calls]
-        self.calls += 1
-        if isinstance(outcome, Exception):
-            raise outcome
-        if outcome == "ok":
-            return _FakeResp(dict(self.payload))
-        status = cast(_Status, outcome)
-        return httpx.Response(
-            status.code,
-            headers=status.headers,
-            content=status.body.encode(),
-            request=httpx.Request("GET", url),
-        )
-
-
-def test_fetch_client_disables_env_proxy(collect_mod: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    """2026-09-12 regression: httpx honored the env proxy for cluster-internal
-    reads (a no_proxy form it does not match), so /api/events went to a local
-    forward proxy and came back 502 while the gateway was healthy. The client
-    must be built with trust_env=False, like ops/cluster/rpc.py."""
-    client = _FakeClient([])
-    _patch_client(collect_mod, monkeypatch, client)
-
-    collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
-
-    assert client.client_kwargs["trust_env"] is False
-
-
-def test_fetch_retries_transient_then_succeeds(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
-) -> None:
+def test_fetch_retries_transient_then_succeeds(collect_mod: Any, retry_waits: list[float]) -> None:
     """A blip inside the budget must not cost the day's dataset."""
-    rows = [_row(1, _ts_after(0))]
-    client = _ScriptedClient(
-        [_Status(502), httpx.ReadTimeout("slow"), "ok"],
-        payload={"items": rows, "meta": {"has_more": False}},
-    )
-    _patch_client(collect_mod, monkeypatch, client)
-
-    out = collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
+    rows = [world.event_row(1, world.ts_after(0))]
+    script = [world.Scripted(502), world.Scripted(None)]
+    with world.serve_events(rows, script=script) as server:
+        out = _read(collect_mod, server, seconds=3600)
 
     assert [r["id"] for r in out] == [1]
-    assert client.calls == 3
+    assert len(server.requests) == 3
     assert retry_waits == [5.0, 10.0]
 
 
 @pytest.mark.parametrize("code", [502, 503, 504])
 def test_fetch_retryable_status_exhausts_budget_with_diagnostics(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, code: int, retry_waits: list[float]
+    collect_mod: Any, code: int, retry_waits: list[float]
 ) -> None:
     """2026-09-12 regression: a spent budget must raise with the responder's
     status, headers, and body — the evidence that tells a local forward
     proxy's 502 from the gateway's own 503 — on the 5/10/20/40 s schedule."""
-    reply = _Status(
+    reply = world.Scripted(
         code,
         headers={"content-type": "text/html", "server": "forward-proxy"},
         body="<html>Bad Gateway</html>",
     )
-    client = _ScriptedClient([reply] * 5)
-    _patch_client(collect_mod, monkeypatch, client)
-
-    with pytest.raises(RuntimeError) as err:
-        collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
+    with world.serve_events([], script=[reply] * 5) as server, pytest.raises(RuntimeError) as err:
+        _read(collect_mod, server, seconds=3600)
 
     message = str(err.value)
     assert f"HTTP {code}" in message
     assert "server" in message and "forward-proxy" in message
     assert "<html>Bad Gateway</html>" in message
     assert "after 5 attempts" in message
-    assert client.calls == 5
+    assert len(server.requests) == 5
     assert retry_waits == [5.0, 10.0, 20.0, 40.0]
     assert isinstance(err.value.__cause__, httpx.HTTPStatusError)
 
 
-@pytest.mark.parametrize(
-    "failure",
-    [httpx.ConnectError("connection refused"), httpx.ReadTimeout("read timed out")],
-    ids=["connect-error", "timeout"],
-)
-def test_fetch_transport_failure_exhausts_budget_with_diagnostics(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, failure: Exception, retry_waits: list[float]
+# meiva:note
+# Transport errors (httpx.TransportError includes TimeoutException) run the same budget, and the spent-budget error names the failure.
+def test_fetch_connection_refused_exhausts_budget_with_diagnostics(
+    collect_mod: Any, retry_waits: list[float]
 ) -> None:
-    """Transport errors (httpx.TransportError includes TimeoutException) run
-    the same budget, and the spent-budget error names the failure."""
-    client = _ScriptedClient([failure] * 5)
-    _patch_client(collect_mod, monkeypatch, client)
-
+    window = window_mod.Window(world.ts_after(0), world.ts_after(3600))
     with pytest.raises(RuntimeError) as err:
-        collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
+        collect_mod.fetch_events_window("telemetry", window, gateway=world.grant(closed_port_url()))
 
-    message = str(err.value)
-    assert type(failure).__name__ in message
-    assert str(failure) in message
-    assert client.calls == 5
+    cause = err.value.__cause__
+    assert isinstance(cause, httpx.ConnectError)
+    assert f"{type(cause).__name__}: {cause}" in str(err.value)
+    assert retry_waits == [5.0, 10.0, 20.0, 40.0]
+
+
+def test_fetch_dropped_connection_exhausts_budget_with_diagnostics(
+    collect_mod: Any, retry_waits: list[float]
+) -> None:
+    with (
+        world.serve_events([], script=[world.Scripted(None)] * 5) as server,
+        pytest.raises(RuntimeError) as err,
+    ):
+        _read(collect_mod, server, seconds=3600)
+
+    cause = err.value.__cause__
+    assert isinstance(cause, httpx.TransportError)
+    assert f"{type(cause).__name__}: {cause}" in str(err.value)
+    assert len(server.requests) == 5
     assert retry_waits == [5.0, 10.0, 20.0, 40.0]
 
 
 @pytest.mark.usefixtures("retry_waits")
-def test_fetch_exhausted_diagnostics_are_bounded(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_fetch_exhausted_diagnostics_are_bounded(collect_mod: Any) -> None:
     """A huge body / header block must not flood the scan's log line: each
     diagnostic field is capped, with an explicit truncation marker."""
-    reply = _Status(503, headers={"x-note": "h" * 1000}, body="b" * 1000)
-    client = _ScriptedClient([reply] * 5)
-    _patch_client(collect_mod, monkeypatch, client)
-
-    with pytest.raises(RuntimeError) as err:
-        collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
+    reply = world.Scripted(503, headers={"x-note": "h" * 1000}, body="b" * 1000)
+    with world.serve_events([], script=[reply] * 5) as server, pytest.raises(RuntimeError) as err:
+        _read(collect_mod, server, seconds=3600)
 
     message = str(err.value)
     assert "b" * 300 in message and "(+700 chars)" in message  # body capped at 300
@@ -571,25 +452,109 @@ def test_fetch_exhausted_diagnostics_are_bounded(
 
 @pytest.mark.parametrize("code", [429, 500, 404])
 def test_fetch_permanent_status_fails_fast(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, code: int, retry_waits: list[float]
+    collect_mod: Any, code: int, retry_waits: list[float]
 ) -> None:
     """Task #3126: only 502/503/504 are retryable. 429/500 (transient in the
     shared default) and every other status are structural for this read —
     one attempt, no sleep, the original HTTPStatusError."""
-    client = _ScriptedClient([_Status(code)] * 5)
-    _patch_client(collect_mod, monkeypatch, client)
+    with (
+        world.serve_events([], script=[world.Scripted(code)] * 5) as server,
+        pytest.raises(httpx.HTTPStatusError),
+    ):
+        _read(collect_mod, server, seconds=3600)
 
-    with pytest.raises(httpx.HTTPStatusError):
-        collect_mod._fetch_events_window("telemetry", _ts_after(0), _ts_after(3600))
-
-    assert client.calls == 1
+    assert len(server.requests) == 1
     assert retry_waits == []
+
+
+# meiva:note
+# The single-agent path builds the record from the gateway's events and the agent's database rows, and a malformed `plugin_activation` row is counted on the record and named in a warning (issue #92).
+def test_collect_one_reads_one_agents_week_and_warns_about_malformed_plugin_rows(
+    collect_mod: Any,
+    db_conn: psycopg.Connection,
+    database: Database,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    now = world.ts_after(3600)
+    rows = [
+        world.event_row(
+            1,
+            world.ts_after(10),
+            event_name="llm_usage",
+            attributes={"model": "m", "in_total": 100, "out_total": 20},
+        ),
+        world.event_row(
+            2, world.ts_after(20), event_name="turn_end", attributes={"duration_seconds": 3}
+        ),
+        world.event_row(
+            3,
+            world.ts_after(30),
+            event_name="plugin_activation",
+            attributes={"plugin": "meiva_code", "surface": "hooks"},
+        ),
+        world.event_row(
+            4,
+            world.ts_after(40),
+            event_name="plugin_activation",
+            attributes={"plugin": "meiva_code", "surface": "hooks", "identifier": "before_exec"},
+        ),
+        world.event_row(5, world.ts_after(50), agent_id=99, event_name="turn_end"),
+        world.event_row(
+            6,
+            world.ts_after(60),
+            category="audit",
+            event_name="skill_invoked",
+            attributes={
+                "skill": "meiva-goal",
+                "identifier": "meiva-goal",
+                "invocation_depth": "loaded",
+            },
+        ),
+    ]
+    with db_conn.cursor() as cur:
+        world.insert_agent(cur, 7, status="terminated", last_message="delivered")
+        world.insert_inbound(cur, 7, "user", "do the task", "1 hour")
+    db_conn.commit()
+
+    with world.serve_events(rows) as server:
+        rec = collect_mod.collect_one(
+            7, "2026-08-13", None, database=database, gateway=world.grant(server.url), now=now
+        )
+
+    assert rec["agent_id"] == 7
+    assert rec["turns"] == 1
+    assert rec["tokens_in"] == 100
+    assert rec["task_prompt"] == "do the task"
+    assert rec["skills_touched"] == ["meiva-goal"]
+    assert rec["plugins_activated"] == {"meiva_code/hooks/before_exec": 1}
+    assert rec["plugins_activated_skipped"] == 1
+    assert rec["evidence_grade"] == "complete"
+    assert rec["subprocess_calls"] == 0
+    assert "agent 7: skipped 1 malformed plugin_activation row(s)" in capsys.readouterr().out
+    assert {r.params["agent_id"] for r in server.requests} == {"7"}
+
+
+def test_collect_one_refuses_an_agent_without_a_lifecycle_row(
+    collect_mod: Any, database: Database
+) -> None:
+    with (
+        world.serve_events([]) as server,
+        pytest.raises(ValueError, match="no agents_meta row for agent 5"),
+    ):
+        collect_mod.collect_one(
+            5,
+            "2026-08-13",
+            None,
+            database=database,
+            gateway=world.grant(server.url),
+            now=world.ts_after(3600),
+        )
 
 
 # ── plugin attribution (issue #40) ──────────────────────────────────────────
 
 
-def test_plugins_activated_counts_per_contribution(collect_mod: Any) -> None:
+def test_plugins_activated_counts_per_contribution() -> None:
     """The plugin-side counterpart of `skills_touched`: hooks and wraps act
     silently, so without this the dataset carried no evidence that a plugin
     touched a bad run. Keyed per contribution, not per plugin, so a regression
@@ -628,7 +593,7 @@ def test_plugins_activated_counts_per_contribution(collect_mod: Any) -> None:
         ("turn_end", {"ok": True}),
     ]
 
-    fired, skipped = collect_mod._plugins_activated(events)
+    fired, skipped = record_mod._plugins_activated(record_mod.event_facts(events))
     assert fired == {
         "meiva_code/sdkWraps/files.read": 1,
         "meiva_syntax_fix/hooks/before_exec": 2,
@@ -636,51 +601,25 @@ def test_plugins_activated_counts_per_contribution(collect_mod: Any) -> None:
     assert skipped == 0
 
 
-def test_plugins_activated_counts_and_reports_malformed_rows(collect_mod: Any) -> None:
+def test_plugins_activated_counts_and_reports_malformed_rows() -> None:
     """Issue #92: a row missing part of the key is still dropped (graceful
     drift — it never crashes the weekly collect), but the drop is now counted
     instead of vanishing silently, so an event-contract drift is visible on
     the run record rather than quietly thinning the dataset to empty."""
     events = [
         ("plugin_activation", {"plugin": "meiva_code", "surface": "hooks"}),
-        ("plugin_activation", None),
         ("plugin_activation", {}),
+        ("plugin_activation", {"identifier": "before_exec"}),
     ]
 
-    fired, skipped = collect_mod._plugins_activated(events)
+    fired, skipped = record_mod._plugins_activated(record_mod.event_facts(events))
     assert fired == {}
     assert skipped == 3
 
 
-def _fake_transcript(_agent_id: int, *, database: Database) -> list[dict[str, str]]:
-    return []
-
-
-def build_minimal_record(
-    collect_mod: Any, monkeypatch: pytest.MonkeyPatch, events: list[tuple], *, database: Database
-) -> dict[str, Any]:
-    """build_record with every other input reduced to its empty case, so the
-    test isolates the plugins_activated_skipped wiring."""
-    monkeypatch.setattr(collect_mod, "_transcript", _fake_transcript)
-    return collect_mod.build_record(
-        database=database,
-        agent_id=1,
-        week="2026-W99",
-        events=events,
-        log_events=[],
-        inbounds=[],
-        meta=("user", "completed", "done"),
-    )
-
-
-def test_build_record_surfaces_plugins_activated_skipped(
-    collect_mod: Any,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    database: Database,
-) -> None:
-    """Issue #92: the skip count must land on the run record (not just the
-    private counter), and a nonzero count must print a visible warning."""
+# meiva:note
+# Issue #92: the skip count must land on the run record, not just a private counter.
+def test_build_record_surfaces_plugins_activated_skipped() -> None:
     events = [
         ("plugin_activation", {"plugin": "meiva_code", "surface": "hooks"}),  # malformed
         (
@@ -689,21 +628,15 @@ def test_build_record_surfaces_plugins_activated_skipped(
         ),
     ]
 
-    rec = build_minimal_record(collect_mod, monkeypatch, events, database=database)
+    rec = _record(events=tuple(events))
 
     assert rec["plugins_activated_skipped"] == 1
     assert rec["plugins_activated"] == {"meiva_code/hooks/before_exec": 1}
-    assert "skipped 1" in capsys.readouterr().out
 
 
-def test_build_record_well_formed_rows_report_zero_skipped(
-    collect_mod: Any,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    database: Database,
-) -> None:
-    """Well-formed rows must not be affected by the loud-skip change: zero
-    skipped, no warning printed."""
+# meiva:note
+# Well-formed rows must not be affected by the loud-skip change: zero skipped.
+def test_build_record_well_formed_rows_report_zero_skipped() -> None:
     events = [
         (
             "plugin_activation",
@@ -711,11 +644,25 @@ def test_build_record_well_formed_rows_report_zero_skipped(
         ),
     ]
 
-    rec = build_minimal_record(collect_mod, monkeypatch, events, database=database)
+    rec = _record(events=tuple(events))
 
     assert rec["plugins_activated_skipped"] == 0
     assert rec["plugins_activated"] == {"meiva_code/hooks/before_exec": 1}
-    assert capsys.readouterr().out == ""
+
+
+# meiva:note
+# Only a `skill_invoked` row whose payload validates with invocation depth `loaded` counts.
+def test_loaded_skills_keeps_only_validated_loads(collect_mod: Any) -> None:
+    log_events = [
+        ("skill_invoked", {"skill": "b", "identifier": "b", "invocation_depth": "loaded"}),
+        ("skill_invoked", {"skill": "a", "identifier": "a", "invocation_depth": "loaded"}),
+        ("skill_invoked", {"skill": "a", "identifier": "a", "invocation_depth": "loaded"}),
+        ("skill_invoked", {"skill": "c", "identifier": "c", "invocation_depth": "listed"}),
+        ("skill_invoked", {"skill": "d"}),
+        ("compact", {"skill": "e", "identifier": "e", "invocation_depth": "loaded"}),
+    ]
+
+    assert collect_mod.loaded_skills(log_events) == ["a", "b"]
 
 
 def test_task_receipts_by_agent_counts_notes_states_and_changes(
@@ -745,6 +692,6 @@ def test_task_receipts_by_agent_counts_notes_states_and_changes(
     with db_conn.cursor() as cur:
         counts = collect_mod._task_receipts_by_agent(cur, [7001, 7002, 7999])
 
-    assert counts[7001] == {"note": 2, "status": 5, "results": 1, "state_changes": 3}
-    assert counts[7002] == {"note": 1, "status": 0, "results": 0, "state_changes": 0}
+    assert counts[7001] == record_mod.TaskReceipts(2, 5, 1, 3)
+    assert counts[7002] == record_mod.TaskReceipts(1, 0, 0, 0)
     assert 7999 not in counts

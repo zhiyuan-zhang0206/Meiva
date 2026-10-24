@@ -244,7 +244,7 @@ def _launch(workspace: Path, prompt: str, ttl_seconds: float) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description="Launch DeepSeek Harness in a persistent shell session."
     )
@@ -297,4 +297,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

@@ -1,7 +1,9 @@
 """Print the native instructions inherited by an active impersonator."""
 
 import argparse
+import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from langchain_core.messages import BaseMessage, SystemMessage
 
@@ -27,23 +29,38 @@ def instruction_text(messages: Sequence[BaseMessage]) -> str:
     return "\n\n".join(parts)
 
 
-def read_instructions(session_id: int, agent_id: int) -> str:
-    """Read native guidance under the existing attachment's authority checks."""
-    with impersonation.attach(session_id, agent_id=agent_id) as attachment:
-        # meiva.state also includes external journal replay. Read the native
-        # snapshot separately so a controller's staged messages cannot replace
-        # the inherited instructions. Attachment close revalidates the lease
-        # before this function returns any text to the executor.
-        return instruction_text(attachment.native_snapshot().messages)
+@dataclass(frozen=True)
+class Target:
+    session_id: int
+    agent_id: int
 
 
-def main() -> None:
+# meiva:note
+# Read native guidance under the attachment's authority checks. The attachment is opened and
+# closed here, and closing revalidates the lease, so the text is selected and returned only
+# after the lease held through detach. meiva.state also includes external journal replay, so
+# the native snapshot is read separately: a controller's staged messages cannot replace the
+# inherited instructions.
+def read_instructions(target: Target) -> str:
+    with impersonation.attach(target.session_id, agent_id=target.agent_id) as attached:
+        messages: Sequence[BaseMessage] = attached.native_snapshot().messages
+    return instruction_text(messages)
+
+
+# meiva:note
+# The session and agent named on the command line.
+def parse_target(argv: Sequence[str]) -> Target:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("session_id", type=int)
     parser.add_argument("--agent", required=True, type=int, dest="agent_id")
-    args = parser.parse_args()
-    print(read_instructions(args.session_id, args.agent_id))
+    args = parser.parse_args(argv)
+    return Target(session_id=args.session_id, agent_id=args.agent_id)
+
+
+def main(argv: Sequence[str]) -> None:
+    target = parse_target(argv)
+    print(read_instructions(target))
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

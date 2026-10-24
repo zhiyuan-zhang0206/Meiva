@@ -95,7 +95,7 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
             parser.error("--prompt must be non-empty")
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     _validate_args(parser, args)
@@ -135,4 +135,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

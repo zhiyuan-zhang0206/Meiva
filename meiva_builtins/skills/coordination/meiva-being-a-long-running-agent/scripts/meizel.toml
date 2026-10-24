@@ -1,1 +1,4 @@
 exports = ["agent_usage.py"]
+
+[purity]
+"usage_budget.py" = "strict"

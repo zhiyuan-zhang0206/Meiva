@@ -9,10 +9,26 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any
+from pathlib import Path
+from typing import Any, assert_never
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from usage_budget import (
+    BudgetFacts,
+    Finish,
+    Notify,
+    Sleep,
+    budget_message,
+    check_usd_limit,
+    next_step,
+    parse_time,
+    positive_id,
+)
 
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -20,41 +36,6 @@ from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import process_name
 from base.telemetry.metrics.usage import usage_report
-
-
-def parse_time(value: str) -> datetime:
-    result = datetime.fromisoformat(value)
-    if result.utcoffset() is None:
-        raise ValueError("window timestamps must include a timezone")
-    return result.astimezone(UTC)
-
-
-def positive_id(value: str) -> int:
-    result = int(value)
-    if result <= 0:
-        raise ValueError("agent IDs must be positive integers")
-    return result
-
-
-def budget_message(report: dict[str, Any], *, usd_limit: float | None) -> str | None:
-    """A reminder leaves the receiving agent in charge of graceful disposition."""
-    if usd_limit is not None and (
-        isinstance(usd_limit, bool) or not math.isfinite(usd_limit) or usd_limit <= 0
-    ):
-        raise ValueError("USD limit must be positive and finite")
-    totals = report["totals"]
-    if usd_limit is None or totals["recorded_cost_usd"] < usd_limit:
-        return None
-    ids = [agent["agent_id"] for agent in report["agents"]]
-    return (
-        f"Usage budget reminder: recorded USD {totals['recorded_cost_usd']:.6f} "
-        f">= {usd_limit}. Agents: {ids}; "
-        f"lineage: {report['lineage']}; window: [{report['start']}, {report['end']}). "
-        f"Unpriced calls: {totals['unpriced_calls']}. Reassess before adding work. "
-        "Preserve useful results and recovery notes; finish a safe in-flight unit, "
-        "prepare a handoff, narrow remaining work, or request a revised budget as appropriate. "
-        "This reminder has not terminated any agent or granted additional spending."
-    )
 
 
 def notify_agents(recipients: Sequence[int], message: str) -> None:
@@ -65,7 +46,7 @@ def notify_agents(recipients: Sequence[int], message: str) -> None:
         meiva.agents.send_message(agent_id, message)
 
 
-def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--agent-id", type=positive_id, action="append", required=True)
     parser.add_argument("--lineage", choices=("self", "spawn", "fork", "all"), default="self")
@@ -82,7 +63,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=float,
         help="Poll until breach; bound lifetime with a watcher timeout",
     )
-    args = parser.parse_args(argv)
+    args = parser.parse_args(list(argv))
     validate_args(args, parser)
     return args
 
@@ -98,18 +79,27 @@ def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
     if args.lifetime and args.end:
         parser.error("--lifetime cannot end at a historical timestamp")
     # Validate thresholds before database access, even on an empty report.
-    budget_message(
-        {"totals": {"total_tokens": 0, "recorded_cost_usd": 0}},
-        usd_limit=args.usd_limit,
+    check_usd_limit(args.usd_limit)
+
+
+# meiva:note
+# What a reminder states about a usage report, read from the report's totals and agent rows.
+def facts_of(report: dict[str, Any]) -> BudgetFacts:
+    totals = report["totals"]
+    return BudgetFacts(
+        recorded_cost_usd=totals["recorded_cost_usd"],
+        unpriced_calls=totals["unpriced_calls"],
+        agent_ids=tuple(agent["agent_id"] for agent in report["agents"]),
+        lineage=report["lineage"],
+        start=report["start"],
+        end=report["end"],
     )
 
 
-def main() -> None:
-    args = parse_args()
-    image = LoadedCommit.capture()
-    version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process=process_name())
-    database = Database.from_settings(gate=gate)
+# meiva:note
+# Read the usage report each round inside one read-only snapshot, print it as JSON, and let `next_step` decide: a reminder goes to the named peers once and ends the run, a polling run waits and reads again. The window's end is the clock at each round unless `--end` fixed it.
+def main(argv: Sequence[str], *, database: Database) -> None:
+    args = parse_args(argv)
     while True:
         with database.connect() as conn:
             conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
@@ -120,16 +110,31 @@ def main() -> None:
                 start=args.start,
                 end=args.end or datetime.now(UTC),
             )
-        message = budget_message(report, usd_limit=args.usd_limit)
+        message = budget_message(facts_of(report), usd_limit=args.usd_limit)
         print(
             json.dumps(report, sort_keys=True), flush=True
         )  # script output, not framework logging
-        if message is not None:
-            notify_agents(args.notify_agent, message)
-        if message is not None or args.poll_seconds is None:
+        step = next_step(message, args.poll_seconds)
+        if isinstance(step, Notify):
+            notify_agents(args.notify_agent, step.message)
             return
-        time.sleep(args.poll_seconds)
+        if isinstance(step, Finish):
+            return
+        if isinstance(step, Sleep):
+            time.sleep(step.seconds)
+        else:
+            assert_never(step)
+
+
+# meiva:note
+# The composition root of the CLI: one captured entry gate and the database handle built on it, kept for every poll.
+def process_database() -> Database:
+    image = LoadedCommit.capture()
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process=process_name())
+    return Database.from_settings(gate=gate)
 
 
 if __name__ == "__main__":
-    main()
+    parse_args(sys.argv[1:])
+    main(sys.argv[1:], database=process_database())

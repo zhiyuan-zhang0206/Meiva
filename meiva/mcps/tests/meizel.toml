@@ -1,3 +1,5 @@
+exports = ["stub_daemon.py"]
+
 [uses]
 "_mcps_helpers.py" = ["stub_daemon.py"]
 "daemon" = ["line_streams.py"]

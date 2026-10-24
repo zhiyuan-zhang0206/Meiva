@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
 from meiva_builtins.skills.tests.skill_script import load_skill_script
+
+_NOW = datetime(2026, 10, 24, 9, 30, tzinfo=UTC)
 
 
 @pytest.fixture()
@@ -52,7 +55,8 @@ def _run(aggregate_mod: Any, tmp_path: Path, eval_dir: Path) -> dict[str, Any]:
             "120",
             "--out",
             str(out),
-        ]
+        ],
+        _NOW,
     )
     return cast(dict[str, Any], json.loads(out.read_text(encoding="utf-8")))
 
@@ -60,7 +64,7 @@ def _run(aggregate_mod: Any, tmp_path: Path, eval_dir: Path) -> dict[str, Any]:
 def test_total_runs_is_required(aggregate_mod: Any, tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as excinfo:
         aggregate_mod.main(
-            ["--changes", str(_changes(tmp_path)), "--week", "2026-W42", "--out", "r.json"]
+            ["--changes", str(_changes(tmp_path)), "--week", "2026-W42", "--out", "r.json"], _NOW
         )
 
     assert excinfo.value.code == 2
