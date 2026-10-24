@@ -1,1 +1,4 @@
 exports = ["transcribe.py"]
+
+[purity]
+"transcribe_plan.py" = "strict"

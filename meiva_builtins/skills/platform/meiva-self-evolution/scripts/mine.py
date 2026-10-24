@@ -32,6 +32,8 @@ import json
 import re
 import sys
 from collections import defaultdict
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -144,13 +146,14 @@ def render(clusters: dict[str, list[dict[str, Any]]], empty: str = "") -> str:
     return "\n".join(lines)
 
 
-def _default_dataset() -> Path:
-    from collect import dataset_path, default_week
+def _default_dataset(home: Path, now: datetime) -> Path:
+    from collect import dataset_path
+    from events_window import week_label
 
-    return dataset_path(default_week())
+    return dataset_path(home, week_label(now))
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Cluster a dataset's failed/fumbled runs by skill (markdown digest).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -158,12 +161,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "dataset", nargs="?", default=None, help="dataset JSONL path (default: this week's)"
     )
-    return p.parse_args()
+    return p.parse_args(list(argv))
 
 
-def main() -> None:
-    args = parse_args()
-    path = Path(args.dataset) if args.dataset else _default_dataset()
+def main(argv: Sequence[str], *, home: Path, now: datetime) -> None:
+    args = parse_args(argv)
+    path = Path(args.dataset) if args.dataset else _default_dataset(home, now)
     records = load_records(path)
     print(f"# Failure clusters — {path.name} ({len(records)} runs total)\n")
     print("# By skill\n")
@@ -181,4 +184,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    from base.paths import meiva_home
+
+    main(sys.argv[1:], home=meiva_home(), now=datetime.now(UTC))

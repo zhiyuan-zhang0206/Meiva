@@ -1,9 +1,27 @@
-import sys
+from __future__ import annotations
+
+from types import ModuleType
 from typing import Any
 
+import psycopg
 import pytest
+from langchain_core.messages import HumanMessage, SystemMessage
 
+import meiva
+from agent.tests.impersonation.external.runtime import Takeover
+from agent.tests.impersonation.external.runtime import attached_runtime as attached_runtime
+from agent.tests.impersonation.external.runtime import cluster as cluster
+from agent.tests.impersonation.external.runtime import prior_context as prior_context
+from agent.tests.impersonation.external.runtime import sample_surface as sample_surface
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.config.tests.config_authority import config_authority as config_authority
+from base.packages.tests.model_catalog import model_catalog as model_catalog
 from meiva_builtins.skills.tests.skill_script import load_skill_script
+
+
+@pytest.fixture
+def sdk_identity() -> ModuleType:
+    return meiva
 
 
 @pytest.fixture
@@ -20,8 +38,6 @@ def instruction_reader() -> Any:
 def test_instruction_script_selects_native_prompt_and_preloaded_skills(
     instruction_reader: Any,
 ) -> None:
-    from langchain_core.messages import HumanMessage, SystemMessage
-
     from agent.messages import NoteTag, system_note_message
 
     messages = [
@@ -42,33 +58,71 @@ def test_instruction_script_selects_native_prompt_and_preloaded_skills(
 def test_instruction_script_refuses_missing_or_nontext_prompt(
     instruction_reader: Any, content: Any
 ) -> None:
-    from langchain_core.messages import SystemMessage
-
     messages = [] if content is None else [SystemMessage(content=content)]
     with pytest.raises((RuntimeError, ValueError), match=r"system prompt|nonempty text"):
         instruction_reader.instruction_text(messages)
 
 
-def test_instruction_script_prints_only_after_successful_detach(
-    instruction_reader: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_instruction_script_reads_the_target_from_the_command_line(
+    instruction_reader: Any,
 ) -> None:
-    from contextlib import contextmanager
-    from types import SimpleNamespace
+    target = instruction_reader.parse_target(["0", "--agent", "405"])
+    assert (target.session_id, target.agent_id) == (0, 405)
 
-    from langchain_core.messages import SystemMessage
 
-    @contextmanager
-    def attach(session_id: int, *, agent_id: int) -> Any:
-        assert (session_id, agent_id) == (0, 405)
-        yield SimpleNamespace(
-            native_snapshot=lambda: SimpleNamespace(
-                messages=[SystemMessage(content="Native rules")]
-            )
-        )
-        raise RuntimeError("lease expired before detach")
+def test_instruction_script_requires_the_agent(
+    instruction_reader: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        instruction_reader.parse_target(["0"])
+    assert exit_info.value.code == 2
+    assert "--agent" in capsys.readouterr().err
 
-    monkeypatch.setattr(instruction_reader.impersonation, "attach", attach)
-    monkeypatch.setattr(sys, "argv", ["read_instructions.py", "0", "--agent", "405"])
-    with pytest.raises(RuntimeError, match="lease expired"):
-        instruction_reader.main()
+
+# meiva:note
+# Against a real throwaway database no agent holds a lease, so the real attach refuses before
+# anything is read; nothing may reach stdout.
+def test_instruction_script_prints_nothing_when_the_attachment_is_refused(
+    instruction_reader: Any, db_url: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(ValueError, match="no impersonation session 0"):
+        instruction_reader.main(["0", "--agent", "405"])
     assert capsys.readouterr().out == ""
+
+
+# meiva:note
+# The real attachment reads valid native instructions, then Postgres refuses its receipt seal.
+# Closing must fail before main can publish the text; an early attach refusal cannot prove this.
+def test_instruction_script_prints_only_after_successful_detach(
+    instruction_reader: Any, attached_runtime: Takeover, capsys: pytest.CaptureFixture[str]
+) -> None:
+    attached_runtime.write_checkpoint(messages=[SystemMessage(content="Native rules")])
+    db = attached_runtime.cluster.db_conn
+    db.execute(
+        "CREATE FUNCTION refuse_instruction_detach() RETURNS trigger LANGUAGE plpgsql AS "
+        "$$ BEGIN RAISE EXCEPTION 'instruction detach refused'; END $$"
+    )
+    db.execute(
+        "CREATE TRIGGER refuse_instruction_detach BEFORE UPDATE "
+        "ON agent_impersonation_event_participants FOR EACH ROW "
+        "WHEN (NEW.state = 'sealed') EXECUTE FUNCTION refuse_instruction_detach()"
+    )
+    db.commit()
+    try:
+        with pytest.raises(psycopg.errors.RaiseException, match="instruction detach refused"):
+            instruction_reader.main(
+                [
+                    str(attached_runtime.lease()["session_id"]),
+                    "--agent",
+                    str(attached_runtime.agent_id),
+                ]
+            )
+        assert capsys.readouterr().out == ""
+        assert attached_runtime.receipts() == ["open"]
+    finally:
+        db.rollback()
+        db.execute(
+            "DROP TRIGGER refuse_instruction_detach ON agent_impersonation_event_participants"
+        )
+        db.execute("DROP FUNCTION refuse_instruction_detach()")
+        db.commit()

@@ -38,6 +38,7 @@ there is no lost event to prevent by launching before an uncertain spawn.
 """
 
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import meiva
@@ -49,48 +50,65 @@ MATCH_GLOB = ""  # e.g. "w5_feedback_*.json" — instead of naming the files
 REQUIRED_COUNT = 0  # 0 = all of EXPECTED_FILES; K > 0 = wake at K of them
 ORCHESTRATOR_ID = 0  # the agent to wake at this checkpoint
 
-_dir = Path(HANDOFF_DIR)
+
+# meiva:note
+# One checkpoint, as values: the directory to watch, the files it names or the glob it matches, how many must have landed (0 = all named files), and the agent to wake. The placeholders above are read into it once, at the bottom of this file.
+@dataclass(frozen=True)
+class Checkpoint:
+    handoff_dir: str
+    expected_files: tuple[str, ...]
+    match_glob: str
+    required_count: int
+    orchestrator_id: int
 
 
-def landed() -> list[str]:
+def landed(checkpoint: Checkpoint) -> list[str]:
     """Result files present so far."""
-    if MATCH_GLOB:
-        return sorted(p.name for p in _dir.glob(MATCH_GLOB))
-    return [f for f in EXPECTED_FILES if (_dir / f).exists()]
+    directory = Path(checkpoint.handoff_dir)
+    if checkpoint.match_glob:
+        return sorted(p.name for p in directory.glob(checkpoint.match_glob))
+    return [f for f in checkpoint.expected_files if (directory / f).exists()]
 
 
-def threshold() -> int:
+def threshold(checkpoint: Checkpoint) -> int:
     """How many files this checkpoint waits for."""
-    if REQUIRED_COUNT > 0:
-        return REQUIRED_COUNT
-    if MATCH_GLOB:
+    if checkpoint.required_count > 0:
+        return checkpoint.required_count
+    if checkpoint.match_glob:
         raise ValueError("MATCH_GLOB needs an explicit REQUIRED_COUNT — 'all' is undefined")
-    if not EXPECTED_FILES:
+    if not checkpoint.expected_files:
         raise ValueError("configure EXPECTED_FILES, or MATCH_GLOB with REQUIRED_COUNT")
-    return len(EXPECTED_FILES)
+    return len(checkpoint.expected_files)
 
 
-def _wake(message: str) -> None:
+# meiva:note
+# The wake message of a reached checkpoint: where it was watching, how many of how many landed, and which files.
+def wake_message(checkpoint: Checkpoint, ready: list[str], need: int) -> str:
+    return f"checkpoint reached in {checkpoint.handoff_dir} ({len(ready)}/{need}): " + ", ".join(
+        ready
+    )
+
+
+def _wake(orchestrator_id: int, message: str) -> None:
     """Deliver the checkpoint wake once; a failed send logs and exits 2."""
     try:
-        meiva.agents.send_message(ORCHESTRATOR_ID, message)
+        meiva.agents.send_message(orchestrator_id, message)
     except Exception as exc:  # a lost wake must surface as an exit notice
         print(f"wake delivery failed: {exc!r}", flush=True)
         raise SystemExit(2) from None
 
 
-def watch(interval_s: float = 3.0) -> None:
-    need = threshold()
+def watch(checkpoint: Checkpoint, interval_s: float = 3.0) -> None:
+    need = threshold(checkpoint)
     while True:
-        ready = landed()
+        ready = landed(checkpoint)
         if len(ready) >= need:
-            message = f"checkpoint reached in {HANDOFF_DIR} ({len(ready)}/{need}): " + ", ".join(
-                ready
-            )
-            _wake(message)
+            _wake(checkpoint.orchestrator_id, wake_message(checkpoint, ready, need))
             return
         time.sleep(interval_s)
 
 
 if __name__ == "__main__":
-    watch()
+    watch(
+        Checkpoint(HANDOFF_DIR, tuple(EXPECTED_FILES), MATCH_GLOB, REQUIRED_COUNT, ORCHESTRATOR_ID)
+    )

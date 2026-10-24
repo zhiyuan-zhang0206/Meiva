@@ -1,578 +1,645 @@
-"""Unit tests for the web-ai shared driver
-(meiva_builtins/skills/integrations/web-ai/scripts/webchat.py), plus its `_utils` leaf helpers
-(split out of webchat.py, 2026-08-07, Task #1011).
-
-The live browser behavior (real chrome MCP against the logged-in sites) was
-verified by hand during the build; these lock the *pure* tab-ownership logic
-that regresses silently: every navigation opens its OWN fresh tab (new_page,
-never navigate_page on a shared current page), the [selected] page-id parse, and
-the one-shot close (a finished ask closes its tab; keep_tab / wait=False keep
-it). The chrome MCP seam is mocked so nothing drives a browser.
-
-The `_utils._cluster` tests below lock its home-derived download label to the
-shared resolver (`base.paths.home.resolve_meiva_home`) rather than a
-private `os.environ` read.
-"""
-
+# meiva:note
+# Tests of the shell of the web-ai shared driver (meiva_builtins/skills/integrations/web-ai/scripts/webchat.py), run against a stand-in browser behind a real MCP daemon socket (`web_ai/chrome_stand_in.py`). Every navigation must open its OWN fresh tab, a finished ask closes its tab, and a failure anywhere after a tab opened closes it too. The decisions the shell executes are pure modules, tested with plain values in `web_ai/test_web_ai_decisions.py`.
 from __future__ import annotations
 
-import sys
+import re
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
 import meiva
-from meiva_builtins.skills.tests.skill_script import load_skill_script
+from base.host.tests.short_tmp import short_tmp as short_tmp
+from meiva.mcps.tests.stub_daemon import stub_daemon as stub_daemon
+from meiva_builtins.skills.tests.web_ai.chrome_stand_in import (
+    PageScript,
+    ServeChrome,
+    StandInChrome,
+    known_sites,
+)
+from meiva_builtins.skills.tests.web_ai.chrome_stand_in import serve_chrome as serve_chrome
+from meiva_builtins.skills.tests.web_ai.driver_modules import load_driver_modules
 
-# `_utils.py` is a module-only sibling of `webchat.py`, reached in production
-# only through a child sub-skill script's own __file__-derived sys.path guard
-# (e.g. meiva_builtins/skills/integrations/web-ai/console/scripts/ask.py). Loading it here
-# directly reproduces that guard — tests are outside Structure Rule 6's scope
-# (see meiva_builtins/skills/tests/skill_script.py) — so this file does not depend on collection
-# order putting some other skill's guard on sys.path first.
-sys.path.insert(
-    0,
-    str(
-        Path(__file__).resolve().parents[3]
-        / "meiva_builtins"
-        / "skills"
-        / "integrations"
-        / "web-ai"
-        / "scripts"
-    ),
+M = load_driver_modules()
+webchat = M.webchat
+
+CHATGPT = "https://chatgpt.com/"
+GEMINI = "https://gemini.google.com/app"
+CLAUDE = "https://claude.ai/new"
+CONVERSATION = "https://chatgpt.com/c/abc"
+
+# meiva:note
+# Waits that take no time: the stand-in browser answers at once, so only the deadlines (a fraction of a second) are ever waited out.
+FAST = M.pacing.Pacing(
+    page_settle=0.0,
+    composer_wait=0.3,
+    editor_settle=0.0,
+    login_click_gap=0.0,
+    login_wait=0.3,
+    login_probe_wait=0.3,
+    ready_poll=0.01,
+    answer_stable=0.0,
+    answer_poll=0.0,
+    attach_click_gap=0.0,
+    upload_wait=0.3,
+    upload_poll=0.01,
+    download_poll=0.01,
+    download_recheck=0.01,
 )
 
-_utils = load_skill_script("integrations", "web-ai", "scripts", "_utils.py")
-webchat = load_skill_script("integrations", "web-ai", "scripts", "webchat.py")
 
-_PAGE_LIST = (
-    "## Pages\n"
-    "1: http://localhost:3000/?agent_id=240\n"
-    "2: https://chatgpt.com/c/abc [selected]\n"
-    "3: https://drive.google.com/\n"
-)
+# meiva:note
+# A page that streams two texts with the stop control up, then holds the final one with the control gone, and lands on a conversation URL once the prompt is submitted.
+def answering(final: str = "final answer", url: str = CONVERSATION) -> PageScript:
+    return PageScript(after_submit_url=url, answers=("partial", final), stops=(True, False))
 
 
-@pytest.fixture
-def fake_chrome(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    """Install a fake chrome MCP tool on the real `meiva.mcps` module.
-
-    webchat does `import meiva` at the top level, so it always gets the real
-    `meiva` module. Mocking only `meiva.mcps.chrome` (not the whole `meiva` module)
-    keeps `meiva.sdk_surface.agent_identity` and other submodules accessible — needed by
-    `daemon_socket_path()` called during MCP tool loading.
-    """
-    chrome = MagicMock()
-    chrome.new_page.return_value = _PAGE_LIST
-    import meiva as _meiva
-
-    # `setitem` on the module dict, not `setattr`: `setattr(..., raising=False)` first reads the old
-    # value through the module `__getattr__`, gets a live server proxy back, and on undo writes that
-    # proxy into the module as a real attribute, which later sends the metering walk into the daemon.
-    monkeypatch.setitem(vars(_meiva.mcps), "chrome", chrome)
-    return chrome
+def browser(
+    serve: ServeChrome, pages: dict[str, PageScript] | None = None, *, marks_selected: bool = True
+) -> StandInChrome:
+    return serve(
+        StandInChrome(
+            js=M.js, profiles=known_sites(M.sites, M.js), pages=pages, marks_selected=marks_selected
+        )
+    )
 
 
-# --------------------------------------------------------------------------- #
-# [selected] page-id parse
-# --------------------------------------------------------------------------- #
+def test_downloads_root_creates_the_capability_directory(tmp_path: Path) -> None:
+    places = M.landing.Places(home=tmp_path / ".meiva-t1", downloads=tmp_path / "Downloads")
+    root = M.utils.downloads_root("console", places=places)
+    assert root == tmp_path / "Downloads" / "meiva_meiva-t1_web-ai" / "console"
+    assert root.is_dir()
+    assert M.utils.downloads_root("console", places=places) == root
 
 
-def test_selected_page_id_reads_marked_line() -> None:
-    assert webchat._selected_page_id(_PAGE_LIST) == 2
+def test_system_places_reads_the_home_and_the_downloads_folder(unit_home: Path) -> None:
+    places = M.utils.system_places()
+    assert places.home.resolve() == unit_home.resolve()
+    assert places.downloads == Path("~/Downloads").expanduser()
 
 
-def test_selected_page_id_none_when_unmarked() -> None:
-    assert webchat._selected_page_id("## Pages\n1: https://x\n2: https://y\n") is None
+def test_now_stamp_is_a_sortable_local_time_stamp() -> None:
+    assert re.fullmatch(r"\d{8}-\d{6}", M.utils.now_stamp())
 
 
-def test_selected_page_id_empty() -> None:
-    assert webchat._selected_page_id("") is None
+def test_navigate_opens_new_tab_not_navigate_page(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome)
+
+    page_id = webchat.navigate(CHATGPT)
+
+    assert page_id == 2
+    assert chrome.events == [f"new_page {CHATGPT}"]
+    assert chrome.tabs[1].location == "https://user.example/"
 
 
-# --------------------------------------------------------------------------- #
-# navigate opens a fresh OWNED tab (new_page), never navigate_page
-# --------------------------------------------------------------------------- #
-
-
-def test_navigate_opens_new_tab_not_navigate_page(fake_chrome: MagicMock) -> None:
-    page_id = webchat.navigate("https://chatgpt.com/")
-
-    fake_chrome.new_page.assert_called_once_with(url="https://chatgpt.com/")
-    fake_chrome.navigate_page.assert_not_called()
-    assert page_id == 2  # the [selected] tab in the returned listing
-
-
-def test_open_chat_returns_owned_page_id(
-    fake_chrome: MagicMock, monkeypatch: pytest.MonkeyPatch
+def test_navigate_returns_none_when_the_listing_marks_no_selected_tab(
+    serve_chrome: ServeChrome,
 ) -> None:
-    # _wait_composer and wait_until poll the live page; stub them out — we only
-    # test tab ownership. wait_until returning True means "composer found" so the
-    # login-detection branch is never entered.
-    monkeypatch.setattr(webchat, "_wait_composer", MagicMock(return_value=None))
-    monkeypatch.setattr(webchat, "wait_until", MagicMock(return_value=True))
-    assert webchat.open_chat("chatgpt") == 2
-    fake_chrome.new_page.assert_called_once_with(url=webchat.site("chatgpt")["new_chat_url"])
+    browser(serve_chrome, marks_selected=False)
+    assert webchat.navigate(CHATGPT) is None
 
 
-# --------------------------------------------------------------------------- #
-# close_tab: closes only the id handed in, no-ops on None, swallows errors
-# --------------------------------------------------------------------------- #
+def test_select_activates_tab(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome)
+    webchat.navigate(CHATGPT)
+    webchat.navigate(GEMINI)
+    assert chrome.selected == 3
+
+    webchat.select(2)
+
+    assert chrome.selected == 2
 
 
-def test_close_tab_closes_by_id(fake_chrome: MagicMock) -> None:
-    webchat.close_tab(2)
-    fake_chrome.close_page.assert_called_once_with(pageId=2)
+def test_open_chat_returns_owned_page_id(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome)
+
+    assert webchat.open_chat("chatgpt", pace=FAST) == 2
+
+    assert sorted(chrome.tabs) == [1, 2]
+    assert chrome.tabs[2].location == webchat.site("chatgpt").new_chat_url
 
 
-def test_close_tab_none_is_noop(fake_chrome: MagicMock) -> None:
+def test_open_chat_signs_in_through_google_when_the_page_shows_a_wall(
+    serve_chrome: ServeChrome,
+) -> None:
+    wall = PageScript(
+        composer=False,
+        snapshot='Log in to ChatGPT\nuid=1_1 button "Continue with Google"',
+        reveals_composer=("1_1",),
+    )
+    chrome = browser(serve_chrome, {CHATGPT: wall})
+
+    assert webchat.open_chat("chatgpt", pace=FAST) == 2
+
+    assert chrome.tabs[2].composer
+    assert "click 2 1_1" in chrome.events
+
+
+def test_open_chat_closes_its_tab_when_no_sign_in_path_works(serve_chrome: ServeChrome) -> None:
+    chrome = browser(
+        serve_chrome, {CHATGPT: PageScript(composer=False, snapshot="Log in to ChatGPT")}
+    )
+
+    with pytest.raises(RuntimeError, match="ChatGPT: not logged in"):
+        webchat.open_chat("chatgpt", pace=FAST)
+
+    assert sorted(chrome.tabs) == [1]
+
+
+def test_open_chat_reports_selector_drift_and_closes_its_tab(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome, {CHATGPT: PageScript(composer=False, snapshot="nothing known")})
+
+    with pytest.raises(RuntimeError, match=r"composer not found at https://chatgpt.com/"):
+        webchat.open_chat("chatgpt", pace=FAST)
+
+    assert sorted(chrome.tabs) == [1]
+
+
+# meiva:note
+# A browser that answers no script (no site profile for the page): the first composer probe is refused, and the tab opened a moment earlier must not leak.
+def test_open_chat_closes_its_tab_when_the_browser_fails_mid_wait(
+    serve_chrome: ServeChrome,
+) -> None:
+    chrome = serve_chrome(StandInChrome(js=M.js, profiles={}))
+
+    with pytest.raises(meiva.mcps.MCPCallError, match="no site profile"):
+        webchat.open_chat("chatgpt", pace=FAST)
+
+    assert sorted(chrome.tabs) == [1]
+
+
+def test_close_tab_closes_by_id(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome)
+    page_id = webchat.navigate(CHATGPT)
+
+    webchat.close_tab(page_id)
+
+    assert sorted(chrome.tabs) == [1]
+
+
+def test_close_tab_none_is_noop(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome)
     webchat.close_tab(None)
-    fake_chrome.close_page.assert_not_called()
+    assert chrome.events == []
 
 
-def test_close_tab_swallows_close_error(fake_chrome: MagicMock) -> None:
-    # The browser refuses to close the last open tab; cleanup must not raise.
-    fake_chrome.close_page.side_effect = meiva.mcps.MCPCallError("last page cannot be closed")
-    webchat.close_tab(2)  # must not raise
-    fake_chrome.close_page.assert_called_once()
+# meiva:note
+# The browser refuses to close the final tab; cleanup must not raise.
+def test_close_tab_swallows_close_error(
+    serve_chrome: ServeChrome,
+) -> None:
+    chrome = browser(serve_chrome)
+
+    webchat.close_tab(1)
+
+    assert sorted(chrome.tabs) == [1]
+    assert chrome.events == ["close_page 1"]
 
 
-def test_close_tab_does_not_hide_a_bug(fake_chrome: MagicMock) -> None:
-    # Only the tool's own refusal is cleanup noise; anything else is a real failure.
-    fake_chrome.close_page.side_effect = RuntimeError("bug")
-    with pytest.raises(RuntimeError, match="bug"):
+# meiva:note
+# Only the tool's own refusal is cleanup noise; a browser that cannot be reached is a failure.
+def test_close_tab_does_not_hide_a_bug(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome)
+    assert chrome.socket is not None
+    chrome.socket.unlink()
+
+    with pytest.raises(meiva.mcps.MCPConnectError, match="MCP daemon unavailable"):
         webchat.close_tab(2)
 
 
-# --------------------------------------------------------------------------- #
-# ask(): one-shot close vs keep_tab vs wait=False
-# --------------------------------------------------------------------------- #
+def test_inject_prompt_types_into_the_composer_and_submit_sends_it(
+    serve_chrome: ServeChrome,
+) -> None:
+    chrome = browser(serve_chrome)
+    webchat.navigate(CHATGPT)
+
+    webchat.inject_prompt("chatgpt", 'say "hi"\nthen `code`')
+    via = webchat.submit("chatgpt")
+
+    assert chrome.tabs[2].typed == 'say "hi"\nthen `code`'
+    assert chrome.tabs[2].submitted and via == "button:send"
 
 
-def _stub_ask_internals(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    """Stub the page-driving helpers so ask() runs without a browser. open_chat
-    owns tab 7, navigate (continuation) owns tab 9. Returns the close_tab mock so
-    a test can assert which page id (if any) was closed."""
-    monkeypatch.setattr(webchat, "open_chat", MagicMock(return_value=7))
-    monkeypatch.setattr(webchat, "navigate", MagicMock(return_value=9))
-    monkeypatch.setattr(webchat, "_wait_composer", MagicMock(return_value=None))
-    monkeypatch.setattr(webchat, "inject_prompt", MagicMock(return_value=None))
-    monkeypatch.setattr(webchat, "submit", MagicMock(return_value="button"))
-    monkeypatch.setattr(webchat, "current_url", MagicMock(return_value="https://chatgpt.com/c/abc"))
-    monkeypatch.setattr(
-        webchat, "wait_until_idle", MagicMock(return_value={"answer": "hi", "complete": True})
-    )
-    close_tab = MagicMock()
-    monkeypatch.setattr(webchat, "close_tab", close_tab)
-    return close_tab
+def test_inject_prompt_raises_when_the_editor_rejects_the_insert(serve_chrome: ServeChrome) -> None:
+    browser(serve_chrome, {CHATGPT: PageScript(registers=False)})
+    webchat.navigate(CHATGPT)
+
+    with pytest.raises(RuntimeError, match="prompt did not register in the composer"):
+        webchat.inject_prompt("chatgpt", "hello")
 
 
-def test_ask_one_shot_closes_owned_tab(monkeypatch: pytest.MonkeyPatch) -> None:
-    close_tab = _stub_ask_internals(monkeypatch)
+def test_submit_falls_back_to_enter_and_raises_without_any_target(
+    serve_chrome: ServeChrome,
+) -> None:
+    browser(serve_chrome, {CHATGPT: PageScript(send="enter"), GEMINI: PageScript(send="none")})
+    webchat.navigate(CHATGPT)
+    assert webchat.submit("chatgpt") == "enter"
 
-    r = webchat.ask("chatgpt", "hello")
+    webchat.navigate(GEMINI)
+    with pytest.raises(RuntimeError, match=r"Gemini: could not submit \(no-send-target\)"):
+        webchat.submit("gemini")
 
-    close_tab.assert_called_once_with(7)  # open_chat's owned tab was closed
+
+# meiva:note
+# The tab open_chat owned is closed once the answer is collected.
+def test_ask_one_shot_closes_owned_tab(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome, {CHATGPT: answering()})
+
+    r = webchat.ask("chatgpt", "hello", timeout=5.0, pace=FAST)
+
     assert r["tab_kept"] is False
-    assert r["answer"] == "hi" and r["url"] == "https://chatgpt.com/c/abc"
+    assert sorted(chrome.tabs) == [1]
+    assert chrome.events.count("close_page 2") == 1
+    assert (r["site"], r["label"], r["submitted_via"]) == ("chatgpt", "ChatGPT", "button:send")
+    assert r["answer"] == "final answer" and r["complete"] is True
+    assert r["url"] == CONVERSATION and r["chat_id"] == "abc"
 
 
-def test_ask_keep_tab_leaves_tab_open(monkeypatch: pytest.MonkeyPatch) -> None:
-    close_tab = _stub_ask_internals(monkeypatch)
+def test_ask_types_the_prompt_into_the_fresh_chat(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome, {CHATGPT: answering()})
+    webchat.ask("chatgpt", "hello", keep_tab=True, timeout=5.0, pace=FAST)
+    assert chrome.tabs[2].typed == "hello"
 
-    r = webchat.ask("chatgpt", "hello", keep_tab=True)
 
-    close_tab.assert_not_called()
+def test_ask_keep_tab_leaves_tab_open(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome, {CHATGPT: answering()})
+
+    r = webchat.ask("chatgpt", "hello", keep_tab=True, timeout=5.0, pace=FAST)
+
+    assert sorted(chrome.tabs) == [1, 2]
     assert r["tab_kept"] is True
 
 
-def test_ask_wait_false_always_keeps_tab(monkeypatch: pytest.MonkeyPatch) -> None:
-    close_tab = _stub_ask_internals(monkeypatch)
+# meiva:note
+# The answer is still streaming and is collected later through the conversation URL, so the tab stays.
+def test_ask_wait_false_always_keeps_tab(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome, {CHATGPT: answering()})
 
-    r = webchat.ask("chatgpt", "hello", wait=False)
+    r = webchat.ask("chatgpt", "hello", wait=False, pace=FAST)
 
-    close_tab.assert_not_called()  # streaming answer collected later — tab stays
-    assert r["tab_kept"] is True and r["answer"] == ""
-
-
-def test_ask_continue_url_closes_its_own_tab(monkeypatch: pytest.MonkeyPatch) -> None:
-    close_tab = _stub_ask_internals(monkeypatch)
-
-    webchat.ask("chatgpt", "follow up", conversation_url="https://chatgpt.com/c/abc")
-
-    close_tab.assert_called_once_with(9)  # the navigate()-opened tab, not open_chat's
+    assert sorted(chrome.tabs) == [1, 2]
+    assert r["tab_kept"] is True and r["answer"] == "" and r["complete"] is False
+    assert r["url"] == CONVERSATION
 
 
-def test_ask_closes_owned_tab_when_wait_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An error during the answer wait must still close the owned tab, never leak
-    it into the shared browser."""
-    close_tab = _stub_ask_internals(monkeypatch)
-    monkeypatch.setattr(webchat, "wait_until_idle", MagicMock(side_effect=RuntimeError("boom")))
+def test_ask_returns_the_partial_answer_when_the_wait_times_out(serve_chrome: ServeChrome) -> None:
+    streaming = PageScript(after_submit_url=CONVERSATION, answers=("still going",), stops=(True,))
+    chrome = browser(serve_chrome, {CHATGPT: streaming})
 
-    with pytest.raises(RuntimeError, match="boom"):
-        webchat.ask("chatgpt", "hello")
+    r = webchat.ask("chatgpt", "hello", timeout=0.1, pace=FAST)
 
-    close_tab.assert_called_once_with(7)
+    assert r["answer"] == "still going" and r["complete"] is False
+    assert sorted(chrome.tabs) == [1]
 
 
-def test_start_closes_tab_when_submit_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_start opened the tab; if a later setup step (submit) raises, the tab is
-    closed before the error propagates, not left piling up."""
-    close_tab = _stub_ask_internals(monkeypatch)
-    monkeypatch.setattr(webchat, "submit", MagicMock(side_effect=RuntimeError("send failed")))
+# meiva:note
+# The first page opened is the conversation, not a fresh chat, and its own tab is closed afterwards.
+def test_ask_continue_url_closes_its_own_tab(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome, {CHATGPT: PageScript(), CONVERSATION: answering()})
 
-    with pytest.raises(RuntimeError, match="send failed"):
-        webchat._start("chatgpt", "hello")
+    r = webchat.ask("chatgpt", "follow up", conversation_url=CONVERSATION, timeout=5.0, pace=FAST)
 
-    close_tab.assert_called_once_with(7)
-
-
-# --------------------------------------------------------------------------- #
-# select(): activates a tab by id so the read helpers act on it
-# --------------------------------------------------------------------------- #
+    assert chrome.events[0] == f"new_page {CONVERSATION}"
+    assert sorted(chrome.tabs) == [1]
+    assert r["chat_id"] == "abc"
 
 
-def test_select_activates_tab(fake_chrome: MagicMock) -> None:
-    webchat.select(5)
-    fake_chrome.select_page.assert_called_once_with(pageId=5)
-
-
-# --------------------------------------------------------------------------- #
-# _idle_step state machine: the placeholder guard + the two ways to settle
-# --------------------------------------------------------------------------- #
-
-
-def _drive_idle(monkeypatch: pytest.MonkeyPatch, answers: list[str], streams: list[bool]) -> None:
-    """Feed read_answer / is_streaming the given per-poll sequences (last value
-    repeats once exhausted, so a test can poll past the script)."""
-    ai, si = iter(answers), iter(streams)
-    last_a, last_s = answers[-1], streams[-1]
-
-    def read(_name: str) -> str:
-        nonlocal last_a
-        last_a = next(ai, last_a)
-        return last_a
-
-    def streaming(_name: str) -> bool:
-        nonlocal last_s
-        last_s = next(si, last_s)
-        return last_s
-
-    monkeypatch.setattr(webchat, "read_answer", read)
-    monkeypatch.setattr(webchat, "is_streaming", streaming)
-
-
-def test_idle_step_placeholder_never_settles(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Constant non-empty text that never streamed (no stop button, grew only once
-    # from "") must NOT read as a finished answer — the guard holds.
-    _drive_idle(monkeypatch, ["Thinking"], [False])
-    st = webchat._new_idle_state()
-    for t in range(6):
-        webchat._idle_step("x", st, now=float(t), stable_secs=0.0)
-    assert not st["done"]
-
-
-def test_idle_step_settles_after_stable_when_stop_button_seen(
-    monkeypatch: pytest.MonkeyPatch,
+def test_ask_refuses_a_conversation_url_on_another_host_before_opening_a_tab(
+    serve_chrome: ServeChrome,
 ) -> None:
-    # Stop button seen while text grows, then text goes stable -> settles.
-    _drive_idle(
-        monkeypatch,
-        ["partial", "final answer", "final answer", "final answer"],
-        [True, True, False, False],
-    )
-    st = webchat._new_idle_state()
-    webchat._idle_step("x", st, now=0.0, stable_secs=3.0)  # grew, streaming
-    webchat._idle_step("x", st, now=1.0, stable_secs=3.0)  # grew again, streaming
-    webchat._idle_step("x", st, now=2.0, stable_secs=3.0)  # stable, stop gone -> mark start
-    assert not st["done"] and st["stable_start"] == 2.0
-    webchat._idle_step("x", st, now=6.0, stable_secs=3.0)  # 6-2 >= 3 -> done
-    assert st["done"] and st["complete"] and st["answer"] == "final answer"
+    chrome = browser(serve_chrome)
+
+    with pytest.raises(ValueError, match=r"refusing to navigate to non-chatgpt\.com URL"):
+        webchat.ask("chatgpt", "hi", conversation_url="https://evil.example/c/abc", pace=FAST)
+
+    assert chrome.events == []
 
 
-def test_idle_step_settles_via_growth_without_stop_button(
-    monkeypatch: pytest.MonkeyPatch,
+def test_ask_closes_the_tab_when_the_conversation_has_no_composer(
+    serve_chrome: ServeChrome,
 ) -> None:
-    # Stop selector drifted (never True); two growth steps still let it converge.
-    _drive_idle(monkeypatch, ["a", "ab", "abc", "abc"], [False])
-    st = webchat._new_idle_state()
-    webchat._idle_step("x", st, now=0.0, stable_secs=2.0)  # "a"  growth=1
-    webchat._idle_step("x", st, now=1.0, stable_secs=2.0)  # "ab" growth=2
-    webchat._idle_step("x", st, now=2.0, stable_secs=2.0)  # "abc" growth=3
-    webchat._idle_step("x", st, now=3.0, stable_secs=2.0)  # stable -> mark start
-    assert not st["done"] and st["stable_start"] == 3.0
-    webchat._idle_step("x", st, now=5.0, stable_secs=2.0)  # 5-3 >= 2 -> done
-    assert st["done"] and st["answer"] == "abc"
+    chrome = browser(serve_chrome, {CONVERSATION: PageScript(composer=False)})
+
+    with pytest.raises(RuntimeError, match=r"composer not found at https://chatgpt\.com/c/abc"):
+        webchat.ask("chatgpt", "hi", conversation_url=CONVERSATION, pace=FAST)
+
+    assert sorted(chrome.tabs) == [1]
 
 
-# --------------------------------------------------------------------------- #
-# wait_many_idle: round-robin, selects each tab before reading, per-key results
-# --------------------------------------------------------------------------- #
+# meiva:note
+# An error during the answer wait must still close the owned tab, never leak it into the shared browser.
+def test_ask_closes_owned_tab_when_wait_raises(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome, {CHATGPT: PageScript(answer_fails=True)})
+
+    with pytest.raises(meiva.mcps.MCPCallError, match="stopped answering"):
+        webchat.ask("chatgpt", "hello", timeout=5.0, pace=FAST)
+
+    assert sorted(chrome.tabs) == [1]
 
 
-def test_wait_many_idle_empty_is_noop() -> None:
-    assert webchat.wait_many_idle({}, timeout=1.0) == {}
-
-
-def test_wait_many_idle_polls_each_tab_under_its_own_selection(
-    monkeypatch: pytest.MonkeyPatch,
+# meiva:note
+# With no URL to come back to, a tab kept for a later read is a tab nobody can reach.
+def test_ask_wait_false_closes_the_tab_when_the_url_cannot_be_read(
+    serve_chrome: ServeChrome,
 ) -> None:
-    # read_answer / is_streaming resolve against the CURRENTLY-selected tab, so
-    # this proves wait_many_idle selects each tab before reading it (otherwise the
-    # two answers would cross).
-    selected: dict[str, int | None] = {"id": None}
-    reads: dict[int, int] = {2: 0, 3: 0}
-    answer_for = {2: "ans-chatgpt", 3: "ans-gemini"}
+    chrome = browser(serve_chrome, {CHATGPT: PageScript(location_fails=True)})
 
-    monkeypatch.setattr(webchat, "select", lambda pid: selected.__setitem__("id", pid))  # pyright: ignore[reportUnknownArgumentType]
+    with pytest.raises(meiva.mcps.MCPCallError, match="the tab is gone"):
+        webchat.ask("chatgpt", "hello", wait=False, pace=FAST)
 
-    def read(_name: str) -> str:
-        pid = selected["id"]
-        assert pid is not None
-        reads[pid] += 1
-        return answer_for[pid]
-
-    def streaming(_name: str) -> bool:
-        # Report streaming only on each tab's first read, so saw_stream flips True.
-        pid = selected["id"]
-        assert pid is not None
-        return reads[pid] <= 1
-
-    monkeypatch.setattr(webchat, "read_answer", read)
-    monkeypatch.setattr(webchat, "is_streaming", streaming)
-
-    tabs = {
-        "A": {"name": "chatgpt", "page_id": 2},
-        "B": {"name": "gemini", "page_id": 3},
-    }
-    out = webchat.wait_many_idle(tabs, timeout=5.0, stable_secs=0.0, poll=0.0)
-
-    assert out["A"] == {"answer": "ans-chatgpt", "complete": True}
-    assert out["B"] == {"answer": "ans-gemini", "complete": True}
+    assert sorted(chrome.tabs) == [1]
 
 
-def test_wait_many_idle_returns_partial_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Never stops streaming -> never settles -> times out with the partial text.
-    monkeypatch.setattr(webchat, "select", MagicMock())
-    monkeypatch.setattr(webchat, "read_answer", lambda _name: "still going")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(webchat, "is_streaming", lambda _name: True)  # pyright: ignore[reportUnknownArgumentType]
+# meiva:note
+# The setup opened the tab; if a later step (submit) raises, the tab is closed before the error propagates, not left piling up.
+def test_start_closes_tab_when_submit_raises(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome, {CHATGPT: PageScript(send="none")})
+
+    with pytest.raises(RuntimeError, match="could not submit"):
+        webchat.ask("chatgpt", "hello", pace=FAST)
+
+    assert sorted(chrome.tabs) == [1]
+
+
+def test_wait_until_idle_settles_on_the_final_answer(serve_chrome: ServeChrome) -> None:
+    browser(serve_chrome, {CHATGPT: answering()})
+    webchat.navigate(CHATGPT)
+    webchat.submit("chatgpt")
+
+    answer = webchat.wait_until_idle("chatgpt", timeout=5.0, pace=FAST)
+
+    assert (answer.text, answer.complete) == ("final answer", True)
+
+
+def test_wait_many_idle_empty_is_noop(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome)
+    assert webchat.wait_many_idle({}, timeout=1.0, pace=FAST) == {}
+    assert chrome.events == []
+
+
+# meiva:note
+# Reads resolve against the CURRENTLY-selected tab, so correct answers per key prove each tab is selected before it is read (otherwise the two answers would cross).
+def test_wait_many_idle_polls_each_tab_under_its_own_selection(serve_chrome: ServeChrome) -> None:
+    chatgpt = PageScript(answers=("ans-chatgpt",), stops=(True, False))
+    gemini = PageScript(answers=("ans-gemini",), stops=(True, False))
+    browser(serve_chrome, {CHATGPT: chatgpt, GEMINI: gemini})
+    first = webchat.navigate(CHATGPT)
+    webchat.submit("chatgpt")
+    second = webchat.navigate(GEMINI)
+    webchat.submit("gemini")
+    assert first is not None and second is not None
 
     out = webchat.wait_many_idle(
-        {"A": {"name": "chatgpt", "page_id": 2}}, timeout=-1.0, stable_secs=0.0, poll=0.0
-    )
-    assert out["A"] == {"answer": "still going", "complete": False}
-
-
-# --------------------------------------------------------------------------- #
-# ask_many: setup all tabs THEN wait on them together; per-spec error isolation
-# --------------------------------------------------------------------------- #
-
-
-def _stub_ask_many_internals(
-    monkeypatch: pytest.MonkeyPatch, *, calls: list[Any] | None = None
-) -> MagicMock:
-    """Stub _start (owns tab 2/3 by name) and the concurrent waiter so ask_many
-    runs without a browser. Returns the close_tab mock."""
-    page_id_for = {"chatgpt": 2, "gemini": 3, "claude": 4}
-
-    def fake_start(name: str, prompt: str, *, file: Any = None, conversation_url: Any = None):
-        if calls is not None:
-            calls.append(("start", name))
-        return page_id_for[name], "button"
-
-    def fake_wait(tabs: dict[Any, dict[str, Any]], *, timeout: float) -> dict[Any, dict[str, Any]]:
-        if calls is not None:
-            calls.append(("wait", tuple(tabs)))
-        return {k: {"answer": "A-" + v["name"], "complete": True} for k, v in tabs.items()}
-
-    monkeypatch.setattr(webchat, "_start", fake_start)
-    monkeypatch.setattr(webchat, "wait_many_idle", fake_wait)
-    monkeypatch.setattr(webchat, "select", MagicMock())
-    monkeypatch.setattr(webchat, "current_url", MagicMock(return_value="https://x/c/1"))
-    close_tab = MagicMock()
-    monkeypatch.setattr(webchat, "close_tab", close_tab)
-    return close_tab
-
-
-def test_ask_many_sets_up_all_tabs_before_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[Any] = []
-    close_tab = _stub_ask_many_internals(monkeypatch, calls=calls)
-
-    rows = webchat.ask_many(
-        [{"name": "chatgpt", "prompt": "q"}, {"name": "gemini", "prompt": "q"}], timeout=10.0
+        {"A": M.idle.Tab("chatgpt", first), "B": M.idle.Tab("gemini", second)},
+        timeout=5.0,
+        pace=FAST,
     )
 
-    # The single wait happens only AFTER both tabs are set up — that's the overlap.
-    assert calls == [("start", "chatgpt"), ("start", "gemini"), ("wait", (0, 1))]
+    assert (out["A"].text, out["A"].complete) == ("ans-chatgpt", True)
+    assert (out["B"].text, out["B"].complete) == ("ans-gemini", True)
+
+
+# meiva:note
+# A tab that never stops streaming never settles and times out with the partial text.
+def test_wait_many_idle_returns_partial_on_timeout(serve_chrome: ServeChrome) -> None:
+    browser(serve_chrome, {CHATGPT: PageScript(answers=("still going",), stops=(True,))})
+    page_id = webchat.navigate(CHATGPT)
+    webchat.submit("chatgpt")
+    assert page_id is not None
+
+    out = webchat.wait_many_idle({"A": M.idle.Tab("chatgpt", page_id)}, timeout=-1.0, pace=FAST)
+
+    assert (out["A"].text, out["A"].complete) == ("still going", False)
+
+
+def _spec(name: str) -> object:
+    return webchat.AskSpec(name=name, prompt="q")
+
+
+# meiva:note
+# The slow part (reading answers) starts only AFTER both tabs are submitted: that is the overlap.
+def test_ask_many_sets_up_all_tabs_before_waiting(serve_chrome: ServeChrome) -> None:
+    chrome = browser(
+        serve_chrome,
+        {CHATGPT: answering("A-chatgpt", "https://chatgpt.com/c/1"), GEMINI: answering("A-gemini")},
+    )
+
+    rows = webchat.ask_many([_spec("chatgpt"), _spec("gemini")], timeout=10.0, pace=FAST)
+
+    submits = [i for i, e in enumerate(chrome.events) if e.startswith("submit ")]
+    reads = [i for i, e in enumerate(chrome.events) if e.startswith("answer ")]
+    assert len(submits) == 2 and min(reads) > max(submits)
     assert [r["site"] for r in rows] == ["chatgpt", "gemini"]
     assert rows[0]["answer"] == "A-chatgpt" and rows[1]["answer"] == "A-gemini"
-    assert close_tab.call_count == 2  # default: close each owned tab
+    assert sorted(chrome.tabs) == [1]
 
 
-def test_ask_many_setup_failure_isolated_to_its_row(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_ask_many_internals(monkeypatch)
-
-    def fake_start(name: str, prompt: str, *, file: Any = None, conversation_url: Any = None):
-        if name == "gemini":
-            raise RuntimeError("composer not found")
-        return {"chatgpt": 2, "claude": 4}[name], "button"
-
-    monkeypatch.setattr(webchat, "_start", fake_start)
+# meiva:note
+# The live models still answered: one dead model did not sink the panel.
+def test_ask_many_setup_failure_isolated_to_its_row(serve_chrome: ServeChrome) -> None:
+    chrome = browser(
+        serve_chrome,
+        {
+            CHATGPT: answering("A-chatgpt"),
+            GEMINI: PageScript(composer=False, snapshot="nothing known"),
+            CLAUDE: answering("A-claude", "https://claude.ai/chat/c1"),
+        },
+    )
 
     rows = webchat.ask_many(
-        [
-            {"name": "chatgpt", "prompt": "q"},
-            {"name": "gemini", "prompt": "q"},
-            {"name": "claude", "prompt": "q"},
-        ],
-        timeout=10.0,
+        [_spec("chatgpt"), _spec("gemini"), _spec("claude")], timeout=10.0, pace=FAST
     )
 
     assert [r["site"] for r in rows] == ["chatgpt", "gemini", "claude"]
-    assert "error" in rows[1] and "composer not found" in rows[1]["error"]
-    # The live models still answered — one dead model did not sink the panel.
+    assert "composer not found" in rows[1].get("error", "")
     assert rows[0]["answer"] == "A-chatgpt" and "error" not in rows[0]
     assert rows[2]["answer"] == "A-claude" and "error" not in rows[2]
+    assert sorted(chrome.tabs) == [1]
 
 
-def test_ask_many_none_page_id_becomes_error_row(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_ask_many_internals(monkeypatch)
+def test_ask_many_none_page_id_becomes_error_row(serve_chrome: ServeChrome) -> None:
+    browser(serve_chrome, {CHATGPT: answering()}, marks_selected=False)
 
-    def fake_start(name: str, prompt: str, *, file: Any = None, conversation_url: Any = None):
-        return None, "button"  # page-list format drift: no [selected] tab id
+    rows = webchat.ask_many([_spec("chatgpt")], timeout=10.0, pace=FAST)
 
-    monkeypatch.setattr(webchat, "_start", fake_start)
-
-    rows = webchat.ask_many([{"name": "chatgpt", "prompt": "q"}], timeout=10.0)
-
-    assert "error" in rows[0] and "page-list format drift" in rows[0]["error"]
+    assert "page-list format drift" in rows[0].get("error", "")
 
 
-def test_ask_many_keep_tab_leaves_tabs_open(monkeypatch: pytest.MonkeyPatch) -> None:
-    close_tab = _stub_ask_many_internals(monkeypatch)
+def test_ask_many_unknown_site_raises_before_any_tab_opens(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome)
 
-    rows = webchat.ask_many([{"name": "chatgpt", "prompt": "q"}], timeout=10.0, keep_tab=True)
+    with pytest.raises(ValueError, match="unknown site 'bard'"):
+        webchat.ask_many([_spec("bard")], timeout=10.0, pace=FAST)
 
-    close_tab.assert_not_called()
-    assert rows[0]["tab_kept"] is True
+    assert chrome.events == []
 
 
-def test_ask_many_closes_live_tabs_when_wait_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """If the shared wait raises after all tabs are set up, every live tab is
-    still closed, not leaked."""
-    close_tab = _stub_ask_many_internals(monkeypatch)
-    monkeypatch.setattr(
-        webchat, "wait_many_idle", MagicMock(side_effect=RuntimeError("panel died"))
+def test_ask_many_keep_tab_leaves_tabs_open(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome, {CHATGPT: answering()})
+
+    rows = webchat.ask_many([_spec("chatgpt")], timeout=10.0, keep_tab=True, pace=FAST)
+
+    assert sorted(chrome.tabs) == [1, 2]
+    assert rows[0].get("tab_kept") is True
+
+
+# meiva:note
+# If the shared wait raises after all tabs are set up, every live tab is still closed, not leaked.
+def test_ask_many_closes_live_tabs_when_wait_raises(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome, {CHATGPT: answering(), GEMINI: PageScript(answer_fails=True)})
+
+    with pytest.raises(meiva.mcps.MCPCallError, match="stopped answering"):
+        webchat.ask_many([_spec("chatgpt"), _spec("gemini")], timeout=10.0, pace=FAST)
+
+    assert sorted(chrome.tabs) == [1]
+    assert sorted(e for e in chrome.events if e.startswith("close_page")) == [
+        "close_page 2",
+        "close_page 3",
+    ]
+
+
+# meiva:note
+# A raise partway through the collect loop (after the first tab already closed) still closes the remaining tab, and never double-closes the first: page 2 closes in the loop, page 3 in the finally, each exactly once.
+def test_ask_many_mid_loop_raise_closes_rest_exactly_once(serve_chrome: ServeChrome) -> None:
+    chrome = browser(
+        serve_chrome,
+        {
+            CHATGPT: answering(),
+            GEMINI: PageScript(location_fails=True, answers=("x",), stops=(True, False)),
+        },
     )
 
-    with pytest.raises(RuntimeError, match="panel died"):
-        webchat.ask_many(
-            [{"name": "chatgpt", "prompt": "q"}, {"name": "gemini", "prompt": "q"}], timeout=10.0
-        )
+    with pytest.raises(meiva.mcps.MCPCallError, match="the tab is gone"):
+        webchat.ask_many([_spec("chatgpt"), _spec("gemini")], timeout=10.0, pace=FAST)
 
-    assert {c.args[0] for c in close_tab.call_args_list} == {2, 3}  # both live tabs closed
-
-
-def test_ask_many_mid_loop_raise_closes_rest_exactly_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A raise partway through the collect loop (after the first tab already
-    closed) still closes the remaining tab, and never double-closes the first."""
-    close_tab = _stub_ask_many_internals(monkeypatch)
-    n = {"calls": 0}
-
-    def raising_url() -> str:
-        n["calls"] += 1
-        if n["calls"] == 2:  # fails while collecting the 2nd tab
-            raise RuntimeError("read failed")
-        return "https://x/c/1"
-
-    monkeypatch.setattr(webchat, "current_url", raising_url)
-
-    with pytest.raises(RuntimeError, match="read failed"):
-        webchat.ask_many(
-            [{"name": "chatgpt", "prompt": "q"}, {"name": "gemini", "prompt": "q"}], timeout=10.0
-        )
-
-    # page 2 closed in-loop, page 3 closed in the finally — each exactly once.
-    assert sorted(c.args[0] for c in close_tab.call_args_list) == [2, 3]
+    closes = [e for e in chrome.events if e.startswith("close_page")]
+    assert sorted(closes) == ["close_page 2", "close_page 3"]
+    assert sorted(chrome.tabs) == [1]
 
 
-# --------------------------------------------------------------------------- #
-# chat_id_from_url: extract a stable conversation identifier
-# --------------------------------------------------------------------------- #
+def test_check_login_detects_login_indicators(serve_chrome: ServeChrome) -> None:
+    chrome = browser(
+        serve_chrome, {CHATGPT: PageScript(composer=False, snapshot="Log in to ChatGPT")}
+    )
+
+    assert webchat.check_login("chatgpt", pace=FAST) is False
+
+    assert sorted(chrome.tabs) == [1]
 
 
-def test_chat_id_from_url_extracts_chatgpt_id() -> None:
-    assert webchat.chat_id_from_url("chatgpt", "https://chatgpt.com/c/abc-123") == "abc-123"
+def test_check_login_confirms_logged_in_when_composer_present(serve_chrome: ServeChrome) -> None:
+    chrome = browser(serve_chrome)
+
+    assert webchat.check_login("chatgpt", pace=FAST) is True
+
+    assert sorted(chrome.tabs) == [1]
 
 
-def test_chat_id_from_url_extracts_claude_id() -> None:
-    assert webchat.chat_id_from_url("claude", "https://claude.ai/chat/xyz-789") == "xyz-789"
+_ATTACH_MENU = 'uid=a1 button "Add files and more"\nuid=a2 menuitem "Add photos & files"'
 
 
-def test_chat_id_from_url_returns_none_when_no_pattern_matches() -> None:
-    assert webchat.chat_id_from_url("chatgpt", "https://chatgpt.com/") is None
-
-
-def test_chat_id_from_url_returns_none_for_unknown_site() -> None:
-    # A site with no chat_id_patterns defined returns None.
-    # Use a site name that exists but modify its patterns — actually just test
-    # that the function handles missing patterns gracefully.
-    # The real SITES all have patterns now, so test with a URL that won't match.
-    assert webchat.chat_id_from_url("chatgpt", "https://other.com/page") is None
-
-
-# --------------------------------------------------------------------------- #
-# chat_url: build a conversation URL from a chat_id
-# --------------------------------------------------------------------------- #
-
-
-def test_chat_url_builds_chatgpt_url() -> None:
-    assert webchat.chat_url("chatgpt", "abc-123") == "https://chatgpt.com/c/abc-123"
-
-
-def test_chat_url_builds_claude_url() -> None:
-    assert webchat.chat_url("claude", "xyz-789") == "https://claude.ai/chat/xyz-789"
-
-
-# --------------------------------------------------------------------------- #
-# check_login: probe for login wall (pure logic, no browser)
-# --------------------------------------------------------------------------- #
-
-
-def test_check_login_detects_login_indicators(
-    monkeypatch: pytest.MonkeyPatch, fake_chrome: MagicMock
+# meiva:note
+# The menu control is clicked first, then the file chooser control is handed the file.
+def test_attach_file_walks_the_attach_path_and_hands_over_the_file(
+    serve_chrome: ServeChrome, tmp_path: Path
 ) -> None:
-    # Simulate a login page where the snapshot contains "Log in" and no composer
-    monkeypatch.setattr(webchat, "page_snapshot", MagicMock(return_value="Log in to ChatGPT"))
-    monkeypatch.setattr(webchat, "evaluate", MagicMock(return_value=False))  # composer absent
-    monkeypatch.setattr(webchat, "close_tab", MagicMock())
+    note = tmp_path / "note.txt"
+    note.write_text("hello", encoding="utf-8")
+    chrome = browser(serve_chrome, {CHATGPT: PageScript(snapshot=_ATTACH_MENU)})
+    webchat.navigate(CHATGPT)
 
-    assert webchat.check_login("chatgpt") is False
+    webchat.attach_file("chatgpt", note, pace=FAST)
+
+    assert chrome.tabs[2].uploads == ["note.txt"]
+    assert "click 2 a1" in chrome.events
 
 
-def test_check_login_confirms_logged_in_when_composer_present(
-    monkeypatch: pytest.MonkeyPatch, fake_chrome: MagicMock
+def test_attach_file_raises_for_a_missing_file_without_touching_the_browser(
+    serve_chrome: ServeChrome, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(webchat, "evaluate", MagicMock(return_value=True))  # composer present
-    monkeypatch.setattr(webchat, "close_tab", MagicMock())
+    chrome = browser(serve_chrome)
 
-    assert webchat.check_login("chatgpt") is True
+    with pytest.raises(FileNotFoundError, match="attachment not found"):
+        webchat.attach_file("chatgpt", tmp_path / "absent.txt", pace=FAST)
 
-
-# --------------------------------------------------------------------------- #
-# `_utils._cluster` — labels from the resolved home
-# --------------------------------------------------------------------------- #
+    assert chrome.events == []
 
 
-def test_cluster_label_strips_leading_dots(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_utils, "resolve_meiva_home", lambda: Path("/home/user/.meiva-t1"))
-    assert _utils._cluster() == "meiva-t1"
-
-
-def test_cluster_label_defaults_to_meiva_when_home_name_is_all_dots(
-    monkeypatch: pytest.MonkeyPatch,
+def test_attach_file_names_the_control_it_could_not_find(
+    serve_chrome: ServeChrome, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(_utils, "resolve_meiva_home", lambda: Path("/home/user/.meiva"))
-    assert _utils._cluster() == "meiva"
+    note = tmp_path / "note.txt"
+    note.write_text("hello", encoding="utf-8")
+    browser(serve_chrome, {CHATGPT: PageScript(snapshot="")})
+    webchat.navigate(CHATGPT)
+
+    with pytest.raises(RuntimeError, match=r"could not find \('Add files and more',\)"):
+        webchat.attach_file("chatgpt", note, pace=FAST)
+
+
+def _export_page(downloads: Path, *, saves: bool = True) -> PageScript:
+    saved = (("d1", downloads / "report.md"),) if saves else ()
+    return PageScript(snapshot='uid=d1 menuitem "Export to Markdown"', saves_on_click=saved)
+
+
+def test_download_by_click_moves_the_new_file_to_dest(
+    serve_chrome: ServeChrome, tmp_path: Path
+) -> None:
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    (downloads / "older.md").write_text("old", encoding="utf-8")
+    browser(serve_chrome, {CHATGPT: _export_page(downloads)})
+    webchat.navigate(CHATGPT)
+    dest = tmp_path / "out" / "report.md"
+
+    got = webchat.download_by_click(
+        ["Export to Markdown"],
+        dest=dest,
+        suffixes=(".md",),
+        downloads=downloads,
+        timeout=2.0,
+        pace=FAST,
+    )
+
+    assert got == dest and dest.read_text(encoding="utf-8") == "downloaded"
+    assert sorted(p.name for p in downloads.iterdir()) == ["older.md"]
+
+
+def test_download_by_click_is_none_when_the_control_is_missing(
+    serve_chrome: ServeChrome, tmp_path: Path
+) -> None:
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    browser(serve_chrome, {CHATGPT: PageScript(snapshot="")})
+    webchat.navigate(CHATGPT)
+
+    got = webchat.download_by_click(
+        ["Export to Markdown"],
+        dest=tmp_path / "report.md",
+        suffixes=(".md",),
+        downloads=downloads,
+        pace=FAST,
+    )
+
+    assert got is None
+
+
+def test_download_by_click_is_none_when_no_new_file_lands_in_time(
+    serve_chrome: ServeChrome, tmp_path: Path
+) -> None:
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    (downloads / "report.md").write_text("already there", encoding="utf-8")
+    browser(serve_chrome, {CHATGPT: _export_page(downloads, saves=False)})
+    webchat.navigate(CHATGPT)
+
+    got = webchat.download_by_click(
+        ["Export to Markdown"],
+        dest=tmp_path / "out.md",
+        suffixes=(".md",),
+        downloads=downloads,
+        timeout=0.1,
+        pace=FAST,
+    )
+
+    assert got is None
+    assert (downloads / "report.md").read_text(encoding="utf-8") == "already there"

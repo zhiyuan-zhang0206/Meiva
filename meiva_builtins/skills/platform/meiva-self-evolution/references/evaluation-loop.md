@@ -53,16 +53,18 @@ watcher on them. Each following turn, reload and check:
 
 ```python
 import evaluate
+from base.cluster.machine.ambient import gateway_access_from_settings
 from meiva.sdk_surface.settings import database as sdk_database
 db = sdk_database()
 state = evaluate.latest_state("meiva-goal")
 progress = evaluate.poll(state, database=db)   # {"done": [...], "pending": [...]}
 # when pending is empty:
-report = evaluate.gather(state, database=db)   # {"mean": {...}, "per_task": [...]}
+gateway = gateway_access_from_settings()       # the gateway URL and bearer, read once
+report = evaluate.gather(state, database=db, gateway=gateway)   # {"mean": {...}, "per_task": [...]}
 ```
 
 The imported read helpers (`poll`, `gather`, and `debrief`) take an explicit
-`Database`. A caller in an established SDK context can obtain its supplied
+`Database`; `gather` also takes the `GatewayAccess` it reads the events with. A caller in an established SDK context can obtain its supplied
 handle with `sdk_database()`; other callers pass their own process-root handle.
 The standalone collection scripts construct one gate at startup and reuse the
 same handle for lifecycle rows and checkpoint transcripts.

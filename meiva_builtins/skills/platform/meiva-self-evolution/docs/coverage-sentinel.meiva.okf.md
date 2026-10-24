@@ -19,7 +19,8 @@ as a data-quality problem instead of pretending either health or a regression.
 
 `settings.general.self_evolution_coverage_alert_floor` (alias
 `MEIVA_SELF_EVOLUTION_COVERAGE_ALERT_FLOOR`, cluster-pinned, no restart) defaults
-to 0.5. It lives in the `general` domain rather than a `self_evolution` domain
+to 0.5. `daily_scan.py` reads it once at its start and `scan_report.py` takes it as a
+value, so the verdict and the alert line are functions of the floor they are given. It lives in the `general` domain rather than a `self_evolution` domain
 because the scan runs as a subprocess of an agent process, so it inherits the
 `MEIVA_PROCESS_PROFILE=agent` marker: a domain outside that profile raises
 `profile_domain_error` at the read. Evidence grading leaves roughly a quarter of

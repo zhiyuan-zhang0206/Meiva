@@ -27,160 +27,80 @@ import argparse
 import mimetypes
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
 
 import httpx
 
 from base.config import settings
 
-# Telegram's hard cap for documents sent through the Bot API.
-MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
-# Telegram's caption cap for sendDocument (task #3696 exception inventory).
-MAX_CAPTION_CHARS = 1024
-# Uploads up to 50 MB over a private link need more headroom than a text
-# message; a slow link should fail loudly rather than hang the caller.
-_SEND_TIMEOUT_S = 120.0
+# meiva:note
+# `telegram_delivery` is a sibling in this skill's own scripts/ dir, not an importable
+# package (PYTHONSAFEPATH=1 keeps a script's own directory off sys.path). Structure Rule 6
+# recognizes this exact __file__-derived, within-skill shape as the endorsed guard.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from telegram_delivery import (
+    SEND_TIMEOUT_S,
+    TELEGRAM_API_BASE,
+    Credentials,
+    build_request,
+    check_caption,
+    check_document_size,
+    credentials_from_env,
+    read_response,
+    success_line,
+)
 
 
+# meiva:note
+# Return ``path`` as a resolved regular file, or raise. Gates: exists, regular file,
+# non-empty, within Telegram's 50 MB document cap. A directory, a missing path, an empty
+# file, or an oversized file all fail fast with a message the caller can show the user.
 def validate_file(path: str | Path) -> Path:
-    """Return ``path`` as a resolved regular file, or raise.
-
-    Gates: exists, regular file, non-empty, within Telegram's 50 MB document
-    cap. A directory, a missing path, an empty file, or an oversized file
-    all fail fast with a message the caller can show the user.
-    """
-
     p = Path(path).expanduser()
     if not p.is_file():
         raise FileNotFoundError(f"not a file: {p}")
-    size = p.stat().st_size
-    if size <= 0:
-        raise ValueError(f"empty file: {p}")
-    if size > MAX_DOCUMENT_BYTES:
-        raise ValueError(
-            "file exceeds Telegram's sendDocument cap "
-            f"({MAX_DOCUMENT_BYTES // (1024 * 1024)} MB): {p} ({size} bytes)"
-        )
+    check_document_size(str(p), p.stat().st_size)
     return p
 
 
-def _api_url(token: str) -> str:
-    return f"https://api.telegram.org/bot{token}/sendDocument"
-
-
-def _credentials_from_env(env: Mapping[str, str]) -> tuple[str, int]:
-    """Parse the two aliases from an env mapping; malformed owner id -> 0.
-
-    Pure (env passed in) so tests exercise the exact precedence logic
-    without touching the process environment.
-    """
-
-    token = env.get("MEIVA_TELEGRAM_BOT_TOKEN", "")
-    owner_raw = env.get("MEIVA_TELEGRAM_OWNER_ID", "0")
-    try:
-        owner = int(owner_raw)
-    except ValueError:
-        owner = 0
-    return token, owner
-
-
-def _credentials(env: Mapping[str, str] | None = None) -> tuple[str, int]:
-    """Bot token + owner chat id, from the cluster's env aliases.
-
-    Agent processes may NOT construct the ``telegram`` settings domain
-    (per-process config, Task #856: the agent profile excludes it, and the
-    consumption-matrix guard keeps it that way). The canonical env aliases
-    are read directly instead — ``load_meiva_env`` populates os.environ from
-    $MEIVA_HOME/.env, the same source im_bridge's settings read. When the
-    aliases are empty (test pins, or a bare CLI context), fall back to the
-    settings domain when this process may construct it (no profile marker).
-    """
-
-    token, owner = _credentials_from_env(env if env is not None else os.environ)
-    if settings.has_domain("telegram"):  # noqa: SIM102 - required domain guard shape
-        if not token:
-            token = settings.telegram.telegram_bot_token
-            owner = settings.telegram.telegram_owner_id
-    return token, owner
-
-
+# meiva:note
+# POST one file to Telegram's sendDocument at `api_base`; return the result object. Errors
+# are sanitized: httpx exceptions can embed the request URL, which contains the bot token,
+# so only the exception class name is surfaced.
 def send_document(
-    *,
-    token: str,
-    chat_id: int,
-    path: Path,
-    caption: str | None = None,
-    client: httpx.Client | None = None,
-) -> dict[str, Any]:
-    """POST one file to Telegram's sendDocument; return the result object.
-
-    The result carries ``message_id`` (and the delivered message). Errors are
-    sanitized: httpx exceptions can embed the request URL, which contains the
-    bot token, so only the exception class name is surfaced; the response
-    body (which never contains the token) is included for status failures.
-    """
-
-    if caption is not None and len(caption) > MAX_CAPTION_CHARS:
-        raise ValueError(f"caption exceeds {MAX_CAPTION_CHARS} chars")
+    *, api_base: str, credentials: Credentials, path: Path, caption: str | None = None
+) -> Mapping[str, object]:
+    request = build_request(api_base, credentials, caption)
     content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    owns = client is None
-    http = client or httpx.Client(timeout=_SEND_TIMEOUT_S)
-    data: dict[str, object] = {"chat_id": chat_id}
-    if caption is not None:
-        data["caption"] = caption
     try:
-        with path.open("rb") as fh:
+        with httpx.Client(timeout=SEND_TIMEOUT_S) as http, path.open("rb") as fh:
             resp = http.post(
-                _api_url(token),
-                data=data,
+                request.url,
+                data=request.form(),
                 files={"document": (path.name, fh, content_type)},
-                timeout=_SEND_TIMEOUT_S,
             )
     except httpx.HTTPError as exc:
         raise RuntimeError(f"telegram sendDocument failed: {type(exc).__name__}") from None
-    finally:
-        if owns:
-            http.close()
-    if resp.status_code != 200:
-        raise RuntimeError(
-            f"telegram sendDocument failed: HTTP {resp.status_code} - {resp.text[:200]}"
-        )
-    payload = resp.json()
-    if not payload.get("ok"):
-        raise RuntimeError(
-            f"telegram sendDocument failed: API {payload.get('description', 'unknown error')}"
-        )
-    return payload["result"]
+    return read_response(resp.status_code, resp.text)
 
 
-def _deliver(path_arg: str, caption: str | None) -> str:
-    """Validate and send; return the one-line success report.
-
-    Every failure raises (FileNotFoundError / ValueError / RuntimeError) so
-    ``main`` can render one uniform ``error: <reason>`` line; keeping the
-    raises outside any try block also keeps TRY301 happy.
-    """
-
+# meiva:note
+# Validate and send; return the one-line success report. Every failure raises
+# (FileNotFoundError / ValueError / RuntimeError) so `main` can render one uniform
+# ``error: <reason>`` line.
+def _deliver(path_arg: str, caption: str | None, *, api_base: str, credentials: Credentials) -> str:
     path = validate_file(path_arg)
-    if caption is not None and len(caption) > MAX_CAPTION_CHARS:
-        raise ValueError(f"caption exceeds {MAX_CAPTION_CHARS} chars")
-    token, chat_id = _credentials()
-    if not token:
-        raise RuntimeError("Telegram bot token not configured (MEIVA_TELEGRAM_BOT_TOKEN)")
-    if not chat_id:
-        raise RuntimeError("Telegram owner chat not configured (MEIVA_TELEGRAM_OWNER_ID)")
-    result = send_document(token=token, chat_id=chat_id, path=path, caption=caption)
-    return (
-        f"sent {path.name} ({path.stat().st_size} bytes) to chat {chat_id}: "
-        f"message_id={result['message_id']}"
-    )
+    check_caption(caption)
+    credentials.require()
+    result = send_document(api_base=api_base, credentials=credentials, path=path, caption=caption)
+    return success_line(path.name, path.stat().st_size, credentials.chat_id, result)
 
 
-def main(argv: list[str] | None = None) -> int:
-    """CLI entry point: validate, send, report. Returns the exit code."""
-
+# meiva:note
+# CLI entry point: validate, send, report. Returns the exit code.
+def main(argv: Sequence[str], *, api_base: str, credentials: Credentials) -> int:
     parser = argparse.ArgumentParser(
         prog="telegram-send-file",
         description="Send one local file to the user's Telegram chat (Bot API sendDocument).",
@@ -193,12 +113,30 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
-        print(_deliver(args.path, args.caption))
+        print(_deliver(args.path, args.caption, api_base=api_base, credentials=credentials))
         return 0
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
 
+# meiva:note
+# The process entry reads the world once. Bot token + owner chat id come from the canonical env
+# aliases (`load_meiva_env` populates them from $MEIVA_HOME/.env, the same source im_bridge's
+# settings read), because agent processes may NOT construct the ``telegram`` settings domain
+# (per-process config, Task #856: the agent profile excludes it, and the consumption-matrix
+# guard keeps it that way; the guard recognizes a settings read only inside an
+# ``if settings.has_domain("telegram")`` body). When the token alias is empty (a bare CLI
+# context), the settings domain supplies both values if this process may construct it.
 if __name__ == "__main__":
-    raise SystemExit(main())
+    credentials = credentials_from_env(os.environ)
+    if settings.has_domain("telegram"):
+        credentials = (
+            Credentials(
+                token=settings.telegram.telegram_bot_token,
+                chat_id=settings.telegram.telegram_owner_id,
+            )
+            if credentials.lacks_token()
+            else credentials
+        )
+    raise SystemExit(main(sys.argv[1:], api_base=TELEGRAM_API_BASE, credentials=credentials))

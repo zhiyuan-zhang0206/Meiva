@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Callable, Iterable, Sequence
+import sys
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -160,17 +161,17 @@ def stub_judge(name: str) -> Judge:
     return stubs[name]
 
 
-def main(argv: Iterable[str] | None = None) -> int:
+def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(
         description="Score a judge against trivial baselines on a balanced case set."
     )
     parser.add_argument("--cases", required=True, help="JSON case file")
     parser.add_argument("--judge", default="always-pass", help="stub name")
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    args = parser.parse_args(list(argv))
     cal = calibrate(load_cases(args.cases), stub_judge(args.judge))
     print(format_report(cal))
     return 0 if cal.beats_baselines else 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

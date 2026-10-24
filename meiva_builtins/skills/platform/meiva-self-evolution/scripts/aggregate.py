@@ -22,6 +22,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -127,7 +129,7 @@ def measured_mean(state: dict[str, Any]) -> dict[str, Any] | None:
     return cast(dict[str, Any], mean)
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: Sequence[str], now: datetime) -> None:
     p = argparse.ArgumentParser(description="Aggregate self_evolution outputs into a report JSON.")
     p.add_argument("--changes", required=True, help="JSON list of {skill, summary, pr, pr_url}")
     p.add_argument("--eval-dir", help="directory containing evaluate.py gather outputs")
@@ -135,7 +137,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--week", required=True, help="ISO week label e.g. 2025-06-30")
     p.add_argument("--total-runs", type=int, required=True, help="total runs in dataset")
     p.add_argument("--out", default="report.json", help="output path")
-    args = p.parse_args(argv)
+    args = p.parse_args(list(argv))
 
     # Changes
     changes = load_json(Path(args.changes))
@@ -187,6 +189,7 @@ def main(argv: list[str] | None = None) -> None:
         failure_clusters=failure_clusters,
         eval_results=eval_results,
         total_runs=args.total_runs,
+        now=now,
     )
 
     out_path = Path(args.out)
@@ -195,4 +198,4 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:], datetime.now(UTC))

@@ -1,6 +1,7 @@
 exports = ["coordination"]
 
 [uses]
+"coordination" = ["tests"]
 "platform" = ["tests"]
 "tests" = ["integrations", "practice"]
 

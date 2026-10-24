@@ -6,8 +6,9 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.db import Database
 from meiva_builtins.skills.tests.skill_script import load_skill_script
+
+record_mod = load_skill_script("platform", "meiva-self-evolution", "scripts", "record.py")
 
 
 @pytest.fixture(scope="module")
@@ -42,8 +43,6 @@ def _fetch(collect_mod: Any, cur: psycopg.Cursor, agent_ids: list[int]) -> Any:
 
 
 def _build(
-    collect_mod: Any,
-    database: Database,
     agent_id: int,
     inbounds: list[dict[str, Any]],
     spawner: str,
@@ -51,20 +50,22 @@ def _build(
     transcript: list[dict[str, str]] | None = None,
     status: str = "completed",
 ) -> dict[str, Any]:
-    return collect_mod.build_record(
-        database=database,
-        agent_id=agent_id,
-        week="2026-08-30",
-        events=[],
-        log_events=[],
-        inbounds=inbounds,
-        transcript=[] if transcript is None else transcript,
-        meta=(spawner, status, "delivered"),
+    return record_mod.build_record(
+        record_mod.RunInputs(
+            agent_id=agent_id,
+            week="2026-08-30",
+            events=record_mod.event_facts(()),
+            log_events=(),
+            inbounds=record_mod.inbound_facts(tuple(inbounds)),
+            meta=record_mod.AgentMeta(spawner, status, "delivered"),
+            transcript=record_mod.transcript_facts(() if transcript is None else tuple(transcript)),
+            skills_touched=(),
+        )
     )
 
 
 def test_spawn_brief_older_than_the_window_is_the_task_prompt(
-    collect_mod: Any, db_conn: psycopg.Connection, database: Database
+    collect_mod: Any, db_conn: psycopg.Connection
 ) -> None:
     with db_conn.cursor() as cur:
         _insert_agent(cur, 8, spawner="agent:1")
@@ -74,14 +75,14 @@ def test_spawn_brief_older_than_the_window_is_the_task_prompt(
     with db_conn.cursor() as cur:
         inbounds = _fetch(collect_mod, cur, [8])
 
-    rec = _build(collect_mod, database, 8, inbounds[8], "agent:1")
+    rec = _build(8, inbounds[8], "agent:1")
 
     assert rec["task_prompt"] == "ancient spawn brief"
     assert rec["task_prompt_source"] == "spawner"
 
 
 def test_shell_notice_does_not_shadow_the_spawn_brief(
-    collect_mod: Any, db_conn: psycopg.Connection, database: Database
+    collect_mod: Any, db_conn: psycopg.Connection
 ) -> None:
     with db_conn.cursor() as cur:
         _insert_agent(cur, 10, spawner="agent:1")
@@ -94,14 +95,14 @@ def test_shell_notice_does_not_shadow_the_spawn_brief(
     with db_conn.cursor() as cur:
         inbounds = _fetch(collect_mod, cur, [10])
 
-    rec = _build(collect_mod, database, 10, inbounds[10], "agent:1")
+    rec = _build(10, inbounds[10], "agent:1")
 
     assert rec["task_prompt"] == "spawn brief"
     assert rec["task_prompt_source"] == "spawner"
 
 
 def test_shell_session_notice_is_never_the_task_prompt(
-    collect_mod: Any, db_conn: psycopg.Connection, database: Database
+    collect_mod: Any, db_conn: psycopg.Connection
 ) -> None:
     with db_conn.cursor() as cur:
         _insert_agent(cur, 11, spawner="agent:1")
@@ -113,14 +114,14 @@ def test_shell_session_notice_is_never_the_task_prompt(
     with db_conn.cursor() as cur:
         inbounds = _fetch(collect_mod, cur, [11])
 
-    rec = _build(collect_mod, database, 11, inbounds.get(11, []), "agent:1")
+    rec = _build(11, inbounds.get(11, []), "agent:1")
 
     assert rec["task_prompt"] == ""
     assert rec["task_prompt_source"] == "none"
 
 
 def test_resurrect_wake_contributes_no_task_inbound(
-    collect_mod: Any, db_conn: psycopg.Connection, database: Database
+    collect_mod: Any, db_conn: psycopg.Connection
 ) -> None:
     with db_conn.cursor() as cur:
         _insert_agent(cur, 12, spawner="agent:1")
@@ -130,7 +131,7 @@ def test_resurrect_wake_contributes_no_task_inbound(
     with db_conn.cursor() as cur:
         inbounds = _fetch(collect_mod, cur, [12])
 
-    rec = _build(collect_mod, database, 12, inbounds.get(12, []), "agent:1", status="terminated")
+    rec = _build(12, inbounds.get(12, []), "agent:1", status="terminated")
 
     assert rec["task_prompt"] == ""
 

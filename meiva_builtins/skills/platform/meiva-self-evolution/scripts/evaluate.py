@@ -51,9 +51,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from audit import LeakPaths
 from collect import collect_one
+from events_window import week_label
 from record import task_prompt_of
 from rubric import scores
 
+from base.cluster.machine import GatewayAccess
 from base.paths import meiva_home, workspace_dir
 
 # Tool-call prefixes that make a run unsafe to re-run: fleet/user-facing side
@@ -209,7 +211,7 @@ def _leak_paths(agent_id: int) -> LeakPaths:
     )
 
 
-def gather(state: dict[str, Any], *, database: Database) -> dict[str, Any]:
+def gather(state: dict[str, Any], *, database: Database, gateway: GatewayAccess) -> dict[str, Any]:
     """Collect + score every finished eval agent.
 
     Agents still running are listed under `pending`. Finished replays that do
@@ -218,11 +220,15 @@ def gather(state: dict[str, Any], *, database: Database) -> dict[str, Any]:
     are excluded from the mean and `n`.
     """
     progress = poll(state, database=database)
+    now = datetime.now(UTC)
     records = {
         run["eval_agent_id"]: collect_one(
             run["eval_agent_id"],
+            week_label(now),
+            _leak_paths(run["eval_agent_id"]),
             database=database,
-            leak_paths=_leak_paths(run["eval_agent_id"]),
+            gateway=gateway,
+            now=now,
         )
         for run in state["runs"]
         if run["eval_agent_id"] in progress["done"]

@@ -97,9 +97,8 @@ disagreement is the signal to dig in.
 
 - `not logged in` → the auto-login attempt (Continue with Google) failed.
   Open the site in the shared browser and log in manually, then retry.
-- `composer not found` / selector drift →
-- `prompt did not register` / `answer empty` → a selector drifted; see the
-  drift section in [`../SKILL.md`](../SKILL.md) and fix the one selector list in
-  `webchat.py`.
+- `composer not found` / `prompt did not register` / `answer empty` → a selector
+  drifted; see the drift section in [`../SKILL.md`](../SKILL.md) and fix the one
+  selector list in `scripts/_sites.py`.
 - A ChatGPT run stalls → a Cloudflare bot-check may be up; clear it once in the
   browser.

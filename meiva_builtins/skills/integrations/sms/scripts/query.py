@@ -16,186 +16,91 @@ OperationalError propagates to the caller — there is no fallback (fail fast).
 from __future__ import annotations
 
 import argparse
-import re
 import sqlite3
 import sys
-from datetime import UTC, datetime, timedelta
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
-CHAT_DB_PATH = Path.home() / "Library" / "Messages" / "chat.db"
+# meiva:note
+# `sms_messages` is a sibling in this skill's own scripts/ dir, not an importable package
+# (PYTHONSAFEPATH=1 keeps a script's own directory off sys.path). Structure Rule 6
+# recognizes this exact __file__-derived, within-skill shape as the endorsed guard.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# Apple epoch (2001-01-01 UTC) is 978307200 seconds after the Unix epoch.
-APPLE_EPOCH_OFFSET = 978307200
-
-DEFAULT_LOOKBACK_HOURS = 12
-
-# Patterns for common 2FA verification codes.
-# Each pattern captures one group: the code digits.
-VERIFICATION_PATTERNS: list[re.Pattern[str]] = [
-    # Chinese keywords
-    re.compile(
-        r"(?:\u9a8c\u8bc1\u7801|\u6821\u9a8c\u7801|\u52a8\u6001\u7801|\u77ed\u4fe1\u9a8c\u8bc1\u7801)\D{0,5}?(\d{4,8})"
-    ),
-    # Korean keywords
-    re.compile(r"(?:\uc778\uc99d\ubc88\ud638|\uc778\uc99d\s*\ucf54\ub4dc)\D{0,5}?(\d{4,8})"),
-    # Japanese keywords
-    re.compile(
-        r"(?:\u8a8d\u8a3c\u30b3\u30fc\u30c9|\u78ba\u8a8d\u30b3\u30fc\u30c9)\D{0,5}?(\d{4,8})"
-    ),
-    # Google-style
-    re.compile(r"G-(\d{4,8})\s+is\s+your", re.IGNORECASE),
-    # English keywords
-    re.compile(
-        r"(?:verification|security|one.?time|OTP|auth(?:entication)?)\s*(?:code|pin|password)\D{0,5}?(\d{4,8})",
-        re.IGNORECASE,
-    ),
-    # Generic "code: 123456"
-    re.compile(r"(?:code|pin|\u5bc6\u7801)\D{0,5}?(\d{4,8})", re.IGNORECASE),
-    # Standalone 6-digit sequences
-    re.compile(r"(?:^|\s)(\d{6})(?:\s|$)", re.MULTILINE),
-    # Square bracket codes
-    re.compile(r"\[(\d{4,8})\]"),
-    # "XXXXXX is your..." pattern
-    re.compile(r"(\d{4,8})\s+is\s+your", re.IGNORECASE),
-]
+from sms_messages import (
+    DEFAULT_LIMIT,
+    DEFAULT_LOOKBACK_HOURS,
+    ChatFilter,
+    ChatQuery,
+    ChatRow,
+    SmsMessage,
+    build_chat_query,
+    format_code_line,
+    format_message_line,
+    select_messages,
+)
 
 
-def _apple_epoch_to_datetime(apple_date: int) -> datetime:
-    """Convert Apple's message date (ns or s since 2001-01-01) to a datetime."""
-    if apple_date > 1_000_000_000_000_000:  # nanoseconds
-        unix_ts = apple_date / 1_000_000_000 + APPLE_EPOCH_OFFSET
-    else:  # seconds
-        unix_ts = apple_date + APPLE_EPOCH_OFFSET
-    return datetime.fromtimestamp(unix_ts, tz=UTC)
-
-
-def _extract_codes(text: str) -> list[str]:
-    """Extract candidate verification codes from message text, in first-seen order."""
-    if not text:
-        return []
-    codes: list[str] = []
-    seen: set[str] = set()
-    for pattern in VERIFICATION_PATTERNS:
-        for match in pattern.finditer(text):
-            code = match.group(1)
-            if code not in seen and len(code) >= 4:
-                seen.add(code)
-                codes.append(code)
-    return codes
-
-
-def _query_chat_db(
-    phone_suffix: str | None,
-    lookback_hours: float,
-    limit: int,
-    *,
-    codes_only: bool,
-) -> list[dict[str, Any]]:
-    """Return recent SMS rows, newest first. When codes_only, keep only messages
-    that carry a verification code — scanning a wider candidate window so the
-    result can still reach `limit` code-bearing messages."""
-    if not CHAT_DB_PATH.exists():
-        raise FileNotFoundError(f"Messages database not found at {CHAT_DB_PATH}")
-
-    cutoff_dt = datetime.now(tz=UTC) - timedelta(hours=lookback_hours)
-    cutoff_ns = int((cutoff_dt.timestamp() - APPLE_EPOCH_OFFSET) * 1_000_000_000)
-    scan_limit = max(limit * 5, 50) if codes_only else limit
-
-    conn = sqlite3.connect(str(CHAT_DB_PATH))
-    conn.row_factory = sqlite3.Row
+# meiva:note
+# Run `query` against the chat.db at `db_path` and return its rows. A missing database
+# raises FileNotFoundError; a TCC-blocked read raises sqlite3.OperationalError to the caller.
+def fetch_rows(db_path: Path, query: ChatQuery) -> list[ChatRow]:
+    if not db_path.exists():
+        raise FileNotFoundError(f"Messages database not found at {db_path}")
+    conn = sqlite3.connect(str(db_path))
     try:
-        query = """
-            SELECT
-                m.ROWID AS id,
-                m.text,
-                m.date,
-                m.is_from_me,
-                m.service,
-                h.id AS phone
-            FROM message m
-            JOIN handle h ON m.handle_id = h.ROWID
-            WHERE m.service = 'SMS'
-              AND m.date > ?
-              AND m.text IS NOT NULL
-              AND m.text != ''
-        """
-        params: list[Any] = [cutoff_ns]
-        if phone_suffix:
-            query += " AND h.id LIKE ?"
-            params.append(f"%{phone_suffix}")
-        query += " ORDER BY m.date DESC LIMIT ?"
-        params.append(scan_limit)
-        rows = conn.execute(query, params).fetchall()
+        return [ChatRow(*row) for row in conn.execute(query.sql, query.params).fetchall()]
     finally:
         conn.close()
 
-    results: list[dict[str, Any]] = []
-    for row in rows:
-        codes = _extract_codes(row["text"])
-        if codes_only and not codes:
-            continue
-        results.append(
-            {
-                "id": row["id"],
-                "text": row["text"],
-                "phone": row["phone"],
-                "date": _apple_epoch_to_datetime(row["date"]).isoformat(),
-                "is_from_me": bool(row["is_from_me"]),
-                "service": row["service"],
-                "codes": codes,
-            }
-        )
-        if len(results) >= limit:
-            break
-    return results
+
+# meiva:note
+# The messages `filt` selects from the chat.db at `db_path`, as of `now`, newest first.
+def query_messages(db_path: Path, now: datetime, filt: ChatFilter) -> list[SmsMessage]:
+    return select_messages(fetch_rows(db_path, build_chat_query(filt, now)), filt)
 
 
-# 20-row default page for both lenses (task #3696 exception inventory);
-# --limit overrides, and the codes path over-scans internally to fill it.
-def query_codes(
-    phone_suffix: str | None = None,
-    lookback_hours: float = DEFAULT_LOOKBACK_HOURS,
-    limit: int = 20,
-) -> list[dict[str, Any]]:
-    """Return recent SMS messages that contain verification codes."""
-    return _query_chat_db(phone_suffix, lookback_hours, limit, codes_only=True)
-
-
-def query_messages(
-    phone_suffix: str | None = None,
-    lookback_hours: float = DEFAULT_LOOKBACK_HOURS,
-    limit: int = 20,
-) -> list[dict[str, Any]]:
-    """Return recent SMS messages."""
-    return _query_chat_db(phone_suffix, lookback_hours, limit, codes_only=False)
-
-
-def main() -> None:
+# meiva:note
+# The CLI: parse `argv`, query the chat.db at `chat_db` as of `now`, print one line per
+# message. A limit or lookback that selects nothing is refused as a usage error.
+def main(argv: Sequence[str], *, chat_db: Path, now: datetime) -> None:
     parser = argparse.ArgumentParser(description="Query SMS from Messages.app")
     parser.add_argument("--recent-codes", action="store_true", help="Get recent verification codes")
     parser.add_argument("--recent-messages", action="store_true", help="Get recent SMS messages")
     parser.add_argument("--phone-suffix", type=str, default=None, help="Filter by last N digits")
     parser.add_argument("--lookback-hours", type=float, default=DEFAULT_LOOKBACK_HOURS)
-    parser.add_argument("--limit", type=int, default=20, help="Max messages")
-    args = parser.parse_args()
+    parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT, help="Max messages")
+    args = parser.parse_args(argv)
 
+    if not (args.recent_codes or args.recent_messages):
+        parser.print_help(sys.stderr)
+        return
+    try:
+        filt = ChatFilter(
+            phone_suffix=args.phone_suffix,
+            lookback_hours=args.lookback_hours,
+            limit=args.limit,
+            codes_only=args.recent_codes,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
+    results = query_messages(chat_db, now, filt)
     if args.recent_codes:
-        results = query_codes(args.phone_suffix, args.lookback_hours, args.limit)
-        for r in results:
-            print(f"[{r['date']}] codes={' '.join(r['codes'])} | {r['phone']}: {r['text'][:100]}")
+        for message in results:
+            print(format_code_line(message))
         if not results:
             print("No verification codes found.")
-    elif args.recent_messages:
-        results = query_messages(args.phone_suffix, args.lookback_hours, args.limit)
-        for r in results:
-            direction = "To" if r["is_from_me"] else "From"
-            print(f"[{r['date']}] {direction} {r['phone']}: {r['text'][:200]}")
+    else:
+        for message in results:
+            print(format_message_line(message))
         if not results:
             print("No messages found.")
-    else:
-        parser.print_help(sys.stderr)
 
 
 if __name__ == "__main__":
-    main()
+    main(
+        sys.argv[1:],
+        chat_db=Path.home() / "Library" / "Messages" / "chat.db",
+        now=datetime.now(tz=UTC),
+    )

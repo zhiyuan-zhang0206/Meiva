@@ -22,13 +22,21 @@ optional safe replay to `references/evaluation-loop.md`, and method explanation
 to `references/method-context.md`. Replay remains optional, with the existing
 read/compute safety and evidence constraints; schedules retain their own
 authorization scope.
-Output data lands in `$MEIVA_HOME/self_evolution/` (per-deployment private), not in the repo. Triggered by a weekly cron job spawn; the skill directory name contains hyphens, so `scripts/` itself cannot be a package — all of it (the CLI entry points `daily_scan.py` / `evaluate.py` / `mine.py` / `aggregate.py` / `collect.py` / `render_report.py`, plus the shared collection/scoring/report modules they import as flat siblings, `record.py` / `audit.py` / `label.py` / `rubric.py`) runs only via `.venv/bin/python`, importing each other through a one-line `__file__`-derived `sys.path` guard (structure Rule 6's endorsed within-skill exception). `render_report.py`'s template lives beside it in `assets/report_template.html`.
+Output data lands in `$MEIVA_HOME/self_evolution/` (per-deployment private), not in the repo. Triggered by a weekly cron job spawn; the skill directory name contains hyphens, so `scripts/` itself cannot be a package — all of it (the CLI entry points `daily_scan.py` / `evaluate.py` / `mine.py` / `aggregate.py` / `collect.py` / `render_report.py`, plus the shared collection/scoring/report modules they import as flat siblings, `record.py` / `window_records.py` / `events_window.py` / `scan_report.py` / `audit.py` / `label.py` / `rubric.py`) runs only via `.venv/bin/python`, importing each other through a one-line `__file__`-derived `sys.path` guard (structure Rule 6's endorsed within-skill exception). `render_report.py`'s template lives beside it in `assets/report_template.html`.
 
 ## Record assembly
 
-`collect.py` reads the inbounds and `record.py` assembles the record; what
-counts as a run's task, and which inbounds may be read for it, is the
-[collection contract](collection.meiva.okf.md).
+`collect.py` reads the events, the inbounds and the transcripts and `record.py`
+assembles the record from those values; what counts as a run's task, and which
+inbounds may be read for it, is the [collection contract](collection.meiva.okf.md).
+
+The decisions are `strict` modules over values: `events_window.py` (the window and
+how the events API is paged), `window_records.py` (which agents become records and
+the records themselves), `record.py` (one record and its evidence grade),
+`scan_report.py` (what the daily report says and whether the scan alerts), `audit.py`
+and `label.py`. The shells (`collect.py`, `daily_scan.py`) read the database, the
+gateway and the clock and hand the values in; a process root (`process_env`) builds
+the database handle, the gateway access, the clock reading and the home once.
 
 ## evidence block and grading
 
