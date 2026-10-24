@@ -154,5 +154,5 @@ def test_contradicting_evidence_fails_the_stop_before_it_confirms_or_stops_anyth
     assert "initialization journal conflicts with application launch evidence" in err
     assert "phases: before the first phase" in err
     assert "Status journal" not in err, "there is no journal to point at"
-    assert start_serving.state_path().exists(), "nothing was revoked"
+    assert start_serving.state_path(partial_home).exists(), "nothing was revoked"
     assert not (partial_home / "run/lifecycle-op.json").exists(), "no journal was opened"

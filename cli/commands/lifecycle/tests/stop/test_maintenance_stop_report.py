@@ -88,7 +88,11 @@ def test_shell_survivor_names_itself_and_persists_exact_inventory(
     )
     assert survivor["role"] == "shell" and survivor["service"] == "private-shell-session"
     stop_report.report_incomplete(
-        failure, [("shell-sessions", 0.25)], owns_journal=True, journal_opened=True
+        failure,
+        [("shell-sessions", 0.25)],
+        home=home,
+        owns_journal=True,
+        journal_opened=True,
     )
     journal = json.loads((home / "run/lifecycle-op.json").read_text())
     assert journal["complete"] and journal["result"]["rc"] == 1

@@ -113,7 +113,7 @@ def execute_plan(
 ) -> StopOutcome:
     outcome = StopOutcome((), ())
     for step in plan.steps:
-        with timed_phase(run.phases, phase_label(step) if timed else None):
+        with timed_phase(env.command.home, run.phases, phase_label(step) if timed else None):
             reported = _perform(step, env, run, retained_children)
         if reported is not None:
             outcome = reported
