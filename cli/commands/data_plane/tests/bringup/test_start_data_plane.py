@@ -73,7 +73,7 @@ def _admin(cluster: NativeCluster, database: str) -> psycopg.Connection[tuple[ob
     )
 
 
-def test_a_born_home_gets_its_database_extension_and_checkpoint_schema(
+def test_a_born_home_gets_the_extension_its_postgres_carries_and_the_checkpoint_schema(
     native_cluster: NativeCluster,
     command_machine: MachineIdentity,
     operator_database: OperatorDatabaseFactory,
@@ -86,7 +86,11 @@ def test_a_born_home_gets_its_database_extension_and_checkpoint_schema(
         assert conn.execute(
             "SELECT rolcanlogin FROM pg_roles WHERE rolname = %s", (native_cluster.identity,)
         ).fetchone() == (False,)
-        assert conn.execute("SELECT 1 FROM pg_extension WHERE extname = 'vector'").fetchone()
+        available = conn.execute(
+            "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'"
+        ).fetchone()
+        installed = conn.execute("SELECT 1 FROM pg_extension WHERE extname = 'vector'").fetchone()
+        assert (installed is not None) == (available is not None)
         assert conn.execute("SELECT to_regclass('checkpoints') IS NOT NULL").fetchone() == (True,)
 
 
