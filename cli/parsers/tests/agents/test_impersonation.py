@@ -19,6 +19,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from pydantic import JsonValue
 
 from base.agents import impersonation as leases
 from base.agents.impersonation.host_transport import AntigravityServer, write_antigravity_endpoint
@@ -113,7 +114,7 @@ def test_timeline_command_dispatches_to_the_timeline_reader(
         ["agents", "timeline", "405", "--limit", "100", "--before", "12.0"]
     )
     args.runtime = command_runtime
-    timeline = {"items": [], "msg_count": 0, "has_more": False}
+    timeline: dict[str, JsonValue] = {"items": [], "msg_count": 0, "has_more": False}
     with serving({("GET", "/api/agents/405/timeline"): Reply(body=timeline)}) as gateway:
         command_runtime.config.set_field("gateway_url", gateway.url)
         command_runtime.config.set_field("cluster_secret", "test-cluster-secret")
@@ -682,4 +683,6 @@ def test_send_reads_a_dash_content_from_the_invocations_stdin(
             database=operator_database,
         )
     assert code == 0
-    assert gateway.requests[0].body["content"] == "from stdin\nsecond line"
+    body = gateway.requests[0].body
+    assert isinstance(body, dict)
+    assert body["content"] == "from stdin\nsecond line"

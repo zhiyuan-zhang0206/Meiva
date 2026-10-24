@@ -180,7 +180,8 @@ def _closed(lease: Lease) -> InboxSnapshot:
 # A lease without an immutable terminal record (a synthetic or pre-migration one) keeps the
 # supplied lease scope and discloses that its historical time is unavailable.
 def announce_end(snapshot: InboxSnapshot, ref: LeaseRef, adapter: RelayAdapter) -> bool:
-    match end_verdict(snapshot.status, notify_terminal=notifies_terminal(adapter)):
+    verdict = end_verdict(snapshot.status, notify_terminal=notifies_terminal(adapter))
+    match verdict:
         case EndVerdict.CONTINUE:
             return False
         case EndVerdict.STOP_SILENT:
@@ -188,8 +189,7 @@ def announce_end(snapshot: InboxSnapshot, ref: LeaseRef, adapter: RelayAdapter) 
         case EndVerdict.STOP_WITH_NOTICE:
             deliver(adapter, notice_text(terminal_record(snapshot, ref).model_dump()))
             return True
-        case _ as unreachable:
-            assert_never(unreachable)
+    assert_never(verdict)
 
 
 def _clock() -> ClockReading:
@@ -287,8 +287,8 @@ class _InboxRelay:
                 case Deliver(pause=pause):
                     if await self._deliver(pause):
                         return
-                case _ as unreachable:
-                    assert_never(unreachable)
+                case _:
+                    assert_never(step)
 
     async def run(self) -> None:
         await run_then_clean_up(self._loop(), self.listener.stop(), what="Redis listener stop")

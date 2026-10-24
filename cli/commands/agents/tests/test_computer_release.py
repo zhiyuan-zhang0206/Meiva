@@ -90,6 +90,21 @@ def test_a_daemon_that_is_not_listening_is_a_one_line_refusal(
             "release failed: no such tool",
         ),
         (json.dumps({"ok": False}).encode(), "release failed: unknown error"),
+        (json.dumps({"ok": "yes"}).encode(), "release failed: unknown error"),
+        (
+            json.dumps({"ok": True, "result": {"content": [{"text": "{}"}]}}).encode(),
+            "computer-mcp daemon returned an unexpected release payload",
+        ),
+        (_released("405"), "computer-mcp daemon returned an unexpected release payload"),
+        (_released(True), "computer-mcp daemon returned an unexpected release payload"),
+        (
+            json.dumps({"ok": True, "result": None}).encode(),
+            "computer-mcp daemon returned an unexpected release payload",
+        ),
+        (
+            json.dumps({"ok": True, "result": {"content": [{"text": 1}]}}).encode(),
+            "computer-mcp daemon returned an unexpected release payload",
+        ),
         (
             json.dumps({"ok": True, "result": {"content": []}}).encode(),
             "computer-mcp daemon returned an unexpected release payload",

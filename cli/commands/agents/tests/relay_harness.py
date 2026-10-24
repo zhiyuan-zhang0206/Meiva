@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import io
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager, suppress
 from typing import Any
 from uuid import UUID
@@ -53,7 +53,7 @@ async def running(
     redis_url: str,
     adapter: RelayAdapter,
     tuning: RelayTuning = FAST,
-) -> AsyncIterator[asyncio.Task[None]]:
+) -> AsyncGenerator[asyncio.Task[None], None]:
     listener = RedisInboundListener(redis_url, lease.agent_id)
     task = asyncio.create_task(
         push_inbox(
