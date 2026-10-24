@@ -10,7 +10,6 @@ from pydantic import ValidationError
 
 from base.agents.to_user import ToUserDocument, ToUserReadRequest
 from base.cluster.machine import gateway_auth_headers
-from base.cluster.machine.boot import gateway_access_from_boot
 from base.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered, lookup
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.http.config import gateway_config
@@ -154,7 +153,7 @@ async def get_resource(
     )
     if resource is None:
         raise HTTPException(404, "The document no longer references this resource")
-    access = gateway_access_from_boot(request.app.state.gateway_process.config)
+    access = request.app.state.gateway_access
     try:
         ops_url = await asyncio.to_thread(lookup, request.app.state.db, machine)
         async with httpx.AsyncClient(

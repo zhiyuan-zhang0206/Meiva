@@ -14,6 +14,7 @@ from gateway.events.sse_frames import SseCadence
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.events.sse_support import FakeRequest, refused_redis_url
 from gateway.tests.routers.alerts_api.alerts_support import (
+    ImBridge,
     alert,
     alerts_client,
     capture_im,
@@ -280,14 +281,14 @@ def test_an_ingested_alert_reaches_a_subscriber_of_the_alerts_channel(
 
 
 def test_a_group_of_instances_is_one_im_and_one_row_each(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, alerts_im: ImBridge
 ) -> None:
     alerts = [
         alert(alertname="machine offline", fingerprint=f"g{n}", summary=f"machine m{n} down")
         for n in range(4)
     ]
     with alerts_client() as client:
-        sent = capture_im(monkeypatch)
+        sent = capture_im(alerts_im)
         resp = ingest(client, webhook(alerts=alerts))
     assert resp.json() == {"processed": 4, "inserted": 4, "updated": 0, "notified": 4}
     assert len(sent) == 1
@@ -299,7 +300,7 @@ def test_a_group_of_instances_is_one_im_and_one_row_each(
 
 
 def test_instances_of_different_rules_in_one_post_are_separate_messages(
-    monkeypatch: pytest.MonkeyPatch,
+    alerts_im: ImBridge,
 ) -> None:
     alerts = [
         alert(alertname="rule-a", fingerprint="a1"),
@@ -307,7 +308,7 @@ def test_instances_of_different_rules_in_one_post_are_separate_messages(
         alert(alertname="rule-b", fingerprint="b1"),
     ]
     with alerts_client() as client:
-        sent = capture_im(monkeypatch)
+        sent = capture_im(alerts_im)
         resp = ingest(client, webhook(alerts=alerts))
     assert resp.json()["notified"] == 3
     assert len(sent) == 2
@@ -315,11 +316,11 @@ def test_instances_of_different_rules_in_one_post_are_separate_messages(
 
 
 def test_a_failed_group_send_leaves_every_instance_unnotified_for_the_next_resend(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, alerts_im: ImBridge
 ) -> None:
     alerts = [alert(fingerprint=f"r{n}") for n in range(2)]
     with alerts_client() as client:
-        sent = capture_im(monkeypatch, ok=False)
+        sent = capture_im(alerts_im, ok=False)
         assert ingest(client, webhook(alerts=alerts)).json()["notified"] == 0
         sent.clear()
 
@@ -327,19 +328,19 @@ def test_a_failed_group_send_leaves_every_instance_unnotified_for_the_next_resen
             sent.append(text)
             return True
 
-        install_im(monkeypatch, _ok)
+        install_im(alerts_im, _ok)
         assert ingest(client, webhook(alerts=alerts)).json()["notified"] == 2
     assert len(sent) == 1
 
 
-def test_a_resolved_group_is_one_recovery_message(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_resolved_group_is_one_recovery_message(alerts_im: ImBridge) -> None:
     firing = [alert(fingerprint=f"x{n}") for n in range(3)]
     resolved = [
         alert(status="resolved", fingerprint=f"x{n}", ends_at="2026-08-04T11:00:00Z")
         for n in range(3)
     ]
     with alerts_client() as client:
-        sent = capture_im(monkeypatch)
+        sent = capture_im(alerts_im)
         ingest(client, webhook(alerts=firing))
         sent.clear()
         assert ingest(client, webhook(status="resolved", alerts=resolved)).json()["notified"] == 3

@@ -15,7 +15,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base import paths, telemetry
 from base.api_contracts.agent_contract import MeivaAgentError
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.boot import gateway_access_from_boot, machine_from_boot
 from base.cluster.rate_limit import LoginRateLimitConfig, LoginRateLimiter
 from base.config import ConfigBoot, Settings
 from base.config.service_read import ConfigAuthority
@@ -174,6 +174,7 @@ def _build_request_resources(
     gateway: GatewayConfig = app.state.gateway_config
     app.state.reply_suggestions = reply_suggestion_service(gateway.models.llm_override)
     app.state.reply_suggestion_policy = reply_suggestion_policy(config)
+    app.state.gateway_access = gateway_access_from_boot(config)
     app.state.memory_search_gate = memory_router.build_search_gate(
         config.view.services.memory_search_max_concurrency
     )

@@ -21,7 +21,7 @@ from base import config
 from base.cluster import rate_limit
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.cluster.rate_limit import LoginRateLimitConfig
+from base.cluster.rate_limit import LoginRateLimitConfig, LoginRateLimiter
 from gateway.http.config import gateway_config_from_boot
 from gateway.tests.auth.gateway_config import (
     GatewayTestClient,
@@ -104,20 +104,32 @@ def test_successful_login_resets_failure_counter(*, machine_identity: MachineIde
 
 
 def test_lockout_expires_and_recovers(*, machine_identity: MachineIdentity) -> None:
-    window_s = 1
+    window_s = 60
     with gateway_test_client(
         machine=machine_identity, fields={"login_lockout_seconds": window_s}
     ) as client:
+        limiter: LoginRateLimiter = client.app.state.login_limiter
+        now = time.time()
+        # meiva:note
+        # The failures arrive through the limiter at the instants the test names: the streak that
+        # locked this address ended a second ago, so the lockout has expired without any waiting.
         for _ in range(config.settings.gateway.login_max_failures):
-            _wrong_login(client)
-        assert (
-            client.post("/api/auth/login", json={"password": "wrong-password"}).status_code == 429
-        )
-        time.sleep(window_s + 0.2)
-        # Expired: a wrong password is a plain 401 again, the correct one works.
+            limiter.record_failure("testclient", now=now - window_s - 1)
         _wrong_login(client)
         resp = client.post("/api/auth/login", json={"password": _SECRET})
     assert resp.status_code == 200
+
+
+def test_lockout_holds_until_it_expires(*, machine_identity: MachineIdentity) -> None:
+    window_s = 60
+    with gateway_test_client(
+        machine=machine_identity, fields={"login_lockout_seconds": window_s}
+    ) as client:
+        limiter: LoginRateLimiter = client.app.state.login_limiter
+        for _ in range(config.settings.gateway.login_max_failures):
+            limiter.record_failure("testclient", now=time.time())
+        locked = client.post("/api/auth/login", json={"password": "wrong-password"})
+    assert locked.status_code == 429
 
 
 def test_lockout_is_per_ip(*, machine_identity: MachineIdentity) -> None:
@@ -180,8 +192,10 @@ def test_lockout_threshold_and_window_follow_config(*, machine_identity: Machine
         resp = client.post("/api/auth/login", json={"password": "wrong-password"})
         assert resp.status_code == 429
         assert 0 < int(resp.headers["retry-after"]) <= 2
-        time.sleep(2.2)  # the configured window has passed
-        _wrong_login(client)  # expired: a plain 401 again
+        # meiva:note
+        # The configured two-second window is over at an instant after it; no waiting needed.
+        limiter: LoginRateLimiter = client.app.state.login_limiter
+        assert limiter.lockout_remaining("testclient", now=time.time() + 3) == 0
 
 
 # ── Limiter unit behavior ─────────────────────────────────────────────

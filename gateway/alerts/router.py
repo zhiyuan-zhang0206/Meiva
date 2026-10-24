@@ -45,8 +45,9 @@ from base.telemetry.alerts import (
     display_language,
     upsert_alert,
 )
-from base.telemetry.alerts.native import native_sent_count, notify_alert_group
+from base.telemetry.alerts.native import native_sent_count
 from base.telemetry.alerts.shadow import AlertShadowBatch
+from gateway.alerts.im_notify import notify_alert_group
 from gateway.alerts.schemas import (
     AlertIngestResult,
     AlertsListMeta,
@@ -136,8 +137,14 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
 
     publish_alert_rows(request.app.state.bus, rows)
 
-    for group_id in sorted(shadow.native_ids):
-        notify_alert_group(group_id)
+    alert_settings = gateway_config(request).alerts
+    if alert_settings.im_notify_enabled:
+        for group_id in sorted(shadow.native_ids):
+            notify_alert_group(
+                group_id,
+                bridge_url=alert_settings.im_bridge_url,
+                access=request.app.state.gateway_access,
+            )
     with request.app.state.db_pool.connection() as conn:
         notified = native_sent_count(conn, shadow.native_ids)
 
