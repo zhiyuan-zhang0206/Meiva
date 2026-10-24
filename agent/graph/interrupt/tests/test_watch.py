@@ -9,7 +9,7 @@ from agent.graph.interrupt._watch import watch_for_interrupt
 from agent.graph.interrupt.tests.queued_commands import queue_command
 from base.agents.messages.inbound import InterruptReason
 from base.db import create_agent
-from base.db.tests.parked_pool import ParkedAsyncPool
+from base.db.tests.swallowed_cancel import CancelSwallowingPool
 from base.native_process.turn_identity import HostedTurnResources
 
 _ARRIVAL_TIMEOUT_S = 5.0
@@ -55,6 +55,14 @@ async def test_the_watcher_keeps_polling_until_a_cancel_is_queued(
     assert event.reason is InterruptReason.USER
 
 
+async def _until_a_borrower_waits(pool: AsyncConnectionPool) -> None:
+    async def waiting() -> None:
+        while pool.get_stats().get("requests_waiting", 0) < 1:
+            await asyncio.sleep(_POLL_S)
+
+    await asyncio.wait_for(waiting(), _ARRIVAL_TIMEOUT_S)
+
+
 @pytest.mark.parametrize("cancel_is_pending", [False, True])
 async def test_a_poll_that_returns_after_stop_ends_the_watcher_without_firing(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, cancel_is_pending: bool
@@ -63,12 +71,13 @@ async def test_a_poll_that_returns_after_stop_ends_the_watcher_without_firing(
     if cancel_is_pending:
         queue_command(db_conn, agent_id, "cancel")
     event, stop = InterruptEvent(), asyncio.Event()
-    pool = ParkedAsyncPool(aops_pool, park_on=1)
-    watcher = asyncio.create_task(watch_for_interrupt(pool, event, agent_id, stop, poll_s=_POLL_S))
-    await asyncio.wait_for(pool.parked.wait(), _ARRIVAL_TIMEOUT_S)
-    assert not watcher.done()
-    stop.set()
-    pool.release()
+    async with aops_pool.connection(), aops_pool.connection():
+        watcher = asyncio.create_task(
+            watch_for_interrupt(aops_pool, event, agent_id, stop, poll_s=_POLL_S)
+        )
+        await _until_a_borrower_waits(aops_pool)
+        assert not watcher.done()
+        stop.set()
     await asyncio.wait_for(watcher, _ARRIVAL_TIMEOUT_S)
 
     assert not event.is_set()
@@ -80,18 +89,22 @@ async def test_a_borrow_that_swallows_the_watchers_cancel_still_ends_after_stop_
     agent_id = create_agent(db_conn)
     queue_command(db_conn, agent_id, "cancel")
     event, stop = InterruptEvent(), asyncio.Event()
-    pool = ParkedAsyncPool(aops_pool, park_on=1, swallow_cancel=True)
+    pool = CancelSwallowingPool(aops_pool)
     watcher = asyncio.create_task(watch_for_interrupt(pool, event, agent_id, stop, poll_s=_POLL_S))
-    await asyncio.wait_for(pool.parked.wait(), _ARRIVAL_TIMEOUT_S)
-    stop.set()
-    watcher.cancel()
-    while not pool.cancellations_swallowed:
-        await asyncio.sleep(_POLL_S)
-    assert not watcher.done()
-    pool.release()
-    await asyncio.wait_for(watcher, _ARRIVAL_TIMEOUT_S)
-
-    assert not event.is_set()
+    try:
+        await asyncio.wait_for(pool.waiting.wait(), _ARRIVAL_TIMEOUT_S)
+        stop.set()
+        watcher.cancel()
+        await asyncio.wait_for(pool.swallowed.wait(), _ARRIVAL_TIMEOUT_S)
+        assert not watcher.done()
+        pool.release()
+        await asyncio.wait_for(watcher, _ARRIVAL_TIMEOUT_S)
+        assert not event.is_set()
+    finally:
+        stop.set()
+        pool.release()
+        watcher.cancel()
+        await asyncio.gather(watcher, return_exceptions=True)
 
 
 @pytest.mark.parametrize("missing_scope", [True, False])

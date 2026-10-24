@@ -7,10 +7,11 @@ from typing import Any
 import httpx
 import psycopg
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from starlette.datastructures import State
 
-from base.agents.messages.inbound_provenance import InboundProvenance
 from base.agents.upload_delivery import source
 from base.agents.upload_delivery.models import CopyProof, ReceiveRequest
 from base.cluster.machine import MachineIdentity
@@ -20,6 +21,7 @@ from base.config.service_read import ConfigAuthority
 from base.db.tests.lost_ack import LostAckPool
 from base.host.db_authority.unit import UnitIdentity
 from base.host.system.tests.fake_commands import fake_host
+from gateway.app import cluster_auth_middleware
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.support.db_faults.insert_fault import failing_insert
 from gateway.tests.support.db_faults.update_fault import failing_update
@@ -42,6 +44,7 @@ from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
 from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
     uploaded_agent as uploaded_agent,
 )
+from gateway.upload_delivery.router import router as delivery_router
 from ops import upload_delivery as receiver
 from ops.rpc_schemas import OpStatus
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
@@ -70,44 +73,34 @@ def test_source_ready_commit_failure_recovers(
 
 # meiva:note
 # The ready write commits, then the caller sees a failure: the pool lends the batch claim first
-# and the ready write second, and loses the acknowledgement of the second.
+# and the ready write second, and loses the acknowledgement of the second. The route answers 500,
+# and the next upload of the same batch finds the committed work again.
 def test_source_ready_lost_commit_ack_recovers(
-    uploaded_agent: tuple[GatewayTestClient, int],
-    db_conn: psycopg.Connection[Any],
-    *,
-    machine_identity: MachineIdentity,
+    uploaded_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection[Any]
 ):
     client, agent = uploaded_agent
-    pool = client.app.state.db_pool
-    home = client.app.state.gateway_config.upload_home
-    names = ["photo.png"]
-    batch = [("photo.png", b"bytes", "image/png")]
-    provenance = InboundProvenance(source_verified_by=None, source_transport="http")
-    lossy = LostAckPool(pool, lose_on=2, message="source ready response lost")
-    with pytest.raises(psycopg.OperationalError, match="source ready response lost"):
-        source.accept(
-            lossy,
-            "lost-ack",
-            agent,
-            names,
-            batch,
-            provenance,
-            local_machine=machine_identity.name(),
-            upload_home=home,
-        )
-    assert db_conn.execute("SELECT state FROM upload_delivery_batches").fetchone() == ("pending",)
-    recovered = source.accept(
-        pool,
-        "lost-ack",
-        agent,
-        names,
-        batch,
-        provenance,
-        local_machine=machine_identity.name(),
-        upload_home=home,
+    # meiva:note
+    # Assemble the real upload router with its failing ConnectionSource from the start. Borrow
+    # the live gateway's native worker and authentication resources; never rewire its pool.
+    app = FastAPI()
+    app.state = State(
+        {
+            "db_pool": LostAckPool(
+                client.app.state.db_pool, lose_on=2, message="source ready response lost"
+            ),
+            "gateway_config": client.app.state.gateway_config,
+            "gateway_process": client.app.state.gateway_process,
+            "machine_token_acceptance": client.app.state.machine_token_acceptance,
+            "machine": client.app.state.machine,
+            "upload_recovery": client.app.state.upload_recovery,
+        }
     )
-    assert db_conn.execute("SELECT count(*) FROM upload_delivery_batches").fetchone() == (1,)
-    assert client.get(recovered.status_url + "/objects/0").content == b"bytes"
+    app.middleware("http")(cluster_auth_middleware)
+    app.include_router(delivery_router)
+    with GatewayTestClient(app, raise_server_exceptions=False) as faulted:
+        assert post(faulted, agent).status_code == 500
+    assert db_conn.execute("SELECT state FROM upload_delivery_batches").fetchone() == ("pending",)
+    _recovered_source_ready(client, db_conn, agent)
 
 
 def _request_and_proof(
