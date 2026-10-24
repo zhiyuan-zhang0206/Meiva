@@ -18,6 +18,7 @@ tags:
 
 ### Lint (`lint_*.py` + `check_*.py`)
 Split by kind: code/AST/Python-convention guards in [[scripts/lint/docs/lint.meiva.okf.md]]; document/OKF/skill/migration-format guards in [[scripts/content_lint/docs/content_lint.meiva.okf.md]].
+The diff hints, commit-time questions answered by a `Hint-Ack:` trailer, are [[scripts/lint/docs/diff-hints/diff-hints.meiva.okf.md]].
 
 ### `audit/` — read-only drift audits
 GitHub protection, reference and move inventories, runtime impact, SDK usage and
