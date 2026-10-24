@@ -1,49 +1,52 @@
 from __future__ import annotations
 
-import subprocess
-from types import SimpleNamespace
-from unittest.mock import Mock
-
 import pytest
 
-from base.native_process.root_control import client
 from services.supervision.healthchecks import frontend as hc
+from services.supervision.healthchecks.plans.frontend_plan import application_port
+from services.supervision.healthchecks.tests.http_stub import HttpStub
 
 
-@pytest.mark.parametrize("returncode,ready", [(0, True), (7, False)])
-def test_application_http_result_controls_availability(
-    monkeypatch: pytest.MonkeyPatch, returncode: int, ready: bool
+def test_application_http_answer_controls_availability() -> None:
+    with HttpStub(status=200) as app:
+        assert hc.probe_frontend_at(app.port).alive is True
+        assert app.requests == [("GET", "/", b"")]
+
+
+@pytest.mark.parametrize("status", [404, 500, 503])
+def test_a_non_2xx_answer_is_down(status: int) -> None:
+    with HttpStub(status=status) as app:
+        assert not hc.probe_frontend_at(app.port).alive
+
+
+def test_nothing_listening_is_down() -> None:
+    with HttpStub() as app:
+        port = app.port
+
+    assert not hc.probe_frontend_at(port).alive
+
+
+def test_a_missing_curl_is_down() -> None:
+    with HttpStub() as app:
+        assert not hc.probe_frontend_at(app.port, curl_binary="curl-that-does-not-exist").alive
+
+
+def test_an_application_that_never_answers_is_down_within_the_timeout() -> None:
+    with HttpStub(hang=True) as app:
+        assert not hc.probe_frontend_at(app.port, timeout_s=0.5).alive
+
+
+@pytest.mark.parametrize(
+    ("entry_port", "app_port", "expected"),
+    [
+        (3000, 3001, 3001),
+        (3000, None, 3001),
+        (4100, 0, 4101),
+        (None, None, 3001),
+        (3000, 9000, 9000),
+    ],
+)
+def test_the_application_port_is_the_explicit_one_or_the_entry_port_plus_one(
+    entry_port: int | None, app_port: int | None, expected: int
 ) -> None:
-    run = Mock(return_value=subprocess.CompletedProcess([], returncode))
-    monkeypatch.setattr(hc.subprocess, "run", run)
-    monkeypatch.setattr(
-        hc,
-        "settings",
-        SimpleNamespace(
-            services=SimpleNamespace(
-                frontend_healthcheck_url="http://localhost:3000",
-                app_port=3001,
-            )
-        ),
-    )
-    assert hc.probe_frontend().alive is ready
-    assert run.call_args.args[0][-1] == "http://localhost:3001"
-    assert run.call_args.kwargs["timeout"] == 5
-
-
-@pytest.mark.parametrize("error", [FileNotFoundError("curl"), subprocess.TimeoutExpired("curl", 5)])
-def test_missing_or_timed_out_http_probe_is_down(
-    monkeypatch: pytest.MonkeyPatch, error: Exception
-) -> None:
-    monkeypatch.setattr(hc.subprocess, "run", Mock(side_effect=error))
-    assert not hc.probe_frontend().alive
-
-
-def test_healthy_http_needs_no_root_or_socket_census(monkeypatch: pytest.MonkeyPatch) -> None:
-    def forbidden(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("frontend availability is an HTTP observation")
-
-    monkeypatch.setattr("psutil.process_iter", forbidden)
-    monkeypatch.setattr(client, "root_process", forbidden)
-    monkeypatch.setattr(hc.subprocess, "run", Mock(return_value=subprocess.CompletedProcess([], 0)))
-    assert hc.probe_frontend().alive
+    assert application_port(entry_port=entry_port, app_port=app_port) == expected

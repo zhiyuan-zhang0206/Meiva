@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
+import subprocess
+import sys
+from functools import partial
 from pathlib import Path
 from typing import cast
 
@@ -8,13 +12,17 @@ import pytest
 
 from base.cluster.machine import MachineIdentity, MachineRole
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.config import settings
 from base.daemon.endpoints import ServiceEndpoints
+from base.daemon.health import DaemonProbe, probe_daemon
 from base.host.system import probes
-from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
+from base.paths.tests.homes import unit_home as unit_home
 from services.supervision import roster
-from services.supervision.roster import healthz, service_spec, spec
+from services.supervision.roster import service_spec, spec
 
+_CHILD = Path(__file__).with_name("gate_roster_child.py")
+_REPO = Path(__file__).resolve().parents[4]
 _GATEWAY_SESSIONS = {
     "gate",
     "loki",
@@ -111,23 +119,6 @@ def test_annotated_roster_membership_per_capability(
     assert got == expected
 
 
-def test_station_roster_contains_only_lgtm_with_host_enablement_gate(
-    unit_home: Path, *, machine_identity: MachineIdentity
-) -> None:
-    rows = spec.services_for_capabilities_annotated(
-        frozenset({"observability-station"}), machine=machine_identity, host=fake_host()
-    )
-    assert {service.session for service, _reason in rows} == {"loki", "prometheus", "grafana"}
-    assert all(reason is not None for _service, reason in rows)
-    (unit_home / "lgtm-host").touch()
-    assert {
-        service.session
-        for service in spec.services_for_capabilities(
-            frozenset({"observability-station"}), machine=machine_identity, host=fake_host()
-        )
-    } == {"loki", "prometheus", "grafana"}
-
-
 def test_gateway_roster_ordering_is_load_bearing() -> None:
     order = [s.session for s in roster.build_services()]
     assert order.index("memory-search") < order.index("memory-indexer")
@@ -151,176 +142,117 @@ def test_application_roster_has_one_supervision_authority() -> None:
     assert all("services.watchdog.daemon" not in service.cmd for service in services.values())
 
 
-def test_browser_gated_when_disabled(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+def test_station_roster_contains_only_lgtm_with_host_enablement_gate(
+    unit_home: Path, *, machine_identity: MachineIdentity
 ) -> None:
-    monkeypatch.setattr(spec.settings.services, "browser_enabled", False)
-    start = {
-        s.session
-        for s in spec.services_for_capabilities(
-            frozenset({"agent-runner"}), machine=machine_identity, host=fake_host()
+    rows = spec.services_for_capabilities_annotated(
+        frozenset({"observability-station"}), machine=machine_identity, host=fake_host()
+    )
+    assert {service.session for service, _reason in rows} == {"loki", "prometheus", "grafana"}
+    assert all(reason is not None for _service, reason in rows)
+
+    (unit_home / "lgtm-host").touch()
+
+    assert {
+        service.session
+        for service in spec.services_for_capabilities(
+            frozenset({"observability-station"}), machine=machine_identity, host=fake_host()
         )
-    }
-    assert "browser" not in start
+    } == {"loki", "prometheus", "grafana"}
+
+
+def test_browser_family_is_gated_by_the_platform_when_enabled(
+    *, machine_identity: MachineIdentity
+) -> None:
+    host = fake_host()
+    expected = probes.browser_incapability(settings.services.chrome_binary, host=host)
+    assert expected is not None
+
     annotated = {
         s.session: r
         for s, r in spec.services_for_capabilities_annotated(
-            frozenset({"agent-runner"}), machine=machine_identity, host=fake_host()
+            frozenset({"agent-runner"}), machine=machine_identity, host=host
         )
     }
-    assert annotated["browser"] and "MEIVA_BROWSER_ENABLED" in annotated["browser"]
-    assert annotated["browser-mcp"] and "MEIVA_BROWSER_ENABLED" in annotated["browser-mcp"]
+
+    assert annotated["browser"] == expected
+    assert annotated["browser-mcp"] == expected
 
 
-def _agent_runner_annotated(
-    monkeypatch: pytest.MonkeyPatch, *, local_machine: MachineIdentity
+# meiva:note
+# The roster gates evaluated by a child process that has `env` as its environment and `home` as
+# its home, for the roles given. The gates read process settings and the environment.
+def _gates_in_child(
+    home: Path, roles: str, env: dict[str, str] | None = None
 ) -> dict[str, str | None]:
-    monkeypatch.setattr(spec.settings.services, "browser_enabled", True)
-    return {
-        s.session: r
-        for s, r in spec.services_for_capabilities_annotated(
-            frozenset({"agent-runner"}), machine=local_machine, host=fake_host()
-        )
-    }
+    base_env = {key: os.environ[key] for key in ("PATH", "HOME", "TMPDIR") if key in os.environ}
+    done = subprocess.run(  # noqa: S603
+        [sys.executable, str(_CHILD), roles],
+        cwd=_REPO,
+        env={**base_env, "MEIVA_HOME": str(home), **(env or {})},
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=True,
+    )
+    return json.loads(done.stdout.strip().splitlines()[-1])
 
 
-def test_otel_collector_gated_on_gateway_without_lgtm_marker(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+# meiva:note
+# A host-scope flag reaches a process through its environment; a cluster-scope one only through
+# the unit's own `.env`, so each case is delivered the way its scope is read.
+@pytest.mark.parametrize(
+    ("flag", "sessions", "wording", "scope"),
+    [
+        ("MEIVA_BROWSER_ENABLED", ("browser", "browser-mcp"), "MEIVA_BROWSER_ENABLED", "host"),
+        (
+            "MEIVA_IM_BRIDGE_ENABLED",
+            ("im-bridge",),
+            "disabled (MEIVA_IM_BRIDGE_ENABLED off)",
+            "cluster",
+        ),
+    ],
+)
+def test_a_session_whose_flag_is_off_is_gated_out_with_the_flag_named(
+    tmp_path: Path, flag: str, sessions: tuple[str, ...], wording: str, scope: str
 ) -> None:
-    home = tmp_path / "gateway"
-    home.mkdir()
-    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+    roles = "agent-runner" if "browser" in sessions else "gateway"
+    if scope == "cluster":
+        (tmp_path / ".env").write_text(f"{flag}=false\n")
 
-    def observability_home(machine: MachineIdentity, *, home: Path) -> Path:
-        assert machine is machine_identity
-        return target_home
+    annotated = _gates_in_child(tmp_path, roles, {flag: "false"} if scope == "host" else None)
 
-    target_home = home
-    monkeypatch.setattr(spec, "gateway_observability_home", observability_home)
+    for session in sessions:
+        reason = annotated[session]
+        assert reason is not None and wording in reason
 
-    annotated = {
-        service.session: reason
-        for service, reason in spec.services_for_capabilities_annotated(
-            frozenset({"gateway"}), machine=machine_identity, host=fake_host()
-        )
-    }
+
+def test_otel_collector_gated_on_gateway_without_lgtm_marker(tmp_path: Path) -> None:
+    annotated = _gates_in_child(tmp_path, "gateway")
+
     reason = annotated["otel-collector"]
     assert reason is not None
     assert "lgtm-host" in reason
 
-    start = {
-        service.session
-        for service in spec.services_for_capabilities(
-            frozenset({"gateway"}), machine=machine_identity, host=fake_host()
-        )
-    }
-    assert "otel-collector" not in start
 
+def test_otel_collector_runs_on_gateway_with_lgtm_marker(tmp_path: Path) -> None:
+    (tmp_path / "lgtm-host").touch()
 
-def test_otel_collector_runs_on_gateway_with_lgtm_marker(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
-    home = tmp_path / "gateway"
-    home.mkdir()
-    (home / "lgtm-host").touch()
-
-    def observability_home(machine: MachineIdentity, *, home: Path) -> Path:
-        assert machine is machine_identity
-        return target_home
-
-    target_home = home
-    monkeypatch.setattr(spec, "gateway_observability_home", observability_home)
-
-    annotated = {
-        service.session: reason
-        for service, reason in spec.services_for_capabilities_annotated(
-            frozenset({"gateway"}), machine=machine_identity, host=fake_host()
-        )
-    }
-    assert annotated["otel-collector"] is None
-    start = {
-        service.session
-        for service in spec.services_for_capabilities(
-            frozenset({"gateway"}), machine=machine_identity, host=fake_host()
-        )
-    }
-    assert "otel-collector" in start
+    assert _gates_in_child(tmp_path, "gateway")["otel-collector"] is None
 
 
 def test_otel_collector_runs_on_gateway_without_marker_when_endpoint_override_explicit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    tmp_path: Path,
 ) -> None:
-    home = tmp_path / "gateway"
-    home.mkdir()
-    monkeypatch.setitem(
-        os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318"
+    annotated = _gates_in_child(
+        tmp_path, "gateway", {"MEIVA_TELEMETRY_OTLP_ENDPOINT": "http://collector.invalid:4318"}
     )
 
-    def observability_home(machine: MachineIdentity, *, home: Path) -> Path:
-        assert machine is machine_identity
-        return target_home
-
-    target_home = home
-    monkeypatch.setattr(spec, "gateway_observability_home", observability_home)
-
-    annotated = {
-        service.session: reason
-        for service, reason in spec.services_for_capabilities_annotated(
-            frozenset({"gateway"}), machine=machine_identity, host=fake_host()
-        )
-    }
     assert annotated["otel-collector"] is None
-    start = {
-        service.session
-        for service in spec.services_for_capabilities(
-            frozenset({"gateway"}), machine=machine_identity, host=fake_host()
-        )
-    }
-    assert "otel-collector" in start
 
 
-def test_otel_collector_runs_on_pure_runner(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
-    home = tmp_path / "runner"
-    home.mkdir()
-
-    def observability_home(machine: MachineIdentity, *, home: Path) -> None:
-        assert machine is machine_identity
-
-    monkeypatch.setattr(spec, "gateway_observability_home", observability_home)
-
-    annotated = {
-        service.session: reason
-        for service, reason in spec.services_for_capabilities_annotated(
-            frozenset({"agent-runner"}), machine=machine_identity, host=fake_host()
-        )
-    }
-    assert annotated["otel-collector"] is None
-    start = {
-        service.session
-        for service in spec.services_for_capabilities(
-            frozenset({"agent-runner"}), machine=machine_identity, host=fake_host()
-        )
-    }
-    assert "otel-collector" in start
-
-
-def test_browser_mcp_gated_out_when_browser_is(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
-    def fake_browser_incapability(_chrome: str | None, *, host: Host) -> str | None:
-        return "no display (headless)"
-
-    monkeypatch.setattr(probes, "browser_incapability", fake_browser_incapability)
-
-    def fake_browser_incapability2(_chrome: str | None, *, host: Host) -> str | None:
-        return "no display (headless)"
-
-    monkeypatch.setattr(spec, "browser_incapability", fake_browser_incapability2)
-    annotated = _agent_runner_annotated(monkeypatch, local_machine=machine_identity)
-    assert annotated["browser"] == "no display (headless)"
-    assert annotated["browser-mcp"] == "no display (headless)"
+def test_otel_collector_runs_on_pure_runner(tmp_path: Path) -> None:
+    assert _gates_in_child(tmp_path, "agent-runner")["otel-collector"] is None
 
 
 def test_every_service_declares_an_identity_probe() -> None:
@@ -328,39 +260,16 @@ def test_every_service_declares_an_identity_probe() -> None:
     assert missing == set(), f"{sorted(missing)} have no identity-bound health probe"
 
 
-def test_daemon_identity_binds_the_probe_to_one_daemons_facts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    seen: dict[str, object] = {}
-
-    def _capture(name: str, url: str, *, pidfile: Path, **_kw: object) -> object:
-        seen.update(name=name, url=url, pidfile=pidfile)
-        from base.daemon.health import DaemonProbe
-
-        return DaemonProbe.up("stub")
-
-    monkeypatch.setattr(healthz, "probe_daemon", _capture)
+def test_daemon_identity_binds_the_probe_to_one_daemons_facts(tmp_path: Path) -> None:
     pidfile = tmp_path / "ops.pid"
-    assert roster.daemon_identity("ops", pidfile)().alive is True
-    assert seen["name"] == "ops"
-    assert seen["pidfile"] == pidfile
-    assert str(ServiceEndpoints.from_settings().of("ops").health_port) in str(seen["url"])
 
+    bound = cast("partial[DaemonProbe]", roster.daemon_identity("ops", pidfile))
 
-def test_im_bridge_gated_when_disabled(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
-    from base.config import settings
-
-    monkeypatch.setattr(settings.services, "im_bridge_enabled", False)
-    annotated = {
-        s.session: reason
-        for s, reason in spec.services_for_capabilities_annotated(
-            frozenset({"gateway"}), machine=machine_identity, host=fake_host()
-        )
-    }
-    assert "im-bridge" in annotated
-    assert annotated["im-bridge"] == "disabled (MEIVA_IM_BRIDGE_ENABLED off)"
+    assert bound.func is probe_daemon
+    name, url = bound.args
+    assert name == "ops"
+    assert str(ServiceEndpoints.from_settings().of("ops").health_port) in url
+    assert bound.keywords == {"pidfile": pidfile}
 
 
 @pytest.mark.parametrize(

@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from base.config import ConfigBoot
 from base.daemon.health import DaemonProbe
 
 _TIMEOUT_S = 3.0
 
 
-def post_search(
-    uri: str, *, embedding_name_reader: Callable[[], str]
-) -> dict[str, object] | DaemonProbe:
+def post_search(uri: str, *, embedding_name: str) -> dict[str, object] | DaemonProbe:
     """One POST /search with a zero vector — the body dict when it
     answered, or the not-alive verdict that trying produced (fail
     closed: any failure means "not alive", per the module docstring)."""
@@ -20,7 +16,7 @@ def post_search(
 
     from services.derived.memory_indexer.embeddings.factory import get_descriptor
 
-    dim = get_descriptor(embedding_name_reader()).dim
+    dim = get_descriptor(embedding_name).dim
     try:
         resp = httpx.post(
             f"{uri}/search",
@@ -33,16 +29,22 @@ def post_search(
         return DaemonProbe.down(f"POST /search failed ({type(exc).__name__}: {exc})")
 
 
+# meiva:note
+# The verdict on one search answer: alive only for a body that carries a `hits` payload, since a
+# foreign process answering 200 on the port is not the search service.
+def search_verdict(answer: dict[str, object] | DaemonProbe) -> DaemonProbe:
+    if isinstance(answer, DaemonProbe):
+        return answer
+    if "hits" in answer:
+        return DaemonProbe.up("POST /search answered with a hits payload")
+    return DaemonProbe.down("POST /search answered without a hits payload")
+
+
 def memory_search_probe() -> DaemonProbe:
     """Alive when the service answers a real search with a hits payload."""
     config = ConfigBoot()
     config.read_process_environment()
-    payload = post_search(
-        config.view.services.memory_search_uri,
-        embedding_name_reader=lambda: config.view.services.embedding_backend,
+    services = config.view.services
+    return search_verdict(
+        post_search(services.memory_search_uri, embedding_name=services.embedding_backend)
     )
-    if isinstance(payload, DaemonProbe):
-        return payload
-    if "hits" in payload:
-        return DaemonProbe.up("POST /search answered with a hits payload")
-    return DaemonProbe.down("POST /search answered without a hits payload")

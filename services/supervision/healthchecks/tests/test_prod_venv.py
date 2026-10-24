@@ -1,81 +1,23 @@
 from __future__ import annotations
 
-import subprocess
+import os
+import stat
 import venv
 from pathlib import Path
-from unittest.mock import Mock
 
 import pytest
 
 from services.supervision.healthchecks import prod_venv as hc
 
-
-@pytest.fixture(autouse=True)
-def isolated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    interpreter = tmp_path / ".venv/bin/python"
-    interpreter.parent.mkdir(parents=True)
-    interpreter.touch()
-    monkeypatch.setattr(hc.shutil, "which", Mock(return_value="/tools/uv"))
+_HEALTHY_ENV = {"PATH": os.environ.get("PATH", "")}
 
 
-def _package_files(site: Path) -> dict[Path, bytes]:
-    return {p.relative_to(site): p.read_bytes() for p in site.rglob("*") if p.is_file()}
-
-
-def test_explicit_checkout_and_isolated_environment(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setenv("VIRTUAL_ENV", "/other/.venv")
-    monkeypatch.setenv("PYTHONPATH", "/other")
-    run = Mock(return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""))
-    monkeypatch.setattr(hc.proc, "run_bounded", run)
-    assert hc.venv_violations(source_root=tmp_path) == ()
-    assert len(run.call_args_list) == 2
-    assert run.call_args_list[0].args[0][-1] == str(tmp_path / ".venv/bin/python")
-    for call in run.call_args_list:
-        assert "VIRTUAL_ENV" not in call.kwargs["env"]
-        assert "PYTHONPATH" not in call.kwargs["env"]
-        assert call.kwargs["timeout"] == 5
-
-
-def test_dependency_timeout_does_not_skip_import_check(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    run = Mock(
-        side_effect=[
-            subprocess.TimeoutExpired("uv", 5),
-            subprocess.CompletedProcess([], 0, stdout="", stderr=""),
-        ]
-    )
-    monkeypatch.setattr(hc.proc, "run_bounded", run)
-    violations = hc.venv_violations(source_root=tmp_path)
-    assert len(violations) == 1
-    assert "timed out" in violations[0]
-    assert run.call_count == 2
-
-
-def test_missing_python_does_not_spawn_a_diagnostic(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    def _no_python(_source_root: Path) -> Path | None:
-        return None
-
-    monkeypatch.setattr(hc.editable_install, "venv_python", _no_python)
-    run = Mock(side_effect=AssertionError("must not spawn"))
-    monkeypatch.setattr(hc.proc, "run_bounded", run)
-    assert "venv python missing" in hc.venv_violations(source_root=tmp_path)[0]
-    run.assert_not_called()
-
-
-@pytest.mark.parametrize("damage", ["healthy", "missing", "hollow"])
-def test_real_isolated_import_detects_damage_without_writes(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    damage: str,
-) -> None:
-    (tmp_path / ".venv/bin/python").unlink()
-    venv.EnvBuilder(with_pip=False, symlinks=True).create(tmp_path / ".venv")
-    site = next((tmp_path / ".venv/lib").glob("python*/site-packages"))
+# meiva:note
+# A real virtualenv at `<root>/.venv` whose site-packages holds the four packages the import smoke
+# names, as real directories: complete, or hollow (no `__init__.py`), or with one missing.
+def _checkout(root: Path, damage: str) -> Path:
+    venv.EnvBuilder(with_pip=False, symlinks=True).create(root / ".venv")
+    site = next((root / ".venv/lib").glob("python*/site-packages"))
     for name in ("meiva", "pydantic", "psycopg", "fastapi"):
         if name == "psycopg" and damage == "missing":
             continue
@@ -83,14 +25,103 @@ def test_real_isolated_import_detects_damage_without_writes(
         package.mkdir()
         if damage != "hollow":
             (package / "__init__.py").write_text("")
+    return site
+
+
+def _package_files(site: Path) -> dict[Path, bytes]:
+    return {p.relative_to(site): p.read_bytes() for p in site.rglob("*") if p.is_file()}
+
+
+# meiva:note
+# An executable script that stands in for `uv`: it exits with `code` after writing the
+# environment variables it was given, or sleeps when `hang` is set.
+def _uv(root: Path, *, code: int = 0, hang: bool = False) -> str:
+    script = root / "fake-uv"
+    body = "sleep 30" if hang else f"env > {root}/uv-env.txt\nexit {code}"
+    script.write_text(f"#!/bin/sh\n{body}\n")
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    return str(script)
+
+
+def test_the_isolated_environment_drops_only_the_variables_that_redirect_imports() -> None:
+    kept = hc.isolated_env(
+        {"VIRTUAL_ENV": "/other/.venv", "PYTHONPATH": "/other", "PATH": "/bin", "HOME": "/h"}
+    )
+
+    assert kept == {"PATH": "/bin", "HOME": "/h"}
+
+
+def test_the_dependency_check_runs_in_the_isolated_environment(tmp_path: Path) -> None:
+    _checkout(tmp_path, "healthy")
+    uv = _uv(tmp_path)
+
+    violations = hc.venv_violations(
+        source_root=tmp_path,
+        uv=uv,
+        environment={**_HEALTHY_ENV, "VIRTUAL_ENV": "/other/.venv", "PYTHONPATH": "/other"},
+    )
+
+    assert violations == ()
+    seen = (tmp_path / "uv-env.txt").read_text()
+    assert "VIRTUAL_ENV" not in seen
+    assert "PYTHONPATH" not in seen
+
+
+def test_a_failing_dependency_check_is_a_violation(tmp_path: Path) -> None:
+    _checkout(tmp_path, "healthy")
+
+    violations = hc.venv_violations(
+        source_root=tmp_path, uv=_uv(tmp_path, code=3), environment=_HEALTHY_ENV
+    )
+
+    assert len(violations) == 1
+    assert violations[0].startswith("uv pip check failed (rc=3)")
+
+
+def test_dependency_timeout_does_not_skip_import_check(tmp_path: Path) -> None:
+    _checkout(tmp_path, "missing")
+
+    violations = hc.venv_violations(
+        source_root=tmp_path, uv=_uv(tmp_path, hang=True), environment=_HEALTHY_ENV, timeout_s=0.5
+    )
+
+    assert "timed out" in violations[0]
+    assert any("No module named" in violation for violation in violations)
+
+
+def test_an_unstartable_uv_is_reported_not_raised(tmp_path: Path) -> None:
+    _checkout(tmp_path, "healthy")
+
+    violations = hc.venv_violations(
+        source_root=tmp_path, uv=str(tmp_path / "no-uv"), environment=_HEALTHY_ENV
+    )
+
+    assert len(violations) == 1
+    assert "could not start" in violations[0]
+
+
+def test_missing_python_does_not_spawn_a_diagnostic(tmp_path: Path) -> None:
+    uv = _uv(tmp_path)
+
+    violations = hc.venv_violations(source_root=tmp_path, uv=uv, environment=_HEALTHY_ENV)
+
+    assert "venv python missing" in violations[0]
+    assert not (tmp_path / "uv-env.txt").exists()
+
+
+@pytest.mark.parametrize("damage", ["healthy", "missing", "hollow"])
+def test_real_isolated_import_detects_damage_without_writes(tmp_path: Path, damage: str) -> None:
+    site = _checkout(tmp_path, damage)
     shadow = tmp_path / "shadow"
     shadow.mkdir()
     (shadow / "psycopg.py").write_text("")
-    monkeypatch.setenv("PYTHONPATH", str(shadow))
-    monkeypatch.setattr(hc.shutil, "which", Mock(return_value=None))
     before = _package_files(site)
 
-    violations = hc.venv_violations(source_root=tmp_path)
+    violations = hc.venv_violations(
+        source_root=tmp_path,
+        uv=None,
+        environment={**_HEALTHY_ENV, "PYTHONPATH": str(shadow)},
+    )
 
     assert before == _package_files(site)
     if damage == "healthy":

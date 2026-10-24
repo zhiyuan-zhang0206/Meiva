@@ -2,37 +2,17 @@
 
 from __future__ import annotations
 
-import email.message
-import io
 import json
-import urllib.error
 import urllib.parse
-import urllib.request
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
 
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
-from base.daemon.health import DaemonProbe
-from base.native_process.root_control import client
+from base.paths.tests.homes import unit_home as unit_home
 from services.supervision.healthchecks import lgtm as hc
-
-
-class _Response:
-    def __init__(self, *, status: int, body: bytes = b"") -> None:
-        self.status = status
-        self._body = body
-
-    def __enter__(self) -> _Response:
-        return self
-
-    def __exit__(self, *_args: object) -> None:
-        return None
-
-    def read(self) -> bytes:
-        return self._body
+from services.supervision.healthchecks.tests.loki_stub import BackendStub
 
 
 def test_readiness_probes_exclude_remote_tempo() -> None:
@@ -65,159 +45,100 @@ def test_readiness_probes_ignore_remote_query_urls(
     )
 
 
-def test_write_path_probe_rejects_400_push(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _raise(_request: object, **_kwargs: object) -> None:
-        raise urllib.error.HTTPError("http://loki/otlp/v1/logs", 400, "rejected", {}, None)  # pyright: ignore[reportArgumentType]
-
-    monkeypatch.setattr(hc, "open_local", _raise)
-
-    assert hc.write_path_probe() == (False, "push_http_400")
+_NO_PAUSE = (0.0, 0.0)
 
 
-def test_write_path_probe_retries_429_with_bounded_backoff(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    requests: list[urllib.request.Request] = []
-    sleeps: list[int] = []
+def test_write_path_probe_rejects_400_push() -> None:
+    with BackendStub() as loki:
+        loki.script.push_answers = [(400, b"")]
 
-    def _reject(request: urllib.request.Request, **_kwargs: object) -> None:
-        requests.append(request)
-        raise urllib.error.HTTPError(  # pyright: ignore[reportArgumentType]
-            request.full_url, 429, "throttled", email.message.Message(), None
+        assert hc.write_path_probe(loki.url, backoff_s=_NO_PAUSE) == (False, "push_http_400")
+
+
+def test_write_path_probe_retries_429_with_bounded_backoff() -> None:
+    with BackendStub() as loki:
+        loki.script.push_answers = [(429, b"")]
+
+        assert hc.write_path_probe(loki.url, backoff_s=_NO_PAUSE) == (False, "push_http_429")
+        assert len(loki.script.pushes) == 3
+
+
+def test_write_path_probe_succeeds_after_a_throttle() -> None:
+    with BackendStub() as loki:
+        loki.script.push_answers = [(429, b""), (204, b"")]
+
+        assert hc.write_path_probe(loki.url, backoff_s=_NO_PAUSE) == (True, "ok")
+        assert len(loki.script.pushes) == 2
+
+
+def test_write_path_probe_identifies_stuck_ingester() -> None:
+    with BackendStub() as loki:
+        loki.script.push_answers = [
+            (500, b"RPC error: code = Unknown desc = InGeStEr Is ShUtTiNg DoWn")
+        ]
+
+        assert hc.write_path_probe(loki.url, backoff_s=_NO_PAUSE) == (
+            False,
+            "ingester_shutting_down",
         )
 
-    monkeypatch.setattr(hc, "open_local", _reject)
-    monkeypatch.setattr(hc.time, "sleep", sleeps.append)
 
-    assert hc.write_path_probe() == (False, "push_http_429")
-    assert len(requests) == 3
-    assert requests[0] is requests[1] is requests[2]
-    assert sleeps == [1, 2]
+def test_write_path_probe_does_not_misclassify_plain_503() -> None:
+    with BackendStub() as loki:
+        loki.script.push_answers = [(503, b"write throttled because disk usage is too high")]
 
-
-def test_write_path_probe_identifies_stuck_ingester(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _raise(_request: object, **_kwargs: object) -> None:
-        raise urllib.error.HTTPError(  # pyright: ignore[reportArgumentType]
-            "http://loki/otlp/v1/logs",
-            500,
-            "internal error",
-            email.message.Message(),
-            io.BytesIO(b"RPC error: code = Unknown desc = InGeStEr Is ShUtTiNg DoWn"),
-        )
-
-    monkeypatch.setattr(hc, "open_local", _raise)
-
-    assert hc.write_path_probe() == (False, "ingester_shutting_down")
+        assert hc.write_path_probe(loki.url, backoff_s=_NO_PAUSE) == (False, "push_http_503")
 
 
-def test_write_path_probe_does_not_misclassify_plain_503(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def _raise(_request: object, **_kwargs: object) -> None:
-        raise urllib.error.HTTPError(  # pyright: ignore[reportArgumentType]
-            "http://loki/otlp/v1/logs",
-            503,
-            "throttled",
-            email.message.Message(),
-            io.BytesIO(b"write throttled because disk usage is too high"),
-        )
+def test_write_path_probe_reports_push_request_error() -> None:
+    with BackendStub() as loki:
+        url = loki.url
 
-    monkeypatch.setattr(hc, "open_local", _raise)
-
-    assert hc.write_path_probe() == (False, "push_http_503")
+    assert hc.write_path_probe(url, backoff_s=_NO_PAUSE) == (False, "push_error")
 
 
-def test_write_path_probe_reports_push_request_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _raise(_request: object, **_kwargs: object) -> None:
-        raise OSError("connection refused")
+def test_write_path_probe_reports_marker_not_visible() -> None:
+    with BackendStub() as loki:
+        loki.script.query_mode = "empty"
 
-    monkeypatch.setattr(hc, "open_local", _raise)
-
-    assert hc.write_path_probe() == (False, "push_error")
+        assert hc.write_path_probe(loki.url, backoff_s=_NO_PAUSE) == (False, "probe_not_visible")
 
 
-def test_write_path_probe_reports_marker_not_visible(monkeypatch: pytest.MonkeyPatch) -> None:
-    requests: list[urllib.request.Request] = []
+def test_write_path_probe_finds_marker_in_numeric_query_window() -> None:
+    with BackendStub() as loki:
+        assert hc.write_path_probe(loki.url, backoff_s=_NO_PAUSE) == (True, "ok")
 
-    def _open(request: urllib.request.Request, **_kwargs: object) -> _Response:
-        requests.append(request)
-        if len(requests) == 1:
-            return _Response(status=204)
-        return _Response(status=200, body=b'{"data":{"result":[]}}')
-
-    monkeypatch.setattr(hc, "open_local", _open)
-
-    assert hc.write_path_probe() == (False, "probe_not_visible")
-    request_body = requests[0].data
-    assert isinstance(request_body, bytes)
-    payload = cast(dict[str, Any], json.loads(request_body))
-    record = payload["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]
-    timestamp = record["timeUnixNano"]
-    marker = record["body"]["stringValue"]
-    assert timestamp.isdigit()
-    assert marker == f"watchdog-write-probe-{timestamp}"
-    assert requests[0].full_url.endswith("/otlp/v1/logs")
-    assert requests[0].get_header("X-scope-orgid") == "fake"
-    assert requests[0].get_header("Content-type") == "application/json"
-
-
-def test_write_path_probe_finds_marker_in_numeric_query_window(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    requests: list[urllib.request.Request] = []
-    marker = ""
-
-    def _open(request: urllib.request.Request, **_kwargs: object) -> _Response:
-        nonlocal marker
-        requests.append(request)
-        if len(requests) == 1:
-            request_body = request.data
-            assert isinstance(request_body, bytes)
-            payload = cast(dict[str, Any], json.loads(request_body))
-            resource_log = payload["resourceLogs"][0]
-            attributes = {
-                attribute["key"]: attribute["value"]["stringValue"]
-                for attribute in resource_log["resource"]["attributes"]
-            }
-            record = resource_log["scopeLogs"][0]["logRecords"][0]
-            marker = record["body"]["stringValue"]
-            assert attributes == {
-                "agent_id": "watchdog",
-                "event_name": "watchdog-write-probe",
-            }
-            assert record["timeUnixNano"] == marker.removeprefix("watchdog-write-probe-")
-            return _Response(status=204)
-        body = json.dumps({"data": {"result": [{"values": [["1", marker]]}]}}).encode()
-        return _Response(status=200, body=body)
-
-    monkeypatch.setattr(hc, "open_local", _open)
-
-    assert hc.write_path_probe() == (True, "ok")
-    query = urllib.parse.parse_qs(urllib.parse.urlparse(requests[1].full_url).query)
-    assert query["query"] == [
-        f'{{agent_id="watchdog", event_name="watchdog-write-probe"}} |= "{marker}"'
-    ]
-    assert query["start"][0].isdigit()
-    assert query["end"][0].isdigit()
-    marker_ts = int(marker.removeprefix("watchdog-write-probe-"))
-    assert int(query["end"][0]) > marker_ts  # range end is exclusive
-    assert int(query["end"][0]) - int(query["start"][0]) >= 121_000_000_000
-    assert "/loki/api/v1/query_range?" in requests[1].full_url
+        push = loki.script.pushes[0]
+        assert push["path"] == "/otlp/v1/logs"
+        assert push["org"] == "fake"
+        assert push["content_type"] == "application/json"
+        resource_log = push["payload"]["resourceLogs"][0]
+        attributes = {
+            attribute["key"]: attribute["value"]["stringValue"]
+            for attribute in resource_log["resource"]["attributes"]
+        }
+        record = resource_log["scopeLogs"][0]["logRecords"][0]
+        marker = record["body"]["stringValue"]
+        assert attributes == {"agent_id": "watchdog", "event_name": "watchdog-write-probe"}
+        assert record["timeUnixNano"].isdigit()
+        assert marker == f"watchdog-write-probe-{record['timeUnixNano']}"
+        assert record["timeUnixNano"] == marker.removeprefix("watchdog-write-probe-")
+        (request_path,) = loki.script.queries
+        assert request_path.startswith("/loki/api/v1/query_range?")
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(request_path).query)
+        assert query["query"] == [
+            f'{{agent_id="watchdog", event_name="watchdog-write-probe"}} |= "{marker}"'
+        ]
+        marker_ts = int(marker.removeprefix("watchdog-write-probe-"))
+        assert int(query["end"][0]) > marker_ts  # range end is exclusive
+        assert int(query["end"][0]) - int(query["start"][0]) >= 121_000_000_000
 
 
-def test_write_path_probe_reports_query_request_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = 0
+def test_write_path_probe_reports_query_request_error() -> None:
+    with BackendStub() as loki:
+        loki.script.query_mode = "drop"
 
-    def _open(_request: object, **_kwargs: object) -> _Response:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            return _Response(status=204)
-        raise OSError("query unavailable")
-
-    monkeypatch.setattr(hc, "open_local", _open)
-
-    assert hc.write_path_probe() == (False, "query_error")
+        assert hc.write_path_probe(loki.url, backoff_s=_NO_PAUSE) == (False, "query_error")
 
 
 def test_is_lgtm_host_accepts_station_capability(tmp_path: Path) -> None:
@@ -241,33 +162,28 @@ def test_is_lgtm_host_accepts_station_capability(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("status", [301, 401, 500, 503])
-def test_unready_http_cannot_certify_backend(monkeypatch: pytest.MonkeyPatch, status: int) -> None:
-    def response(*_args: object, **_kw: object) -> _Response:
-        return _Response(status=status)
+def test_unready_http_cannot_certify_backend(status: int) -> None:
+    with BackendStub() as backend:
+        backend.script.ready = (status, b"")
 
-    monkeypatch.setattr(hc, "open_local", response)
-    assert not hc.protocol_readiness("loki").alive
+        assert not hc.readiness_at("loki", f"{backend.url}/ready").alive
+
+
+def test_a_ready_backend_is_certified() -> None:
+    with BackendStub() as backend:
+        assert hc.readiness_at("loki", f"{backend.url}/ready").alive
 
 
 @pytest.mark.parametrize("database,ready", [("ok", True), ("failed", False)])
-def test_grafana_health_requires_database_ready(
-    monkeypatch: pytest.MonkeyPatch, database: str, ready: bool
-) -> None:
-    def response(*_args: object, **_kw: object) -> _Response:
-        return _Response(status=200, body=json.dumps({"database": database}).encode())
+def test_grafana_health_requires_database_ready(database: str, ready: bool) -> None:
+    with BackendStub() as backend:
+        backend.script.ready = (200, json.dumps({"database": database}).encode())
 
-    monkeypatch.setattr(hc, "open_local", response)
-    assert hc.protocol_readiness("grafana").alive is ready
+        assert hc.readiness_at("grafana", f"{backend.url}/ready").alive is ready
 
 
-def test_backend_health_needs_no_native_owner(monkeypatch: pytest.MonkeyPatch) -> None:
-    def forbidden(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("backend protocol health must not inspect native ownership")
+def test_an_unreachable_backend_reads_down() -> None:
+    with BackendStub() as backend:
+        url = f"{backend.url}/ready"
 
-    monkeypatch.setattr(client, "root_process", forbidden)
-
-    def ready(_name: str) -> DaemonProbe:
-        return DaemonProbe.up("ready")
-
-    monkeypatch.setattr(hc, "protocol_readiness", ready)
-    assert hc.probe_backend("loki").alive
+    assert not hc.readiness_at("loki", url).alive
