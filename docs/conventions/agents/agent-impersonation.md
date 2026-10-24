@@ -285,6 +285,14 @@ what is lost is the marker (the reaper's bound on that row), not the recovery; r
 paused agent asleep, and the grace window holds roughly three chances before the reaper takes
 the row.
 
+Two states sit outside both the rungs and the scan. A row whose machine runs no host at all
+(retired, or offline long enough that the row is all that is left) has nobody to scan it or run
+its turn, and a row already `terminated` is out of the scan's reach by design — its WHERE
+clause admits idling and running rows. Neither is silent about itself: the first keeps the owed lease
+and the row's status as its record, the second keeps the termination and its
+`termination_source`, and both still show the receipt as owed. What is lost in them is the turn
+that would settle it, not the evidence that it is owed.
+
 ## Return control
 
 Stop external work and close attachments before releasing:

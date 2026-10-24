@@ -94,6 +94,13 @@ async def test_the_scan_wake_settles_the_receipt_it_selected_the_row_for(
     db_conn.commit()
 
     assert await settle_running_rows_at_start(aops_pool, "handoff-scan") == [agent_id]
+    # meiva:note
+    # The settle leaves no crash marker, and the conventions say so when they call the scan
+    # the path a restart takes. A stamp added here "for safety" would falsify that sentence
+    # while every other assertion below still passed, so pin the absence itself.
+    assert db_conn.execute(
+        "SELECT last_turn_fatal_at FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == (None,)
     assert await scan_rows(aops_pool, "handoff-scan") == [agent_id]
 
     async def idle(_state: states.BaseAgentState) -> dict[str, Any]:
