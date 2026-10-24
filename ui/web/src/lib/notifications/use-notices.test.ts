@@ -14,10 +14,12 @@ import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { NoticeItem, NoticesFeed } from "../contracts/types";
-import { fakeApi } from "../transport/tests/api/fake-api";
+import { startGateway, type TestGateway } from "../transport/tests/api/api-provider";
+import { gatewayRig } from "../transport/tests/api/api-provider";
 import { eventStreamHarness, type EventStreamHarness } from "../transport/tests/stream/event-stream-harness";
 import {
   NOTICES_QUERY_KEY,
+  NOTICES_RESOLVED_QUERY_KEY,
   dropTombstonesResetForTest,
   dropOpenNotices,
   useNotices,
@@ -49,61 +51,38 @@ function feed(over: Partial<NoticesFeed> = {}): NoticesFeed {
   };
 }
 
-interface CursorRead {
-  beforeAt?: string;
-  beforeId?: number;
-}
-
-// meiva:note
-// The gateway's notice store as one in-memory service. Every read answers from the
-// store as it is when the read starts, so a test changes the lists between reads
-// the way the server's state changes. The open queue reads without parameters and
-// the resolved history always reads with a parameter object, which is how a
-// failure is aimed at one of the two. A read that carries a cursor gets the older
-// page, and `cursorReads` keeps those cursors.
-class NoticeDesk {
-  open: NoticeItem[] = [];
-  awaiting: NoticeItem[] = [];
-  resolved: NoticeItem[] = [];
-  nextCursor: NoticesFeed["next_cursor"] = null;
-  older: NoticeItem[] = [];
-  feedFails = false;
-  historyFails = false;
-  readonly cursorReads: CursorRead[] = [];
-  readonly api = fakeApi({ getNotices: (params) => this.read(params) });
-
-  private read(params?: CursorRead): Promise<NoticesFeed> {
-    if (params === undefined) {
-      if (this.feedFails) return Promise.reject(new Error("boom"));
-    } else if (this.historyFails) {
-      return Promise.reject(new Error("boom"));
-    }
-    if (params?.beforeAt != null) {
-      this.cursorReads.push({ ...params });
-      return Promise.resolve(feed({ resolved_page: this.older }));
-    }
-    return Promise.resolve(feed({
-      open: this.open,
-      awaiting: this.awaiting,
-      resolved_page: this.resolved,
-      next_cursor: this.nextCursor,
-    }));
-  }
-}
+let desk: {
+  open: NoticeItem[];
+  awaiting: NoticeItem[];
+  resolved: NoticeItem[];
+  nextCursor: NoticesFeed["next_cursor"];
+  older: NoticeItem[];
+};
+let failureStatus: number | null;
+let gateway: TestGateway;
 
 let queryClient: QueryClient;
-let desk: NoticeDesk;
 let stream: EventStreamHarness;
 
-beforeEach(() => {
+beforeEach(async () => {
   dropTombstonesResetForTest();
-  desk = new NoticeDesk();
+  desk = { open: [], awaiting: [], resolved: [], nextCursor: null, older: [] };
+  failureStatus = null;
+  gateway = await startGateway((request) => {
+    const url = new URL(request.path, "http://gateway");
+    if (url.pathname !== "/api/notices") return { kind: "text", status: 404, body: "unexpected route" };
+    if (failureStatus !== null) return { kind: "text", status: failureStatus, body: "unavailable" };
+    return { kind: "json", body: url.searchParams.has("before_at")
+      ? feed({ resolved_page: desk.older })
+      : feed({ open: desk.open, awaiting: desk.awaiting, resolved_page: desk.resolved, next_cursor: desk.nextCursor }) };
+  });
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  stream = eventStreamHarness({ api: desk.api, queryClient, wallNow: () => Date.now() });
+  stream = eventStreamHarness({ api: gatewayRig(gateway).api, queryClient, wallNow: () => Date.now() });
 });
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   vi.useRealTimers();
+  await gateway.close();
 });
 
 async function settle(): Promise<void> {
@@ -126,13 +105,14 @@ describe("useNotices", () => {
     const { result } = renderHook(() => useNotices(), { wrapper: stream.wrapper });
     await waitFor(() => expect(ids(result.current.open)).toEqual([1]));
     expect(ids(result.current.awaiting)).toEqual([2]);
-    expect(ids(result.current.resolved)).toEqual([3]);
+    await waitFor(() => expect(ids(result.current.resolved)).toEqual([3]));
   });
 
   it("notice_resolved invalidates BOTH the open queue and the resolved history", async () => {
     desk.open = [notice(7, "fyi")];
     const { result } = renderHook(() => useNotices(), { wrapper: stream.wrapper });
     await waitFor(() => expect(ids(result.current.open)).toEqual([7]));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
     await stream.whenSourceExists();
 
     desk.open = [];
@@ -147,6 +127,7 @@ describe("useNotices", () => {
     desk.resolved = [notice(5, "done")];
     const { result } = renderHook(() => useNotices(), { wrapper: stream.wrapper });
     await waitFor(() => expect(ids(result.current.resolved)).toEqual([5]));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
     await stream.whenSourceExists();
 
     desk.open = [notice(8, "fyi")];
@@ -174,7 +155,11 @@ describe("useNotices", () => {
   // Audit C3: failures must surface (stale-while-error), not silently degrade
   // to an empty list — the queue cannot distinguish "empty" from "broken".
   it("a failed open-queue fetch surfaces error=true with an empty list", async () => {
-    desk.feedFails = true;
+    // meiva:note
+    // The history is already cached; only the cold open queue needs this HTTP response.
+    queryClient.setQueryDefaults(NOTICES_RESOLVED_QUERY_KEY, { staleTime: Infinity });
+    queryClient.setQueryData(NOTICES_RESOLVED_QUERY_KEY, { pages: [feed()], pageParams: [undefined] });
+    failureStatus = 503;
     const { result } = renderHook(() => useNotices(), { wrapper: stream.wrapper });
     await waitFor(() => expect(result.current.error).toBe(true));
     expect(result.current.open).toEqual([]);
@@ -183,7 +168,12 @@ describe("useNotices", () => {
 
   it("a failed resolved-history fetch surfaces resolvedError=true with an empty list", async () => {
     desk.open = [notice(1, "fyi")];
-    desk.historyFails = true;
+    // meiva:note
+    // Both initial reads use the same wire URL. Keep the open queue warm so this
+    // real HTTP refusal belongs to the cold history, rather than inventing a JS-only route.
+    queryClient.setQueryDefaults(NOTICES_QUERY_KEY, { staleTime: Infinity });
+    queryClient.setQueryData(NOTICES_QUERY_KEY, feed({ open: desk.open }));
+    failureStatus = 503;
     const { result } = renderHook(() => useNotices(), { wrapper: stream.wrapper });
     await waitFor(() => expect(result.current.resolvedError).toBe(true));
     expect(result.current.resolved).toEqual([]);
@@ -199,11 +189,11 @@ describe("useNotices", () => {
     await waitFor(() => expect(ids(result.current.resolved)).toEqual([5]));
     act(() => result.current.fetchNextPage());
     await waitFor(() => expect(ids(result.current.resolved)).toEqual([5, 4]));
-    expect(desk.cursorReads).toHaveLength(1);
-    expect(desk.cursorReads[0]).toMatchObject({
-      beforeAt: "2026-06-14T02:00:00Z",
-      beforeId: 5,
-    });
+    const cursors = gateway.requests.map((request) => new URL(request.path, gateway.origin))
+      .filter((url) => url.searchParams.has("before_at"));
+    expect(cursors).toHaveLength(1);
+    expect(cursors[0].searchParams.get("before_at")).toBe("2026-06-14T02:00:00Z");
+    expect(cursors[0].searchParams.get("before_id")).toBe("5");
   });
 });
 
@@ -290,6 +280,7 @@ describe("dropOpenNotices (Task #1814)", () => {
     queryClient.setQueryData(NOTICES_QUERY_KEY, feed({ open: desk.open }));
     const { result } = renderHook(() => useNotices(), { wrapper: stream.wrapper });
     await waitFor(() => expect(ids(result.current.open)).toEqual([1, 2]));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     // The user resolves notice 1 (optimistic drop + tombstone).
     dropOpenNotices(queryClient, [1]);
@@ -315,6 +306,7 @@ describe("dropOpenNotices (Task #1814)", () => {
     queryClient.setQueryData(NOTICES_QUERY_KEY, feed({ open: desk.open }));
     renderHook(() => useNotices(), { wrapper: stream.wrapper });
     await waitFor(() => expect(openIds()).toEqual([7]));
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
 
     dropOpenNotices(queryClient, [7]);
     vi.useFakeTimers({ toFake: ["Date"] });

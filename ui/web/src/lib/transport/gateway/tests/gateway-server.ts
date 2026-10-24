@@ -85,7 +85,9 @@ function send(response: ServerResponse, reply: GatewayReply, cors: Record<string
 // JSON or text answer, no answer at all, headers without a finished body, and a
 // dropped connection. Browser-origin requests (XMLHttpRequest from the test DOM)
 // get matching CORS headers and preflight answers.
-export async function startGateway(answer: (request: GatewayRequest) => GatewayReply): Promise<TestGateway> {
+export async function startGateway(
+  answer: (request: GatewayRequest) => GatewayReply | Promise<GatewayReply>,
+): Promise<TestGateway> {
   const requests: GatewayRequest[] = [];
   const closedRequests: GatewayRequest[] = [];
   const sockets = new Set<Socket>();
@@ -96,7 +98,7 @@ export async function startGateway(answer: (request: GatewayRequest) => GatewayR
       response.end();
       return;
     }
-    void readBody(request).then((body) => {
+    void readBody(request).then(async (body) => {
       const recorded: GatewayRequest = {
         method: request.method ?? "",
         path: request.url ?? "",
@@ -105,7 +107,8 @@ export async function startGateway(answer: (request: GatewayRequest) => GatewayR
       };
       requests.push(recorded);
       response.once("close", () => closedRequests.push(recorded));
-      send(response, answer(recorded), cors);
+      const reply = await answer(recorded);
+      if (!response.destroyed) send(response, reply, cors);
     });
   });
   server.on("connection", (socket) => {

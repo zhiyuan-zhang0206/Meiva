@@ -5,10 +5,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { TaskFields, TaskListResponse, TaskRow, TaskSummaryRow } from "../contracts/types";
-import { apiWrapper, fakeApi } from "../transport/tests/api/fake-api";
+import type { TaskListResponse, TaskRow } from "../contracts/types";
+import { apiWrapper } from "../transport/tests/api/api-provider";
+import { startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
+import { gatewayRig } from "../transport/tests/api/api-provider";
 import { useTasks } from "./use-tasks";
 
 function task(id: number): TaskRow {
@@ -30,42 +32,38 @@ function task(id: number): TaskRow {
 
 const RESPONSE: TaskListResponse = { tasks: [task(1), task(2)] };
 
-interface TaskRequest {
-  window?: string;
-  fields?: string;
-}
+let gateway: TestGateway;
+let answer: GatewayReply;
 
-// meiva:note
-// The renderer for these tests: the hook runs against a scripted gateway whose
-// task read is `read`, inside a real QueryClient with retries off so the success
-// and error edges run end to end. `requests` keeps the projections the hook asked
-// for. The gateway's `getTasks` is generic over the projection and its row type
-// follows that parameter, so the scripted read is asserted to the row type once,
-// here.
-function renderTasks(read: () => Promise<TaskListResponse>, client: QueryClient = freshClient()) {
-  const requests: TaskRequest[] = [];
-  const ApiWrapper = apiWrapper(fakeApi({
-    getTasks: <T extends TaskFields>(request?: { window?: string; fields?: T }) => {
-      requests.push({ ...request });
-      return read() as Promise<TaskListResponse<T extends "full" ? TaskRow : TaskSummaryRow>>;
-    },
-  }));
+function renderTasks(client: QueryClient = freshClient()) {
+  const ApiWrapper = apiWrapper(gatewayRig(gateway).api);
   const wrapper = ({ children }: { children: ReactNode }) =>
     createElement(ApiWrapper, {
       children: createElement(QueryClientProvider, { client, children }),
     });
-  return { ...renderHook(() => useTasks(), { wrapper }), requests };
+  return renderHook(() => useTasks(), { wrapper });
 }
 
 function freshClient(): QueryClient {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-afterEach(cleanup);
+beforeEach(async () => {
+  answer = { kind: "json", body: RESPONSE };
+  gateway = await startGateway((request) => request.path === "/api/tasks?window=all&fields=full"
+    ? answer : { kind: "text", status: 404, body: "unexpected route" });
+});
+
+afterEach(async () => {
+  cleanup();
+  await gateway.close();
+});
 
 describe("useTasks", () => {
-  it("while pending: empty list, loading=true, error=false", () => {
-    const { result } = renderTasks(() => new Promise<TaskListResponse>(() => undefined));
+  it("while pending: empty list, loading=true, error=false", async () => {
+    answer = { kind: "hang" };
+    const { result } = renderTasks();
+    await waitFor(() => expect(gateway.requests).toHaveLength(1));
 
     expect(result.current.tasks).toEqual([]);
     expect(result.current.loading).toBe(true);
@@ -73,7 +71,7 @@ describe("useTasks", () => {
   });
 
   it("on success: returns the tasks, loading=false, error=false", async () => {
-    const { result } = renderTasks(() => Promise.resolve(RESPONSE));
+    const { result } = renderTasks();
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.tasks).toEqual(RESPONSE.tasks);
@@ -81,14 +79,15 @@ describe("useTasks", () => {
   });
 
   it("defaults to the full task projection", async () => {
-    const { result, requests } = renderTasks(() => Promise.resolve(RESPONSE));
+    const { result } = renderTasks();
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(requests).toEqual([{ window: "all", fields: "full" }]);
+    expect(gateway.requests.map((request) => request.path)).toEqual(["/api/tasks?window=all&fields=full"]);
   });
 
   it("cold error: empty list, loading=false, error=true", async () => {
-    const { result } = renderTasks(() => Promise.reject(new Error("HTTP 500")));
+    answer = { kind: "text", status: 500, body: "unavailable" };
+    const { result } = renderTasks();
 
     await waitFor(() => expect(result.current.error).toBe(true));
     expect(result.current.loading).toBe(false);
@@ -96,19 +95,14 @@ describe("useTasks", () => {
   });
 
   it("stale-while-error: a failed poll after data keeps the last good tasks (error flagged, not blanked)", async () => {
-    let gatewayDown = false;
     const client = freshClient();
-
-    const { result } = renderTasks(
-      () => (gatewayDown ? Promise.reject(new Error("gateway down")) : Promise.resolve(RESPONSE)),
-      client,
-    );
+    const { result } = renderTasks(client);
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.tasks).toEqual(RESPONSE.tasks);
     expect(result.current.error).toBe(false);
 
-    gatewayDown = true;
+    answer = { kind: "drop" };
     await act(async () => {
       await client.refetchQueries({ queryKey: ["tasks"] });
     });

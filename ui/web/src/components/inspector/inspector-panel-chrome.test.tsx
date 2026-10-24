@@ -26,7 +26,6 @@ import {
   getAgentInspectWidgets,
   getAgentRoster,
   getSettings,
-  listPages,
   liveFixture,
   panelState,
   putSetting,
@@ -36,6 +35,7 @@ import {
   rosterFixture,
   setInspectorOpen,
   setupInspectorTest,
+  setInspectorPages,
   streamHandlers,
 } from "./inspector-test-mock";
 
@@ -46,7 +46,6 @@ vi.mock("@/lib/transport/api", () => ({
     getAgentInspectWidgets,
     getAgentRoster,
     getAgent,
-    listPages,
     resolveNotice,
     putSetting,
     getSettings,
@@ -331,7 +330,7 @@ describe("InspectorPanel section layout", () => {
       created_at: "2026-08-24T12:00:00Z",
       closed_at: null,
     } satisfies PageRow;
-    listPages.mockResolvedValue([page]);
+    setInspectorPages([page]);
     getAgentRoster.mockResolvedValue(rosterFixture({ harness: "meiva" }));
     act(() => {
       useTimelineStore.getState().applyTokenUsage(109_600, 0, 1_000_000, 374_000, 512_000);
@@ -344,7 +343,7 @@ describe("InspectorPanel section layout", () => {
     const liveness = screen.getByText("Liveness");
     const configOverlay = screen.getByText("Configuration overlay");
     const runLink = screen.getByRole("link", { name: "Open run timeline" });
-    const pageSection = screen.getByText("Page");
+    const pageSection = await screen.findByText("Page");
     const context = screen.getByText("Context");
     const activity = screen.getByText("Activity");
     const before = (first: Node, second: Node) =>
@@ -356,7 +355,7 @@ describe("InspectorPanel section layout", () => {
     expect(before(configOverlay, context)).toBeTruthy();
     expect(before(context, activity)).toBeTruthy();
     act(() => { useTimelineStore.getState().applyTokenUsage(0, 0, 0, 0, 0); });
-    listPages.mockResolvedValue([]);
+    setInspectorPages([]);
   });
 
   it("embedded: renders without the header bar or the category selector", async () => {

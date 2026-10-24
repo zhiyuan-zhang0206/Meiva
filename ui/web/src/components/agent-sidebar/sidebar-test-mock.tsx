@@ -4,7 +4,7 @@ import { vi } from "vitest";
 
 import type { StatsWindowHours } from "@/lib/agents/sidebar";
 import type { AgentRow, AlertsResponse, StatsDashboard, UiStatContribution } from "@/lib/contracts/types";
-import { apiWrapper, fakeApi } from "@/lib/transport/tests/api/fake-api";
+import { apiWrapper, cacheOnlyApi } from "@/lib/transport/tests/api/api-provider";
 
 export const state = {
   agents: [] as AgentRow[],
@@ -172,17 +172,18 @@ export function StubButton({
   );
 }
 
-const NO_ALERTS: AlertsResponse = {
+export const NO_ALERTS: AlertsResponse = {
   alerts: [],
   meta: { window: "24h", total: 0, unresolved_count: 0 },
 };
 
-export const gatewayWrapper = apiWrapper(fakeApi({ getAlerts: () => Promise.resolve(NO_ALERTS) }));
+export const gatewayWrapper = apiWrapper(cacheOnlyApi());
 
 export function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  qc.setQueryData(["alerts"], NO_ALERTS);
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>, {
     wrapper: gatewayWrapper,
   });

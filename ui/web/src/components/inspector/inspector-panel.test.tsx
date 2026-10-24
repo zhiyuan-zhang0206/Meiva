@@ -23,7 +23,6 @@ import {
   getAgentInspectWidgets,
   getAgentRoster,
   getSettings,
-  listPages,
   liveFixture,
   putSetting,
   QueryClientProvider,
@@ -31,6 +30,8 @@ import {
   renderWithGlobalRetries,
   resolveNotice,
   setupInspectorTest,
+  inspectorPageReads,
+  setInspectorPages,
   streamHandlers,
 } from "./inspector-test-mock";
 
@@ -41,7 +42,6 @@ vi.mock("@/lib/transport/api", () => ({
     getAgentInspectWidgets,
     getAgentRoster,
     getAgent,
-    listPages,
     resolveNotice,
     putSetting,
     getSettings,
@@ -237,7 +237,7 @@ describe("InspectorPanel", () => {
       created_at: "2026-08-24T12:00:00Z",
       closed_at: null,
     } satisfies PageRow;
-    listPages.mockResolvedValueOnce([page]);
+    setInspectorPages([page]);
 
     render(<InspectorPanel agentId={1} />);
 
@@ -251,7 +251,7 @@ describe("InspectorPanel", () => {
   it("hides the Page section when no page is open", async () => {
     render(<InspectorPanel agentId={1} />);
 
-    await waitFor(() => expect(listPages).toHaveBeenCalled());
+    await waitFor(() => expect(inspectorPageReads()).toHaveLength(1));
     expect(screen.queryByText("Page")).toBeNull();
   });
 
