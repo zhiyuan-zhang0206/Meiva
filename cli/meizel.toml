@@ -3,7 +3,7 @@ exports = ["__main__.py", "commands", "database", "fleet_update", "parsers", "st
 [uses]
 "__main__.py" = ["main.py"]
 "commands" = ["database", "start_identity.py", "start_runtime.py"]
-"conftest.py" = ["commands"]
+"conftest.py" = ["commands", "tests"]
 "fleet_update" = ["main.py"]
 "init_intent.py" = ["commands", "start_identity.py", "start_runtime.py", "startup"]
 "main.py" = ["database", "parsers", "preflight.py", "start_identity.py", "start_runtime.py", "startup"]
