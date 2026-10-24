@@ -14,7 +14,6 @@ import json
 import shlex
 import shutil
 import signal
-import socket
 import subprocess
 import tempfile
 import time
@@ -31,6 +30,7 @@ from base.cluster import postgres as native_postgres
 from base.cluster.dataplane import pg_admin, walg_binary
 from base.cluster.dataplane.pg_tools import pg_shm_args, pg_start_env, pg_tool, pg_tz_args
 from base.config import settings
+from base.host.env import port_lease
 from services.backup.walg.archive import archive_pg_args
 from services.backup.walg.pg_target import PgTarget
 
@@ -168,10 +168,12 @@ class PgInstance:
         return PgTarget(url, self.data, "postgres")
 
 
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to
+# every other live holder on the host, so two workers — or two runs of one shard on
+# one machine — cannot be given it.
 def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
+    return port_lease.lease_ports(1)[0]
 
 
 # meiva:note

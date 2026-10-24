@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import os
-import socket
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -15,6 +14,7 @@ import httpx
 import pytest
 
 from base.config import ConfigBoot
+from base.host.env import port_lease
 from services.derived.memory_indexer.embeddings import factory
 from services.derived.memory_search import daemon
 from services.derived.memory_search.config import MemorySearchConfig
@@ -34,10 +34,12 @@ def owned_config_environment() -> Iterator[None]:
         time.tzset()
 
 
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to
+# every other live holder on the host, so two workers — or two runs of one shard on
+# one machine — cannot be given it.
 def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
+    return port_lease.lease_ports(1)[0]
 
 
 @pytest.mark.usefixtures("owned_config_environment")

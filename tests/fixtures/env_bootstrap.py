@@ -20,10 +20,8 @@ and every other plugin load after this module and read what it established.
 # invariant — that no project module was imported early — which is stricter than
 # what E402 can express here.
 
-import contextlib
 import hashlib
 import os
-import socket
 import sys
 import tempfile
 import time
@@ -563,6 +561,7 @@ os.environ.update(
 )
 
 # These owners are settings-free: isolate ports before a subject chooses to boot config.
+from base.host.env import port_lease
 from base.host.env.port_table import FIXED_PORTS
 from base.host.env.registry import health_port_env_aliases
 from base.native_process.os_platform import raise_fd_limit
@@ -571,20 +570,17 @@ os.environ.pop("MEIVA_AGENT_ID", None)
 os.environ["MEIVA_EXEC_TIMEOUT_SECONDS"] = "60.0"
 
 
+# meiva:note
+# `count` different localhost ports that stay this session's for its whole life.
+#
+# The lease (`base.host.env.port_lease`) is the host-wide authority, not this
+# process's opinion: binding `:0` here and closing the sockets only proved the
+# numbers were free while the loop ran, so the same number could be handed to a
+# sibling xdist worker — or to a second run of the same shard on this machine — and
+# to a fixture of this very process later on. A leased number is refused to every
+# other holder while this one lives, and a dead holder frees it.
 def _reserve_distinct_ports(count: int) -> list[int]:
-    """`count` different free localhost ports: every socket stays bound until all
-    are chosen, so the kernel cannot hand the same number out twice. The small race
-    before a server binds one is the same that base/deploy/tests/containers.py accepts for
-    pg/redis."""
-    with contextlib.ExitStack() as stack:
-        socks: list[socket.socket] = []
-        for _ in range(count):
-            sock = stack.enter_context(
-                contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
-            )
-            sock.bind(("127.0.0.1", 0))
-            socks.append(sock)
-        return [int(sock.getsockname()[1]) for sock in socks]
+    return port_lease.lease_ports(count)
 
 
 def _pin_setting(field: str, value: object) -> None:

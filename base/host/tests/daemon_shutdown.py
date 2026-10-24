@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import os
 import signal
-import socket
 import subprocess
 import time
 from collections.abc import Sequence
@@ -37,6 +36,7 @@ from typing import IO
 
 import pytest
 
+from base.host.env import port_lease
 from base.host.tests.daemon_shutdown_child import (
     CLEANUP_FAILURE_ENV,
     INTERNAL_STOP_ENV,
@@ -123,10 +123,12 @@ class Child:
         self.log_file.close()
 
 
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to
+# every other live holder on the host, so two workers — or two runs of one shard on
+# one machine — cannot be given it.
 def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+    return port_lease.lease_ports(1)[0]
 
 
 def spawn_child(

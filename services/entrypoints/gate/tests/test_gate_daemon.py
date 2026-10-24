@@ -16,6 +16,7 @@ import pytest
 
 from base import telemetry
 from base.cluster.machine import MachineIdentity
+from base.host.env import port_lease
 from base.log.tests.log_records import LogRecords, loguru_records
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.pipeline import EventPipeline
@@ -198,10 +199,12 @@ def _start_entry(home: Path, *args: str) -> subprocess.Popen[str]:
     )
 
 
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to
+# every other live holder on the host, so two workers — or two runs of one shard on
+# one machine — cannot be given it.
 def _free_port() -> int:
-    with socket.socket() as reservation:
-        reservation.bind(("127.0.0.1", 0))
-        return reservation.getsockname()[1]
+    return port_lease.lease_ports(1)[0]
 
 
 def _health(port: int) -> dict[str, object] | None:
