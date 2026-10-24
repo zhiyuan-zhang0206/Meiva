@@ -30,6 +30,7 @@ from pathlib import Path
 
 import psutil
 
+from base.host.env.agent_env import AGENT_ID_ENV
 from base.host.memory_pressure import MemorySource
 from base.host.proc import EXEC_DOMAIN_SESSION_ENTRIES
 from base.log import logger
@@ -86,7 +87,7 @@ def find_exec_domains(host_pid: int, source: MemorySource) -> list[ExecDomain]:
     for leader in leaders:
         try:
             env = leader.environ()
-            raw_agent_id = env.get("MEIVA_AGENT_ID")
+            raw_agent_id = env.get(AGENT_ID_ENV)
             result_path = Path(env["MEIVA_EXEC_RESULT_FILE"])
             created = leader.create_time()
         except (psutil.Error, KeyError, OSError):

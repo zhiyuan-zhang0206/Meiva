@@ -116,7 +116,7 @@ def group_model(
         agent_id,
         fallback=inputs.hierarchy_model(),
         catalog=catalog,
-        default_model_reader=inputs.default_model,
+        default_model=inputs.default_model(),
     )
 
 

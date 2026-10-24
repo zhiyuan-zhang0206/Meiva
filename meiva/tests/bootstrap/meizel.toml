@@ -19,7 +19,6 @@ exports = ["child_sdk_probes.py"]
 "test_session_venv_projection.py#monkeypatch.setitem os.environ.MEIVA_REDIS_URL" = 2
 
 [debt.first-party-patch]
-"child_sdk_probes.py#assignment base.agents.sdk.call_policy.policy" = 1
 "child_sdk_probes.py#assignment base.telemetry.emit" = 1
 "child_sdk_probes.py#assignment meiva.sdk_surface.installation.installed" = 2
 "test_connect_fail_fast.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 2

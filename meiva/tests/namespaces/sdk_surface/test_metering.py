@@ -28,6 +28,7 @@ from base.agents.context.identity import ExternalLease
 from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage_telemetry
 from base.agents.sdk.tally import SdkCallTally
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.cluster.machine import MachineIdentity
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import (
@@ -89,17 +90,9 @@ def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, obje
 
 @pytest.fixture
 def sampling_owner() -> Iterator[call_policy.SamplingPolicyOwner]:
-    owner = call_policy.SamplingPolicyOwner()
+    owner = fixed_sampling_owner()
     yield owner
     owner.close()
-
-
-@pytest.fixture(autouse=True)
-def _valid_policy(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
 
 
 def _help(*targets: object) -> str:
@@ -178,7 +171,7 @@ def test_install_is_idempotent(
 def test_install_rejects_a_different_owner_before_wrapping(_installed: None) -> None:
     once = meiva.files.read
     with pytest.raises(ValueError, match="another sampling owner"):
-        metering.install(call_policy.SamplingPolicyOwner())
+        metering.install(fixed_sampling_owner())
     assert meiva.files.read is once
 
 
@@ -412,9 +405,7 @@ async def test_async_calls_measure_each_concurrent_entry(
 
 @pytest.mark.parametrize("async_call", [False, True])
 async def test_recorder_rejects_invalid_sampling_before_the_original_call(
-    monkeypatch: pytest.MonkeyPatch,
     async_call: bool,
-    sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
     from base.agents.sdk import call_policy
 
@@ -430,10 +421,10 @@ async def test_recorder_rejects_invalid_sampling_before_the_original_call(
     async def async_body() -> str:
         return body()
 
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return invalid()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
+    sampling_owner = call_policy.SamplingPolicyOwner(
+        initial=call_policy.SamplingPolicy(), fetch=invalid
+    )
+    sampling_owner.refresh()
     original = async_body if async_call else body
     wrapped = metering.make_recorder(original, "plugin.write", sampling_owner)
     assert inspect.signature(wrapped) == inspect.signature(original)
@@ -449,8 +440,6 @@ def test_borrowed_identity_is_stamped_on_external_sdk_events(
     sampling_owner: call_policy.SamplingPolicyOwner,
     emitted_events: EmittedEvents,
 ) -> None:
-    from base.agents.sdk import call_policy
-
     def validate() -> int:
         pytest.fail("observational telemetry must not validate the lease")
 
@@ -460,10 +449,6 @@ def test_borrowed_identity_is_stamped_on_external_sdk_events(
         clients=_capturing_clients(emitted_events),
     )
 
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     wrapped = metering.make_recorder(lambda: "ok", "files.read", sampling_owner)
     assert wrapped() == "ok"
     [event] = emitted_events
@@ -580,15 +565,8 @@ async def test_awaited_calls_retain_their_entry_identity(
     """A later attachment cannot relabel an already-admitted async SDK call."""
     import asyncio
 
-    from base.agents.sdk import call_policy
-
     entered = asyncio.Event()
     release = asyncio.Event()
-
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
 
     async def held() -> None:
         entered.set()

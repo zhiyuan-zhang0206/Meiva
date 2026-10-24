@@ -1,26 +1,19 @@
+exports = ["sampling_owners.py"]
+
 [external]
 "test_sdk_telemetry.py" = "wraps builtins.__import__ so one import raises"
 
 [uses]
 "test_call_policy.py" = ["_sdk_cold_child.py"]
-"test_sdk_telemetry.py" = ["_sdk_cold_child.py"]
+"test_sdk_emission_failures.py" = ["sampling_owners.py"]
+"test_sdk_telemetry.py" = ["_sdk_cold_child.py", "sampling_owners.py"]
 
 [debt.first-party-patch]
-"_sdk_cold_child.py#assignment base.agents.sdk.call_policy.policy" = 1
 "_sdk_cold_child.py#assignment base.agents.sdk.telemetry.emit" = 1
-"test_call_policy.py#monkeypatch.setattr base.agents.sdk.call_policy.read_policy" = 9
 "test_call_policy.py#monkeypatch.setattr base.agents.sdk.call_policy.time.monotonic" = 1
-"test_call_policy.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 2
-"test_call_policy.py#monkeypatch.setattr base.host.env.bootstrap.fetch_bootstrap_config" = 1
-"test_call_policy.py#monkeypatch.setattr base.host.env.bootstrap.should_fetch_from_gateway" = 2
-"test_call_policy.py#monkeypatch.setattr base.host.env.dotenv_file.env_file_path" = 1
 "test_call_policy.py#monkeypatch.setattr base.telemetry.emitter.init_telemetry" = 1
-"test_policy_owner.py#monkeypatch.setattr base.agents.sdk.call_policy.read_policy" = 2
-"test_sdk_emission_failures.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 1
 "test_sdk_emission_failures.py#monkeypatch.setattr base.agents.sdk.telemetry.emit" = 1
 "test_sdk_emission_failures.py#monkeypatch.setattr base.telemetry.emit" = 2
-"test_sdk_telemetry.py#monkeypatch.setattr base.agents.sdk.call_policy.policy" = 5
-"test_sdk_telemetry.py#monkeypatch.setattr base.agents.sdk.call_policy.read_policy" = 2
 "test_sdk_telemetry.py#monkeypatch.setattr base.agents.sdk.telemetry.emit" = 1
 "test_sdk_telemetry.py#monkeypatch.setattr base.telemetry.emit" = 1
 

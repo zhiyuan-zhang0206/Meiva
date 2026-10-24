@@ -6,9 +6,9 @@ import httpx
 import pytest
 
 import meiva
-from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage
 from base.agents.sdk.tally import SdkCallTally
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from meiva.gateway_client import use_client
 from meiva.sdk_surface import metering, process_context
 from meiva.sdk_surface.installation import Installation
@@ -28,10 +28,6 @@ def test_installed_send_keeps_unknown_response_when_emission_also_fails(
     process_context.bind_context(replace(meiva.context, sdk_calls=tally))
     monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
 
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     responses: list[httpx.Response] = []
     emission_failure = RuntimeError("SDK emitter code failed")
 
@@ -60,7 +56,7 @@ def test_installed_send_keeps_unknown_response_when_emission_also_fails(
         ) as client,
         use_client(client),
     ):
-        ledger = metering.install(call_policy.SamplingPolicyOwner())
+        ledger = metering.install(fixed_sampling_owner())
         try:
             with pytest.raises(httpx.HTTPStatusError) as raised:
                 meiva.agents.send_message(42, "one logical send")
