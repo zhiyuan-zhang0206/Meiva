@@ -217,6 +217,32 @@ def test_a_missing_binary_fails_before_anything_is_written(
     assert owned_pooler(unit_home) is None
 
 
+@pytest.mark.parametrize(
+    ("macos", "install", "other"),
+    [(True, "brew install pgbouncer", "database.sh"), (False, "database.sh", "brew install")],
+)
+def test_the_install_hint_of_a_missing_binary_is_the_platforms_the_spec_names(
+    unit_home: Path,
+    command_machine: MachineIdentity,
+    capsys: pytest.CaptureFixture[str],
+    macos: bool,
+    install: str,
+    other: str,
+) -> None:
+    spec = pooler_spec(
+        command_machine,
+        listen_port=free_port(),
+        socket_dir=unit_home,
+        binary=str(unit_home / "no-such" / "pgbouncer"),
+        macos=macos,
+    )
+
+    assert pgbouncer.ensure_pgbouncer(spec) == 1
+
+    err = capsys.readouterr().err
+    assert install in err and other not in err
+
+
 # meiva:note
 # A listener on the pooler's port that the home's custody cannot account for is a refusal
 # before any file is written or signal sent: native readiness never authorizes changes to a

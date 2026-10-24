@@ -9,10 +9,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
-__all__ = ["StopSurvivor", "SurvivorInventory"]
+__all__ = ["StopSurvivor", "SurvivorInventory", "SurvivorRole"]
 
 _CMDLINE_SHOWN = 300
+
+
+# meiva:note
+# What a known process is to its session: the shell itself or any other recorded member.
+#
+# These are the two strings the pty closure's `Survivor.role` carries on the wire
+# (`base/sessions/pty/closure.py`, which owns that vocabulary); `SurvivorRole(raw)` refuses any
+# other string where a report is built. This copy goes when base exports its own enum.
+class SurvivorRole(Enum):
+    SHELL = "shell"
+    JOB = "job"
 
 
 # meiva:note
@@ -24,7 +36,7 @@ _CMDLINE_SHOWN = 300
 @dataclass(frozen=True)
 class StopSurvivor:
     pid: int
-    role: str
+    role: SurvivorRole
     service: str | None
     ppid: int | None
     pgid: int | None
@@ -39,7 +51,7 @@ class StopSurvivor:
             parts.append(f"ppid={self.ppid}")
         if self.pgid is not None:
             parts.append(f"pgid={self.pgid}")
-        parts.append(f"role={self.role}")
+        parts.append(f"role={self.role.value}")
         parts.append(f"service={self.service!r}" if self.service else "service=<unattributed>")
         if self.status is not None:
             parts.append(f"status={self.status}")
@@ -58,7 +70,7 @@ class StopSurvivor:
     def payload(self) -> dict[str, object]:
         return {
             "pid": self.pid,
-            "role": self.role,
+            "role": self.role.value,
             "service": self.service,
             "ppid": self.ppid,
             "pgid": self.pgid,

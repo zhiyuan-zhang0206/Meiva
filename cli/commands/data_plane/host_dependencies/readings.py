@@ -11,6 +11,7 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import assert_never
 
 from base.cluster.dataplane import pooler
 from base.cluster.dataplane.pg_tools import pg_tool
@@ -115,6 +116,8 @@ def _read(tool: HostTool, scope: StartScope, probing: Probing) -> Reading:
             return Found("/bin/sh", executable=True) if Path("/bin/sh").is_file() else Absent()
         case Probe.SYSTEMD:
             return Found("systemd", executable=True) if systemd_running(host=host) else Absent()
+        case _:
+            assert_never(tool.probe)
 
 
 # meiva:note

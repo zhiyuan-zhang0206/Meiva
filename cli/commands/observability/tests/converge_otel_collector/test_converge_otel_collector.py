@@ -23,7 +23,7 @@ from base.host.db_authority.unit import telemetry_bearer
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.paths import otel_collector_config, otel_collector_dir
 from cli.commands.observability import otel_collector as oc
-from cli.commands.observability.inputs import collector_settings
+from cli.commands.observability.inputs import collector_settings_from_boot
 from cli.commands.observability.plans.collector.data_plane import PEER_PLACEHOLDER
 from cli.commands.observability.tests.converge_otel_collector.collector_harness import (
     GATEWAY,
@@ -61,7 +61,7 @@ def test_the_collector_settings_are_read_from_the_domains_of_one_owner(
 ) -> None:
     view = command_runtime.config.view
 
-    values = collector_settings(observability=view.observability, data_plane=view.data_plane)
+    values = collector_settings_from_boot(command_runtime.config)
 
     for group, domain in (
         (values.observability, view.observability),
@@ -159,17 +159,40 @@ def test_a_platform_without_a_pinned_collector_warns_and_installs_nothing(
     assert not otel_collector_dir(collector_unit.home).exists()
 
 
+@pytest.mark.parametrize(
+    "roles", [pytest.param(GATEWAY, id="gateway"), pytest.param(HYBRID, id="hybrid")]
+)
 def test_a_gateway_home_that_is_not_the_station_skips_the_collector_and_says_why(
-    collector_unit: CollectorUnit, capsys: pytest.CaptureFixture[str]
+    collector_unit: CollectorUnit, capsys: pytest.CaptureFixture[str], roles: frozenset[str]
 ) -> None:
-    collector_unit.machine.set(role=GATEWAY)
+    collector_unit.machine.set(role=roles)
 
-    oc.ensure_otel_collector_step(collector_unit.converge_ctx(GATEWAY))
+    oc.ensure_otel_collector_step(collector_unit.converge_ctx(roles))
 
     err = capsys.readouterr().err
     assert "collector skipped" in err
     assert "lgtm-host" in err
     assert not otel_collector_dir(collector_unit.home).exists()
+
+
+# meiva:note
+# The operator's explicit `MEIVA_TELEMETRY_OTLP_ENDPOINT` is the escape hatch that keeps a
+# non-station gateway's collector: the step reads it from the launch environment its configuration
+# owner holds, and prepares the collector instead of skipping it.
+def test_a_gateway_home_with_an_explicit_collector_endpoint_prepares_the_collector(
+    collector_unit: CollectorUnit, capsys: pytest.CaptureFixture[str]
+) -> None:
+    collector_unit.machine.set(role=GATEWAY)
+    collector_unit.runtime.config.set_field("db_url", PLACEHOLDER_DB_URL)
+    collector_unit.runtime.config.environment = {
+        "MEIVA_TELEMETRY_OTLP_ENDPOINT": "http://collector.invalid:4318"
+    }
+    collector_unit.install_pinned_binary()
+
+    oc.ensure_otel_collector_step(collector_unit.converge_ctx(GATEWAY))
+
+    assert "collector skipped" not in capsys.readouterr().err
+    assert otel_collector_config(collector_unit.home).is_file()
 
 
 def test_a_residual_config_is_preserved_and_reported_when_the_collector_is_skipped(

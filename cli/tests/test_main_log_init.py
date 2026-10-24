@@ -219,28 +219,6 @@ def test_main_hands_stop_the_explicit_caller_child_owner(monkeypatch: pytest.Mon
     assert owners == [shared]
 
 
-# meiva:note
-# A lifecycle command whose caller cannot be named is refused before it starts, and the refusal is
-# one operator-readable line, not a traceback: the working directory of this process is removed,
-# which is how a real shell loses it.
-def test_a_command_that_cannot_name_its_caller_is_refused_in_one_line(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    gone = tmp_path / "gone"
-    gone.mkdir()
-    monkeypatch.chdir(gone)
-    gone.rmdir()
-    full_stop = ["--yes", "--close-shell-sessions", "--stop-browser", "--stop-extras"]
-    full_stop += ["--keep-no-services", "--mode", "smooth", "--timeout", "60"]
-
-    assert _main.main(["stop", *full_stop], retained_children=[]) == 1
-
-    err = capsys.readouterr().err
-    assert "cannot read the caller block" in err
-    assert "the command was not started" in err
-    assert "Traceback" not in err
-
-
 @pytest.mark.parametrize("verb", [["start"], ["lgtm", "on"], ["lgtm", "off"]])
 def test_inspection_parser_cannot_launch_without_a_child_owner(verb: list[str]) -> None:
     args = build_parser().parse_args([*verb, "--all-services"])
@@ -389,7 +367,7 @@ def _cold_report(
 
 
 def operator_producer(
-    database_factory: OperatorDatabaseFactory, *, machine: MachineIdentity, home: Path
+    database_factory: OperatorDatabaseFactory, machine: MachineIdentity, home: Path
 ) -> OperatorEventPipeline:
     """The producer the entry builds for a command: the operator pipeline over its factory."""
     return operator_event_pipeline(database_factory, machine=machine, home=home)

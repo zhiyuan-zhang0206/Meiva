@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from base.host.net.predicates import is_loopback_host
 from cli.commands.observability.plans.authority import host_port, is_unspecified_address
 from cli.commands.observability.plans.collector.text import yaml_quote
-from cli.commands.observability.plans.url_view import UrlView
+from cli.commands.observability.plans.url_parts import UrlParts
 
 __all__ = [
     "NO_REMOTE_INGRESS",
@@ -43,7 +43,7 @@ _REMOTE_TRACE_PIPELINE = """
 # The one validity definition for `MEIVA_GATEWAY_OTLP_ENDPOINT`: a non-loopback `http://host:port`
 # with no credentials, path, query or fragment. `endpoint` is the parsed, whitespace-stripped
 # value.
-def ingress_endpoint_problem(endpoint: UrlView) -> str | None:
+def ingress_endpoint_problem(endpoint: UrlParts) -> str | None:
     host = endpoint.hostname or ""
     if (
         endpoint.scheme != "http"
@@ -69,7 +69,7 @@ def ingress_endpoint_problem(endpoint: UrlView) -> str | None:
 #
 # `raw` is the configured value and `parsed` its stripped, parsed form. An invalid value fails
 # closed: the runner must wait for the gateway to publish a usable ingress.
-def gateway_ingress_endpoint(raw: str, parsed: UrlView) -> str:
+def gateway_ingress_endpoint(raw: str, parsed: UrlParts) -> str:
     if ingress_endpoint_problem(parsed) is not None:
         raise RuntimeError(
             "cannot build runner OTLP relay: gateway bootstrap must publish "

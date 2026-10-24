@@ -157,6 +157,33 @@ def test_the_read_step_passes_the_gateway_reader_when_the_factory_requires_it(
     ]
 
 
+# meiva:note
+# A checkout whose runtime takes the resolved home (the generation after this change) is handed
+# that home; the older ones above, whose `create()` takes none, are not.
+def test_the_read_step_hands_the_resolved_home_to_a_runtime_that_takes_one(tmp_path: Path) -> None:
+    checkout = {
+        **_FACTORY_CHECKOUT,
+        **_packages("base", "base/paths"),
+        "base/paths/home.py": (
+            "from pathlib import Path\n\n\n"
+            "def resolve_meiva_home():\n    return Path('/stand-in/home')\n"
+        ),
+        "cli/database/runtime.py": (
+            "class _Machine:\n"
+            "    def __init__(self, home):\n        self.home = home\n\n"
+            "    def host(self):\n        return str(self.home)\n\n\n"
+            "class CommandRuntime:\n"
+            "    def __init__(self, home):\n        self.machine = _Machine(home)\n\n"
+            "    @classmethod\n    def create(cls, home):\n        return cls(home)\n"
+        ),
+    }
+    _tree(tmp_path / "current", checkout)
+    out = tmp_path / "rows.json"
+    proc = _read_rows(tmp_path / "current", out)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(out.read_text()) == [[1, "digest", "host=/stand-in/home"]]
+
+
 def test_a_failing_read_is_an_error_not_a_fallback(tmp_path: Path) -> None:
     broken = {
         **_OLD_CHECKOUT,

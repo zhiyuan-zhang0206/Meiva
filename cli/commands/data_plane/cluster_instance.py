@@ -49,6 +49,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import assert_never
 
 import psycopg
 
@@ -63,7 +64,6 @@ from base.host.net.url_secret import url_host
 from base.host.private_storage import write_private_bytes
 from base.host.proc import run_bounded
 from base.native_process.child_env import daemon_process_env, inherited_process_env
-from base.native_process.os_platform import is_macos
 from base.native_process.ownership import OwnedProcess
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.instance import pg_plan, redis_plan
@@ -157,6 +157,8 @@ def _redis_bin(redis_bin_dir: str, name: str, *, macos: bool) -> str:
             return str(brew_prefix(formula) / "bin" / name)
         case OnPath():
             return name
+        case _:
+            assert_never(source)
 
 
 def redis_server_bin(redis_bin_dir: str, *, macos: bool) -> str:
@@ -423,6 +425,8 @@ def start_pg(
                 )
             case pg_plan.CheckArchive():
                 warn_archive_inactive(config.walg_config_file)
+            case _:
+                assert_never(step)
     return 0
 
 
@@ -512,6 +516,8 @@ class _RedisStart:
             case redis_plan.ReportReady(already_running=already):
                 state = "already running" if already else "started"
                 print(f"  ✓ redis {state} ({self.dial_host}:{self.redis_port})")
+            case _:
+                assert_never(step)
         return 0
 
     def _await_ready(self) -> int:
@@ -535,10 +541,10 @@ def start_redis(
     *,
     home: Path,
     machine: MachineIdentity,
+    macos: bool,
     tuning: StartTuning = PRODUCTION_TUNING,
 ) -> int:
     redis_plan.require_redis_credentials(config.redis_admin_password, runtime_password)
-    macos = is_macos()
     redis_cli = redis_cli_bin(config.redis_bin_dir, macos=macos)
     dial_host = url_host(config.redis_url)
     admin = config.redis_admin_password
@@ -565,15 +571,18 @@ def start_redis(
 
 
 # meiva:note
-# Run `redis-server --daemonize yes` on the planned command line; print why and say no when it
-# exits non-zero.
-def _launch_redis(
+# The `redis-server --daemonize yes` command line of this cluster's Redis.
+#
+# The platform decides two things: which `redis-server` is run (`redis_server_bin`) and which
+# addresses it binds (`redis_plan.redis_bind_addrs`: loopback alone on macOS, else the machine's
+# declared bind addresses).
+def redis_launch_argv(
     config: DataPlaneConfig, redis_port: int, data: Path, machine: MachineIdentity, *, macos: bool
-) -> bool:
+) -> list[str]:
     bind = redis_plan.redis_bind_addrs(
         macos=macos, declared=tuple(port_preflight.bind_addrs(machine=machine))
     )
-    argv = redis_plan.redis_server_argv(
+    return redis_plan.redis_server_argv(
         redis_plan.RedisLaunch(
             server_bin=redis_server_bin(config.redis_bin_dir, macos=macos),
             conf=data / "redis.conf",
@@ -582,8 +591,16 @@ def _launch_redis(
             data=data,
         )
     )
+
+
+# meiva:note
+# Run `redis-server --daemonize yes` on the planned command line; print why and say no when it
+# exits non-zero.
+def _launch_redis(
+    config: DataPlaneConfig, redis_port: int, data: Path, machine: MachineIdentity, *, macos: bool
+) -> bool:
     result = run_bounded(
-        argv,
+        redis_launch_argv(config, redis_port, data, machine, macos=macos),
         capture_output=True,
         text=True,
         env=daemon_process_env(),
@@ -665,13 +682,16 @@ def ensure_cluster_storage(
     redis_user: str,
     retained_children: list[subprocess.Popen[bytes]],
     machine: MachineIdentity,
+    macos: bool,
 ) -> int:
     require_storage_credentials(config.redis_admin_password, redis_password)
     print(f"\n→ per-cluster data plane (pg :{pg_port}, redis :{redis_port})")
     rc = start_pg(config, pg_port, home=home, retained_children=retained_children, machine=machine)
     if rc != 0:
         return rc
-    return start_redis(config, redis_port, redis_password, redis_user, home=home, machine=machine)
+    return start_redis(
+        config, redis_port, redis_password, redis_user, home=home, machine=machine, macos=macos
+    )
 
 
 # meiva:note

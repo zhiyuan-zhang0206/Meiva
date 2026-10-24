@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 from base.config import ConfigBoot
 from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_boot
@@ -17,7 +16,8 @@ __all__ = ["StartConfig", "read_start_config"]
 
 
 # meiva:note
-# The `general`, `gateway`, `services`, `walg` and data-plane fields a start reads.
+# The `general`, `gateway`, `services` and data-plane fields a start reads. The WAL-G configuration
+# file is one of the data plane's (`data_plane.walg_config_file`) and is carried nowhere else.
 @dataclass(frozen=True)
 class StartConfig:
     service_path: str
@@ -28,7 +28,6 @@ class StartConfig:
     entry_url: str
     app_port: int | None
     browser_cdp_port: int
-    walg_config_file: Path | None
 
 
 # meiva:note
@@ -44,5 +43,4 @@ def read_start_config(config: ConfigBoot) -> StartConfig:
         entry_url=view.services.frontend_healthcheck_url,
         app_port=view.services.app_port,
         browser_cdp_port=view.services.browser_cdp_port,
-        walg_config_file=view.walg.walg_config_file,
     )

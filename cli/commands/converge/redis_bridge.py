@@ -10,9 +10,9 @@
 from __future__ import annotations
 
 import logging
-import sys
 import time
 from pathlib import Path
+from typing import assert_never
 
 from base.cluster.dataplane.redis_bridge import (
     RedisBridgeUnconfiguredError,
@@ -22,7 +22,6 @@ from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.host.net.url_secret import url_with_host
 from base.host.system.hostport import Host
-from base.paths import meiva_home
 from cli.commands.converge.plans.bridge_retirement import (
     Expired,
     Leave,
@@ -82,15 +81,18 @@ def bootout_and_wait(host: Host, *, timeout_s: float = _BOOTOUT_TIMEOUT_S) -> bo
     )
     started = time.monotonic()
     while job_loaded(host):
-        match bootout_wait_step(
+        wait = bootout_wait_step(
             elapsed_s=time.monotonic() - started,
             timeout_s=timeout_s,
             interval_s=_BOOTOUT_POLL_INTERVAL_S,
-        ):
+        )
+        match wait:
             case Expired():
                 return False
             case Retry(after_s):
                 time.sleep(after_s)
+            case _:
+                assert_never(wait)
     return True
 
 
@@ -173,14 +175,14 @@ def probe_bridge_on(
 
 
 # meiva:note
-# The status of this process's relay, on this process's platform and (by default) home.
+# The status of the relay of `home`, on the platform of `host`.
 def probe_redis_bridge(
-    home: Path | None = None, *, machine: MachineIdentity, config: ConfigBoot
+    home: Path, *, host: Host, machine: MachineIdentity, config: ConfigBoot
 ) -> RedisBridgeStatus:
-    return probe_bridge_on(
-        sys.platform, (home or meiva_home()).expanduser(), machine=machine, config=config
-    )
+    return probe_bridge_on(host.platform.system, home, machine=machine, config=config)
 
 
-def print_redis_bridge_status(*, machine: MachineIdentity, config: ConfigBoot) -> None:
-    print(status_line(probe_redis_bridge(machine=machine, config=config)))
+def print_redis_bridge_status(
+    home: Path, *, host: Host, machine: MachineIdentity, config: ConfigBoot
+) -> None:
+    print(status_line(probe_redis_bridge(home, host=host, machine=machine, config=config)))

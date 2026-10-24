@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import assert_never
 
 from base import cluster
 from base.cluster import session_name
@@ -235,6 +236,8 @@ def _check_schema(start: _Start, *, live: bool) -> int | None:
                         return rc
                 case SchemaCheck.CHECKPOINT:
                     cluster.assert_checkpoint_schema_current(db_url)
+                case _:
+                    assert_never(check)
     return None
 
 
@@ -380,7 +383,7 @@ def _assert_archive_after_readiness(start: _Start, wait: probe.ReadinessWait) ->
 
     assert_configured_archive(
         machine=start.command.machine.name(),
-        path=start.config.walg_config_file,
+        path=start.config.data_plane.walg_config_file,
         admin=probe.admin_connection(),
     )
 
@@ -439,7 +442,7 @@ def _wait_ready(
 def _finalize(start: _Start, serving_generation: str) -> int:
     with start_trace.phase("finalize"):
         if not start_serving.mark_serving(
-            start.command.home, serving_generation, runtime=start.runtime.loaded
+            start.command.home, serving_generation, runtime=start.runtime.identity_now()
         ):
             print("  \u2717 this start lost its serving generation", file=sys.stderr)
             return 1

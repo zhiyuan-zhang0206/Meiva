@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
@@ -16,7 +17,6 @@ from base.log import logger
 from base.native_process.root_control.ipc import CallerPayload
 
 __all__ = [
-    "AuditUnavailableError",
     "CommandAudit",
     "lifecycle_audit",
     "operator_lifecycle_audit",
@@ -25,12 +25,6 @@ __all__ = [
     "record_lifecycle_request",
     "record_lifecycle_result",
 ]
-
-
-# meiva:note
-# The audit scope of a command cannot be opened because the process cannot name its caller or its
-# source commit. `cli.main` reports it as one line and exits 1, before the command ran.
-class AuditUnavailableError(RuntimeError): ...
 
 
 RequestRecorder = Callable[[str, Sequence[str]], None]
@@ -113,12 +107,14 @@ def record_lifecycle_result(*, outcome: Outcome, seconds: float) -> None:
 # through the command's own database. `enabled=False` is the OS boot job's retried
 # start — nothing asked for it, so there is no operator to attribute and no result
 # worth a row. The caller block and the source commit are read once, when the scope
-# opens. A reading that fails is an environment fault (a working directory that is gone, a
-# home that cannot be created) and refuses the command with an `AuditUnavailableError` naming it,
-# before the command changes anything: a command must not run unattributed behind the
-# operator's back. A source checkout with no readable commit is not a fault; its `head_sha`
-# is None. Writing a row stays best-effort once the scope is open: the record must never
-# fail the command that repairs the host.
+# opens.
+#
+# The audit is a write-only sink, so a sink that cannot be built never stops the command: a
+# reading that fails for any reason (a working directory that is gone, a home that cannot be
+# read) prints one warning line on stderr (a CLI verb that opens no log sink would drop a loguru
+# record) and the command runs unaudited, because the record must never fail the command that
+# repairs the host. Writing a row stays best-effort once the scope is open for the same reason.
+# A source checkout with no readable commit is not a fault; its `head_sha` is None.
 # meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
 @contextmanager
 def operator_lifecycle_audit(
@@ -132,14 +128,16 @@ def operator_lifecycle_audit(
         return
     try:
         caller = _caller_identity()
-    except OSError as exc:
-        raise AuditUnavailableError(f"lifecycle audit cannot read the caller block: {exc}") from exc
-    try:
         head_sha = _head_sha()
-    except OSError as exc:
-        raise AuditUnavailableError(
-            f"lifecycle audit cannot read the source commit: {exc}"
-        ) from exc
+    except Exception as exc:
+        print(
+            f"meiva: warning: lifecycle audit could not identify its caller ({exc!r}); "
+            "this command runs unaudited",
+            file=sys.stderr,
+        )
+        with lifecycle_audit(None) as command:
+            yield command
+        return
     with lifecycle_audit(
         operator_request_recorder(
             database_factory=database_factory, caller=caller, head_sha=head_sha

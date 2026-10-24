@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from base.cluster import ClusterPorts
 
+from base.host.db_authority import unit
+from base.host.private_storage import write_private_bytes
 from cli.commands.observability.inputs import CollectorSettings, LgtmSettings
 from cli.commands.observability.plans.lgtm.download_retry import DownloadLimits
 from cli.commands.observability.plans.observability_config import (
@@ -29,6 +31,7 @@ __all__ = [
     "REPO_ROOT",
     "collector_settings",
     "data_plane",
+    "install_unit_capability",
     "lgtm_settings",
     "observability",
     "write_cluster_record",
@@ -145,3 +148,21 @@ def write_cluster_record(home: Path, *, postgres_port: int = 5433, redis_port: i
         created_at="test",
     )
     (home / INTENT_NAME).write_text(json.dumps({"record": asdict(record)}), encoding="utf-8")
+
+
+# meiva:note
+# Give `home` a real installed capability whose OTLP relay token is `telemetry`, the file a pure
+# runner holds in place of the human secret.
+def install_unit_capability(home: Path, *, telemetry: str) -> None:
+    resolved = home.resolve()
+    capability = unit.UnitCapability(
+        version=1,
+        unit=unit.UnitIdentity(machine="runner-1", home=str(resolved)),
+        endpoint="postgresql://meiva@10.0.0.7:6433/meiva",
+        generation=unit.GenerationRef(number=1, credential_digest="a" * 64),
+        role="meiva_runner",
+        password="p" * 40,
+        bundle="0" * 32,
+        api=unit.UnitApi(token="t" * 40, gateway="b" * 64, telemetry=telemetry),
+    )
+    write_private_bytes(unit.unit_capability_path(resolved), capability.model_dump_json().encode())

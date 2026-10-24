@@ -13,6 +13,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import assert_never
 
 from base.deploy.lifecycle import status_journal
 from base.host.exit_codes import RESTART_DECLINED_EXIT_CODE
@@ -31,6 +32,7 @@ from cli.commands.lifecycle.stop.execute import StopEnvironment
 from cli.commands.lifecycle.stop.restart_plan import (
     AGENT_HOST,
     NO_ROOT_REFUSAL,
+    Continue,
     Finish,
     Leg,
     RestartRequest,
@@ -128,6 +130,8 @@ def _run_leg(leg: Leg, run: _Invocation, retained_children: list[subprocess.Pope
                 producer=run.producer,
                 command=command,
             )
+        case _:
+            assert_never(leg)
 
 
 # meiva:note
@@ -151,8 +155,13 @@ def _restart(run: _Invocation, retained_children: list[subprocess.Popen[bytes]])
         with status_journal.phase(home, leg.phase):
             rc = _run_leg(leg, run, retained_children)
         outcome = settle_leg(leg, rc)
-        if isinstance(outcome, Finish):
-            return conclude(home, outcome, owns_journal=owns_journal)
+        match outcome:
+            case Finish():
+                return conclude(home, outcome, owns_journal=owns_journal)
+            case Continue():
+                pass
+            case _:
+                assert_never(outcome)
     raise AssertionError("the start leg always ends a restart")
 
 

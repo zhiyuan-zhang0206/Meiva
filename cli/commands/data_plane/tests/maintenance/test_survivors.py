@@ -8,11 +8,15 @@ from __future__ import annotations
 
 import dataclasses
 
-from cli.commands.data_plane.maintenance.survivors import StopSurvivor, SurvivorInventory
+from cli.commands.data_plane.maintenance.survivors import (
+    StopSurvivor,
+    SurvivorInventory,
+    SurvivorRole,
+)
 
 _SHELL = StopSurvivor(
     pid=4242,
-    role="shell",
+    role=SurvivorRole.SHELL,
     service="meiva-agent-1-shell-1",
     ppid=1,
     pgid=4242,
@@ -23,7 +27,7 @@ _SHELL = StopSurvivor(
 )
 _UNREADABLE = StopSurvivor(
     pid=77,
-    role="job",
+    role=SurvivorRole.JOB,
     service=None,
     ppid=None,
     pgid=None,

@@ -22,6 +22,7 @@ import psycopg
 import pytest
 
 from base.db import Database
+from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.telemetry import EventPipeline
 from base.telemetry.tests.capture.event_capture import EmittedEvents, FollowedAttributes
 from cli.commands.cluster.health import cmd_health_probe, health_options, run_health_probe
@@ -368,7 +369,11 @@ def test_a_clean_prod_checkout_passes(cluster: Cluster, tmp_path: Path) -> None:
 def test_a_broken_wal_archiver_configuration_fails_the_probe_alert_only(
     cluster: Cluster, tmp_path: Path, signals: FollowedAttributes
 ) -> None:
-    assert cluster.probe(walg_config_file=tmp_path / "missing-walg.json") == 1
+    plane = dataclasses.replace(
+        cluster.options.data_plane, walg_config_file=tmp_path / "missing-walg.json"
+    )
+
+    assert cluster.probe(data_plane=plane) == 1
 
     assert signals == [
         {
@@ -494,9 +499,33 @@ def test_the_command_reads_its_round_from_its_own_configuration(
     assert options.gateway_url == "http://gw.test:8000"
     assert options.rules == HealthRules(agent_min=0, check_schema=False, disk_watermark=0.90)
     assert options.source_root == probe_command.home / "source"
-    assert options.walg_config_file is None
+    assert options.data_plane.walg_config_file is None
     assert options.checkout_refusal is None
     assert options.provider.balance_min_cny == 500.0
+
+
+# meiva:note
+# The facts of the invocation come from its runtime, not from the process: the user's home names
+# the editable allowlist, the platform names the data volume, and the checkout is judged against
+# the runtime's own home (a home that carries its `source` forbids any other checkout).
+def test_the_round_takes_the_user_home_the_platform_and_the_checkout_from_the_invocation(
+    probe_command: CommandRuntime, tmp_path: Path
+) -> None:
+    linux = health_options(probe_command, check_schema=True)
+    mac = health_options(
+        dataclasses.replace(probe_command, host=fake_host(platform=DARWIN_ARM64)),
+        check_schema=True,
+    )
+    (probe_command.home / "source").mkdir()
+    foreign = health_options(
+        dataclasses.replace(probe_command, checkout=tmp_path / "elsewhere"), check_schema=True
+    )
+
+    assert linux.editable_allowed_roots == (probe_command.session.user_home / "Meiva",)
+    assert linux.data_volume == Path("/")
+    assert mac.data_volume == Path("/System/Volumes/Data")
+    assert foreign.checkout_refusal is not None
+    assert str(tmp_path / "elsewhere") in foreign.checkout_refusal
 
 
 def test_the_command_runs_a_round_from_its_configuration(

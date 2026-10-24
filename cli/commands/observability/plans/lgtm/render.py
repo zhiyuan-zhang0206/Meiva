@@ -16,7 +16,7 @@ from cli.commands.observability.plans.authority import (
     is_specific_non_loopback_listen,
     url_host_port,
 )
-from cli.commands.observability.plans.url_view import UrlView
+from cli.commands.observability.plans.url_parts import UrlParts
 
 __all__ = [
     "CONFIG_TEMPLATES",
@@ -119,7 +119,7 @@ def render_run_script(template: str, values: NativeRenderValues) -> str:
 # The warning for a Tempo query URL and intake endpoint that disagree about being loopback, or
 # None. A remote cluster's intake with a local query URL leaves Grafana querying the wrong Tempo.
 def tempo_topology_warning(
-    *, query_url: str, query: UrlView, intake_endpoint: str, intake: UrlView
+    *, query_url: str, query: UrlParts, intake_endpoint: str, intake: UrlParts
 ) -> str | None:
     if has_loopback_hostname(query) == has_loopback_hostname(intake):
         return None
@@ -138,7 +138,7 @@ class ReadSurface:
     env_var: str
     listen_host: str
     read_url: str
-    read: UrlView
+    read: UrlParts
 
 
 # meiva:note

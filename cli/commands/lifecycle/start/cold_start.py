@@ -13,6 +13,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import assert_never
 
 from base.cluster.machine import MachineRoles
 from base.deploy import start_trace
@@ -118,6 +119,7 @@ def _run_step(
             return bringup.ensure_gateway_data_plane(
                 cold.plane,
                 home=command.home,
+                macos=command.host.platform.system == "darwin",
                 retained_children=retained_children,
                 database_factory=cold.database_factory,
                 machine=command.machine,
@@ -137,6 +139,7 @@ def _run_step(
                 environment=command.config.process_environment(),
                 database_factory=cold.database_factory,
                 machine=command.machine,
+                macos=command.host.platform.system == "darwin",
             )
             return 0
         case ColdStep.SCHEMA_CHECK:
@@ -156,6 +159,8 @@ def _run_step(
                 database_factory=cold.database_factory, skills_root=skills_dir(command.home)
             )
             return 0
+        case _:
+            assert_never(step)
 
 
 def _apply_migrations(cold: ColdStart) -> int:

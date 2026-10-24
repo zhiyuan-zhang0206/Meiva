@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import assert_never
 
 from cli.commands.data_plane.host_dependencies.scope import StartScope
 from cli.commands.data_plane.host_dependencies.table import HostTool, Probe, required_tools
@@ -166,8 +167,10 @@ def _presence_problem(probe: Probe, reading: Reading) -> DependencyProblem | Non
                         "systemd is not this host's service manager (no systemctl, "
                         "or /run/systemd/system is absent)"
                     )
-                case _:
+                case Probe.WHICH:
                     return DependencyProblem("not on PATH")
+                case _:
+                    raise ValueError(f"{probe!r} is not a presence probe")
         case _:
             raise ValueError(f"{reading!r} is not a presence reading")
 
@@ -189,6 +192,8 @@ def diagnose(tool: HostTool, reading: Reading) -> DependencyProblem | None:
             return _node_problem(tool.name, reading)
         case Probe.WHICH | Probe.SHELL | Probe.SYSTEMD:
             return _presence_problem(tool.probe, reading)
+        case _:
+            assert_never(tool.probe)
 
 
 # meiva:note

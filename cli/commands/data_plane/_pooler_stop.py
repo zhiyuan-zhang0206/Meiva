@@ -76,6 +76,15 @@ class OwnedPooler:
                 raise
             return None
 
+    # meiva:note
+    # Record the intent for this birth, then signal it once.
+    #
+    # `OwnedProcess.send_signal` returns False when the birth is already gone, or when its pid now
+    # belongs to a different birth: the process this stop owns no longer exists, which is the
+    # state the stop asks for, so nothing is signalled and the wait that follows returns at once.
+    # A stranger on the recycled pid is never signalled, and a pid that changes birth between the
+    # check and the delivery raises inside `send_signal`. The "native birth changed before signal"
+    # error this stop used to raise covered the gone case too, which is now a finished stop.
     def _request_stop(self, deadline: float) -> None:
         budget = time_left(deadline, time.monotonic())
         if budget is None:
@@ -109,7 +118,9 @@ class OwnedPooler:
         return True
 
     # meiva:note
-    # Request safe shutdown once; explicit force has a separate settle bound.
+    # Request safe shutdown once; explicit force has a separate settle bound. The forced SIGKILL
+    # follows the same rule as the first signal: a birth that is already gone is not signalled and
+    # the settle wait ends at once.
     def stop(self, *, deadline: float, force: bool = False) -> bool:
         if not self.identity.live():
             return True

@@ -14,7 +14,7 @@ import psutil
 
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
-from cli.commands.data_plane.maintenance.survivors import StopSurvivor
+from cli.commands.data_plane.maintenance.survivors import StopSurvivor, SurvivorRole
 
 
 # meiva:note
@@ -77,10 +77,16 @@ def identity_matches(identity: OwnedProcess) -> bool:
 
 
 # meiva:note
-# Read one survivor's live facts; reads only, never signals, never raises.
+# Read one survivor's live facts; reads only and never signals. An unreadable process is reported
+# as that, never dropped.
+#
+# `role` is the closure's wire string; a role outside the shell/job vocabulary raises
+# `ValueError` before any live fact is read, because it means the service and this stop disagree
+# on the contract.
 def capture_survivor(
     identity: OwnedProcess, *, service: str | None, role: str, pgid_hint: int | None = None
 ) -> StopSurvivor:
+    survivor_role = SurvivorRole(role)
     ppid: int | None = None
     pgid = pgid_hint
     status: str | None = None
@@ -100,7 +106,7 @@ def capture_survivor(
                 pgid = None
     return StopSurvivor(
         pid=identity.pid,
-        role=role,
+        role=survivor_role,
         service=service,
         ppid=ppid,
         pgid=pgid,

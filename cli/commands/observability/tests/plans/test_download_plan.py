@@ -31,23 +31,19 @@ LIMITS = DownloadLimits(
 
 
 def test_the_backoff_grows_by_one_step_per_attempt() -> None:
-    assert retry_wait(LIMITS, attempt=1, remaining_s=885.0) == 5.0
-    assert retry_wait(LIMITS, attempt=2, remaining_s=875.0) == 10.0
-
-
-def test_the_last_attempt_does_not_wait() -> None:
-    assert retry_wait(LIMITS, attempt=3, remaining_s=870.0) is None
+    assert retry_wait(LIMITS, attempt=0, remaining_s=885.0) == 5.0
+    assert retry_wait(LIMITS, attempt=1, remaining_s=875.0) == 10.0
 
 
 def test_a_wait_never_runs_past_the_budget_that_remains() -> None:
-    assert retry_wait(LIMITS, attempt=1, remaining_s=3.0) == 3.0
+    assert retry_wait(LIMITS, attempt=0, remaining_s=3.0) == 3.0
 
 
 @pytest.mark.parametrize("remaining_s", [0.0, -2.5])
 def test_a_spent_budget_waits_zero_seconds_and_lets_the_next_attempt_fail(
     remaining_s: float,
 ) -> None:
-    assert retry_wait(LIMITS, attempt=1, remaining_s=remaining_s) == 0.0
+    assert retry_wait(LIMITS, attempt=0, remaining_s=remaining_s) == 0.0
 
 
 @pytest.mark.parametrize(

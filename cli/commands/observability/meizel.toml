@@ -1,4 +1,4 @@
-exports = ["grafana_render.py", "inputs.py", "lgtm.py", "lgtm_native.py", "logs.py", "otel_collector.py", "plans", "trace.py"]
+exports = ["grafana_render.py", "inputs.py", "lgtm.py", "lgtm_native.py", "logs.py", "otel_collector.py", "plans", "trace.py", "tests"]
 
 [purity]
 "__init__.py" = "strict"
@@ -8,7 +8,8 @@ exports = ["grafana_render.py", "inputs.py", "lgtm.py", "lgtm_native.py", "logs.
 "grafana_render.py" = ["_lgtm_provisioning.py", "plans"]
 "inputs.py" = ["plans"]
 "lgtm.py" = ["_lgtm_provisioning.py"]
-"lgtm_native.py" = ["_lgtm_assets.py", "_lgtm_provisioning.py", "inputs.py", "plans"]
-"otel_collector.py" = ["inputs.py", "plans"]
-"tests" = ["_lgtm_provisioning.py", "grafana_render.py", "inputs.py", "lgtm_native.py", "otel_collector.py", "plans", "trace.py"]
-"trace.py" = ["inputs.py", "plans"]
+"lgtm_native.py" = ["_lgtm_assets.py", "_lgtm_provisioning.py", "inputs.py", "plans", "url_split.py"]
+"otel_collector.py" = ["inputs.py", "plans", "url_split.py"]
+"tests" = ["_lgtm_provisioning.py", "grafana_render.py", "inputs.py", "lgtm_native.py", "otel_collector.py", "plans", "trace.py", "url_split.py"]
+"trace.py" = ["inputs.py", "plans", "url_split.py"]
+"url_split.py" = ["plans"]

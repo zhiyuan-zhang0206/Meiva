@@ -16,7 +16,6 @@ from base.packages.plugins.config_registration import plugin_bootstrap_config
 from base.paths.tests.homes import point_home
 from cli.commands.data_plane import completion
 from cli.commands.data_plane import pgbouncer as pooler
-from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 from cli.commands.tests import test_single_box as _single_box
 from cli.commands.tests.test_single_box import Born, assert_refused
@@ -60,7 +59,6 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
     monkeypatch: pytest.MonkeyPatch,
     *,
     command_runtime: CommandRuntime,
-    data_plane_config: DataPlaneConfig,
 ) -> None:
     bootstrap_authority = _serve_on_loopback(monkeypatch, born)
     endpoint = served_db_endpoint(bootstrap_authority)
@@ -72,12 +70,13 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
         unit.install_bundle(runner, _open(bundle), machine=MACHINE, served_endpoint=endpoint)
     assert unit.load_unit_capability(runner) is None
     completion.ensure_pooler(
-        data_plane_config,
+        born.plane,
         born.record,
         "meiva",
         born.home,
         delivery.active_generation(born.home),
         machine=command_runtime.machine,
+        macos=command_runtime.host.platform.system == "darwin",
     )
     installed = unit.install_bundle(
         runner, _open(bundle), machine=MACHINE, served_endpoint=endpoint

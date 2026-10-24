@@ -1,14 +1,7 @@
 [uses]
 "test_parser_contract.py" = ["child_public_queries.py"]
 
-[debt.env-patch]
-"test_walg_cmd.py#patch.dict os.environ" = 1
-
 [debt.first-party-patch]
-"test_walg_cmd.py#monkeypatch.setattr base.config.ConfigBoot.boot" = 1
-"test_walg_cmd.py#monkeypatch.setattr base.config.settings.walg.walg_config_file" = 1
-"test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.ConfigBoot" = 2
-"test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.check.run_check" = 1
 "test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.restored_instance" = 2
 "test_walg_cmd.py#monkeypatch.setattr services.backup.walg.probe.admin_connection" = 3
 

@@ -6,6 +6,7 @@
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 from __future__ import annotations
 
+import inspect
 import json
 from typing import Any
 
@@ -41,7 +42,16 @@ def operator_database() -> Any:
     from cli.database import open_operator_database, operator_database_factory
     from cli.database.runtime import CommandRuntime
 
-    command = CommandRuntime.create()
+    # meiva:note
+    # This program is piped to hosts whose installed code predates the checkout it came from, and
+    # `CommandRuntime.create` takes the resolved home only in newer ones.
+    create: Any = CommandRuntime.create
+    if "home" in inspect.signature(create).parameters:
+        from base.paths.home import resolve_meiva_home
+
+        command = create(resolve_meiva_home().resolve())
+    else:
+        command = create()
     factory = operator_database_factory(
         local_host=command.machine.host, open_database=open_operator_database
     )

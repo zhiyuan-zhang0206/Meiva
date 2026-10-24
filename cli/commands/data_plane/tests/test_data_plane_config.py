@@ -5,6 +5,10 @@
 from __future__ import annotations
 
 import dataclasses
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -84,3 +88,31 @@ def test_no_secret_or_login_reaches_the_repr(data_plane_config: DataPlaneConfig)
 def test_the_config_is_frozen(data_plane_config: DataPlaneConfig) -> None:
     with pytest.raises(dataclasses.FrozenInstanceError):
         data_plane_config.pgbouncer_enabled = not data_plane_config.pgbouncer_enabled  # pyright: ignore[reportAttributeAccessIssue]
+
+
+# meiva:note
+# The settings models are never named by the mapping, so importing it builds nothing eager: the
+# commands that must run while the eager configuration cannot be built (`meiva stop`, `meiva
+# status`) import it.
+def test_importing_the_module_does_not_build_the_eager_configuration(tmp_path: Path) -> None:
+    repo = Path(__file__).resolve().parents[4]
+    subprocess.run(
+        [sys.executable, "-I", "-B", str(Path(__file__).resolve()), str(repo)],
+        check=True,
+        env={**os.environ, "MEIVA_HOME": str(tmp_path), "MEIVA_CONFIG_FETCH": "skip"},
+    )
+
+
+# meiva:note
+# The child: import the module in a fresh interpreter and inspect what loaded.
+def _import_the_module() -> None:
+    from cli.commands.data_plane.config import DataPlaneConfig
+
+    assert DataPlaneConfig.__module__ == "cli.commands.data_plane.config"
+    assert "base.config" in sys.modules
+    assert "base.config._full" not in sys.modules
+
+
+if __name__ == "__main__":
+    sys.path.insert(0, sys.argv[1])
+    _import_the_module()

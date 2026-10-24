@@ -33,6 +33,19 @@ resolved binary, the daemon environment (`daemon_process_env`) and the waits, so
 a real pooler under its own home with small waits instead of replacing the code that looks
 for it.
 
+Where the pooler's files live is the one thing here that still follows the process rather than
+the `home` argument: `ini_path()`, `pidfile_path()` and `pooler_dir()` in
+`base/cluster/dataplane/pooler.py` resolve `meiva_home()`. `completion.ensure_pooler` renders the
+userlist for the `home` it is given, but `pgbouncer.py` writes it (and the ini, the pidfile and
+the log) under the process home, and `stop_pgbouncer` and the maintenance stop look for the
+pooler there. The two agree whenever the process is the home's own, which is every production
+call; they move together when base's `pooler.*` functions take the home.
+
+A pooler stop signals a recorded birth once (`_pooler_stop.OwnedPooler`): a birth that is already
+gone, or whose pid another process now holds, is reported stopped and never signalled, and an
+intent file that is not exactly the recorded shape (not JSON, not an object, wrong keys or types)
+is one `RuntimeError` that retains custody.
+
 Native maintenance-stop tests wait for both listener readiness and the daemon's
 PID publication: an open port does not prove the PID file is complete. Their
 bounded fixture wait accepts missing or empty publication while startup proceeds;
@@ -71,6 +84,15 @@ reported as unreadable, which refuses the stop with its pid instead of raising o
 scan or passing, because proving that nothing unrecorded runs is what the scan is for.
 `maintenance/report_lines.py` renders the clients still on the pooler and a Postgres
 escalation for the operator and the stop journal.
+
+The forced stop of a cluster's own instance (`bringup.stop_cluster_instance`, the `--mode force`
+path) ends Redis with a bounded `redis-cli shutdown nosave` as its admin user (30 seconds; a
+timeout reads as return code -1) and counts it stopped only when its port no longer accepts
+connections, since neither the exit status nor an authenticated PING proves that. The home's
+`redis-server` processes (name and working directory) are identified before the shutdown; a
+listener that outlives it while one is alive is reported as that Redis still answering, and one
+with none alive as a process other than this home's Redis holding the port. The stop fails either
+way.
 
 The shell tests start the real processes (`../tests/native_processes.py`: a pgbouncer under a
 test home, a Redis on its data directory, a Postgres through `start_pg`); the decisions are

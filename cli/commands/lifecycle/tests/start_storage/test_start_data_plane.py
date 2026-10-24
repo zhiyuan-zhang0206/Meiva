@@ -90,6 +90,7 @@ def test_gateway_data_plane_brings_up_own_instance(
             retained_children=[],
             database_factory=operator_database,
             machine=command_runtime.machine,
+            macos=command_runtime.host.platform.system == "darwin",
         )
         == 0
     )
@@ -107,6 +108,7 @@ def test_gateway_data_plane_brings_up_own_instance(
             "redis_user": "meiva",
             "retained_children": [],
             "machine": command_runtime.machine,
+            "macos": False,
         }
     ]
     # meiva:note
@@ -135,6 +137,7 @@ def test_gateway_data_plane_refuses_a_home_without_a_ledger_before_any_effect(
             retained_children=[],
             database_factory=operator_database,
             machine=command_runtime.machine,
+            macos=command_runtime.host.platform.system == "darwin",
         )
         == 1
     )
@@ -160,6 +163,7 @@ def test_gateway_data_plane_no_record_is_error(
             retained_children=[],
             database_factory=operator_database,
             machine=command_runtime.machine,
+            macos=command_runtime.host.platform.system == "darwin",
         )
         == 1
     )
@@ -182,6 +186,7 @@ def test_local_launch_without_owner_cannot_publish_authority(
             retained_children=None,
             database_factory=operator_database,
             machine=command_runtime.machine,
+            macos=command_runtime.host.platform.system == "darwin",
         )
 
     assert not telemetry_token_path(unit_home.resolve()).exists()

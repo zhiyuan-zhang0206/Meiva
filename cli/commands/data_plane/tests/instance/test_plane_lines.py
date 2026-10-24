@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from cli.commands.data_plane.instance import stop_plan
 from cli.commands.data_plane.instance.bringup_lines import (
     remote_announce,
@@ -109,10 +111,25 @@ def test_every_leftover_is_named_in_the_orphan_warning() -> None:
     assert only_pg is not None and "local postgres from before" in only_pg
 
 
-def test_redis_stopped_only_when_it_no_longer_answers() -> None:
-    assert stop_plan.redis_stop_failure(6399, still_answers=False) is None
-    failure = stop_plan.redis_stop_failure(6399, still_answers=True)
+@pytest.mark.parametrize("home_redis_alive", [True, False])
+def test_redis_stopped_only_when_its_port_no_longer_accepts(home_redis_alive: bool) -> None:
+    assert (
+        stop_plan.redis_stop_failure(6399, listening=False, home_redis_alive=home_redis_alive)
+        is None
+    )
+
+
+def test_a_listener_that_is_this_homes_redis_is_a_redis_that_did_not_stop() -> None:
+    failure = stop_plan.redis_stop_failure(6399, listening=True, home_redis_alive=True)
     assert failure == "redis still answers on 127.0.0.1:6399 after shutdown"
+
+
+def test_a_listener_that_is_not_this_homes_redis_is_named_as_another_process() -> None:
+    failure = stop_plan.redis_stop_failure(6399, listening=True, home_redis_alive=False)
+    assert failure == (
+        "127.0.0.1:6399 still accepts connections after shutdown, "
+        "held by a process other than this home's redis"
+    )
 
 
 def test_the_remote_bring_up_words_carry_the_dial_detail() -> None:

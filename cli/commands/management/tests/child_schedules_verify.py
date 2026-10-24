@@ -16,7 +16,7 @@ def _no_gateway() -> GatewayAccess:
 
 
 def _check_rows(rows_file: str) -> None:
-    command = CommandRuntime.create()
+    command = CommandRuntime.create(meiva_home().resolve())
     database = operator_database_factory(
         local_host=command.machine.host,
         open_database=open_operator_database,

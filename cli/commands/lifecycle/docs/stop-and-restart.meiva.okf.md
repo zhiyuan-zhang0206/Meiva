@@ -47,8 +47,7 @@ Restart over the service tree runs four legs (`restart_plan.Leg`): the preflight
 (the data plane kept on a gateway, no announcement, no prompt, the operator's other choices) and
 `restart_start_leg` its start leg (the operator's explicit service selection, not reconciled to
 the units the stop kept). `restart.restart_runtime` admits the checkout once, before the
-journal opens, and the `StartRuntime` it returns (the loaded identity included) is held through
-both legs. `meiva restart --only agent-host` first admits the live root
+journal opens, and the `StartRuntime` it returns is held through both legs; the start leg re-reads its source digest when it publishes serving. `meiva restart --only agent-host` first admits the live root
 (`restart.admit_agent_host_restart`, before the roster is built), then downs agent-host through
 it and brings it back (`restart.restart_agent_host`), touching nothing else.
 

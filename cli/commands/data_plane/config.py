@@ -11,16 +11,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, cast
 
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot
 from base.host.net.url_secret import names_foreign_host
 
-__all__ = ["DataPlaneConfig", "data_plane_config_from_boot", "data_plane_config_from_settings"]
+__all__ = ["DataPlaneConfig", "data_plane_config_from_boot"]
 
 
 # meiva:note
-# The `data_plane` and `services` fields these commands read.
+# The `data_plane`, `services` and `walg` fields these commands read.
+#
+# `walg_config_file` is carried here and nowhere else: a command that needs the WAL-G
+# configuration path takes it from this value.
 @dataclass(frozen=True)
 class DataPlaneConfig:
     # meiva:note
@@ -48,67 +50,12 @@ class DataPlaneConfig:
 
 
 # meiva:note
-# The config as the process settings hold it now: the composition roots call this once.
-def data_plane_config_from_settings() -> DataPlaneConfig:
-    return _from_view(settings)
-
-
-# meiva:note
-# The same config read from one explicit configuration owner (tests build theirs this way).
+# The config read from one configuration owner's view: a command's entry passes `command.config`,
+# a test passes the owner it built. Reading a field resolves it on that owner, so the values are
+# the ones that owner holds now; the settings models are never named here, which keeps importing
+# this module from building the eager configuration.
 def data_plane_config_from_boot(boot: ConfigBoot) -> DataPlaneConfig:
-    return _from_view(cast("_ConfigView", boot.view))
-
-
-# meiva:note
-# The three domains of a configuration owner this config reads. Importing the `Settings` model to
-# name them would make every importer of this module build the eager configuration, which the
-# settings-free commands must not do, so the shape is spelled out here.
-class _DataPlaneDomain(Protocol):
-    @property
-    def db_url(self) -> str: ...
-    @property
-    def redis_url(self) -> str: ...
-    @property
-    def redis_admin_password(self) -> str: ...
-    @property
-    def cluster_secret(self) -> str: ...
-    @property
-    def pgbouncer_enabled(self) -> bool: ...
-    @property
-    def pooler_max_client_conn(self) -> int: ...
-    @property
-    def redis_bin_dir(self) -> str: ...
-    @property
-    def trusted_cidrs(self) -> str: ...
-    @property
-    def events_channel(self) -> str: ...
-
-
-class _ServicesDomain(Protocol):
-    @property
-    def memory_search_backend(self) -> str: ...
-    @property
-    def embedding_backend(self) -> str: ...
-
-
-class _WalgDomain(Protocol):
-    @property
-    def walg_config_file(self) -> Path | None: ...
-
-
-class _ConfigView(Protocol):
-    @property
-    def data_plane(self) -> _DataPlaneDomain: ...
-    @property
-    def services(self) -> _ServicesDomain: ...
-    @property
-    def walg(self) -> _WalgDomain: ...
-
-
-# meiva:note
-# A configuration owner's view resolves the owner's own model on each read, so the process
-# settings and an explicit owner map through the same function.
-def _from_view(view: _ConfigView) -> DataPlaneConfig:
+    view = boot.view
     plane = view.data_plane
     return DataPlaneConfig(
         db_url=plane.db_url,

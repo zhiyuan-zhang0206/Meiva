@@ -23,7 +23,7 @@ from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import (
     remote_data_plane_config as remote_data_plane_config,
 )
-from cli.commands.data_plane.tests.native_cluster import NativeCluster
+from cli.commands.data_plane.tests.native_cluster import NATIVE_TEST_MACOS, NativeCluster
 from cli.commands.data_plane.tests.native_cluster import native_cluster as native_cluster
 from cli.commands.data_plane.tests.native_cluster import retained_children as retained_children
 from cli.database import OperatorDatabaseFactory
@@ -60,6 +60,7 @@ def _start_instance(
         retained_children=cluster.retained_children,
         database_factory=factory,
         machine=machine,
+        macos=NATIVE_TEST_MACOS,
     )
     assert rc == 0
 
@@ -73,6 +74,14 @@ def _admin(cluster: NativeCluster, database: str) -> psycopg.Connection[tuple[ob
     )
 
 
+# meiva:note
+# The vector extension is pre-created exactly when the cluster's Postgres lists it as available.
+#
+# What the assertion proves depends on the Postgres the shard runs: where the package is installed
+# it proves the born home got the extension, and where it is not (the plain apt server on some CI
+# shards) it proves only that nothing was created for an extension that cannot exist. The two
+# halves cannot both be exercised on one Postgres without skipping one, which the suite does not
+# allow; the first half runs on the shards whose Postgres carries pgvector.
 def test_a_born_home_gets_the_extension_its_postgres_carries_and_the_checkpoint_schema(
     native_cluster: NativeCluster,
     command_machine: MachineIdentity,
@@ -150,6 +159,7 @@ def test_a_release_readiness_refuses_a_home_without_a_ledger_before_any_dial(
             refresh_schema=False,
             database_factory=operator_database,
             machine=command_machine,
+            macos=NATIVE_TEST_MACOS,
         )
 
 

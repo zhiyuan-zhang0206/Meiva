@@ -1,5 +1,6 @@
 """Explicit configuration and machine inputs for one CLI test invocation."""
 
+import io
 from pathlib import Path
 
 import pytest
@@ -10,9 +11,9 @@ from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
 from base.host.system.tests.fake_commands import fake_host
-from base.paths import meiva_home
+from base.paths import meiva_home, repo_root
 from base.sessions.tests.refuse_helper import refuse_helper
-from cli.database.runtime import CommandRuntime, UserSession
+from cli.database.runtime import CommandRuntime, Terminal, UserSession
 
 __all__ = ["command_config_machine", "command_machine", "command_runtime"]
 
@@ -24,7 +25,8 @@ def command_runtime(tmp_path: Path) -> CommandRuntime:
     The host is inert: it finds no program and runs no command, so a test that reaches for the
     host must say what the host answers (`fake_host(...)`). The user's session is a zsh login
     with no terminal whose home is `tmp_path / "user"`, so a step that wires the user's account
-    writes under the test's own directory.
+    writes under the test's own directory. The terminal is three empty streams that are not
+    ttys, so a command that asks a person a question finds nobody to answer.
     """
     config = snapshot_process_config()
     return CommandRuntime(
@@ -35,6 +37,8 @@ def command_runtime(tmp_path: Path) -> CommandRuntime:
         host=fake_host(),
         session=UserSession(user_home=tmp_path / "user", login_shell="/bin/zsh", interactive=False),
         timers=ManualTimers(),
+        checkout=repo_root(),
+        terminal=Terminal(io.StringIO(), io.StringIO(), io.StringIO()),
     )
 
 

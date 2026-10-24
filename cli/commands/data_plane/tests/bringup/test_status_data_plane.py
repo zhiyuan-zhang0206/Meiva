@@ -24,6 +24,7 @@ from cli.commands.data_plane.tests.data_plane_records import (
     remote_data_plane_config as remote_data_plane_config,
 )
 from cli.commands.data_plane.tests.native_cluster import (
+    NATIVE_TEST_MACOS,
     RUNTIME_PASSWORD,
     NativeCluster,
 )
@@ -52,6 +53,7 @@ def _start_storage(cluster: NativeCluster, machine: MachineIdentity) -> None:
         redis_user=cluster.identity,
         retained_children=cluster.retained_children,
         machine=machine,
+        macos=NATIVE_TEST_MACOS,
     )
     assert rc == 0
 

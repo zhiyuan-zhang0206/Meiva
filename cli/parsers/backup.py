@@ -3,36 +3,51 @@ from __future__ import annotations
 import argparse
 
 
-def _h_backup_walg_check(_args: argparse.Namespace) -> int:
-    from cli.commands.data_plane.walg import cmd_walg_check
+def _h_backup_walg_check(args: argparse.Namespace) -> int:
+    from cli.commands.data_plane.walg import cmd_walg_check, walg_plane
 
-    return cmd_walg_check()
-
-
-def _h_backup_walg_run(_args: argparse.Namespace) -> int:
-    from cli.commands.data_plane.walg import cmd_walg_run
-
-    return cmd_walg_run(database_for_url=_args.database_for_url)
+    return cmd_walg_check(walg_plane(args.runtime.config))
 
 
-def _h_backup_walg_drill(_args: argparse.Namespace) -> int:
-    from cli.commands.data_plane.walg import cmd_walg_drill
+def _h_backup_walg_run(args: argparse.Namespace) -> int:
+    from cli.commands.data_plane.walg import cmd_walg_run, walg_plane, walg_throwaway
 
-    return cmd_walg_drill(database_for_url=_args.database_for_url)
-
-
-def _h_backup_walg_restore(args: argparse.Namespace) -> int:
-    from cli.commands.data_plane.walg import cmd_walg_restore
-
-    return cmd_walg_restore(
-        directory=args.dir, backup=args.backup, time=args.time, lsn=args.lsn, user=args.user
+    config = args.runtime.config
+    return cmd_walg_run(
+        walg_plane(config),
+        throwaway=walg_throwaway(config),
+        database_for_url=args.database_factory.for_url,
     )
 
 
-def _h_backup_walg_status(_args: argparse.Namespace) -> int:
-    from cli.commands.data_plane.walg import cmd_walg_status
+def _h_backup_walg_drill(args: argparse.Namespace) -> int:
+    from cli.commands.data_plane.walg import cmd_walg_drill, walg_plane, walg_throwaway
 
-    return cmd_walg_status()
+    config = args.runtime.config
+    return cmd_walg_drill(
+        walg_plane(config),
+        throwaway=walg_throwaway(config),
+        database_for_url=args.database_factory.for_url,
+    )
+
+
+def _h_backup_walg_restore(args: argparse.Namespace) -> int:
+    from cli.commands.data_plane.walg import cmd_walg_restore, walg_plane
+
+    return cmd_walg_restore(
+        walg_plane(args.runtime.config),
+        directory=args.dir,
+        backup=args.backup,
+        time=args.time,
+        lsn=args.lsn,
+        user=args.user,
+    )
+
+
+def _h_backup_walg_status(args: argparse.Namespace) -> int:
+    from cli.commands.data_plane.walg import cmd_walg_status, walg_plane
+
+    return cmd_walg_status(walg_plane(args.runtime.config))
 
 
 def add_backup_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

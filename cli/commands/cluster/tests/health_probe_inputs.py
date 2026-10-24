@@ -29,6 +29,7 @@ from cli.commands.cluster._provider_guard import ProviderGuardConfig
 from cli.commands.cluster.health_readings import HealthOptions
 from cli.commands.cluster.plans.health_verdicts import HealthRules
 from cli.commands.cluster.tests.gateway_server import Reply, ScriptedGateway, serving
+from cli.commands.data_plane.config import data_plane_config_from_boot
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -79,14 +80,18 @@ def provider_off() -> ProviderGuardConfig:
 # A round that holds a healthy cluster to its rules: the gateway of the test, one live agent
 # required, no prod checkout to guard, WAL-G off, the volume of `tmp_path`, no retry wait.
 @pytest.fixture
-def healthy_options(gateway: ScriptedGateway, tmp_path: Path) -> HealthOptions:
+def healthy_options(
+    gateway: ScriptedGateway, tmp_path: Path, probe_command: CommandRuntime
+) -> HealthOptions:
     return HealthOptions(
         gateway_url=gateway.url,
         rules=HealthRules(agent_min=1, check_schema=True, disk_watermark=0.90),
         provider=provider_off(),
         source_root=None,
         editable_allowed_roots=(),
-        walg_config_file=None,
+        data_plane=dataclasses.replace(
+            data_plane_config_from_boot(probe_command.config), walg_config_file=None
+        ),
         data_volume=tmp_path,
         checkout_refusal=None,
         liveness_attempts=3,
@@ -179,6 +184,6 @@ def entry_command(
     agents, with a prod checkout and an empty launch record under its home."""
     probe_command.config.set_field("gateway_url", gateway.url)
     probe_command.config.set_field("health_probe_agent_min", 0)
-    git_checkout(probe_command.home / "source")
+    source = git_checkout(probe_command.home / "source")
     launch_record(probe_command.home)
-    return probe_command
+    return dataclasses.replace(probe_command, checkout=source)

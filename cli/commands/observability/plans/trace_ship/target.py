@@ -8,10 +8,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from cli.commands.observability.plans.collector.remote import gateway_ingress_endpoint
-from cli.commands.observability.plans.url_view import UrlView
+from cli.commands.observability.plans.url_parts import UrlParts
 
 __all__ = ["OTLP_V1_PATH", "ShipTarget", "TraceShipError", "plan_ship_target"]
 
@@ -30,7 +31,7 @@ class TraceShipError(RuntimeError): ...
 @dataclass(frozen=True)
 class ShipTarget:
     endpoint: str
-    headers: dict[str, str]
+    headers: Mapping[str, str]
     label: str
 
 
@@ -47,7 +48,7 @@ def plan_ship_target(
     roles: frozenset[str],
     tempo_endpoint: str,
     gateway_endpoint: str,
-    gateway: UrlView,
+    gateway: UrlParts,
     token: str | None,
 ) -> ShipTarget:
     if not otlp_enabled:
