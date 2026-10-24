@@ -2,13 +2,12 @@
 # A reply-suggestion harness over the real store.
 #
 # The agent, its status and its conversation live in the throwaway Postgres; the service reads them
-# as it does in the gateway. Only the two model calls are doubles (`FakeDecide`, `FakeChat`), handed
+# as it does in the gateway. Only the two model calls are doubles (`ScriptedDecide`, `ScriptedDraftModel`), handed
 # to the service as its required `decide` and `draft_model`.
 
 from __future__ import annotations
 
-import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
@@ -23,8 +22,8 @@ from base.clock import Clock
 from base.config import settings
 from base.db import Database, create_agent
 from base.lm.catalog import ModelCatalog
-from base.lm.catalog.decide.types import Decision, Question
-from base.lm.catalog.provider_keys import ProviderKeys
+from base.lm.catalog.decide.types import Decision
+from base.lm.tests.scripted_calls import ScriptedDecide, ScriptedDraftModel
 from base.packages.tests.model_catalog import inert_keys
 from gateway.agents.reply_suggestion.plan import ReplySuggestionPolicy
 from gateway.agents.reply_suggestion.schemas import ReplySuggestionResponse
@@ -91,57 +90,6 @@ def default_policy() -> ReplySuggestionPolicy:
     )
 
 
-class FakeDecide:
-    def __init__(self, result: Mapping[str, Decision] | None = None) -> None:
-        self.result = result if result is not None else useful_reply(0.9)
-        self.error: Exception | None = None
-        self.calls: list[tuple[str, str, Mapping[str, Question], dict[str, Any]]] = []
-
-    async def __call__(
-        self, model: str, state: str, questions: Mapping[str, Question], **kwargs: Any
-    ) -> Mapping[str, Decision]:
-        self.calls.append((model, state, questions, kwargs))
-        if self.error is not None:
-            raise self.error
-        return self.result
-
-
-class FakeChat:
-    def __init__(
-        self,
-        reply: str = '{"suggestions": ["Yes, go ahead.", "Wait, explain the plan first."]}',
-    ) -> None:
-        self.reply = reply
-        self.error: Exception | None = None
-        self.built: list[str] = []
-        self.invocations: list[Sequence[BaseMessage]] = []
-        self.bindings: list[tuple[dict[str, Any], dict[str, Any]]] = []
-        self.usage = {"input_tokens": 120, "output_tokens": 14, "total_tokens": 134}
-        self.raw = AIMessage(content=reply)
-        self.metadata = {"model_provider": "anthropic", "stop_reason": "end_turn"}
-
-    def factory(self, model: str, _catalog: ModelCatalog, _keys: ProviderKeys) -> FakeChat:
-        self.built.append(model)
-        return self
-
-    def with_structured_output(self, schema: dict[str, Any], **kwargs: Any) -> FakeChat:
-        self.bindings.append((schema, kwargs))
-        return self
-
-    async def ainvoke(self, messages: Sequence[BaseMessage]) -> dict[str, Any]:
-        self.invocations.append(messages)
-        if self.error is not None:
-            raise self.error
-        self.raw = AIMessage(
-            content=self.reply, response_metadata=self.metadata, usage_metadata=self.usage
-        )
-        try:
-            parsed = json.loads(self.reply)
-        except json.JSONDecodeError as error:
-            return {"raw": self.raw, "parsed": None, "parsing_error": error}
-        return {"raw": self.raw, "parsed": parsed, "parsing_error": None}
-
-
 # meiva:note
 # One idle agent whose newest message is a question, plus a service with model doubles.
 class Harness:
@@ -152,8 +100,10 @@ class Harness:
         self.database = database
         self.catalog: ModelCatalog | CatalogLoadFailure = catalog
         self.policy = default_policy()
-        self.decide = FakeDecide()
-        self.chat = FakeChat()
+        self.decide = ScriptedDecide(useful_reply(0.9))
+        self.chat = ScriptedDraftModel(
+            '{"suggestions": ["Yes, go ahead.", "Wait, explain the plan first."]}'
+        )
         self.service = ReplySuggestionService(decide=self.decide, draft_model=self.chat.factory)
         self.rendering = TimestampPolicy(clock=Clock.from_settings(), timestamps_enabled=False)
         self.agent_id = self._create_idle_agent()
