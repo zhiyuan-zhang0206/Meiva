@@ -7,6 +7,10 @@ module. The real exec is not unit-tested (it replaces the process); the testable
 surface is the pure helpers, launch ordering, and the POSIX exec path.
 """
 
+from __future__ import annotations
+
+import json
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -56,13 +60,22 @@ def test_main_asserts_capable_then_execvps_chrome(
     def fake_assert_browser_capable(*, host: Host) -> None:
         order.append("capable")
 
+    fake_chrome = tmp_path / "chrome"
+    argv_out = tmp_path / "argv.json"
+    fake_chrome.write_text(
+        f"#!{sys.executable}\n"
+        "import json, pathlib, sys\n"
+        f"pathlib.Path({str(argv_out)!r}).write_text(json.dumps(sys.argv), encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    fake_chrome.chmod(0o755)
     monkeypatch.setattr(bd, "assert_browser_capable", fake_assert_browser_capable)
     monkeypatch.setattr(
         bd,
         "cdp_reachable",
         lambda _p: (order.append("port"), False)[1],  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(bd, "resolve_chrome_binary", lambda _chrome, **_kwargs: "/chrome")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(bd, "resolve_chrome_binary", lambda _chrome, **_kwargs: str(fake_chrome))  # pyright: ignore[reportUnknownArgumentType]
 
     def _profile() -> Path:
         order.append("profile")
@@ -80,22 +93,12 @@ def test_main_asserts_capable_then_execvps_chrome(
     monkeypatch.setattr(bd, "logs_dir", lambda: tmp_path)
     monkeypatch.setattr(settings.services, "app_port", 3001)
     monkeypatch.setattr(settings.gateway, "gateway_url", "http://10.0.0.72:8000")
-    monkeypatch.setattr(bd.os, "open", lambda *_a, **_k: 99)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(bd.os, "dup2", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(bd.os, "close", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType]
-    captured_file = ""
-    captured_args: list[str] = []
-
-    def _fake_execvp(file: str, args: list[str]) -> None:
-        nonlocal captured_file, captured_args
-        order.append("exec")
-        captured_file = file
-        captured_args = args
-
-    monkeypatch.setattr(bd.os, "execvp", _fake_execvp)
-    bd.main(restore_last_session=restore)
-    assert order == ["capable", "port", "ready", "profile", "exec"]
-    assert captured_file == "/chrome"
+    with pytest.raises(SystemExit) as exc:
+        bd.main(restore_last_session=restore)
+    assert exc.value.code == 1
+    captured_args: list[str] = json.loads(argv_out.read_text(encoding="utf-8"))
+    assert order == ["capable", "port", "ready", "profile"]
+    assert captured_args[0] == str(fake_chrome)
     # main() takes the port from settings, and a cluster gets one out of its own
     # port block — a literal here only holds on a default-home install.
     assert f"--remote-debugging-port={settings.services.browser_cdp_port}" in captured_args
@@ -131,17 +134,8 @@ def test_cdp_reachable_false_on_connection_refused(monkeypatch: pytest.MonkeyPat
     assert bd.cdp_reachable(9222) is False
 
 
-def test_launch_execs_in_place_on_posix(monkeypatch: pytest.MonkeyPatch) -> None:
-    """POSIX keeps `os.execvp`: the pane's process BECOMES Chrome, so there is
-    one pid and killing the pane kills the browser."""
-    captured: list[tuple[str, list[str]]] = []
-    monkeypatch.setattr(bd.os, "execvp", lambda f, a: captured.append((f, a)))  # pyright: ignore[reportUnknownArgumentType]
-    bd.exec_chrome("/chrome", ["/chrome", "--remote-debugging-port=9222"])
-    assert captured == [("/chrome", ["/chrome", "--remote-debugging-port=9222"])]
-
-
 def test_main_refuses_when_cdp_port_already_served(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     """A Chrome already on the CDP port (e.g. a hand-started one holding the
     profile lock) makes main() refuse with a non-zero exit and never exec a
@@ -153,16 +147,87 @@ def test_main_refuses_when_cdp_port_already_served(
 
     monkeypatch.setattr(bd, "assert_browser_capable", fake_assert_browser_capable)
     monkeypatch.setattr(bd, "cdp_reachable", lambda _p: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(bd, "profile_dir", lambda: Path("/x/chrome-profile"))
-    monkeypatch.setattr(
-        bd.os,
-        "execvp",
-        lambda *_a: pytest.fail("execvp must not run when the port is taken"),  # pyright: ignore[reportUnknownArgumentType]
-    )
+    monkeypatch.setattr(bd, "profile_dir", lambda: tmp_path / "chrome-profile")
     with pytest.raises(SystemExit) as exc:
         bd.main()
     assert exc.value.code == 1
     assert "already served" in capsys.readouterr().err
+
+
+# meiva:note
+# plan_port_occupancy decides between launching directly, adopting our cluster's healthy
+# Chrome, reaping our wedged Chrome before relaunching, or refusing a foreign Chrome.
+def test_plan_port_occupancy() -> None:
+    assert bd.plan_port_occupancy(reachable=False, holder_pid=None, cdp_healthy=False) == "launch"
+    assert bd.plan_port_occupancy(reachable=True, holder_pid=4242, cdp_healthy=True) == "adopt"
+    assert (
+        bd.plan_port_occupancy(reachable=True, holder_pid=4242, cdp_healthy=False)
+        == "reap_and_launch"
+    )
+    assert bd.plan_port_occupancy(reachable=True, holder_pid=None, cdp_healthy=True) == "refuse"
+
+
+# meiva:note
+# watch_step returns 0 on stop, None while either the spawned handle or a cluster Chrome PID
+# is alive, and a non-zero exit code once both are gone.
+def test_watch_step() -> None:
+    assert (
+        bd.watch_step(stopping=True, proc_running=True, proc_returncode=None, cluster_pids=[4242])
+        == 0
+    )
+    assert (
+        bd.watch_step(stopping=False, proc_running=True, proc_returncode=None, cluster_pids=[])
+        is None
+    )
+    assert (
+        bd.watch_step(stopping=False, proc_running=False, proc_returncode=0, cluster_pids=[4242])
+        is None
+    )
+    assert (
+        bd.watch_step(stopping=False, proc_running=False, proc_returncode=0, cluster_pids=[]) == 1
+    )
+    assert (
+        bd.watch_step(stopping=False, proc_running=False, proc_returncode=2, cluster_pids=[]) == 2
+    )
+
+
+# meiva:note
+# SIGTERM to the keeper unit must exit watch_chrome cleanly (no SystemExit) and leave the
+# detached child process running in its own session.
+def test_watch_chrome_exits_zero_on_sigterm_without_killing_browser(tmp_path: Path) -> None:
+    child_script = tmp_path / "keep_alive.py"
+    child_script.write_text(
+        f"#!{sys.executable}\n"
+        "import os, signal, time\n"
+        "time.sleep(0.05)\n"
+        "os.kill(os.getppid(), signal.SIGTERM)\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    child_script.chmod(0o755)
+    proc = bd.spawn_chrome(str(child_script), [str(child_script)])
+    try:
+        bd.watch_chrome(tmp_path, proc, poll_interval_s=0.01)
+        assert proc.poll() is None
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+# meiva:note
+# When the child exits on its own and no cluster Chrome remains on the profile, watch_chrome
+# exits non-zero so meiva-root respawns the browser unit.
+def test_watch_chrome_exits_nonzero_when_browser_disappears(tmp_path: Path) -> None:
+    child_script = tmp_path / "exit_zero.py"
+    child_script.write_text(
+        f"#!{sys.executable}\nraise SystemExit(0)\n",
+        encoding="utf-8",
+    )
+    child_script.chmod(0o755)
+    proc = bd.spawn_chrome(str(child_script), [str(child_script)])
+    with pytest.raises(SystemExit) as exc:
+        bd.watch_chrome(tmp_path, proc, poll_interval_s=0.01)
+    assert exc.value.code == 1
 
 
 def test_chrome_args_restores_the_last_session_only_on_request(tmp_path: Path) -> None:

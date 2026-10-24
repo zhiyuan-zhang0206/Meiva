@@ -30,6 +30,9 @@ BROWSER_SESSION = "browser"
 # `keep_infra` is None exactly on a host without the gateway capability (no local data
 # plane); every other choice is a required explicit answer. `announce` says whether this
 # stop tells the gateway and records a stand-down (a restart's stop leg does neither).
+# `keep_browser_unit` keeps the root-supervised `browser` unit in `meiva-root` during an
+# in-place `meiva restart`; an ordinary `meiva stop --keep-browser` stops the keeper unit
+# so `meiva-root` itself stops while the detached Chrome process stays running.
 @dataclass(frozen=True)
 class StopChoices:
     keep_infra: bool | None
@@ -39,6 +42,7 @@ class StopChoices:
     announce: bool
     teardown_extras: bool
     force: bool
+    keep_browser_unit: bool = False
 
 
 # meiva:note

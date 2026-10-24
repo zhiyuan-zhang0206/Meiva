@@ -95,19 +95,20 @@ def services(*preserve: str, force: bool = False, phase: str = "services") -> St
 def test_a_normal_stop_closes_the_shell_sessions_between_the_two_service_stops() -> None:
     # meiva:note
     # The pty-sessions unit outlives the services phase: it holds the shells it closes, and
-    # goes down only once nothing is left in it.
+    # goes down only once nothing is left in it. Keeping the browser keeps the detached Chrome
+    # process while stopping the root keeper unit so meiva-root itself stops.
     assert steps(choices()) == (
         ClearServing(),
-        services("browser", PTY),
+        services(PTY),
         CloseShellSessions(direct_db=False, force=False),
-        services("browser", phase="pty-sessions"),
+        services(phase="pty-sessions"),
     )
 
 
 def test_keeping_the_shell_sessions_keeps_their_service_and_closes_nothing() -> None:
     assert steps(choices(keep_shell_sessions=True)) == (
         ClearServing(),
-        services("browser", PTY),
+        services(PTY),
     )
 
 
@@ -163,9 +164,9 @@ def test_a_host_without_the_gateway_capability_has_no_data_plane_step_and_dials_
 def test_a_kept_service_stays_up_through_both_service_stops() -> None:
     assert steps(choices(preserve=frozenset({"frontend"}))) == (
         ClearServing(),
-        services("browser", "frontend", PTY),
+        services("frontend", PTY),
         CloseShellSessions(direct_db=False, force=False),
-        services("browser", "frontend", phase="pty-sessions"),
+        services("frontend", phase="pty-sessions"),
     )
 
 
@@ -220,9 +221,9 @@ def test_a_restart_stop_leg_on_a_host_without_a_gateway_has_no_data_plane_choice
 def test_a_force_stop_interrupts_the_services_then_closes_the_shells_through_the_service() -> None:
     assert steps(choices(force=True)) == (
         ClearServing(),
-        services("browser", PTY, force=True),
+        services(PTY, force=True),
         CloseShellSessions(direct_db=False, force=True),
-        services("browser", force=True, phase="pty-sessions"),
+        services(force=True, phase="pty-sessions"),
         SkipDataPlane(DataPlane.NONE),
     )
 
@@ -242,7 +243,7 @@ def test_a_force_stop_keeping_the_shell_sessions_closes_none() -> None:
     plan = steps(choices(force=True, keep_shell_sessions=True))
     assert plan == (
         ClearServing(),
-        services("browser", PTY, force=True),
+        services(PTY, force=True),
         SkipDataPlane(DataPlane.NONE),
     )
 
@@ -266,7 +267,7 @@ def test_a_force_stop_narrates_a_kept_data_plane_and_stops_one_that_is_not(
 
 def test_a_force_stop_lists_the_service_tree_against_the_units_it_keeps() -> None:
     scope = plan_stop(choices(force=True, keep_shell_sessions=True), RUNNER, WINDOW).scope
-    assert scope.force and scope.tree_preserve == frozenset({"browser", PTY})
+    assert scope.force and scope.tree_preserve == frozenset({PTY})
     assert plan_stop(choices(), RUNNER, WINDOW).scope.tree_preserve is None
 
 
@@ -386,7 +387,7 @@ def test_a_compatible_extras_choice_is_admitted(
 def test_a_force_stop_needs_no_roster_and_so_checks_the_kept_services_against_none() -> None:
     offline = replace(RUNNER, roster=None)
     plan = plan_stop(choices(force=True, preserve=frozenset({"nonesuch"})), offline, WINDOW)
-    assert services("browser", "nonesuch", PTY, force=True) in plan.steps
+    assert services("nonesuch", PTY, force=True) in plan.steps
 
 
 def test_a_stop_that_is_not_forced_cannot_be_planned_without_the_roster() -> None:

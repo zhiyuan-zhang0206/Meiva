@@ -88,11 +88,11 @@ def test_a_stop_downs_the_services_then_the_pty_sessions_unit_and_leaves_what_it
     asked = verbs(root.calls)
     assert asked[0] == ("down", "agent-host"), "the services phase comes first"
     assert asked[-1] == ("down", "pty-sessions"), "the pty-sessions unit goes down last"
-    assert {unit for _verb, unit in asked} == {"agent-host", "pty-sessions"}
+    assert {unit for _verb, unit in asked} == {"agent-host", "browser", "pty-sessions"}
     assert [row.state for row in root.units.values()] == [
         "stopped",
         "running",
-        "running",
+        "stopped",
         "stopped",
     ]
 
@@ -109,7 +109,7 @@ def test_keeping_the_shell_sessions_keeps_their_service_running_in_the_tree(
             retained_children=[],
         )
     assert rc == 0
-    assert verbs(root.calls) == [("down", "agent-host")]
+    assert verbs(root.calls) == [("down", "agent-host"), ("down", "browser")]
     assert root.units["pty-sessions"].state == "running"
 
 
@@ -201,7 +201,7 @@ def test_a_force_stop_lists_the_live_service_tree_before_it_asks_and_stops_only_
     assert "The following will be stopped:" in out
     # meiva:note
     # The units the stop will down, by their session names; what it keeps is left out.
-    assert "service sessions: meiva-agent-host, meiva-pty-sessions" in out
+    assert "service sessions: meiva-agent-host, meiva-browser, meiva-pty-sessions" in out
     assert "browser: kept up (meiva-browser, login session preserved)" in out
     assert ("confirm? [y/N] " in out) and (("aborted" in out) is not stops)
     assert (len(verbs(root.calls)) > 0) is stops

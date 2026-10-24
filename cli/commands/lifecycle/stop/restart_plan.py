@@ -133,6 +133,7 @@ def restart_stop_request(request: RestartRequest, *, roles: frozenset[str]) -> S
         announce=False,
         teardown_extras=request.restart_extras,
         force=request.force,
+        keep_browser_unit=request.keep_browser,
     )
     return StopRequest(
         choices,
