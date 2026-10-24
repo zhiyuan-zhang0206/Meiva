@@ -1,7 +1,8 @@
-exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains", "profiles.py", "runtime_config.py", "service_read.py", "tests"]
+exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains", "env_changed.py", "profiles.py", "runtime_config.py", "service_read.py", "tests"]
 
 [purity]
 "base.py" = "strict-to-be"
+"env_changed.py" = "strict"
 "lite_parse.py" = "strict"
 "profiles.py" = "strict"
 "wiring.py" = "strict"
@@ -14,7 +15,7 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 "agent_pins.py" = ["config_registry.py"]
 "config_registry.py" = ["base.py", "domains", "profiles.py"]
 "domains" = ["base.py"]
-"runtime_config.py" = ["config_registry.py"]
+"runtime_config.py" = ["config_registry.py", "env_changed.py"]
 "service_read.py" = ["config_registry.py", "domains", "runtime_config.py"]
 "tests" = ["__init__.py", "_full.py", "_lite.py", "admin", "base.py", "config_registry.py", "lite_parse.py", "runtime_config.py", "service_read.py"]
 

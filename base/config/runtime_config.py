@@ -36,6 +36,7 @@ from typing import Any, cast, get_origin
 
 from dotenv import set_key, unset_key
 
+from base.config.env_changed import EnvChangedError
 from base.host.env import dotenv_file
 from base.host.env.dotenv_file import (
     ENV_LOCK_TIMEOUT_S,
@@ -126,7 +127,7 @@ def _check_digest(path: Path, expected_digest: str | None) -> None:
 
     current = path.read_bytes() if path.exists() else b""
     if hashlib.sha256(current).hexdigest() != expected_digest:
-        raise RuntimeError(".env changed before owned runtime-config write")
+        raise EnvChangedError
 
 
 def _rewrite_env(

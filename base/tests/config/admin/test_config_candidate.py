@@ -14,6 +14,7 @@ import pytest
 
 from base.config import runtime_config
 from base.config.admin.candidate import EnvPatchValidation
+from base.config.env_changed import EnvChangedError
 
 type EnvPatchValidator = Callable[[dict[str, object], set[str]], list[str]]
 
@@ -137,7 +138,7 @@ def test_stale_candidate_digest_cannot_persist_an_invalid_combination(
     _write(
         configured_env, {"exec_timeout_seconds": 1000}, expected_digest=raise_inner.expected_digest
     )
-    with pytest.raises(RuntimeError, match="changed before owned runtime-config write"):
+    with pytest.raises(EnvChangedError):
         _write(
             configured_env,
             {"exec_node_timeout_seconds": 900},
