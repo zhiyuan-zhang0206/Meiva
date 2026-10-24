@@ -170,10 +170,17 @@ def test_embed_framing_drip_deadline(
     timeout = 0.2
     monkeypatch.setattr(resilience, "retry_sleep", time.sleep)
     monkeypatch.setattr(resilience, "retry_asleep", asyncio.sleep)
+    classified: list[Exception] = []
+
+    def classify(exc: Exception) -> bool:
+        classified.append(exc)
+        return resilience.http_classifier(exc)
+
     policy = Policy(
         max_attempts=attempts,
         backoff=ExponentialBackoff(base=0.001, factor=1, cap=0.001),
         jitter_span=0,
+        classify=classify,
     )
     framing_started = threading.Event()
     with embedding_server(framing=framing, framing_started=framing_started) as (
@@ -206,7 +213,12 @@ def test_embed_framing_drip_deadline(
                 )
         elapsed = time.monotonic() - started
         assert isinstance(error.value.__cause__, httpx.ReadTimeout)
-        assert len(requests) == attempts
+        assert len(classified) == attempts - 1
+        assert all(isinstance(exc, httpx.ReadTimeout) for exc in classified)
+        # meiva:note
+        # The total deadline can expire before a request reaches the server.
+        # Retry failures, rather than observed POSTs, count client attempts.
+        assert 1 <= len(requests) <= attempts
         assert framing_started.is_set()
         assert attempts * timeout <= elapsed < attempts * (timeout + 0.2)
         assert elapsed < 2
