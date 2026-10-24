@@ -12,6 +12,9 @@ exports = ["analysis.py", "cli.py", "enumerations.py", "sync.py"]
 "manifest_text.py" = "strict"
 "rule.py" = "strict"
 
+[roots]
+"cli.py" = { kinds = ["cwd"], why = "CLI composition root captures the working directory once for repository and relative-path inputs" }
+
 [uses]
 "ambient_read.py" = ["debt.py", "manifest.py", "policy.py"]
 "analysis.py" = ["ambient_read.py", "debt.py", "ledger.py", "manifest.py", "policy.py", "rule.py"]

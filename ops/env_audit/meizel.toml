@@ -7,3 +7,7 @@
 "integrity_plan.py" = "strict"
 "redaction.py" = "strict"
 "write_record.py" = "strict"
+
+[debt.ambient-read]
+"__init__.py#clock datetime.datetime.now" = 2
+"__init__.py#pid os.getpid" = 1

@@ -17,4 +17,9 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 "export_process.py" = { kinds = ["settings"], why = "Tool entry composes its process resources from the launch configuration" }
 
 [debt.ambient-read]
+"accounting.py#clock datetime.datetime.now" = 1
+"classify_paths.py#cwd pathlib.Path.cwd" = 1
 "export_process.py#db base.db.Database.from_settings" = 1
+"pr_flow_export.py#clock datetime.datetime.now" = 1
+"pr_flow_export.py#home pathlib.Path.home" = 1
+"runs_export.py#clock datetime.datetime.now" = 1

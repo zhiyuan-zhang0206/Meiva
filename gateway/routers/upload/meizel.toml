@@ -8,3 +8,6 @@ exports = ["batches.py", "router.py"]
 [purity]
 "__init__.py" = "strict"
 "upload_plan.py" = "strict"
+
+[debt.ambient-read]
+"batches.py#random uuid.uuid4" = 2

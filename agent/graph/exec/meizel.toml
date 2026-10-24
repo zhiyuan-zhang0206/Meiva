@@ -23,3 +23,11 @@ exports = ["node.py", "output.py", "process.py", "tests"]
 
 [roots]
 "process.py" = { kinds = ["environ"], why = "read_parent_facts copies the LIVE parent env, which plan_child_launch (in _child_boundary.py) layers the exec protocol vars on top of — a whole-environment child handoff (same class as base/sessions/env_forwarding.py / ops/agent_launch.py); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env" }
+
+[debt.ambient-read]
+"_crop.py#random uuid.uuid4" = 1
+"_output_pipe.py#clock time.monotonic" = 3
+"_subprocess.py#clock time.monotonic" = 4
+"node.py#clock datetime.datetime.now" = 4
+"process.py#cwd pathlib.Path.cwd" = 1
+"process.py#home pathlib.Path.home" = 1

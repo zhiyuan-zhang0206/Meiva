@@ -21,3 +21,7 @@ exports = ["metrics.py"]
 "_repair_text.py" = "strict"
 "_ruff_plan.py" = "strict"
 "plugin.py" = "strict"
+
+[debt.ambient-read]
+"_llm_repair.py#clock time.time_ns" = 1
+"agent_runtime.py#clock datetime.datetime.now" = 1

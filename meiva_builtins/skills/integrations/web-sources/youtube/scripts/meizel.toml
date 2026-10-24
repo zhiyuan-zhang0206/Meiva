@@ -4,3 +4,6 @@ exports = ["feed.py"]
 "yt_plan.py" = "strict"
 "yt_post.py" = "strict"
 "yt_wire.py" = "strict"
+
+[debt.ambient-read]
+"yt_run.py#clock datetime.datetime.now" = 1

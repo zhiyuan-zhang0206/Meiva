@@ -10,36 +10,8 @@ from scripts.lint.diagnostics.diff_hints.tests.support import ROLES, hints, site
 # meiva:note
 # Each case: the hint id, the path of the file, a source that must raise the hint and a
 # source that must not. Production hints look at application packages, test hints at
-# tests, and a composition root is found by its file name.
+# tests; service-locator recognizes declared settings roots and legacy entry filenames.
 CASES = [
-    pytest.param(
-        HintId.AMBIENT_READ,
-        "cli/x.py",
-        "import time\n\ndef f():\n    return time.time()\n",
-        "import time\n\ndef f(now: float):\n    time.sleep(1)\n    return now\n",
-        id="ambient-clock",
-    ),
-    pytest.param(
-        HintId.AMBIENT_READ,
-        "cli/x.py",
-        "from datetime import UTC, datetime\n\ndef f():\n    return datetime.now(UTC)\n",
-        "from datetime import datetime\n\ndef f(now: datetime):\n    return now\n",
-        id="ambient-datetime",
-    ),
-    pytest.param(
-        HintId.AMBIENT_READ,
-        "cli/x.py",
-        "import os\nfrom pathlib import Path\n\ndef f():\n    return os.environ, Path.home()\n",
-        "from pathlib import Path\n\ndef f(home: Path):\n    return home / 'x'\n",
-        id="ambient-environment",
-    ),
-    pytest.param(
-        HintId.AMBIENT_READ,
-        "cli/x.py",
-        "from base.config import settings\n\ndef f():\n    return settings.agent\n",
-        "from base.config import settings\n\ndef f(config: object):\n    return config\n",
-        id="ambient-settings",
-    ),
     pytest.param(
         HintId.CALLABLE_DEFAULT,
         "cli/x.py",
@@ -269,12 +241,11 @@ def test_a_hint_fires_on_its_shape_and_not_on_the_clean_shape(
 
 
 def test_a_composition_root_is_found_by_its_file_name() -> None:
-    clock = "import time\n\ndef f():\n    return time.time()\n"
     locator = "def f(request):\n    return request.app.state.thing\n"
-    assert hints(clock, "cli/main.py") == []
-    assert hints(clock, "cli/commands/runtime.py") == []
+    assert hints(locator, "cli/main.py") == []
+    assert hints(locator, "cli/commands/runtime.py") == []
     assert hints(locator, "gateway/app.py") == []
-    assert hints(clock, "cli/other.py") == [HintId.AMBIENT_READ]
+    assert hints(locator, "cli/other.py") == [HintId.SERVICE_LOCATOR]
 
 
 def test_a_sleep_in_a_helper_script_is_the_real_resource_not_a_seam() -> None:
@@ -296,23 +267,23 @@ def test_a_protocol_fires_above_base_and_not_in_base() -> None:
 
 
 def test_production_hints_do_not_judge_tests_and_test_hints_do_not_judge_production() -> None:
-    clock = "import time\n\ndef f():\n    return time.time()\n"
-    assert hints(clock, "cli/tests/test_x.py") == []
+    locator = "def f(request):\n    return request.app.state.thing\n"
+    assert hints(locator, "cli/tests/test_x.py") == []
     spy = "def f(m):\n    m.assert_called_once()\n"
     assert hints(spy, "cli/x.py") == []
 
 
 def test_files_outside_the_application_and_test_packages_are_not_judged() -> None:
-    clock = "import time\n\ndef f():\n    return time.time()\n"
-    assert hints(clock, "scripts/x.py") == []
-    assert hints(clock, "docs/x.txt") == []
+    locator = "def f(request):\n    return request.app.state.thing\n"
+    assert hints(locator, "scripts/x.py") == []
+    assert hints(locator, "docs/x.txt") == []
 
 
 def test_only_added_lines_raise_a_hint() -> None:
-    source = "import time\n\ndef f():\n    return time.time()\n\ndef g():\n    return time.time()\n"
-    assert [s.line for s in sites(source)] == [4, 7]
-    assert [s.line for s in sites(source, added=frozenset({7}))] == [7]
-    assert sites(source, added=frozenset({1, 2})) == []
+    source = "def f(r):\n    return r.app.state.a\n\ndef g(r):\n    return r.app.state.b\n"
+    assert [s.line for s in sites(source)] == [2, 5]
+    assert [s.line for s in sites(source, added=frozenset({5}))] == [5]
+    assert sites(source, added=frozenset({1, 3})) == []
 
 
 def test_a_file_that_does_not_parse_raises_nothing() -> None:
@@ -368,17 +339,6 @@ def test_a_sleep_that_paces_a_poll_is_the_real_resource_form() -> None:
     waiting = "import time\n\ndef test_a():\n    time.sleep(0.2)\n"
     assert hints(polling, "cli/tests/test_x.py") == []
     assert hints(waiting, "cli/tests/test_x.py") == [HintId.TEST_SEAM]
-
-
-def test_a_clock_handed_to_a_call_as_its_now_is_the_form_the_hint_asks_for() -> None:
-    handed = "from datetime import UTC, datetime\n\ndef f():\n    return g(now=datetime.now(UTC), finished_at=datetime.now(UTC))\n"
-    kept = "from datetime import UTC, datetime\n\ndef f():\n    return g(label=datetime.now(UTC))\n"
-    assert hints(handed) == []
-    assert hints(kept) == [HintId.AMBIENT_READ]
-
-
-def test_a_generated_id_is_not_an_ambient_read() -> None:
-    assert hints("import uuid\n\ndef f():\n    return uuid.uuid4().hex\n") == []
 
 
 def test_a_sleep_inside_a_fake_s_handler_is_the_behavior_it_simulates() -> None:
@@ -465,40 +425,12 @@ def test_freezing_a_class_that_already_held_a_list_is_asked() -> None:
     assert sites(source, added=frozenset({1})) == []
 
 
-def test_an_interval_clock_asks_only_where_the_function_also_sleeps() -> None:
-    duration = "import time\n\ndef f():\n    started = time.monotonic()\n    return time.monotonic() - started\n"
-    polling = (
-        "import time\n\ndef f():\n    deadline = time.monotonic() + 3\n"
-        "    while time.monotonic() < deadline:\n        time.sleep(0.1)\n"
-    )
-    asyncio_poll = (
-        "import asyncio\nimport time\n\nasync def f():\n    t = time.perf_counter()\n"
-        "    await asyncio.sleep(1)\n    return t\n"
-    )
-    nested = (
-        "import time\n\ndef f():\n    def g():\n        return time.monotonic()\n"
-        "    time.sleep(1)\n    return g\n"
-    )
-    assert hints(duration) == []
-    assert [s.hint for s in sites(polling)] == [HintId.AMBIENT_READ] * 2
-    assert hints(asyncio_poll) == [HintId.AMBIENT_READ]
-    assert hints(nested) == []
+def test_a_non_settings_root_still_reports_service_locator_reads() -> None:
+    source = "def inputs(request):\n    return request.app.state.thing\n"
+    found = sites(source, "cli/worker.py", roots=frozenset({AmbientKind.ENVIRON}))
+    assert [site.hint for site in found] == [HintId.SERVICE_LOCATOR]
 
 
-def test_the_wall_clock_always_asks() -> None:
-    wall = "import time\nfrom datetime import UTC, datetime\n\ndef f():\n    return time.time(), datetime.now(UTC)\n"
-    assert hints(wall) == [HintId.AMBIENT_READ, HintId.AMBIENT_READ]
-
-
-def test_declared_roots_exempt_only_their_actual_ambient_kinds() -> None:
-    source = "import os\nimport time\n\nx = os.environ['A']\ny = time.time()\n"
-    declared = sites(source, "base/host/env/registry.py", roots=frozenset({AmbientKind.ENVIRON}))
-    assert [(site.hint, site.line) for site in declared] == [(HintId.AMBIENT_READ, 5)]
-
-
-def test_a_settings_root_can_assemble_inputs_from_the_process() -> None:
-    source = "from base.config import settings\n\nx = settings.service\n"
-    assert (
-        sites(source, "services/wake/heartbeat/daemon.py", roots=frozenset({AmbientKind.SETTINGS}))
-        == []
-    )
+def test_a_settings_root_can_assemble_inputs_from_the_application() -> None:
+    source = "def inputs(request):\n    return request.app.state.thing\n"
+    assert sites(source, "cli/worker.py", roots=frozenset({AmbientKind.SETTINGS})) == []

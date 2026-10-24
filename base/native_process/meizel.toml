@@ -18,3 +18,16 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 "child_env.py" = { kinds = ["environ"], why = "centralized process-protocol seam: copies the complete live env, consumes one-shot markers, and adopts a child's committed handoff; Settings cannot model dynamic per-process state" }
 "os_platform.py" = { kinds = ["environ"], why = "launchd_job_label reads the per-process XPC_SERVICE_NAME scheduler identity" }
 "ownership.py" = { kinds = ["environ"], why = "process_metadata records CODEX_HOME, the provider routing context the impersonation relay spec needs — a child-env handoff read, not persisted cluster config" }
+
+[debt.ambient-read]
+"__init__.py#platform sys.platform" = 3
+"exec_domain.py#platform sys.platform" = 1
+"os_platform.py#clock time.monotonic" = 2
+"os_platform.py#home pathlib.Path.home" = 1
+"os_platform.py#pid os.getpid" = 1
+"os_platform.py#pid os.getuid" = 1
+"os_platform.py#platform platform.machine" = 1
+"os_platform.py#platform sys.platform" = 3
+"ownership.py#pid os.getpid" = 1
+"ownership.py#platform sys.platform" = 6
+"pidfd.py#platform sys.platform" = 1

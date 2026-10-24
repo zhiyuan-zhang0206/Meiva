@@ -14,3 +14,7 @@ exports = ["diagnostic_probes.py", "manifests.py"]
 
 [debt.ambient-read]
 "diagnostic_probes.py#settings base.config.settings" = 1
+"diagnostics.py#clock time.time" = 3
+"drill.py#clock time.time" = 1
+"glue.py#cwd pathlib.Path.cwd" = 1
+"glue.py#platform sys.platform" = 1

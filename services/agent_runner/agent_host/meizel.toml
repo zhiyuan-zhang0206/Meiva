@@ -20,4 +20,10 @@ exports = ["daemon.py", "host.py", "invocation", "lifecycle", "runtime.py", "set
 "daemon.py" = ["endpoints"]
 
 [debt.ambient-read]
+"daemon.py#pid os.getpid" = 1
+"dispatcher.py#clock datetime.datetime.now" = 1
+"dispatcher.py#clock time.monotonic" = 2
 "dispatcher.py#settings base.config.settings" = 1
+"exec_memory_guard.py#pid os.getpid" = 1
+"health_routes.py#pid os.getpid" = 1
+"host.py#random uuid.uuid4" = 1

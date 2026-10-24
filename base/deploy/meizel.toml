@@ -11,4 +11,5 @@ exports = ["git", "lifecycle", "progress_timeout.py", "release", "schedule_timin
 "schedule_timing.py" = "strict"
 
 [debt.ambient-read]
+"start_trace.py#pid os.getpid" = 1
 "timing.py#settings base.config.settings" = 1

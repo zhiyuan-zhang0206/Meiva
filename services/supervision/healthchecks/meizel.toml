@@ -12,5 +12,6 @@ exports = ["browser_reach.py", "frontend.py", "gate.py", "lgtm.py", "memory_sear
 "browser_mcp.py#settings base.config.settings" = 1
 "frontend.py#settings base.config.settings" = 1
 "gateway.py#settings base.config.settings" = 1
+"lgtm.py#clock time.time_ns" = 2
 "otel_collector.py#settings base.config.settings" = 1
 "protocol_probe.py#settings base.config.settings" = 1

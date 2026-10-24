@@ -26,26 +26,6 @@ class HintSpec:
     see: str
 
 
-def _spec_ambient_read() -> HintSpec:
-    return HintSpec(
-        why=(
-            "a decision that reads the clock, the environment, the platform or the settings "
-            "itself cannot be tested with values and silently depends on when and where it "
-            "runs; the composition root reads once and passes the value down."
-        ),
-        instead=(
-            "1) take the value as a parameter (`now`, `home`, a field of a frozen `XxxConfig`) "
-            "and let the root read it once; 2) if the read sits inside a loop or a retry, lift "
-            "the decision into a pure function of `now` and the previous state and keep the "
-            "sleep in the shell; 3) a real resource does not apply, because what is read is data "
-            "and not an effect; 4) only a loop whose behavior is the interleaving takes `Timers` "
-            "or `Clock` from base/clock. If this file is a composition root or the system "
-            "implementation of a port, answer `composition root`."
-        ),
-        see=_FORMS,
-    )
-
-
 def _spec_callable_default() -> HintSpec:
     return HintSpec(
         why=(
@@ -281,7 +261,6 @@ def _spec_spy_assert() -> HintSpec:
 # id, so the text cannot lag the vocabulary.
 def _builders() -> dict[HintId, Callable[[], HintSpec]]:
     return {
-        HintId.AMBIENT_READ: _spec_ambient_read,
         HintId.CALLABLE_DEFAULT: _spec_callable_default,
         HintId.CALLABLE_BAG: _spec_callable_bag,
         HintId.NONE_FALLBACK: _spec_none_fallback,

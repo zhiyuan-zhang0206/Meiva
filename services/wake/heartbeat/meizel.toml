@@ -11,3 +11,7 @@ exports = ["daemon.py", "station_probe.py"]
 [roots]
 "daemon.py" = { kinds = ["bus", "settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 "station_probe.py" = { kinds = ["db", "settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+
+[debt.ambient-read]
+"completion_digest.py#clock datetime.datetime.now" = 1
+"daemon.py#pid os.getpid" = 1

@@ -8,3 +8,6 @@
 "python_source.py" = ["directives.py", "fixtures.py", "model.py"]
 "tests" = ["changes.py", "check.py", "cli.py", "model.py", "python_source.py", "typescript_index.py"]
 "typescript_index.py" = ["check.py", "model.py"]
+
+[debt.ambient-read]
+"cli.py#cwd pathlib.Path.cwd" = 1

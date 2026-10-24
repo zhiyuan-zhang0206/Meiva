@@ -11,4 +11,9 @@
 "collect.py" = ["db"]
 
 [debt.ambient-read]
+"aggregate.py#clock datetime.datetime.now" = 1
+"collect.py#clock datetime.datetime.now" = 1
 "daily_scan.py#settings base.config.settings" = 1
+"evaluate.py#clock datetime.datetime.now" = 2
+"evaluate.py#random uuid.uuid4" = 1
+"mine.py#clock datetime.datetime.now" = 1

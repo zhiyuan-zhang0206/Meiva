@@ -1,0 +1,6 @@
+[debt.ambient-read]
+"codebase_sweep_lite.py#clock datetime.datetime.now" = 1
+"codebase_sweep_lite.py#home pathlib.Path.home" = 1
+"codebase_sweep_lite.py#random uuid.uuid4" = 1
+"deep_research_lite.py#clock datetime.datetime.now" = 1
+"deep_research_lite.py#random uuid.uuid4" = 1

@@ -6,3 +6,7 @@ exports = ["feed.py"]
 
 [roots]
 "feed.py" = { kinds = ["environ"], why = "The command entry builds its scrape configuration from the process environment before invoking run" }
+
+[debt.ambient-read]
+"feed.py#clock datetime.datetime.now" = 1
+"feed.py#clock time.time" = 1

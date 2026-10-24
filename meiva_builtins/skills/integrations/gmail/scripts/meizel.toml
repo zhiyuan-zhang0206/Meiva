@@ -9,3 +9,9 @@ exports = ["feed.py"]
 
 [roots]
 "feed.py" = { kinds = ["environ"], why = "The script entry assembles Process and AuthSources from the process environment before invoking the command" }
+
+[debt.ambient-read]
+"feed.py#clock time.time" = 1
+"feed.py#home pathlib.Path.home" = 1
+"imap.py#clock datetime.datetime.now" = 1
+"smtp.py#clock time.time" = 1

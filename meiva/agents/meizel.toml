@@ -6,3 +6,6 @@ exports = ["peers.py"]
 
 [purity]
 "peers.py" = "strict"
+
+[debt.ambient-read]
+"__init__.py#clock datetime.datetime.now" = 1

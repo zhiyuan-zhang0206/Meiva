@@ -9,3 +9,10 @@ exports = ["agent_runtime.py", "plugin.py"]
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.ambient-read]
+"_state.py#home pathlib.Path.home" = 1
+"agent_runtime.py#clock datetime.datetime.now" = 2
+"agent_runtime.py#home pathlib.Path.home" = 1
+"plugin.py#clock datetime.datetime.now" = 1
+"plugin.py#home pathlib.Path.home" = 1

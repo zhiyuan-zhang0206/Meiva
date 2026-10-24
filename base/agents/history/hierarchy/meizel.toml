@@ -19,3 +19,6 @@ exports = ["build.py", "chunk_consumer.py", "chunk_plan.py", "chunks.py", "group
 [purity]
 "__init__.py" = "strict"
 "usage.py" = "strict"
+
+[debt.ambient-read]
+"group_consumer.py#random uuid.uuid4" = 1

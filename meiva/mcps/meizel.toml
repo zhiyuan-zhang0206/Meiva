@@ -17,6 +17,9 @@ exports = ["config.py", "tests"]
 
 [debt.ambient-read]
 "_daemon.py#settings base.config.settings" = 1
+"_guards.py#pid os.getpid" = 1
+"_remote.py#clock time.time" = 2
+"_tools.py#clock time.time" = 2
 
 [debt.third-party-patch]
 "_oauth.py#assignment mcp.client.auth.oauth2.OAuthContext.prepare_token_auth" = 1

@@ -37,18 +37,6 @@ _WHAT = {
     AmbientKind.PID: "the process identity",
     AmbientKind.RANDOM: "randomness",
 }
-# meiva:note
-# Rollout: the scanner records every kind, and the kinds below are judged. The rest follow in the
-# next change, which records the sites each of them holds today.
-_JUDGED = frozenset(
-    {
-        AmbientKind.SETTINGS,
-        AmbientKind.DB,
-        AmbientKind.ENDPOINTS,
-        AmbientKind.BUS,
-        AmbientKind.ENVIRON,
-    }
-)
 _HELD = frozenset({AmbientKind.SETTINGS, AmbientKind.DB, AmbientKind.ENDPOINTS, AmbientKind.BUS})
 # meiva:note
 # The three lines every ambient-read carries: the principle, the recipe and the rule.
@@ -139,7 +127,7 @@ def ambient_diagnostics(
         found.extend(
             _diagnostic(scan, acquisition, mode, owner)
             for acquisition in scan.ambient
-            if acquisition.kind in _JUDGED and acquisition.kind not in allowed
+            if acquisition.kind not in allowed
         )
     return found
 

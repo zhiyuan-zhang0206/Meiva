@@ -7,3 +7,7 @@ exports = ["conversation_query.py", "memory_note.py", "memory_recall.py", "skill
 [purity]
 "__init__.py" = "strict"
 "memory_note.py" = "strict"
+
+[debt.ambient-read]
+"memory_recall.py#clock datetime.datetime.now" = 1
+"skill_recall.py#clock datetime.datetime.now" = 1

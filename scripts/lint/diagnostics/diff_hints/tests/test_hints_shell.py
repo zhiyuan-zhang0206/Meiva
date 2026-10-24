@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 HINTS = Path(__file__).resolve().parents[1] / "hints.py"
-CLOCK_READ = "import time\n\n\ndef now() -> float:\n    return time.time()\n"
+LOCATOR = "def inputs(request):\n    return request.app.state.thing\n"
 
 
 # meiva:note
@@ -51,50 +51,46 @@ def message_file(repo: Path, text: str) -> str:
     return str(path)
 
 
-def stage_clock_read(repo: Path) -> None:
-    (repo / "cli" / "x.py").write_text(CLOCK_READ, encoding="utf-8")
+def stage_locator(repo: Path) -> None:
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
     git(repo, "add", "cli/x.py")
 
 
 def test_an_unanswered_hint_blocks_the_commit_message(repo: Path) -> None:
-    stage_clock_read(repo)
-    done = run(repo, "commit-msg", message_file(repo, "Read the clock\n"))
+    stage_locator(repo)
+    done = run(repo, "commit-msg", message_file(repo, "Fetch from the application\n"))
     assert done.returncode == 1
-    assert "cli/x.py:5: hint ambient-read" in done.stderr
+    assert "cli/x.py:2: hint service-locator" in done.stderr
     assert "why:" in done.stderr and "instead:" in done.stderr and "see:" in done.stderr
-    assert "Hint-Ack: ambient-read cli/x.py:5 -- <reason>" in done.stderr
+    assert "Hint-Ack: service-locator cli/x.py:2 -- <reason>" in done.stderr
 
 
 def test_a_line_trailer_answers_the_commit(repo: Path) -> None:
-    stage_clock_read(repo)
-    message = (
-        "Read the clock\n\nHint-Ack: ambient-read cli/x.py:5 -- composition root of the daemon\n"
-    )
+    stage_locator(repo)
+    message = "Fetch from the application\n\nHint-Ack: service-locator cli/x.py:2 -- composition root of the daemon\n"
     done = run(repo, "commit-msg", message_file(repo, message))
     assert done.returncode == 0, done.stderr
 
 
 def test_a_path_trailer_answers_every_site_in_the_file(repo: Path) -> None:
-    stage_clock_read(repo)
-    message = (
-        "Read the clock\n\nHint-Ack: ambient-read cli/x.py -- composition root of the daemon\n"
-    )
+    stage_locator(repo)
+    message = "Fetch from the application\n\nHint-Ack: service-locator cli/x.py -- composition root of the daemon\n"
     assert run(repo, "commit-msg", message_file(repo, message)).returncode == 0
 
 
 def test_a_trailer_for_another_line_leaves_the_hint_open(repo: Path) -> None:
-    stage_clock_read(repo)
-    message = (
-        "Read the clock\n\nHint-Ack: ambient-read cli/x.py:99 -- composition root of the daemon\n"
-    )
+    stage_locator(repo)
+    message = "Fetch from the application\n\nHint-Ack: service-locator cli/x.py:99 -- composition root of the daemon\n"
     done = run(repo, "commit-msg", message_file(repo, message))
     assert done.returncode == 1
     assert "matches no open site" in done.stderr
 
 
 def test_a_malformed_trailer_is_reported(repo: Path) -> None:
-    stage_clock_read(repo)
-    done = run(repo, "commit-msg", message_file(repo, "x\n\nHint-Ack: ambient-read cli/x.py:5\n"))
+    stage_locator(repo)
+    done = run(
+        repo, "commit-msg", message_file(repo, "x\n\nHint-Ack: service-locator cli/x.py:2\n")
+    )
     assert done.returncode == 1
     assert "this line is not an answer" in done.stderr
 
@@ -107,21 +103,21 @@ def test_a_commit_without_hints_passes(repo: Path) -> None:
 
 def test_the_branch_check_accepts_an_answer_in_any_commit_of_the_branch(repo: Path) -> None:
     git(repo, "switch", "-q", "-c", "work")
-    (repo / "cli" / "x.py").write_text(CLOCK_READ, encoding="utf-8")
-    commit(repo, "Read the clock")
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
+    commit(repo, "Fetch from the application")
     assert run(repo, "branch").returncode == 1
     (repo / "cli" / "y.py").write_text("VALUE = 3\n", encoding="utf-8")
     commit(
         repo,
-        "Another change\n\nHint-Ack: ambient-read cli/x.py:5 -- composition root of the daemon",
+        "Another change\n\nHint-Ack: service-locator cli/x.py:2 -- composition root of the daemon",
     )
     assert run(repo, "branch").returncode == 0
 
 
 def test_the_branch_check_judges_the_final_diff_not_each_commit(repo: Path) -> None:
     git(repo, "switch", "-q", "-c", "work")
-    (repo / "cli" / "x.py").write_text(CLOCK_READ, encoding="utf-8")
-    commit(repo, "Read the clock")
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
+    commit(repo, "Fetch from the application")
     (repo / "cli" / "x.py").write_text("VALUE = 1\n", encoding="utf-8")
     commit(repo, "Take it back out")
     assert run(repo, "branch").returncode == 0
@@ -136,33 +132,35 @@ def test_the_branch_check_needs_origin_main(repo: Path) -> None:
 
 def test_report_lists_every_site_without_asking_for_answers(repo: Path) -> None:
     git(repo, "switch", "-q", "-c", "work")
-    (repo / "cli" / "x.py").write_text(CLOCK_READ, encoding="utf-8")
-    commit(repo, "Read the clock")
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
+    commit(repo, "Fetch from the application")
     done = run(repo, "report", "main", "HEAD")
     assert done.returncode == 0
-    assert done.stdout.startswith("cli/x.py:5: hint ambient-read")
+    assert done.stdout.startswith("cli/x.py:2: hint service-locator")
     as_json = run(repo, "report", "main", "HEAD", "--json")
-    assert '"hint": "ambient-read"' in as_json.stdout
+    assert '"hint": "service-locator"' in as_json.stdout
 
 
 def test_a_mnemonic_prefix_config_does_not_blind_the_hook(repo: Path) -> None:
     git(repo, "config", "diff.mnemonicPrefix", "true")
-    stage_clock_read(repo)
-    done = run(repo, "commit-msg", message_file(repo, "Read the clock\n"))
+    stage_locator(repo)
+    done = run(repo, "commit-msg", message_file(repo, "Fetch from the application\n"))
     assert done.returncode == 1
-    assert "cli/x.py:5: hint ambient-read" in done.stderr
+    assert "cli/x.py:2: hint service-locator" in done.stderr
 
 
 def test_a_no_prefix_config_does_not_blind_the_hook(repo: Path) -> None:
     git(repo, "config", "diff.noprefix", "true")
-    stage_clock_read(repo)
-    assert run(repo, "commit-msg", message_file(repo, "Read the clock\n")).returncode == 1
+    stage_locator(repo)
+    assert (
+        run(repo, "commit-msg", message_file(repo, "Fetch from the application\n")).returncode == 1
+    )
 
 
 def test_a_pure_rename_asks_nothing(repo: Path) -> None:
     (repo / "cli" / "tests").mkdir()
     spy = "def test_a(m):\n    m.assert_called_once_with(1)\n"
-    (repo / "cli" / "x.py").write_text(CLOCK_READ, encoding="utf-8")
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
     (repo / "cli" / "tests" / "test_a.py").write_text(spy, encoding="utf-8")
     commit(repo, "Add both")
     git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
@@ -172,17 +170,19 @@ def test_a_pure_rename_asks_nothing(repo: Path) -> None:
 
 
 def test_a_rename_with_edits_asks_about_the_edits_only(repo: Path) -> None:
-    (repo / "cli" / "x.py").write_text(CLOCK_READ, encoding="utf-8")
-    commit(repo, "Add the clock read")
+    filler = "".join(f"VALUE_{n} = {n}\n" for n in range(20))
+    base = LOCATOR + filler
+    (repo / "cli" / "x.py").write_text(base, encoding="utf-8")
+    commit(repo, "Add the locator")
     git(repo, "mv", "cli/x.py", "cli/y.py")
-    (repo / "cli" / "y.py").write_text(
-        CLOCK_READ + "\n\ndef later() -> float:\n    return time.time()\n", encoding="utf-8"
-    )
+    extended = base + "\n\ndef later(request):\n    return request.app.state.other\n"
+    (repo / "cli" / "y.py").write_text(extended, encoding="utf-8")
     git(repo, "add", "cli/y.py")
     done = run(repo, "commit-msg", message_file(repo, "Move and extend\n"))
     assert done.returncode == 1
-    assert "cli/y.py:9: hint ambient-read: `time.time`" in done.stderr
-    assert "cli/y.py:5" not in done.stderr
+    added = len(extended.splitlines())
+    assert f"cli/y.py:{added}: hint service-locator: `request.app.state`" in done.stderr
+    assert "cli/y.py:2:" not in done.stderr
 
 
 def test_the_branch_check_takes_an_explicit_base_and_writes_the_summary(
@@ -190,9 +190,10 @@ def test_the_branch_check_takes_an_explicit_base_and_writes_the_summary(
 ) -> None:
     base = git(repo, "rev-parse", "HEAD")
     git(repo, "switch", "-q", "-c", "work")
-    (repo / "cli" / "x.py").write_text(CLOCK_READ, encoding="utf-8")
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
     commit(
-        repo, "Read the clock\n\nHint-Ack: ambient-read cli/ -- the whole package is a shell layer"
+        repo,
+        "Fetch from the application\n\nHint-Ack: service-locator cli/ -- the whole package is a shell layer",
     )
     git(repo, "update-ref", "-d", "refs/remotes/origin/main")
     summary = tmp_path / "summary.md"
@@ -219,12 +220,12 @@ def test_a_narrative_line_that_starts_with_the_key_does_not_wedge_the_push(repo:
 @pytest.mark.parametrize(
     "table",
     [
-        '[roots]\n"x.py" = ["environ"]\n',
-        '[roots]\n"x.py" = { kinds = ["environ"], why = "process entry" }\n',
+        '[roots]\n"x.py" = ["settings"]\n',
+        '[roots]\n"x.py" = { kinds = ["settings"], why = "process entry" }\n',
     ],
 )
 def test_the_commit_hint_reads_roots_from_the_index(repo: Path, table: str) -> None:
-    (repo / "cli" / "x.py").write_text("import os\nx = os.environ['A']\n", encoding="utf-8")
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
     manifest = repo / "cli" / "meizel.toml"
     manifest.write_text(table, encoding="utf-8")
     git(repo, "add", "cli/x.py", "cli/meizel.toml")
@@ -234,20 +235,20 @@ def test_the_commit_hint_reads_roots_from_the_index(repo: Path, table: str) -> N
 
 
 def test_an_unstaged_root_does_not_answer_a_staged_read(repo: Path) -> None:
-    (repo / "cli" / "x.py").write_text("import os\nx = os.environ['A']\n", encoding="utf-8")
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
     manifest = repo / "cli" / "meizel.toml"
     manifest.write_text("", encoding="utf-8")
     git(repo, "add", "cli/x.py", "cli/meizel.toml")
-    manifest.write_text('[roots]\n"x.py" = ["environ"]\n', encoding="utf-8")
-    done = run(repo, "commit-msg", message_file(repo, "Read the environment\n"))
+    manifest.write_text('[roots]\n"x.py" = ["settings"]\n', encoding="utf-8")
+    done = run(repo, "commit-msg", message_file(repo, "Fetch application inputs\n"))
     assert done.returncode == 1
-    assert "hint ambient-read" in done.stderr
+    assert "hint service-locator" in done.stderr
 
 
 def test_the_branch_hint_uses_roots_at_the_head_revision(repo: Path) -> None:
-    (repo / "cli" / "x.py").write_text("import os\nx = os.environ['A']\n", encoding="utf-8")
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
     manifest = repo / "cli" / "meizel.toml"
-    manifest.write_text('[roots]\n"x.py" = ["environ"]\n', encoding="utf-8")
+    manifest.write_text('[roots]\n"x.py" = ["settings"]\n', encoding="utf-8")
     commit(repo, "Declare the process entry")
     manifest.write_text("", encoding="utf-8")
     done = run(repo, "branch")
@@ -255,7 +256,7 @@ def test_the_branch_hint_uses_roots_at_the_head_revision(repo: Path) -> None:
 
 
 def test_an_unknown_root_kind_fails_the_hint_explicitly(repo: Path) -> None:
-    stage_clock_read(repo)
+    stage_locator(repo)
     manifest = repo / "cli" / "meizel.toml"
     manifest.write_text('[roots]\n"x.py" = ["typo"]\n', encoding="utf-8")
     git(repo, "add", "cli/meizel.toml")

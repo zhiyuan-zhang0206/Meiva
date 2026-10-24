@@ -8,10 +8,8 @@ import ast
 from collections.abc import Iterable, Mapping
 
 # meiva:note
-# The dotted names of the process environment, spelled in two parts so that this module,
-# which only names them, is not itself a use the os.environ lint would report.
-OS_ENVIRON = "os." + "environ"
-OS_GETENV = "os." + "getenv"
+# The process environment name shared by default-collaborator and test-seam detectors.
+OS_ENVIRON = "os.environ"
 
 
 def import_names(nodes: Iterable[ast.AST]) -> dict[str, str]:

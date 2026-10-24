@@ -9,3 +9,10 @@ exports = ["antigravity.py", "claude.py", "codex.py", "plans"]
 "claude.py" = ["_claude_checks.py", "_common.py", "_first_run.py", "plans"]
 "codex.py" = ["_common.py", "plans"]
 "tests" = ["__init__.py", "_claude_checks.py", "_common.py", "_first_run.py", "antigravity.py", "claude.py", "codex.py", "plans"]
+
+[debt.ambient-read]
+"__init__.py#clock datetime.datetime.now" = 1
+"_claude_checks.py#clock time.monotonic" = 2
+"_common.py#home pathlib.Path.home" = 1
+"claude.py#random uuid.uuid4" = 1
+"codex.py#clock time.monotonic" = 8

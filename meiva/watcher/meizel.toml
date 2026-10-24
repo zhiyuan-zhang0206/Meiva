@@ -10,6 +10,9 @@ exports = ["launch_plan.py", "plans.py", "spawn.py", "wiring.py"]
 "." = "strict-to-be"
 "launch_plan.py" = "strict"
 
+[debt.ambient-read]
+"__init__.py#clock datetime.datetime.now" = 1
+
 [debt.impure-call]
 "__init__.py#datetime.now" = 1
 "files.py#Path.mkdir" = 1

@@ -14,3 +14,18 @@ exports = ["adversarial_batch.py", "adversarial_scenario.py", "adversarial_worke
 
 [roots]
 "entry.py" = { kinds = ["settings"], why = "Schedule process entry boots configuration before assembling its runtime" }
+
+[debt.ambient-read]
+"adversarial_batch.py#clock datetime.datetime.now" = 3
+"adversarial_batch.py#random uuid.uuid4" = 3
+"adversarial_workers.py#clock datetime.datetime.now" = 2
+"agent_directory.py#random uuid.uuid4" = 1
+"c9_report.py#clock datetime.datetime.now" = 1
+"ci_metrics.py#clock datetime.datetime.now" = 1
+"debt_sweep.py#clock datetime.datetime.now" = 1
+"loop.py#clock datetime.datetime.now" = 1
+"model_tracker.py#clock datetime.datetime.now" = 1
+"self_evolution_scan.py#clock datetime.datetime.now" = 1
+"self_evolution_weekly.py#clock datetime.datetime.now" = 3
+"stall_watch.py#clock datetime.datetime.now" = 2
+"stall_watch.py#clock time.time" = 1

@@ -10,3 +10,10 @@ exports = ["daemon.py", "service.py", "shutdown_budget.py"]
 
 [roots]
 "daemon.py" = { kinds = ["settings"], why = "The exec-host process entry boots configuration before composing its service resources" }
+
+[debt.ambient-read]
+"daemon.py#cwd pathlib.Path.cwd" = 1
+"daemon.py#pid os.getuid" = 1
+"memory_guard.py#pid os.getpid" = 1
+"service.py#clock time.monotonic" = 5
+"service.py#pid os.getpid" = 1

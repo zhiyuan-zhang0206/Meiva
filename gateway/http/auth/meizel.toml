@@ -10,3 +10,8 @@ exports = ["rejection_log.py", "request_principal.py", "router.py", "session_sto
 [purity]
 "__init__.py" = "strict"
 "rejection_policy.py" = "strict"
+
+[debt.ambient-read]
+"request_principal.py#random secrets.token_hex" = 1
+"router.py#clock time.time" = 5
+"session_store.py#clock datetime.datetime.now" = 1

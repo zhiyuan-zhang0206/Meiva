@@ -17,7 +17,6 @@ Each hint prints the site, then once per id: `why` (the principle in a sentence)
 
 | Id | Fires on (added lines) | Instead, first choice |
 |---|---|---|
-| `ambient-read` | production file, not a root: the wall clock `time.time`, an interval clock (`time.monotonic`, `time.perf_counter`) only in a function that also sleeps, `datetime.now/utcnow/today`, `os.environ`, `os.getenv`, `os.getcwd`, `Path.home/cwd`, `platform.*`, `sys.platform`, `socket.gethostname`, `random.*`, a read of `settings`; not a clock handed to a call as `now=`/`*_at`/`*_ts` | take the value; lift a loop's decision into a pure function of `now` and keep the sleep in the shell |
 | `callable-default` | a parameter annotated `Callable`, `Coroutine` or `Awaitable`, or named `*_fn`, `*_hook`, `*_cb`, `*_reader`, `*_factory`, `*_fetch`, with a default | required parameter; a value if it only fetches one; a plan if it is an effect |
 | `callable-bag` | a dataclass, `NamedTuple`, `TypedDict`, `Protocol` or `BaseModel` with two or more `Callable` fields | values in, a plan out; one narrow port in `base/` for a real effect |
 | `none-fallback` | production file: a `None` default and `x or Call()`, `if x is None: x = Call()` or `Call() if x is None else x` | required parameter; split a borrowed and an owned mode into two types |
@@ -31,6 +30,10 @@ Each hint prints the site, then once per id: `why` (the principle in a sentence)
 | `test-subclass` | test file: a class with a method whose base is a production class (resolved through imports to a first-party non-test module) or a `psycopg`, `psycopg_pool` or `redis` class; exception bases are skipped | give the class the value it reads as a constructor field; a real resource for the fault |
 | `lambda-dependency` | a call passing `lambda` for a `*_reader`, `*_fn` or `*_hook` keyword, or for a `*_factory` keyword when the lambda only returns a name, attribute or constant | pass the value; change the lower API and name its owner |
 | `spy-assert` | test file: `assert_called*`, `assert_awaited*`, `assert_not_called`, `assert_has_calls`, `assert_any_call`, `call_args`, `call_count`, `mock_calls` and the await spellings | assert the plan or the real effect's result |
+
+Reading the world itself (the clock, the environment, the platform, randomness, the whole `Settings`)
+is not a hint: it is the `ambient-read` code of `meizel check`, judged against the `[roots]` of each
+directory ([ambient reads](../../../../meizel/docs/checker/ambient.meiva.okf.md)).
 
 The same rules in the order `instead` gives them are "data in, decisions out"
 ([the forms](../../../../docs/conventions/python-conventions.md#data-in-decisions-out-the-forms-in-order)).

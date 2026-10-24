@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 
 from meizel.graph.model import AmbientKind
-from scripts.lint.diagnostics.diff_hints.ambient import ambient_read, service_locator
+from scripts.lint.diagnostics.diff_hints.ambient import service_locator
 from scripts.lint.diagnostics.diff_hints.branches import wildcard_case
 from scripts.lint.diagnostics.diff_hints.model import FileChange, Roles, Site, Unit
 from scripts.lint.diagnostics.diff_hints.removed import deleted_tests
@@ -25,7 +25,6 @@ from scripts.lint.diagnostics.diff_hints.signatures import (
 Detector = Callable[[Unit], list[Site]]
 
 _DETECTORS: tuple[Detector, ...] = (
-    ambient_read,
     service_locator,
     callable_default,
     none_fallback,

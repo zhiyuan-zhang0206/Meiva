@@ -11,3 +11,6 @@ exports = ["cleanup_plan.py", "staging.py", "worker_process.py"]
 "__init__.py" = "strict"
 "cleanup_plan.py" = "strict"
 "worker_bootstrap.py" = "strict"
+
+[debt.ambient-read]
+"worker_process.py#clock time.monotonic" = 1

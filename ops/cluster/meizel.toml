@@ -8,4 +8,6 @@ exports = ["operations.py", "rpc.py", "rpc_plans.py"]
 "rpc_plans.py" = "strict"
 
 [debt.ambient-read]
+"rpc.py#random random.uniform" = 1
+"rpc.py#random uuid.uuid4" = 1
 "rpc.py#settings base.config.settings" = 1

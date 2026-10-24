@@ -8,6 +8,10 @@ exports = ["collector_artifact.py", "editable_install.py", "python_lock.py", "st
 "__init__.py" = "strict"
 "start_inputs.py" = "strict"
 
+[debt.ambient-read]
+"collector_artifact.py#platform platform.machine" = 1
+"collector_artifact.py#platform platform.system" = 2
+
 [debt.impure-call]
 "collector_artifact.py#Path.open" = 1
 "collector_artifact.py#Path.read_bytes" = 1

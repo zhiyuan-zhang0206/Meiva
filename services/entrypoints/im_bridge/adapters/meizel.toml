@@ -11,5 +11,12 @@ exports = ["feishu.py", "feishu_poll_cursor.py", "feishu_ws_proxy.py", "run_plan
 "run_plan.py" = "strict"
 "ws_proxy_plan.py" = "strict"
 
+[debt.ambient-read]
+"feishu_poll_cursor.py#clock time.time" = 1
+"weixin.py#clock time.time" = 3
+"weixin.py#random secrets.token_bytes" = 1
+"weixin.py#random uuid.uuid4" = 1
+"weixin_login.py#clock time.monotonic" = 2
+
 [debt.third-party-patch]
 "feishu_ws_proxy.py#setattr lark_oapi.ws.client._ws_connect_kwargs" = 1

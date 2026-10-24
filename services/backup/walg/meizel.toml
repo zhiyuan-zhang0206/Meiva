@@ -18,4 +18,9 @@ exports = ["archive.py", "check.py", "config.py", "probe.py", "restore.py", "sta
 "archive_plan.py" = "strict"
 
 [debt.ambient-read]
+"check.py#random uuid.uuid4" = 1
+"drill.py#clock datetime.datetime.now" = 1
 "pg_target.py#settings base.config.settings" = 1
+"probe.py#clock datetime.datetime.now" = 1
+"restore.py#clock time.monotonic" = 2
+"tick.py#clock datetime.datetime.now" = 1

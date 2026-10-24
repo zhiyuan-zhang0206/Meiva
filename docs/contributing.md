@@ -57,7 +57,7 @@ problem and gives the recipe in order of preference. Change the code, or answer 
 commit message with one line per site:
 
 ```text
-Hint-Ack: ambient-read cli/commands/x/runtime.py:42 -- composition root of the daemon
+Hint-Ack: service-locator cli/commands/x/runtime.py:42 -- composition root of the daemon
 ```
 
 A path without a line answers every site of that id in the file, and a directory with a
@@ -109,8 +109,9 @@ violations pass, anything new fails, and the debt may only shrink
   `debt carry --move-symbol OLD_FILE::NAME=NEW_FILE` does. `debt sites --code <patch code>
   --target-prefix <prefix>` lists where a target is patched (file, line, form), and `debt diff
   --by-target` reports what a change paid down per target; a codemod PR pastes the latter.
-- Only a composition root reads the world. A file that takes `settings`, the environment, or the
-  process's own database, event bus or service endpoints is an `ambient-read` unless its directory's
+- Only a composition root reads the world. A file that takes `settings`, the environment, the
+  clock, the home or working directory, the platform, a process id, randomness, or the process's
+  own database, event bus or service endpoints is an `ambient-read` unless its directory's
   `meizel.toml` declares it under `[roots]` with that kind. Pass the value in from the root; a
   decision in the middle becomes a pure function of its inputs. Declare a file a root only when
   it is one, and a root that stops reading a kind fails as `stale-root`

@@ -8,6 +8,7 @@ exports = ["configuration.py", "tests"]
 "tests" = ["__init__.py", "configuration.py"]
 
 [debt.ambient-read]
+"__init__.py#clock datetime.datetime.now" = 1
 "__init__.py#settings base.config.settings" = 1
 
 [debt.impure-call]

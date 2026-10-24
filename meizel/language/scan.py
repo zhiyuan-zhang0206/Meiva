@@ -378,7 +378,7 @@ class Scanner(AmbientAccess):
     def visit_call(self, node: ast.Call) -> None:
         callee = self.dotted(node.func)
         if self.records_ambient:
-            self.ambient.called(callee, node.lineno)
+            self.ambient.called(callee, node)
         self.patch_forms(node, callee)
         self.spawn_call(callee, node)
         fixtures.record_call(self.fixture_state, node, callee, requester=self.fixture_requester)
