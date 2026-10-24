@@ -125,6 +125,13 @@ def test_persistent_429_exhausts_the_retry_budget(web_harness: WebHarness) -> No
 
 
 # meiva:note
+# The server records a start after the client's connection setup, so the first and the last start
+# can each be off by a few milliseconds of latency; a pacer that did not wait would show a window
+# of about zero, far below this slack.
+_CLOCK_SKEW_S = 0.1
+
+
+# meiva:note
 # The end-to-end claim the provider cares about, and the one a real clock can carry: four
 # requests occupy at least `(n-1)/qps` because every start waits for its own slot, and sleep
 # overshoot only widens that window. The upper bound is the regression direction a floor cannot
@@ -148,7 +155,7 @@ def test_batch_request_starts_stay_inside_the_configured_rate_window(
 
     assert len(starts) == 4
     window = max(starts) - min(starts)
-    assert window >= 3 / 5.0, f"four requests inside {window:.3f}s for 5 QPS"
+    assert window >= 3 / 5.0 - _CLOCK_SKEW_S, f"four requests inside {window:.3f}s for 5 QPS"
     assert window <= 1.0, f"four requests spread over {window:.3f}s for 5 QPS"
 
 
