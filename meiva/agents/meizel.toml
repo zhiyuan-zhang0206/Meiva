@@ -1,11 +1,12 @@
 exports = ["peers.py"]
 
 [uses]
-"__init__.py" = ["peers.py"]
-"tests" = ["__init__.py", "peers.py"]
+"__init__.py" = ["peers.py", "row_text.py"]
+"tests" = ["__init__.py", "peers.py", "row_text.py"]
 
 [purity]
 "peers.py" = "strict"
+"row_text.py" = "strict"
 
 [debt.ambient-read]
 "__init__.py#clock datetime.datetime.now" = 1
