@@ -1,7 +1,6 @@
 from uuid import uuid4
 
 import psycopg
-from psycopg.types.json import Jsonb
 
 from base.agents.tasks.delivery import lock_task_note_owner
 from base.db import pool as db_pool
@@ -56,9 +55,9 @@ def test_assignment_deadline_has_inspectable_failure(
         (owner,),
     )
     db_conn.commit()
-    note_pool = db_pool(gate=database_gate)
-    assert note_pool is not None
-    assert dead_letter_stale_pending_terminated(note_pool, 86400) == 1
+    with db_pool(gate=database_gate) as note_pool:
+        assert note_pool is not None
+        assert dead_letter_stale_pending_terminated(note_pool, 86400) == 1
     row = db_conn.execute(
         "SELECT status,payload FROM inbound_messages WHERE agent_id=%s", (owner,)
     ).fetchone()
@@ -67,31 +66,3 @@ def test_assignment_deadline_has_inspectable_failure(
         "outcome": "failed",
         "reason": "resurrection_deadline_expired",
     }
-
-
-def test_reminder_policy_never_resurrects_terminated_owner(
-    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
-) -> None:
-    actor = seed_agent(db_conn)
-    pin_agent(actor)
-    owner = seed_agent(db_conn, status="terminated")
-    task = task_registry.create(
-        "reminder", "work", parent=root_task_id, owner=owner, operation_key=str(uuid4())
-    )
-    db_conn.execute(
-        "UPDATE inbound_messages SET payload=%s WHERE agent_id=%s",
-        (
-            Jsonb(
-                {
-                    "note_tag": "task",
-                    "task_id": task.id,
-                    "task_notification": True,
-                    "delivery_resurrect": False,
-                }
-            ),
-            owner,
-        ),
-    )
-    db_conn.commit()
-    note_pool = db_pool(gate=database_gate)
-    assert note_pool is not None

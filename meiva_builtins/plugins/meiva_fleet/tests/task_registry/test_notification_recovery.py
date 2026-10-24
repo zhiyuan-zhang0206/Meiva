@@ -4,8 +4,6 @@ import psycopg
 
 import meiva
 from base.db import fetch_one
-from base.db import pool as db_pool
-from base.db.code_version_gate import ProcessDbGate
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet import task_registry
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
@@ -14,9 +12,7 @@ from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import seed_agent
 
 
-def test_sdk_commit_survives_producer_loss(
-    db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
-) -> None:
+def test_sdk_commit_survives_producer_loss(db_conn: psycopg.Connection, root_task_id: int) -> None:
     actor = seed_agent(db_conn)
     owner = seed_agent(db_conn, status="terminated")
     pin_agent(actor)
@@ -40,12 +36,10 @@ def test_sdk_commit_survives_producer_loss(
     assert len(notes) == 1
     assert notes[0][1]["task_id"] == task_id
     assert notes[0][1]["delivery_resurrect"] is True
-    note_pool = db_pool(gate=database_gate)
-    assert note_pool is not None
 
 
 def test_aba_assignment_supersedes_old_directions(
-    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     actor = seed_agent(db_conn)
     owner_a = seed_agent(db_conn, status="terminated")
@@ -65,5 +59,3 @@ def test_aba_assignment_supersedes_old_directions(
     assert len(notes) == 3
     assert [note[2] for note in notes] == ["done", "done", "pending"]
     assert all(note[3]["delivery_result"]["outcome"] == "superseded" for note in notes[:2])
-    note_pool = db_pool(gate=database_gate)
-    assert note_pool is not None
