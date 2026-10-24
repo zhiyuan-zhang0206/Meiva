@@ -1,4 +1,3 @@
-import { QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
   fireEvent,
@@ -31,6 +30,7 @@ import {
   liveFixture,
   panelState,
   putSetting,
+  QueryClientProvider,
   render,
   resolveNotice,
   rosterFixture,

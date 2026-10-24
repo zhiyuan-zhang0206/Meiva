@@ -1,34 +1,15 @@
 // useTasks tests — the Task Graph data source, focused on its resilience
 // contract: the board self-heals (keeps polling after an error) and never
 // blanks a loaded board on a transient poll failure (stale-while-error).
-//
-// api.getTasks is mocked; a real QueryClient (retry off) drives the query so the
-// success/error edges run end to end. useEventStream is mocked out — the
-// spawn/update-driven invalidate is covered by useEventStream's own suite; here
-// we only care about the query result derivation.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import React from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createElement, type ReactNode } from "react";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { api } from "../transport/api";
-import type { TaskListResponse, TaskRow } from "../contracts/types";
+import type { TaskFields, TaskListResponse, TaskRow, TaskSummaryRow } from "../contracts/types";
+import { apiWrapper, fakeApi } from "../transport/tests/api/fake-api";
 import { useTasks } from "./use-tasks";
-
-vi.mock("../transport/api", () => ({
-  api: { getTasks: vi.fn() },
-}));
-
-// useEventStream needs a Provider ancestor; mock it to a noop — the query path is
-// what these tests exercise.
-vi.mock("../transport/useEventStream", () => ({
-  useEventStream: vi.fn(),
-  EventStreamProvider: ({ children }: { children: React.ReactNode }) =>
-    React.createElement(React.Fragment, null, children),
-}));
-
-const getTasks = vi.mocked(api.getTasks);
 
 function task(id: number): TaskRow {
   return {
@@ -49,29 +30,42 @@ function task(id: number): TaskRow {
 
 const RESPONSE: TaskListResponse = { tasks: [task(1), task(2)] };
 
-function withClient(client: QueryClient) {
-  return function Wrapper({ children }: { children: React.ReactNode }) {
-    return React.createElement(QueryClientProvider, { client }, children);
-  };
+interface TaskRequest {
+  window?: string;
+  fields?: string;
+}
+
+// meiva:note
+// The renderer for these tests: the hook runs against a scripted gateway whose
+// task read is `read`, inside a real QueryClient with retries off so the success
+// and error edges run end to end. `requests` keeps the projections the hook asked
+// for. The gateway's `getTasks` is generic over the projection and its row type
+// follows that parameter, so the scripted read is asserted to the row type once,
+// here.
+function renderTasks(read: () => Promise<TaskListResponse>, client: QueryClient = freshClient()) {
+  const requests: TaskRequest[] = [];
+  const ApiWrapper = apiWrapper(fakeApi({
+    getTasks: <T extends TaskFields>(request?: { window?: string; fields?: T }) => {
+      requests.push({ ...request });
+      return read() as Promise<TaskListResponse<T extends "full" ? TaskRow : TaskSummaryRow>>;
+    },
+  }));
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(ApiWrapper, {
+      children: createElement(QueryClientProvider, { client, children }),
+    });
+  return { ...renderHook(() => useTasks(), { wrapper }), requests };
 }
 
 function freshClient(): QueryClient {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-beforeEach(() => {
-  getTasks.mockReset();
-});
-
 afterEach(cleanup);
 
 describe("useTasks", () => {
   it("while pending: empty list, loading=true, error=false", () => {
-    getTasks.mockReturnValue(new Promise<TaskListResponse>(() => {
-      /* never settles — keeps the query pending */
-    }));
-
-    const { result } = renderHook(() => useTasks(), { wrapper: withClient(freshClient()) });
+    const { result } = renderTasks(() => new Promise<TaskListResponse>(() => undefined));
 
     expect(result.current.tasks).toEqual([]);
     expect(result.current.loading).toBe(true);
@@ -79,9 +73,7 @@ describe("useTasks", () => {
   });
 
   it("on success: returns the tasks, loading=false, error=false", async () => {
-    getTasks.mockResolvedValue(RESPONSE);
-
-    const { result } = renderHook(() => useTasks(), { wrapper: withClient(freshClient()) });
+    const { result } = renderTasks(() => Promise.resolve(RESPONSE));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.tasks).toEqual(RESPONSE.tasks);
@@ -89,18 +81,14 @@ describe("useTasks", () => {
   });
 
   it("defaults to the full task projection", async () => {
-    getTasks.mockResolvedValue(RESPONSE);
-
-    const { result } = renderHook(() => useTasks(), { wrapper: withClient(freshClient()) });
+    const { result, requests } = renderTasks(() => Promise.resolve(RESPONSE));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(getTasks).toHaveBeenCalledWith({ window: "all", fields: "full" });
+    expect(requests).toEqual([{ window: "all", fields: "full" }]);
   });
 
   it("cold error: empty list, loading=false, error=true", async () => {
-    getTasks.mockRejectedValue(new Error("HTTP 500"));
-
-    const { result } = renderHook(() => useTasks(), { wrapper: withClient(freshClient()) });
+    const { result } = renderTasks(() => Promise.reject(new Error("HTTP 500")));
 
     await waitFor(() => expect(result.current.error).toBe(true));
     expect(result.current.loading).toBe(false);
@@ -108,23 +96,24 @@ describe("useTasks", () => {
   });
 
   it("stale-while-error: a failed poll after data keeps the last good tasks (error flagged, not blanked)", async () => {
-    getTasks.mockResolvedValueOnce(RESPONSE);
-    getTasks.mockRejectedValue(new Error("gateway down"));
+    let gatewayDown = false;
     const client = freshClient();
 
-    const { result } = renderHook(() => useTasks(), { wrapper: withClient(client) });
+    const { result } = renderTasks(
+      () => (gatewayDown ? Promise.reject(new Error("gateway down")) : Promise.resolve(RESPONSE)),
+      client,
+    );
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.tasks).toEqual(RESPONSE.tasks);
     expect(result.current.error).toBe(false);
 
-    // Force the next poll (the mock now rejects).
+    gatewayDown = true;
     await act(async () => {
       await client.refetchQueries({ queryKey: ["tasks"] });
     });
 
     await waitFor(() => expect(result.current.error).toBe(true));
-    // The board is NOT cleared — the last-loaded tasks are still served.
     expect(result.current.tasks).toEqual(RESPONSE.tasks);
   });
 });

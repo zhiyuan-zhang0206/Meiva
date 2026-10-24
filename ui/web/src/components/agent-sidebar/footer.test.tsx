@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ALERTS_QUERY_KEY } from "@/lib/notifications/use-alerts";
 import { api } from "@/lib/transport/api";
+import { apiWrapper, fakeApi } from "@/lib/transport/tests/api/fake-api";
 
 import { SidebarFooter } from "./footer";
 
@@ -33,7 +34,9 @@ function render(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.add(qc);
   qc.setQueryData(ALERTS_QUERY_KEY, { alerts: [], meta: { window: "24h", total: 0, unresolved_count: 3 } });
-  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>, {
+    wrapper: apiWrapper(fakeApi({ getAlerts: api.getAlerts })),
+  });
 }
 
 afterEach(() => {

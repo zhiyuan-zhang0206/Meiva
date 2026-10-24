@@ -9,7 +9,12 @@ import type { UseTimelineTestContext } from "./use-timeline-context";
 
 export function registerUseTimelineSseTests(ctx: UseTimelineTestContext): void {
   const {
-    api,
+    timeline,
+    snapshot,
+    timelineReads,
+    snapshotReads,
+    resolves,
+    rejects,
     pushEvent,
     pushConnectionEvent,
     snapshotItem,
@@ -21,9 +26,9 @@ export function registerUseTimelineSseTests(ctx: UseTimelineTestContext): void {
 describe("useTimeline SSE LLM streaming flow", () => {
   it("partial chat → timeline_snapshot replaces the partial", async () => {
     const showError = vi.fn();
-    vi.mocked(api.getTimeline).mockResolvedValueOnce(tlResp([
+    timeline.queue(resolves(tlResp([
       snapshotItem({ item_id: "1.0", kind: "inbound_chat", payload: "user msg", inbound_id: 1 }),
-    ]));
+    ])));
 
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(result.current.items).toHaveLength(1));
@@ -58,7 +63,7 @@ describe("useTimeline SSE LLM streaming flow", () => {
 
   it("streaming reasoning → timeline_snapshot replaces", async () => {
     const showError = vi.fn();
-    vi.mocked(api.getTimeline).mockResolvedValueOnce(tlResp([]));
+    timeline.queue(resolves(tlResp([])));
 
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(result.current.items).toHaveLength(0));
@@ -86,9 +91,9 @@ describe("useTimeline SSE LLM streaming flow", () => {
 
   it("user sends a message mid-stream → timeline_snapshot fixes up", async () => {
     const showError = vi.fn();
-    vi.mocked(api.getTimeline).mockResolvedValueOnce(tlResp([
+    timeline.queue(resolves(tlResp([
       snapshotItem({ kind: "code_output", payload: "old" }),
-    ]));
+    ])));
 
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(result.current.items).toHaveLength(1));
@@ -133,7 +138,7 @@ describe("useTimeline error & cancellation paths", () => {
   it("getTimeline initial load failure clears partials", async () => {
     const showError = vi.fn();
 
-    vi.mocked(api.getTimeline).mockRejectedValueOnce(new Error("network down"));
+    timeline.queue(rejects(new Error("network down")));
 
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
 
@@ -151,15 +156,15 @@ describe("useTimeline error & cancellation paths", () => {
     const showError = vi.fn();
 
     let resolveStaleA: (v: TimelineResponse) => void = () => undefined;
-    vi.mocked(api.getTimeline).mockImplementationOnce(
+    timeline.queue(
       () =>
         new Promise((r) => {
           resolveStaleA = r;
         }),
+      resolves(tlResp([
+        snapshotItem({ payload: "thread B fresh" }),
+      ])),
     );
-    vi.mocked(api.getTimeline).mockResolvedValueOnce(tlResp([
-      snapshotItem({ payload: "thread B fresh" }),
-    ]));
 
     const { result, rerender, unmount } = renderHook(
       ({ tid }: { tid: number | null }) => useTimeline(tid, showError),
@@ -182,14 +187,14 @@ describe("useTimeline connectionState", () => {
   it("default connectionState='open'", async () => {
     const showError = vi.fn();
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalled());
+    await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
     expect(result.current.connectionState).toBe("open");
   });
 
   it("reconnecting raises no toast; restores after open", async () => {
     const showError = vi.fn();
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalled());
+    await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
 
     pushConnectionEvent({ type: "reconnecting" });
     expect(result.current.connectionState).toBe("reconnecting");
@@ -202,7 +207,7 @@ describe("useTimeline connectionState", () => {
   it("closed only changes state, no toast (single-channel banner, avoids double-noise)", async () => {
     const showError = vi.fn();
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalled());
+    await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
 
     pushConnectionEvent({ type: "closed" });
     expect(result.current.connectionState).toBe("closed");
@@ -211,7 +216,7 @@ describe("useTimeline connectionState", () => {
 
   it("on closed, partial flags cleared + streamingCode=false (SSE dead, stream won't resume)", async () => {
     const showError = vi.fn();
-    vi.mocked(api.getTimeline).mockResolvedValueOnce(tlResp([]));
+    timeline.queue(resolves(tlResp([])));
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(result.current.items).toEqual([]));
 
@@ -245,7 +250,7 @@ describe("useTimeline connectionState", () => {
       ({ tid }: { tid: number | null }) => useTimeline(tid, showError),
       { initialProps: { tid: 1 }, wrapper },
     );
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalled());
+    await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
 
     pushConnectionEvent({ type: "closed" });
     expect(result.current.connectionState).toBe("closed");
@@ -261,15 +266,15 @@ describe("useTimeline connectionState", () => {
   });
 
   it("opening the selected stream reconciles through one composed snapshot read", async () => {
-    vi.mocked(api.getTimeline).mockResolvedValue(
+    timeline.always(resolves(
       tlResp([snapshotItem({ item_id: "1.0", payload: "initial read" })]),
-    );
-    vi.mocked(api.getConversationSnapshot).mockReset().mockResolvedValue(
+    ));
+    snapshot.always(resolves(
       composedSnapshot(tlResp([
         snapshotItem({ item_id: "1.0", payload: "reconciled after gap" }),
         snapshotItem({ item_id: "2.0", payload: "committed while away" }),
       ])),
-    );
+    ));
     const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("initial read"));
 
@@ -280,9 +285,9 @@ describe("useTimeline connectionState", () => {
         ["reconciled after gap", "committed while away"],
       ),
     );
-    expect(api.getConversationSnapshot).toHaveBeenCalledTimes(1);
+    expect(snapshotReads).toHaveLength(1);
 
-    expect(api.getTimeline).toHaveBeenCalledTimes(1);
+    expect(timelineReads).toHaveLength(1);
   });
 
   it("open with no active agent does not reconcile a snapshot", async () => {
@@ -291,13 +296,13 @@ describe("useTimeline connectionState", () => {
     pushConnectionEvent({ type: "open" });
     await act(async () => { await ctx.delay(20); });
 
-    expect(api.getConversationSnapshot).not.toHaveBeenCalled();
+    expect(snapshotReads).toHaveLength(0);
   });
 
   it("parse-failed: first toast fires; subsequent same-error toasts deduped (no flood)", async () => {
     const showError = vi.fn();
     renderHook(() => useTimeline(42, showError), { wrapper });
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalled());
+    await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
 
     const sameError = new SyntaxError("Unexpected token");
     pushConnectionEvent({ type: "parse-failed", raw: "x", error: sameError });
@@ -313,7 +318,7 @@ describe("useTimeline connectionState", () => {
   it("parse-failed different errors → each reported once", async () => {
     const showError = vi.fn();
     renderHook(() => useTimeline(42, showError), { wrapper });
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalled());
+    await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
 
     pushConnectionEvent({
       type: "parse-failed",
@@ -335,7 +340,7 @@ describe("useTimeline connectionState", () => {
   it("open event resets the parse-failed dedupe set (new connection re-enables toast)", async () => {
     const showError = vi.fn();
     renderHook(() => useTimeline(42, showError), { wrapper });
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalled());
+    await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
 
     const err = new SyntaxError("dup");
     pushConnectionEvent({ type: "parse-failed", raw: "x", error: err });
@@ -356,7 +361,7 @@ describe("useTimeline connectionState", () => {
       ({ se }: { se: (msg: string) => void }) => useTimeline(42, se),
       { initialProps: { se: firstShowError }, wrapper },
     );
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalled());
+    await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
 
     rerender({ se: secondShowError });
 

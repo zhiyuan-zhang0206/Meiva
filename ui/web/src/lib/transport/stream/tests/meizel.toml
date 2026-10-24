@@ -1,0 +1,3 @@
+exports = ["fake-stream.ts", "scripted-auth.ts"]
+
+purity = "strict"

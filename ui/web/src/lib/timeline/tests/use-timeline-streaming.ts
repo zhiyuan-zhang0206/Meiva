@@ -10,8 +10,10 @@ import type { UseTimelineTestContext } from "./use-timeline-context";
 
 export function registerUseTimelineStreamingTests(ctx: UseTimelineTestContext): void {
   const {
-    api,
-    noteTurnStart,
+    timeline,
+    timelineReads,
+    turnStarts,
+    resolves,
     startTransitionSpy,
     pushEvent,
     pushBatch,
@@ -23,10 +25,9 @@ export function registerUseTimelineStreamingTests(ctx: UseTimelineTestContext): 
 describe("useTimeline streamingCode flag", () => {
   it("code_start sets streamingCode=true; exec_start clears it back to false", async () => {
     const showError = vi.fn();
-    vi.mocked(api.getTimeline).mockReset().mockResolvedValue(tlResp([]));
 
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalled());
+    await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
 
     expect(result.current.streamingCode).toBe(false);
     pushEvent({ role: "code_start", item_id: "test", agent_id: 42 });
@@ -39,10 +40,9 @@ describe("useTimeline streamingCode flag", () => {
 describe("useTimeline token_usage (single subscription — R10)", () => {
   it("token_usage is NOT folded by useTimeline — the token state is owned solely by useTokenUsage", async () => {
     const showError = vi.fn();
-    vi.mocked(api.getTimeline).mockReset().mockResolvedValue(tlResp([]));
 
     renderHook(() => useTimeline(42, showError), { wrapper });
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalled());
+    await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
 
     expect(useTimelineStore.getState().activeThreadId).toBe(42);
     useTimelineStore.setState({ tokenUsage: 0, reasoningTokens: 0 });
@@ -63,7 +63,7 @@ describe("useTimeline token_usage (single subscription — R10)", () => {
 describe("useTimeline full two-turn conversation overall order (e2e)", () => {
   it("both turns pushed via timeline_snapshot; order strictly aligned by item_id", async () => {
     const showError = vi.fn();
-    vi.mocked(api.getTimeline).mockResolvedValueOnce(tlResp([]));
+    timeline.queue(resolves(tlResp([])));
 
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(result.current.items).toHaveLength(0));
@@ -136,9 +136,9 @@ describe("useTimeline full two-turn conversation overall order (e2e)", () => {
 
     const showError = vi.fn();
 
-    vi.mocked(api.getTimeline).mockResolvedValueOnce(tlResp([
+    timeline.queue(resolves(tlResp([
       snapshotItem({ item_id: "2.0", kind: "inbound_chat", payload: "turn 1 env", inbound_id: 100 }),
-    ]));
+    ])));
 
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(result.current.items).toHaveLength(1));
@@ -176,9 +176,8 @@ describe("useTimeline startTransition split (isStreamingDelta cluster)", () => {
     "%s wraps in startTransition (kills L167-172 streaming role / equality / if-branch mutations)",
     async (_label, ev) => {
       const showError = vi.fn();
-      vi.mocked(api.getTimeline).mockReset().mockResolvedValue(tlResp([]));
       renderHook(() => useTimeline(42, showError), { wrapper });
-      await waitFor(() => expect(api.getTimeline).toHaveBeenCalled());
+      await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
 
       startTransitionSpy.mockClear();
       pushEvent(ev);
@@ -208,9 +207,8 @@ describe("useTimeline startTransition split (isStreamingDelta cluster)", () => {
     "%s does not go through startTransition (kills L167-172 if-branch false path + role equality reverse mutation)",
     async (_label, ev) => {
       const showError = vi.fn();
-      vi.mocked(api.getTimeline).mockReset().mockResolvedValue(tlResp([]));
       renderHook(() => useTimeline(42, showError), { wrapper });
-      await waitFor(() => expect(api.getTimeline).toHaveBeenCalled());
+      await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
 
       startTransitionSpy.mockClear();
       pushEvent(ev);
@@ -222,9 +220,8 @@ describe("useTimeline startTransition split (isStreamingDelta cluster)", () => {
   it("if(isStreamingDelta) → true mutation: non-streaming events also wrongly wrapped (kills L172 true)", async () => {
 
     const showError = vi.fn();
-    vi.mocked(api.getTimeline).mockReset().mockResolvedValue(tlResp([]));
     renderHook(() => useTimeline(42, showError), { wrapper });
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalled());
+    await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
 
     startTransitionSpy.mockClear();
     pushEvent({ role: "exec_start", item_id: "5.0", agent_id: 42 });
@@ -234,9 +231,8 @@ describe("useTimeline startTransition split (isStreamingDelta cluster)", () => {
 
   it("if(isStreamingDelta) → false mutation: streaming events miss transition (kills L172 false)", async () => {
     const showError = vi.fn();
-    vi.mocked(api.getTimeline).mockReset().mockResolvedValue(tlResp([]));
     renderHook(() => useTimeline(42, showError), { wrapper });
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalled());
+    await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
 
     startTransitionSpy.mockClear();
     pushEvent({ role: "code_delta", item_id: "1", agent_id: 42, content: "x" });
@@ -249,30 +245,26 @@ describe("useTimeline data effect agentId==null guard (L135)", () => {
   it("agentId=null with pre-filled query cache: data effect does not call reloadSnapshot (kills L135 agentId==null → false)", async () => {
 
     const showError = vi.fn();
-    const reloadSpy = vi.fn();
-    useTimelineStore.setState({
-      reloadSnapshot: reloadSpy,
-    });
 
     ctx.getQueryClient().setQueryData<TimelineResponse>(
       ["timeline", null],
       tlResp([snapshotItem({ payload: "prefilled null cache" })]),
     );
 
-    renderHook(() => useTimeline(null, showError), { wrapper });
+    const { result } = renderHook(() => useTimeline(null, showError), { wrapper });
 
     await ctx.delay(0);
 
-    expect(reloadSpy).not.toHaveBeenCalled();
+    expect(result.current.items).toEqual([]);
+    expect(useTimelineStore.getState().items).toEqual([]);
   });
 });
 
 describe("useTimeline SSE batch path", () => {
   it("a frame batch folds into the expected final timeline state", async () => {
     const showError = vi.fn();
-    vi.mocked(api.getTimeline).mockReset().mockResolvedValue(tlResp([]));
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalled());
+    await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
 
     await act(async () => {
       await Promise.resolve();
@@ -289,7 +281,7 @@ describe("useTimeline SSE batch path", () => {
     expect(result.current.items[0].item_id).toBe("7.0");
     expect(result.current.items[0].payload).toBe("print");
     expect(result.current.streamingCode).toBe(true);
-    expect(noteTurnStart).toHaveBeenCalledWith(42);
+    expect(turnStarts).toContain(42);
   });
 });
 
@@ -299,13 +291,14 @@ describe("impersonation timeline refresh", () => {
     const reply = snapshotItem({ item_id: "4.2", payload: "Fix verified", source: "agent:42",
       impersonation: { agent_id: 42, session_id: 0, name: "Fix login", executor_name: "Codex: helper",
         provider: "codex", anchor_item_id: "4.0", seq: 1 } });
-    vi.mocked(api.getTimeline).mockResolvedValueOnce(tlResp([anchor])).mockResolvedValue(tlResp([anchor, reply]));
+    timeline.queue(resolves(tlResp([anchor])));
+    timeline.always(resolves(tlResp([anchor, reply])));
     const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
     await waitFor(() => expect(result.current.items).toHaveLength(1));
     pushEvent({ role: "impersonation_changed", agent_id: 42 });
     await waitFor(() => expect(result.current.items.map((entry) => entry.payload)).toContain("Fix verified"));
     pushEvent({ role: "impersonation_changed", agent_id: 42 });
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(timelineReads).toHaveLength(3));
     expect(result.current.items.filter((entry) => entry.item_id === "4.2")).toHaveLength(1);
     expect(result.current.items.find((entry) => entry.item_id === "4.2")?.impersonation?.executor_name).toBe("Codex: helper");
   });

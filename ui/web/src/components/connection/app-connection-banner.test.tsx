@@ -9,14 +9,21 @@ import { act, cleanup, render as rtlRender } from "@testing-library/react";
 import { useEffect, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ConnectionState } from "@/lib/contracts/types";
+import type { ClusterStatus, ConnectionState } from "@/lib/contracts/types";
 import { useStore } from "@/lib/state/store";
-import { api } from "@/lib/transport/api";
+import { apiWrapper, fakeApi } from "@/lib/transport/tests/api/fake-api";
 
 const clients = new Set<QueryClient>();
 const states: string[] = [];
 let emit: ((ev: { type: string }) => void) | null = null;
+let clusterStatusReads = 0;
 const origSetConnState = useStore.getState().setConnState;
+const ApiWrapper = apiWrapper(fakeApi({
+  getClusterStatus: () => {
+    clusterStatusReads += 1;
+    return new Promise<ClusterStatus>(() => undefined);
+  },
+}));
 
 vi.mock("@/lib/auth/auth-context", () => ({
   useAuth: () => ({ status: "authenticated" }),
@@ -37,13 +44,13 @@ import { NOTICE_DELAY_MS } from "@/components/notifications/connection-notice";
 function render(ui: ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.add(qc);
-  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return rtlRender(<ApiWrapper><QueryClientProvider client={qc}>{ui}</QueryClientProvider></ApiWrapper>);
 }
 
 beforeEach(() => {
   states.length = 0;
   emit = null;
-  vi.spyOn(api, "getClusterStatus").mockImplementation(() => new Promise(() => undefined));
+  clusterStatusReads = 0;
   useStore.setState({
     connState: "open",
     setConnState: (v: ConnectionState) => {
@@ -59,7 +66,6 @@ afterEach(() => {
   for (const client of clients) client.clear();
   clients.clear();
   useStore.setState({ connState: "open", setConnState: origSetConnState });
-  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -75,7 +81,7 @@ describe("AppConnectionBanner connection state", () => {
       vi.advanceTimersByTime(NOTICE_DELAY_MS * 2);
     });
     expect(states).toEqual(["open"]);
-    expect(api.getClusterStatus).toHaveBeenCalledTimes(1);
+    expect(clusterStatusReads).toBe(1);
     act(() => emit?.({ type: "reconnecting" }));
     view.unmount();
     expect(emit).toBeNull();

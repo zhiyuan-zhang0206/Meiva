@@ -103,7 +103,7 @@ Code locations:
   and [store cleanup](../ui/web/src/lib/timeline/timeline-store.ts).
 - [Budget-driven cleanup](../ui/web/src/lib/timeline/use-compact-history-retention.ts).
 - [Unbounded conversation reads](../ui/web/src/lib/transport/api.ts).
-- [Cached and broadcast open states](../ui/web/src/lib/transport/sse-share.ts).
+- [Cached and broadcast open states](../ui/web/src/lib/transport/stream/sse-share.ts).
 
 These are code and isolated lifecycle reproductions. The reported Chrome visual
 flicker was not reproduced in a browser recording. The floating header's backdrop

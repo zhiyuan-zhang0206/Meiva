@@ -4,7 +4,7 @@ import { useEffect } from "react";
 
 import { useUserSettings } from "../state/use-user-settings";
 import { registerSseRuntime } from "../transport/sse-lifecycle";
-import type { SseChannel } from "../transport/sse-share";
+import type { SseChannel } from "../transport/stream/sse-share";
 
 // meiva:note
 // Which logical channels ride the one merged `/api/stream` source, and the

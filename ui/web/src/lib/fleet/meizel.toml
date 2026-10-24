@@ -9,10 +9,6 @@ exports = ["use-fleet-graph.ts", "use-force-layout.ts", "use-svg-zoom-pan.ts"]
 "." = "strict-to-be"
 "memory-graph-colors.ts" = "strict"
 
-[debt.first-party-patch]
-"use-fleet-graph.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"use-fleet-graph.test.ts#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
-
 [debt.impure-call]
 "use-fleet-graph.ts#useFleetGraph#useQuery" = 1
 "use-force-layout.ts#useForceLayout#cancelAnimationFrame" = 1

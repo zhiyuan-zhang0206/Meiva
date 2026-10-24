@@ -11,7 +11,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import { api } from "../transport/api";
+import { useApi } from "../transport/transport-context";
 import type {
   TaskFields,
   TaskGraphRow,
@@ -39,6 +39,7 @@ export function useTasks(
   window: TaskWindow = "all",
   fields: TaskFields = "full",
 ): TasksResult {
+  const api = useApi();
   const { data, isError, isLoading } = useQuery({
     // meiva:note
     // Projection and window join the key so neither can reuse the other's rows.

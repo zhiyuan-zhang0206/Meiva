@@ -22,7 +22,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useRef } from "react";
 
-import { api } from "../transport/api";
+import { useApi } from "../transport/transport-context";
 import { useAgentReconcile } from "./agent-reconcile";
 import { useAgentReadRepair } from "./use-agent-read-repair";
 import { CONVERSATION_RETENTION_MS } from "../layout/switch-budget";
@@ -75,6 +75,7 @@ export function usePendingMessages(
   agentId: number | null,
   showError: (msg: string) => void,
 ): PendingInbound[] {
+  const api = useApi();
   const { isVisible, requestRepair } = useAgentReadRepair("pending", agentId);
   const { requestReconcile } = useAgentReconcile(agentId);
   const seenParseErrors = useRef<Set<string>>(new Set());

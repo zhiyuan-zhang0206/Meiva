@@ -1,33 +1,50 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type React from "react";
-import type { Mock, MockInstance } from "vitest";
+import type { Mock } from "vitest";
 
 import type {
   BackendTimelineItem,
   ConversationSnapshotResponse,
   SystemEvent,
   TimelineResponse,
-  UserSettingListResponse,
 } from "../../contracts/types";
 import type { ApiError } from "../../transport/api";
 import type { ConnectionEvent } from "../../transport/useEventStream";
 
-export interface UseTimelineTestApi {
-  getTimeline: (
-    agentId: number,
-    opts?: { limit?: number; before?: string; signal?: AbortSignal },
-  ) => Promise<TimelineResponse>;
-  getConversationSnapshot: (
-    agentId: number,
-    signal?: AbortSignal,
-  ) => Promise<ConversationSnapshotResponse>;
-  getSettings: () => Promise<UserSettingListResponse>;
+export interface TimelineReadOptions {
+  limit?: number;
+  before?: string;
+  signal?: AbortSignal;
+}
+
+export interface TimelineRead {
+  agentId: number;
+  before: string | undefined;
+  limit: number | undefined;
+  signal: AbortSignal | undefined;
+}
+
+export interface SnapshotRead {
+  agentId: number;
+  signal: AbortSignal | undefined;
+}
+
+export type Answer<Args extends unknown[], Reply> = (...args: Args) => Promise<Reply>;
+
+export interface AnswerScript<Args extends unknown[], Reply> {
+  queue: (...answers: Answer<Args, Reply>[]) => void;
+  always: (answer: Answer<Args, Reply>) => void;
 }
 
 export interface UseTimelineTestContext {
-  api: UseTimelineTestApi;
   ApiError: typeof ApiError;
-  noteTurnStart: (agentId: number) => void;
+  timeline: AnswerScript<[agentId: number, options: TimelineReadOptions | undefined], TimelineResponse>;
+  snapshot: AnswerScript<[agentId: number, signal: AbortSignal | undefined], ConversationSnapshotResponse>;
+  timelineReads: TimelineRead[];
+  snapshotReads: SnapshotRead[];
+  turnStarts: number[];
+  resolves: <T>(value: T) => () => Promise<T>;
+  rejects: (error: Error) => () => Promise<never>;
   startTransitionSpy: Mock<(cb: () => void) => void>;
   pushEvent: (ev: SystemEvent) => void;
   pushBatch: (evs: SystemEvent[]) => void;
@@ -38,9 +55,7 @@ export interface UseTimelineTestContext {
   composedSnapshot: (timeline: TimelineResponse) => ConversationSnapshotResponse;
   getQueryClient: () => QueryClient;
   wrapper: ({ children }: { children: React.ReactNode }) => React.ReactElement;
-  spyInvalidateQueries: () => MockInstance<(opts?: { queryKey?: unknown }) => Promise<void>>;
-  spyReloadSnapshot: () => MockInstance;
-  spyDocumentVisibility: () => MockInstance<() => DocumentVisibilityState>;
-  dispatchVisibilityChange: () => void;
+  seedSettings: (overrides: Record<string, unknown>) => void;
+  setVisibility: (visibility: DocumentVisibilityState) => void;
   delay: (ms?: number) => Promise<void>;
 }
