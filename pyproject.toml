@@ -1466,6 +1466,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "scripts/lint/diagnostics/diff_hints/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "scripts/lint/diagnostics/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

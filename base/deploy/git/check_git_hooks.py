@@ -86,7 +86,7 @@ def inspect_checkout(checkout: Path) -> tuple[list[str], str | None]:
         override = hooks_path_override(checkout)
         if override:
             problems.append(override)
-        for hook_type in ("pre-commit", "pre-push"):
+        for hook_type in ("pre-commit", "pre-push", "commit-msg"):
             hook = common_dir / "hooks" / hook_type
             try:
                 problem = hook_problem(hook)
@@ -159,7 +159,7 @@ def scan_machine() -> int:
         sys.stdout.write(f"hook check: {problems_total} problem(s) across {len(clones)} clone(s)\n")
         sys.stdout.write(
             "Reinstall from each main clone's stable interpreter (never a worktree): "
-            ".venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push\n"
+            ".venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push --hook-type commit-msg\n"
         )
         return 1
     sys.stdout.write(f"hook check: OK ({len(clones)} clone(s))\n")
@@ -190,12 +190,12 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(f"WARNING: {problem}\n")
         sys.stdout.write(
             f"From {location} (never an ephemeral worktree), run: "
-            ".venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push\n"
+            ".venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push --hook-type commit-msg\n"
         )
         sys.stdout.write(
             "If the main clone's runtime venv is protected, use a stable user-level runner: "
             "env -u VIRTUAL_ENV uv tool install pre-commit; then from the main clone run "
-            "~/.local/bin/pre-commit install --hook-type pre-commit --hook-type pre-push\n"
+            "~/.local/bin/pre-commit install --hook-type pre-commit --hook-type pre-push --hook-type commit-msg\n"
         )
         if args.strict:
             return 1
