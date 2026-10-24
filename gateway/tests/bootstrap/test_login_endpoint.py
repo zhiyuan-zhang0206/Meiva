@@ -190,49 +190,55 @@ def test_lockout_threshold_and_window_follow_config(*, machine_identity: Machine
 def test_limiter_locks_at_threshold_and_restarts_after_expiry() -> None:
     fake = _FakeClock()
     limiter = rate_limit.LoginRateLimiter(
-        max_failures_reader=lambda: config.settings.gateway.login_max_failures,
-        lockout_seconds_reader=lambda: config.settings.gateway.login_lockout_seconds,
-        config=LoginRateLimitConfig(),
-        clock=fake.time,
+        LoginRateLimitConfig(
+            max_failures=config.settings.gateway.login_max_failures,
+            lockout_seconds=config.settings.gateway.login_lockout_seconds,
+        )
     )
     ip = "203.0.113.9"
 
     for _ in range(config.settings.gateway.login_max_failures - 1):
-        assert limiter.lockout_remaining(ip) == 0
-        limiter.record_failure(ip)
-    assert limiter.lockout_remaining(ip) == 0
+        assert limiter.lockout_remaining(ip, now=fake.t) == 0
+        limiter.record_failure(ip, now=fake.t)
+    assert limiter.lockout_remaining(ip, now=fake.t) == 0
 
-    limiter.record_failure(ip)
-    assert limiter.lockout_remaining(ip) == config.settings.gateway.login_lockout_seconds
-    assert limiter.lockout_remaining("203.0.113.10") == 0  # other IP untouched
+    limiter.record_failure(ip, now=fake.t)
+    assert (
+        limiter.lockout_remaining(ip, now=fake.t) == config.settings.gateway.login_lockout_seconds
+    )
+    assert limiter.lockout_remaining("203.0.113.10", now=fake.t) == 0  # other IP untouched
 
     # Lockout expires and the streak starts fresh: one failure after the
     # window is nowhere near a lockout again.
     fake.t += config.settings.gateway.login_lockout_seconds + 1
-    assert limiter.lockout_remaining(ip) == 0
-    limiter.record_failure(ip)
+    assert limiter.lockout_remaining(ip, now=fake.t) == 0
+    limiter.record_failure(ip, now=fake.t)
     for _ in range(config.settings.gateway.login_max_failures - 2):
-        limiter.record_failure(ip)
-    assert limiter.lockout_remaining(ip) == 0
-    limiter.record_failure(ip)
-    assert limiter.lockout_remaining(ip) == config.settings.gateway.login_lockout_seconds
+        limiter.record_failure(ip, now=fake.t)
+    assert limiter.lockout_remaining(ip, now=fake.t) == 0
+    limiter.record_failure(ip, now=fake.t)
+    assert (
+        limiter.lockout_remaining(ip, now=fake.t) == config.settings.gateway.login_lockout_seconds
+    )
 
 
 def test_limiter_success_resets_streak() -> None:
     fake = _FakeClock()
     limiter = rate_limit.LoginRateLimiter(
-        max_failures_reader=lambda: config.settings.gateway.login_max_failures,
-        lockout_seconds_reader=lambda: config.settings.gateway.login_lockout_seconds,
-        config=LoginRateLimitConfig(),
-        clock=fake.time,
+        LoginRateLimitConfig(
+            max_failures=config.settings.gateway.login_max_failures,
+            lockout_seconds=config.settings.gateway.login_lockout_seconds,
+        )
     )
     ip = "203.0.113.11"
 
     for _ in range(config.settings.gateway.login_max_failures - 1):
-        limiter.record_failure(ip)
+        limiter.record_failure(ip, now=fake.t)
     limiter.record_success(ip)
     for _ in range(config.settings.gateway.login_max_failures - 1):
-        limiter.record_failure(ip)
-    assert limiter.lockout_remaining(ip) == 0
-    limiter.record_failure(ip)
-    assert limiter.lockout_remaining(ip) == config.settings.gateway.login_lockout_seconds
+        limiter.record_failure(ip, now=fake.t)
+    assert limiter.lockout_remaining(ip, now=fake.t) == 0
+    limiter.record_failure(ip, now=fake.t)
+    assert (
+        limiter.lockout_remaining(ip, now=fake.t) == config.settings.gateway.login_lockout_seconds
+    )

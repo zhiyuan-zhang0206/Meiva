@@ -39,25 +39,27 @@ from __future__ import annotations
 
 import math
 import threading
-import time
-from collections.abc import Callable
 from dataclasses import dataclass
 
 
+# meiva:note
+# The limiter's policy, as the gateway read it at boot.
+#
+# `max_failures` and `lockout_seconds` are cluster config (`gateway.login_max_failures` /
+# `gateway.login_lockout_seconds`); `max_entries` is the protective memory bound (task #3696
+# exception inventory): a soft cap on tracked IPs, swept on the next failure record when
+# exceeded, bounding memory for a subnet scan without a background timer.
 @dataclass(frozen=True)
 class LoginRateLimitConfig:
-    """The limiter's memory bound; the default is the production value.
-
-    The threshold and the window are cluster config (``gateway.login_max_failures`` /
-    ``gateway.login_lockout_seconds``), read live through the limiter's readers; this is the
-    protective constant (task #3696 exception inventory).
-    """
-
+    max_failures: int
+    lockout_seconds: float
     max_entries: int = 10_000
-    """Soft cap on tracked IPs: when exceeded, expired entries are swept on the next failure
-    record. Bounds memory for a subnet scan without a background timer."""
 
     def __post_init__(self) -> None:
+        if self.max_failures < 1:
+            raise ValueError("max_failures must be at least 1: a lockout needs a failure")
+        if self.lockout_seconds <= 0:
+            raise ValueError("lockout_seconds must be positive")
         if self.max_entries < 1:
             raise ValueError("max_entries must be at least 1: a cap of 0 or less drops every entry")
 
@@ -73,45 +75,30 @@ class Entry:
         self.last_failure_at = last_failure_at  # epoch seconds of most recent failure
 
 
+# meiva:note
+# Per-IP consecutive-failure lockout, safe for concurrent requests.
+#
+# The gateway is single-process, so one instance covers the whole cluster;
+# the application lifespan owns the instance shared by its login requests.
+# The policy is a value and every call is handed the epoch second it acts at.
+# Methods are idempotent under races: a lock guards the dict, and
+# worst-case concurrent failures just count a couple of attempts early.
 class LoginRateLimiter:
-    """Per-IP consecutive-failure lockout, safe for concurrent requests.
-
-    The gateway is single-process, so one instance covers the whole cluster;
-    the application lifespan owns the instance shared by its login requests.
-    Required policy readers are retained without reading during construction;
-    each failure reads their live values before acquiring the state lock.
-    Methods are idempotent under races: a lock guards the dict, and
-    worst-case concurrent failures just count a couple of attempts early.
-    """
-
-    def __init__(
-        self,
-        *,
-        max_failures_reader: Callable[[], int],
-        lockout_seconds_reader: Callable[[], float],
-        config: LoginRateLimitConfig,
-        clock: Callable[[], float] | None = None,
-    ) -> None:
-        self._max_failures_reader = max_failures_reader
+    def __init__(self, config: LoginRateLimitConfig) -> None:
         self._config = config
-        self._lockout_seconds_reader = lockout_seconds_reader
-        self._clock = clock
         self._entries: dict[str, Entry] = {}
         self._lock = threading.Lock()
 
-    def _now(self) -> float:
-        return self._clock() if self._clock is not None else time.time()
-
-    def lockout_remaining(self, ip: str) -> int:
-        """Whole seconds until ``ip``'s lockout expires; 0 when not locked."""
-        now = self._now()
+    # meiva:note
+    # Whole seconds until ``ip``'s lockout expires at epoch second ``now``; 0 when not locked.
+    def lockout_remaining(self, ip: str, *, now: float) -> int:
         with self._lock:
             entry = self._entries.get(ip)
             if entry is None or entry.locked_until <= now:
                 return 0
             return math.ceil(entry.locked_until - now)
 
-    def record_failure(self, ip: str) -> None:
+    def record_failure(self, ip: str, *, now: float) -> None:
         """Count one failed login for ``ip``, locking it at the configured
         ``gateway.login_max_failures``.
 
@@ -119,9 +106,8 @@ class LoginRateLimiter:
         ``gateway.login_lockout_seconds`` window) restarts from one — failures
         are only "consecutive" while they keep coming.
         """
-        now = self._now()
-        max_failures = self._max_failures_reader()
-        lockout_seconds = self._lockout_seconds_reader()
+        max_failures = self._config.max_failures
+        lockout_seconds = self._config.lockout_seconds
         with self._lock:
             entry = self._entries.get(ip)
             if entry is None or self._is_stale(entry, now, lockout_seconds):
