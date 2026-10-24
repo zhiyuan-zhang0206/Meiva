@@ -104,13 +104,11 @@ def mutable_in_frozen(unit: Unit) -> list[Site]:
     for node in unit.classes:
         if not _is_frozen_dataclass(node, unit):
             continue
+        refrozen = any(decorator.lineno in unit.added for decorator in node.decorator_list)
         for field in _fields(node):
             head = _mutable_head(field.annotation)
-            if (
-                head is not None
-                and field.lineno in unit.added
-                and isinstance(field.target, ast.Name)
-            ):
+            touched = field.lineno in unit.added or refrozen
+            if head is not None and touched and isinstance(field.target, ast.Name):
                 detail = f"frozen `{node.name}.{field.target.id}` holds a mutable `{head}`"
                 sites.append(Site(HintId.MUTABLE_IN_FROZEN, unit.path, field.lineno, detail))
     return sites

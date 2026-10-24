@@ -18,8 +18,8 @@ The first real one is the next set of reviewed pull requests, and this page is u
 
 | Measure | Value |
 |---|---|
-| Sites raised | 656 (0.31 per changed file) |
-| Answers needed at path level | 449, of which 247 are `deleted-test` (one per file; one per directory with a directory trailer) |
+| Sites raised | 670 (0.32 per changed file) |
+| Answers needed at path level | 463, of which 261 are `deleted-test` (one per file; one per directory with a directory trailer) |
 | Reviewed findings | 73 |
 | Findings that are a diff shape | 38 (52%) |
 | Of those, a hint fired on the cited site | 33 (87%) on the fitted set; of all 73 findings 45% |
@@ -54,7 +54,7 @@ count: every hit is a real removal and no detector decides it.
 | `callable-default` | 6 | 5 | 6 | 2 | 0 | `database_factory = never_dialed`, a default that raises |
 | `callable-bag` | 3 | 3 | 3 | 1 | 1 | `WrapAdded`, the undo record of a wrap layer, not a dependency |
 | `spy-assert` | 2 | 2 | 2 | 0 | 0 | |
-| `deleted-test` | 247 | 247 | not judged | not judged | 6 | |
+| `deleted-test` | 261 | 261 | not judged | not judged | 6 | |
 
 Pooled over the 219 judged sites: 7 misfires (3.2%). `callable-default` and `spy-assert` hit no
 finding because the reviewed callbacks and spies were leftovers outside the added lines.

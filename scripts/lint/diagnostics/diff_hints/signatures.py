@@ -68,8 +68,17 @@ _PROTOCOLS = frozenset({"typing.Protocol", "typing_extensions.Protocol"})
 _SETTINGS = "base.config.settings"
 
 
-def _callable_reason(arg: ast.arg) -> str | None:
-    if annotation_names(arg.annotation) & _CALLABLE_TYPES:
+# meiva:note
+# The names an annotation mentions, with an aliased import (`Callable as Cb`) seen as the name it
+# was imported under.
+def _annotation_types(annotation: ast.expr | None, unit: Unit) -> frozenset[str]:
+    found = set(annotation_names(annotation))
+    found |= {unit.names[name].rsplit(".", 1)[-1] for name in found if name in unit.names}
+    return frozenset(found)
+
+
+def _callable_reason(arg: ast.arg, unit: Unit) -> str | None:
+    if _annotation_types(arg.annotation, unit) & _CALLABLE_TYPES:
         return "is a callable"
     if arg.arg.endswith(_CALLBACK_SUFFIXES):
         return "is named like a callback"
@@ -80,16 +89,25 @@ def _is_stub_default(default: ast.expr) -> bool:
     return isinstance(default, ast.Constant) and default.value is Ellipsis
 
 
+# meiva:note
+# The first added line among a parameter's name, annotation and default (a signature written over
+# several lines puts them on different lines), or None when the change touched none of them.
+def _added_line(arg: ast.arg, default: ast.expr, unit: Unit) -> int | None:
+    lines = [arg.lineno, getattr(arg.annotation, "lineno", 0), default.lineno]
+    return next((line for line in lines if line in unit.added), None)
+
+
 def callable_default(unit: Unit) -> list[Site]:
     sites: list[Site] = []
     for function in unit.functions:
         for arg, default in parameters(function):
-            if default is None or _is_stub_default(default) or arg.lineno not in unit.added:
+            if default is None or _is_stub_default(default):
                 continue
-            reason = _callable_reason(arg)
-            if reason is not None:
+            line = _added_line(arg, default, unit)
+            reason = _callable_reason(arg, unit) if line is not None else None
+            if line is not None and reason is not None:
                 detail = f"parameter `{arg.arg}` {reason} and has a default"
-                sites.append(Site(HintId.CALLABLE_DEFAULT, unit.path, arg.lineno, detail))
+                sites.append(Site(HintId.CALLABLE_DEFAULT, unit.path, line, detail))
     return sites
 
 
@@ -105,20 +123,38 @@ def _none_parameters(function: FunctionNode) -> dict[str, int]:
     }
 
 
+# meiva:note
+# The top-level functions and classes of the file: a default that names one of them reaches that
+# implementation as surely as a call to it does.
+def _module_defs(unit: Unit) -> frozenset[str]:
+    return frozenset(
+        stmt.name
+        for stmt in unit.tree.body
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+    )
+
+
 def _real_value(expr: ast.expr, unit: Unit) -> bool:
     if isinstance(expr, ast.Call):
         callee = expr.func
         return not (isinstance(callee, ast.Name) and callee.id in _PLAIN_CONSTRUCTORS)
+    if isinstance(expr, ast.Name) and expr.id in _module_defs(unit):
+        return True
     if isinstance(expr, ast.Attribute | ast.Name):
         name = dotted(expr, unit.names)
-        return name is not None and (name == OS_ENVIRON or name.startswith(_SETTINGS))
+        if name is None:
+            return False
+        constant = name.rsplit(".", 1)[-1].isupper()
+        return name == OS_ENVIRON or name.startswith(_SETTINGS) or not constant
     return False
 
 
 # meiva:note
 # `(parameter, whether the test is true when the parameter is None)` for `p is None`,
-# `p is not None`, `p == None` and `not p`; None for any other test.
+# `p is not None`, `p == None`, `not p` and a bare `p`; None for any other test.
 def _none_test(test: ast.expr) -> tuple[str, bool] | None:
+    if isinstance(test, ast.Name):
+        return test.id, False
     if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
         if isinstance(test.operand, ast.Name):
             return test.operand.id, True
@@ -151,16 +187,35 @@ def _conditional_fallback(node: ast.IfExp, unit: Unit, none_params: dict[str, in
     return [node.lineno] if _real_value(none_branch, unit) else []
 
 
+def _targets_of(node: ast.Assign | ast.AnnAssign) -> list[ast.expr]:
+    return list(node.targets) if isinstance(node, ast.Assign) else [node.target]
+
+
+# meiva:note
+# Whether a target receives the default of parameter `name`: the name itself, or an attribute of
+# `self` (`self.client = Client()` in the None branch of a constructor).
+def _assigns_default(target: ast.expr, name: str) -> bool:
+    if isinstance(target, ast.Name):
+        return target.id == name
+    return (
+        isinstance(target, ast.Attribute)
+        and isinstance(target.value, ast.Name)
+        and target.value.id == "self"
+    )
+
+
 def _if_fallback(node: ast.If, unit: Unit, none_params: dict[str, int]) -> list[int]:
     tested = _none_test(node.test)
     if tested is None or not tested[1] or tested[0] not in none_params:
         return []
+    name = tested[0]
     return [
         inner.lineno
         for stmt in node.body
         for inner in ast.walk(stmt)
-        if isinstance(inner, ast.Assign)
-        and any(isinstance(t, ast.Name) and t.id == tested[0] for t in inner.targets)
+        if isinstance(inner, ast.Assign | ast.AnnAssign)
+        and inner.value is not None
+        and any(_assigns_default(target, name) for target in _targets_of(inner))
         and _real_value(inner.value, unit)
     ]
 
