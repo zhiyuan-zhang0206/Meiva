@@ -151,11 +151,15 @@ describe("bounded reads", () => {
     answer = phase === "fetch" ? { kind: "hang" } : { kind: "headers-then-hang" };
     const rig = rigWith(steppedClock(1));
     const failure = rig.api.getRunTimeline(6111).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(gateway.requests).toHaveLength(1));
     if (phase === "body") await vi.waitFor(() => expect(rig.responses).toHaveLength(1));
     await vi.advanceTimersByTimeAsync(35_000);
     expect(await failure).toMatchObject({ name: "TimeoutError" });
     expect(rig.sent[0].init.signal?.aborted).toBe(true);
-    expect(vi.getTimerCount()).toBe(0);
+    // meiva:note
+    // The real fetch implementation owns internal timers after abort. Observe the request's
+    // closure at the server; a global timer count cannot identify this client's deadline.
+    await vi.waitFor(() => expect(gateway.closedRequests).toEqual(gateway.requests));
   });
 
   it("forwards caller cancellation to a pending fetch and preserves AbortError", async () => {
