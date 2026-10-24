@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import shlex
-import xml.etree.ElementTree as ET
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -12,6 +12,7 @@ import pytest
 from base.host.system import cron
 from base.host.system import walg_job as job
 from base.host.system.hostport import Host
+from base.host.system.job_values import JobRoots
 from base.host.system.tests.fake_commands import (
     DARWIN_ARM64,
     LINUX_X86,
@@ -24,14 +25,6 @@ from base.host.system.tests.fake_crontab import FakeCrontab
 _UID = 501
 
 
-def _meiva(*, host: Host) -> str:
-    return "/work tree/.venv/bin/meiva"
-
-
-def _path(*, host: Host) -> str:
-    return "/work tree/.venv/bin:/usr/bin"
-
-
 _NOT_LOADED = Reply(returncode=113, stderr="Could not find service")
 
 
@@ -40,11 +33,17 @@ def _launchctl() -> tuple[FakeCommands, Host]:
     commands = FakeCommands()
     commands.on(["launchctl", "print"], _NOT_LOADED, repeat=True)
     commands.on("launchctl", Reply(), repeat=True)
-    return commands, fake_host(commands, platform=DARWIN_ARM64, uid=_UID)
+    return commands, fake_host(
+        commands, platform=DARWIN_ARM64, uid=_UID, programs={"meiva": "/work tree/.venv/bin/meiva"}
+    )
 
 
 def _linux(crontab: FakeCrontab) -> Host:
-    return fake_host(crontab, platform=LINUX_X86, programs={"crontab": "/usr/bin/crontab"})
+    return fake_host(
+        crontab,
+        platform=LINUX_X86,
+        programs={"crontab": "/usr/bin/crontab", "meiva": "/work tree/.venv/bin/meiva"},
+    )
 
 
 def _recorder(calls: list[str], label: str) -> Callable[..., None]:
@@ -57,52 +56,17 @@ def _recorder(calls: list[str], label: str) -> Callable[..., None]:
 @pytest.fixture(autouse=True)
 def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(cron, "meiva_binary_path", _meiva)
-    monkeypatch.setattr(cron, "job_home", lambda: str(tmp_path / ".meiva"))
-    monkeypatch.setattr(cron, "launchd_path_env", _path)
 
 
-def test_the_tick_runs_three_hours_after_the_logical_dump_becomes_due() -> None:
-    assert (job.hour(backup_hour=3), job.MINUTE) == (
-        6,
-        25,
-    )
-
-
-@pytest.mark.parametrize(("dump_hour", "tick_hour"), [(0, 3), (20, 23), (21, 0), (23, 2)])
-def test_the_tick_hour_follows_the_logical_dump_hour_and_wraps(
-    dump_hour: int, tick_hour: int
+def test_macos_reregistration_rewrites_and_reloads_idempotently(
+    job_roots: JobRoots,
 ) -> None:
-    assert job.hour(backup_hour=dump_hour) == tick_hour
-
-
-def test_launchd_plist_runs_the_tick_command_daily_and_logs_to_walg_log(tmp_path: Path) -> None:
-    content = job.launchd_plist_content(
-        backup_hour=3,
-        host=fake_host(platform=DARWIN_ARM64),
-    )
-    root = ET.fromstring(content)  # noqa: S314 — self-generated plist
-    values = [element.text for element in root.findall("./dict/array/string")]
-
-    assert "<string>com.meiva.walg</string>" in content
-    assert values == ["/bin/sh", "-c", "'/work tree/.venv/bin/meiva' backup walg run"]
-    assert (
-        "<key>StartCalendarInterval</key>\n    <dict>\n"
-        "            <key>Hour</key>\n            <integer>6</integer>\n"
-        "            <key>Minute</key>\n            <integer>25</integer>\n"
-    ) in content
-    assert "<key>RunAtLoad</key>\n    <false/>" in content
-    assert content.count(f"{tmp_path}/.meiva/logs/walg.log") == 2
-    assert f"<string>{tmp_path}/.meiva</string>" in content  # MEIVA_HOME pin
-
-
-def test_macos_reregistration_rewrites_and_reloads_idempotently() -> None:
     commands, host = _launchctl()
 
-    assert job.register_macos(backup_hour=3, host=host) == 0
+    assert job.register_macos(roots=job_roots, backup_hour=3, host=host) == 0
     plist = job.launchd_plist_path()
     first = plist.read_text(encoding="utf-8")
-    assert job.register_macos(backup_hour=3, host=host) == 0
+    assert job.register_macos(roots=job_roots, backup_hour=3, host=host) == 0
 
     assert plist.read_text(encoding="utf-8") == first
     assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == [
@@ -113,9 +77,11 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently() -> None:
     ]
 
 
-def test_macos_unregister_removes_the_plist_and_is_repeatable() -> None:
+def test_macos_unregister_removes_the_plist_and_is_repeatable(
+    job_roots: JobRoots,
+) -> None:
     commands, host = _launchctl()
-    assert job.register_macos(backup_hour=3, host=host) == 0
+    assert job.register_macos(roots=job_roots, backup_hour=3, host=host) == 0
     plist = job.launchd_plist_path()
     assert plist.exists()
 
@@ -125,12 +91,12 @@ def test_macos_unregister_removes_the_plist_and_is_repeatable() -> None:
     assert [argv[1] for argv in commands.argvs if argv[1] != "print"][-2:] == ["bootout", "bootout"]
 
 
-def test_linux_registration_replaces_only_its_own_line(tmp_path: Path) -> None:
+def test_linux_registration_replaces_only_its_own_line(job_roots: JobRoots, tmp_path: Path) -> None:
     other = "40 4 * * * /x/meiva logs rotate  # meiva-logs-maintenance"
     old = "25 1 * * * /old/meiva backup walg run  # meiva-walg"
     crontab = FakeCrontab(f"{other}\n\n{old}\n{old}\n")
 
-    assert job.register_linux(backup_hour=3, host=_linux(crontab)) == 0
+    assert job.register_linux(roots=job_roots, backup_hour=3, host=_linux(crontab)) == 0
 
     body = crontab.writes[-1]
     assert f"{other}\n\n" in body
@@ -146,10 +112,12 @@ def test_linux_registration_replaces_only_its_own_line(tmp_path: Path) -> None:
 
 
 def test_linux_without_crontab_reports_and_registers_nothing(
+    job_roots: JobRoots,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     assert (
         job.register_linux(
+            roots=job_roots,
             backup_hour=3,
             host=fake_host(platform=LINUX_X86),
         )
@@ -169,7 +137,9 @@ def test_linux_unregister_removes_the_line_and_keeps_the_rest() -> None:
     assert crontab.table == other + "\n"
 
 
-def test_register_skips_when_os_jobs_are_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_register_skips_when_os_jobs_are_disabled(
+    job_roots: JobRoots, monkeypatch: pytest.MonkeyPatch
+) -> None:
     skipped: list[str] = []
     monkeypatch.setattr(cron, "skip_os_job", skipped.append)
 
@@ -179,6 +149,7 @@ def test_register_skips_when_os_jobs_are_disabled(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(cron, "register_platform_job", no_platform)
 
     job.register_walg_job(
+        roots=job_roots,
         enabled=False,
         backup_hour=None,
         host=fake_host(),
@@ -188,7 +159,7 @@ def test_register_skips_when_os_jobs_are_disabled(monkeypatch: pytest.MonkeyPatc
 
 
 def test_register_and_unregister_delegate_in_the_default_home(
-    default_home: Path, monkeypatch: pytest.MonkeyPatch
+    job_roots: JobRoots, default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[str] = []
 
@@ -196,6 +167,7 @@ def test_register_and_unregister_delegate_in_the_default_home(
     monkeypatch.setattr(cron, "unregister_platform_job", _recorder(calls, "unregister"))
 
     job.register_walg_job(
+        roots=replace(job_roots, home=default_home / ".meiva", user_home=default_home),
         enabled=True,
         backup_hour=3,
         host=fake_host(),
