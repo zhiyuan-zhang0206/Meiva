@@ -1,20 +1,23 @@
 from __future__ import annotations
 
-import asyncio
 import os
+import signal
 import socket
 import stat
+import subprocess
+import sys
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
 
 import httpx
+import psycopg
 import pytest
 import uvicorn
 from fastapi.testclient import TestClient
@@ -23,16 +26,12 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
-from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.db.config import DbConfig
 from base.lm.catalog import ModelCatalog
-from base.native_process import code_version
+from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import insights_pidfile, insights_socket
+from base.paths import insights_pidfile, insights_socket, meiva_home
 from services.derived.insights import daemon
 from services.derived.insights.app import build_app
 from services.derived.insights.config import InsightsConfig
@@ -40,10 +39,16 @@ from services.derived.insights.daemon import bind_socket
 from services.derived.insights.run_timeline.tests.test_projection import World
 from services.derived.insights.run_timeline.tests.test_projection import world as world
 
-_CONFIG = InsightsConfig(run_timeline_message_text_max=20)
 _TIMELINE_INPUTS = TimestampPolicy(
     clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS), timestamps_enabled=False
 )
+_CONFIG = InsightsConfig(
+    run_timeline_message_text_max=20,
+    default_model="claude-opus-5",
+    timeline_inputs=_TIMELINE_INPUTS,
+)
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_OTLP_ENDPOINT = "MEIVA_TELEMETRY_OTLP_ENDPOINT"
 
 
 def _app(
@@ -56,11 +61,9 @@ def _app(
     app = build_app(
         world.db if world else cast(Database, object()),
         world.pool if world else cast(ConnectionPool[Any], object()),
-        _CONFIG,
+        replace(_CONFIG, timeline_inputs=timeline_inputs),
         home=home,
         catalog=model_catalog,
-        default_model_reader=lambda: "deepseek-v4-flash-vision-exp",
-        timeline_inputs=timeline_inputs,
     )
     if world:
         app.state.run_timeline_reader.read_segment = world.read_segment
@@ -188,8 +191,8 @@ def test_apps_keep_their_rendering_policy_and_cache_separate(
     hidden, shown = _policy(enabled=False), _policy(enabled=True)
     first = _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=hidden, world=world)
     second = _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=shown, world=world)
-    assert first.state.timeline_inputs is hidden
-    assert second.state.timeline_inputs is shown
+    assert first.state.insights_config.timeline_inputs is hidden
+    assert second.state.insights_config.timeline_inputs is shown
     path = "/api/agents/9/run-timeline/messages?start=0&end=0&full=true"
 
     assert TestClient(first).get(path).json()["messages"][0]["parts"][0]["text"] == (
@@ -210,157 +213,132 @@ def owned_config_environment() -> Iterator[None]:
         time.tzset()
 
 
-@pytest.mark.asyncio
+# meiva:note
+# The root reads the process configuration once into the frozen value the app is built from: the
+# text limit and the default model as plain values, the clock (in the cluster's zone) and the
+# timestamp switch as one `TimestampPolicy`. A later edit of the owner does not reach it.
 @pytest.mark.usefixtures("owned_config_environment")
-async def test_daemon_binds_live_rendering_to_its_configuration_owner(
-    monkeypatch: pytest.MonkeyPatch, short_dir: Path, *, model_catalog: ModelCatalog
-) -> None:
+def test_the_root_builds_one_config_from_the_process_configuration() -> None:
     boot = ConfigBoot()
     boot.set_field("timezone", "Asia/Tokyo")
     boot.set_field("message_timestamp_weekday", False)
     boot.set_field("message_timestamps", False)
     boot.set_field("run_timeline_message_text_max", 37)
-    apps: list[Any] = []
-    closed: list[bool] = []
-    pool = SimpleNamespace(close=lambda: closed.append(True))
+    boot.set_field("llm_model", "claude-opus-5")
 
-    class Store:
-        def pool(self, *, max_size: int) -> Any:
-            assert max_size == 4
-            assert insights_pidfile(short_dir).exists()
-            return pool
+    config = daemon.config_from_boot(boot)
+    boot.set_field("llm_model", "claude-haiku-4-5-20251001")
 
-    db = Store()
+    assert config.run_timeline_message_text_max == 37
+    assert config.default_model == "claude-opus-5"
+    assert config.timeline_inputs.timestamps_enabled is False
+    assert config.timeline_inputs.clock.format_timestamp(
+        datetime(2026, 10, 10, 12, tzinfo=UTC)
+    ) == ("[2026-10-10 21:00:00]")
 
-    class Server:
-        def __init__(self, config: uvicorn.Config) -> None:
-            apps.append(config.app)
 
-        async def serve(self, *, sockets: list[socket.socket]) -> None:
-            for sock in sockets:
-                sock.close()
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
 
-    monkeypatch.setattr(daemon, "build_model_catalog", lambda: model_catalog)
-    monkeypatch.setattr(daemon.uvicorn, "Server", Server)
-    await daemon.run(home=short_dir, config=boot, database=lambda: cast(Database, db))
 
-    assert len(apps) == 1
-    assert short_dir != Path(os.environ["MEIVA_HOME"])
-    assert TestClient(apps[0]).get("/healthz").json() == {
-        "name": "insights",
-        "pid": os.getpid(),
-        "home": str(short_dir),
-    }
-    assert apps[0].state.config.run_timeline_message_text_max == 37
-    model_reader = apps[0].state.default_model_reader
-    boot.set_field("llm_model", "first-process-model")
-    assert model_reader() == "first-process-model"
-    boot.set_field("llm_model", "updated-process-model")
-    assert model_reader() == "updated-process-model"
-    inputs: TimestampPolicy = apps[0].state.timeline_inputs
-    assert inputs.timestamps_enabled is False
-    assert inputs.clock.format_timestamp(datetime(2026, 10, 10, 12, tzinfo=UTC)) == (
-        "[2026-10-10 21:00:00]"
+def _backend_names(db_conn: psycopg.Connection) -> set[str]:
+    db_conn.rollback()
+    rows = db_conn.execute(
+        "SELECT DISTINCT application_name FROM pg_stat_activity WHERE application_name LIKE 'meiva:%%'"
+    ).fetchall()
+    return {row[0] for row in rows}
+
+
+# meiva:note
+# The entry's first `/healthz` answer over its socket; fails with the log tail when the process
+# exits or 90 seconds pass first.
+def _wait_for_health(
+    http: httpx.Client, proc: subprocess.Popen[bytes], log_path: Path
+) -> httpx.Response:
+    deadline = time.monotonic() + 90.0
+    while proc.poll() is None and time.monotonic() <= deadline:
+        try:
+            return http.get("/healthz")
+        except httpx.TransportError:
+            time.sleep(0.1)
+    pytest.fail(f"the entry never served:\n{log_path.read_text()[-4000:]}")
+
+
+# meiva:note
+# Wait until the entry's database connection shows up under its application name.
+def _wait_for_backend(
+    db_conn: psycopg.Connection, name: str, proc: subprocess.Popen[bytes], log_path: Path
+) -> None:
+    deadline = time.monotonic() + 30.0
+    while name not in _backend_names(db_conn):
+        if proc.poll() is not None or time.monotonic() > deadline:
+            pytest.fail(f"the entry never connected as {name!r}:\n{log_path.read_text()[-4000:]}")
+        time.sleep(0.1)
+
+
+# meiva:note
+# The production entry as a real process: it captures its commit, checks the schema, builds its
+# logging and database from one gate, serves the app on its owner-only socket, touches the
+# database for a request, and leaves cleanly on SIGTERM, removing its pidfile and socket. The
+# child gets a home of its own (short, because a unix socket path is short) and a dead telemetry
+# endpoint; the database and Redis are the test's throwaway ones, inherited through the environment.
+def test_the_entry_serves_over_its_socket_with_the_captured_commit_and_stops_on_sigterm(
+    db_conn: psycopg.Connection, short_dir: Path
+) -> None:
+    home = short_dir / "home"
+    home.mkdir()
+    dead_telemetry = f"http://127.0.0.1:{_free_port()}"
+    # meiva:note
+    # The test cluster's own configuration (database, Redis, ports) plus this child's overrides.
+    (home / ".env").write_text(
+        (meiva_home() / ".env").read_text(encoding="utf-8")
+        + f"\n{_OTLP_ENDPOINT}={dead_telemetry}\nMEIVA_MACHINE_NAME=insights-entry-test\n",
+        encoding="utf-8",
     )
-    assert closed == [True]
-    assert not insights_pidfile(short_dir).exists()
-    assert not insights_socket(short_dir).exists()
+    env = os.environ.copy()
+    env["MEIVA_HOME"] = str(home)
+    env[_OTLP_ENDPOINT] = dead_telemetry
+    env.pop("MEIVA_PERMISSIONS_HELPER_PID", None)
+    log_path = short_dir / "insights.log"
+    expected_name = f"meiva:insights:v{CodeVersion(LoadedCommit.capture()).get()}"
+    socket_path = insights_socket(home)
+    with log_path.open("wb") as log:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "services.derived.insights.daemon"],
+            cwd=_REPO_ROOT,
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )
+        try:
+            transport = httpx.HTTPTransport(uds=str(socket_path))
+            with httpx.Client(transport=transport, base_url="http://insights", timeout=5.0) as http:
+                health = _wait_for_health(http, proc, log_path)
+                assert health.status_code == 200
+                body = health.json()
+                assert body["name"] == "insights" and body["pid"] == proc.pid
+                assert Path(body["home"]).resolve() == home.resolve()
+                # meiva:note
+                # A route that reads the database: the pool connects under the entry's gate.
+                assert http.get(
+                    "/api/agents/1/run-timeline/messages?start=0&end=0"
+                ).status_code in (
+                    404,
+                    503,
+                )
+            _wait_for_backend(db_conn, expected_name, proc, log_path)
+            assert insights_pidfile(home).exists() and stat.S_ISSOCK(socket_path.stat().st_mode)
 
+            proc.send_signal(signal.SIGTERM)
+            exit_code = proc.wait(timeout=30.0)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5.0)
 
-def _assert_gate_matches_image(
-    gates: list[ProcessDbGate], reads: list[tuple[Path, str]], image: LoadedCommit
-) -> None:
-    assert len(gates) == 2 and gates[0] is gates[1]
-    if image.sha is None:
-        with pytest.raises(code_version.CodeVersionError, match="loaded commit"):
-            gates[0].application_name()
-        assert reads == []
-    else:
-        assert gates[0].application_name() == gates[1].application_name() == "meiva:insights:v42"
-        assert reads == [(image.source_root, image.sha)]
-
-
-def _run_main(
-    monkeypatch: pytest.MonkeyPatch, *, exit_process: Callable[[int], None] | None = None
-) -> None:
-    runner = asyncio.Runner()
-    monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)
-    try:
-        daemon.main() if exit_process is None else daemon.main(exit_process=exit_process)
-    finally:
-        runner.close()
-
-
-@pytest.mark.parametrize("sha", ["captured-insights", None])
-@pytest.mark.usefixtures("owned_config_environment")
-def test_entry_shares_the_captured_gate_with_logging_and_work(
-    monkeypatch: pytest.MonkeyPatch, sha: str | None
-) -> None:
-    from base.deploy.schema import migrations
-
-    boot = ConfigBoot()
-    boot.set_field("machine_name", "insights-entry")
-    image = LoadedCommit(Path("/entry-insights"), sha)
-    stages: list[str] = []
-    gates: list[ProcessDbGate] = []
-    reads: list[tuple[Path, str]] = []
-    factories: list[Callable[[], Database]] = []
-    slices: list[DbConfig] = []
-    pipeline = object()
-
-    class Store:
-        def __init__(
-            self, config: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
-        ) -> None:
-            gates.append(gate)
-            slices.append(config)
-
-    def capture() -> LoadedCommit:
-        stages.append("capture")
-        return image
-
-    def count(root: Path, commit: str) -> int:
-        reads.append((root, commit))
-        return 42
-
-    def build(*, database: Callable[[], Database], machine: MachineIdentity, home: Path) -> object:
-        stages.append("producer")
-        factories.append(database)
-        return pipeline
-
-    def initialize(**inputs: Any) -> None:
-        stages.append("logging")
-        assert inputs["image"] is image
-        assert inputs["producer"]() is pipeline
-        assert inputs["machine_reader"]() == "insights-entry"
-        factories[0]()
-
-    async def work(*, home: Path, config: ConfigBoot, database: Callable[[], Database]) -> None:
-        stages.append("run")
-        assert config is boot
-        assert database is factories[0]
-        config.set_field("db_pool_max_size", 37)
-        database()
-
-    def checked_schema(_url: str) -> None:
-        stages.append("schema")
-
-    def no_signal_handlers(_name: str) -> None:
-        pass
-
-    def exit_process(code: int) -> None:
-        stages.append(f"exit:{code}")
-
-    monkeypatch.setattr(daemon, "ConfigBoot", lambda: boot)
-    monkeypatch.setattr(daemon.LoadedCommit, "capture", capture)
-    monkeypatch.setattr(code_version, "first_parent_count", count)
-    monkeypatch.setattr(daemon, "Database", Store)
-    monkeypatch.setattr(daemon, "build_pipeline", build)
-    monkeypatch.setattr(daemon, "init_gateway_process", initialize)
-    monkeypatch.setattr(migrations, "assert_schema_current", checked_schema)
-    monkeypatch.setattr(daemon, "install_graceful_shutdown", no_signal_handlers)
-    monkeypatch.setattr(daemon, "run", work)
-    _run_main(monkeypatch, exit_process=exit_process)
-    assert stages == ["capture", "schema", "producer", "logging", "run", "exit:0"]
-    assert len(slices) == 2 and slices[1].db_pool_max_size == 37
-    _assert_gate_matches_image(gates, reads, image)
+    assert exit_code == 0, log_path.read_text()[-4000:]
+    assert "[insights] interrupted, shutting down" in log_path.read_text()
+    assert not insights_pidfile(home).exists()
+    assert not socket_path.exists()

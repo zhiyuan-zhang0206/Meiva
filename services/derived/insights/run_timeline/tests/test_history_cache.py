@@ -93,7 +93,7 @@ def test_head_check_cannot_restore_bookkeeping_for_an_evicted_snapshot(
         inputs=world.inputs,
         jobs=world.jobs,
         read_segment=world.read_segment,
-        timer=lambda: world.clock,
+        timers=world.timers,
     )
     reader.read_source = evict_during_capture
     first = reader.get(1)

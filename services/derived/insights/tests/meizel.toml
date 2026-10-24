@@ -1,16 +1,2 @@
 [debt.env-patch]
 "test_insights_service.py#patch.dict os.environ" = 1
-
-[debt.first-party-patch]
-"test_insights_service.py#monkeypatch.setattr base.deploy.schema.migrations.assert_schema_current" = 1
-"test_insights_service.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
-"test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.ConfigBoot" = 1
-"test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.Database" = 1
-"test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.LoadedCommit.capture" = 1
-"test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.asyncio.Runner" = 1
-"test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.build_model_catalog" = 1
-"test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.build_pipeline" = 1
-"test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.init_gateway_process" = 1
-"test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.install_graceful_shutdown" = 1
-"test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.run" = 1
-"test_insights_service.py#monkeypatch.setattr services.derived.insights.daemon.uvicorn.Server" = 1
