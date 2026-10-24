@@ -1,4 +1,4 @@
-exports = ["fake_commands.py", "fake_crontab.py", "scripted_frames.py"]
+exports = ["fake_commands.py", "fake_crontab.py"]
 
 [uses]
 "test_autostart.py" = ["fake_commands.py"]
@@ -14,7 +14,6 @@ exports = ["fake_commands.py", "fake_crontab.py", "scripted_frames.py"]
 "test_pr_flow_job.py" = ["fake_commands.py", "fake_crontab.py"]
 "test_probes.py" = ["fake_commands.py"]
 "test_system_backend.py" = ["fake_commands.py"]
-"test_thread_frames.py" = ["scripted_frames.py"]
 "test_walg_job.py" = ["fake_commands.py", "fake_crontab.py"]
 
 [debt.env-patch]

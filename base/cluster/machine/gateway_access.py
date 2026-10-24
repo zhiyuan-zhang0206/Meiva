@@ -92,9 +92,7 @@ class GatewayAccess:
 
 # meiva:note
 # Launcher profiles whose processes present the machine API token and never the
-# meiva:note
 # human secret: the launcher delivers one to every agent host and runner service
-# meiva:note
 # (`cli.commands.data_plane.bringup.api_delivery`), exec children inherit it.
 _TOKEN_ONLY_PROFILES: frozenset[ProcessProfile] = frozenset({"agent", "runner"})
 

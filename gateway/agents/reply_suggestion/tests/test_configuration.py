@@ -6,11 +6,8 @@ from pydantic import ValidationError
 from base.config.domains.lm import LmSettings
 from base.config.tests.configuration import snapshot_process_config
 from base.lm.effort import ReasoningEffort
-from gateway.agents.reply_suggestion.configuration import (
-    draft_model_options,
-    reply_suggestion_policy,
-)
-from gateway.agents.reply_suggestion.service import DRAFT_TIMEOUT_S
+from gateway.agents.reply_suggestion.configuration import reply_suggestion_policy
+from gateway.agents.reply_suggestion.service import DRAFT_TIMEOUT_S, draft_model_options
 
 
 def test_defaults() -> None:

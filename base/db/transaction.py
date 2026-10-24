@@ -17,9 +17,8 @@ _CT = TypeVar("_CT", bound=psycopg.AsyncConnection[Any])
 
 # meiva:note
 # What an async reader needs of a pool: one connection lent for the length of an `async with`
-# block. `psycopg_pool.AsyncConnectionPool` is one; a test pool that parks or swallows the
-# cancellation of the borrow (`base/db/tests/parked_pool.py`) is the other, a fault no real
-# Postgres produces on demand.
+# block. `psycopg_pool.AsyncConnectionPool` is one; a test pool that swallows a cancellation of the
+# borrow (`base/db/tests/swallowed_cancel.py`) is the other, a fault no real pool produces on demand.
 class AsyncConnectionSource(Protocol):
     def connection(
         self, timeout: float | None = None

@@ -39,10 +39,8 @@ from gateway.agents.history import understanding as agents_understanding_router
 from gateway.agents.notice_operations import notices as notices_router
 from gateway.agents.notice_operations import router as guarded_notices_router
 from gateway.agents.reply_suggestion import router as reply_suggestion_router
-from gateway.agents.reply_suggestion.configuration import (
-    reply_suggestion_policy,
-    reply_suggestion_service,
-)
+from gateway.agents.reply_suggestion.configuration import reply_suggestion_policy
+from gateway.agents.reply_suggestion.service import ReplySuggestionService
 from gateway.agents.task_assignment import router as task_assignments_router
 from gateway.agents.to_user import document as to_user_router
 from gateway.alerts import router as alerts_router
@@ -172,7 +170,9 @@ def _build_request_resources(
     app.state.inspect_query_cache = inspect_queries
     releases.push_async_callback(inspect_queries.aclose)
     gateway: GatewayConfig = app.state.gateway_config
-    app.state.reply_suggestions = reply_suggestion_service(gateway.models.llm_override)
+    app.state.reply_suggestions = ReplySuggestionService(
+        llm_override=gateway.models.llm_override, transport=None
+    )
     app.state.reply_suggestion_policy = reply_suggestion_policy(config)
     app.state.gateway_access = gateway_access_from_boot(config)
     app.state.memory_search_gate = memory_router.build_search_gate(

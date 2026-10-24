@@ -21,7 +21,7 @@ from agent.graph.exec._result import (
 )
 from base.agents.messages.inbound import InterruptReason
 from base.agents.messages.kwargs import ExecStatus
-from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
+from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 
 
 def test_a_finished_run_continues_the_turn() -> None:

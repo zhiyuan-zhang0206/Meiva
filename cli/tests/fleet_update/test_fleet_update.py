@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+from base.host.env.agent_env import AGENT_ID_ENV
 from base.native_process.root_control import instance_lock
 from base.paths import repo_root
 from cli.fleet_update import fleet_verify, oneshot
@@ -523,7 +524,7 @@ def test_refuses_inside_an_meiva_agent(
     env: tuple[Cluster, Callable[..., int]], command: str
 ) -> None:
     cluster, run = env
-    cluster.environ["MEIVA_AGENT_ID"] = "7"
+    cluster.environ[AGENT_ID_ENV] = "7"
     assert run(command) == 2
     assert cluster.effects == []
 

@@ -26,6 +26,9 @@ def main(
     argv: list[str], *, repo: Path, env: Mapping[str, str], now: datetime, pacing: Pacing
 ) -> int:
     args = choices.parse(argv, env)
+    # meiva:note
+    # The updater imports no application module, so the agent-shell marker is spelled out here;
+    # its owner is `base.host.env.agent_env.AGENT_ID_ENV` (a test pins the two together).
     if "MEIVA_AGENT_ID" in env:
         print(
             "refused: run from a plain login shell or an OS-owned job, not an Meiva "

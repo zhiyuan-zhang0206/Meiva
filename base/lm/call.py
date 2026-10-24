@@ -14,11 +14,8 @@ effort, then invoke) for the prompt-vs-material shape both entry points use.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
-from typing import Any, Protocol, TypedDict, cast
-
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage
+from collections.abc import Callable
+from typing import Any, cast
 
 from base.host.env.agent_slices import ModelOverrides
 from base.host.net.resilience import extract_retry_after, jittered
@@ -273,59 +270,3 @@ def answer_text(
         usage_source=usage_source,
         catalog=catalog,
     )
-
-
-# meiva:note
-# What a structured-output call returns with `include_raw=True`: the provider's own message, the
-# parsed value (None when parsing failed) and the parsing error, if any.
-class StructuredReply(TypedDict):
-    raw: AIMessage
-    parsed: object
-    parsing_error: BaseException | None
-
-
-# meiva:note
-# A model bound to a structured-output schema, invoked once on a message list.
-class StructuredDraft(Protocol):
-    async def ainvoke(self, messages: Sequence[BaseMessage]) -> StructuredReply: ...
-
-
-# meiva:note
-# A chat model that can be bound to a JSON schema. `ChatDraftModel` adapts the real chat model;
-# `base.lm.tests.scripted_calls.ScriptedDraftModel` is the test double.
-class DraftModel(Protocol):
-    def with_structured_output(
-        self, schema: dict[str, Any], *, method: str, strict: bool, include_raw: bool
-    ) -> StructuredDraft: ...
-
-
-# meiva:note
-# Builds the draft model for a model id from the catalog and the provider keys.
-class DraftModelFactory(Protocol):
-    def __call__(self, model: str, catalog: ModelCatalog, keys: ProviderKeys) -> DraftModel: ...
-
-
-class _ChatStructuredDraft:
-    def __init__(self, bound: Any) -> None:
-        self._bound = bound
-
-    async def ainvoke(self, messages: Sequence[BaseMessage]) -> StructuredReply:
-        reply = await self._bound.ainvoke(list(messages))
-        if not isinstance(reply, dict) or not {"raw", "parsed", "parsing_error"} <= reply.keys():
-            raise TypeError("a structured call with include_raw=True returns raw/parsed/error")
-        return cast(StructuredReply, reply)
-
-
-# meiva:note
-# The real chat model as a `DraftModel`.
-class ChatDraftModel:
-    def __init__(self, chat: BaseChatModel) -> None:
-        self._chat = chat
-
-    def with_structured_output(
-        self, schema: dict[str, Any], *, method: str, strict: bool, include_raw: bool
-    ) -> StructuredDraft:
-        bound = self._chat.with_structured_output(
-            schema, method=method, strict=strict, include_raw=include_raw
-        )
-        return _ChatStructuredDraft(bound)
