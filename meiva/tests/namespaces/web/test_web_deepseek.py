@@ -136,18 +136,16 @@ def test_persistent_429_exhausts_the_retry_budget(web_harness: WebHarness) -> No
 
 
 # meiva:note
-# The server records a start after the client's connection setup, so the first and the last start
-# can each be off by a few milliseconds of latency; a pacer that did not wait would show a window
-# of about zero, far below this slack.
-_CLOCK_SKEW_S = 0.1
+# Keep a conservative tolerance on the reservation floor. Both timestamps use this process's
+# monotonic clock; the tolerance is not a bound on connection or server scheduling latency.
+_FLOOR_SLACK_S = 0.1
 
 
 # meiva:note
-# The end-to-end claim the provider cares about, and the one a real clock can carry: four
-# requests occupy at least `(n-1)/qps` because every start waits for its own slot, and sleep
-# overshoot only widens that window. The upper bound is the regression direction a floor cannot
-# see (a pacer ten times slower still satisfies a floor). The slot arithmetic itself is asserted
-# on values in `test_web_pacing.py`.
+# The last receipt cannot precede the fourth reserved slot, measured from before the batch.
+# Measuring from the first receipt would compress the window when that handler starts late.
+# The existing receipt-spread ceiling also rejects an excessively slow pacer. Neither bound
+# guarantees network receipt spacing; exact slot arithmetic lives in `test_web_pacing.py`.
 def test_batch_request_starts_stay_inside_the_configured_rate_window(
     web_harness: WebHarness,
 ) -> None:
@@ -162,11 +160,16 @@ def test_batch_request_starts_stay_inside_the_configured_rate_window(
 
     web_harness.loopback.respond(answer)
 
+    batch_started = time.monotonic()
     web_harness.search(["a", "b", "c", "d"], max_concurrent=4)
 
     assert len(starts) == 4
+    assert len(web_harness.loopback.received) == 4
+    floor_elapsed = max(starts) - batch_started
     window = max(starts) - min(starts)
-    assert window >= 3 / 5.0 - _CLOCK_SKEW_S, f"four requests inside {window:.3f}s for 5 QPS"
+    assert floor_elapsed >= 3 / 5.0 - _FLOOR_SLACK_S, (
+        f"four requests received within {floor_elapsed:.3f}s of batch start for 5 QPS"
+    )
     assert window <= 1.0, f"four requests spread over {window:.3f}s for 5 QPS"
 
 

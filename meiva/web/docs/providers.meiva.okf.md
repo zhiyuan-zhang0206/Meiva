@@ -22,7 +22,7 @@ Each call's provider is configuration, not code:
 | `MEIVA_WEB_DEEPSEEK_SEARCH_ENDPOINT` | `https://api.deepseek.com/v1/tools/search` | URL | DeepSeek Search endpoint |
 | `MEIVA_WEB_DEEPSEEK_FETCH_ENDPOINT` | `https://api.deepseek.com/v1/tools/fetch` | URL | DeepSeek Fetch endpoint |
 | `MEIVA_WEB_DEEPSEEK_MAX_RESULTS` | 50 | int | DeepSeek's own result ceiling; `count` is clamped to it |
-| `MEIVA_WEB_DEEPSEEK_QPS` | 5 | float | request starts per second `meiva.web` allows itself |
+| `MEIVA_WEB_DEEPSEEK_QPS` | 5 | float | reserved request slots per second within one batch |
 
 The defaults stay on the incumbent pair: adding a provider must not move them, and a switch is a decision, not a routine config edit. Both DeepSeek tools authenticate with `DEEPSEEK_API_KEY` — the key the `deepseek-*` models already use — so a model-capable installation needs no second credential.
 
@@ -34,10 +34,10 @@ The defaults stay on the incumbent pair: adding a provider must not move them, a
 
 ## Request rate
 
-DeepSeek allows 5 requests per second per account across Search and Fetch and answers 429 above it, so `meiva.web` paces DeepSeek request starts `1/MEIVA_WEB_DEEPSEEK_QPS` apart; a 12-wide batch queues locally instead of retrying. Measured 2026-10-17 with 10 queries at `max_concurrent=12`: unthrottled, 4 of 14 requests were 429 and the batch took 2.1s; paced to 5 QPS, none was rejected and it took 1.4s. The retry policy (3 attempts, exponential backoff, `Retry-After`) stays the second line of defence. Brave has no such pacing need at this workload: the same 10-query batch ran in 0.9s without a single 429.
+DeepSeek allows 5 requests per second per account across Search and Fetch and answers 429 above it, so `meiva.web` reserves DeepSeek request slots `1/MEIVA_WEB_DEEPSEEK_QPS` apart; a 12-wide batch waits locally before its attempts. Measured 2026-10-17 with 10 queries at `max_concurrent=12`: unthrottled, 4 of 14 requests were 429 and the batch took 2.1s; paced to 5 QPS, none was rejected and it took 1.4s. The retry policy (3 attempts, exponential backoff, `Retry-After`) stays the second line of defence. Brave has no such pacing need at this workload: the same 10-query batch ran in 0.9s without a single 429.
 
-The deps carry the rate as a value (`qps`); `runner.py` builds one limiter per batch and every DeepSeek request of that batch waits on it, so one SDK call cannot burst past the account limit. Two concurrent `meiva.web` calls in one process each pace themselves: the account limit is shared, the limiter is not.
+The deps carry the rate as a value (`qps`); `runner.py` builds one limiter per batch and every DeepSeek attempt of that batch waits for its reserved slot. A late wake-up or connection/server scheduling can compress actual request or receipt gaps: this is a reservation schedule, not a guarantee of network spacing or account-wide compliance. Two concurrent `meiva.web` calls in one process each pace themselves: the account limit is shared, the limiter is not.
 
-The DeepSeek path authenticates with DEEPSEEK_API_KEY, clamps count to the DeepSeek result ceiling, maps each result to SearchResult with kind web and the snippet-or-summary text, waits on the batch's rate limiter before every request attempt so the account QPS holds, and raises SearchError or FetchError carrying the provider's own error message.
+The DeepSeek path authenticates with DEEPSEEK_API_KEY, clamps count to the DeepSeek result ceiling, maps each result to SearchResult with kind web and the snippet-or-summary text, waits on the batch's rate limiter before every request attempt, and raises SearchError or FetchError carrying the provider's own error message.
 
 web_search_provider and web_fetch_reader select the provider when the deps are built, both default to the incumbent brave and jina, and a provider switch leaves the fetch answer step and the injection check unchanged.
