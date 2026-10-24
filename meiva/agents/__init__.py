@@ -40,7 +40,7 @@ from base.api_contracts.agent_contract import MachineNotRegistered as MachineNot
 from base.api_contracts.agent_contract import ResurrectError as ResurrectError
 from base.api_contracts.agent_contract import SpawnTargetNotAgentRunner as SpawnTargetNotAgentRunner
 from meiva import gateway_client
-from meiva.agents import peers
+from meiva.agents import peers, row_text
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 
@@ -195,18 +195,8 @@ def _relative_time(dt: datetime) -> str:
     from meiva.sdk_surface.settings import clock
 
     zone = clock().zone()
-    delta = datetime.now().astimezone(zone) - dt.astimezone(zone)
-    seconds = int(delta.total_seconds())
-    if seconds < 60:
-        return f"{seconds}s ago"
-    minutes = seconds // 60
-    if minutes < 60:
-        return f"{minutes}m ago"
-    hours = minutes // 60
-    if hours < 24:
-        return f"{hours}h ago"
-    days = hours // 24
-    return f"{days}d ago"
+    now = datetime.now().astimezone(zone)
+    return row_text.relative_age(dt.astimezone(zone), now=now)
 
 
 @dataclass
