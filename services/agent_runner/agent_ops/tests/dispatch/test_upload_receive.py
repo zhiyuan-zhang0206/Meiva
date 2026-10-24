@@ -2,20 +2,24 @@
 # The real receiver must classify source refusals from the production HTTP client.
 from __future__ import annotations
 
+from pathlib import Path
+
 import httpx
 import pytest
 
 from base.agents.upload_delivery.models import ReceiveRequest, current_unit, make_manifest
 from base.config import get_field, set_field
 from base.host.net.tests.local_http import serve_json
+from base.paths.tests.homes import default_home as default_home
 from ops.rpc_schemas import OpStatus
 from services.agent_runner.agent_ops.tests.ops_support import Ops
 
 
 @pytest.mark.parametrize("status_code", [401, 403, 404, 409])
 async def test_upload_receive_classifies_real_source_refusals(
-    ops: Ops, agent_id: int, status_code: int
+    default_home: Path, ops: Ops, agent_id: int, status_code: int
 ) -> None:
+    assert Path.home() == default_home
     target = current_unit(local_machine=ops.machine.name())
     manifest = make_manifest(agent_id, ["source.txt"], [("source.txt", b"source", "text/plain")])
     request = ReceiveRequest(version=1, target=target, source=target, manifest=manifest)
@@ -35,8 +39,9 @@ async def test_upload_receive_classifies_real_source_refusals(
 
 
 async def test_upload_receive_keeps_server_errors_distinct_from_source_refusals(
-    ops: Ops, agent_id: int
+    default_home: Path, ops: Ops, agent_id: int
 ) -> None:
+    assert Path.home() == default_home
     target = current_unit(local_machine=ops.machine.name())
     manifest = make_manifest(agent_id, ["source.txt"], [("source.txt", b"source", "text/plain")])
     request = ReceiveRequest(version=1, target=target, source=target, manifest=manifest)
