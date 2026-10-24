@@ -8,10 +8,11 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 "pr_flow_export.py" = ["export_process.py", "trunk_api.py"]
 "runs_api.py" = ["export_process.py"]
 "runs_export.py" = ["export_process.py", "runs_api.py"]
-"tests" = ["accounting.py", "commands.py", "diagnose.py", "export_process.py", "job_rerun.py", "monitor.py", "owner_operations.py", "runs_api.py", "runs_export.py", "status.py", "trunk_api.py"]
+"tests" = ["accounting.py", "commands.py", "diagnose.py", "export_process.py", "job_rerun.py", "monitor.py", "owner_operations.py", "runs_api.py", "runs_export.py", "shared_plan_input.py", "status.py", "trunk_api.py"]
 "watch_pr.py" = ["status.py"]
 
 [roots]
+"shared_plan_input.py" = { kinds = ["clock"], why = "The CI entry bounds read-only producer/artifact registration waits and each gh subprocess by one monotonic deadline" }
 "commands.py" = { kinds = ["environ"], why = "TRUNK_API_TOKEN optionally adds read-only queue evidence to diagnosis; it is not deployment configuration" }
 
 "export_process.py" = { kinds = ["settings"], why = "Tool entry composes its process resources from the launch configuration" }

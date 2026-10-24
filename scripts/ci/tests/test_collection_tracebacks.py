@@ -135,7 +135,7 @@ def test_frame_churn_finishes_with_complete_tracebacks(
 @pytest.mark.parametrize(
     ("workflow", "counts"),
     [
-        ("ci.yml", ["8", "8", "${{ needs.classify.outputs.shards }}"]),
+        ("ci.yml", ["8", "${{ needs.classify.outputs.shards }}"]),
         ("file-shard-proof.yml", ["16"]),
     ],
 )

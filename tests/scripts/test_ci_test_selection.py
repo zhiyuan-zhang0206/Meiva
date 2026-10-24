@@ -66,8 +66,7 @@ def _backend_verdict(
         | {
             "TEST_SELECTION_MODE": mode,
             "DECISION": decision,
-            "SHARED_FILE_PLAN": "false",
-            "PLAN_ARTIFACT_ID": "",
+            "PLAN_ARTIFACT_ID": "123",
         },
         capture_output=True,
         text=True,
@@ -104,9 +103,7 @@ def _assert_backend_verdicts(script: str, dependencies: list[str]) -> None:
         for outcome in ("failure", "cancelled", "skipped"):
             actual = _backend_verdict(script, "true", results | {job: outcome})
             # FULL has no enforced subset; every required dependency must succeed.
-            assert actual.returncode == (0 if job in {"backend-selected", "backend-plan"} else 1), (
-                actual.stdout
-            )
+            assert actual.returncode == (0 if job == "backend-selected" else 1), actual.stdout
     # The selector step is continue-on-error inside classify; its outcome is an output.
     # A failed or cancelled selector keeps the full net but fails the required check;
     # a skipped one (no PR, or no backend side) is not a failure.
@@ -153,15 +150,15 @@ def test_shards_are_skipped_only_on_the_enforced_subset_path(tmp_path: Path) -> 
     """Everything except enforce+SELECTED runs the full fan-out: shadow, FULL,
     SKIP, and a selector failure (empty decision) all keep the gate."""
     shard = _workflow_jobs()["backend-shard"]
-    assert shard["needs"] == ["classify", "backend-plan"]
+    assert shard["needs"] == ["classify"]
     condition = shard["if"]
     # A status function admits skipped needs on main, but respects run cancellation.
     assert "!cancelled()" in condition
     assert "needs.classify.outputs.mode != 'enforce'" in condition
     assert "needs.classify.outputs.decision != 'SELECTED'" in condition
     run = _step(shard, "Run pytest shard")["run"]
-    assert "-m scripts.ci.pull_requests.plan_file_shards" in run
-    assert "--count 8 --plan tmp/file-shards/plan.json" in run
+    assert "plan_file_shards" not in run
+    assert run.count("--file-shard-shared --file-shard-count=8") == 2
     assert run.count("--file-shard-check=tmp/file-shards/plan.json") == 2
     assert run.count("--file-shard-group=${{ matrix.group }}") == 2
     assert run.count("--file-shard-execute") == 2
@@ -184,35 +181,30 @@ def _assert_shard_failure_verdicts(root: Path, script: str) -> None:
         "calls = json.loads(path.read_text()) if path.exists() else []\n"
         "calls.append(sys.argv[1:])\n"
         "path.write_text(json.dumps(calls))\n"
-        "if sys.argv[2] == 'python':\n"
-        "    sys.exit(int(os.environ['PLAN_STATUS']))\n"
         "attempt = sum(call[1] == 'pytest' for call in calls)\n"
         "sys.exit(int(os.environ['FIRST_STATUS' if attempt == 1 else 'FINAL_STATUS']))\n"
     )
     uv.chmod(0o755)
     cases = [
-        (23, 0, 0, 1, 23, 0),
-        (0, 2, 0, 1, 2, 1),
-        (0, 3, 0, 1, 3, 1),
-        (0, 4, 0, 1, 4, 1),
-        (0, 1, 0, 1, 0, 2),
-        (0, 1, 19, 1, 19, 2),
-        (0, 1, 0, 8, 1, 1),
-        (0, 0, 0, 1, 0, 1),
+        (2, 0, 1, 2, 1),
+        (3, 0, 1, 3, 1),
+        (4, 0, 1, 4, 1),
+        (1, 0, 1, 0, 2),
+        (1, 19, 1, 19, 2),
+        (1, 0, 8, 1, 1),
+        (0, 0, 1, 0, 1),
     ]
-    for index, (plan_status, first, final, group, expected, attempts) in enumerate(cases):
+    for index, (first, final, group, expected, attempts) in enumerate(cases):
         directory = root / str(index)
         directory.mkdir()
         env = {
             **os.environ,
             "PATH": str(binary) + os.pathsep + os.environ["PATH"],
-            "PLAN_STATUS": str(plan_status),
             "FIRST_STATUS": str(first),
             "FINAL_STATUS": str(final),
             "GROUP": str(group),
             "COVERAGE_FILE": "coverage-data",
             "GITHUB_OUTPUT": str(directory / "outputs"),
-            "SHARED_FILE_PLAN": "false",
         }
         result = subprocess.run(  # noqa: S603 -- repository shell with test-owned commands
             [
@@ -232,8 +224,8 @@ def _assert_shard_failure_verdicts(root: Path, script: str) -> None:
         )
         assert result.returncode == expected, result.stdout + result.stderr
         calls = cast("list[list[str]]", json.loads((directory / "calls.json").read_text()))
-        assert len(calls) == 1 + attempts
-        assert sum(call[1] == "python" for call in calls) == 1
+        assert len(calls) == attempts
+        assert all(call[1] == "pytest" for call in calls)
 
 
 def test_subset_job_gates_only_in_enforce() -> None:
@@ -285,7 +277,13 @@ def test_the_full_fanout_width_is_the_selectors_constant() -> None:
     width = test_selector.FULL_FANOUT_SHARDS
     assert full["strategy"]["matrix"]["group"] == list(range(1, width + 1))
     assert full["name"] == f"backend shard (${{{{ matrix.group }}}}/{width})"
-    assert f"--count {width} --plan" in _step(full, "Run pytest shard")["run"]
+    assert f"--file-shard-count={width}" in _step(full, "Run pytest shard")["run"]
+    assert (
+        f"--count {width} --shared --plan"
+        in _step(_workflow_jobs()["backend-plan"], "Collect the complete eligible population once")[
+            "run"
+        ]
+    )
 
 
 def test_subset_shards_plan_and_execute_like_the_full_shards_over_the_published_list() -> None:
@@ -306,7 +304,9 @@ def test_subset_shards_plan_and_execute_like_the_full_shards_over_the_published_
     assert published["with"]["path"].endswith("/selected-tests/tests.txt")
     assert (
         _step(subset, "Restore the test durations")["with"]["key"]
-        == _step(full, "Restore the test durations")["with"]["key"]
+        == _step(jobs["backend-plan"], "Restore the full population's test durations")["with"][
+            "key"
+        ]
     )
 
 

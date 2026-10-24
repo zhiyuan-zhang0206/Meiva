@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Required whole-file backend shards"
-description: "Identity-bound shared queue plans, runner-local PR plans and fail-closed worker collection checks."
+description: "Identity-bound shared full plans, concurrent runner preparation and fail-closed worker collection checks."
 tags:
 - infrastructure
 - testing
@@ -9,23 +9,37 @@ tags:
 
 # Required whole-file backend shards
 
-Each ordinary pull-request runner creates a fresh complete eligible plan from its
-current checkout before starting four workers. Planning uses the same native
-environment, filters, configuration overrides and duration input as execution.
-Each worker collects only its group's files and checks the exact planned nodes
-and declared fixture closure before test bodies. Planning errors, configuration
-drift and collection/worker validation errors fail directly without fallback or
-retry; ordinary test failures retain the existing retry and canary policy.
-Duration measurement retries restore the committed input before executing the
-same plan, and attempt reports remain distinct.
+Every FULL backend population uses one complete eligible collection. The
+`backend-plan` producer and eight shard runners share `classify` as their only
+routing dependency, so native environment setup overlaps planning. Their FULL
+predicate is identical, including unknown impact, shadow mode and selector
+failure. SELECTED populations retain local selected-file planning and do not
+start the full producer. Planning errors, configuration drift and collection or
+worker validation errors fail directly without fallback or retry; ordinary test
+failures retain the existing retry and canary policy.
 
-Trunk queue branches and manual dispatches are known FULL before classification.
-Their `backend-plan` job starts alongside `classify`, performs one complete
-collection and publishes a plan for all eight runners. It owns that population's
-duration-cache key; every consumer restores exactly that key, including its empty
-no-cache value. Workers wait on both jobs and download the exact published artifact
-ID. Ordinary PRs, including unknown-impact FULL decisions, retain local planning;
-selected subsets do not start a speculative complete collection.
+Classification resolves the exact duration-cache key once and records its actual
+execution attempt. The producer publishes the plan with the exact duration bytes
+it used. A zero-byte bundle member represents a missing input; an empty JSON map
+remains a present input. Consumers never resolve another timing cache.
+
+After environment setup, each shard waits within a bounded deadline for this
+run's successful producer and downloads its exact artifact ID. All paginated
+job records are checked against the source head and run. The classifier's saved
+attempt is the minimum eligible producer generation: a full rerun cannot consume
+a previous plan while its new producer is registering. A failed-only rerun may
+reuse a successful producer that did not execute again. A newer queued or running
+producer blocks older success; current-generation failure fails directly. Prior
+failure can wait only within the same bounded registration budget. Carried-forward
+job records retain their successful generation-marker step. The producer owns
+that explicit generation, validates it against its actual environment, and pairs
+it with a bundle receipt. A new job ID or run-attempt view cannot advance the
+marker. Missing, duplicate, failed or malformed markers are rejected; no timestamp
+fingerprint guesses an execution identity. The consumer checks the bundle receipt
+against the marker before restoring input.
+Artifacts are named by run and actual producer attempt and must be unique,
+unexpired and tied to the same source. API errors, malformed metadata, incomplete
+pagination and deadline expiry fail closed.
 
 Shared plans require schema v2 and `--file-shard-shared` on producer and consumers.
 Before restricting collection, the plugin compares the exact Git tree, clean
@@ -43,10 +57,11 @@ Every real worker still collects its group's files and compares every node and
 fixture closure before executing bodies. Invalid/missing identity, tracked drift,
 missing artifacts and producer/worker failures fail closed; neither a local replan
 nor a node-split fallback can hide them. The backend aggregator explicitly checks
-the required producer and artifact even when downstream jobs are skipped.
-The single additional job can add queue delay; lower runner usage does not alone
-prove a shorter workflow critical path. Compare actual plan/setup/test timings
-before claiming a wall-clock gain.
+the required producer and artifact on FULL routes even when shard jobs are skipped.
+Environment preparation overlaps the producer instead of following it. Runner
+queue delays can still change the critical path; lower runner usage does not
+alone prove a wall-clock gain. Compare actual setup, planning, handoff and test
+timings before claiming one.
 
 Plans remain disposable evidence for one run, not a discovery cache. Planning
 diagnostics and per-worker reports accompany the existing native reports; their
