@@ -1,15 +1,23 @@
+# meiva:note
+# Fleet silence behavior against a loopback Grafana wire. Pure window facts use a fixed clock;
+# the executable entry reads real private-home configuration in an isolated interpreter.
+
 from __future__ import annotations
 
 import base64
 import json
+import socket
+import sys
 import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from base.host.proc import run_bounded
 from cli import fleet_alert_silence as silence
 
 _NOW = datetime(2026, 10, 4, 4, 0, tzinfo=UTC)
@@ -90,6 +98,7 @@ def grafana() -> Iterator[tuple[FakeGrafana, str]]:
     finally:
         server.shutdown()
         thread.join()
+        server.server_close()
 
 
 def test_open_creates_one_silence_over_every_alert_but_a_full_disk_with_expiry_and_comment(
@@ -132,57 +141,72 @@ def test_close_expires_only_the_silences_it_owns(grafana: tuple[FakeGrafana, str
     assert silence.close_window(base, "pw") == []
 
 
+# meiva:note
+# The entry reads a real .env in its private home in a fresh interpreter. HTTP and credential
+# handling stay real, including the configured URL's normalization and an absent password.
+def _run(home: Path, base: str, credential: str | None, *argv: str) -> str:
+    values = {"MEIVA_TELEMETRY_GRAFANA_URL": base}
+    if credential is not None:
+        values["GRAFANA_ADMIN_PASSWORD"] = credential
+    (home / ".env").write_text("".join(f"{key}={value}\n" for key, value in values.items()))
+    env = {
+        "HOME": str(home),
+        "MEIVA_HOME": str(home),
+        "MEIVA_CONFIG_FETCH": "skip",
+        "MEIVA_TIMEZONE": "UTC",
+    }
+    child = run_bounded(
+        [sys.executable, "-I", "-m", "cli.fleet_alert_silence", *argv],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert child.returncode == 0, child.stderr
+    return child.stdout
+
+
 def test_main_opens_then_closes_through_the_hosts_settings(
-    grafana: tuple[FakeGrafana, str],
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+    grafana: tuple[FakeGrafana, str], tmp_path: Path
 ) -> None:
     fake, base = grafana
-    monkeypatch.setattr(silence, "colocated_grafana", lambda: (base, "pw"))
-    assert silence.main(["open", "--hours", "2", "--comment", "window"]) == 0
-    assert capsys.readouterr().out.startswith("SILENCE opened id=s1 until=")
+    assert _run(tmp_path, base, "pw", "open", "--hours", "2", "--comment", "window").startswith(
+        "SILENCE opened id=s1 until="
+    )
     assert fake.rows[0]["status"]["state"] == "active"
-    assert silence.main(["close"]) == 0
-    assert capsys.readouterr().out == "SILENCE closed 1\n"
+    assert _run(tmp_path, base, "pw", "close") == "SILENCE closed 1\n"
     assert fake.rows[0]["status"]["state"] == "expired"
 
 
-def test_an_unreachable_grafana_is_reported_not_raised(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(silence, "colocated_grafana", lambda: ("http://127.0.0.1:9", "pw"))
-    assert silence.main(["open", "--hours", "1", "--comment", "w"]) == 0
-    assert capsys.readouterr().out.startswith("SILENCE failed: GET /api/")
+def test_an_unreachable_grafana_is_reported_not_raised(tmp_path: Path) -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as denied:
+        denied.bind(("127.0.0.1", 0))
+        base = f"http://127.0.0.1:{denied.getsockname()[1]}"
+        output = _run(tmp_path, base, "pw", "open", "--hours", "1", "--comment", "w")
+    assert output.startswith("SILENCE failed: GET /api/")
 
 
 def test_a_refused_credential_is_reported_not_raised(
-    grafana: tuple[FakeGrafana, str],
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+    grafana: tuple[FakeGrafana, str], tmp_path: Path
 ) -> None:
     _fake, base = grafana
-    monkeypatch.setattr(silence, "colocated_grafana", lambda: (base, "wrong"))
-    assert silence.main(["close"]) == 0
-    assert capsys.readouterr().out == f"SILENCE failed: GET {silence.SILENCES}: HTTP 401\n"
-
-
-def test_a_home_without_the_admin_password_skips(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(silence, "colocated_grafana", lambda: None)
-    assert silence.main(["close"]) == 0
-    assert capsys.readouterr().out.startswith("SILENCE skipped:")
-
-
-def test_the_credential_comes_from_the_alerts_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    from pydantic import SecretStr
-
-    from base.config import settings
-
-    monkeypatch.setattr(settings.alerts, "grafana_admin_password", SecretStr("secret"))
-    monkeypatch.setattr(
-        settings.observability, "telemetry_grafana_url", "http://grafana.test:3003/"
+    assert _run(tmp_path, base, "wrong", "close") == (
+        f"SILENCE failed: GET {silence.SILENCES}: HTTP 401\n"
     )
-    assert silence.colocated_grafana() == ("http://grafana.test:3003", "secret")
-    monkeypatch.setattr(settings.alerts, "grafana_admin_password", None)
-    assert silence.colocated_grafana() is None
+
+
+@pytest.mark.parametrize("credential", [None, ""])
+def test_a_home_without_the_admin_password_skips(
+    grafana: tuple[FakeGrafana, str], tmp_path: Path, credential: str | None
+) -> None:
+    fake, base = grafana
+    assert _run(tmp_path, base, credential, "close").startswith("SILENCE skipped:")
+    assert fake.calls == []
+
+
+def test_the_credential_comes_from_the_alerts_settings(
+    grafana: tuple[FakeGrafana, str], tmp_path: Path
+) -> None:
+    fake, base = grafana
+    assert _run(tmp_path, base + "/", "pw", "close") == "SILENCE closed 0\n"
+    assert fake.calls == [("GET", silence.SILENCES)]
