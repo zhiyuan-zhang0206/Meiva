@@ -65,13 +65,16 @@ class AuditedAgent:
     # `(skill, depth)` of every row written since the last call, oldest first.
     def invoked(self) -> list[tuple[str, str]]:
         rows = self._conn.execute(
-            "SELECT attributes->>'skill', attributes->>'invocation_depth' FROM audit_events "
+            "SELECT attributes FROM audit_events "
             "WHERE agent_id = %s AND event_name = 'skill_invoked' ORDER BY id",
             (self.id,),
         ).fetchall()
         fresh = rows[self._seen :]
         self._seen = len(rows)
-        return [(skill, depth) for skill, depth in fresh]
+        return [
+            (str(attributes["skill"]), str(attributes["invocation_depth"]))
+            for (attributes,) in fresh
+        ]
 
 
 @pytest.fixture
