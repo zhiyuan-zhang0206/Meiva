@@ -72,10 +72,10 @@ def validate_timezone(tz: str) -> None:
         raise ValueError(f"invalid IANA timezone: {tz!r}") from exc
 
 
-def validate_cron(expr: str) -> None:
+def validate_cron(expr: str, *, now: _dt.datetime) -> None:
     """Validate a 5-field cron expression; raises CronExprError on invalid."""
     try:
-        croniter(expr, _dt.datetime.now(_dt.UTC))
+        croniter(expr, now)
     except (ValueError, KeyError) as exc:
         raise CronExprError(f"invalid cron expression: {expr!r}") from exc
 
@@ -164,11 +164,10 @@ def previous_fire(
 # `when` normalization
 
 
-def normalize_when(when: _dt.datetime | _dt.timedelta | str) -> _dt.datetime:
-    """Normalize datetime / timedelta / ISO str to a TZ-aware UTC datetime.
-
-    Naive datetime / ISO string without tz → ValueError.
-    """
+# meiva:note
+# Normalize datetime / timedelta / ISO text to an aware UTC datetime. Relative inputs use
+# the caller's aware snapshot; naive datetime / ISO inputs still raise ValueError.
+def normalize_when(when: _dt.datetime | _dt.timedelta | str, *, now: _dt.datetime) -> _dt.datetime:
     if isinstance(when, _dt.datetime):
         if when.tzinfo is None:
             raise ValueError(
@@ -176,7 +175,9 @@ def normalize_when(when: _dt.datetime | _dt.timedelta | str) -> _dt.datetime:
             )
         return when.astimezone(_dt.UTC)
     if isinstance(when, _dt.timedelta):
-        return _dt.datetime.now(_dt.UTC) + when
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("now must carry tzinfo when resolving a relative time")
+        return now.astimezone(_dt.UTC) + when
     if isinstance(when, str):
         parsed = _dt.datetime.fromisoformat(when)
         if parsed.tzinfo is None:

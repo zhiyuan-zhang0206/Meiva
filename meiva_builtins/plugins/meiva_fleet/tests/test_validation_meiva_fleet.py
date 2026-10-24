@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -133,3 +134,55 @@ class TestNoticeEntries:
 
         with pytest.raises(TypeError, match="task must be int"):
             fleet_plugin.notify("hi", task=("5",), idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+
+
+# meiva:note
+# The SDK still sends the real gateway request. Its relative expiration is encoded as one
+# absolute UTC deadline; a negative interval is rejected before the listener sees anything.
+def test_relative_notice_expiration_reaches_the_gateway(wire: GatewayWire) -> None:
+    from meiva_builtins.plugins.meiva_fleet import plugin as fleet_plugin
+
+    wire.stub.reply(
+        "POST",
+        "/api/agents/900001/notices",
+        {"id": 1, "pending_count": 0, "superseded": [], "pending_notices": []},
+        status=201,
+    )
+    pin_agent(900001, clients=wire.context.clients)
+    interval = timedelta(minutes=5)
+    before = datetime.now(UTC)
+    assert fleet_plugin.notify("expires", expire_at=interval, idempotency_key="notice-expiry") == 1
+    after = datetime.now(UTC)
+    [received] = wire.stub.received
+    due = datetime.fromisoformat(received.body["expire_at"])
+    assert before + interval <= due <= after + interval
+    assert received.headers["idempotency-key"] == "notice-expiry"
+
+
+def test_past_notice_expiration_is_rejected_without_http(wire: GatewayWire) -> None:
+    from meiva_builtins.plugins.meiva_fleet import plugin as fleet_plugin
+
+    pin_agent(900001, clients=wire.context.clients)
+    with pytest.raises(ValueError, match="expire_at is in the past"):
+        fleet_plugin.notify("expired", expire_at=timedelta(seconds=-1), idempotency_key="expired")
+    assert wire.stub.received == []
+
+
+# meiva:note
+# Equality passes the client's existing past-time comparison, but the server evaluates
+# expiration at arrival. A real HTTP refusal remains an SDK ValueError, not success.
+def test_zero_notice_expiration_preserves_a_gateway_refusal(wire: GatewayWire) -> None:
+    from meiva_builtins.plugins.meiva_fleet import plugin as fleet_plugin
+
+    wire.stub.reply(
+        "POST", "/api/agents/900001/notices", {"detail": "expire_at is in the past"}, status=422
+    )
+    pin_agent(900001, clients=wire.context.clients)
+    before = datetime.now(UTC)
+    with pytest.raises(ValueError, match="expire_at is in the past"):
+        fleet_plugin.notify(
+            "immediate expiry", expire_at=timedelta(0), idempotency_key="zero-expiry"
+        )
+    [received] = wire.stub.received
+    due = datetime.fromisoformat(received.body["expire_at"])
+    assert before <= due <= datetime.now(UTC)

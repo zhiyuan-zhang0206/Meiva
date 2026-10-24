@@ -26,14 +26,16 @@ from base.daemon.schedules.watcher import (
 )
 from meiva.sdk_surface import process_context
 
+_NOW = dt.datetime(2026, 1, 1, 0, 0, 30, 123456, tzinfo=dt.UTC)
+
 
 def test_validate_cron_accepts_valid() -> None:
-    validate_cron("0 18 * * 1-5")  # no raise
+    validate_cron("0 18 * * 1-5", now=_NOW)  # no raise
 
 
 def test_validate_cron_rejects_invalid() -> None:
     with pytest.raises(CronExprError):
-        validate_cron("not a cron")
+        validate_cron("not a cron", now=_NOW)
 
 
 def test_next_fire_returns_future_utc() -> None:
@@ -109,16 +111,16 @@ def test_previous_and_next_fire_are_inverse_across_timezones(
 
 def test_normalize_when_naive_datetime_raises() -> None:
     with pytest.raises(ValueError, match="tzinfo"):
-        normalize_when(dt.datetime(2026, 1, 1, 12, 0))  # noqa: DTZ001 — naive on purpose
+        normalize_when(dt.datetime(2026, 1, 1, 12, 0), now=_NOW)  # noqa: DTZ001 — naive on purpose
 
 
 def test_normalize_when_timedelta() -> None:
-    out = normalize_when(dt.timedelta(minutes=5))
-    assert out.tzinfo is not None
+    out = normalize_when(dt.timedelta(minutes=5), now=_NOW)
+    assert out == _NOW + dt.timedelta(minutes=5)
 
 
 def test_normalize_when_iso_z() -> None:
-    out = normalize_when("2026-01-01T12:00:00Z")
+    out = normalize_when("2026-01-01T12:00:00Z", now=_NOW)
     assert out == dt.datetime(2026, 1, 1, 12, 0, tzinfo=dt.UTC)
 
 
@@ -223,12 +225,12 @@ def test_validate_timezone_rejects_invalid() -> None:
 
 
 def test_normalize_when_iso_with_offset() -> None:
-    out = normalize_when("2026-01-01T12:00:00+08:00")
+    out = normalize_when("2026-01-01T12:00:00+08:00", now=_NOW)
     assert out == dt.datetime(2026, 1, 1, 4, 0, tzinfo=dt.UTC)
 
 
 def test_normalize_when_iso_with_microseconds() -> None:
-    out = normalize_when("2026-01-01T12:00:00.123456Z")
+    out = normalize_when("2026-01-01T12:00:00.123456Z", now=_NOW)
     expected = dt.datetime(2026, 1, 1, 12, 0, 0, 123456, tzinfo=dt.UTC)
     assert out == expected
 
@@ -238,18 +240,18 @@ def test_normalize_when_aware_datetime() -> None:
 
     tz = ZoneInfo("America/Los_Angeles")
     dt_in = dt.datetime(2026, 7, 1, 8, 0, tzinfo=tz)
-    out = normalize_when(dt_in)
+    out = normalize_when(dt_in, now=_NOW)
     assert out == dt.datetime(2026, 7, 1, 15, 0, tzinfo=dt.UTC)  # July is PDT (UTC-7)
 
 
 def test_normalize_when_iso_no_tz_raises() -> None:
     with pytest.raises(ValueError, match="timezone"):
-        normalize_when("2026-01-01T12:00:00")
+        normalize_when("2026-01-01T12:00:00", now=_NOW)
 
 
 def test_normalize_when_bad_type_raises() -> None:
     with pytest.raises(TypeError, match="when must be"):
-        normalize_when(42)  # type: ignore[arg-type]
+        normalize_when(42, now=_NOW)  # type: ignore[arg-type]
 
 
 # -- wall-clock stepping (issue #182) -----------------------------------------
@@ -567,3 +569,21 @@ def test_a_fire_wakes_the_launching_agent_as_the_watcher_session() -> None:
 
     assert (request.method, request.url.path) == ("POST", "/api/agents/3115/messages")
     assert json.loads(request.content) == {"content": "wake up", "source": "watcher:77"}
+
+
+# meiva:note
+# Relative waits use elapsed UTC time even when the captured snapshot crosses a DST gap.
+def test_normalize_relative_when_uses_the_supplied_snapshot_in_utc() -> None:
+    from zoneinfo import ZoneInfo
+
+    now = dt.datetime(2026, 3, 8, 1, 30, tzinfo=ZoneInfo("America/Los_Angeles"))
+    assert normalize_when(dt.timedelta(hours=2), now=now) == dt.datetime(
+        2026, 3, 8, 11, 30, tzinfo=dt.UTC
+    )
+
+
+def test_normalize_relative_when_refuses_a_naive_snapshot() -> None:
+    # meiva:note
+    # A relative input must not silently interpret a naive snapshot in the host timezone.
+    with pytest.raises(ValueError, match=r"now.*tzinfo"):
+        normalize_when(dt.timedelta(seconds=1), now=dt.datetime(2026, 1, 1))  # noqa: DTZ001
