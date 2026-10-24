@@ -16,7 +16,6 @@ exports = ["api-factory.ts", "http.ts", "plans"]
 "upload-delivery.ts" = ["http.ts", "plans"]
 
 [purity]
-"." = "strict-to-be"
 "api-control.ts" = "strict"
 "api-factory.ts" = "strict"
 "upload-delivery.ts" = "strict"

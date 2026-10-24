@@ -10,7 +10,6 @@ exports = ["sse-plan.ts", "sse-share.ts", "stream-hub.ts", "tests"]
 "stream-hub.ts" = ["sse-plan.ts", "sse-share.ts"]
 
 [purity]
-"." = "strict-to-be"
 "share-plan.ts" = "strict"
 "sse-plan.ts" = "strict"
 "stream-hub.ts" = "strict"
