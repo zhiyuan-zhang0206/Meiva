@@ -5,18 +5,19 @@ import re
 import shutil
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 import meiva.skills
-from base.clock.tests.manual_timers import ManualTimers
+from base.clock import SYSTEM_TIMERS
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.extensions import external_skills
 from cli.commands.extensions.skills_sync import converge_skills
+from cli.commands.extensions.tests.support.source_bindings import PROD_ELSEWHERE
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime, UserSession
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
@@ -44,7 +45,7 @@ def test_converged_namespaces_load_real_task_instructions(
     db_url: str, tmp_path: Path, unit_home: Path
 ) -> None:
     repo = _repo(tmp_path)
-    converge_skills(repo, unit_home)
+    converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
 
     expected = {
         ("meiva_guide", "deploy"): "meiva init",
@@ -92,7 +93,7 @@ def _assert_portable_reading_links(target: Path) -> None:
 def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
     tmp_path: Path,
     client: str,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -128,7 +129,7 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
         host=fake_host(),
         session=UserSession(user_home=meiva_home, login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
-        timers=ManualTimers(),
+        timers=SYSTEM_TIMERS,
     )
     external_skills.converge_external_agent_skill(context, host_home=host_home)
     target = client_home / "skills" / "meiva-guide"

@@ -284,6 +284,8 @@ def cmd_packages_status(*, config: ConfigBoot, json_output: bool = False) -> int
 def cmd_packages_refresh(
     *,
     config: ConfigBoot,
+    repo: Path,
+    now: datetime,
     check_only: bool = False,
     only: str | None = None,
     json_output: bool = False,
@@ -299,7 +301,14 @@ def cmd_packages_refresh(
 
     from cli.commands.extensions.packages.refresh import run_refresh
 
-    report = run_refresh(config=config, check_only=check_only, only=only, from_job=from_job)
+    report = run_refresh(
+        config=config,
+        repo=repo,
+        now=now,
+        check_only=check_only,
+        only=only,
+        from_job=from_job,
+    )
     if json_output:
         payload = {
             "ran": report.ran,

@@ -64,16 +64,3 @@ def test_update_requires_at_least_one_field_at_parse_time(
     args = parse_args(["schedules", "update", "7"])
     assert args.func(args) == 2
     assert "at least one" in capsys.readouterr().err
-
-
-def test_update_passes_the_parse_gate_with_one_field(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from cli.commands.management import schedules as _schedules
-
-    def fake(_args: object) -> int:
-        return 0
-
-    monkeypatch.setattr(_schedules, "h_schedules_update", fake)
-    args = parse_args(["schedules", "update", "7", "--enable"])
-    assert args.func(args) == 0

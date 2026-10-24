@@ -12,7 +12,6 @@
     "test_mcp.py",
     "test_mcp_enable.py",
     "test_mcp_install.py",
-    "test_plugins_enable_disable.py",
     "test_plugins_inspect.py",
     "test_plugins_install.py",
     "test_plugins_verify.py",

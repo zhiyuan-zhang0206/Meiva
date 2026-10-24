@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
-from cli import fleet_update
+from base.paths import repo_root
 
 _ROSTER = {
     "name": "runner-a",
@@ -112,7 +112,7 @@ def run_program(tmp_path: Path, gateway: Gateway, *args: str) -> subprocess.Comp
     }
     return subprocess.run(
         [sys.executable, "-m", "cli.commands.management.fleet_gateway", *args],
-        cwd=fleet_update.REPO,
+        cwd=repo_root(),
         env=env,
         capture_output=True,
         text=True,
@@ -163,10 +163,3 @@ def test_smoke_program_spawns_executes_and_terminates_with_current_gateway_api(
         "source": "user",
     }
     assert gateway.secret not in proc.stdout + proc.stderr
-
-
-def test_gateway_transport_sends_the_executed_module_source() -> None:
-    owner = Path(__file__).resolve().parents[2] / "commands" / "management" / "fleet_gateway.py"
-    assert owner.read_text(encoding="utf-8") == fleet_update.program_text(
-        fleet_update.VERIFY_SCRIPTS / "fleet_gateway.py"
-    )

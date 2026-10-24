@@ -75,6 +75,7 @@ from cli.commands.data_plane.instance.status_lines import (
 )
 from cli.commands.data_plane.instance.storage_plan import (
     ProbeRemotePlane,
+    RecordedPorts,
     Refuse,
     StartLocalStorage,
     admit_gateway_storage,
@@ -112,7 +113,9 @@ def ensure_gateway_data_plane(
     rec = cluster.get_record(home)
     admission = admit_gateway_storage(
         home=home,
-        has_record=rec is not None,
+        ports=None
+        if rec is None
+        else RecordedPorts(postgres=rec.ports["postgres"], redis=rec.ports["redis"]),
         remote=config.is_remote,
         legacy_home=not config.is_remote and _legacy_home(home),
     )
@@ -123,15 +126,15 @@ def ensure_gateway_data_plane(
         case ProbeRemotePlane():
             publish_telemetry_token(home.resolve(), config.cluster_secret)
             return _verify_remote_plane(config, database_factory=database_factory)
-        case StartLocalStorage():
-            if rec is None or retained_children is None:
-                raise RuntimeError("the admitted local storage lost its record or its children")
+        case StartLocalStorage(ports=ports):
+            if retained_children is None:
+                raise RuntimeError("the admitted local storage lost its children")
             publish_telemetry_token(home.resolve(), config.cluster_secret)
             return instance.ensure_cluster_storage(
                 config,
                 home=home,
-                pg_port=rec.ports["postgres"],
-                redis_port=rec.ports["redis"],
+                pg_port=ports.postgres,
+                redis_port=ports.redis,
                 redis_password=cluster.redis_password_from_env(),
                 redis_user=cluster.redis_identity(config.redis_url),
                 retained_children=retained_children,

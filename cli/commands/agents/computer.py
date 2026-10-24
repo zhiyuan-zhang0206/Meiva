@@ -1,25 +1,29 @@
-"""`meiva computer` — operator commands for the computer-use daemon.
-
-Today one verb: `release` — the operator's last resort to force-release the
-screen when a session is wedged (a holder that stopped acting but whose lease
-has not expired yet). The next FIFO waiter takes over immediately. This talks
-the daemon's line protocol directly (no agent identity — it is an operator
-action, so it is logged by the daemon but not audited as a computer_action).
-"""
+# meiva:note
+# `meiva computer`: operator commands for the computer-use daemon.
+#
+# Today one verb, `release`: the operator's last resort to force-release the screen when a
+# session is wedged (a holder that stopped acting but whose lease has not expired yet). The next
+# FIFO waiter takes over immediately. This talks the daemon's line protocol directly (no agent
+# identity: it is an operator action, so the daemon logs it but does not audit it as a
+# computer_action).
 
 from __future__ import annotations
 
 import json
 import socket
 import sys
+from pathlib import Path
+
+from pydantic import JsonValue
+
+from base.paths import computer_mcp_socket
 
 
-def h_computer_release(args: object) -> int:
-    """Force-release the screen from its current holder."""
-    del args  # no flags today
-    from base.paths import computer_mcp_socket, meiva_home
-
-    sock_path = str(computer_mcp_socket(meiva_home()))
+# meiva:note
+# Force-release the screen from its current holder. `home` is the one the invocation settled
+# on; the daemon's socket lives under it.
+def cmd_computer_release(*, home: Path) -> int:
+    sock_path = str(computer_mcp_socket(home))
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.connect(sock_path)
@@ -41,21 +45,31 @@ def h_computer_release(args: object) -> int:
         print("computer-mcp daemon closed the connection", file=sys.stderr)
         return 1
     try:
-        resp = json.loads(line)
+        resp: JsonValue = json.loads(line)
     except json.JSONDecodeError:
+        resp = None
+    if not isinstance(resp, dict):
         print("computer-mcp daemon returned a corrupted response", file=sys.stderr)
         return 1
-    if not resp.get("ok"):
+    if resp.get("ok") is not True:
         print(f"release failed: {resp.get('error', 'unknown error')}", file=sys.stderr)
         return 1
-    try:
-        result = json.loads(resp["result"]["content"][0]["text"])
-    except (KeyError, TypeError, json.JSONDecodeError):
-        print("computer-mcp daemon returned an unexpected release payload", file=sys.stderr)
-        return 1
-    released = result.get("released")
-    if released is not None:
-        print(f"released the screen from agent {released}")
-    else:
-        print("screen was free (no holder)")
-    return 0
+    result: JsonValue = None
+    match resp.get("result"):
+        case {"content": [{"text": str(text)}, *_]}:
+            try:
+                result = json.loads(text)
+            except json.JSONDecodeError:
+                result = None
+        case _:
+            result = None
+    match result:
+        case {"released": None}:
+            print("screen was free (no holder)")
+            return 0
+        case {"released": int(released)} if not isinstance(released, bool):
+            print(f"released the screen from agent {released}")
+            return 0
+        case _:
+            print("computer-mcp daemon returned an unexpected release payload", file=sys.stderr)
+            return 1

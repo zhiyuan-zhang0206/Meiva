@@ -1,24 +1,23 @@
-"""`meiva` CLI argparse surface — per-domain parser builders + their `_h_*` handlers.
-
-`cli.main` imports this package at module level (settings-free: nothing here
-imports runtime command modules / ``base.config``, so ``meiva --help`` builds the tree
-on a host with no .env) and calls :func:`build_parser` from ``main()``. Each
-builder binds its own module's handler directly (``set_defaults(func=_h_x)``);
-a test that fakes a handler patches the parser module that defines it, before
-``build_parser()`` runs. Handlers lazy-import their ``cmd_*`` implementation so
-the Settings load stays deferred to dispatch time — see the ``cli.main``
-module docstring.
-
-One module per domain:
-
-- ``host`` — init/start/stop/restart/status/converge/firewall/trace
-- ``cluster`` — the whole-cluster verbs
-- ``cli.commands.agents.parsers`` — agents + notices, beside their implementations
-- ``cli.commands.agents.impersonation_parsers`` — external sessions and relays
-- ``backup`` — WAL-G physical backups
-- ``cli.commands.extensions.parsers`` — plugins, skill, MCP, memory and packages
-- ``management`` — config + presets + schedules
-"""
+# meiva:note
+# `meiva` CLI argparse surface — per-domain parser builders + their `_h_*` handlers.
+#
+# `cli.main` imports this package at module level (settings-free: nothing here imports runtime
+# command modules / ``base.config``, so ``meiva --help`` builds the tree on a host with no .env)
+# and calls :func:`build_parser` from ``main()``. Each builder binds its own module's handler
+# directly (``set_defaults(func=_h_x)``); a handler is exercised by parsing an argv and calling the
+# bound ``func`` with the namespace the entry would have built. Handlers lazy-import their
+# ``cmd_*`` implementation so the Settings load stays deferred to dispatch time — see the
+# ``cli.main`` module docstring.
+#
+# One module per domain:
+#
+# - ``host`` — init/start/stop/restart/status/converge/firewall/trace
+# - ``cluster`` — the whole-cluster verbs
+# - ``cli.commands.agents.parsers`` — agents + notices, beside their implementations
+# - ``cli.commands.agents.impersonation_parsers`` — external sessions and relays
+# - ``backup`` — WAL-G physical backups
+# - ``cli.commands.extensions.parsers`` — plugins, skill, MCP, memory and packages
+# - ``management`` — config + presets + schedules
 
 from __future__ import annotations
 
@@ -61,11 +60,9 @@ def build_parser(
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> argparse.ArgumentParser:
-    """Build the full `meiva` argparse tree; each subparser binds ``func=`` here.
-
-    The registration order below IS the `meiva --help` listing order — keep it in
-    sync with the command surface.
-    """
+    # meiva:note
+    # Build the full `meiva` argparse tree; each subparser binds ``func=`` here. The registration
+    # order below IS the `meiva --help` listing order — keep it in sync with the command surface.
     parser = argparse.ArgumentParser(
         prog="meiva",
         description="Meiva cluster ops: native pg/redis + service sessions + cron healthchecks.",
@@ -102,26 +99,24 @@ def build_parser(
 
 
 def parse_args(
-    argv: list[str] | None = None,
+    argv: list[str],
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> argparse.Namespace:
-    """Parse the operator command without dispatch or Settings construction.
-
-    None reads sys.argv as argparse does. Help and invalid arguments retain
-    argparse's output and SystemExit codes. Lifecycle handlers keep the supplied
-    child-owner list when the caller later dispatches the returned namespace.
-    """
+    # meiva:note
+    # Parse the operator command without dispatch or Settings construction. The entry names the
+    # arguments it parsed; nothing here reads `sys.argv`. Help and invalid arguments retain
+    # argparse's output and SystemExit codes. Lifecycle handlers keep the supplied child-owner list
+    # when the caller later dispatches the returned namespace.
     return build_parser(retained_children=retained_children).parse_args(argv)
 
 
 def command_options() -> dict[tuple[str, ...], set[str]]:
-    """Long options accepted at each command path, including the `meiva` root.
-
-    Aliases have their own paths. Options belong only to the parser accepting
-    them, so a start option never certifies the same spelling on stop. Return a
-    fresh snapshot for documentation checks without loading command runtimes.
-    """
+    # meiva:note
+    # Long options accepted at each command path, including the `meiva` root. Aliases have their
+    # own paths. Options belong only to the parser accepting them, so a start option never
+    # certifies the same spelling on stop. Return a fresh snapshot for documentation checks
+    # without loading command runtimes.
     root = build_parser()
     by_path: dict[tuple[str, ...], set[str]] = {}
     pending: list[tuple[tuple[str, ...], argparse.ArgumentParser]] = [(("meiva",), root)]

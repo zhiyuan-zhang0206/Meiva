@@ -12,10 +12,10 @@ import json
 import os
 import shutil
 import subprocess
-from collections.abc import Iterator
+from collections.abc import MutableMapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
+from typing import cast
 
 import pytest
 from loguru import logger
@@ -24,9 +24,17 @@ from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
 from base.paths.home import resolve_meiva_home
 from cli.commands.duration import parse_duration
-from cli.commands.extensions._refresh_rules import effective_interval_seconds, is_due
-from cli.commands.extensions.packages import refresh
-from cli.commands.extensions.packages.refresh import Pass, run_refresh
+from cli.commands.extensions.packages.refresh import Pass, RefreshReport, run_refresh
+from cli.commands.extensions.packages.refresh_git_plan import (
+    core_fetch,
+    core_listing,
+    package_listing,
+)
+from cli.commands.extensions.packages.refresh_rules import (
+    core_fetch_needed,
+    effective_interval_seconds,
+    is_due,
+)
 
 
 @pytest.fixture
@@ -37,14 +45,27 @@ def refresh_config() -> ConfigBoot:
 
 
 @pytest.fixture(autouse=True)
-def _hermetic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
-    """Restore real boot delivery as well as the scratch home."""
-    with patch.dict(os.environ):
-        home = tmp_path / ".meiva"
-        (home / "skills").mkdir(parents=True)
-        (home / "logs").mkdir()
-        monkeypatch.setenv("MEIVA_HOME", str(home))
-        yield
+def _scratch_home(unit_home: Path) -> None:
+    (unit_home / "skills").mkdir()
+    (unit_home / "logs").mkdir()
+
+
+def _refresh(
+    config: ConfigBoot,
+    repo: Path,
+    *,
+    check_only: bool = False,
+    only: str | None = None,
+    from_job: bool = False,
+) -> RefreshReport:
+    return run_refresh(
+        config=config,
+        repo=repo,
+        now=datetime.now(UTC),
+        check_only=check_only,
+        only=only,
+        from_job=from_job,
+    )
 
 
 def _home() -> Path:
@@ -219,7 +240,7 @@ def test_refresh_applies_only_the_changed_package(
     _write_skill(core_repo, "foo", "# v2\n")
     c2 = _commit_push(core_repo, "foo v2")
 
-    report = run_refresh(config=refresh_config, repo=core_repo)
+    report = _refresh(refresh_config, core_repo)
     assert report.ran
     by_name = {item.name: item for item in report.items}
     assert by_name["foo"].result == "applied"
@@ -232,7 +253,7 @@ def test_refresh_applies_only_the_changed_package(
     _assert_registry_advanced_to_core_head(c2)
 
     # idempotent second run: nothing to do, no content change
-    again = run_refresh(config=refresh_config, repo=core_repo)
+    again = _refresh(refresh_config, core_repo)
     assert {i.name: i.result for i in again.items} == {
         "foo": "up_to_date",
         "bar": "up_to_date",
@@ -258,13 +279,13 @@ def test_refresh_apply_then_apply_with_installed_hash(
     _write_skill(core_repo, "foo", "# v2\n")
     _commit_push(core_repo, "foo v2")
 
-    assert run_refresh(config=refresh_config, repo=core_repo).items[0].result == "applied"
+    assert _refresh(refresh_config, core_repo).items[0].result == "applied"
     row = _row("foo")
     assert row.installed_hash == row.content_hash  # the guards moved with the tree
 
     _write_skill(core_repo, "foo", "# v3\n")
     c3 = _commit_push(core_repo, "foo v3")
-    second = run_refresh(config=refresh_config, repo=core_repo)
+    second = _refresh(refresh_config, core_repo)
     assert second.items[0].result == "applied"  # no local-edit refusal
     assert _row("foo").update.applied_rev == c3
 
@@ -284,7 +305,7 @@ def test_refresh_reconciles_unknown_baseline_by_content(
     _write_skill(core_repo, "foo", "# v2\n")
     c2 = _commit_push(core_repo, "foo v2")
 
-    report = run_refresh(config=refresh_config, repo=core_repo)
+    report = _refresh(refresh_config, core_repo)
     by_name = {item.name: item for item in report.items}
     assert by_name["foo"].result == "applied"
     assert by_name["bar"].result == "up_to_date"  # staged content == disk
@@ -310,7 +331,7 @@ def test_core_refresh_replaces_a_hand_edited_copy_and_reports_it(
     warnings: list[str] = []
     sink = logger.add(lambda m: warnings.append(str(m)), level="INFO", format="{message}")
     try:
-        report = run_refresh(config=refresh_config, repo=core_repo)
+        report = _refresh(refresh_config, core_repo)
     finally:
         logger.remove(sink)
     assert report.items[0].result == "applied"
@@ -391,14 +412,14 @@ def test_refresh_skips_local_source_rows(
 
     for source in ("local:testbox", str(tmp_path)):
         _register_local(source)
-        report = run_refresh(config=refresh_config, repo=core_repo)
+        report = _refresh(refresh_config, core_repo)
         assert report.ran and "foo" not in {i.name for i in report.items}
         row = _row("foo")
         assert row.update.failures == 0
         assert row.update.last_result is None  # skipped, not recorded as an error
 
     _register_local("local:testbox", channel="git")
-    assert run_refresh(config=refresh_config, repo=core_repo).ran
+    assert _refresh(refresh_config, core_repo).ran
     assert _row("foo").update.failures == 0
 
 
@@ -418,7 +439,7 @@ def test_refresh_blocks_on_the_version_gate(refresh_config: ConfigBoot, core_rep
     )
     _commit_push(core_repo, "foo v2")
 
-    report = run_refresh(config=refresh_config, repo=core_repo)
+    report = _refresh(refresh_config, core_repo)
     assert report.items[0].result.startswith("blocked_version")
     home = _home()
     assert "# v1" in (home / "skills" / "foo" / "SKILL.md").read_text(encoding="utf-8")
@@ -435,7 +456,7 @@ def test_refresh_never_deletes_a_package_removed_upstream(
     shutil.rmtree(core_repo / "meiva_builtins" / "skills" / "foo")
     _commit_push(core_repo, "drop foo")
 
-    report = run_refresh(config=refresh_config, repo=core_repo)
+    report = _refresh(refresh_config, core_repo)
     assert report.items[0].result.startswith("error")
     assert "converge" in report.items[0].result
     # old content stays; converge's cleanup owns removal
@@ -443,14 +464,14 @@ def test_refresh_never_deletes_a_package_removed_upstream(
 
 
 def test_refresh_records_error_and_backs_off_when_offline(
-    refresh_config: ConfigBoot, core_repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    refresh_config: ConfigBoot, core_repo: Path, tmp_path: Path
 ) -> None:
     c1 = _head(core_repo)
     _seed(core_repo, "foo", applied_rev=c1)
     _seed(core_repo, "bar", applied_rev=c1)
     _git(core_repo, "remote", "set-url", "origin", str(tmp_path / "missing.git"))
 
-    report = run_refresh(config=refresh_config, repo=core_repo)
+    report = _refresh(refresh_config, core_repo)
     assert {i.name: i.result.startswith("error") for i in report.items} == {
         "foo": True,
         "bar": True,
@@ -460,7 +481,7 @@ def test_refresh_records_error_and_backs_off_when_offline(
 
     # the job retries only after the backoff: same run parameters, not due now
     refresh_config.set_field("os_jobs_enabled", True)
-    report = run_refresh(config=refresh_config, repo=core_repo, from_job=True)
+    report = _refresh(refresh_config, core_repo, from_job=True)
     assert report.ran and report.items == ()
     assert report.counts.get("skipped_not_due") == 2
 
@@ -474,7 +495,7 @@ def test_check_only_records_available_without_applying(
     _write_skill(core_repo, "foo", "# v2\n")
     _commit_push(core_repo, "foo v2")
 
-    report = run_refresh(config=refresh_config, repo=core_repo, check_only=True)
+    report = _refresh(refresh_config, core_repo, check_only=True)
     by_name = {item.name: item for item in report.items}
     assert by_name["foo"].result.startswith("available: ")
     assert by_name["bar"].result == "up_to_date"
@@ -490,7 +511,7 @@ def test_notify_mode_records_available_without_applying(
     _write_skill(core_repo, "foo", "# v2\n")
     _commit_push(core_repo, "foo v2")
 
-    report = run_refresh(config=refresh_config, repo=core_repo)
+    report = _refresh(refresh_config, core_repo)
     assert report.items[0].result.startswith("available: ")
     assert "# v1" in (_home() / "skills" / "foo" / "SKILL.md").read_text(encoding="utf-8")
     assert _row("foo").update.mode == "notify"  # explicit mode survives
@@ -503,28 +524,26 @@ def test_flock_skips_a_concurrent_pass(refresh_config: ConfigBoot, core_repo: Pa
     from base.native_process.os_platform import file_lock
 
     with file_lock(_home() / "packages-refresh.lock", timeout_s=1):
-        report = run_refresh(config=refresh_config, repo=core_repo)
+        report = _refresh(refresh_config, core_repo)
     assert not report.ran and "holds the lock" in (report.skip_reason or "")
 
 
-def test_from_job_gates(
-    refresh_config: ConfigBoot, core_repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_from_job_gates(refresh_config: ConfigBoot, core_repo: Path) -> None:
     # Suite default: OS jobs off -> the job run is a no-op.
-    report = run_refresh(config=refresh_config, repo=core_repo, from_job=True)
+    report = _refresh(refresh_config, core_repo, from_job=True)
     assert not report.ran and "OS jobs disabled" in (report.skip_reason or "")
 
     refresh_config.set_field("os_jobs_enabled", True)
-    monkeypatch.setattr(refresh_config.view.packages, "refresh_enabled", False)
-    report = run_refresh(config=refresh_config, repo=core_repo, from_job=True)
+    refresh_config.set_field("refresh_enabled", False)
+    report = _refresh(refresh_config, core_repo, from_job=True)
     assert not report.ran and "refresh disabled" in (report.skip_reason or "")
 
-    monkeypatch.setattr(refresh_config.view.packages, "refresh_enabled", True)
+    refresh_config.set_field("refresh_enabled", True)
     c1 = _head(core_repo)
     now_stamp = datetime.now(UTC).isoformat(timespec="seconds")
     _seed(core_repo, "foo", applied_rev=c1, last_check_at=now_stamp)
     _seed(core_repo, "bar", applied_rev=c1, last_check_at=now_stamp)
-    report = run_refresh(config=refresh_config, repo=core_repo, from_job=True)
+    report = _refresh(refresh_config, core_repo, from_job=True)
     assert report.ran and report.items == ()
     assert report.counts.get("skipped_not_due") == 2
 
@@ -537,7 +556,7 @@ def test_only_limits_the_pass(refresh_config: ConfigBoot, core_repo: Path) -> No
     _write_skill(core_repo, "bar", "# v2\n")
     _commit_push(core_repo, "both v2")
 
-    report = run_refresh(config=refresh_config, repo=core_repo, only="foo")
+    report = _refresh(refresh_config, core_repo, only="foo")
     assert [item.name for item in report.items] == ["foo"]
     assert "# v1" in (_home() / "skills" / "bar" / "SKILL.md").read_text(encoding="utf-8")
     assert _row("bar").update.applied_rev == c1
@@ -546,7 +565,7 @@ def test_only_limits_the_pass(refresh_config: ConfigBoot, core_repo: Path) -> No
 def test_only_reports_a_skip_reason_for_untracked_names(
     refresh_config: ConfigBoot, core_repo: Path
 ) -> None:
-    report = run_refresh(config=refresh_config, repo=core_repo, only="nope")
+    report = _refresh(refresh_config, core_repo, only="nope")
     assert report.ran and report.items == ()
     assert any("no tracked channel-backed skill" in note for note in report.notes)
 
@@ -563,7 +582,7 @@ def test_rollback_restores_the_previous_tree(
     _seed(core_repo, "foo", applied_rev=c1)
     _write_skill(core_repo, "foo", "# v2\n")
     _commit_push(core_repo, "foo v2")
-    assert run_refresh(config=refresh_config, repo=core_repo).items[0].result == "applied"
+    assert _refresh(refresh_config, core_repo).items[0].result == "applied"
 
     assert cmd_packages_rollback("foo") == 0
     home = _home()
@@ -607,19 +626,22 @@ def test_policy_verb_writes_explicit_values(refresh_config: ConfigBoot, core_rep
 
 
 def test_refresh_cmd_json_shape(
-    refresh_config: ConfigBoot,
-    core_repo: Path,
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
+    refresh_config: ConfigBoot, core_repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    import base.paths as paths_mod
     from cli.commands.extensions.packages import cmd_packages_refresh
 
-    monkeypatch.setattr(paths_mod, "repo_root", lambda: core_repo)
     c1 = _head(core_repo)
     _seed(core_repo, "foo", applied_rev=c1)
 
-    assert cmd_packages_refresh(config=refresh_config, json_output=True) == 0
+    assert (
+        cmd_packages_refresh(
+            config=refresh_config,
+            repo=core_repo,
+            now=datetime.now(UTC),
+            json_output=True,
+        )
+        == 0
+    )
     payload = json.loads(capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
     assert payload["ran"] is True
     (item,) = payload["items"]
@@ -628,34 +650,47 @@ def test_refresh_cmd_json_shape(
     assert "counts" in payload and "notes" in payload
 
 
-def test_second_run_checks_but_does_not_fetch(
-    refresh_config: ConfigBoot, core_repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Acceptance #6: consecutive runs are cheap — once the head is applied and
-    the objects are present, a pass does `ls-remote` only, never a fetch."""
-    import cli.commands.extensions.packages.refresh as refresh_mod
-
+# meiva:note
+# Acceptance #6: consecutive runs are cheap. Once the head is applied and its objects are
+# present, a pass asks `ls-remote` only; `git fetch` rewrites the checkout's `FETCH_HEAD`, so
+# the file's modification time is the instrument, and the last step shows a real fetch moves it.
+def test_second_run_checks_but_does_not_fetch(refresh_config: ConfigBoot, core_repo: Path) -> None:
     c1 = _head(core_repo)
     _seed(core_repo, "foo", applied_rev=c1)
     _write_skill(core_repo, "foo", "# v2\n")
     _commit_push(core_repo, "foo v2")
+    fetch_head = core_repo / ".git" / "FETCH_HEAD"
 
-    real = refresh_mod.run_bounded
-    calls: list[tuple[str, ...]] = []
+    assert _refresh(refresh_config, core_repo).items[0].result == "applied"
+    fetched_at = fetch_head.stat().st_mtime_ns
+    assert _refresh(refresh_config, core_repo).items[0].result == "up_to_date"
+    assert fetch_head.stat().st_mtime_ns == fetched_at
 
-    def spy(argv: list[str], **kwargs: object) -> object:
-        calls.append(tuple(argv))
-        return real(argv, **kwargs)  # pyright: ignore[reportArgumentType]
+    _write_skill(core_repo, "foo", "# v3\n")
+    _commit_push(core_repo, "foo v3")
+    assert _refresh(refresh_config, core_repo).items[0].result == "applied"
+    assert fetch_head.stat().st_mtime_ns != fetched_at
 
-    monkeypatch.setattr(refresh_mod, "run_bounded", spy)
 
-    assert run_refresh(config=refresh_config, repo=core_repo).items[0].result == "applied"
-    calls.clear()
-    assert run_refresh(config=refresh_config, repo=core_repo).items[0].result == "up_to_date"
-    git_calls = [c for c in calls if c and c[0] == "git"]
-    assert git_calls
-    assert not any("fetch" in c for c in git_calls)
-    assert any("ls-remote" in c for c in git_calls)
+# meiva:note
+# The fetch decision, from values: the head moved since the channel was last seen, or some due
+# package never applied, sits at another revision, or is failing.
+@pytest.mark.parametrize(
+    ("last_seen", "applied", "needed"),
+    [
+        ("a" * 40, [("a" * 40, 0), ("a" * 40, 0)], False),
+        ("b" * 40, [("a" * 40, 0)], True),
+        (None, [("a" * 40, 0)], True),
+        ("a" * 40, [("a" * 40, 0), (None, 0)], True),
+        ("a" * 40, [("a" * 40, 0), ("b" * 40, 0)], True),
+        ("a" * 40, [("a" * 40, 2)], True),
+        ("a" * 40, [], False),
+    ],
+)
+def test_core_fetch_needed(
+    last_seen: str | None, applied: list[tuple[str | None, int]], needed: bool
+) -> None:
+    assert core_fetch_needed("a" * 40, last_seen, applied) is needed
 
 
 def test_refresh_preserves_marked_subtrees(refresh_config: ConfigBoot, core_repo: Path) -> None:
@@ -670,81 +705,66 @@ def test_refresh_preserves_marked_subtrees(refresh_config: ConfigBoot, core_repo
     _write_skill(core_repo, "foo", "# v2\n")
     _commit_push(core_repo, "foo v2")
 
-    report = run_refresh(config=refresh_config, repo=core_repo)
+    report = _refresh(refresh_config, core_repo)
     assert report.items[0].result == "applied"
     assert (adapter / "local.py").is_file()
     assert "# v2" in (_home() / "skills" / "foo" / "SKILL.md").read_text(encoding="utf-8")
     assert not (_home() / "skills" / ".foo.prev" / "adapters").exists()
 
 
-def test_manual_refresh_does_not_construct_job_configuration(
-    refresh_config: ConfigBoot,
-    core_repo: Path,
-    monkeypatch: pytest.MonkeyPatch,
+# meiva:note
+# The apply quota is read from the configuration owner the pass was handed: with room for one
+# apply, two changed packages land one (least recently checked first, then by name) and the other
+# is skipped on budget, its disk and its recorded revision untouched.
+def test_the_apply_quota_comes_from_the_supplied_owner(
+    refresh_config: ConfigBoot, core_repo: Path
 ) -> None:
-    def unexpected_owner() -> None:
-        pytest.fail("manual refresh constructed the from-job configuration owner")
-
-    monkeypatch.setattr(refresh, "ConfigBoot", unexpected_owner)
-    report = run_refresh(config=refresh_config, repo=core_repo, check_only=True)
-    assert report.ran
-
-
-def test_pass_reads_live_quota_from_supplied_owner(
-    refresh_config: ConfigBoot, core_repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+    c1 = _head(core_repo)
+    _seed(core_repo, "foo", applied_rev=c1)
+    _seed(core_repo, "bar", applied_rev=c1)
+    _write_skill(core_repo, "foo", "# v2\n")
+    _write_skill(core_repo, "bar", "# v2\n")
+    _commit_push(core_repo, "both v2")
     refresh_config.set_field("refresh_max_applies", 1)
-    pass_ = Pass(
-        config=refresh_config,
-        check_only=False,
-        only=None,
-        from_job=False,
-        now=datetime.now(UTC),
-        repo=core_repo,
+
+    report = _refresh(refresh_config, core_repo)
+
+    assert [(item.name, item.result) for item in report.items] == [("bar", "applied")]
+    assert report.counts == {"applied": 1, "skipped_budget": 1}
+    assert "# v2" in _installed_skill_text("bar")
+    assert "# v1" in _installed_skill_text("foo")
+    assert _row("foo").update.applied_rev == c1
+
+
+# meiva:note
+# Timeouts and command composition are values. The other cases in this module execute the real
+# Git resources; no command spy is needed to prove the supplied 6/7 second bounds.
+@pytest.mark.parametrize("timeout", [6.0, 7.0])
+def test_network_command_plans_hold_the_supplied_timeout(tmp_path: Path, timeout: float) -> None:
+    env = {"GIT_TERMINAL_PROMPT": "0"}
+    commands = (
+        core_listing(tmp_path, "https://example.invalid/core", "main", env=env, timeout=timeout),
+        core_fetch(tmp_path, "https://example.invalid/core", "main", env=env, timeout=timeout),
+        package_listing("https://example.invalid/skill", None, env=env, timeout=timeout),
     )
-    processed: list[str] = []
-
-    def process(pkg: reg.InstalledPackage) -> None:
-        processed.append(pkg.name)
-        pass_.applies_used += 1
-        refresh_config.set_field("refresh_max_applies", 2)
-
-    monkeypatch.setattr(pass_, "_process_git", process)
-    queue = [reg.InstalledPackage(name=name, type="skill") for name in ("a", "b", "c")]
-    pass_.deadline = float("inf")
-    pass_._process_queue([], queue)
-    assert processed == ["a", "b"]
-    assert pass_.counts == {"skipped_budget": 1}
-
-
-def test_network_operations_read_live_timeout_from_same_owner(
-    refresh_config: ConfigBoot, core_repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    refresh_config.set_field("refresh_network_timeout_seconds", 6.0)
-    pass_ = Pass(
-        config=refresh_config,
-        check_only=False,
-        only=None,
-        from_job=False,
-        now=datetime.now(UTC),
-        repo=core_repo,
-    )
-    timeouts: list[float] = []
-
-    def bounded(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        timeout = kwargs["timeout"]
-        assert isinstance(timeout, float)
-        timeouts.append(timeout)
-        return subprocess.CompletedProcess(["git"], 0, "a" * 40 + "\trefs/heads/main\n", "")
-
-    monkeypatch.setattr(refresh, "run_bounded", bounded)
-    assert pass_._ls_remote("https://example.invalid/core", "main") == ("a" * 40, None)
-    refresh_config.set_field("refresh_network_timeout_seconds", 7.0)
-    assert pass_._fetch_core("https://example.invalid/core", "main") is None
-    assert pass_._ls_remote_git("https://example.invalid/skill", "main") == ("a" * 40, False, None)
-    assert timeouts == [6.0, 7.0, 7.0]
+    assert [command.timeout for command in commands] == [timeout, timeout, timeout]
+    assert [command.cwd for command in commands] == [tmp_path, tmp_path, None]
+    assert [command.argv for command in commands] == [
+        ("git", "ls-remote", "https://example.invalid/core", "main"),
+        ("git", "fetch", "--no-tags", "https://example.invalid/core", "main"),
+        ("git", "ls-remote", "https://example.invalid/skill", "HEAD"),
+    ]
+    assert all(command.env == env for command in commands)
+    env["GIT_TERMINAL_PROMPT"] = "changed after planning"
+    for command in commands:
+        assert command.env == {"GIT_TERMINAL_PROMPT": "0"}
+        # meiva:note
+        # Even a caller that bypasses Mapping's static door cannot mutate the planned value.
+        with pytest.raises(TypeError):
+            cast("MutableMapping[str, str]", command.env)["GIT_TERMINAL_PROMPT"] = "changed"
+    assert package_listing("remote", "branch", env=env, timeout=timeout).argv[-1] == "branch"
 
 
 def test_refresh_rejects_unprepared_owner(core_repo: Path) -> None:
     with pytest.raises(ValueError, match="prepared configuration owner"):
-        run_refresh(config=ConfigBoot(), repo=core_repo)
+        _refresh(ConfigBoot(), core_repo)

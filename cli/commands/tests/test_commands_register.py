@@ -9,17 +9,11 @@ import pytest
 import cli.commands.probe as _probe_commands
 import services.supervision.roster as _roster
 import services.supervision.roster.service_spec as _service_spec
-from base.cluster import machines
-from base.cluster.machine import MachineRoles
-from base.daemon.tests.fakes import pin_endpoints
+from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.deploy.schema import migrations
 from cli.commands._repo import register_machine_or_die
 from cli.commands._setup import SetupValues
 from cli.database.runtime import CommandRuntime
-from cli.database.tests.command_fakes import fake_session_backends as fake_session_backends
-from cli.database.tests.command_fakes import hermetic_gateway_base as hermetic_gateway_base
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
@@ -84,162 +78,98 @@ def test_service_without_identity_probe_cannot_claim_readiness() -> None:
     assert result.label == "unavailable"
 
 
+# meiva:note
+# The dial URL a unit registered, read back from the machine registry's unit rows.
+def _registered_url(db: Database, machine_name: str) -> str | None:
+    with db.connect() as conn, conn.cursor() as cur:
+        cur.execute("SELECT url FROM machine_units WHERE machine_name = %s", (machine_name,))
+        rows = cur.fetchall()
+    assert len(rows) == 1
+    return rows[0][0]
+
+
 def test_register_gateway_advertises_without_gateway_url(
-    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
     *,
-    database_gate: ProcessDbGate,
     command_runtime: CommandRuntime,
 ) -> None:
-
-    calls: list[str | None] = []
-
-    def fake_register_self(
-        _db: object,
-        *,
-        url: str | None = None,
-        name: str,
-        roles: MachineRoles,
-        description: str | None,
-        home: str,
-        gateway: str | None,
-    ) -> None:
-        assert name == command_runtime.machine.name()
-        assert roles and home
-        assert description == command_runtime.machine.description()
-        assert gateway == command_runtime.config.view.gateway.gateway_url
-        calls.append(url)
-
-    monkeypatch.setattr(machines, "register_self", fake_register_self)
     command_runtime.config.set_field("gateway_url", "")
     command_runtime.config.set_field("gateway_port", 8000)
     command_runtime.machine.set(host="10.0.0.2")
+    db = database
 
     rc = register_machine_or_die(
-        Database.from_settings(gate=database_gate),
+        db,
         cast(SetupValues, {"machine_name": "control"}),
         frozenset({"gateway"}),
         command=command_runtime,
     )
     assert rc == 0
-    assert calls == ["http://10.0.0.2:8000"]
+    assert _registered_url(db, command_runtime.machine.name()) == "http://10.0.0.2:8000"
 
 
 def test_register_gateway_only_advertises_reachable_host(
-    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
     *,
-    database_gate: ProcessDbGate,
     command_runtime: CommandRuntime,
 ) -> None:
-
-    calls: list[str | None] = []
-
-    def fake_register_self(
-        _db: object,
-        *,
-        url: str | None = None,
-        name: str,
-        roles: MachineRoles,
-        description: str | None,
-        home: str,
-        gateway: str | None,
-    ) -> None:
-        assert name == command_runtime.machine.name()
-        assert roles and home
-        assert description == command_runtime.machine.description()
-        assert gateway == command_runtime.config.view.gateway.gateway_url
-        calls.append(url)
-
-    monkeypatch.setattr(machines, "register_self", fake_register_self)
     command_runtime.config.set_field("gateway_url", "https://meiva.example:8000")
     command_runtime.machine.set(host="10.0.0.2")
+    db = database
 
     rc = register_machine_or_die(
-        Database.from_settings(gate=database_gate),
+        db,
         cast(SetupValues, {"machine_name": "control"}),
         frozenset({"gateway"}),
         command=command_runtime,
     )
     assert rc == 0
-    assert calls == ["http://10.0.0.2:8000"]
+    assert _registered_url(db, command_runtime.machine.name()) == "http://10.0.0.2:8000"
 
 
 def test_register_agent_runner_advertises_ops_url(
-    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
     *,
-    database_gate: ProcessDbGate,
     command_runtime: CommandRuntime,
 ) -> None:
-    calls: list[str | None] = []
-
-    def fake_register_self(
-        _db: object,
-        *,
-        url: str | None = None,
-        name: str,
-        roles: MachineRoles,
-        description: str | None,
-        home: str,
-        gateway: str | None,
-    ) -> None:
-        assert name == command_runtime.machine.name()
-        assert roles and home
-        assert description == command_runtime.machine.description()
-        assert gateway == command_runtime.config.view.gateway.gateway_url
-        calls.append(url)
-
-    monkeypatch.setattr(machines, "register_self", fake_register_self)
     command_runtime.machine.set(host="10.0.0.2")
-    pin_endpoints(monkeypatch, port=lambda name: 8106 if name == "ops" else 0)
+    ops_port = ServiceEndpoints.from_settings().of("ops").health_port
+    db = database
 
     rc = register_machine_or_die(
-        Database.from_settings(gate=database_gate),
+        db,
         cast(SetupValues, {"machine_name": "runner-a"}),
         frozenset({"agent-runner"}),
         command=command_runtime,
     )
     assert rc == 0
-    assert calls == ["http://10.0.0.2:8106"]
+    assert _registered_url(db, command_runtime.machine.name()) == f"http://10.0.0.2:{ops_port}"
 
 
 def test_register_agent_runner_loopback_host_exits_nonzero(
-    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    database: Database,
     *,
-    database_gate: ProcessDbGate,
     command_runtime: CommandRuntime,
 ) -> None:
-    from base.cluster.machines import LoopbackDialUrlRefused
-
-    calls: list[str | None] = []
-
-    def _reject(
-        _db: object,
-        *,
-        url: str | None = None,
-        name: str,
-        roles: MachineRoles,
-        description: str | None,
-        home: str,
-        gateway: str | None,
-    ) -> None:
-        assert name == command_runtime.machine.name()
-        assert roles and home
-        assert description == command_runtime.machine.description()
-        assert gateway == command_runtime.config.view.gateway.gateway_url
-        calls.append(url)
-        raise LoopbackDialUrlRefused(f"loopback dial url refused: {url}")
-
-    monkeypatch.setattr(machines, "register_self", _reject)
     command_runtime.machine.set(host="127.0.0.1")
-    pin_endpoints(monkeypatch, port=lambda name: 8106 if name == "ops" else 0)
+    db = database
 
     rc = register_machine_or_die(
-        Database.from_settings(gate=database_gate),
+        db,
         cast(SetupValues, {"machine_name": "runner-a"}),
         frozenset({"agent-runner"}),
         command=command_runtime,
     )
     assert rc == 1
-    assert calls == ["http://127.0.0.1:8106"]
+    assert "would register a loopback dial URL" in capsys.readouterr().err
+    with db.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT count(*) FROM machine_units WHERE machine_name = %s",
+            (command_runtime.machine.name(),),
+        )
+        row = cur.fetchone()
+    assert row == (0,)
 
 
 def _named_commands(text: str) -> set[str]:
@@ -247,36 +177,27 @@ def _named_commands(text: str) -> set[str]:
 
 
 def test_register_schema_behind_hint_names_working_commands(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    database: Database,
     *,
-    database_gate: ProcessDbGate,
     command_runtime: CommandRuntime,
 ) -> None:
-    import psycopg
-
-    def _missing_table(
-        _db: object,
-        *,
-        url: str | None = None,
-        name: str,
-        roles: MachineRoles,
-        description: str | None,
-        home: str,
-        gateway: str | None,
-    ) -> None:
-        del _db, url, name, roles, description, home, gateway
-        raise psycopg.errors.UndefinedTable('relation "machines" does not exist')
-
-    monkeypatch.setattr(machines, "register_self", _missing_table)
     command_runtime.machine.set(host="10.0.0.2")
-
-    rc = register_machine_or_die(
-        Database.from_settings(gate=database_gate),
-        cast(SetupValues, {"machine_name": "gw"}),
-        frozenset({"gateway"}),
-        command=command_runtime,
-    )
+    db = database
+    with db.write_transaction() as conn:
+        conn.execute("ALTER TABLE machine_units RENAME TO machine_units_gone")
+        conn.commit()
+    try:
+        rc = register_machine_or_die(
+            db,
+            cast(SetupValues, {"machine_name": "gw"}),
+            frozenset({"gateway"}),
+            command=command_runtime,
+        )
+    finally:
+        with db.write_transaction() as conn:
+            conn.execute("ALTER TABLE machine_units_gone RENAME TO machine_units")
+            conn.commit()
 
     assert rc == 1
     err = capsys.readouterr().err
@@ -285,17 +206,21 @@ def test_register_schema_behind_hint_names_working_commands(
 
 
 def test_code_behind_schema_hint_names_working_commands(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str], db_url: str, database: Database
 ) -> None:
     import cli.commands._repo as _repo_commands
-    from base.deploy.schema.migrations import CodeBehindSchema
 
-    def _ahead(_url: str) -> None:
-        raise CodeBehindSchema("DB has migrations this checkout lacks")
-
-    monkeypatch.setattr(migrations, "assert_schema_current", _ahead)
-
-    assert _repo_commands.assert_schema_current_or_die("postgresql://meiva@127.0.0.1:1/meiva") == 1
+    db = database
+    future = "99991231T235959_a_migration_this_checkout_lacks"
+    with db.write_transaction() as conn:
+        conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (future,))
+        conn.commit()
+    try:
+        assert _repo_commands.assert_schema_current_or_die(db_url) == 1
+    finally:
+        with db.write_transaction() as conn:
+            conn.execute("DELETE FROM schema_migrations WHERE name = %s", (future,))
+            conn.commit()
     err = capsys.readouterr().err
     assert "gateway's revision" in err
     assert _named_commands(err) == {"meiva start"}

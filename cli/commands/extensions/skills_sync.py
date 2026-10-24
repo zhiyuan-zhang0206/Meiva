@@ -37,8 +37,8 @@ next skill scan without a restart.
 
 from __future__ import annotations
 
-import os
 import shutil
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -53,47 +53,32 @@ from base.packages.extensions.install_registry import (
     tree_hash,
 )
 from base.packages.skills.names import SkillIdentity, match_key
-from base.paths.home import is_default_home
 from base.telemetry.converge_report import report_converge_preserve
+from cli.commands.extensions.plans.source_binding import SourceBinding, worktree_sync_refusal
 from cli.commands.extensions.skill_package import contains_skill_md
 
-# A git worktree checkout's sources are branch work-in-progress. converge and
-# `meiva skill update` take their sources from the checkout the CLI runs from
-# (`_repo_root()`), and in a worktree-heavy dev environment that assumption is
-# false exactly when the CLI is run from a `.worktrees/...` or
-# `.claude/worktrees/...` checkout while the resolved home is the default prod
-# home — the worktree's branch content (possibly unmerged) then lands in
-# `~/.meiva/skills`, silently shadowing what main ships. Observed 2026-08-08: a
-# R5 worktree's copy of `meiva-serious-research` was synced into prod by a
-# `skill update` run from that worktree (audit round 2, skills-plugins #3).
-# Only the prod-home + worktree combination is refused: a home of any other
-# name (a test or scratch home) takes whatever checkout runs.
-_WORKTREE_MARKERS = (".claude/worktrees", "/.worktrees/")
+
+# meiva:note
+# Fail when a sync would write a *worktree* checkout's sources into the prod home's load dir.
+# The decision is `plans.source_binding.worktree_sync_refusal`; this resolves the two paths it
+# compares. `MEIVA_CONVERGE_ALLOW_WORKTREE=1`, carried by the binding, opts out for a caller
+# that means it.
+def assert_repo_source_bound(repo: Path, meiva_home: Path, binding: SourceBinding) -> None:
+    refusal = worktree_sync_refusal(
+        binding, repo=str(repo.resolve()), home=str(meiva_home.resolve())
+    )
+    if refusal is not None:
+        raise RuntimeError(refusal)
 
 
-def _is_worktree_checkout(repo: Path) -> bool:
-    """Whether `repo` lives under a git worktree (`.worktrees/...` or
-    `.claude/worktrees/...`) — same criterion `converge_host` uses to gate
-    host-global steps."""
-    resolved = str(repo.resolve())
-    return any(marker in resolved for marker in _WORKTREE_MARKERS)
-
-
-def assert_repo_source_bound(repo: Path, meiva_home: Path) -> None:
-    """Fail when a sync would write a *worktree* checkout's sources into the
-    prod home's load dir.
-
-    `MEIVA_CONVERGE_ALLOW_WORKTREE=1` opts out (a caller that means it).
-    """
-    if os.environ.get("MEIVA_CONVERGE_ALLOW_WORKTREE") == "1":
-        return
-    if is_default_home(meiva_home) and _is_worktree_checkout(repo):
-        raise RuntimeError(
-            f"refusing to sync skills from worktree checkout {repo} into the prod "
-            f"home {meiva_home}: a worktree's sources are branch work-in-progress and "
-            f"must not replace prod's load dir (run `meiva` from the prod checkout, "
-            f"or set MEIVA_CONVERGE_ALLOW_WORKTREE=1 to override)"
-        )
+# meiva:note
+# The binding of a sync's invoker, from the user's home directory and the process environment
+# its root read: the default home is `<user home>/.meiva`.
+def source_binding(user_home: Path, environ: Mapping[str, str]) -> SourceBinding:
+    return SourceBinding(
+        default_home=str((user_home / ".meiva").resolve()),
+        allow_worktree=environ.get("MEIVA_CONVERGE_ALLOW_WORKTREE") == "1",
+    )
 
 
 def _warn_preserved(result: SkillsConvergeResult, s: Source, dest: Path) -> None:
@@ -480,11 +465,11 @@ def _cleanup_gone_sources(
                 entry.trust = "unreviewed"
 
 
-def converge_skills(repo: Path, meiva_home: Path) -> SkillsConvergeResult:
+def converge_skills(repo: Path, meiva_home: Path, binding: SourceBinding) -> SkillsConvergeResult:
     """Sync all skill sources into `<meiva_home>/skills/` and update the install
     registry. Idempotent; never touches user-origin entries or user-edited
     copies. See the module docstring for the full rules."""
-    assert_repo_source_bound(repo, meiva_home)
+    assert_repo_source_bound(repo, meiva_home, binding)
     skills_root = meiva_home / "skills"
     skills_root.mkdir(parents=True, exist_ok=True)
     now = datetime.now(UTC).isoformat(timespec="seconds")

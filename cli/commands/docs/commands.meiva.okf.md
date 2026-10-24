@@ -27,7 +27,13 @@ Each command module is its own door; parser adapters lazy-import
 subpackages hold the domains, each an independent package door:
 
 - `agents/` — lifecycle control, notices, timelines, external-agent
-  impersonation, the pty allocation freeze and the computer-use daemons
+  impersonation, the pty allocation freeze and the computer-use daemons. The gateway
+  verbs (`control.py`, `notices.py`, `notices_audit.py`, `timeline.py`) take the
+  `GatewayAccess` their parser handler built from the command's configuration; the
+  commands that read the shell's environment take it as a value the handler read once
+  (`ImpersonationEnv`) and `pty` and `computer` take the invocation's home. The impersonation
+  relay is a shell (`impersonation_relay.py`, `impersonation_adapters.py`) around strict
+  decisions in `agents/relay/`.
 - `management/` — gateway-managed config, schedules
 - `extensions/` — plugins, skills, packages, MCP servers, memory; owns its
   converge steps (`materialize.py`, `skills_sync.py`, `external_skills.py`)

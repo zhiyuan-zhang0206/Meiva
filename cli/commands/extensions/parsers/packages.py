@@ -21,6 +21,8 @@ def _h_packages_status(args: argparse.Namespace) -> int:
 
 
 def _h_packages_refresh(args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
     from base.config import ConfigBoot
     from cli.commands.extensions.packages import cmd_packages_refresh
 
@@ -29,6 +31,8 @@ def _h_packages_refresh(args: argparse.Namespace) -> int:
 
     return cmd_packages_refresh(
         config=config,
+        repo=args.runtime.checkout,
+        now=datetime.now(UTC),
         check_only=args.check,
         only=args.package,
         json_output=args.json_output,

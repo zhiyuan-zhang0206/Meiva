@@ -30,6 +30,7 @@ from cli.commands.extensions.skill import (
     cmd_skill_trust,
 )
 from cli.commands.extensions.skill_package import ExtensionRegistryError
+from cli.commands.extensions.tests.support.source_bindings import PROD_ELSEWHERE
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
@@ -352,7 +353,7 @@ def test_converge_stamps_repo_skills_builtin_and_leaves_a_review_alone(
     )
     assert cmd_skill_trust("code-review") == 0
 
-    converge_skills(repo, unit_home)
+    converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
 
     assert reg.get("meiva-goal").trust == "builtin"  # type: ignore[union-attr]
     assert reg.get("code-review").trust == "reviewed"  # type: ignore[union-attr]
@@ -365,7 +366,7 @@ def test_trust_refuses_to_hand_edit_a_builtin_tier(unit_home: Path, tmp_path: Pa
 
     repo = tmp_path / "repo"
     _write(repo / "meiva_builtins" / "skills" / "meiva-goal", "meiva-goal", _BENIGN)
-    converge_skills(repo, unit_home)
+    converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
 
     assert cmd_skill_trust("meiva-goal") == 1
     assert reg.get("meiva-goal").trust == "builtin"  # type: ignore[union-attr]

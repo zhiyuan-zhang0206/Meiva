@@ -37,6 +37,7 @@ from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
 from base.paths import meiva_home
+from cli.commands.extensions.plans.source_binding import SourceBinding
 from cli.commands.extensions.skill_package import ExtensionGateway
 from cli.commands.extensions.skills_sync import Source
 
@@ -564,38 +565,35 @@ def _report_update(
     return 0
 
 
+# meiva:note
+# `meiva skill update [name ...]` — bring repo-native skills (from this checkout) into the load
+# dir.
+#
+# The explicit update for repo-native skills (R5 ruling: converge only lands missing copies, never
+# updates). Per package:
+#
+# - copy absent -> landed + tracked (origin=repo)
+# - copy matches source -> nothing to do
+# - copy matches registry content_hash (no local edits) -> updated to the source
+# - copy differs from the recorded hash -> converged to the source and reported (a differing
+#   local copy is never kept)
+# - user-origin residue of a repo skill (installed by hand from the project skill dirs before
+#   converge knew the source) -> adopted as repo when content matches, converged (and reported)
+#   otherwise
+#
+# `repo` is the checkout whose sources to sync from; `binding` says which home is the prod home and
+# whether a worktree checkout may sync into it.
 def cmd_skill_update(
-    names: list[str] | None, *, config: ConfigBoot, repo: Path | None = None
+    names: list[str] | None, *, config: ConfigBoot, repo: Path, binding: SourceBinding
 ) -> int:
-    """`meiva skill update [name ...]` — bring repo-native skills (from this
-    checkout) into the load dir.
-
-    The explicit update for repo-native skills (R5 ruling: converge only lands
-    missing copies, never updates). Per package:
-
-    - copy absent            -> landed + tracked (origin=repo)
-    - copy matches source    -> nothing to do
-    - copy matches registry  -> updated to the source
-      content_hash (no local edits)
-    - copy differs from the  -> converged to the source and reported (a
-      recorded hash            differing local copy is never kept)
-    - user-origin residue of a repo skill (installed by hand from the
-      project skill dirs before converge knew the source) -> adopted as repo
-      when content matches, converged (and reported) otherwise
-
-    `repo` is the checkout whose sources to sync from (tests inject a
-    synthetic tree; default = this checkout).
-    """
     from datetime import UTC, datetime
 
     from base import paths
     from base.packages.extensions import install_registry as reg
-    from cli.commands._repo import repo_root
     from cli.commands.extensions.skills_sync import assert_repo_source_bound
 
-    repo = repo or repo_root()
     try:
-        assert_repo_source_bound(repo, meiva_home())
+        assert_repo_source_bound(repo, meiva_home(), binding)
     except RuntimeError as e:
         print(f"[meiva skill update] {e}", file=sys.stderr)
         return 1

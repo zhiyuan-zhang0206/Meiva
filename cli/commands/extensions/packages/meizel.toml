@@ -1,4 +1,8 @@
-exports = ["cluster_registry.py", "refresh.py"]
+exports = ["cluster_registry.py", "refresh.py", "refresh_git_plan.py", "refresh_rules.py"]
 
 [uses]
 "__init__.py" = ["refresh.py"]
+"refresh.py" = ["refresh_git_plan.py", "refresh_rules.py"]
+
+[purity]
+"refresh_git_plan.py" = "strict"

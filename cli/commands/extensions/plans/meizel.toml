@@ -1,0 +1,10 @@
+exports = ["mcp_server_spec.py", "memory_search.py", "source_binding.py"]
+
+[uses]
+"tests" = ["mcp_server_spec.py", "memory_search.py", "source_binding.py"]
+
+[purity]
+"__init__.py" = "strict"
+"mcp_server_spec.py" = "strict"
+"memory_search.py" = "strict"
+"source_binding.py" = "strict"

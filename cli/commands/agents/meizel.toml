@@ -1,11 +1,12 @@
-exports = ["computer.py", "control.py", "impersonation.py", "impersonation_adapters.py", "impersonation_parsers.py", "impersonation_relay.py", "parsers.py", "pty.py", "timeline.py"]
+exports = ["cleanup_after.py", "computer.py", "control.py", "impersonation.py", "impersonation_adapters.py", "impersonation_parsers.py", "impersonation_relay.py", "parsers.py", "pty.py", "relay", "tests", "timeline.py"]
 
 [uses]
-"impersonation.py" = ["control.py"]
-"impersonation_parsers.py" = ["impersonation.py", "impersonation_relay.py"]
-"impersonation_relay.py" = ["impersonation.py", "impersonation_adapters.py"]
+"impersonation.py" = ["cleanup_after.py", "control.py", "impersonation_adapters.py", "relay"]
+"impersonation_adapters.py" = ["relay"]
+"impersonation_parsers.py" = ["impersonation.py", "impersonation_relay.py", "relay"]
+"impersonation_relay.py" = ["cleanup_after.py", "impersonation_adapters.py", "relay"]
 "parsers.py" = ["control.py", "notices.py", "notices_audit.py", "timeline.py"]
-"tests" = ["control.py", "impersonation.py", "impersonation_adapters.py", "impersonation_relay.py", "notices.py", "notices_audit.py", "timeline.py"]
+"tests" = ["cleanup_after.py", "computer.py", "control.py", "impersonation.py", "impersonation_adapters.py", "impersonation_relay.py", "notices.py", "notices_audit.py", "relay", "timeline.py"]
 
 [external]
 "impersonation.py" = "runs the Python the operator pipes in or names as a file"
@@ -14,10 +15,5 @@ exports = ["computer.py", "control.py", "impersonation.py", "impersonation_adapt
 "__init__.py" = "strict"
 
 [roots]
-"impersonation.py" = { kinds = ["bus", "environ"], why = "MEIVA_IMPERSONATION_RELAY_TOKEN is the relay's scoped credential handoff (stdin for codex, env for claude); it is neither persisted cluster config nor inherited native agent identity" }
+"impersonation.py" = ["bus"]
 "impersonation_relay.py" = ["bus"]
-
-[debt.ambient-read]
-"impersonation.py#settings base.config.settings" = 2
-"impersonation_parsers.py#environ os.environ" = 1
-"impersonation_relay.py#settings base.config.settings" = 1

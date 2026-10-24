@@ -590,7 +590,7 @@ def launch_service_tree(
         if snapshot is not None:
             require_root_owner(snapshot, helper=helper, home=home)
             require_same_generation(manifest, snapshot, reconcile=reconcile)
-        _ensure_frontend_deps(roster, snapshot, repo)
+        _ensure_frontend_deps(roster, snapshot, repo, environment=inputs.environment)
         if snapshot is None:
             require_root_absent(home)
             snapshot = bring_up_cold_root(
@@ -614,10 +614,17 @@ def launch_service_tree(
     return _launch_outcome(roster, snapshot)
 
 
+_NPM_CI_ARGV = ("npm", "ci")
+
+
 # meiva:note
 # Install the frontend's dependencies when the frontend is requested and not running.
 def _ensure_frontend_deps(
-    roster: tuple[ServiceSpec, ...], snapshot: RootSnapshot | None, repo: Path
+    roster: tuple[ServiceSpec, ...],
+    snapshot: RootSnapshot | None,
+    repo: Path,
+    *,
+    environment: Mapping[str, str],
 ) -> None:
     if not any(spec.session == "frontend" for spec in roster):
         return
@@ -626,7 +633,7 @@ def _ensure_frontend_deps(
         return
     from cli.commands._repo import ensure_frontend_deps
 
-    ensure_frontend_deps(repo)
+    ensure_frontend_deps(repo, environ=environment, install_argv=_NPM_CI_ARGV)
 
 
 # meiva:note

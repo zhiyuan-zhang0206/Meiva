@@ -1,9 +1,18 @@
-exports = ["__init__.py", "__main__.py", "fleet_gate.py", "fleet_verify.py", "schedules_verify_check_rows.py"]
+exports = ["__init__.py", "__main__.py", "choices.py", "fleet_gate.py", "fleet_verify.py", "oneshot.py", "plan", "programs.py", "schedules_verify_check_rows.py", "session.py"]
 
 [uses]
-"__init__.py" = ["fleet_gate.py", "fleet_verify.py"]
-"__main__.py" = ["__init__.py"]
-"fleet_verify.py" = ["fleet_gate.py"]
+"__init__.py" = ["choices.py", "down.py", "plan", "session.py", "up.py"]
+"__main__.py" = ["__init__.py", "session.py"]
+"down.py" = ["choices.py", "fleet_gate.py", "oneshot.py", "plan", "programs.py", "session.py"]
+"fleet_gate.py" = ["plan", "session.py"]
+"fleet_verify.py" = ["plan", "session.py"]
+"oneshot.py" = ["plan"]
+"programs.py" = ["plan", "session.py"]
+"session.py" = ["plan"]
+"up.py" = ["choices.py", "fleet_verify.py", "oneshot.py", "plan", "programs.py", "session.py"]
 
-[debt.ambient-read]
-"__init__.py#environ os.environ" = 2
+[purity]
+"oneshot.py" = "strict"
+
+[roots]
+"__main__.py" = { kinds = ["environ"], why = "The executable composition root reads the caller environment once and passes it explicitly to main and the command shells" }

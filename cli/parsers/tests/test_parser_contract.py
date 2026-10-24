@@ -42,9 +42,8 @@ def test_help_and_errors_keep_argparse_output(
     assert capsys.readouterr() == expected
 
 
-def test_omitted_arguments_read_the_process_argv(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sys, "argv", ["meiva", "memory", "search", "text", "--limit", "8"])
-    args = parse_args()
+def test_the_arguments_are_the_ones_the_caller_names() -> None:
+    args = parse_args(["memory", "search", "text", "--limit", "8"])
     assert args.query == "text" and args.limit == 8
 
 

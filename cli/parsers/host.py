@@ -272,7 +272,10 @@ def _h_firewall_status(args: argparse.Namespace) -> int:
     from cli.commands.converge.firewall_command import cmd_firewall_status
 
     return cmd_firewall_status(
-        home=args.runtime.home, machine=args.runtime.machine, host=args.runtime.host
+        home=args.runtime.home,
+        user_home=args.runtime.session.user_home,
+        machine=args.runtime.machine,
+        host=args.runtime.host,
     )
 
 
@@ -280,7 +283,10 @@ def _h_firewall_sync(args: argparse.Namespace) -> int:
     from cli.commands.converge.firewall_command import cmd_firewall_sync
 
     return cmd_firewall_sync(
-        home=args.runtime.home, machine=args.runtime.machine, host=args.runtime.host
+        home=args.runtime.home,
+        user_home=args.runtime.session.user_home,
+        machine=args.runtime.machine,
+        host=args.runtime.host,
     )
 
 

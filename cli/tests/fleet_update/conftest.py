@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from cli import fleet_update
 from cli.tests.fleet_update.fleet_update_cluster import Cluster, git
 
 Group = tuple[frozenset[str], tuple[str, ...]]
@@ -60,7 +59,11 @@ def env(tmp_path: Path) -> tuple[Cluster, Callable[..., int]]:
         (repo / "uv.lock").write_text(message)
         git(repo, "add", "-A")
         git(repo, "commit", "-qm", message)
-    cluster = Cluster(git(repo, "rev-parse", "HEAD~1"), git(repo, "rev-parse", "HEAD"), repo=repo)
+    workdir = tmp_path / "cluster"
+    workdir.mkdir()
+    cluster = Cluster(
+        git(repo, "rev-parse", "HEAD~1"), git(repo, "rev-parse", "HEAD"), repo=repo, workdir=workdir
+    )
     # meiva:note
     # The shipped table names real machines; a test cluster has its own aliases, so the table
     # in this repository is written the way an operator's pull request would write it.
@@ -78,14 +81,7 @@ def env(tmp_path: Path) -> tuple[Cluster, Callable[..., int]]:
         groups = (*_BOTH, *(_STOP if half != "up" else ()), *(_START if half != "down" else ()))
         chosen = [token for flags, tokens in groups if not given & flags for token in tokens]
         new = ["--new", cluster.new] if half in ("run", "down") else []
-        cluster.run_started_at = len(cluster.effects)
         argv = [half, "--gateway", "gw", "--log-dir", logs, *new, *chosen, *extra]
-        return fleet_update.main(
-            argv,
-            repo=cluster.repo,
-            ssh_fn=cluster.ssh,
-            clock=cluster,
-            env=cluster.environ,
-        )
+        return cluster.invoke(argv)
 
     return cluster, run

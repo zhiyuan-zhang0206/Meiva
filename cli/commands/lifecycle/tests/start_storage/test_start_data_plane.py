@@ -4,25 +4,34 @@
 # Every cluster owns its Postgres+Redis; `ensure_gateway_data_plane` reads the cluster's record from
 # the home's start intent and starts the per-cluster instance on the record's pg/redis ports. A
 # missing record (defensive) is a hard error, not a silent fall-through onto some shared instance.
-# The home here is a real born home (`prepare_identity` writes its intent and record); the native
-# instance itself is brought up for real by `cli/commands/tests/test_single_box.py`.
+# The refusal cases use a real born home (`prepare_identity` writes its intent and record); the
+# first case brings the native instance up for real.
 
 from __future__ import annotations
 
-import dataclasses
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import psycopg
 import pytest
 
 from base import cluster
 from base.host.db_authority.api import read_telemetry_token, telemetry_token, telemetry_token_path
 from cli import start_identity
 from cli.commands.data_plane import bringup
-from cli.commands.data_plane import cluster_instance as _ci
+from cli.commands.data_plane.cluster_instance import pg_socket_dir
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
+from cli.commands.data_plane.tests.native_cluster import (
+    BEARER,
+    NATIVE_TEST_MACOS,
+    NativeCluster,
+    redis_from_url,
+    redis_ping,
+)
+from cli.commands.data_plane.tests.native_cluster import native_cluster as native_cluster
+from cli.commands.data_plane.tests.native_cluster import retained_children as retained_children
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -47,73 +56,41 @@ def _born(home: Path) -> cluster.ClusterRecord:
 
 
 # meiva:note
-# A born cluster: the per-cluster instance on the record's exact pg/redis ports, with each
-# data-plane identity read from its own URL.
+# A born cluster: the per-cluster instance comes up for real on the record's exact pg/redis ports,
+# each data-plane identity read from its own URL, and the root that holds the secret publishes the
+# telemetry token the station probe reads.
 def test_gateway_data_plane_brings_up_own_instance(
-    monkeypatch: pytest.MonkeyPatch,
-    unit_home: Path,
     seed_write_generation: Callable[[Path], Any],
     operator_database: Callable[[], Any],
+    native_cluster: NativeCluster,
     *,
     command_runtime: CommandRuntime,
-    data_plane_config: DataPlaneConfig,
 ) -> None:
-    record = _born(unit_home)
-    # meiva:note
-    # an established home: its database authority ledger exists
-    seed_write_generation(unit_home)
-    (unit_home / ".env").write_text("MEIVA_REDIS_PASSWORD=redis-runtime\n")
-    # meiva:note
-    # The credentials are literals of a throwaway config that never leaves the test process, so
-    # the hard-coded-password rule has nothing to protect here.
-    config = dataclasses.replace(
-        data_plane_config,
-        cluster_secret="bearer",  # noqa: S106
-        redis_admin_password="redis-admin",  # noqa: S106
-        db_url="postgresql://meiva_main:sek@127.0.0.1:23011/meiva_main",
-        redis_url="redis://meiva:sek@127.0.0.1:23012/0",
-    )
-    own_calls: list[dict[str, object]] = []
-    stored_with: list[DataPlaneConfig] = []
-
-    def _record_storage(config: DataPlaneConfig, **kwargs: object) -> int:
-        stored_with.append(config)
-        own_calls.append(kwargs)
-        return 0
-
-    monkeypatch.setattr(_ci, "ensure_cluster_storage", _record_storage)
+    native_cluster.born()
+    seed_write_generation(native_cluster.home)
 
     assert (
         bringup.ensure_gateway_data_plane(
-            config,
-            home=unit_home,
-            retained_children=[],
+            native_cluster.plane,
+            home=native_cluster.home,
+            retained_children=native_cluster.retained_children,
             database_factory=operator_database,
             machine=command_runtime.machine,
-            macos=command_runtime.host.platform.system == "darwin",
+            macos=NATIVE_TEST_MACOS,
         )
         == 0
     )
-    # meiva:note
-    # The root that holds the secret published the telemetry token the station probe reads.
-    assert read_telemetry_token(unit_home.resolve()) == telemetry_token("bearer")
-    # meiva:note
-    # The ports come from the home's record, the identity from the URLs, never a name derivation.
-    assert own_calls == [
-        {
-            "home": unit_home.resolve(),
-            "pg_port": record.ports["postgres"],
-            "redis_port": record.ports["redis"],
-            "redis_password": "redis-runtime",
-            "redis_user": "meiva",
-            "retained_children": [],
-            "machine": command_runtime.machine,
-            "macos": False,
-        }
-    ]
-    # meiva:note
-    # the admin login travels inside the config
-    assert stored_with == [config]
+
+    assert read_telemetry_token(native_cluster.home.resolve()) == telemetry_token(BEARER)
+    with redis_from_url(native_cluster.plane.redis_url) as client:
+        assert redis_ping(client), "redis answers on the record's port as the URL's identity"
+    with psycopg.connect(
+        host=str(pg_socket_dir(native_cluster.home)),
+        port=native_cluster.pg_port,
+        dbname="postgres",
+        autocommit=True,
+    ) as conn:
+        assert conn.execute("SELECT 1").fetchone() == (1,)
 
 
 # meiva:note

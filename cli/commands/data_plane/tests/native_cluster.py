@@ -14,7 +14,7 @@ import contextlib
 import dataclasses
 import json
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import cast
@@ -74,11 +74,21 @@ def free_port() -> int:
 @dataclass(frozen=True)
 class NativeCluster:
     home: Path
-    pg_port: int
-    redis_port: int
-    pooler_port: int
+    ports: cluster.ClusterPorts
     plane: DataPlaneConfig
     retained_children: list[subprocess.Popen[bytes]]
+
+    @property
+    def pg_port(self) -> int:
+        return self.ports["postgres"]
+
+    @property
+    def redis_port(self) -> int:
+        return self.ports["redis"]
+
+    @property
+    def pooler_port(self) -> int:
+        return self.ports["pgbouncer"]
 
     @property
     def identity(self) -> str:
@@ -89,10 +99,8 @@ class NativeCluster:
         return self.home / "pg"
 
     def record(self) -> cluster.ClusterRecord:
-        ports = dict(cluster.new_home_ports())
-        ports.update(postgres=self.pg_port, redis=self.redis_port, pgbouncer=self.pooler_port)
         return cluster.ClusterRecord(
-            ports=cast("cluster.ClusterPorts", ports),
+            ports=self.ports.copy(),
             gateway_home=str(self.home),
             created_at="test",
         )
@@ -146,8 +154,20 @@ def native_cluster(
     retained_children: list[subprocess.Popen[bytes]],
     postgres_access: None,
     redis_access: None,
+    distinct_free_ports: Callable[[int], list[int]],
 ) -> Iterator[NativeCluster]:
-    pg_port, redis_port = free_port(), free_port()
+    ports = cluster.new_home_ports()
+    reserved = set(ports.values())
+    for _ in range(8):
+        native_ports = distinct_free_ports(3)
+        if reserved.isdisjoint(native_ports):
+            break
+    else:
+        raise RuntimeError(
+            "could not allocate native cluster ports outside the home table in 8 attempts"
+        )
+    pg_port, redis_port, pooler_port = native_ports
+    ports.update(postgres=pg_port, redis=redis_port, pgbouncer=pooler_port)
     plane = dataclasses.replace(
         data_plane_config,
         db_url=f"postgresql://{_IDENTITY}@127.0.0.1:{pg_port}/{_IDENTITY}",
@@ -159,7 +179,7 @@ def native_cluster(
         trusted_cidrs="",
         walg_config_file=None,
     )
-    running = NativeCluster(unit_home, pg_port, redis_port, free_port(), plane, retained_children)
+    running = NativeCluster(unit_home, ports, plane, retained_children)
     try:
         yield running
     finally:

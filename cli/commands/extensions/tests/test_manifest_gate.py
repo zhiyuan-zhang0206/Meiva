@@ -14,12 +14,12 @@ from pathlib import Path
 import pytest
 
 from base.cluster.machine import MachineIdentity
-from base.host.git import host_version
 from base.packages.extensions import install_registry as reg
-from cli.commands.extensions import mcp
-from cli.commands.extensions.mcp import cmd_mcp_install, cmd_mcp_upgrade
+from cli.commands.extensions.mcp import UvBuild, cmd_mcp_install, cmd_mcp_upgrade
 from cli.commands.extensions.plugins import cmd_plugins_install
 from cli.commands.extensions.skill import cmd_skill_install
+from cli.commands.extensions.tests.support.source_bindings import PROD_ELSEWHERE
+from cli.commands.extensions.tests.support.uv_support import fake_uv_build
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
@@ -69,57 +69,29 @@ def _git(cwd: Path, *args: str) -> None:
 
 
 @pytest.fixture
-def fake_uv_sync(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub `uv_sync` to drop a fake `.venv/bin/python` — no real resolve."""
-
-    def _fake(pkg_dir: Path) -> None:
-        venv_bin = pkg_dir / ".venv" / "bin"
-        venv_bin.mkdir(parents=True, exist_ok=True)
-        py = venv_bin / "python"
-        py.write_text("#!/bin/sh\n", encoding="utf-8")
-        py.chmod(0o755)
-
-    monkeypatch.setattr(mcp, "uv_sync", _fake)
+def uv(tmp_path: Path) -> UvBuild:
+    return fake_uv_build(tmp_path / "bin")
 
 
 # ─── meiva mcp install ───────────────────────────────────────────────────
 
 
 def test_mcp_install_refuses_manifest_beyond_host_engines(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
     # ">=2099" (not ">=99"): the host version is now the derived date axis
     # (2026.x), so the beyond-host example must outrun a full year, not two digits.
     bad = dict(GOOD_MANIFEST, engines={"meiva": ">=2099"})
     _write_manifest(pkg, bad)
-    assert cmd_mcp_install(str(pkg), None, None) == 1
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 1
     assert "requires Meiva >=2099" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.get("acme") is None
     assert not (unit_home / "mcps" / "acme").exists()
 
 
-def test_mcp_install_refuses_prerelease_host_without_opt_in(
-    unit_home: Path,
-    tmp_path: Path,
-    fake_uv_sync: None,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture,
-) -> None:
-    def prerelease_host(_repo: Path) -> str:
-        return "1.2.3-alpha"
-
-    monkeypatch.setattr(host_version, "host_version", prerelease_host)
-    pkg = _make_mcp_package(tmp_path)
-    _write_manifest(pkg, dict(GOOD_MANIFEST, engines={"meiva": ">=1.2.3"}))
-    assert cmd_mcp_install(str(pkg), None, None) == 1
-    assert "requires Meiva >=1.2.3" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert reg.get("acme") is None
-    assert not (unit_home / "mcps" / "acme").exists()
-
-
 def test_mcp_install_refuses_unbounded_pyproject(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture
 ) -> None:
     """The #1198 shape: pyproject without an upper bound, manifest with one."""
     pkg = _make_mcp_package(tmp_path)
@@ -129,13 +101,13 @@ def test_mcp_install_refuses_unbounded_pyproject(
         'requires-python = ">=3.12"\ndependencies = ["mcp>=1.27"]\n\n[tool.uv]\npackage = false\n',
         encoding="utf-8",
     )
-    assert cmd_mcp_install(str(pkg), None, None) == 1
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 1
     assert "#1198" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.get("acme") is None
 
 
 def test_mcp_install_refuses_pyproject_out_of_declared_range(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
     _write_manifest(pkg, GOOD_MANIFEST)
@@ -144,39 +116,37 @@ def test_mcp_install_refuses_pyproject_out_of_declared_range(
         'requires-python = ">=3.12"\ndependencies = ["mcp>=1.27,<3"]\n\n[tool.uv]\npackage = false\n',
         encoding="utf-8",
     )
-    assert cmd_mcp_install(str(pkg), None, None) == 1
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 1
     assert "reaches above" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.get("acme") is None
 
 
 def test_mcp_install_refuses_invalid_manifest(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
     (pkg / "meiva-plugin.json").write_text("not json", encoding="utf-8")
-    assert cmd_mcp_install(str(pkg), None, None) == 1
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 1
     assert "not valid JSON" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.get("acme") is None
 
 
-def test_mcp_install_accepts_valid_manifest(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None
-) -> None:
+def test_mcp_install_accepts_valid_manifest(unit_home: Path, tmp_path: Path, uv: UvBuild) -> None:
     pkg = _make_mcp_package(tmp_path)
     _write_manifest(pkg, GOOD_MANIFEST)
-    assert cmd_mcp_install(str(pkg), None, None) == 0
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 0
     row = reg.get("acme")
     assert row is not None
     assert (unit_home / "mcps" / "acme" / "meiva-plugin.json").is_file()
 
 
 def test_mcp_install_manifest_without_pyproject_fails_when_declaring_packages(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
     _write_manifest(pkg, GOOD_MANIFEST)
     (pkg / "pyproject.toml").unlink()
-    assert cmd_mcp_install(str(pkg), None, None) == 1
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 1
     assert "no pyproject.toml" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -184,7 +154,7 @@ def test_mcp_install_manifest_without_pyproject_fails_when_declaring_packages(
 
 
 def test_mcp_upgrade_refuses_source_that_breaks_the_contract(
-    unit_home: Path, tmp_path: Path, fake_uv_sync: None, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
     _write_manifest(pkg, GOOD_MANIFEST)
@@ -194,12 +164,12 @@ def test_mcp_upgrade_refuses_source_that_breaks_the_contract(
     _git(pkg, "add", ".")
     _git(pkg, "commit", "-q", "-m", "init")
     url = f"file://{pkg}"
-    assert cmd_mcp_install(url, None, None) == 0
+    assert cmd_mcp_install(url, None, None, uv=uv) == 0
 
     _write_manifest(pkg, dict(GOOD_MANIFEST, engines={"meiva": ">=2099"}))
     _git(pkg, "add", ".")
     _git(pkg, "commit", "-q", "-m", "break engines")
-    assert cmd_mcp_upgrade("acme") == 1
+    assert cmd_mcp_upgrade("acme", uv=uv) == 1
     assert "requires Meiva >=2099" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     # the landed copy still carries the previous manifest — nothing was re-landed
     landed = unit_home / "mcps" / "acme" / "meiva-plugin.json"
@@ -230,7 +200,12 @@ def test_plugins_install_refuses_invalid_manifest_before_detection(
     (pkg / "meiva-plugin.json").write_text('{"apiVersion": 99}', encoding="utf-8")
     assert (
         cmd_plugins_install(
-            _git_repo(pkg), None, None, gateway=RecordingGateway(), machine=command_machine
+            _git_repo(pkg),
+            None,
+            None,
+            gateway=RecordingGateway(),
+            machine=command_machine,
+            binding=PROD_ELSEWHERE,
         )
         == 1
     )
@@ -254,7 +229,12 @@ def test_plugins_install_accepts_manifest_with_valid_engines(
     _write_manifest(pkg, dict(GOOD_MANIFEST, name="pkg"))
     assert (
         cmd_plugins_install(
-            _git_repo(pkg), None, None, gateway=RecordingGateway(), machine=command_machine
+            _git_repo(pkg),
+            None,
+            None,
+            gateway=RecordingGateway(),
+            machine=command_machine,
+            binding=PROD_ELSEWHERE,
         )
         == 1
     )

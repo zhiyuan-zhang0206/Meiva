@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 import pytest
 
-from cli import fleet_update
+from base.paths import repo_root
 from cli.tests.fleet_update.fleet_update_cluster import Cluster
 
 Env = tuple[Cluster, Callable[..., int]]
@@ -64,9 +64,7 @@ def test_the_tracked_table_is_keyed_by_ssh_alias() -> None:
     # The gate looks each host up by the alias the window names (`mba`), never by the machine
     # name that host boots into (`macbook-air`): a table keyed by the other name tells every
     # window that the host has no baseline, so the two names must not drift apart again.
-    table = json.loads(
-        (fleet_update.REPO / "deploy" / "fleet" / "helper-identities.json").read_text()
-    )
+    table = json.loads((repo_root() / "deploy" / "fleet" / "helper-identities.json").read_text())
     assert set(table) == {"mba", "macmini", "company-air", "company-mini"}
 
 
@@ -199,3 +197,29 @@ def test_a_rebuilt_gateway_keeps_its_data_plane_choice(
     assert run("down", "--stop-extras", "--rebuild-extras") == 0
     gateway = [c for alias, c in cluster.commands if alias == "gw" and '" stop' in c]
     assert gateway and "--keep-infra" in gateway[0]
+
+
+@pytest.mark.parametrize("field", ["helper", "valid", "loaded", "stale"])
+def test_unknown_helper_words_refuse_before_stop_or_switch(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str], field: str
+) -> None:
+    cluster, run = env
+    cluster.hosts["mac"][field] = "future"
+    if field == "loaded":
+        cluster.hosts["mac"]["recorded_hash"] = "b" * 64
+    assert run("down") == 2
+    assert all(kind == "fetch" for kind, _ in cluster.effects)
+    out = capsys.readouterr().out
+    assert "invalid helper probe: mac:" in out and field in out and "'future'" in out
+
+
+@pytest.mark.parametrize("field", ["hook", "active"])
+def test_unknown_host_flags_refuse_before_fetch(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str], field: str
+) -> None:
+    cluster, run = env
+    cluster.hosts["mac"][field] = "future"
+    assert run("down") == 2
+    assert cluster.effects == []
+    out = capsys.readouterr().out
+    assert f"invalid host probe: invalid mac.{field} probe value: 'future'" in out

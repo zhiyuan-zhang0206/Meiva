@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
-import shlex
+import os
 import subprocess
-from collections.abc import Callable
+import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from cli import fleet_update
+from cli.fleet_update.plan.host_commands import CLEAN
+from cli.fleet_update.programs import ALERT_SILENCE_SCRIPT, VERIFY_SCRIPTS, program_text
+from cli.fleet_update.session import Pacing
 
 
 def git(repo: Path, *args: str) -> str:
@@ -21,16 +25,34 @@ _IDLE: dict[str, Any] = {
     "active": "no",
     "up": True,
 }
-_ROW = ("name", "online", "identity_mismatch", "head_sha", "running_sha", "serve_agent_runner")
+
+_FAKE_SSH = Path(__file__).with_name("fake_ssh.py")
+
+
+# meiva:note
+# The `ssh` a window finds on its PATH: a shell wrapper that runs `script` with this interpreter.
+# The wrapper is a real executable in a directory the test owns, so the window launches it exactly
+# as it launches the operator's `ssh`.
+def ssh_on_path(bin_dir: Path, script: Path) -> Path:
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    wrapper = bin_dir / "ssh"
+    wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" -I -S "{script}" "$@"\n')
+    wrapper.chmod(0o755)
+    return bin_dir
 
 
 # meiva:link cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md
 class Cluster:
-    def __init__(self, old: str, new: str, *, repo: Path | None = None) -> None:
+    def __init__(self, old: str, new: str, *, repo: Path, workdir: Path) -> None:
         self.old = old
         self.new = new
-        self.repo = repo or fleet_update.REPO
+        self.repo = repo
+        self.workdir = workdir
+        self.bin_dir = ssh_on_path(workdir / "bin", _FAKE_SSH)
+        self.state_path = workdir / "cluster-state.json"
         self.environ: dict[str, str] = {}
+        self.pacing = Pacing(roster_poll_s=0.01, lease_tick_s=0.25)
+        self.invocations = 0
         self.hosts: dict[str, dict[str, Any]] = {
             a: {**_IDLE, "os": o, "head": old}
             for a, o in (("gw", "Linux"), ("mac", "Darwin"), ("lin", "Linux"))
@@ -47,9 +69,9 @@ class Cluster:
         self.output = ""
         self.stored_schedules: tuple[int, list[str]] = (0, [])
         self.roster_lag = 0
+        self.roster_reply: str | None = None
         self.incomplete: dict[str, str] = {}
         self.roster_reads = 0
-        self.now = 0.0
         self.silence_open = False
         self.silence_hours = 0.0
         self.silence_comment = ""
@@ -83,232 +105,91 @@ class Cluster:
         # certificate) and the rest stay as a healthy fleet would report them.
         self.helper_hash = "a" * 64
         self.helper_cert_root = "f" * 40
+        self.violations: list[str] = []
 
-    def monotonic(self) -> float:
-        return self.now
+    def process_env(self) -> dict[str, str]:
+        base = {
+            "PATH": f"{self.bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "HOME": str(self.workdir),
+            "FLEET_CLUSTER_STATE": str(self.state_path),
+        }
+        return {**base, **self.environ}
 
-    def sleep(self, seconds: float) -> None:
-        self.now += seconds
+    def _state(self) -> dict[str, Any]:
+        return {
+            "old": self.old,
+            "new": self.new,
+            "clean": CLEAN,
+            "programs": {
+                "gateway": program_text(VERIFY_SCRIPTS / "fleet_gateway.py"),
+                "silence": program_text(ALERT_SILENCE_SCRIPT),
+                "leases": program_text(VERIFY_SCRIPTS / "fleet_leases.py"),
+            },
+            "hosts": self.hosts,
+            "names": self.names,
+            "silent": sorted(self.silent),
+            "hidden": sorted(self.hidden),
+            "smoked": self.smoked,
+            "laptop": self.laptop,
+            "effects": self.effects,
+            "commands": self.commands,
+            "run_started_at": self.run_started_at,
+            "fail": {f"{kind}|{alias}": rc for (kind, alias), rc in self.fail.items()},
+            "output": self.output,
+            "stored_schedules": list(self.stored_schedules),
+            "roster_lag": self.roster_lag,
+            "roster_reply": self.roster_reply,
+            "incomplete": self.incomplete,
+            "roster_reads": self.roster_reads,
+            "silence_open": self.silence_open,
+            "silence_hours": self.silence_hours,
+            "silence_comment": self.silence_comment,
+            "silence_reply": self.silence_reply,
+            "leases": self.leases,
+            "lease_reply": self.lease_reply,
+            "lease_rc": self.lease_rc,
+            "host_up": self.host_up,
+            "journal": self.journal,
+            "stop_fails": self.stop_fails,
+            "journal_after_stop": self.journal_after_stop,
+            "stop_fails_leaves_up": sorted(self.stop_fails_leaves_up),
+            "recover_fails": sorted(self.recover_fails),
+            "lease_reads": self.lease_reads,
+            "helper_hash": self.helper_hash,
+            "helper_cert_root": self.helper_cert_root,
+            "violations": self.violations,
+        }
 
-    def _runners_up(self) -> bool:
-        return any(h["up"] for a, h in self.hosts.items() if a != "gw")
+    def _adopt(self, data: dict[str, Any]) -> None:
+        self.hosts = data["hosts"]
+        self.smoked = data["smoked"]
+        self.effects = [(kind, alias) for kind, alias in data["effects"]]
+        self.commands = [(alias, command) for alias, command in data["commands"]]
+        self.roster_reads = data["roster_reads"]
+        self.silence_open = data["silence_open"]
+        self.silence_hours = data["silence_hours"]
+        self.silence_comment = data["silence_comment"]
+        self.host_up = data["host_up"]
+        self.journal = data["journal"]
+        self.lease_reads = data["lease_reads"]
+        self.roster_lag = data["roster_lag"]
+        self.violations = data["violations"]
 
     # meiva:note
-    # One stop: a staged failure keeps its daemon only when the test says so.
-    # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
-    def _stop(self, alias: str, host: dict[str, Any]) -> int:
-        assert not (alias == "gw" and self._runners_up()), "gateway stopped before a runner"
-        rc = self.stop_fails.get(alias, 0)
-        if not rc or alias not in self.stop_fails_leaves_up:
-            host["up"] = False
-            self.host_up[alias] = False
-        self.journal[alias] = {
-            "operation": "stop",
-            "complete": True,
-            "result": {"rc": rc, "error": None if not rc else "RuntimeError: helper busy"},
-        }
-        if alias in self.journal_after_stop:
-            self.journal[alias] = self.journal_after_stop[alias]
-        return rc
-
-    def _effect(self, kind: str, alias: str, host: dict[str, Any], command: str) -> int:
-        self.effects.append((kind, alias))
-        if self.fail.get((kind, alias)):
-            return self.fail[(kind, alias)]
-        if kind == "stop":
-            return self._stop(alias, host)
-        if kind == "switch":
-            assert not host["up"] and self.new in command
-            assert fleet_update.CLEAN in shlex.split(command)[2]
-            assert "uv sync --frozen --compile-bytecode" in command
-            host["head"] = self.new
-        elif kind in ("start", "oneshot"):
-            assert (kind == "oneshot") == (host["os"] == "Darwin")
-            assert self.hosts["gw"]["up"] if alias != "gw" else not self._runners_up()
-            if alias in self.recover_fails:
-                return 1
-            host["up"] = True
-            self.host_up[alias] = True
-        elif kind == "smoke":
-            name = command.partition(" - smoke ")[2].split()[0].strip("'")
-            self.smoked.append(name)
-            # meiva:note
-            # A smoke runs on the gateway, so the host it is about is the one in the command:
-            # a test stages that machine's red smoke without touching the gateway's own line.
-            return self.fail.get(("smoke", name), 0)
-        elif kind == "refresh":
-            assert "--force" not in command
-        return 0
-
-    def _reported(self, alias: str, host: dict[str, Any], emit: Callable[[str], None]) -> int:
-        for key in ("head", "dirty", "hook", "active"):
-            emit(f"{key}={host[key]}")
-        journal = self.journal.get(alias)
-        emit(f"op={'' if journal is None else json.dumps(journal)}")
-        emit(f"root={'up' if host['up'] else 'down'}")
-        return 0
-
-    def _roster_json(self) -> str:
-        online = self.roster_lag <= 0
-        self.roster_reads, self.roster_lag = self.roster_reads + 1, self.roster_lag - 1
-        values = [
-            (
-                self.names[a],
-                h["up"] and online and a not in self.silent,
-                False,
-                h["head"],
-                h["head"],
-                True,
+    # Run `fleet_update.main` against this cluster: write the state the fake `ssh` will read,
+    # run the window with the fake first on its PATH, read back what the hosts did, and fail the
+    # test on any order production forbids. Each invocation is stamped one second later than the
+    # last, so two windows in one test never collide on a log name.
+    def invoke(self, argv: list[str]) -> int:
+        self.run_started_at = len(self.effects)
+        self.state_path.write_text(json.dumps(self._state()))
+        now = datetime(2026, 10, 24, 12, 0, 0, tzinfo=UTC) + timedelta(seconds=self.invocations)
+        self.invocations += 1
+        try:
+            code = fleet_update.main(
+                argv, repo=self.repo, env=self.process_env(), now=now, pacing=self.pacing
             )
-            for a, h in self.hosts.items()
-            if a not in self.hidden
-        ]
-        if self.laptop:
-            values.append(("laptop", *self.laptop["row"]))
-        return json.dumps([dict(zip(_ROW, row, strict=True)) for row in values])
-
-    def ssh(self, alias: str, command: str, stdin: str | None, emit: Callable[[str], None]) -> int:
-        self.commands.append((alias, command))
-        host = self.hosts[alias]
-        emit(self.output)
-        if command == "uname -s":
-            emit(str(host["os"]))
-            return 0
-        if '"head=$(git rev-parse HEAD)"' in command:
-            return self._reported(alias, host, emit)
-        if "machine_from_boot(ConfigBoot()).name()" in command:
-            emit(self.names[alias])
-            return 0
-        if " - roster" in command:
-            assert stdin == fleet_update.program_text(
-                fleet_update.VERIFY_SCRIPTS / "fleet_gateway.py"
-            )
-            emit(self._roster_json())
-            return 0
-        if stdin in (
-            fleet_update.program_text(fleet_update.ALERT_SILENCE_SCRIPT),
-            fleet_update.program_text(fleet_update.VERIFY_SCRIPTS / "fleet_leases.py"),
-        ):
-            return self._shipped(alias, command, stdin, emit)
-        if "agent_host.pid" in command:
-            emit(f"host={'up' if self.host_up[alias] else 'down'}")
-            journal = self.journal.get(alias)
-            if journal is not None:
-                emit(json.dumps(journal))
-            return 0
-        if "helper-signing.py" in command and " facts" in command:
-            emit(self._helper_facts(alias, host))
-            return 0
-        if "converge-incomplete.json" in command:
-            return self._incomplete(alias, emit)
-        if "verify" in command:
-            return self._verify(alias, command, emit)
-        return self._effect_for(alias, host, command, emit)
-
-    def _effect_for(
-        self, alias: str, host: dict[str, Any], command: str, emit: Callable[[str], None]
-    ) -> int:
-        kinds = {
-            "git fetch": "fetch",
-            'meiva" stop': "stop",
-            "--detach": "switch",
-            "launchctl bootstrap": "oneshot",
-            'meiva" start': "start",
-            " - smoke": "smoke",
-            "packages refresh": "refresh",
-        }
-        kind = next(k for s, k in kinds.items() if s in command)
-        if kind == "refresh":
-            emit("  summary: applied 2, conflict 1")
-        return self._effect(kind, alias, host, command)
-
-    # meiva:note
-    # The helper facts one host reports; a test stages a host by editing its dict, exactly as
-    # the owner module would report it, so no assertion needs a real machine.
-    def _helper_facts(self, alias: str, host: dict[str, Any]) -> str:
-        if error := host.get("probe_error"):
-            return f"h_error={error}"
-        helper = host.get("helper", "present")
-        lines = [f"h_rc={host.get('facts_rc', 0)}", f"h_helper={helper}"]
-        if helper != "present":
-            return "\n".join(lines)
-        facts = {
-            "recorded_hash": host.get("recorded_hash", self.helper_hash),
-            "expected_hash": self.helper_hash,
-            "loaded": host.get("loaded", "no"),
-            "valid": "yes",
-            "cert_root": host.get("cert_root", self.helper_cert_root),
-            "signed_at": "2026-10-22T00:00:00+00:00",
-        }
-        lines += [f"h_{name}={value}" for name, value in facts.items()]
-        lines.append(
-            "h_stale=no" if facts["recorded_hash"] == facts["expected_hash"] else "h_stale=yes"
-        )
-        dropped = host.get("drop_fact")
-        return "\n".join(
-            line for line in lines if dropped is None or not line.startswith(f"h_{dropped}=")
-        )
-
-    def _incomplete(self, alias: str, emit: Callable[[str], None]) -> int:
-        recorded = self.incomplete.get(alias)
-        if recorded is None:
-            return 1
-        for line in recorded.splitlines():
-            emit(line)
-        return 0
-
-    # meiva:note
-    # A program `fleet_update` ships to the gateway over stdin: silence, else leases.
-    # meiva:link cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md
-    def _shipped(
-        self, alias: str, command: str, stdin: str | None, emit: Callable[[str], None]
-    ) -> int:
-        if stdin == fleet_update.program_text(fleet_update.ALERT_SILENCE_SCRIPT):
-            return self._silence(alias, command, emit)
-        self.lease_reads.append(len(self.effects))
-        assert alias == "gw", "the lease table is read on the gateway host"
-        reply = self.lease_reply
-        emit(reply if reply is not None else json.dumps({"leases": self.leases}))
-        return self.lease_rc
-
-    def _silence(self, alias: str, command: str, emit: Callable[[str], None]) -> int:
-        assert alias == "gw", "the silence is Grafana's: it runs on the gateway host"
-        script = shlex.split(command)[2]
-        verb, *rest = shlex.split(script.partition('/bin/python" - ')[2])
-        self.effects.append((f"silence-{verb}", alias))
-        if self.silence_reply is not None:
-            emit(self.silence_reply)
-            return 0
-        if verb == "open":
-            self.silence_hours = float(rest[rest.index("--hours") + 1])
-            self.silence_comment = rest[rest.index("--comment") + 1]
-            self.silence_open = True
-            emit("SILENCE opened id=s1 until=later")
-        else:
-            self.silence_open = False
-            emit("SILENCE closed 1")
-        return 0
-
-    def _verify(self, alias: str, command: str, emit: Callable[[str], None]) -> int:
-        kind = (
-            "pre-verify"
-            if "pre-update-verify" in command
-            else "schedules-verify"
-            if "schedules verify" in command
-            else "plugins-verify"
-        )
-        self.effects.append((kind, alias))
-        if kind == "pre-verify":
-            assert alias == "gw" and self.new in command
-            assert command.index("_read_schedule_rows") < command.index("worktree add")
-            assert command.index("worktree add") < command.index("cli.main")
-            fresh = [k for k, _ in self.effects[self.run_started_at :]]
-            assert "stop" not in fresh, "checked after a service stopped"
-            code, lines = self.stored_schedules
-            for line in [*lines, f"VERIFY_RC={code}"]:
-                emit(line)
-            return 0
-        assert kind != "schedules-verify" or "--no-notify" in command
-        if rc := self.fail.get((kind, alias), 0):
-            emit(f"RED the {kind} detail from {alias}")
-        return rc
+        finally:
+            self._adopt(json.loads(self.state_path.read_text()))
+        assert not self.violations, self.violations
+        return code

@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Callable
 
 
 def _h_mcp_add(args: argparse.Namespace) -> int:
@@ -55,9 +54,17 @@ def _h_mcp_disable(args: argparse.Namespace) -> int:
 
 
 def _h_mcp_install(args: argparse.Namespace) -> int:
-    from cli.commands.extensions.mcp import cmd_mcp_install
+    from cli.commands.extensions.mcp import UvBuild, cmd_mcp_install
 
-    return cmd_mcp_install(source=args.source, ref=args.ref, path=args.path, env_pairs=args.env)
+    return cmd_mcp_install(
+        source=args.source,
+        ref=args.ref,
+        path=args.path,
+        env_pairs=args.env,
+        uv=UvBuild(
+            host=args.runtime.host, caller_environ=args.runtime.config.process_environment()
+        ),
+    )
 
 
 def _h_mcp_uninstall(args: argparse.Namespace) -> int:
@@ -67,15 +74,21 @@ def _h_mcp_uninstall(args: argparse.Namespace) -> int:
 
 
 def _h_mcp_upgrade(args: argparse.Namespace) -> int:
-    from cli.commands.extensions.mcp import cmd_mcp_upgrade
+    from cli.commands.extensions.mcp import UvBuild, cmd_mcp_upgrade
 
-    return cmd_mcp_upgrade(args.name)
+    return cmd_mcp_upgrade(
+        args.name,
+        uv=UvBuild(
+            host=args.runtime.host, caller_environ=args.runtime.config.process_environment()
+        ),
+    )
 
 
-def _h_memory_refresh(_args: argparse.Namespace) -> int:
+def _h_memory_refresh(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.extensions.memory import cmd_memory_refresh
 
-    return cmd_memory_refresh()
+    return cmd_memory_refresh(access=gateway_access_from_boot(args.runtime.config))
 
 
 def h_memory_init(args: argparse.Namespace) -> int:
@@ -84,15 +97,16 @@ def h_memory_init(args: argparse.Namespace) -> int:
     return cmd_memory_init(machine=args.runtime.machine)
 
 
-def h_memory_search(
-    args: argparse.Namespace,
-    *,
-    search_fn: Callable[..., int] | None = None,
-) -> int:
+def h_memory_search(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.extensions.memory import cmd_memory_search
 
-    target = cmd_memory_search if search_fn is None else search_fn
-    return target(args.query, limit=args.limit, json_output=args.json)
+    return cmd_memory_search(
+        args.query,
+        limit=args.limit,
+        json_output=args.json,
+        access=gateway_access_from_boot(args.runtime.config),
+    )
 
 
 def _nonempty_memory_query(value: str) -> str:

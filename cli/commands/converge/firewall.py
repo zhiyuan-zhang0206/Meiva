@@ -178,7 +178,7 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
         return
 
     outcome = sync_allowlist(
-        audit, rules, machine=ctx.machine, host=ctx.host, user_home=Path.home()
+        audit, rules, machine=ctx.machine, host=ctx.host, user_home=ctx.session.user_home
     )
     for line in converge_summary_lines(
         removed=len(outcome.pruned),

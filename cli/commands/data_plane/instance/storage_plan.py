@@ -29,6 +29,7 @@ __all__ = [
     "ProbeRedis",
     "ProbeRemotePlane",
     "ProveLogins",
+    "RecordedPorts",
     "Refuse",
     "RefuseLegacy",
     "ReportAdmitted",
@@ -78,9 +79,18 @@ class ProbeRemotePlane: ...
 
 
 # meiva:note
-# Bring up the home's own Postgres and Redis.
+# The two storage ports the home's registry record reserved.
 @dataclass(frozen=True)
-class StartLocalStorage: ...
+class RecordedPorts:
+    postgres: int
+    redis: int
+
+
+# meiva:note
+# Bring up the home's own Postgres and Redis on the ports its record reserved.
+@dataclass(frozen=True)
+class StartLocalStorage:
+    ports: RecordedPorts
 
 
 Admission = Refuse | ProbeRemotePlane | StartLocalStorage
@@ -94,9 +104,9 @@ Admission = Refuse | ProbeRemotePlane | StartLocalStorage
 # authority ledger (born before the data plane always authenticated) is refused before any
 # native effect (hba rewrite, migrations), never converted here.
 def admit_gateway_storage(
-    *, home: Path, has_record: bool, remote: bool, legacy_home: bool
+    *, home: Path, ports: RecordedPorts | None, remote: bool, legacy_home: bool
 ) -> Admission:
-    if not has_record:
+    if ports is None:
         return Refuse(
             f"  ✗ no registry record for home {home} — cannot bring up its "
             "data plane. Run `meiva init` for this home first."
@@ -105,7 +115,7 @@ def admit_gateway_storage(
         return ProbeRemotePlane()
     if legacy_home:
         return Refuse(f"  ✗ {legacy_home_refusal(home)}")
-    return StartLocalStorage()
+    return StartLocalStorage(ports)
 
 
 # meiva:note

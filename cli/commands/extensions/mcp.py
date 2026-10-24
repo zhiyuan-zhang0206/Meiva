@@ -43,15 +43,23 @@ endpoint, not by this CLI.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import sys
 import tomllib
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from base.host.system.hostport import Host
 from cli.commands.extensions._pkg_source import AcquiredSource, SourcePathNotFoundError
+from cli.commands.extensions.plans.mcp_server_spec import (
+    build_server_spec,
+    derive_server_name,
+    parse_env_pairs,
+    server_summary,
+)
 
 
 def _machine_config_file() -> Path:
@@ -80,48 +88,6 @@ def _write_machine_config(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
-def _build_server_spec(
-    json_spec: str | None, command: str | None, args: list[str], env_pairs: list[str]
-) -> dict[str, Any]:
-    """Build one server entry from either a pasted JSON object or `--command` flags.
-
-    Raises:
-        ValueError: neither/both input forms given, malformed JSON, a `--env`
-            pair lacks `=`, or the result is not a server object.
-    """
-    if json_spec is not None and command is not None:
-        raise ValueError("pass either --json or --command, not both")
-    if json_spec is not None:
-        parsed = json.loads(json_spec)
-        if not isinstance(parsed, dict):
-            raise ValueError(f"--json must be a server object (got {type(parsed).__name__})")
-        return cast(dict[str, Any], parsed)
-    if command is not None:
-        spec: dict[str, Any] = {"command": command}
-        if args:
-            spec["args"] = args
-        env = _parse_env_pairs(env_pairs)
-        if env:
-            spec["env"] = env
-        return spec
-    raise ValueError("need --json '<server object>' or --command CMD")
-
-
-def _parse_env_pairs(env_pairs: list[str]) -> dict[str, str]:
-    """Parse repeated `KEY=VALUE` flags into an env dict.
-
-    Raises:
-        ValueError: a pair lacks `=`.
-    """
-    env: dict[str, str] = {}
-    for pair in env_pairs:
-        if "=" not in pair:
-            raise ValueError(f"--env expects KEY=VALUE, got {pair!r}")
-        key, value = pair.split("=", 1)
-        env[key] = value
-    return env
-
-
 def cmd_mcp_add(
     name: str,
     json_spec: str | None,
@@ -132,7 +98,7 @@ def cmd_mcp_add(
     """`meiva mcp add <name>` — add/replace a server in the machine MCP config."""
     path = _machine_config_file()
     try:
-        spec = _build_server_spec(json_spec, command, args, env_pairs)
+        spec = build_server_spec(json_spec, command, args, env_pairs)
         config = _read_machine_config(path)
     except (ValueError, json.JSONDecodeError, OSError) as e:
         print(f"[meiva mcp add] {e}", file=sys.stderr)
@@ -150,19 +116,6 @@ def cmd_mcp_add(
     print(f"[meiva mcp add] {verb} MCP server '{name}' in {path}")
     print("  connects on next use; no restart needed.")
     return 0
-
-
-def _server_summary(spec: Any) -> str:
-    """One-line description of a server entry for the list view."""
-    if not isinstance(spec, dict):
-        return "(malformed entry)"
-    spec = cast(dict[str, Any], spec)
-    if "url" in spec:
-        return str(spec["url"])
-    command = spec.get("command", "")
-    args: list[Any] = spec.get("args", [])
-    parts = [str(command), *(str(a) for a in args)] if isinstance(args, list) else [str(command)]
-    return " ".join(p for p in parts if p)
 
 
 def cmd_mcp_list() -> int:
@@ -201,7 +154,7 @@ def cmd_mcp_list() -> int:
             origin = "plugin/built-in (read-only here)"
         disabled = " [disabled]" if not enabled.get(name, True) else ""
         print(f"  {name}  [{origin}]{disabled}")
-        print(f"      {_server_summary(merged[name])}")
+        print(f"      {server_summary(merged[name])}")
         if name in installed and _source_is_dead_local_path(name):
             print(
                 f"      ! recorded source path no longer exists — `meiva mcp upgrade {name}` "
@@ -373,27 +326,61 @@ def _apply_env_overrides(dest: Path, name: str, overrides: dict[str, str]) -> No
     mcp_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
-# The package's build owns its own lock: these ambient knobs describe the
-# caller's project and must not freeze the foreign package's resolution
-# (cli/python_install.py scrubs the same class for the repo build).
+# meiva:note
+# The package's build owns its own lock: these ambient knobs describe the caller's project and
+# must not freeze the foreign package's resolution (cli/python_install.py scrubs the same class
+# for the repo build).
 _UV_LOCK_POLICY_ENV = ("UV_FROZEN", "UV_LOCKED")
 
+# meiva:note
+# A first resolve downloads the package's dependencies, so the bound is generous; a build
+# that outlives it is reported as a failed build instead of hanging the command.
+_UV_SYNC_TIMEOUT_S = 900.0
 
-def uv_sync(pkg_dir: Path) -> None:
-    """Build the package's isolated venv (`<pkg>/.venv`) so its relative
-    `.venv/bin/python` command resolves at spawn time. `uv sync` is the only uv
-    invocation an installed MCP triggers — never `uv run` (a resident wrapper).
 
-    The child environment drops the caller's lock-policy knobs (`UV_FROZEN` /
-    `UV_LOCKED`): the package has no lockfile of its own yet, and an ambient
-    `UV_FROZEN=1` — e.g. exported by a CI job for its repository — would
-    otherwise refuse the build.
+# meiva:note
+# `uv sync` did not build the package's venv; the message is what uv, or the bound, said.
+class UvSyncError(RuntimeError): ...
 
-    Raises:
-        subprocess.CalledProcessError: uv sync failed.
-    """
-    env = {key: value for key, value in os.environ.items() if key not in _UV_LOCK_POLICY_ENV}
-    subprocess.run(["uv", "sync"], cwd=pkg_dir, check=True, capture_output=True, text=True, env=env)
+
+# meiva:note
+# What building an installed package's venv needs from its caller: the host that finds and runs
+# `uv`, and the environment the caller runs in. A root builds it where the command starts; the
+# build passes `caller_environ` on to `uv` without the lock-policy knobs.
+@dataclass(frozen=True)
+class UvBuild:
+    host: Host
+    caller_environ: Mapping[str, str]
+
+
+# meiva:note
+# Build the package's isolated venv (`<pkg>/.venv`) so its relative `.venv/bin/python` command
+# resolves at spawn time. `uv sync` is the only uv invocation an installed MCP triggers, never
+# `uv run` (a resident wrapper).
+#
+# The child environment drops the caller's lock-policy knobs (`UV_FROZEN` / `UV_LOCKED`): the
+# package has no lockfile of its own yet, and an ambient `UV_FROZEN=1`, exported by a CI job for
+# its repository, would otherwise refuse the build.
+#
+# Raises `UvSyncError` when `uv` is not on the host, exits non-zero or outlives the bound.
+def uv_sync(pkg_dir: Path, build: UvBuild) -> None:
+    program = build.host.which("uv")
+    if program is None:
+        raise UvSyncError("`uv` is not on PATH")
+    env = {k: v for k, v in build.caller_environ.items() if k not in _UV_LOCK_POLICY_ENV}
+    try:
+        result = build.host.run(
+            [program, "sync"],
+            cwd=pkg_dir,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=_UV_SYNC_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise UvSyncError(f"timed out after {_UV_SYNC_TIMEOUT_S:.0f}s") from exc
+    if result.returncode != 0:
+        raise UvSyncError(result.stderr.strip())
 
 
 def _register_mcp(
@@ -424,20 +411,6 @@ def _register_mcp(
             installed_hash=content_hash,
         )
     )
-
-
-def _derive_server_name(raw_name: str) -> str:
-    """Derive a clean server name from a pyproject ``name`` field.
-
-    Strips common prefixes (``meiva-mcp-``, ``mcp-server-``, ``mcp-``) and replaces
-    underscores with hyphens so the name is consistent with built-in / machine
-    server naming.
-    """
-    for prefix in ("meiva-mcp-", "mcp-server-", "mcp-"):
-        if raw_name.lower().startswith(prefix):
-            raw_name = raw_name[len(prefix) :]
-            break
-    return raw_name.replace("_", "-").strip("-")
 
 
 def _main_module_candidates(search_dirs: list[Path]) -> list[str]:
@@ -543,7 +516,7 @@ def _auto_detect_mcp(pkg_dir: Path) -> tuple[str, dict[str, Any]]:
     raw_name = project.get("name", "")
     if not raw_name:
         raise ValueError("pyproject.toml [project] has no 'name' field")
-    name = _derive_server_name(str(raw_name))
+    name = derive_server_name(str(raw_name))
     module = _detect_module(pkg_dir, project, name)
     description = str(project.get("description", "")) or f"{name} MCP server"
 
@@ -608,7 +581,12 @@ def _install_name_conflict(name: str, dest: Path) -> bool:
 
 
 def cmd_mcp_install(
-    source: str, ref: str | None, path: str | None, env_pairs: list[str] | None = None
+    source: str,
+    ref: str | None,
+    path: str | None,
+    env_pairs: list[str] | None = None,
+    *,
+    uv: UvBuild,
 ) -> int:
     """`meiva mcp install <source> [--path SUBDIR] [--ref REF] [--env K=V]...` —
     install a standalone MCP package from a git URL or a local directory.
@@ -626,7 +604,7 @@ def cmd_mcp_install(
     from ._pkg_source import cleanup_temp
 
     try:
-        overrides = _parse_env_pairs(env_pairs or [])
+        overrides = parse_env_pairs(env_pairs or [])
     except ValueError as e:
         print(f"[meiva mcp install] {e}", file=sys.stderr)
         return 1
@@ -658,10 +636,10 @@ def cmd_mcp_install(
             _write_mcp_json(dest, name, auto_spec)
         _apply_env_overrides(dest, name, overrides)
         try:
-            uv_sync(dest)
-        except subprocess.CalledProcessError as e:
+            uv_sync(dest, uv)
+        except UvSyncError as e:
             shutil.rmtree(dest, ignore_errors=True)
-            print(f"[meiva mcp install] uv sync failed: {e.stderr.strip()}", file=sys.stderr)
+            print(f"[meiva mcp install] uv sync failed: {e}", file=sys.stderr)
             return 1
 
         _register_mcp(name, source, path, ref, content_hash=install_registry.tree_hash(dest))
@@ -695,7 +673,7 @@ def cmd_mcp_uninstall(name: str) -> int:
     return 0
 
 
-def cmd_mcp_upgrade(name: str) -> int:
+def cmd_mcp_upgrade(name: str, *, uv: UvBuild) -> int:
     """`meiva mcp upgrade <name>` — re-fetch an installed MCP package
     from its source.
 
@@ -772,9 +750,9 @@ def cmd_mcp_upgrade(name: str) -> int:
         _land_package(acq.cloned, pkg_dir, dest)
         _apply_env_overrides(dest, name, carried)
         try:
-            uv_sync(dest)
-        except subprocess.CalledProcessError as e:
-            print(f"[meiva mcp upgrade] uv sync failed: {e.stderr.strip()}", file=sys.stderr)
+            uv_sync(dest, uv)
+        except UvSyncError as e:
+            print(f"[meiva mcp upgrade] uv sync failed: {e}", file=sys.stderr)
             return 1
 
         from datetime import UTC, datetime

@@ -11,7 +11,6 @@ from agent.extensions.catalog import (
     PluginView,
     Surface,
     UnknownPluginError,
-    build_catalog,
     declared_vs_registered,
     entry_point_signature,
 )
@@ -22,8 +21,7 @@ _INDENT = " " * (2 + _LABEL)
 
 
 # meiva:link cli/commands/extensions/docs/plugin-inspection.meiva.okf.md
-def cmd_plugins_inspect(name: str | None) -> int:
-    catalog = build_catalog()
+def cmd_plugins_inspect(name: str | None, *, catalog: Catalog) -> int:
     if name is None:
         _print_surfaces(catalog)
         _print_plugin_directory(catalog)

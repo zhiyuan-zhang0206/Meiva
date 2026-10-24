@@ -1,18 +1,14 @@
 import sys
+from datetime import UTC, datetime
 
-from base.cluster.machine import GatewayAccess
 from base.paths import meiva_home
-from cli.commands.management.schedules_verify import cmd_schedules_verify
+from cli.commands.management.schedules_verify import RowsFromFile, cmd_schedules_verify
 from cli.database import (
     open_operator_database,
     operator_database_factory,
     operator_event_pipeline,
 )
 from cli.database.runtime import CommandRuntime
-
-
-def _no_gateway() -> GatewayAccess:
-    raise AssertionError("the gateway must not be dialed")
 
 
 def _check_rows(rows_file: str) -> None:
@@ -25,7 +21,10 @@ def _check_rows(rows_file: str) -> None:
     try:
         sys.exit(
             cmd_schedules_verify(
-                notify=False, rows_file=rows_file, producer=producer, access=_no_gateway
+                source=RowsFromFile(rows_file),
+                notify=False,
+                now=datetime.now(UTC),
+                producer=producer,
             )
         )
     finally:

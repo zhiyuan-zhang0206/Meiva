@@ -6,8 +6,8 @@
 "meiva.tests.fixtures.sdk" = [
     "test_delivery.py",
     "test_impersonation_agents.py",
-    "test_impersonation_bridge.py",
-    "test_impersonation_bridge_part2.py",
-    "test_relay_heartbeat_ownership.py",
-    "test_relay_status.py",
+    "test_relay_budget.py",
+    "test_relay_command.py",
+    "test_relay_shell.py",
+    "test_relay_supervision.py",
 ]

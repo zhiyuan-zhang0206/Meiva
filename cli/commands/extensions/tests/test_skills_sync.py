@@ -10,9 +10,9 @@ import pytest
 
 import meiva.skills as skills_mod
 from base.packages.extensions import install_registry as reg
-from base.paths import home as paths_home
 from cli.commands.extensions.skill import cmd_skill_disable, cmd_skill_enable, cmd_skill_register
 from cli.commands.extensions.skills_sync import converge_skills
+from cli.commands.extensions.tests.support.source_bindings import PROD_ELSEWHERE, prod_home_is
 
 
 def _write_skill(root: Path, dirname: str, name: str | None = None, body: str = "# B\n") -> Path:
@@ -47,7 +47,7 @@ def _entry(name: str) -> reg.InstalledPackage:
 
 
 def test_first_converge_copies_registers_and_surfaces(unit_home: Path, fake_repo: Path) -> None:
-    result = converge_skills(fake_repo, unit_home)
+    result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     assert sorted(result.copied) == ["goal", "superpowers"]
     assert result.warnings == []
 
@@ -64,9 +64,9 @@ def test_first_converge_copies_registers_and_surfaces(unit_home: Path, fake_repo
 
 
 def test_second_converge_is_noop(unit_home: Path, fake_repo: Path) -> None:
-    converge_skills(fake_repo, unit_home)
+    converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     first = reg.load().model_dump_json()
-    result = converge_skills(fake_repo, unit_home)
+    result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     assert result.copied == [] and result.updated == [] and result.removed == []
     assert sorted(result.unchanged) == ["goal", "superpowers"]
     assert reg.load().model_dump_json() == first  # updated_at untouched on no-op
@@ -77,13 +77,13 @@ def test_grouped_repo_skill_converges_flat_and_keeps_its_identity(
 ) -> None:
     """A skill that moves into a source-tree group (a folder with no SKILL.md of its
     own) keeps its load-dir name, registry row and copy; only `origin_path` follows."""
-    converge_skills(fake_repo, unit_home)
+    converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     old_hash = _entry("goal").content_hash
     skills = fake_repo / "meiva_builtins" / "skills"
     (skills / "coordination").mkdir()
     (skills / "goal").rename(skills / "coordination" / "goal")
 
-    result = converge_skills(fake_repo, unit_home)
+    result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
 
     assert result.copied == [] and result.removed == [] and result.warnings == []
     assert "goal" in result.unchanged
@@ -100,12 +100,12 @@ def test_grouped_repo_skill_converges_flat_and_keeps_its_identity(
 def test_repo_source_change_not_propagated_by_converge(unit_home: Path, fake_repo: Path) -> None:
     """Repo-native sources are bootstrap-only (R5 ruling): a source change is
     NOT synced by converge — the explicit `meiva skill update` owns updates."""
-    converge_skills(fake_repo, unit_home)
+    converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     old_hash = _entry("goal").content_hash
     (fake_repo / "meiva_builtins" / "skills" / "goal" / "SKILL.md").write_text(
         "---\nname: goal\ndescription: v2\n---\n\n# v2\n", encoding="utf-8"
     )
-    result = converge_skills(fake_repo, unit_home)
+    result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     assert result.updated == []
     assert "goal" in result.unchanged
     body = (unit_home / "skills" / "goal" / "SKILL.md").read_text(encoding="utf-8")
@@ -117,13 +117,13 @@ def test_repo_copy_user_edit_untouched_by_converge(unit_home: Path, fake_repo: P
     """A user-edited repo-native copy is left alone, silently: converge no
     longer attempts to update repo-native copies at all, so the edit is not a
     converge concern — a later `meiva skill update` replaces it."""
-    converge_skills(fake_repo, unit_home)
+    converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     copy = unit_home / "skills" / "goal" / "SKILL.md"
     copy.write_text("---\nname: goal\ndescription: MINE\n---\n\nhands off\n", encoding="utf-8")
     (fake_repo / "meiva_builtins" / "skills" / "goal" / "SKILL.md").write_text(
         "---\nname: goal\ndescription: v2\n---\n", encoding="utf-8"
     )
-    result = converge_skills(fake_repo, unit_home)
+    result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     assert result.updated == []
     assert "goal" in result.unchanged
     assert not any("modified locally" in w for w in result.warnings)
@@ -136,9 +136,9 @@ def test_repo_copy_user_edit_untouched_by_converge(unit_home: Path, fake_repo: P
 def test_source_removed_cleans_untouched_copy(unit_home: Path, fake_repo: Path) -> None:
     import shutil
 
-    converge_skills(fake_repo, unit_home)
+    converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     shutil.rmtree(fake_repo / "meiva_builtins" / "skills" / "goal")
-    result = converge_skills(fake_repo, unit_home)
+    result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     assert result.removed == ["goal"]
     assert not (unit_home / "skills" / "goal").exists()
     assert reg.get("goal") is None
@@ -147,12 +147,12 @@ def test_source_removed_cleans_untouched_copy(unit_home: Path, fake_repo: Path) 
 def test_source_removed_keeps_edited_copy(unit_home: Path, fake_repo: Path) -> None:
     import shutil
 
-    converge_skills(fake_repo, unit_home)
+    converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     (unit_home / "skills" / "goal" / "SKILL.md").write_text(
         "---\nname: goal\ndescription: MINE\n---\n", encoding="utf-8"
     )
     shutil.rmtree(fake_repo / "meiva_builtins" / "skills" / "goal")
-    result = converge_skills(fake_repo, unit_home)
+    result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     assert result.removed == []
     assert any("is gone" in w for w in result.warnings)
     assert (unit_home / "skills" / "goal").exists()
@@ -164,7 +164,7 @@ def test_source_removed_keeps_edited_copy(unit_home: Path, fake_repo: Path) -> N
 
 def test_untracked_dir_warned_and_not_loaded(unit_home: Path, fake_repo: Path) -> None:
     _write_skill(unit_home / "skills", "stray")
-    result = converge_skills(fake_repo, unit_home)
+    result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     assert any("'stray'" in w and "not loaded" in w for w in result.warnings)
     assert "stray" not in _loaded_names(unit_home)
 
@@ -179,14 +179,14 @@ def test_lost_registry_row_adopted_when_copy_matches_source(
     the load-dir copies are still byte-identical to their sources. Converge
     adopts them back instead of warning 'untracked shadows' — which left the
     registry empty and the skill scanner gating everything out."""
-    converge_skills(fake_repo, unit_home)
+    converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     assert reg.get("goal") is not None
 
     # Simulate the registry loss: keep only a user row.
     reg.save(reg.Registry(packages=[reg.InstalledPackage(name="mine", type="skill")]))
     assert reg.get("goal") is None
 
-    result = converge_skills(fake_repo, unit_home)
+    result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     assert not any("shadows" in w for w in result.warnings)
     adopted = reg.get("goal")
     assert adopted is not None
@@ -197,12 +197,12 @@ def test_lost_registry_row_adopted_when_copy_matches_source(
 def test_lost_registry_row_different_copy_still_warned(unit_home: Path, fake_repo: Path) -> None:
     """A content-differing untracked copy stays a warning — it may be a
     user's deliberate edit, and adopting it would let converge overwrite it."""
-    converge_skills(fake_repo, unit_home)
+    converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     (unit_home / "skills" / "goal" / "SKILL.md").write_text(
         "---\nname: goal\ndescription: EDITED\n---\n", encoding="utf-8"
     )
     reg.save(reg.Registry(packages=[]))
-    result = converge_skills(fake_repo, unit_home)
+    result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     assert any("shadows" in w and "content differs" in w for w in result.warnings)
     assert reg.get("goal") is None
     assert "goal" not in _loaded_names(unit_home)
@@ -220,7 +220,7 @@ def test_preserved_subtrees_survive_bootstrap_only(unit_home: Path, tmp_path: Pa
     package survive converge: repo-native packages are bootstrap-only, so the
     copy — local adapters included — is never rewritten by converge."""
     repo = _web_sources_repo(tmp_path)
-    converge_skills(repo, unit_home)
+    converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
     for sub in ("people", "rmrb"):
         d = unit_home / "skills" / "web-sources" / sub
         d.mkdir(parents=True)
@@ -232,7 +232,7 @@ def test_preserved_subtrees_survive_bootstrap_only(unit_home: Path, tmp_path: Pa
         "---\nname: web-sources\ndescription: d2\n---\n\nnew content\n",
         encoding="utf-8",
     )
-    result = converge_skills(repo, unit_home)
+    result = converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
     assert result.updated == []
     assert "web-sources" in result.unchanged
     # Converge left the copy (and the adapters) alone; updating to the new
@@ -247,12 +247,12 @@ def test_preserved_only_drift_reads_unchanged(unit_home: Path, tmp_path: Path) -
     """A package whose only drift is preserved local content is in-sync: no
     warning, no freeze, no rewrite."""
     repo = _web_sources_repo(tmp_path)
-    converge_skills(repo, unit_home)
+    converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
     d = unit_home / "skills" / "web-sources" / "people"
     d.mkdir(parents=True)
     (d / "SKILL.md").write_text("---\nname: people\ndescription: local\n---\n", encoding="utf-8")
     (d / ".preserved").touch()
-    result = converge_skills(repo, unit_home)
+    result = converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
     assert "web-sources" in result.unchanged
     assert not any("modified locally" in w for w in result.warnings)
     assert (unit_home / "skills" / "web-sources" / "people" / "SKILL.md").exists()
@@ -266,13 +266,13 @@ def test_cleanup_keeps_source_vanish_with_preserved_subtree(
     import shutil
 
     repo = _web_sources_repo(tmp_path)
-    converge_skills(repo, unit_home)
+    converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
     d = unit_home / "skills" / "web-sources" / "people"
     d.mkdir(parents=True)
     (d / "SKILL.md").write_text("---\nname: people\ndescription: local\n---\n", encoding="utf-8")
     (d / ".preserved").touch()
     shutil.rmtree(repo / "meiva_builtins" / "skills" / "web-sources")
-    result = converge_skills(repo, unit_home)
+    result = converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
     assert result.removed == []
     assert any("preserved local content" in w for w in result.warnings)
     assert (unit_home / "skills" / "web-sources" / "people" / "SKILL.md").exists()
@@ -283,7 +283,7 @@ def test_user_install_shadowing_source_kept(unit_home: Path, fake_repo: Path) ->
     is not synced (never destroy user content)."""
     _write_skill(unit_home / "skills", "goal", body="user version\n")
     reg.register(reg.InstalledPackage(name="goal", type="skill", source="file:///x"))
-    result = converge_skills(fake_repo, unit_home)
+    result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     assert any("shadows" in w for w in result.warnings)
     copy = unit_home / "skills" / "goal" / "SKILL.md"
     assert "user version" in copy.read_text(encoding="utf-8")
@@ -294,7 +294,7 @@ def test_same_name_repo_beats_plugin(unit_home: Path, tmp_path: Path) -> None:
     repo = tmp_path / "repo2"
     _write_skill(repo / "meiva_builtins" / "skills", "dup", body="repo version\n")
     _write_skill(repo / "meiva_builtins" / "plugins" / "dup" / "skills", "inner")
-    result = converge_skills(repo, unit_home)
+    result = converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
     assert any("already provided" in w for w in result.warnings)
     assert "repo version" in (unit_home / "skills" / "dup" / "SKILL.md").read_text(encoding="utf-8")
 
@@ -307,7 +307,7 @@ def test_installed_plugin_skills_gate_on_plugin_entry(unit_home: Path, fake_repo
     plugin's own registry entry — no duplicate type='skill' row."""
     _write_skill(unit_home / "plugins" / "pr-kit" / "skills", "review")
     reg.register(reg.InstalledPackage(name="pr-kit", type="plugin", source="file:///y"))
-    result = converge_skills(fake_repo, unit_home)
+    result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     assert "pr-kit" in result.copied
     entry = _entry("pr-kit")
     assert entry.type == "plugin" and entry.origin == "plugin" and entry.content_hash
@@ -324,7 +324,7 @@ def test_installed_plugin_skills_gate_on_plugin_entry(unit_home: Path, fake_repo
 
 
 def test_skill_disable_enable_roundtrip(unit_home: Path, fake_repo: Path) -> None:
-    converge_skills(fake_repo, unit_home)
+    converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     assert cmd_skill_disable("goal") == 0
     assert _entry("goal").enabled is False
     assert "goal" not in _loaded_names(unit_home)
@@ -344,7 +344,7 @@ def test_skill_register_tracks_stray_dir(unit_home: Path, fake_repo: Path) -> No
     assert entry is not None and entry.origin == "user" and entry.enabled
     assert "stray" in _loaded_names(unit_home)
     # converge leaves it alone afterwards
-    result = converge_skills(fake_repo, unit_home)
+    result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     assert all("stray" not in w for w in result.warnings)
 
 
@@ -370,11 +370,11 @@ def test_copy_staging_dirs_invisible_after_update(unit_home: Path, fake_repo: Pa
     the load dir is bootstrap-only), so this exercises the update path."""
     _write_skill(unit_home / "plugins" / "pr-kit" / "skills", "review")
     reg.register(reg.InstalledPackage(name="pr-kit", type="plugin", source="file:///y"))
-    converge_skills(fake_repo, unit_home)
+    converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     (unit_home / "plugins" / "pr-kit" / "skills" / "review" / "SKILL.md").write_text(
         "---\nname: review\ndescription: v2\n---\n\n# v2\n", encoding="utf-8"
     )
-    result = converge_skills(fake_repo, unit_home)
+    result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     assert "pr-kit" in result.updated
     staging = [p.name for p in (unit_home / "skills").iterdir() if p.name.startswith(".")]
     assert staging == []
@@ -383,7 +383,7 @@ def test_copy_staging_dirs_invisible_after_update(unit_home: Path, fake_repo: Pa
 
 def test_dot_dir_untracked_not_warned(unit_home: Path, fake_repo: Path) -> None:
     (unit_home / "skills" / ".staging-leftover").mkdir(parents=True)
-    result = converge_skills(fake_repo, unit_home)
+    result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     assert all(".staging-leftover" not in w for w in result.warnings)
     assert not (unit_home / "skills" / ".staging-leftover" / "SKILL.md").exists()
 
@@ -427,7 +427,7 @@ def test_agents_project_skills_not_converged(unit_home: Path, tmp_path: Path) ->
     project-local mount (project_skill_roots), never through the fleet-wide
     load dir: converge lands nothing from .agents/skills and records no row."""
     repo = _agents_repo(tmp_path)
-    result = converge_skills(repo, unit_home)
+    result = converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
     assert sorted(result.copied) == ["builtin-a"]
     assert result.removed == []
     assert not any("already provided" in w for w in result.warnings)
@@ -460,7 +460,7 @@ def test_legacy_agents_skill_converge_copy_cleaned_up(unit_home: Path, tmp_path:
             installed_at="2026-08-20T00:00:00+00:00",
         )
     )
-    result = converge_skills(repo, unit_home)
+    result = converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
     assert result.removed == ["project-x"]
     assert not dest.exists()
     assert reg.get("project-x") is None
@@ -479,7 +479,7 @@ def test_dash_source_row_matches_underscore_registry_entry(
     raw names, or the row would never be updated (audit 02 #4 bare
     comparison in `_sync_one`)."""
     _write_skill(fake_repo / "meiva_builtins" / "skills", "meiva-goal")
-    converge_skills(fake_repo, unit_home)
+    converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     entry = reg.get("meiva-goal")
     assert entry is not None
     # Hand-rewrite the row to the legacy underscore spelling, then converge
@@ -489,7 +489,7 @@ def test_dash_source_row_matches_underscore_registry_entry(
         if pkg.name == "meiva-goal":
             pkg.name = "meiva_goal"
     reg.save(registry)
-    result = converge_skills(fake_repo, unit_home)
+    result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     # the legacy-spelled row was FOUND through the fold and kept up to date —
     # no second row was created for the canonical spelling
     assert "meiva-goal" in result.unchanged
@@ -508,7 +508,7 @@ def test_cross_source_same_key_conflict_is_reported_not_duplicated(
     conflict instead of writing both rows."""
     _write_skill(fake_repo / "meiva_builtins" / "skills", "foo-bar")
     _write_skill(fake_repo / "meiva_builtins" / "plugins" / "foo_bar" / "skills", "sub")
-    result = converge_skills(fake_repo, unit_home)
+    result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
     assert any("already provided" in w for w in result.warnings)
     rows = reg.load().packages
     assert len([p for p in rows if p.name in ("foo-bar", "foo_bar")]) == 1
@@ -517,18 +517,15 @@ def test_cross_source_same_key_conflict_is_reported_not_duplicated(
 # ─── worktree source bound (audit round 2, skills-plugins #3) ──────────────
 
 
-def test_worktree_repo_refused_for_default_home(
-    unit_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_worktree_repo_refused_for_default_home(unit_home: Path, tmp_path: Path) -> None:
     """A worktree checkout's sources must never sync into the prod home's load
     dir: the branch content (possibly unmerged) would silently replace what
     main ships (observed 2026-08-08 with meiva-serious-research)."""
-
-    monkeypatch.setattr(paths_home, "default_home", lambda: unit_home)
     repo = tmp_path / "repo" / ".worktrees" / "meiva-9999-task"
     _write_skill(repo / "meiva_builtins" / "skills", "goal")
     with pytest.raises(RuntimeError, match="worktree"):
-        converge_skills(repo, unit_home)
+        converge_skills(repo, unit_home, binding=prod_home_is(unit_home))
+    assert not (unit_home / "skills" / "goal").exists()
 
 
 def test_worktree_repo_allowed_for_dev_home(unit_home: Path, tmp_path: Path) -> None:
@@ -537,20 +534,24 @@ def test_worktree_repo_allowed_for_dev_home(unit_home: Path, tmp_path: Path) -> 
     repo = tmp_path / "repo" / ".worktrees" / "meiva-9999-task"
     _write_skill(repo / "meiva_builtins" / "skills", "goal")
     dev_home = tmp_path / "dev-home"
-    result = converge_skills(repo, dev_home)
+    result = converge_skills(repo, dev_home, binding=PROD_ELSEWHERE)
     assert result.copied == ["goal"]
     assert (dev_home / "skills" / "goal" / "SKILL.md").is_file()
 
 
-def test_worktree_refusal_overridable_by_env(
-    unit_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-
-    monkeypatch.setattr(paths_home, "default_home", lambda: unit_home)
-    monkeypatch.setenv("MEIVA_CONVERGE_ALLOW_WORKTREE", "1")
+def test_worktree_refusal_overridable_by_the_operator(unit_home: Path, tmp_path: Path) -> None:
     repo = tmp_path / "repo" / ".worktrees" / "meiva-9999-task"
     _write_skill(repo / "meiva_builtins" / "skills", "goal")
-    result = converge_skills(repo, unit_home)
+    result = converge_skills(repo, unit_home, binding=prod_home_is(unit_home, allow_worktree=True))
+    assert result.copied == ["goal"]
+
+
+def test_a_checkout_that_is_not_a_worktree_syncs_into_the_default_home(
+    unit_home: Path, tmp_path: Path
+) -> None:
+    repo = tmp_path / "main-checkout"
+    _write_skill(repo / "meiva_builtins" / "skills", "goal")
+    result = converge_skills(repo, unit_home, binding=prod_home_is(unit_home))
     assert result.copied == ["goal"]
 
 
@@ -561,7 +562,7 @@ def test_unmarked_local_subtree_not_preserved(unit_home: Path, tmp_path: Path) -
     a global registry silently missing the entry."""
 
     repo = _web_sources_repo(tmp_path)
-    converge_skills(repo, unit_home)
+    converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
     d = unit_home / "skills" / "web-sources" / "newadapter"
     d.mkdir(parents=True)
     (d / "SKILL.md").write_text(
@@ -582,7 +583,7 @@ def test_ghost_plugin_skills_not_converged(unit_home: Path, fake_repo: Path) -> 
     ghost = unit_home / "plugins" / ".pr-toolkit.backup-999" / "skills"
     _write_skill(ghost, "ghost-skill")
 
-    result = converge_skills(fake_repo, unit_home)
+    result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE)
 
     assert "ghost-skill" not in result.copied
     assert "ghost-skill" not in _loaded_names(unit_home)

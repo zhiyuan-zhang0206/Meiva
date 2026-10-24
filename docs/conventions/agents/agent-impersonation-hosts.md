@@ -8,17 +8,20 @@ message ids and the exact ACK command; the external agent acknowledges each batc
 receipt and processes messages as they arrive.
 
 All providers use the same relay process and delivery loop in
-`cli/commands/agents/impersonation_relay.py`. Provider adapters in
-`cli/commands/agents/impersonation_adapters.py` bind a destination and send the
-loop's envelopes: Codex uses its app-server socket, Antigravity uses its local
-language-server ConnectRPC endpoint (`SendUserCascadeMessage`), Claude flushes
-text to Monitor, and dsh emits one JSON string per stdout line. Adapters also
-declare terminal-notice ownership: the Codex and Antigravity native hosts submit
-their notice once when they see the lease end; controller-session adapters
-deliver theirs through stdout. The shared loop owns inbox reads, batching,
-delivery reservations, retry budgets and exit behavior; adapters do not
-acknowledge messages or renew leases. Process supervision stays with the
-existing owner for each provider, as described below.
+`cli/commands/agents/impersonation_relay.py`. The loop is a shell: its decisions are
+values in `cli/commands/agents/relay/` (which destination the options name, what is
+due, how long to wait, which rows to reserve, the envelope text), and the shell
+reads the inbox, reserves in the database, delivers and listens for wakes.
+`cli/commands/agents/impersonation_adapters.py` holds the closed set of delivery
+methods, one per destination, bound once at startup: Codex uses its app-server
+socket, Antigravity uses its local language-server ConnectRPC endpoint
+(`SendAgentMessage`), Claude flushes text to Monitor, and dsh emits one JSON
+string per stdout line. A method also declares terminal-notice ownership: the Codex
+and Antigravity native hosts submit their notice once when they see the lease end;
+controller-session methods deliver theirs through stdout. The shared loop owns
+inbox reads, batching, delivery reservations, retry budgets and exit behavior;
+delivery methods do not acknowledge messages or renew leases. Process supervision
+stays with the existing owner for each provider, as described below.
 
 This page is the operator and mechanism side. The executor's side of each host
 is its host guide under `meiva_builtins/skills/platform/impersonator-guide/reference/`

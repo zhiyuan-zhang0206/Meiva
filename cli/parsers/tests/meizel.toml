@@ -2,8 +2,4 @@
 "test_parser_contract.py" = ["child_public_queries.py"]
 
 [debt.first-party-patch]
-"test_walg_cmd.py#monkeypatch.setattr cli.commands.data_plane.walg.restored_instance" = 2
-"test_walg_cmd.py#monkeypatch.setattr services.backup.walg.probe.admin_connection" = 3
-
-[debt.stdlib-patch]
-"test_parser_contract.py#monkeypatch.setattr sys.argv" = 1
+"test_walg_cmd.py#monkeypatch.setattr services.backup.walg.probe.admin_connection" = 1

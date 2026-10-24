@@ -5,8 +5,5 @@
 "test_start_migrations.py" = ["owned_postgres.py"]
 "test_remote_data_plane.py" = ["owned_postgres.py"]
 
-[debt.first-party-patch]
-"test_start_data_plane.py#monkeypatch.setattr cli.commands.data_plane.cluster_instance.ensure_cluster_storage" = 1
-
 [debt.third-party-patch]
 "test_start_migrations.py#monkeypatch.setattr langgraph.checkpoint.postgres.PostgresSaver.MIGRATIONS" = 1

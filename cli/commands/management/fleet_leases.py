@@ -10,6 +10,8 @@ import inspect
 import json
 from typing import Any
 
+import psycopg
+
 _QUERY = (
     "SELECT agent_id, session_id, executor_name, expires_at FROM agent_impersonations "
     "WHERE status='active' ORDER BY expires_at, agent_id"
@@ -21,9 +23,8 @@ _QUERY = (
 # token hashes, the handoff document or the process metadata the log must not carry. The filter is
 # the status the table holds rather than the clock -- a stopped cluster's reaper lags, and a row
 # still marked active is exactly the one a stop would end.
-def active_leases(database: Any) -> list[dict[str, Any]]:
-    with database.connect(autocommit=True) as conn:
-        rows = conn.execute(_QUERY).fetchall()
+def active_leases(conn: psycopg.Connection[Any]) -> list[dict[str, Any]]:
+    rows = conn.execute(_QUERY).fetchall()
     return [
         {
             "agent_id": int(agent_id),
@@ -36,9 +37,9 @@ def active_leases(database: Any) -> list[dict[str, Any]]:
 
 
 # meiva:note
-# This home's own operator handle, the one every `meiva` command reads through: the program needs
-# nothing from the operator's checkout but it.
-def operator_database() -> Any:
+# A connection through this home's own operator handle, the one every `meiva` command reads
+# through: the program needs nothing from the operator's checkout but it.
+def operator_connection() -> psycopg.Connection[Any]:
     from cli.database import open_operator_database, operator_database_factory
     from cli.database.runtime import CommandRuntime
 
@@ -55,7 +56,7 @@ def operator_database() -> Any:
     factory = operator_database_factory(
         local_host=command.machine.host, open_database=open_operator_database
     )
-    return factory()
+    return factory().connect(autocommit=True)
 
 
 # meiva:note
@@ -63,7 +64,8 @@ def operator_database() -> Any:
 # warns and goes on instead of raising.
 def main() -> int:
     try:
-        leases = active_leases(operator_database())
+        with operator_connection() as conn:
+            leases = active_leases(conn)
     except Exception as exc:
         print(f"LEASES failed: {type(exc).__name__}: {exc}")
         return 0

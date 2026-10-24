@@ -36,24 +36,34 @@ def _validated_config_json(value: str) -> str:
 
 
 def _h_agents_ls(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import cmd_agents_ls
 
     return cmd_agents_ls(
-        scope=args.scope, query=args.query, before_id=args.before_id, limit=args.limit
+        gateway_access_from_boot(args.runtime.config),
+        scope=args.scope,
+        query=args.query,
+        before_id=args.before_id,
+        limit=args.limit,
     )
 
 
 def _h_agents_timeline(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.timeline import cmd_agents_timeline
 
-    return cmd_agents_timeline(args.agent_id, args.limit, args.before)
+    return cmd_agents_timeline(
+        gateway_access_from_boot(args.runtime.config), args.agent_id, args.limit, args.before
+    )
 
 
 def h_agents_send(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import ProvenanceError, cmd_agents_send
 
     try:
         return cmd_agents_send(
+            gateway_access_from_boot(args.runtime.config),
             args.agent_id,
             args.content,
             args.source,
@@ -66,42 +76,55 @@ def h_agents_send(args: argparse.Namespace) -> int:
 
 
 def _h_agents_cancel(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import cmd_agents_cancel
 
-    return cmd_agents_cancel(args.agent_id)
+    return cmd_agents_cancel(gateway_access_from_boot(args.runtime.config), args.agent_id)
 
 
 def _h_agents_compact(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import cmd_agents_compact
 
-    return cmd_agents_compact(args.agent_id)
+    return cmd_agents_compact(gateway_access_from_boot(args.runtime.config), args.agent_id)
 
 
 def _h_agents_restart(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import ProvenanceError, cmd_agents_restart
 
     try:
-        return cmd_agents_restart(args.agent_id, args.config, source=args.source)
+        return cmd_agents_restart(
+            gateway_access_from_boot(args.runtime.config),
+            args.agent_id,
+            args.config,
+            source=args.source,
+        )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
         return 2
 
 
 def _h_agents_resurrect(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import ProvenanceError, cmd_agents_resurrect
 
     try:
-        return cmd_agents_resurrect(args.agent_id, source=args.source)
+        return cmd_agents_resurrect(
+            gateway_access_from_boot(args.runtime.config), args.agent_id, source=args.source
+        )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
         return 2
 
 
 def _h_agents_terminate(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import ProvenanceError, cmd_agents_terminate
 
     try:
         return cmd_agents_terminate(
+            gateway_access_from_boot(args.runtime.config),
             args.agent_id,
             source=args.source,
             kill_all_shell_sessions=args.kill_all_shell_sessions,
@@ -112,10 +135,12 @@ def _h_agents_terminate(args: argparse.Namespace) -> int:
 
 
 def h_agents_kill(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import ProvenanceError, cmd_agents_kill
 
     try:
         return cmd_agents_kill(
+            gateway_access_from_boot(args.runtime.config),
             args.agent_id,
             source=args.source,
             kill_all_shell_sessions=args.kill_all_shell_sessions,
@@ -126,17 +151,24 @@ def h_agents_kill(args: argparse.Namespace) -> int:
 
 
 def _h_notices_list(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.notices import cmd_notices_list
 
     return cmd_notices_list(
-        agent_id=args.agent, priority=args.priority, type_filter=args.type, stale=args.stale
+        gateway_access_from_boot(args.runtime.config),
+        agent_id=args.agent,
+        priority=args.priority,
+        type_filter=args.type,
+        stale=args.stale,
     )
 
 
 def _h_notices_resolve(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.notices import cmd_notices_resolve
 
     return cmd_notices_resolve(
+        gateway_access_from_boot(args.runtime.config),
         notice_id=args.notice_id,
         agent_id=args.agent,
         action=args.action,
@@ -145,9 +177,16 @@ def _h_notices_resolve(args: argparse.Namespace) -> int:
 
 
 def _h_notices_clear(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.notices import cmd_notices_clear
 
-    return cmd_notices_clear(agent_id=args.agent, force=args.force, stale=args.stale)
+    return cmd_notices_clear(
+        gateway_access_from_boot(args.runtime.config),
+        agent_id=args.agent,
+        force=args.force,
+        stale=args.stale,
+        stdin=args.runtime.terminal.stdin,
+    )
 
 
 def _h_notices_audit(args: argparse.Namespace) -> int:

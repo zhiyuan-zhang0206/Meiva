@@ -1,52 +1,85 @@
-"""Push a durable inbox through the bound relay, without ACK or lease renewal.
-
-Each message uses the delivery budget and ACK window snapshotted on its lease.
-Reservations survive relay restarts. Exhaustion pauses that message's automatic
-push; its durable body remains readable and late receipt ACKs remain valid.
-Executor authority keeps its original TTL.
-"""
+# meiva:note
+# Push a durable inbox through the bound relay, without ACK or lease renewal.
+#
+# Each message uses the delivery budget and ACK window snapshotted on its lease. Reservations
+# survive relay restarts. Exhaustion pauses that message's automatic push; its durable body
+# remains readable and late receipt ACKs remain valid. Executor authority keeps its original
+# TTL.
+#
+# This module is the shell: it reads the inbox, reserves the delivery in the database,
+# delivers into the host and listens for wakes. Every decision between those effects is a
+# function in `relay/`.
+# meiva:link docs/conventions/agents/agent-impersonation-hosts.md
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import contextlib
-import math
-import shlex
 import subprocess
 import sys
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from functools import partial
-from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, TextIO, assert_never
 from uuid import UUID
 
 from pydantic import BaseModel
 
-import base.events.live.redis_listener
 from base.agents.context.clients import DatabaseFactory
-from base.agents.impersonation import RELAY_HEARTBEAT_SECONDS
+from base.agents.impersonation import (
+    RELAY_HEARTBEAT_SECONDS,
+    ImpersonationError,
+    relay_get,
+    relay_heartbeat,
+)
+from base.agents.impersonation import relay_inbox as read_inbox_rows
 from base.agents.impersonation.delivery import reserve_delivery
+from base.agents.impersonation.history import resolve
 from base.agents.impersonation.status import OPEN, ImpersonationStatus
 from base.agents.impersonation.terminal_notices import notice_text
 from base.cluster.machine import MachineIdentity
-from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.log import logger
+from base.events.live.redis_listener import RedisInboundListener
+from cli.commands.agents.cleanup_after import run_then_clean_up
+from cli.commands.agents.impersonation_adapters import (
+    RelayAdapter,
+    bind_adapter,
+    deliver,
+    notifies_terminal,
+)
+from cli.commands.agents.relay.destination import plan_destination
+from cli.commands.agents.relay.inbox import (
+    DeliveryBudget,
+    EndedLease,
+    EndVerdict,
+    InboxMessage,
+    InboxSnapshot,
+    LeaseRef,
+    end_verdict,
+    routine_ids,
+    terminal_record,
+)
+from cli.commands.agents.relay.steps import (
+    PUSH_MAX_CHARS,
+    ClockReading,
+    Deliver,
+    RelayState,
+    RelayTuning,
+    SendStart,
+    WaitForWake,
+    batch_closed,
+    emitted,
+    next_step,
+    plan_reservation,
+    reserved_push,
+)
 
-from .impersonation_adapters import RelayAdapter, resolve_adapter
 
-_CATCHUP_SECONDS = 30.0
-MIN_EMIT_INTERVAL_SECONDS = 2.0
-# Bound each message in the host context; full bodies remain in the durable
-# inbox. The same cap also respects Claude Monitor's per-line budget.
-PUSH_MAX_CHARS = 2000
-_TERMINAL = frozenset(ImpersonationStatus) - frozenset(OPEN)
-
-
+# meiva:note
+# The lease as the relay's credential reads it. A status the shared enum does not know fails
+# here, at the wire, rather than being treated as one it does.
 class Lease(BaseModel):
     id: UUID
     agent_id: int
@@ -57,171 +90,35 @@ class Lease(BaseModel):
     relay_batch_window_seconds: int = 0
     start_message: str = ""
     rejection_reason: str | None = None
-    terminal_notice_snapshot: dict[str, Any] | None = None
+    terminal_notice_snapshot: EndedLease | None = None
+
+    def budget(self) -> DeliveryBudget:
+        return DeliveryBudget(self.ack_window_seconds, self.max_delivery_attempts)
 
 
+# meiva:note
+# The lease one relay serves and the credential it serves it with: the agent, the lease's
+# private id (database reads and reservations), the session number the ACK command names, the
+# scoped relay token, and the machine the lease must be placed on.
 @dataclass(frozen=True)
-class InboxMessage:
-    """One durable inbox row crossing the host wake boundary with its body."""
+class RelayLease:
+    agent_id: int
+    lease_id: UUID
+    session_id: int
+    token: str
+    machine: str
 
-    id: int
-    kind: str
-    source: str
-    content: str
-    delivery_attempts: int = 0
-    delivery_due: bool = True
-
-
-@dataclass(frozen=True)
-class InboxSnapshot:
-    """Pending rows plus the lease facts the delivery loop needs.
-
-    ``messages`` carries each row's full body keyed by id — the push envelope
-    is built from it, so the host never has to read the inbox itself.
-    ``routine_ids`` is the subset of ``message_ids`` that the merge window may
-    coalesce (not a user chat, not a cancel, not a reminder); anything outside
-    it pushes immediately. ``batch_window`` is the lease's configured merge
-    window in seconds; 0 keeps the pre-window behaviour. ``start_message`` is
-    the native agent's briefing; empty only for leases accepted before
-    the push protocol shipped.
-    """
-
-    message_ids: frozenset[int]
-    messages: dict[int, InboxMessage]
-    expires_at: datetime
-    status: ImpersonationStatus = ImpersonationStatus.ACTIVE
-    routine_ids: frozenset[int] = frozenset()
-    batch_window: float = 0.0
-    start_message: str = ""
-    end_reason: str | None = None
-    ack_window_seconds: int = 180
-    max_delivery_attempts: int = 2
-    terminal_notice_snapshot: dict[str, Any] | None = None
-
-    @property
-    def active(self) -> bool:
-        return self.status == ImpersonationStatus.ACTIVE
+    def ref(self) -> LeaseRef:
+        return LeaseRef(self.agent_id, self.session_id)
 
 
-class WakeListener(Protocol):
-    async def ensure_listening(self) -> None: ...
-
-    async def wait_one(self, timeout: float) -> None: ...
-
-    async def stop(self) -> tuple[str, ...]: ...
+def _lease(db: Database, bus: EventBus, lease_id: UUID, token: str, machine: str) -> Lease:
+    return Lease.model_validate(relay_get(db, bus, str(lease_id), token, local_machine=machine))
 
 
-def ack_command(lease_id: int | UUID, ids: Sequence[int], agent_id: int | None = None) -> str:
-    """The exact ACK command for one pushed batch, as a bare `meiva`: the host's
-    `~/.local/bin/meiva`, linked to the production CLI."""
-    return shlex.join(
-        [
-            "meiva",
-            "impersonate",
-            "ack",
-            str(lease_id),
-            *map(str, ids),
-            *(["--agent", str(agent_id)] if isinstance(lease_id, int) else []),
-        ]
-    )
-
-
-def message_push(
-    agent_id: int,
-    lease_id: int | UUID,
-    messages: Sequence[InboxMessage],
-    *,
-    ack_window_seconds: int,
-    max_delivery_attempts: int,
-    redelivery: bool = False,
-    max_chars: int | None = None,
-) -> str:
-    """One self-contained envelope covering one batch of durable inbox rows.
-
-    Carries the full content, the batch's message ids and the exact ACK
-    command, so the external session processes messages without reading or
-    parsing the inbox. A re-delivery push says so explicitly; the ids make it
-    idempotent for a host that already received the batch. ``max_chars`` bounds
-    each content block to fit Claude Monitor's per-line budget and limit host
-    context; the tail points at the inbox command for the full body, to be read
-    before the ACK.
-    """
-    ids = [message.id for message in messages]
-    header = f"Meiva message agent={agent_id} lease={lease_id} ids={','.join(map(str, ids))}"
-    if redelivery:
-        header += " (re-delivery: unacknowledged)"
-    blocks: list[str] = [header]
-    for message in messages:
-        content = message.content
-        if max_chars is not None and len(content) > max_chars:
-            content = (
-                content[:max_chars]
-                + " (truncated — run the inbox command to read the full body before acknowledging)"
-            )
-        blocks.append(f"[id={message.id}] kind={message.kind} from={message.source}")
-        blocks.append(f"Delivery attempt {message.delivery_attempts + 1}/{max_delivery_attempts}")
-        blocks.append(content)
-        blocks.append("")
-    blocks.append(f"ACK after receiving this message: {ack_command(lease_id, ids, agent_id)}")
-    blocks.append(
-        f"ACK within {ack_window_seconds}s. "
-        + (
-            "This batch includes a final delivery; a missed ACK window pauses automatic delivery of those messages."
-            if any(m.delivery_attempts + 1 >= max_delivery_attempts for m in messages)
-            else f"At most {max_delivery_attempts} total attempts per message; "
-            "a missed final ACK window pauses automatic delivery; inbox reads and ACK remain valid."
-        )
-    )
-    return "\n".join(blocks)
-
-
-def activation_hint(
-    agent_id: int, lease_id: int | UUID, *, ack_window_seconds: int, max_delivery_attempts: int
-) -> str:
-    """Fallback start message for a lease accepted without one.
-
-    New accepts require a nonempty start message, so this only serves leases
-    accepted before the push protocol shipped. Updated to the push contract:
-    messages arrive here, acknowledge each batch on receipt, inbox is the
-    fallback read.
-    """
-    prefix = ["meiva", "impersonate"]
-    scope = ["--agent", str(agent_id)] if isinstance(lease_id, int) else []
-    inbox = shlex.join([*prefix, "inbox", str(lease_id), *scope])
-    ack = shlex.join([*prefix, "ack", str(lease_id), *scope])
-    return (
-        f"Meiva control active: agent={agent_id} lease={lease_id}. "
-        "Inbox messages are pushed to this session; acknowledge each batch as soon as it "
-        f"arrives: {ack} ID... Use {inbox} to read missed messages or a truncated "
-        "message's full body — read it before acknowledging. "
-        f"Each message has {max_delivery_attempts} delivery attempts, "
-        f"with {ack_window_seconds}s to ACK each; exhaustion pauses message delivery, not the lease."
-    )
-
-
-def ended(
-    snapshot: InboxSnapshot, agent_id: int, lease_id: int | UUID, emit: Callable[[str], None]
-) -> bool:
-    if snapshot.status not in _TERMINAL:
-        return False
-    if snapshot.status == ImpersonationStatus.RELEASED:
-        return True  # The releasing controller already knows; no notice is sent.
-    terminal = snapshot.terminal_notice_snapshot
-    if terminal is None:
-        # Pre-migration/synthetic snapshots have no immutable terminal record.
-        # Keep the supplied lease scope and disclose unavailable historical time.
-        terminal = {
-            "session_id": lease_id,
-            "lease_id": lease_id,
-            "agent_id": agent_id,
-            "status": snapshot.status,
-            "reason": snapshot.end_reason,
-            "ended_at": "unknown (legacy record)",
-        }
-    emit(notice_text(terminal))
-    return True
-
-
+# meiva:note
+# One read of the lease through the relay's credential: the lease row, and while it is
+# active the pending inbox rows with their bodies.
 def read_relay_inbox(
     db: Database,
     bus: EventBus,
@@ -231,41 +128,21 @@ def read_relay_inbox(
     *,
     local_machine: str,
 ) -> InboxSnapshot:
-    from base.agents import impersonation
-
-    lease = Lease.model_validate(
-        impersonation.relay_get(db, bus, str(lease_id), token, local_machine=local_machine)
-    )
+    lease = _lease(db, bus, lease_id, token, local_machine)
     if lease.agent_id != agent_id or lease.id != lease_id:
         raise ValueError("The impersonation lease does not belong to the requested agent")
     if lease.status != ImpersonationStatus.ACTIVE:
-        return InboxSnapshot(
-            frozenset(),
-            {},
-            lease.expires_at,
-            lease.status,
-            end_reason=lease.rejection_reason,
-            terminal_notice_snapshot=lease.terminal_notice_snapshot,
-        )
+        return _closed(lease)
     try:
         # relay_inbox validates same-machine active authority in its own transaction.
-        rows = impersonation.relay_inbox(db, str(lease_id), token, local_machine=local_machine)
-    except impersonation.ImpersonationError:
-        latest = Lease.model_validate(
-            impersonation.relay_get(db, bus, str(lease_id), token, local_machine=local_machine)
-        )
-        if latest.status in _TERMINAL:
-            return InboxSnapshot(
-                frozenset(),
-                {},
-                latest.expires_at,
-                latest.status,
-                end_reason=latest.rejection_reason,
-                terminal_notice_snapshot=latest.terminal_notice_snapshot,
-            )
+        rows = read_inbox_rows(db, str(lease_id), token, local_machine=local_machine)
+    except ImpersonationError:
+        latest = _lease(db, bus, lease_id, token, local_machine)
+        if latest.status not in OPEN:
+            return _closed(latest)
         raise
-    messages = {
-        row["id"]: InboxMessage(
+    messages = tuple(
+        InboxMessage(
             id=row["id"],
             kind=row["kind"],
             source=row["source"],
@@ -274,270 +151,178 @@ def read_relay_inbox(
             delivery_due=row["delivery_due"],
         )
         for row in rows
-    }
+    )
     return InboxSnapshot(
-        frozenset(messages),
-        messages,
-        lease.expires_at,
-        ImpersonationStatus.ACTIVE,
-        routine_ids=_routine_ids(rows),
+        messages=messages,
+        expires_at=lease.expires_at,
+        status=ImpersonationStatus.ACTIVE,
+        routine_ids=routine_ids(messages),
         batch_window=float(lease.relay_batch_window_seconds),
         start_message=lease.start_message,
-        ack_window_seconds=lease.ack_window_seconds,
-        max_delivery_attempts=lease.max_delivery_attempts,
+        budget=lease.budget(),
+        end_reason=None,
+        ended=None,
     )
 
 
-def _routine_ids(rows: list[dict[str, Any]]) -> frozenset[int]:
-    """The pending ids the merge window may coalesce.
-
-    User chats, cancels and renewal reminders are never routine: they push
-    immediately. Every other arrival (peer/system notification, watcher wake,
-    schedule trigger, page message) may wait out the configured window.
-    """
-    return frozenset(
-        row["id"]
-        for row in rows
-        if row["kind"] not in ("cancel", "reminder")
-        and not (row["kind"] == "chat" and row["source"] == "user")
+def _closed(lease: Lease) -> InboxSnapshot:
+    return InboxSnapshot.without_inbox(
+        lease.status,
+        lease.expires_at,
+        end_reason=lease.rejection_reason,
+        ended=lease.terminal_notice_snapshot,
+        budget=lease.budget(),
     )
 
 
-def loop_time() -> float:
-    """The running loop's monotonic clock, as a seam for deterministic tests."""
-    return asyncio.get_running_loop().time()
+# meiva:note
+# The lease has ended, and the controller session is told so when the relay owns that notice.
+# A lease without an immutable terminal record (a synthetic or pre-migration one) keeps the
+# supplied lease scope and discloses that its historical time is unavailable.
+def announce_end(snapshot: InboxSnapshot, ref: LeaseRef, adapter: RelayAdapter) -> bool:
+    verdict = end_verdict(snapshot.status, notify_terminal=notifies_terminal(adapter))
+    match verdict:
+        case EndVerdict.CONTINUE:
+            return False
+        case EndVerdict.STOP_SILENT:
+            return True
+        case EndVerdict.STOP_WITH_NOTICE:
+            deliver(adapter, notice_text(terminal_record(snapshot, ref).model_dump()))
+            return True
+    assert_never(verdict)
 
 
-def _seconds_left(snapshot: InboxSnapshot) -> float:
-    if snapshot.expires_at.tzinfo is None:
-        raise ValueError("Lease expiry must include a timezone")
-    return (snapshot.expires_at - datetime.now(UTC)).total_seconds()
+def _clock() -> ClockReading:
+    return ClockReading(monotonic_now=asyncio.get_running_loop().time(), wall_now=datetime.now(UTC))
 
 
-def _window_wait(
-    snapshot: InboxSnapshot,
-    *,
-    new_ids: frozenset[int],
-    routine_deadline: float | None,
-    now: float,
-) -> tuple[float | None, float | None]:
-    """(deadline, remaining) for a routine-only page still inside its merge window.
-
-    Returns (None, None) when the page is not window-eligible — no new ids,
-    any urgent id (user chat, cancel or reminder), or a disabled window (0) —
-    or when the window has already elapsed. ``deadline`` carries an open
-    window forward across polls so a burst keeps one shared deadline.
-    """
-    if not new_ids or new_ids - snapshot.routine_ids or snapshot.batch_window <= 0:
-        return None, None
-    if routine_deadline is None:
-        routine_deadline = now + snapshot.batch_window
-    remaining = routine_deadline - now
-    if remaining <= 0:
-        return None, None
-    return routine_deadline, remaining
-
-
-def _due_ids(snapshot: InboxSnapshot, *, redelivery: bool) -> frozenset[int]:
-    return frozenset(
-        message.id
-        for message in snapshot.messages.values()
-        if message.delivery_due
-        and message.delivery_attempts < snapshot.max_delivery_attempts
-        and (message.delivery_attempts > 0) == redelivery
-    )
-
-
+# meiva:note
+# The state of one relay's delivery loop: the lease it serves and the resources it drives. Its
+# decisions are `relay.steps.next_step` and `plan_reservation`; this class takes the steps.
 class _InboxRelay:
-    """The state of one relay's delivery loop: start notice, batching window, rate limit."""
-
     def __init__(
         self,
-        agent_id: int,
-        lease_id: int | UUID,
+        lease: RelayLease,
         *,
-        read_inbox: Callable[[], Awaitable[InboxSnapshot]],
-        reserve: Callable[[list[int]], Awaitable[frozenset[int]]],
-        listener: WakeListener,
-        emit: Callable[[str], None],
-        debounce: float,
-        catchup_seconds: float,
-        max_chars: int | None,
-        notify_terminal: bool,
+        db: Database,
+        bus: EventBus,
+        listener: RedisInboundListener,
+        adapter: RelayAdapter,
+        tuning: RelayTuning,
     ) -> None:
-        self.agent_id = agent_id
-        self.lease_id = lease_id
-        self.read_inbox = read_inbox
-        self.reserve = reserve
+        self.lease = lease
+        self.db = db
+        self.bus = bus
         self.listener = listener
-        self.emit = emit
-        self.debounce = debounce
-        self.catchup_seconds = catchup_seconds
-        self.max_chars = max_chars
-        self.notify_terminal = notify_terminal
-        self.start_sent = False
-        self.last_emit = float("-inf")
-        self.routine_deadline: float | None = None
-        self.activation_pending: frozenset[int] = frozenset()
+        self.adapter = adapter
+        self.tuning = tuning
+        self.state = RelayState.initial()
 
+    # meiva:note
+    # The current snapshot, or None once the lease ended (the end was announced).
     async def _read(self) -> InboxSnapshot | None:
-        """The current snapshot, or None once the lease ended (the end was emitted)."""
-        snapshot = await self.read_inbox()
-        if snapshot.status in _TERMINAL and not self.notify_terminal:
-            return None  # The native host submits the Codex ended notice once.
-        if ended(snapshot, self.agent_id, self.lease_id, self.emit):
-            return None
-        return snapshot
-
-    async def _wait(self, snapshot: InboxSnapshot, remaining: float | None = None) -> None:
-        bound = min(self.catchup_seconds, _seconds_left(snapshot))
-        if remaining is not None:
-            bound = min(bound, remaining)
-        await self.listener.wait_one(max(0.5, bound))
-
-    def _emit_start(self, snapshot: InboxSnapshot) -> None:
-        self.activation_pending = snapshot.message_ids
-        hint = activation_hint(
-            self.agent_id,
-            self.lease_id,
-            ack_window_seconds=snapshot.ack_window_seconds,
-            max_delivery_attempts=snapshot.max_delivery_attempts,
+        lease = self.lease
+        snapshot = await asyncio.to_thread(
+            read_relay_inbox,
+            self.db,
+            self.bus,
+            lease.agent_id,
+            lease.lease_id,
+            lease.token,
+            local_machine=lease.machine,
         )
-        start_message = snapshot.start_message or hint
-        if snapshot.start_message and isinstance(self.lease_id, int):
-            start_message += "\n\n" + hint
-        self.emit(start_message)
-        self.start_sent = True
-        self.last_emit = loop_time()
+        return None if announce_end(snapshot, lease.ref(), self.adapter) else snapshot
 
-    async def _deliver_due(
-        self, snapshot: InboxSnapshot, due: frozenset[int], *, redelivery: bool
-    ) -> bool:
-        """Merge a burst, reserve and push what is due; True when the lease ended meanwhile."""
-        if not redelivery and not (due & self.activation_pending):
-            self.routine_deadline, remaining = _window_wait(
-                snapshot,
-                new_ids=due,
-                routine_deadline=self.routine_deadline,
-                now=loop_time(),
-            )
-            if remaining is not None:
-                await self._wait(snapshot, remaining)
-                return False
-        # Catch ACK/release during debounce and merge bursts. Claude
-        # Monitor replenishes one event allowance per two seconds.
-        await asyncio.sleep(
-            max(self.debounce, self.last_emit + MIN_EMIT_INTERVAL_SECONDS - loop_time())
-        )
+    # meiva:note
+    # Pace, re-read, reserve and push what is due; True when the lease ended meanwhile.
+    #
+    # Catching an ACK or release during the pause is the point of re-reading: the pause merges
+    # bursts and keeps within Claude Monitor's event allowance.
+    async def _deliver(self, pause: float) -> bool:
+        await asyncio.sleep(pause)
         fresh = await self._read()
         if fresh is None:
             return True
         if not fresh.active:
             return False
-        redelivery = bool(_due_ids(fresh, redelivery=True))
-        due = _due_ids(fresh, redelivery=redelivery)
-        reserved: frozenset[int] = await self.reserve(sorted(due)) if due else frozenset()
-        if reserved:
-            self.emit(
-                message_push(
-                    self.agent_id,
-                    self.lease_id,
-                    [fresh.messages[i] for i in sorted(reserved)],
-                    ack_window_seconds=fresh.ack_window_seconds,
-                    max_delivery_attempts=fresh.max_delivery_attempts,
-                    redelivery=redelivery,
-                    max_chars=self.max_chars,
-                )
+        lease = self.lease
+        plan = plan_reservation(fresh)
+        reserved: frozenset[int] = frozenset()
+        if plan.ids:
+            reserved = await asyncio.to_thread(
+                reserve_delivery,
+                self.db,
+                self.bus,
+                str(lease.lease_id),
+                lease.token,
+                list(plan.ids),
+                local_machine=lease.machine,
             )
-            self.last_emit = loop_time()
-        self.routine_deadline = None
+        if reserved:
+            push = reserved_push(
+                fresh, reserved, redelivery=plan.redelivery, ref=lease.ref(), tuning=self.tuning
+            )
+            deliver(self.adapter, push)
+            self.state = emitted(self.state, at=_clock().monotonic_now)
+        self.state = batch_closed(self.state)
         return False
 
-    async def run(self) -> None:
-        try:
-            if await self._read() is None:
+    async def _loop(self) -> None:
+        if await self._read() is None:
+            return
+        await self.listener.ensure_listening()
+        while True:
+            snapshot = await self._read()
+            if snapshot is None:
                 return
-            await self.listener.ensure_listening()
-            while True:
-                snapshot = await self._read()
-                if snapshot is None:
-                    return
-                if not snapshot.active:
-                    await self._wait(snapshot)
-                    continue
-                if not self.start_sent:
-                    self._emit_start(snapshot)
-                    continue
-                redelivery = bool(_due_ids(snapshot, redelivery=True))
-                due = _due_ids(snapshot, redelivery=redelivery)
-                if due:
-                    if await self._deliver_due(snapshot, due, redelivery=redelivery):
+            step, self.state = next_step(
+                self.state, snapshot, _clock(), self.lease.ref(), self.tuning
+            )
+            match step:
+                case SendStart(text=text):
+                    deliver(self.adapter, text)
+                    self.state = emitted(self.state, at=_clock().monotonic_now)
+                case WaitForWake(timeout=timeout):
+                    await self.listener.wait_one(timeout)
+                case Deliver(pause=pause):
+                    if await self._deliver(pause):
                         return
-                    continue
-                # The database owns expiry; periodic catchup also repairs missed
-                # Redis wakes; final-window exhaustion pauses this message's delivery.
-                await self._wait(snapshot)
-        finally:
-            primary = sys.exception()
-            try:
-                await self.listener.stop()
-            except Exception as cleanup_error:
-                if primary is None:
-                    raise
-                primary.add_note(f"Redis listener stop also failed: {cleanup_error!r}")
-                logger.opt(exception=True).warning(
-                    "Redis listener stop failed during relay failure"
-                )
+                case _:
+                    assert_never(step)
+
+    async def run(self) -> None:
+        await run_then_clean_up(self._loop(), self.listener.stop(), what="Redis listener stop")
 
 
-async def relay_inbox(
-    agent_id: int,
-    lease_id: int | UUID,
+# meiva:note
+# Deliver the session start first, then respect the lease budget per pending row.
+#
+# Database time and durable reservations own the ACK windows and budget; local monotonic
+# time only controls batching and rate limits. Every read records exhaustion across the
+# whole lease, even outside this inbox page. Due retries precede fresh rows so arrivals
+# cannot starve them. Reserve immediately before the host call, rechecking ACK/release races.
+# A failed or ambiguous host submission spends an attempt, never an ACK.
+async def push_inbox(
+    lease: RelayLease,
     *,
-    read_inbox: Callable[[], Awaitable[InboxSnapshot]],
-    reserve: Callable[[list[int]], Awaitable[frozenset[int]]],
-    listener: WakeListener,
-    emit: Callable[[str], None],
-    debounce: float = 0.5,
-    catchup_seconds: float = _CATCHUP_SECONDS,
-    max_chars: int | None = None,
-    notify_terminal: bool = True,
+    db: Database,
+    bus: EventBus,
+    listener: RedisInboundListener,
+    adapter: RelayAdapter,
+    tuning: RelayTuning,
 ) -> None:
-    # meiva:note
-    # Deliver the session start first, then respect the lease budget per pending row.
-    #
-    # Database time and durable reservations own the ACK windows and budget;
-    # local monotonic time only controls batching/rate limits. Every read
-    # records exhaustion across the whole lease, even outside this inbox
-    # page. Due retries precede fresh rows so arrivals cannot starve them.
-    # Reserve immediately before the host call, rechecking ACK/release races.
-    # A failed or ambiguous host submission spends an attempt, never an ACK.
-    if not math.isfinite(debounce) or not 0 <= debounce <= _CATCHUP_SECONDS:
-        raise ValueError(f"debounce must be between 0 and {_CATCHUP_SECONDS:g} seconds")
-    if not math.isfinite(catchup_seconds) or catchup_seconds <= 0:
-        raise ValueError("catchup_seconds must be finite and positive")
     await _InboxRelay(
-        agent_id,
-        lease_id,
-        read_inbox=read_inbox,
-        reserve=reserve,
-        listener=listener,
-        emit=emit,
-        debounce=debounce,
-        catchup_seconds=catchup_seconds,
-        max_chars=max_chars,
-        notify_terminal=notify_terminal,
+        lease, db=db, bus=bus, listener=listener, adapter=adapter, tuning=tuning
     ).run()
 
 
+# meiva:note
+# One durable liveness beat; False means the lease ended or the relay credential was
+# revoked, and the heartbeat loop stops silently.
 def write_heartbeat(db: Database, lease_id: UUID, token: str, *, local_machine: str) -> bool:
-    """One durable liveness beat; False means the lease ended or the relay
-    credential was revoked — the heartbeat loop stops silently."""
-    from base.agents import impersonation
-
     try:
-        impersonation.relay_heartbeat(db, str(lease_id), token, local_machine=local_machine)
-    except impersonation.ImpersonationError:
+        relay_heartbeat(db, str(lease_id), token, local_machine=local_machine)
+    except ImpersonationError:
         return False
     return True
 
@@ -558,10 +343,11 @@ async def heartbeat_loop(
             return
 
 
-async def _heartbeat_completion(
+# meiva:note
+# Retain the original heartbeat failure until the relay stops and joins it.
+async def heartbeat_completion(
     db: Database, lease_id: UUID, token: str, *, local_machine: str
 ) -> Exception | None:
-    """Retain the original heartbeat failure until the relay stops and joins it."""
     try:
         await heartbeat_loop(db, lease_id, token, local_machine=local_machine)
     except Exception as error:
@@ -570,153 +356,118 @@ async def _heartbeat_completion(
 
 
 # meiva:note
-# The Antigravity destination this relay may use. A relay spawned by the accepting
-# runtime is handed the record the request wrote, by path; a hand-started relay
-# falls back to the same lookup (its own host-provided environment, then that
-# record). Neither path guesses at a language_server process, which a standalone
-# `agy` CLI never produces.
-# meiva:link docs/conventions/agents/agent-impersonation-hosts.md
-def antigravity_destination(args: argparse.Namespace) -> Callable[[], object]:
-    from base.agents.impersonation.host_transport import (
-        read_antigravity_endpoint_file,
-        resolve_antigravity_endpoint,
+# Run `main` while `heartbeat` beats beside it, and stop the beat when `main` ends.
+#
+# A heartbeat failure does not cancel `main`: it surfaces after `main` stops, when the
+# heartbeat is joined. Closing the task group without a body exception preserves the CLI's
+# original exception type and exit-code boundary.
+async def run_beside_heartbeat(
+    heartbeat: Coroutine[Any, Any, Exception | None], main: Coroutine[Any, Any, None]
+) -> None:
+    group = asyncio.TaskGroup()
+    await group.__aenter__()
+    beat = group.create_task(heartbeat, name="impersonation-relay-heartbeat")
+    try:
+        await main
+    finally:
+        beat.cancel()
+        try:
+            with contextlib.suppress(asyncio.CancelledError):
+                error = await beat
+                if error is not None:
+                    raise error
+        finally:
+            await group.__aexit__(None, None, None)
+
+
+async def _serve(
+    lease: RelayLease,
+    *,
+    db: Database,
+    bus: EventBus,
+    redis_url: str,
+    adapter: RelayAdapter,
+    tuning: RelayTuning,
+) -> None:
+    if not await asyncio.to_thread(
+        write_heartbeat, db, lease.lease_id, lease.token, local_machine=lease.machine
+    ):
+        # meiva:note
+        # Termination can win between startup's lease read and beat. Terminal metadata is
+        # readable; ordinary inbox authority stays closed.
+        ended = await asyncio.to_thread(
+            read_relay_inbox,
+            db,
+            bus,
+            lease.agent_id,
+            lease.lease_id,
+            lease.token,
+            local_machine=lease.machine,
+        )
+        announce_end(ended, lease.ref(), adapter)
+        return
+    listener = RedisInboundListener(redis_url, lease.agent_id)
+    await run_beside_heartbeat(
+        heartbeat_completion(db, lease.lease_id, lease.token, local_machine=lease.machine),
+        push_inbox(lease, db=db, bus=bus, listener=listener, adapter=adapter, tuning=tuning),
     )
-
-    record = getattr(args, "antigravity_endpoint_file", None)
-    if record:
-        path = Path(record)
-
-        def recorded() -> object:
-            server = read_antigravity_endpoint_file(path)
-            if server is None:
-                raise RuntimeError(
-                    f"the request's Antigravity endpoint record is missing at {path}"
-                )
-            return server
-
-        return recorded
-    return partial(resolve_antigravity_endpoint, args.thread_id)
 
 
 # meiva:note
-# Run a native relay until lease release/expiry, failure, or interruption. The
-# transport destination resolves before any lease authority is used, and the first
-# heartbeat follows it: the accepting runtime reads that beat as proof the host can
-# be pushed into, so an unreachable host must fail startup and roll the acceptance
-# back. The relay never renews the lease; its credential reads, reserves delivery,
-# and beats. ``adapter_factory`` defaults to ``resolve_adapter`` so a test can hand
-# in a transport without patching.
+# What the handler read for one relay: the scoped credential from the channel the operator
+# chose, the Redis address of the invocation's configuration, CODEX_HOME as the shell saw it,
+# and the stdout a controller session reads the relay's pushes from.
+@dataclass(frozen=True)
+class RelayInputs:
+    token: str
+    redis_url: str
+    codex_home: str | None
+    stdout: TextIO
+
+
+# meiva:note
+# Run a native relay until lease release/expiry, failure, or interruption. The transport
+# destination binds before any lease authority is used, and the first heartbeat follows it:
+# the accepting runtime reads that beat as proof the host can be pushed into, so an
+# unreachable host must fail startup and roll the acceptance back. The relay never renews the
+# lease; its credential reads, reserves delivery, and beats. The credential arrives as a
+# value, read by the handler from the channel the operator chose.
 # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
 def cmd_relay(
     args: argparse.Namespace,
     *,
+    inputs: RelayInputs,
     database_factory: DatabaseFactory,
     machine: MachineIdentity,
-    adapter_factory: Callable[..., RelayAdapter] | None = None,
 ) -> int:
-    from . import impersonation
-
+    token = inputs.token
     try:
-        from base.agents.impersonation import relay_get
-        from base.agents.impersonation.history import resolve
-
-        adapter = (adapter_factory or resolve_adapter)(
+        destination = plan_destination(
             args.provider,
             args.thread_id,
             codex_remote=args.codex_remote,
-            discover=antigravity_destination(args),
+            endpoint_record=args.antigravity_endpoint_file,
         )
-        adapter.ready()
-
+        tuning = RelayTuning(debounce=args.debounce, max_chars=PUSH_MAX_CHARS)
+        adapter = bind_adapter(destination, codex_home=inputs.codex_home, stdout=inputs.stdout)
+        local_machine = machine.name()
         db = database_factory()
         bus = EventBus.from_settings()
         if args.lease_id is None:
             lease_id = UUID(
-                str(
-                    resolve(
-                        db,
-                        args.agent_id,
-                        args.session_id,
-                        local_machine=machine.name(),
-                    )["id"]
-                )
+                str(resolve(db, args.agent_id, args.session_id, local_machine=local_machine)["id"])
             )
         else:
             lease_id = UUID(args.lease_id)
-        if args.token_stdin:
-            token = impersonation.relay_token_from_stdin()
-        else:
-            token = impersonation.relay_token_from_env()
-        session_id = relay_get(db, bus, str(lease_id), token, local_machine=machine.name())[
+        session_id = relay_get(db, bus, str(lease_id), token, local_machine=local_machine)[
             "session_id"
         ]
-        max_chars = PUSH_MAX_CHARS
-
-        async def run() -> None:
-            async def read_inbox() -> InboxSnapshot:
-                return await asyncio.to_thread(
-                    read_relay_inbox,
-                    db,
-                    bus,
-                    args.agent_id,
-                    lease_id,
-                    token,
-                    local_machine=machine.name(),
-                )
-
-            async def reserve(ids: list[int]) -> frozenset[int]:
-                return await asyncio.to_thread(
-                    reserve_delivery,
-                    db,
-                    bus,
-                    str(lease_id),
-                    token,
-                    ids,
-                    local_machine=machine.name(),
-                )
-
-            if not await asyncio.to_thread(
-                write_heartbeat, db, lease_id, token, local_machine=machine.name()
-            ):
-                # Termination can win between startup's lease read and beat.
-                # Terminal metadata is readable; ordinary inbox authority stays closed.
-                if adapter.notify_terminal:
-                    ended(await read_inbox(), args.agent_id, session_id, adapter.send)
-                return
-            heartbeat_tasks = asyncio.TaskGroup()
-            await heartbeat_tasks.__aenter__()
-            heartbeat = heartbeat_tasks.create_task(
-                _heartbeat_completion(db, lease_id, token, local_machine=machine.name()),
-                name="impersonation-relay-heartbeat",
+        lease = RelayLease(args.agent_id, lease_id, session_id, token, local_machine)
+        asyncio.run(
+            _serve(
+                lease, db=db, bus=bus, redis_url=inputs.redis_url, adapter=adapter, tuning=tuning
             )
-            try:
-                listener = base.events.live.redis_listener.RedisInboundListener(
-                    settings.data_plane.redis_url, args.agent_id
-                )
-                await relay_inbox(
-                    args.agent_id,
-                    session_id,
-                    read_inbox=read_inbox,
-                    reserve=reserve,
-                    listener=listener,
-                    emit=adapter.send,
-                    debounce=args.debounce,
-                    max_chars=max_chars,
-                    notify_terminal=adapter.notify_terminal,
-                )
-            finally:
-                heartbeat.cancel()
-                try:
-                    with contextlib.suppress(asyncio.CancelledError):
-                        error = await heartbeat
-                        if error is not None:
-                            raise error
-                finally:
-                    # Closing without a body exception preserves the CLI's
-                    # original exception type and exit-code boundary.
-                    await heartbeat_tasks.__aexit__(None, None, None)
-
-        asyncio.run(run())
+        )
     except KeyboardInterrupt:
         print(
             "Relay stopped; pending messages are unchanged and the lease is not renewed.",

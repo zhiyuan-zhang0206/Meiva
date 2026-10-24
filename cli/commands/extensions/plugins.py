@@ -31,12 +31,12 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable
 from pathlib import Path
 
 from base.cluster.machine import MachineIdentity
 from cli.commands.extensions._claude_code_plugin import Materialized
 from cli.commands.extensions._manifest_gate import gate_refuses
+from cli.commands.extensions.plans.source_binding import SourceBinding
 from cli.commands.extensions.skill_package import ExtensionGateway
 
 from ._pkg_source import cleanup_temp, clone_git
@@ -117,7 +117,7 @@ def _skill_name_at(pkg_dir: Path) -> str | None:
     return fields["name"]
 
 
-def _sync_skills_load_dir() -> None:
+def _sync_skills_load_dir(binding: SourceBinding) -> None:
     """Run the skills converge pass so a just-(un)installed plugin's skills
     land in / leave `~/.meiva/skills/` now, keeping the "active on the next
     skill scan, no restart" promise. Idempotent."""
@@ -125,7 +125,7 @@ def _sync_skills_load_dir() -> None:
     from cli.commands._repo import repo_root
     from cli.commands.extensions.skills_sync import converge_skills
 
-    result = converge_skills(repo_root(), meiva_home())
+    result = converge_skills(repo_root(), meiva_home(), binding)
     for warning in result.warnings:
         print(f"  ! skills: {warning}", file=sys.stderr)
 
@@ -215,17 +215,16 @@ def _register_plugin_install(
         raise
 
 
-def _atomic_plugin_replace(dest: Path, materialize: Callable[[], object]) -> None:
-    """Replace the plugin at `dest` with a freshly materialized copy, atomically.
-
-    The previous version is renamed aside, the new one is materialized into a
-    staging dir and renamed into place, and only then is the backup deleted.
-    On any failure the previous version is restored — the plugin on disk is
-    always either the previous complete version or the new complete version,
-    never a half-installed tree (2026-08-28 meiva_ledger incident).
-    """
-    # Sweep residue from earlier hard-killed runs first — at this point every
-    # dot-prefixed sibling is stale (the live backup is created below).
+# meiva:note
+# Replace the plugin at `dest` with a freshly materialized copy of `pkg_dir`, atomically.
+#
+# The previous version is renamed aside, the new one is materialized into a staging dir beside it
+# and renamed into place, and only then is the backup deleted. On any failure the previous version
+# is restored: the plugin on disk is always either the previous complete version or the new
+# complete version, never a half-installed tree (2026-08-28 meiva_ledger incident). Residue of
+# earlier hard-killed runs is swept first, because at that point every dot-prefixed sibling is
+# stale (the live backup is created below).
+def _atomic_plugin_replace(dest: Path, pkg_dir: Path) -> None:
     from . import _claude_code_plugin
 
     _claude_code_plugin.sweep_plugin_residue(dest.parent)
@@ -233,7 +232,7 @@ def _atomic_plugin_replace(dest: Path, materialize: Callable[[], object]) -> Non
     if dest.exists():
         dest.replace(backup)
     try:
-        materialize()
+        _claude_code_plugin.materialize(pkg_dir, dest.parent)
     except BaseException:
         if backup.exists():
             if dest.exists():
@@ -244,7 +243,13 @@ def _atomic_plugin_replace(dest: Path, materialize: Callable[[], object]) -> Non
 
 
 def _install_claude_code_plugin(
-    pkg_dir: Path, url: str, path: str | None, ref: str | None, *, accept_risk: bool
+    pkg_dir: Path,
+    url: str,
+    path: str | None,
+    ref: str | None,
+    *,
+    accept_risk: bool,
+    binding: SourceBinding,
 ) -> int:
     """Scan, materialize and register a Claude Code plugin bundle; prints what it contributes."""
     from base import paths
@@ -269,7 +274,7 @@ def _install_claude_code_plugin(
         accepted=accepted,
         dest=paths.plugins_dir() / result.name,
     )
-    _sync_skills_load_dir()
+    _sync_skills_load_dir(binding)
     _print_plugin_install(result, report)
     return 0
 
@@ -311,6 +316,7 @@ def cmd_plugins_install(
     accept_risk: bool = False,
     gateway: ExtensionGateway,
     machine: MachineIdentity,
+    binding: SourceBinding,
 ) -> int:
     """`meiva plugins install <url> [--path SUBDIR] [--ref REF] [--accept-risk]` —
     install an external package.
@@ -358,7 +364,9 @@ def cmd_plugins_install(
             )
 
         if _claude_code_plugin.is_claude_code_plugin(pkg_dir):
-            return _install_claude_code_plugin(pkg_dir, url, path, ref, accept_risk=accept_risk)
+            return _install_claude_code_plugin(
+                pkg_dir, url, path, ref, accept_risk=accept_risk, binding=binding
+            )
 
         if (pkg_dir / ".mcp.json").is_file():
             print(
@@ -434,14 +442,13 @@ def cmd_plugins_installed() -> int:
     return 0
 
 
-def cmd_plugins_upgrade(name: str) -> int:
+def cmd_plugins_upgrade(name: str, *, binding: SourceBinding) -> int:
     """`meiva plugins upgrade <name>` — re-fetch an installed package
     from its source.
 
     A locally edited copy (content differs from what the last install/upgrade
     wrote) is replaced, and the replacement is reported.
     """
-    from base import paths
     from base.packages.extensions import install_registry
 
     from . import _claude_code_plugin
@@ -481,10 +488,7 @@ def cmd_plugins_upgrade(name: str) -> int:
             return 1
         if pkg.type == "plugin":
             try:
-                _atomic_plugin_replace(
-                    dest,
-                    lambda: _claude_code_plugin.materialize(pkg_dir, paths.plugins_dir()),
-                )
+                _atomic_plugin_replace(dest, pkg_dir)
             except _claude_code_plugin.ClaudeCodePluginError as e:
                 print(f"[meiva plugins upgrade] {e}", file=sys.stderr)
                 return 1
@@ -509,7 +513,7 @@ def cmd_plugins_upgrade(name: str) -> int:
         if pkg.type == "plugin":
             # After the registry write — the converge pass updates this
             # entry's content_hash, which a later register(pkg) would clobber.
-            _sync_skills_load_dir()
+            _sync_skills_load_dir(binding)
         print(f"[meiva plugins upgrade] re-fetched '{name}' from {pkg.source}.")
         print("  active on the next skill scan; no restart needed.")
         return 0
