@@ -51,6 +51,17 @@ ROOT_HEALTH_INTERVAL_S = 60.0
 # so a longer wait only delays the honest failure.
 STOP_KILL_REAP_S = 2.0
 
+# meiva:note
+# The held-control path's own settle retry: the wake that ends a takeover owes one
+# checkpoint write before the agent can idle (#5468). Three attempts over a five-second
+# budget, because a wake already holds the incarnation and single-flight — the retry is
+# synchronous on purpose, so nothing survives the wake to race the next dispatch. The
+# budget stays under both bounds: NO_PROGRESS_TIMEOUT_S (360 s) never sees a stalled
+# wake, and CORPSE_REAP_GRACE_S (900 s) leaves the heartbeat its grace window before the
+# reaper takes the row.
+HANDOFF_SETTLE_RETRY_INTERVAL_S = 0.5
+HANDOFF_SETTLE_RETRY_BUDGET_S = 5.0
+
 # How long a crash-marked idling row may sit dead before the agent_host beat's
 # meiva:note
 # corpse reaper stamps it terminated ('reaper'). Longer than the claim-park

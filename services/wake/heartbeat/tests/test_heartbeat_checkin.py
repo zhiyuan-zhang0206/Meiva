@@ -25,9 +25,9 @@ from base.lm.catalog import ModelCatalog
 from services.wake.heartbeat.daemon import (
     backoff_deadlines,
     reconcile_checkin_outcomes,
-    select_idle_agents_needing_heartbeat,
     send_heartbeat_checkin,
 )
+from services.wake.heartbeat.selection import select_idle_agents_needing_heartbeat
 from services.wake.heartbeat.tests.heartbeat_support import THRESHOLD_S, make_idle
 from services.wake.heartbeat.tests.heartbeat_support import pool as pool
 
@@ -51,7 +51,18 @@ def event_pipeline(
 
 def _selected(pool: ConnectionPool) -> dict[int, float]:
     """agent_id -> idle_minutes for every agent the daemon would check in on."""
-    return dict(select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, now=time.time()))
+    return {
+        agent_id: idle
+        for agent_id, idle, _reason in select_idle_agents_needing_heartbeat(
+            pool, THRESHOLD_S, now=time.time()
+        )
+    }
+
+
+# meiva:note
+# The selected agent ids only: these assertions read membership, not idle minutes.
+def _selected_ids(rows: list[tuple[int, float, str | None]]) -> set[int]:
+    return {agent_id for agent_id, _idle, _reason in rows}
 
 
 def _mirror_nudged(agent_id: int) -> tuple[str, str, int] | None:
@@ -197,12 +208,12 @@ class TestSendHeartbeatCheckin:
             )
         db_conn.commit()
 
-        assert aid not in dict(
+        assert aid not in _selected_ids(
             select_idle_agents_needing_heartbeat(
                 pool, THRESHOLD_S, heartbeat_interval_s=300.0, now=time.time()
             )
         )
-        assert aid in dict(
+        assert aid in _selected_ids(
             select_idle_agents_needing_heartbeat(
                 pool, THRESHOLD_S, heartbeat_interval_s=15.0, now=time.time()
             )
@@ -273,7 +284,7 @@ class TestConsecutiveFailureBackoff:
             local_machine=machine_identity,
         )
         # Deadline in the future -> excluded; deadline passed -> selected.
-        assert aid not in dict(
+        assert aid not in _selected_ids(
             select_idle_agents_needing_heartbeat(
                 pool,
                 THRESHOLD_S,
@@ -281,7 +292,7 @@ class TestConsecutiveFailureBackoff:
                 now=time.time(),
             )
         )
-        assert aid in dict(
+        assert aid in _selected_ids(
             select_idle_agents_needing_heartbeat(
                 pool, THRESHOLD_S, backoff_until={aid: time.time() - 1}, now=time.time()
             )

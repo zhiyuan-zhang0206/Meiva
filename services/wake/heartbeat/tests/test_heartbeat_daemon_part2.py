@@ -29,11 +29,8 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-from services.wake.heartbeat.daemon import (
-    reconcile_checkin_outcomes,
-    select_idle_agents_needing_heartbeat,
-    sweep_backoff_resets,
-)
+from services.wake.heartbeat.daemon import reconcile_checkin_outcomes, sweep_backoff_resets
+from services.wake.heartbeat.selection import select_idle_agents_needing_heartbeat
 
 # Explicit threshold so the assertions do not ride on the configured default.
 _THRESHOLD_S = 300.0
@@ -121,7 +118,12 @@ def _make_idle(
 
 def _selected(pool: ConnectionPool) -> dict[int, float]:
     """agent_id -> idle_minutes for every agent the daemon would check in on."""
-    return dict(select_idle_agents_needing_heartbeat(pool, _THRESHOLD_S, now=time.time()))
+    return {
+        agent_id: idle
+        for agent_id, idle, _reason in select_idle_agents_needing_heartbeat(
+            pool, _THRESHOLD_S, now=time.time()
+        )
+    }
 
 
 def _mirror_nudged(agent_id: int) -> tuple[str, str, int] | None:

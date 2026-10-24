@@ -30,12 +30,13 @@ from agent.impersonation import (
     active_lease,
     handoff_owed,
     native_status,
-    process_host,
-    settle_checkpoint,
     supervise_relay,
 )
 from agent.impersonation_handoff import flush_checkpoint
-from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
+from agent.ownership.hosted import (
+    admit_hosted_runtime,
+    settle_hosted_runtime,
+)
 from agent.startup import consume_claimed_inbounds
 from agent.state import BaseAgentState
 from agent.turn.runloop import (
@@ -69,6 +70,7 @@ from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 from base.paths import harness_registrations_dir, harness_sessions_dir
 from base.telemetry.tracing import turn_span
+from services.agent_runner.agent_host.held_settle import HeldSettle, settle_owed_handoff
 from services.agent_runner.agent_host.invocation import (
     HandoffSettlement,
     InvocationHooks,
@@ -183,6 +185,16 @@ class AgentHost:
         self.relays = RelaySupervision()
         self.admission = TurnAdmission(policy.max_concurrent_turns)
         self.stats = HostStats()
+        self._held_settle = HeldSettle(
+            graph=graph,
+            db=db,
+            bus=bus,
+            relays=self.relays,
+            pool=self._control_pool,
+            timestamps=handoff_stamping,
+            machine=self._machine,
+            stats=self.stats,
+        )
         self._resource_service = HostedServiceResources()
 
     @property
@@ -390,17 +402,7 @@ class AgentHost:
         # meiva:link docs/conventions/agents/agent-impersonation.md
         ended = await native_status(self._db, self._bus, agent_id, incarnation=incarnation)
         if handoff_owed(ended):
-            await settle_checkpoint(
-                self._graph,
-                self._db,
-                self._bus,
-                agent_id,
-                self.relays,
-                activate_accepted=False,
-                incarnation=incarnation,
-                timestamps=self._handoff_stamping,
-                host=process_host(self._machine),
-            )
+            await settle_owed_handoff(self._held_settle, agent_id, incarnation)
         batch = await claim_inbound_batch(
             self._control_pool,
             agent_id,

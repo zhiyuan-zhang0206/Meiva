@@ -70,7 +70,9 @@ async def test_failed_checkin_is_retried_after_backoff_across_ticks(
     sent_on_ticks: list[int] = []
 
     class RecordingDispatch(heartbeat_daemon.HeartbeatDispatch):
-        def send_checkin(self, agent_id: int, idle_minutes: float) -> None:
+        def send_checkin(
+            self, agent_id: int, idle_minutes: float, reason: str | None = None
+        ) -> None:
             if agent_id == aid:
                 sent_on_ticks.append(timers.tick)
 

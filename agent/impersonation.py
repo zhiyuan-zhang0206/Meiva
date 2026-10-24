@@ -81,6 +81,7 @@ from base.agents.observation.relay_supervision import RelayChild, RelaySupervisi
 from base.agents.observation.relay_supervision import heartbeat_fresh as _heartbeat_fresh
 from base.agents.observation.relay_supervision import terminate_relay as terminate_relay
 from base.db import Database
+from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -273,6 +274,35 @@ async def apply_plugin_deltas(
             await graph.aupdate_state(config, {**delta, "impersonation_applied": receipt})
             await _handoff.flush_graph_checkpoint(graph, agent_id)
         await asyncio.to_thread(mark_plugin_applied, db, session["id"], step.version, incarnation)
+
+
+# meiva:note
+# The marker write the held path owns (#5468). A settle that failed inside the wake stamps
+# the crash marker so a hard kill mid-retry still leaves evidence; a later attempt that
+# writes the receipt must erase that stamp, or the row would look crash-dead forever. The
+# CAS keeps two facts apart: the stamp must belong to THIS wake
+# (`last_turn_fatal_at >= last_admission_at`, and a NULL admission clears nothing — that is
+# the birth fact, not something this wake wrote), so a marker left by an earlier real turn
+# crash survives until a completed turn clears it.
+# meiva:link docs/conventions/agents/agent-impersonation.md
+async def clear_turn_fatal(pool: AsyncConnectionPool, incarnation: RuntimeIncarnation) -> bool:
+    async with async_write_transaction(pool) as conn:
+        cur = await conn.execute(
+            "UPDATE agents_meta SET last_turn_fatal_at = NULL "
+            "WHERE id = %s AND runtime_generation = %s AND runtime_owner = %s "
+            "AND last_turn_fatal_at IS NOT NULL "
+            "AND last_admission_at IS NOT NULL "
+            "AND last_turn_fatal_at >= last_admission_at RETURNING id",
+            (incarnation.agent_id, incarnation.generation, incarnation.owner),
+        )
+        applied = await cur.fetchone() is not None
+    if applied:
+        logger.info(
+            "a stamped crash marker cleared by the wake that stamped it",
+            event="hosted_turn_corpse_marker_cleared",
+            agent_id=incarnation.agent_id,
+        )
+    return applied
 
 
 def handoff_owed(session: dict[str, Any] | None) -> bool:

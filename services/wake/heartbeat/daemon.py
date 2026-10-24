@@ -56,9 +56,10 @@ from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from ops.cluster import rpc as cluster_rpc
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from services.wake.heartbeat import JITTER_SPAN_S, STALE_PENDING_S, completion_digest
+from services.wake.heartbeat import JITTER_SPAN_S, completion_digest
 from services.wake.heartbeat.liveness import LivenessConfig, run_liveness_pass
 from services.wake.heartbeat.loops import dispatch_loop, liveness_loop
+from services.wake.heartbeat.selection import select_idle_agents_needing_heartbeat
 
 _log = logging.getLogger("services.wake.heartbeat.daemon")
 
@@ -150,117 +151,14 @@ _ADVANCE_SLACK_MINUTES = 0.5
 # The claim node wraps it via system_note_message(tag=NoteTag.HEARTBEAT).
 
 
-def select_idle_agents_needing_heartbeat(
-    pool: ConnectionPool,
-    idle_threshold_s: float,
-    *,
-    now: float,
-    heartbeat_interval_s: float | None = None,
-    jitter_span_s: float = 0.0,
-    limit: int | None = None,
-    backoff_until: dict[int, float] | None = None,
-) -> list[tuple[int, float]]:
-    """Cluster-wide idle agents due for a heartbeat check-in, each as
-    `(agent_id, idle_minutes)`, oldest-idle first.
-
-    The idle clock is `last_active_at` — the timestamp of the agent's last
-    completed LLM turn (real work), NOT `status_changed_at`. status_changed_at is
-    bumped by every status flip including ops lifecycle churn (rollout quiesce /
-    respawn / update cycles an agent through idling and back),
-    so keying idle time off it let an ops restart reset the whole fleet's idle
-    timers. last_active_at is written only by a real turn and is untouched by that
-    cycle (an idle agent runs no LLM turn through it), so an ops event never resets
-    an agent's idle timer.
-
-    Native agents must be idling; active impersonators are eligible while either
-    idling or running. During impersonation the clock runs from lease activation,
-    independent of native turns. The next check-in respects the pause window,
-    threshold plus jitter, and the durable last-heartbeat interval. Native no-op
-    backoff does not apply to an external executor whose progress is not observed
-    through native LLM turns. Preparation and unapplied terminal handoffs stay
-    excluded until a consumer can receive the heartbeat.
-
-    `jitter_span_s` de-phases the idle-clock term by a deterministic per-agent
-    offset `id mod jitter_span_s` seconds, spreading a fleet that went idle
-    together across a `jitter_span_s`-wide window so it does not come due (and
-    wake) in one batch. Deterministic on `id`, so it survives across cycles and
-    breaks the self-synchronization the check-in itself would otherwise induce. `0`
-    (the default) disables jitter — the `NULLIF` guards the `mod` against a
-    divide-by-zero and collapses the offset to 0. Jitter affects only the
-    idle-clock term; while the pause floor dominates, there is no jitter. `limit`
-    caps the batch (the hard per-step wake-rate ceiling); with oldest-idle-first
-    ordering the most overdue agents drain first. Both default to the
-    un-jittered, unlimited behaviour so existing timing tests read the raw
-    predicate.
-
-    No machine filter: the inbound-insert trigger wakes the agent wherever it
-    runs.
-
-    An idle agent has no running turn task and needs no live lease to receive
-    a check-in. The host dispatcher starts its next turn from the durable wake.
-    """
-    # Direct callers that inspect the raw idle predicate retain its historic
-    # threshold cadence; the daemon supplies its configured check-in interval.
-    reminder_interval_s = idle_threshold_s if heartbeat_interval_s is None else heartbeat_interval_s
-
-    # EXTRACT returns numeric (Decimal); keep the observed clock compatible
-    # with the float slack used when the next dispatch reconciles this reading.
-    sql = (
-        "SELECT agents_meta.id, (EXTRACT(EPOCH FROM (now() - "
-        "COALESCE(active.activated_at, active.created_at, last_active_at))) / 60.0)::double precision "
-        "AS idle_minutes "
-        "FROM agents_meta LEFT JOIN agent_impersonations active "
-        "ON active.agent_id = agents_meta.id AND active.status = 'active' "
-        "AND active.expires_at > now() "
-        "WHERE (agents_meta.status = 'idling' "
-        "OR (agents_meta.status = 'running' AND active.id IS NOT NULL)) "
-        "AND agents_meta.permanent_reject_streak = 0 "
-        "AND now() >= GREATEST("
-        "  heartbeat_paused_until, "
-        "  COALESCE(active.activated_at, active.created_at, last_active_at) "
-        "  + make_interval(secs => %s + COALESCE(mod(agents_meta.id, NULLIF(%s, 0)::int), 0)), "
-        "  last_heartbeat_at "
-        "  + make_interval(secs => LEAST(%s * power(2.0, "
-        "CASE WHEN active.id IS NOT NULL THEN 0 ELSE heartbeat_backoff_level END), 86400))"
-        ") "
-        "AND NOT EXISTS ("
-        "  SELECT 1 FROM inbound_messages im "
-        "  WHERE im.agent_id = agents_meta.id AND im.status = 'pending' "
-        "    AND im.created_at >= now() - make_interval(secs => %s) "
-        ") "
-        "AND NOT EXISTS ("
-        "  SELECT 1 FROM agent_impersonations lease "
-        "  WHERE lease.agent_id = agents_meta.id "
-        "    AND (lease.status IN ('requested','accepted') "
-        "         OR (lease.status='active' AND lease.expires_at <= now()) "
-        "         OR (lease.status <> 'active' AND (lease.delta_version > lease.applied_version "
-        "             OR lease.handoff_applied_at IS NULL))) "
-        ") "
-        "ORDER BY COALESCE(active.activated_at, active.created_at, last_active_at) ASC"
-    )
-    params: list[object] = [
-        idle_threshold_s,
-        jitter_span_s,
-        reminder_interval_s,
-        STALE_PENDING_S,
-    ]
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(sql, params)
-        rows = cur.fetchall()
-    # Consecutive-failure backoff: skip agents whose absolute backoff deadline
-    # has not arrived — a wedged agent must not be poked on the normal cadence.
-    # The deadline dict is empty in the common case, so the
-    # filter is a fast no-op. The limit is applied AFTER the backoff filter so
-    # backed-off agents never consume the per-step wake-rate slots.
-    if backoff_until:
-        rows = [r for r in rows if now >= backoff_until.get(r[0], 0.0)]
-    if limit is not None:
-        rows = rows[:limit]
-    return rows
-
-
 def send_heartbeat_checkin(
-    pool: ConnectionPool, db: Database, bus: EventBus, agent_id: int, idle_minutes: float
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    agent_id: int,
+    idle_minutes: float,
+    *,
+    reason: str | None = None,
 ) -> None:
     """INSERT one `heartbeat` inbound for `agent_id`, then publish a Redis wake so
     the (idle-by-selection) target picks it up now instead of at its next inbound-
@@ -289,13 +187,20 @@ def send_heartbeat_checkin(
         # time (process clock, one time source for the whole stream), so it can
         # trail the inbound's transaction time by the drain interval (≤0.5s)
         # plus any queue backlog.
+        # meiva:note
+        # A check-in that exists because a held-path settle failed is a different fact
+        # from a routine nudge: it costs a model turn that nothing else would have spent,
+        # so it is counted under its own event with the reason attached (#5468).
+        # meiva:link docs/conventions/agents/agent-impersonation.md
         telemetry.emit(
             "telemetry",
-            "heartbeat_nudged",
+            "impersonation_handoff_checkin" if reason else "heartbeat_nudged",
             level="info",
             agent_id=agent_id,
             source="system",
-            attributes={"idle_minutes": round(idle_minutes)},
+            attributes={"idle_minutes": round(idle_minutes), "reason": reason}
+            if reason
+            else {"idle_minutes": round(idle_minutes)},
         )
     # The inbound is committed on `with` exit (the emit above is enqueued and
     # lands on the emitter's next batch — best-effort, JSONL-mirrored). The wake
@@ -585,8 +490,10 @@ class HeartbeatDispatch:
     def interval_s(self) -> float:
         return min(self._config.heartbeat_interval_s, _DISPATCH_STEP_S)
 
-    def send_checkin(self, agent_id: int, idle_minutes: float) -> None:
-        send_heartbeat_checkin(self._pool, self._db, self._bus, agent_id, idle_minutes)
+    def send_checkin(self, agent_id: int, idle_minutes: float, reason: str | None = None) -> None:
+        send_heartbeat_checkin(
+            self._pool, self._db, self._bus, agent_id, idle_minutes, reason=reason
+        )
 
     def run_round(self) -> None:
         sweep_backoff_resets(self._pool)
@@ -613,9 +520,9 @@ class HeartbeatDispatch:
                 now=now,
             ),
         )
-        for agent_id, idle_minutes in rows:
+        for agent_id, idle_minutes, reason in rows:
             try:
-                self.send_checkin(agent_id, idle_minutes)
+                self.send_checkin(agent_id, idle_minutes, reason)
                 self._pending_checkin[agent_id] = idle_minutes
                 _log.info(
                     "[heartbeat] checked in on idle agent %s (idle %.0f min)",
