@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from base.cluster import session_name
+from base.host.env.agent_env import AGENT_ID_ENV
 from base.host.env.registry import process_environment
 from base.log import logger
 from base.paths import repo_root, workspace_dir
@@ -231,7 +232,7 @@ class ShellSessions:
         # the exec child (ruling 2026-10-04, docs/decisions/agents/context/2026-10-04-meiva-state-and-context.md,
         # source 2). Per-creation, from this session's owner — not the creating process's
         # copied value, which the allowlist drops (a frozen pane's stale id).
-        session_env["MEIVA_AGENT_ID"] = str(self._agent_id)
+        session_env[AGENT_ID_ENV] = str(self._agent_id)
         if env_overrides:
             session_env.update(env_overrides)
         ok = backend.new_session(

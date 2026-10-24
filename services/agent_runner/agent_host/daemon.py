@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import cast
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
+from base.host.env.agent_env import AGENT_ID_ENV
 from base.log import logger, prepare_process_logging
 
 # The executable owns inherited SDK posture; importing this module never boots it.
@@ -47,7 +48,7 @@ if __name__ == "__main__":
     prepare_process_logging()
     from base.native_process.child_env import inherited_process_env
 
-    if "MEIVA_AGENT_ID" in inherited_process_env():
+    if AGENT_ID_ENV in inherited_process_env():
         raise RuntimeError("a shared agent host cannot inherit a launched-agent identity")
     from meiva.sdk_surface import process_context as _posture
 
