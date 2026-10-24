@@ -9,7 +9,7 @@ exports = ["birth", "context", "history", "impersonation", "inbox", "incarnation
 "observation" = ["impersonation", "tasks"]
 "sdk" = ["impersonation", "messages"]
 "tasks" = ["inbox", "messages"]
-"tests" = ["birth", "context", "history", "impersonation", "inbox", "messages", "model", "observation", "to_user", "upload_delivery"]
+"tests" = ["birth", "context", "history", "impersonation", "inbox", "lifecycle.py", "messages", "model", "observation", "to_user", "upload_delivery"]
 "upload_delivery" = ["inbox", "messages"]
 
 [purity]

@@ -13,7 +13,6 @@ from pydantic import BaseModel, Field
 from agent.execution.protocol import ResultPayload
 from agent.graph.exec.node import ExecDone, exec_node_impl
 from agent.graph.exec.process import ExecProcess, SubprocessExecProcess
-from agent.graph.exec.tests.event_capture import EventCapture, idle_publisher
 from agent.graph.exec.tests.process_inputs import ReportingExecProcess, ScriptedExecProcess
 from agent.graph.tool_calls import normalize_tool_calls
 from agent.state import AgentState, build_agent_state
@@ -26,6 +25,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
+from base.events.live.tests.live_capture import LiveEvents, idle_publisher
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
@@ -205,7 +205,7 @@ async def test_plugin_reducers_commit_between_calls() -> None:
 
 
 async def test_notes_and_media_follow_all_results_and_stream_ids_match(
-    tmp_path: Path, event_capture: EventCapture
+    tmp_path: Path, live_events: LiveEvents
 ) -> None:
     note = HumanMessage(content="context note")
     chart = tmp_path / "chart.png"
@@ -231,7 +231,7 @@ async def test_notes_and_media_follow_all_results_and_stream_ids_match(
         _messages_state("first()", "second()"),
         _node_runtime(
             AgentSlices.resolve(pins={"llm_model": "claude-sonnet-5"}, default_reader=defaults()),
-            event_capture.publisher,
+            live_events.publisher,
         ),
         {"configurable": {"thread_id": "7"}},
         process=process,
@@ -245,7 +245,7 @@ async def test_notes_and_media_follow_all_results_and_stream_ids_match(
     assert isinstance(media, HumanMessage) and len(messages) == 4
     assert read_meiva_kwargs(media).get("meiva_msg_type") == "attach"
     assert "the chart" in json.dumps(media.content)
-    events = await event_capture.events()
+    events = await live_events.events()
     assert [event["item_id"] for event in events] == ["1.0", "1.0", "2.0", "2.0"]
 
 

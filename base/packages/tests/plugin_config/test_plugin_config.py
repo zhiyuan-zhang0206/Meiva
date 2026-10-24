@@ -21,12 +21,12 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_config_images import PluginConfigOwner, config_image_path
 from base.packages.plugins.config_registration import (
-    apply_config_overlay,
     bind_plugin_config,
     disk_image_path,
     get_plugin_config,
     is_per_agent_field,
     merge_disk_image_schema,
+    plan_config_overlay,
     read_config_image,
     resolve_overlay_targets,
     validate_config_overlay,
@@ -572,7 +572,9 @@ def test_apply_config_overlay_mutates_plugin_config(
         ).marker
         == ".git"
     )
-    isolated_registry.update(apply_config_overlay({"marker": ".hg"}, configs=isolated_registry))
+    isolated_registry.update(
+        plan_config_overlay({"marker": ".hg"}, isolated_registry).plugin_configs
+    )
     assert (
         get_plugin_config(
             "overlay_test",
@@ -611,14 +613,10 @@ def test_apply_config_overlay_framework_scope_only_mutates_settings(
         == ".git"
     )
 
-    isolated_registry.update(
-        apply_config_overlay(
-            {"llm_model": "claude-opus-5", "marker": ".hg"},
-            scope="framework",
-            configs=isolated_registry,
-            set_framework_field=owner.set_field,
-        )
-    )
+    for field, value in plan_config_overlay(
+        {"llm_model": "claude-opus-5", "marker": ".hg"}, isolated_registry
+    ).framework_fields:
+        owner.set_field(field, value)
 
     assert owner.get_field("llm_model") == "claude-opus-5"
     assert other.get_field("llm_model") == "other"
@@ -645,11 +643,9 @@ def test_apply_config_overlay_plugin_scope_only_mutates_plugin_configs(
     original_model = settings.lm.llm_model
 
     isolated_registry.update(
-        apply_config_overlay(
-            {"llm_model": "claude-opus-5", "marker": ".hg"},
-            scope="plugin",
-            configs=isolated_registry,
-        )
+        plan_config_overlay(
+            {"llm_model": "claude-opus-5", "marker": ".hg"}, isolated_registry
+        ).plugin_configs
     )
 
     assert settings.lm.llm_model == original_model  # framework untouched
@@ -734,11 +730,7 @@ def test_framework_overlay_targets_its_explicit_owner() -> None:
     first, second = ConfigBoot(), ConfigBoot()
     first.set_field("llm_model", "first")
     second.set_field("llm_model", "second")
-    apply_config_overlay(
-        {"llm_model": "updated"}, scope="framework", set_framework_field=first.set_field
-    )
+    for field, value in plan_config_overlay({"llm_model": "updated"}).framework_fields:
+        first.set_field(field, value)
     assert first.get_field("llm_model") == "updated"
     assert second.get_field("llm_model") == "second"
-    with pytest.raises(RuntimeError, match="configuration owner's setter"):
-        apply_config_overlay({"llm_model": "refused"}, scope="framework")
-    assert first.get_field("llm_model") == "updated"

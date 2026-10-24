@@ -13,7 +13,6 @@ from agent.graph.exec._result import ExecDone
 from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec.node import exec_node, run_agent_code
 from agent.graph.exec.process import SubprocessExecProcess
-from agent.graph.exec.tests.event_capture import idle_publisher
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
@@ -24,6 +23,7 @@ from base.config.agent_pins import resolve_agent_config_pins
 from base.config.tests.configuration import defaults
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.events.live.tests.live_capture import idle_publisher
 from base.host.env.agent_slices import AgentSlices
 from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 from base.lm.catalog import ModelCatalog

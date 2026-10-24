@@ -5,9 +5,9 @@ import pytest
 
 from agent.graph.exec._crop import CropLimits
 from agent.graph.exec.output import OutputLimits
-from agent.graph.exec.tests.event_capture import event_capture as event_capture
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.tests.config_authority import config_authority as config_authority
+from base.events.live.tests.live_capture import live_events as live_events
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.packages.tests.model_catalog import add_bindings as add_bindings
 from base.packages.tests.model_catalog import add_models as add_models

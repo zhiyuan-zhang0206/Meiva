@@ -34,12 +34,12 @@ from agent.graph.exec.node import (
     exec_node_impl,
 )
 from agent.graph.exec.tests.cancel_fixture import ai_with_code
-from agent.graph.exec.tests.event_capture import EventCapture
 from agent.graph.exec.tests.process_inputs import ProcessCall, ScriptedExecProcess, exec_runtime
 from agent.state import AgentState
 from base.config.tests.configuration import defaults
 from base.db import create_agent
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
 from base.log.tests.log_records import LogRecords
 from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
@@ -119,11 +119,11 @@ def _tool_content(command: Command[ExecGoto]) -> str:
 
 
 async def test_exec_node_cancel_event_returns_cancelled_command(
-    database_gate: ProcessDbGate, event_capture: EventCapture
+    database_gate: ProcessDbGate, live_events: LiveEvents
 ) -> None:
     process = ScriptedExecProcess([(ExecCancelled(output="partial work\n"), None)])
     state = AgentState(messages=[ai_with_code('print("x")')], halted=False)
-    runtime = exec_runtime(event_publisher=event_capture.publisher, database_gate=database_gate)
+    runtime = exec_runtime(event_publisher=live_events.publisher, database_gate=database_gate)
 
     result = await exec_node(state, runtime, _CONFIG, process=process)
 
@@ -133,7 +133,7 @@ async def test_exec_node_cancel_event_returns_cancelled_command(
     assert "[cancelled by user]" in content
     assert "partial work" in content
     assert cast(dict[str, object], result.update)["halted"] is True
-    roles = [event["role"] for event in await event_capture.events()]
+    roles = [event["role"] for event in await live_events.events()]
     assert [role for role in roles if role in {"exec_start", "cancelled", "exec_output"}] == [
         "exec_start",
         "cancelled",
@@ -224,14 +224,14 @@ def test_streaming_textio_take_pending_increments() -> None:
     assert stream.getvalue() == "aaabbbccc"
 
 
-async def test_chunk_publisher_uses_correct_item_id(event_capture: EventCapture) -> None:
-    pub = ExecOutputChunkPublisher(event_capture.publisher, agent_id=42, item_id="7.0")
+async def test_chunk_publisher_uses_correct_item_id(live_events: LiveEvents) -> None:
+    pub = ExecOutputChunkPublisher(live_events.publisher, agent_id=42, item_id="7.0")
 
     pub.publish("hello")
     pub.keepalive()
     pub.publish(" world")
 
-    events = await event_capture.events()
+    events = await live_events.events()
     assert [(event["content"], event["keepalive"]) for event in events] == [
         ("hello", False),
         ("", True),
@@ -241,20 +241,20 @@ async def test_chunk_publisher_uses_correct_item_id(event_capture: EventCapture)
 
 
 async def test_exec_node_compaction_writes_nothing_back(
-    database_gate: ProcessDbGate, event_capture: EventCapture
+    database_gate: ProcessDbGate, live_events: LiveEvents
 ) -> None:
     process = ScriptedExecProcess(
         [(ExecLifecycle(output="user prep work\n", kind=LifecycleKind.SYSTEM_HALT), None)]
     )
     state = AgentState(messages=[ai_with_code('meiva.self.compact("s")')], halted=False)
-    runtime = exec_runtime(event_publisher=event_capture.publisher, database_gate=database_gate)
+    runtime = exec_runtime(event_publisher=live_events.publisher, database_gate=database_gate)
 
     result = await exec_node(state, runtime, _CONFIG, process=process)
 
     update = cast(dict[str, object], result.update)
     assert update["halted"] is True
     assert update["messages"] == []
-    roles = [event["role"] for event in await event_capture.events()]
+    roles = [event["role"] for event in await live_events.events()]
     assert "exec_start" in roles
     assert "exec_output" not in roles
 

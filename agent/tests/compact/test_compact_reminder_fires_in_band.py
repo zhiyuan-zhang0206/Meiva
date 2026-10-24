@@ -16,7 +16,6 @@ from agent.graph.hooks.compact import (
     compose_summary_message,
     generate_summary,
 )
-from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.hooks import Hook
 from agent.messages import inbound_message
 from agent.state import AgentState, CompactState, ContextReset
@@ -44,6 +43,7 @@ from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog

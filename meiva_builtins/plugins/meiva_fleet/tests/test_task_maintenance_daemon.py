@@ -22,11 +22,11 @@ from psycopg_pool import ConnectionPool
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus, EventBusConfig
+from base.events.live.tests.live_capture import snapshots_at_events
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva_builtins.plugins.meiva_fleet.task_maintenance import daemon
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon import run_reminders
-from meiva_builtins.plugins.meiva_fleet.tests.task_registry.live_events import snapshots_at_events
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.notes import TaskNotes, record_notes
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
     inserts_failing,

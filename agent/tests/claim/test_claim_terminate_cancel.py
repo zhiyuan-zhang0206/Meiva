@@ -19,7 +19,6 @@ from agent.graph.claim.tests.claim_support import (
     thread_config,
 )
 from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
-from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import await_status, set_agent_status
 from agent.tests.claim.claim_status_support import running_agent as running_agent
@@ -32,6 +31,7 @@ from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 
