@@ -17,10 +17,6 @@ pytest_plugins = [
     "tests.fixtures.guards",
 ]
 
-def pytest_collection_modifyitems(items):
-    # The door is loaded by collection, as the CLI conftest does; the guard refuses a loaded door.
-    import services.desktop.permissions_helper
-
 @pytest.fixture
 def failed_database(db_url):
     import psycopg
@@ -68,10 +64,11 @@ from pathlib import Path
 import pytest
 
 def test_00_late_host_boundaries():
-    from base.sessions.tests.refuse_helper import refuse_helper
+    from inspect import unwrap
     from services.desktop import permissions_helper
-    with pytest.raises(pytest.fail.Exception, match="native effect forbidden"):
-        permissions_helper.converge(helper=refuse_helper)
+    real = unwrap(permissions_helper.converge)
+    assert permissions_helper.converge is not real
+    assert real.__module__ == permissions_helper.__name__
     with pytest.raises(AssertionError, match="would replace the pytest process"):
         os.execv("/nonexistent-test-executable", [])
 

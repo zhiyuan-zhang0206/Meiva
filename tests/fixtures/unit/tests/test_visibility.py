@@ -71,7 +71,8 @@ def test_guarded_pure_case(request):
     assert {"base.config", "base.db", "base.telemetry", "cli.commands.probe",
                 "services.desktop.permissions_helper"}.isdisjoint(sys.modules)
     assert {"_restore_agent_identity", "_restore_metering",
-            "_guard_process_exec", "_guard_permissions_helper_native_io"} <= set(request.fixturenames)
+            "_guard_process_exec"} <= set(request.fixturenames)
+    assert request.config.pluginmanager.get_plugin("permissions-helper-door-guard") is not None
     assert request.getfixturevalue("sdk_identity") is None
 """
     )

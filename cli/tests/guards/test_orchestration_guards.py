@@ -1,23 +1,23 @@
 # meiva:note
-# The permissions-helper guards `cli/conftest.py` binds for every CLI test hold. The converge
-# door is refused by the root harness's guard, which acts on a door the run has loaded; the
-# conftest loads it by importing the helper owner's native-command guard, so this file pins
-# that both halves meet.
+# The root harness wraps the real converge door without calling it, and the helper's native
+# commands retain the owner's guard that the CLI conftest imports. Refusal/admission behavior
+# uses a pure Python door in tests/fixtures/tests/test_helper_door_guard.py.
 
 from __future__ import annotations
 
+from inspect import unwrap
 from types import ModuleType
 
 import pytest
 
-from base.sessions.tests.refuse_helper import refuse_helper
 from services.desktop import permissions_helper
 from services.desktop.permissions_helper import launchd_job, lifecycle
 
 
-def test_a_cli_test_cannot_converge_the_native_helper() -> None:
-    with pytest.raises(pytest.fail.Exception, match="native effect forbidden"):
-        permissions_helper.converge(helper=refuse_helper)
+def test_a_cli_test_keeps_the_native_helper_door_wrapped() -> None:
+    real = unwrap(permissions_helper.converge)
+    assert permissions_helper.converge is not real
+    assert real.__module__ == permissions_helper.__name__
 
 
 @pytest.mark.parametrize("owner", [lifecycle, launchd_job], ids=lambda owner: owner.__name__)
