@@ -12,7 +12,7 @@ tags:
 # Provider harness
 
 `base/lm/harness/` is what every external agent runtime shares with the host.
-An adapter (Claude Agent SDK, DeepSeek Harness over ACP, Codex app-server, Antigravity CLI) owns the
+An adapter (Claude Agent SDK, DeepSeek Harness over ACP, Codex app-server, Antigravity CLI, Kimi Code over ACP) owns the
 transport and the message mapping; this package owns everything whose meaning
 does not change when the provider does, so a second adapter adds a directory
 instead of a second vocabulary.
@@ -40,7 +40,8 @@ invariants the host relies on:
    explicitly unknown; it is not proof that every descendant exited.
 
 Adapters: [[../claude/docs/claude.meiva.okf.md]],
-[[../deepseek/docs/deepseek.meiva.okf.md]]. Contract, provider differences
+[[../deepseek/docs/deepseek.meiva.okf.md]],
+[[../kimi/docs/kimi.meiva.okf.md]]. Contract, provider differences
 and open questions are recorded in
 [external harness adapters](../../../../docs/decisions/agents/graph/2026-10-19-external-harness.md).
 

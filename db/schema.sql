@@ -125,7 +125,7 @@ CREATE TABLE agents_meta (
     spawned_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
     session_index              BIGINT NOT NULL DEFAULT 0,  -- unified shell+watcher session sequence number, auto-incrementing; meiva.shell.new()/meiva.watcher.launch() atomically take the next via UPDATE ... RETURNING
     machine                    TEXT NOT NULL DEFAULT 'unknown',  -- physical machine identifier, for multi-machine deployment (private network + central Postgres); source = MEIVA_MACHINE_NAME, written on INSERT in the create path (spawn_agent), claim_agent_row only verifies
-    harness                    TEXT NOT NULL DEFAULT 'meiva' CHECK (harness IN ('meiva', 'claude_code', 'codex', 'antigravity')),  -- the agent-loop runtime this agent was BORN on (user ruling, task #5407): 'meiva' = the built-in loop, the others = an external CLI harness (Claude Code / Codex / Antigravity). Written once by the birth INSERT (base/agents/birth/transaction.py via base/agents/birth/harness.py); a BEFORE UPDATE trigger rejects any change, and a fork inherits its source's value — asking for a different harness on a fork is an error, never a silent override. Model and provider are separate concerns and are not derived from it.
+    harness                    TEXT NOT NULL DEFAULT 'meiva' CHECK (harness IN ('meiva', 'claude_code', 'codex', 'antigravity', 'kimi_code')),  -- the agent-loop runtime this agent was BORN on (user ruling, task #5407): 'meiva' = the built-in loop, the others = an external CLI harness (Claude Code / Codex / Antigravity / Kimi Code). Written once by the birth INSERT (base/agents/birth/transaction.py via base/agents/birth/harness.py); a BEFORE UPDATE trigger rejects any change, and a fork inherits its source's value — asking for a different harness on a fork is an error, never a silent override. Model and provider are separate concerns and are not derived from it.
     status_changed_at          TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when the row last entered its current status; maintained by the agents_meta_status_changed_at trigger. Lets the restarter reap unclaimed idling rows older than a grace (unlike spawned_at, this resets on resurrect's terminated -> idling)
     last_active_at             TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when the agent last did REAL work: written = now() by the agent process on every completed LLM turn (agent/graph/llm/node.py). Deliberately NOT touched by ops lifecycle churn (rollout quiesce / restarter respawn / self.update / stop-start) — for an idle agent that whole cycle runs without an LLM turn, so this survives it. The heartbeat daemon's idle clock reads THIS (not status_changed_at, which every status flip incl. ops restarts bumps) so an ops event never resets an agent's idle timer. Backfilled from status_changed_at at add time.
     heartbeat_paused_until     TIMESTAMPTZ,              -- pause window for the gateway heartbeat daemon; set to now()+duration by meiva.self.pause_heartbeat(). While in the future, the daemon skips this agent's idle-nudge. NULL = never paused.
@@ -166,8 +166,8 @@ COMMENT ON COLUMN agents_meta.born_spawner IS
 
 COMMENT ON COLUMN agents_meta.harness IS
     'The agent loop runtime this agent was born on (meiva / claude_code / codex / '
-    'antigravity). Immutable: a trigger rejects any UPDATE that changes it, and a '
-    'fork inherits its source''s value.';
+    'antigravity / kimi_code). Immutable: a trigger rejects any UPDATE that changes '
+    'it, and a fork inherits its source''s value.';
 
 COMMENT ON COLUMN agents_meta.last_permanent_reject_reason IS
     'The reason class of the current consecutive permanent-reject streak '

@@ -31,6 +31,7 @@ from base.lm.harness import (
     handle_digest,
 )
 from base.lm.harness.antigravity import AgySession
+from base.lm.harness.kimi import KimiSession
 from base.lm.harness.wiring import HANDOFF_INSTRUCTION, bridge_for, open_session
 
 
@@ -342,6 +343,30 @@ def test_an_antigravity_session_is_built_with_the_skip_flag_it_was_given() -> No
     )
     assert isinstance(plain, AgySession)
     assert plain.config.skip_permissions is False
+
+
+def test_a_kimi_code_session_is_built_with_the_skip_flag_it_was_given() -> None:
+    session = open_session(
+        Harness.KIMI_CODE,
+        agent_id=1,
+        cwd=Path("/agents/6984"),
+        registry=FileSessionRegistry(Path("/registry")),
+        skip_permissions=True,
+    )
+    assert isinstance(session, KimiSession)
+    assert session.config.skip_permissions is True
+    assert session.config.permission_mode == "allow"
+
+    plain = open_session(
+        Harness.KIMI_CODE,
+        agent_id=1,
+        cwd=Path("/agents/6984"),
+        registry=FileSessionRegistry(Path("/registry")),
+        skip_permissions=False,
+    )
+    assert isinstance(plain, KimiSession)
+    assert plain.config.skip_permissions is False
+    assert plain.config.permission_mode == "ask"
 
 
 def record(harness: str = "meiva") -> SessionRecord:

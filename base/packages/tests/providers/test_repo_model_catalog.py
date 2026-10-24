@@ -210,6 +210,13 @@ def test_kimi_k3_1_pro_family_and_display_successor(*, model_catalog: ModelCatal
     assert model_catalog.models["kimi-k3"].spawnable
 
 
+def test_kimi_models_expose_kimi_code_external_harness(*, model_catalog: ModelCatalog) -> None:
+    from base.api_contracts.agent_contract import Harness
+
+    for model in ("kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"):
+        assert model_catalog.models[model].external_harnesses == frozenset({Harness.KIMI_CODE})
+
+
 def test_docs_state_the_actual_plugin_catalog_size(*, model_catalog: ModelCatalog) -> None:
     # meiva:note
     # The two docs that state the roster size have no other consumer, so they are the check.

@@ -62,6 +62,10 @@ def test_picker_publishes_each_models_harnesses(
         Harness.MEIVA,
         Harness.ANTIGRAVITY,
     ]
+    assert catalog.models["kimi-k3.1-pro"].harnesses == [
+        Harness.MEIVA,
+        Harness.KIMI_CODE,
+    ]
     assert catalog.models["deepseek-flash"].harnesses == [Harness.MEIVA]
     wire = catalog.model_dump(mode="json")
     assert wire["models"]["claude-sonnet-5-5"]["harnesses"] == ["meiva", "claude_code"]

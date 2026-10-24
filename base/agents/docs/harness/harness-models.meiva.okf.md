@@ -18,9 +18,9 @@ publishes the answer per model as `harnesses`, built-in runtime first.
 `meiva` runs every spawnable model — it speaks every provider through the
 configured API keys — so `harnesses_for` implies it instead of asking each spec to
 list it. An empty set is the ordinary case for a vendor with no external CLI;
-today `claude-*` declares `claude_code`, `gpt-*` `codex` and `gemini-*`
-`antigravity`, and `with_fast_variants` carries a Standard model's declaration onto
-the Fast service it derives.
+today `claude-*` declares `claude_code`, `gpt-*` `codex`, `gemini-*`
+`antigravity` and `kimi-*` `kimi_code`, and `with_fast_variants` carries a Standard
+model's declaration onto the Fast service it derives.
 
 `validate_spec` refuses a value outside the `Harness` enum instead of dropping
 it, so a typo in a provider plugin fails the catalog build rather than silently

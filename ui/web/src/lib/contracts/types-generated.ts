@@ -2904,7 +2904,7 @@ export interface components {
         HTTPValidationError: {
             detail?: components["schemas"]["ValidationError"][];
         };
-        Harness: "meiva" | "claude_code" | "codex" | "antigravity";
+        Harness: "meiva" | "claude_code" | "codex" | "antigravity" | "kimi_code";
         HarnessAvailability: {
             harness: components["schemas"]["Harness"];
             status: "available" | "unavailable" | "unknown";

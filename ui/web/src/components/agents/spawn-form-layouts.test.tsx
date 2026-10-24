@@ -150,7 +150,7 @@ const modelsWithTwoLadders = (): ModelsResponse => ({
 });
 
 const harnessAllAvailable = () =>
-  (["meiva", "claude_code", "codex", "antigravity"] as const).map((harness) => ({
+  (["meiva", "claude_code", "codex", "antigravity", "kimi_code"] as const).map((harness) => ({
     harness,
     status: "available" as const,
     reason: "",

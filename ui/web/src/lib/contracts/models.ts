@@ -19,7 +19,13 @@ export type HarnessAvailability = components["schemas"]["HarnessAvailability"];
 
 export type HarnessStatus = HarnessAvailability["status"];
 
-export const HARNESSES: readonly Harness[] = ["meiva", "claude_code", "codex", "antigravity"];
+export const HARNESSES: readonly Harness[] = [
+  "meiva",
+  "claude_code",
+  "codex",
+  "antigravity",
+  "kimi_code",
+];
 
 export const DEFAULT_HARNESS: Harness = "meiva";
 
