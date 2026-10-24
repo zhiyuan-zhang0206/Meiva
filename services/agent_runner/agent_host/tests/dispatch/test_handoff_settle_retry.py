@@ -16,6 +16,7 @@ from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
 
 from agent import state as states
+from agent.impersonation import handoff_landed
 from agent.ownership.corpse_reap import reap_crash_corpses
 from agent.ownership.hosted import stamp_turn_fatal
 from agent.ownership.tests.ownership_support import admit_owner, agent_row
@@ -190,6 +191,10 @@ async def test_the_held_path_settles_the_handoff_after_one_failed_attempt(
         event_bus=event_bus,
         model_catalog=model_catalog,
     )
+    # meiva:note
+    # The wake must be wired to the real read: a test that builds `HeldSettle` itself can pass a
+    # double, and this assertion keeps that from quietly replacing production behaviour here.
+    assert host._held_settle.receipt_landed is handoff_landed
     try:
         await settle_owed_handoff(host._held_settle, agent_id, incarnation)
     finally:

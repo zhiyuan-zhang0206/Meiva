@@ -311,6 +311,13 @@ async def handoff_landed(pool: AsyncConnectionPool, agent_id: int) -> bool:
 # cost of the fact-based rule, stated plainly: a marker left by a genuine turn crash is also
 # cleared once this row's receipt is settled, so that crash is retried on the next input instead
 # of being reaped. The incarnation CAS stays: another runtime's marker is not ours to clear.
+#
+# What this narrows, stated where the next reader will look: after the clear the row's recovery
+# depends on the ordinary heartbeat. A row with `permanent_reject_streak > 0` or a heartbeat
+# paused past now takes no heartbeat at all, so it has no recovery path here — unlike before
+# this change, where the leftover marker still let the reaper take it. The clear logs that
+# combination (`hosted_handoff_marker_cleared_while_ineligible`) so it is visible in the log
+# rather than only in this note.
 # meiva:link docs/conventions/agents/agent-impersonation.md
 async def clear_turn_fatal(pool: AsyncConnectionPool, incarnation: RuntimeIncarnation) -> bool:
     async with async_write_transaction(pool) as conn:
@@ -321,17 +328,28 @@ async def clear_turn_fatal(pool: AsyncConnectionPool, incarnation: RuntimeIncarn
             "AND NOT EXISTS (SELECT 1 FROM agent_impersonations owed "
             "  WHERE owed.agent_id = agents_meta.id "
             "    AND owed.status IN ('released','rejected','expired') "
-            "    AND owed.handoff_applied_at IS NULL) RETURNING id",
+            "    AND owed.handoff_applied_at IS NULL) "
+            "RETURNING permanent_reject_streak, heartbeat_paused_until > now()",
             (incarnation.agent_id, incarnation.generation, incarnation.owner),
         )
-        applied = await cur.fetchone() is not None
-    if applied:
-        logger.info(
-            "a stamped crash marker cleared by the wake that stamped it",
-            event="hosted_turn_corpse_marker_cleared",
+        row = await cur.fetchone()
+    if row is None:
+        return False
+    streak, paused = row
+    logger.info(
+        "a crash marker cleared by the wake that settled the row",
+        event="hosted_turn_corpse_marker_cleared",
+        agent_id=incarnation.agent_id,
+    )
+    if streak > 0 or paused:
+        logger.warning(
+            "cleared a marker on a row the heartbeat will not pick up",
+            event="hosted_handoff_marker_cleared_while_ineligible",
             agent_id=incarnation.agent_id,
+            permanent_reject_streak=streak,
+            heartbeat_paused=bool(paused),
         )
-    return applied
+    return True
 
 
 def handoff_owed(session: dict[str, Any] | None) -> bool:

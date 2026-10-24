@@ -13,6 +13,8 @@ from psycopg_pool import AsyncConnectionPool
 from agent.impersonation import clear_turn_fatal
 from agent.ownership.tests.ownership_support import admit_owner, agent_row
 from base.db.code_version_gate import ProcessDbGate
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
@@ -55,6 +57,7 @@ def _lease(db_conn: psycopg.Connection, agent_id: int, *, receipt: bool) -> None
 # asserts first: an ended lease that still owes its receipt keeps the marker (the wake has not
 # finished that row's work), and a marker written by another runtime is never ours to clear.
 async def test_clear_turn_fatal_requires_that_no_receipt_is_still_owed(
+    loguru_records: LogRecords,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     *,
@@ -82,3 +85,16 @@ async def test_clear_turn_fatal_requires_that_no_receipt_is_still_owed(
     assert await clear_turn_fatal(aops_pool, incarnation)
     assert _marker(db_conn, agent_id) is None
     assert not await clear_turn_fatal(aops_pool, incarnation)
+    assert loguru_records.events("hosted_handoff_marker_cleared_while_ineligible") == []
+
+    # meiva:note
+    # The narrowed case this change introduces: the marker is gone and the heartbeat will not
+    # pick the row up (a permanent reject streak keeps it out of every automatic path). Nothing
+    # is wrong with the clear; the log has to say that this row's only recovery is a manual one.
+    _set_marker(db_conn, agent_id, minutes_ago=5)
+    db_conn.execute("UPDATE agents_meta SET permanent_reject_streak = 3 WHERE id = %s", (agent_id,))
+    db_conn.commit()
+    assert await clear_turn_fatal(aops_pool, incarnation)
+    [event] = loguru_records.events("hosted_handoff_marker_cleared_while_ineligible")
+    assert event["extra"]["permanent_reject_streak"] == 3
+    assert event["extra"]["heartbeat_paused"] is False
