@@ -23,19 +23,16 @@ from base.deploy.git.repo_change import (  # noqa: E402 - direct script entry ne
 )
 from meizel.roles import all_packages, pytest_test_hosts  # noqa: E402 - standalone script
 from scripts.ci.test_impact import (  # noqa: E402 - standalone script
-    Impact,
     base_checkout,
+    blocking_gaps,
     build_impact,
     code_names,
     module_files,
     plugin_modules,
     pyproject_change_is_local,
     python_files,
+    unbounded_tests,
     unknown_diagnostics,
-)
-from scripts.structure.imports.facts import (  # noqa: E402 - standalone script
-    UNANCHORED_READ,
-    Unknown,
 )
 from scripts.structure.placement import ModuleIndex  # noqa: E402 - standalone script
 
@@ -133,6 +130,18 @@ class PathClass(StrEnum):
     GLOBAL = "global"  # applies to every test: full suite
     DELETED = "deleted"  # absent from head: use base facts or explicitly keep FULL
     UNMAPPED = "unmapped"  # no rule owns it: full suite (the tracked tree has none)
+
+
+# meiva:note
+# Declarations and baselines that fixed repository paths or the fixture-scope reader consume, and
+# the classes that name their own readers: a change to one runs its recognized readers only.
+# meiva:link docs/conventions/engineering/test-selection.md
+_DECLARATION_NAMES = frozenset({*_MANIFEST_FILES, "path_scopes.toml", "ambient_roots.toml"})
+_BASELINE_PREFIXES = ("scripts/lint/baseline/", "scripts/structure/baseline/")
+_BASELINE_FILES = frozenset({"scripts/structure/skip_sites.json"})
+_MODELED_CLASSES = frozenset(
+    {PathClass.TREE_SCAN_ONLY, PathClass.FRONTEND, PathClass.MANIFEST, PathClass.DOCUMENTATION}
+)
 
 
 @dataclass(frozen=True)
@@ -552,20 +561,22 @@ def _runtime_candidates(
 ) -> tuple[set[str], int, tuple[str, ...]] | SelectionResult:
     impact = build_impact(checkout.repo_root, checkout.collectable)
     reverse_map = impact.tests_by_input
-    data_changed = any(_is_data_change(path) for path in classes)
+    data_changed = any(_is_data_change(path, kind) for path, kind in classes.items())
     diagnostics = list(
-        unknown_diagnostics(_blocking(impact, data_changed=data_changed), tree="head")
+        unknown_diagnostics(blocking_gaps(impact, data_changed=data_changed), tree="head")
     )
-    tainted = _unbounded_tests(impact, data_changed=data_changed)
+    tainted = unbounded_tests(impact, data_changed=data_changed)
     selected = _owner_tests(classes, checkout, reverse_map)
     if base_ref is not None:
         with base_checkout(checkout.repo_root, base_ref) as base_root:
             base = load_checkout(base_root)
             old_impact = build_impact(base_root, base.collectable & checkout.collectable)
             diagnostics.extend(
-                unknown_diagnostics(_blocking(old_impact, data_changed=data_changed), tree="base")
+                unknown_diagnostics(
+                    blocking_gaps(old_impact, data_changed=data_changed), tree="base"
+                )
             )
-            tainted.update(_unbounded_tests(old_impact, data_changed=data_changed))
+            tainted.update(unbounded_tests(old_impact, data_changed=data_changed))
             old_classes = _classify_changed(tuple(classes), base, local)
             old_forced = _forced_full(old_classes, full_estimate)
             if old_forced is not None:
@@ -597,32 +608,20 @@ def _runtime_candidates(
     return selected | tainted, len(reverse_map), tuple(sorted(set(diagnostics)))
 
 
-def _is_data_change(path: str) -> bool:
-    """Whether a changed path is a data file a test could read: anything but Python source,
-    Markdown and the meizel manifests (declarations that no runtime behavior reads).
-
-    Markdown is prose. The tests known to read skill and OKF documents are pinned by
-    ``_doc_readers``, and the Trunk queue runs the full suite before anything reaches main."""
-    return not path.endswith((".py", ".md")) and Path(path).name not in _MANIFEST_FILES
-
-
-def _blocking(impact: Impact, *, data_changed: bool) -> tuple[Unknown, ...]:
-    """The gaps that keep a test from being certified for this change.
-
-    A load the analysis cannot resolve can run any code, so it always blocks. A read whose path
-    cannot be anchored can only matter to a data file (Python sources reach tests through the
-    import graph, and the tests that read source text are the pinned tree-scan family), so it
-    blocks only when the change includes one."""
-    return tuple(item for item in impact.unknown if data_changed or item.reason != UNANCHORED_READ)
-
-
-def _unbounded_tests(impact: Impact, *, data_changed: bool) -> set[str]:
-    """Tests whose runtime graph reaches an input the analysis could not bound."""
-    return {
-        test
-        for item in _blocking(impact, data_changed=data_changed)
-        for test in impact.tests_by_input.get(item.path, ())
-    }
+# meiva:note
+# Whether a changed path is a data file whose readers the analysis may have missed: not Python,
+# Markdown (prose; the skill and OKF readers are pinned), a declaration or baseline, or a path in
+# a class that names its readers. The merge queue runs the full suite.
+# meiva:link docs/conventions/engineering/test-selection.md
+def _is_data_change(path: str, kind: PathClass) -> bool:
+    modeled = (
+        path.endswith((".py", ".md"))
+        or Path(path).name in _DECLARATION_NAMES
+        or path.startswith(_BASELINE_PREFIXES)
+        or path in _BASELINE_FILES
+        or kind in _MODELED_CLASSES
+    )
+    return not modeled
 
 
 def _forced_full(classes: dict[str, PathClass], full_estimate: float) -> SelectionResult | None:
