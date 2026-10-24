@@ -15,7 +15,12 @@ from typing import Any
 import pytest
 
 from gateway.inspect import _metrics_health as imh
-from gateway.inspect._coverage import CoverageNote, coverage_notes, window_is_historical
+from gateway.inspect._coverage import (
+    CoverageFacts,
+    CoverageNote,
+    coverage_notes,
+    window_is_historical,
+)
 from gateway.inspect.schemas import InspectMetricsMetadata, MetricEvidence
 
 T0 = datetime(2026, 9, 17, 10, 0, tzinfo=UTC)
@@ -57,6 +62,25 @@ def _md(
     )
 
 
+def _facts(
+    *,
+    cost: MetricEvidence | None = None,
+    turns: MetricEvidence | None = None,
+    activity: MetricEvidence | None = None,
+    lifecycle: MetricEvidence | None = None,
+    window_start: datetime | None = T0,
+) -> CoverageFacts:
+    return imh.coverage_facts(
+        _md(
+            cost=cost,
+            turns=turns,
+            activity=activity,
+            lifecycle=lifecycle,
+            window_start=window_start,
+        )
+    )
+
+
 def _gap_events(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [r for r in records if r["extra"].get("event") == "inspect_metrics_coverage_gap"]
 
@@ -92,20 +116,20 @@ def test_expected_limit_logs_at_debug_and_emits_no_event(
     ],
 )
 def test_condition_classification(evidence: MetricEvidence, condition: str) -> None:
-    notes = coverage_notes(_md(turns=evidence, window_start=T0), spawned_at=T0)
+    notes = coverage_notes(_facts(turns=evidence, window_start=T0), spawned_at=T0)
     assert [(n.family, n.condition, n.availability) for n in notes] == [
         ("turns", condition, evidence.availability)
     ]
 
 
 def test_a_clean_read_has_no_notes() -> None:
-    assert coverage_notes(_md(window_start=T1), spawned_at=T0) == []
+    assert coverage_notes(_facts(window_start=T1), spawned_at=T0) == []
 
 
 def test_missing_durations_is_unexpected_only_inside_the_collection_era() -> None:
     evidence = _ev("partial", "missing_turn_durations")
-    live = coverage_notes(_md(turns=evidence, window_start=T1), spawned_at=T0)
-    historical = coverage_notes(_md(turns=evidence, window_start=T0), spawned_at=T0)
+    live = coverage_notes(_facts(turns=evidence, window_start=T1), spawned_at=T0)
+    historical = coverage_notes(_facts(turns=evidence, window_start=T0), spawned_at=T0)
     assert live == [CoverageNote("turns", "missing_turn_durations", "partial", unexpected=True)]
     assert historical == [
         CoverageNote("turns", "missing_turn_durations", "partial", unexpected=False)
@@ -113,14 +137,14 @@ def test_missing_durations_is_unexpected_only_inside_the_collection_era() -> Non
 
 
 def test_a_window_is_historical_when_it_reaches_before_the_collection_started() -> None:
-    assert window_is_historical(_md(window_start=T0), spawned_at=T0)
+    assert window_is_historical(_facts(window_start=T0), spawned_at=T0)
     # meiva:note
     # unknown reads quiet
-    assert window_is_historical(_md(window_start=None), spawned_at=T0)
-    assert not window_is_historical(_md(window_start=T1), spawned_at=T0)
+    assert window_is_historical(_facts(window_start=None), spawned_at=T0)
+    assert not window_is_historical(_facts(window_start=T1), spawned_at=T0)
     # meiva:note
     # an agent born inside the collection era never reaches back before it
-    assert not window_is_historical(_md(window_start=T0), spawned_at=T1)
+    assert not window_is_historical(_facts(window_start=T0), spawned_at=T1)
 
 
 def test_unexpected_missing_durations_emits_the_gap_event_on_every_read(
@@ -160,10 +184,7 @@ def test_note_never_raises_into_the_read_path(
     loguru_records: list[dict[str, Any]],
 ) -> None:
     # meiva:note
-    # Metadata that fails the moment it is read.
-    class Broken:
-        def __getattr__(self, name: str) -> object:
-            raise RuntimeError("boom")
-
-    imh.note_inspect_metrics_coverage(42, Broken(), spawned_at=T0)  # pyright: ignore[reportArgumentType]
+    # A metadata value built without its fields: reading any of them fails.
+    broken = InspectMetricsMetadata.model_construct()
+    imh.note_inspect_metrics_coverage(42, broken, spawned_at=T0)
     assert any("note failed" in str(r["message"]) for r in loguru_records)

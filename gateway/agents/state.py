@@ -48,7 +48,7 @@ from gateway.agents.schemas import (
     TraceCheckpointMessagesResponse,
 )
 from gateway.agents.system_note import system_note_blocking as system_note_blocking
-from gateway.http.config import runtime_view
+from gateway.http.config import gateway_config
 from gateway.http.model_catalog import require_model_catalog
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
@@ -381,7 +381,7 @@ def get_agent_messages(
 
     end = msg_count if before is None else min(before, msg_count)
     effective_limit = (
-        limit if limit is not None else runtime_view(request).display.messages_default_limit
+        limit if limit is not None else gateway_config(request).display.messages_default_limit
     )
     start = max(0, end - effective_limit)
     window = messages[start:end]
@@ -506,7 +506,7 @@ def token_usage_response(
         overrides = agent_overrides(config_overlay, row[1] if row else None)
         model: str | None = config_overlay.get("llm_model") if config_overlay else None
         if not model:
-            model = runtime_view(request).lm.llm_model
+            model = gateway_config(request).models.llm_model
         if model:
             budget = resolve_context_budget(model, catalog=catalog, overrides=overrides)
             max_input_tokens = budget.max_context_tokens

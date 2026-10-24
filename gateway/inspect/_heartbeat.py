@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import assert_never
 
 from base.api_contracts.agent_contract import AgentStatus
 
@@ -34,7 +35,7 @@ class HeartbeatCadence:
 @dataclass(frozen=True)
 class HeartbeatState:
     agent_id: int
-    status: str
+    status: AgentStatus
     last_active_at: datetime
     last_heartbeat_at: datetime | None
     paused_until: datetime | None
@@ -72,8 +73,13 @@ class HeartbeatPlan:
 # `last_heartbeat_at` remains the durable cadence floor even when its turn did not produce
 # any LLM work.
 def plan_heartbeat(state: HeartbeatState, cadence: HeartbeatCadence) -> HeartbeatPlan:
-    if state.status != AgentStatus.IDLING:
-        return HeartbeatPlan(next_at=None, paused_until=None, heartbeat_pending=False)
+    match state.status:
+        case AgentStatus.IDLING:
+            pass
+        case AgentStatus.RUNNING | AgentStatus.TERMINATED:
+            return HeartbeatPlan(next_at=None, paused_until=None, heartbeat_pending=False)
+        case _:
+            assert_never(state.status)
     if state.paused_until is not None:
         return HeartbeatPlan(next_at=None, paused_until=state.paused_until, heartbeat_pending=False)
     if state.pending_inbound:

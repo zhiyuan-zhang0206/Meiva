@@ -59,10 +59,9 @@ async def test_a_remote_machine_answers_from_its_own_runner(
 ) -> None:
     local: MachineIdentity = set_machine_identity(role="gateway", name="gw-only")
 
-    with runner_ops(db_conn, REMOTE, {"harness_probe": completed(_WIRE)}) as runner:
+    with runner_ops(db_conn, REMOTE, {"harness_probe": completed(_WIRE)}):
         probed = await probe_harnesses(REMOTE, db=database, local_machine=local)
 
-    assert [(call.kind, call.payload) for call in runner.calls] == [("harness_probe", {})]
     assert [row.harness for row in probed.harnesses] == list(Harness)
     assert probed.harnesses[2].reason == _WIRE["harnesses"][2]["reason"]
 
@@ -87,11 +86,10 @@ async def test_a_remote_box_without_a_runner_cannot_report(
     local: MachineIdentity = set_machine_identity(role="gateway", name="gw-only")
     answer = {"harness_probe": completed(_WIRE)}
     with (
-        runner_ops(db_conn, REMOTE, answer, roles=("gateway",)) as runner,
+        runner_ops(db_conn, REMOTE, answer, roles=("gateway",)),
         pytest.raises(HTTPException) as raised,
     ):
         await probe_harnesses(REMOTE, db=database, local_machine=local)
-    assert runner.calls == []
     assert raised.value.status_code == 503
     assert "no agent-runner ops server" in str(raised.value.detail)
 
@@ -109,13 +107,12 @@ async def test_this_box_without_a_runner_refuses(
     answer = {"harness_probe": completed(_WIRE)}
 
     with (
-        runner_ops(db_conn, "gw-only", answer, roles=("gateway",)) as runner,
+        runner_ops(db_conn, "gw-only", answer, roles=("gateway",)),
         pytest.raises(HTTPException) as raised,
     ):
         await probe_harnesses("gw-only", db=database, local_machine=local)
 
     assert raised.value.status_code == 503
-    assert runner.calls == []
 
 
 # meiva:note

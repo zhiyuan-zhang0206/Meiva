@@ -175,10 +175,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "scans the repository root for entry points that declare the database gate exemption",
     ),
-    "tests/components/gateway/test_okf_graph_contract.py": (
-        "contract",
-        "every .meiva.okf.md bundle of the repository parses identically through the adapter and the legacy parser",
-    ),
     "tests/integration/test_impersonation_audit_root_inventory.py": (
         "contract",
         "scans every production module for audit-construction roots against a classified inventory",
@@ -322,6 +318,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/contracts/test_lint_truncate_isolation.py": (
         "contract",
         "keeps the per-test TRUNCATE list in step with db/schema.sql and migrations/",
+    ),
+    "tests/contracts/test_task_status_wire_contract.py": (
+        "contract",
+        "keeps the TaskStatus enum in step with ui/web/openapi.json and the frontend contract types",
     ),
     "tests/harness/test_os_job_leak_guard.py": (
         "contract",

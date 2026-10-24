@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import subprocess
+import threading
 import uuid
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 
+import psutil
 import psycopg
 import pytest
 from psycopg.types.json import Jsonb
@@ -11,10 +17,16 @@ from base.cluster.machine import MachineIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.deploy.lifecycle import start_serving
+from base.deploy.lifecycle.start_serving import RootBirth
 from base.lm.catalog import ModelCatalog
+from base.native_process.ownership import OwnedProcess
+from base.native_process.root_control.ipc import RequestPayload, ResponsePayload, ok_response
+from base.paths import root_run_dir
 from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.roster.roster_probe import IdentityMismatchLog
 from gateway.cluster.status import RosterEnv
+from services.supervision.meiva_root.server import ControlServer
 
 
 # meiva:note
@@ -156,3 +168,81 @@ def seed_in_progress_task(db_conn: psycopg.Connection, owner: int, title: str) -
         (task_id,) = row
     db_conn.commit()
     return task_id
+
+
+# meiva:note
+# The serving gate, as the home's own state file: a completed start (`serving`) is the root
+# publishing its birth evidence. Without this fixture the unit has not reached `serving`, so the
+# local machine reads `paused` with reason `startup`.
+@pytest.fixture
+def serving_gate(serving_root: RootBirth) -> Generator[None]:
+    assert start_serving.mark_serving(start_serving.begin_start(), runtime=serving_root.runtime)
+    try:
+        yield
+    finally:
+        start_serving.clear_serving()
+
+
+# meiva:note
+# One git command in a temp checkout, with a fixed identity; returns its output.
+def _git(repo: Path, *args: str) -> str:
+    identity = ["-c", "user.name=test", "-c", "user.email=test@example.invalid"]
+    return subprocess.run(  # noqa: S603
+        ["git", *identity, *args], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+# meiva:note
+# A real git checkout at `<home>/source` (where a unit's prod source lives) holding one commit;
+# returns its HEAD sha.
+def prod_source_checkout(home: Path) -> str:
+    source = home / "source"
+    source.mkdir()
+    _git(source, "init", "--initial-branch=main")
+    _git(source, "commit", "--allow-empty", "-m", "prod source")
+    return _git(source, "rev-parse", "HEAD")
+
+
+# meiva:note
+# A root supervisor's control socket under `home`, answering `status` with this process as the
+# root: the exact peer the client verifies, so the unit reads `supervisor_online` true.
+#
+# `home` must be short enough for a unix socket path (`short_tmp`). The server runs on its own
+# event loop in a thread, the way a separate process would serve it.
+@contextmanager
+def root_supervisor_socket(home: Path) -> Generator[None]:
+    owner = OwnedProcess.capture(psutil.Process())
+
+    async def status(request: RequestPayload) -> ResponsePayload:
+        assert request["verb"] == "status"
+        return ok_response(
+            {
+                "root": {
+                    "pid": owner.pid,
+                    "create_time": owner.birth,
+                    "starttime": owner.starttime,
+                },
+                "units": [],
+            }
+        )
+
+    loop = asyncio.new_event_loop()
+    server = ControlServer(root_run_dir(home) / "meiva-root.sock", status)
+    started = threading.Event()
+
+    def serve() -> None:
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(server.start())
+        started.set()
+        loop.run_forever()
+        loop.run_until_complete(server.close())
+
+    thread = threading.Thread(target=serve, name="root-supervisor-socket")
+    thread.start()
+    try:
+        assert started.wait(timeout=5.0), "the control socket did not start"
+        yield
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join()
+        loop.close()

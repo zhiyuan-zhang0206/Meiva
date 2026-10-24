@@ -56,7 +56,7 @@ from gateway.alerts.schemas import (
 from gateway.events.sse import event_stream
 from gateway.events.sse_frames import SseCadence
 from gateway.http.auth.webhook import authenticate_webhook
-from gateway.http.config import runtime_view
+from gateway.http.config import gateway_config
 from ops.alerts import ALERTS_CHANNEL, AlertRow, AlertSeverity, AlertStatus, publish_alert_rows
 
 router = APIRouter()
@@ -114,7 +114,7 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
         lang = display_language(conn)
         alerts = body.flattened()
         shadow = AlertShadowBatch(
-            conn, alerts, lang, native=runtime_view(request).alerts.im_notify_enabled
+            conn, alerts, lang, native=gateway_config(request).alerts.im_notify_enabled
         )
         for alert in shadow.items:
             instance_key, previous = shadow.observe(alert)
@@ -168,7 +168,7 @@ async def get_alerts_stream(request: Request) -> StreamingResponse:
             channel=ALERTS_CHANNEL,
             broadcast=True,
             validator=_alert_frame_validator,
-            poll_s=runtime_view(request).gateway.sse_disconnect_poll_seconds,
+            poll_s=gateway_config(request).sse.disconnect_poll_seconds,
             cadence=SseCadence(),
         ),
         media_type="text/event-stream",
@@ -204,7 +204,7 @@ def list_alerts(
     """
 
     effective_limit = (
-        limit if limit is not None else runtime_view(request).display.alerts_default_limit
+        limit if limit is not None else gateway_config(request).display.alerts_default_limit
     )
     since = datetime.now(UTC) - _WINDOWS[window]
     params: list[Any] = [since]

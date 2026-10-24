@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol, TypedDict
+from typing import TypedDict
 
 from base.api_contracts.status import MachineStatus, PausedReason, SchemaMismatchStatus
 from base.host.resource_sample import ResourceSample
@@ -19,7 +19,7 @@ from gateway.cluster.schemas import ServiceItem
 
 __all__ = [
     "LocalFacts",
-    "ProbedHost",
+    "ProbedFacts",
     "RosterRowSpec",
     "identity_mismatch_status",
     "local_status",
@@ -45,33 +45,24 @@ class RosterRowSpec:
 
 # meiva:note
 # The part of a host's own `status_probe` answer (`ClusterStatus`) a roster row shows.
-class ProbedHost(Protocol):
-    @property
-    def machine_name(self) -> str: ...
-    @property
-    def paused(self) -> bool: ...
-    @property
-    def paused_reason(self) -> PausedReason | None: ...
-    @property
-    def head_sha(self) -> str | None: ...
-    @property
-    def running_sha(self) -> str | None: ...
-    @property
-    def schema_mismatch(self) -> SchemaMismatchStatus | None: ...
-    @property
-    def shell_count(self) -> int: ...
-    @property
-    def agent_host_online(self) -> bool | None: ...
-    @property
-    def supervisor_online(self) -> bool | None: ...
-    @property
-    def agent_count(self) -> int: ...
-    @property
-    def session_count(self) -> int: ...
-    @property
-    def agent_groups(self) -> list[dict[str, object]]: ...
-    @property
-    def resource(self) -> ResourceSample | None: ...
+#
+# The shell copies these fields from the validated answer (`roster_probe.probed_facts`), so the
+# row shaper stays free of the probe's models.
+@dataclass(frozen=True)
+class ProbedFacts:
+    machine_name: str
+    paused: bool
+    paused_reason: PausedReason | None
+    head_sha: str | None
+    running_sha: str | None
+    schema_mismatch: SchemaMismatchStatus | None
+    shell_count: int
+    agent_host_online: bool | None
+    supervisor_online: bool | None
+    agent_count: int
+    session_count: int
+    agent_groups: list[dict[str, object]]
+    resource: ResourceSample | None
 
 
 # meiva:note
@@ -172,7 +163,7 @@ def identity_mismatch_status(row: RosterRowSpec) -> MachineStatus:
 # gateway dial itself and answer under its own name). That is never rendered as
 # the target online: a loud identity-mismatch row instead.
 def reported_status(
-    row: RosterRowSpec, probed: ProbedHost, *, observed_at: datetime | None
+    row: RosterRowSpec, probed: ProbedFacts, *, observed_at: datetime | None
 ) -> MachineStatus:
     if probed.machine_name != row.name:
         return identity_mismatch_status(row)

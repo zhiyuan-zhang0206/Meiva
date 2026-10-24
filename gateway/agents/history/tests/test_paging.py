@@ -1,11 +1,11 @@
 # meiva:note
-# The windowing rules of a timeline page, asserted on plain items (no store, no renderer).
-
-from dataclasses import dataclass
+# The windowing rules of a timeline page, asserted on plain rows (no store, no renderer).
 
 import pytest
 
 from gateway.agents.history.paging import (
+    Row,
+    Selection,
     boundary_read_limit,
     depth_allows,
     initial_window,
@@ -15,26 +15,22 @@ from gateway.agents.history.paging import (
 )
 
 
-@dataclass(frozen=True)
-class Item:
-    item_id: str
-    kind: str = "agent_chat"
-    source: str | None = None
-    impersonation: object | None = None
+def row(item_id: str, kind: str = "agent_chat", *, tagged: bool = False) -> Row:
+    return Row(item_id, kind, tagged_plain=tagged)
 
 
-def ids(items: list[Item]) -> list[str]:
-    return [item.item_id for item in items]
+def picked(rows: list[Row], selection: Selection) -> list[str]:
+    return [rows[i].item_id for i in selection.indices]
 
 
 # meiva:note
 # A prompt, two standing notes and a compact summary, as a segment lays them down.
-def standing_head() -> list[Item]:
+def standing_head() -> list[Row]:
     return [
-        Item("0.0", "system_prompt"),
-        Item("1.0", "system_marker", source="memory"),
-        Item("2.0", "system_marker", source="timezone"),
-        Item("3.0", "inbound_compact_summary"),
+        row("0.0", "system_prompt"),
+        row("1.0", "system_marker", tagged=True),
+        row("2.0", "system_marker", tagged=True),
+        row("3.0", "inbound_compact_summary"),
     ]
 
 
@@ -61,60 +57,66 @@ def test_an_older_segment_needs_a_boundary_and_depth_for_it() -> None:
 
 
 def test_window_before_takes_the_items_just_older_than_the_cursor() -> None:
-    items = [Item(f"{n}.0") for n in range(1, 6)]
-    window, more = window_before(items, "4.0", 2)
-    assert (ids(window), more) == (["2.0", "3.0"], True)
-    assert window_before(items, "4.0", 9) == (items[:3], False)
-    assert window_before(items, "9.9", 2) == ([], False)
+    rows = [row(f"{n}.0") for n in range(1, 6)]
+    window = window_before(rows, "4.0", 2)
+    assert (picked(rows, window), window.has_more) == (["2.0", "3.0"], True)
+    everything = window_before(rows, "4.0", 9)
+    assert (picked(rows, everything), everything.has_more) == (["1.0", "2.0", "3.0"], False)
+    missing = window_before(rows, "9.9", 2)
+    assert (missing.indices, missing.has_more) == ((), False)
 
 
 def test_a_page_in_the_middle_of_a_segment_does_not_cross() -> None:
-    items = [Item(f"{n}.0") for n in range(6)]
-    page = window_or_cross(items, "4.0", 2, older_available=False)
-    assert (ids(page.items), page.has_more, page.crossed) == (["2.0", "3.0"], True, False)
+    rows = [row(f"{n}.0") for n in range(6)]
+    page = window_or_cross(rows, "4.0", 2, older_available=False)
+    assert (picked(rows, page), page.has_more, page.crossed) == (["2.0", "3.0"], True, False)
 
 
 def test_a_cursor_past_only_standing_context_crosses_to_the_older_segment() -> None:
-    items = [*standing_head(), Item("4.0"), Item("5.0")]
-    page = window_or_cross(items, "4.0", 2, older_available=True)
-    assert (ids(page.items), page.has_more, page.crossed) == (
+    rows = [*standing_head(), row("4.0"), row("5.0")]
+    page = window_or_cross(rows, "4.0", 2, older_available=True)
+    assert (picked(rows, page), page.has_more, page.crossed) == (
         ["0.0", "1.0", "2.0", "3.0"],
         True,
         True,
     )
-    last = window_or_cross(items, "4.0", 2, older_available=False)
+    last = window_or_cross(rows, "4.0", 2, older_available=False)
     assert (last.has_more, last.crossed) == (False, True)
 
 
 def test_a_cursor_that_is_not_in_the_segment_yields_nothing() -> None:
-    page = window_or_cross([Item("1.0")], "7.0", 5, older_available=True)
-    assert (page.items, page.has_more, page.crossed) == ([], False, False)
+    page = window_or_cross([row("1.0")], "7.0", 5, older_available=True)
+    assert (page.indices, page.has_more, page.crossed) == ((), False, False)
 
 
 def test_untagged_markers_are_not_standing_notes() -> None:
-    items = [Item("0.0", "system_prompt"), Item("1.0", "system_marker"), Item("2.0")]
-    page = window_or_cross(items, "2.0", 5, older_available=True)
+    rows = [row("0.0", "system_prompt"), row("1.0", "system_marker"), row("2.0")]
+    page = window_or_cross(rows, "2.0", 5, older_available=True)
     assert page.crossed is False
-    assert ids(page.items) == ["0.0", "1.0"]
+    assert picked(rows, page) == ["0.0", "1.0"]
 
 
 def test_the_initial_window_keeps_prompt_notes_and_summaries_ahead_of_the_tail() -> None:
-    items = [*standing_head(), *(Item(f"{n}.0") for n in range(4, 12))]
-    window, more = initial_window(items, (items[-3:], True), 3, historical_segments_available=False)
-    assert ids(window) == ["0.0", "1.0", "2.0", "3.0", "9.0", "10.0", "11.0"]
-    assert more is True
+    rows = [*standing_head(), *(row(f"{n}.0") for n in range(4, 12))]
+    window = initial_window(
+        rows, tail_size=3, tail_has_more=True, limit=3, historical_segments_available=False
+    )
+    assert picked(rows, window) == ["0.0", "1.0", "2.0", "3.0", "9.0", "10.0", "11.0"]
+    assert window.has_more is True
 
 
 def test_the_initial_window_reports_no_more_when_only_standing_context_is_missing() -> None:
-    items = [*standing_head(), Item("4.0"), Item("5.0")]
-    window, more = initial_window(items, (items[-2:], True), 2, historical_segments_available=False)
-    assert ids(window) == ["0.0", "1.0", "2.0", "3.0", "4.0", "5.0"]
-    assert more is False
+    rows = [*standing_head(), row("4.0"), row("5.0")]
+    window = initial_window(
+        rows, tail_size=2, tail_has_more=True, limit=2, historical_segments_available=False
+    )
+    assert picked(rows, window) == ["0.0", "1.0", "2.0", "3.0", "4.0", "5.0"]
+    assert window.has_more is False
 
 
 def test_a_window_holding_the_prompt_attaches_nothing_and_keeps_history_visible() -> None:
-    items = [Item("0.0", "system_prompt"), Item("1.0")]
-    assert initial_window(items, (items, False), 50, historical_segments_available=True) == (
-        items,
-        True,
+    rows = [row("0.0", "system_prompt"), row("1.0")]
+    window = initial_window(
+        rows, tail_size=2, tail_has_more=False, limit=50, historical_segments_available=True
     )
+    assert (picked(rows, window), window.has_more) == (["0.0", "1.0"], True)

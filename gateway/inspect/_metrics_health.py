@@ -27,8 +27,29 @@ from __future__ import annotations
 from datetime import datetime
 
 from base.log import logger
-from gateway.inspect._coverage import coverage_notes
-from gateway.inspect.schemas import InspectMetricsMetadata
+from gateway.inspect._coverage import CoverageFacts, FamilyEvidence, coverage_notes
+from gateway.inspect.schemas import InspectMetricsMetadata, MetricEvidence
+
+
+def _family_evidence(evidence: MetricEvidence) -> FamilyEvidence:
+    return FamilyEvidence(
+        availability=evidence.availability,
+        reason=evidence.reason,
+        retained_unapplied_sources=tuple(evidence.retained_unapplied_sources),
+    )
+
+
+# meiva:note
+# The part of one read's metadata the coverage verdicts read.
+def coverage_facts(metadata: InspectMetricsMetadata) -> CoverageFacts:
+    return CoverageFacts(
+        window_start=metadata.window_start,
+        collection_started_at=metadata.collection_started_at,
+        cost=_family_evidence(metadata.cost),
+        turns=_family_evidence(metadata.turns),
+        activity=_family_evidence(metadata.activity),
+        lifecycle=_family_evidence(metadata.lifecycle),
+    )
 
 
 def note_inspect_metrics_coverage(
@@ -38,7 +59,7 @@ def note_inspect_metrics_coverage(
     ``inspect_metrics_coverage_gap`` WARNING event. Never raises — see the
     module docstring."""
     try:
-        for note in coverage_notes(metadata, spawned_at=spawned_at):
+        for note in coverage_notes(coverage_facts(metadata), spawned_at=spawned_at):
             if note.unexpected:
                 logger.warning(
                     "inspect metrics coverage gap",

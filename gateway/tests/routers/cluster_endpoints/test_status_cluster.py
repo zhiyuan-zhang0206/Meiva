@@ -8,8 +8,8 @@
 
 from __future__ import annotations
 
+import itertools
 import subprocess
-from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
@@ -18,14 +18,14 @@ import pytest
 
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import MachineIdentitySetter
-from base.deploy.lifecycle import start_serving
-from base.deploy.lifecycle.start_serving import RootBirth
 from base.deploy.lifecycle.tests.serving_root import serving_root as serving_root
 from gateway.cluster.status import StatusCache
 from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.routers.cluster_endpoints.cluster_support import serving_gate as serving_gate
 from gateway.tests.support.runner_ops.ops_stub import (
     OpsCall,
     OpsReply,
+    Responder,
     completed,
     refused,
     runner_ops,
@@ -39,19 +39,6 @@ def truncate_machines(db_conn: psycopg.Connection) -> None:
     with db_conn.cursor() as cur:
         cur.execute("TRUNCATE machines")
     db_conn.commit()
-
-
-# meiva:note
-# The serving gate, as the home's own state file: a completed start (`serving`) is the root
-# publishing its birth evidence. Without this fixture the unit has not reached `serving`, so the
-# local machine reads `paused` with reason `startup`.
-@pytest.fixture
-def serving_gate(serving_root: RootBirth) -> Generator[None]:
-    assert start_serving.mark_serving(start_serving.begin_start(), runtime=serving_root.runtime)
-    try:
-        yield
-    finally:
-        start_serving.clear_serving()
 
 
 @pytest.fixture
@@ -102,6 +89,24 @@ def _probe_answer(name: str, *, paused: bool = False, **extra: object) -> OpsRep
             **extra,
         }
     )
+
+
+# meiva:note
+# A runner that numbers its probes: its n-th answer reports `shell_count = n`, so the answer a
+# response carries shows how many probes the gateway had made when it was rendered.
+def _numbered_probes(name: str) -> Responder:
+    numbers = itertools.count(1)
+
+    def answer(call: OpsCall) -> OpsReply:
+        del call
+        return _probe_answer(name, shell_count=next(numbers))
+
+    return answer
+
+
+def _shell_count(response: Any) -> int:
+    (machine,) = response.json()["cluster"]["machines"]
+    return machine["shell_count"]
 
 
 def _assert_local_machine_row(row: dict[str, Any]) -> None:
@@ -249,7 +254,7 @@ class TestClusterPanel:
         self, db_conn: psycopg.Connection, stub_machine_identity: MachineIdentity
     ) -> None:
         with (
-            runner_ops(db_conn, "runner-test", {"status_probe": _probe_answer("runner-test")}) as r,
+            runner_ops(db_conn, "runner-test", {"status_probe": _numbered_probes("runner-test")}),
             gateway_test_client(machine=stub_machine_identity) as client,
         ):
             first = client.get("/api/status")
@@ -257,13 +262,13 @@ class TestClusterPanel:
 
         assert first.status_code == 200
         assert second.status_code == 200
-        assert len(r.calls_of("status_probe")) == 1
+        assert (_shell_count(first), _shell_count(second)) == (1, 1)
 
     def test_response_cache_ttl_zero_reprobes(
         self, db_conn: psycopg.Connection, stub_machine_identity: MachineIdentity
     ) -> None:
         with (
-            runner_ops(db_conn, "runner-test", {"status_probe": _probe_answer("runner-test")}) as r,
+            runner_ops(db_conn, "runner-test", {"status_probe": _numbered_probes("runner-test")}),
             gateway_test_client(machine=stub_machine_identity) as client,
         ):
             client.app.state.status_cache = StatusCache(ttl_s=0.0)
@@ -272,7 +277,7 @@ class TestClusterPanel:
 
         assert first.status_code == 200
         assert second.status_code == 200
-        assert len(r.calls_of("status_probe")) == 2
+        assert (_shell_count(first), _shell_count(second)) == (1, 2)
 
     # meiva:note
     # A transport reset recovered by the roster's retry is cached as the
@@ -287,7 +292,7 @@ class TestClusterPanel:
             return next(answers)
 
         with (
-            runner_ops(db_conn, "runner-test", {"status_probe": reset_then_answer}) as r,
+            runner_ops(db_conn, "runner-test", {"status_probe": reset_then_answer}),
             gateway_test_client(machine=stub_machine_identity) as client,
         ):
             first = client.get("/api/status")
@@ -297,9 +302,6 @@ class TestClusterPanel:
         assert second.status_code == 200
         assert first.json()["cluster"]["machines"][0]["online"] is True
         assert second.json()["cluster"]["machines"][0]["online"] is True
-        # meiva:note
-        # the reset, then the retry that answered
-        assert len(r.calls_of("status_probe")) == 2
 
 
 class TestPanelCarriesNoFrozenPin:

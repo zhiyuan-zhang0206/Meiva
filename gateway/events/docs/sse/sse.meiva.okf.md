@@ -64,7 +64,7 @@ Agent process ──▶ Redis pub/sub (meiva:events)
 ## Pure decisions
 
 - `gateway/events/sse_frames.py` (strict): `SseCadence`, `warm_frame`, `sse_frame`, `sse_batch_frame`, `parse_agent_ids`.
-- `gateway/events/events_plan.py` (strict): how a `GET /api/events` or `GET /api/agents/{id}/events` request becomes a read (`plan_events`, `plan_agent_events`, `page_depth`): validated filters, the stores, the window and the page. The routes execute the plan; their statement timeout is `GatewayConfig.events_read_timeout_ms` and the default page is `display.events_default_limit`, read through `runtime_view(request)`.
+- `gateway/events/events_plan.py` (strict): how a `GET /api/events` or `GET /api/agents/{id}/events` request becomes a read (`plan_events`, `plan_agent_events`, `page_depth`): validated filters, the stores, the window and the page. The routes execute the plan; their statement timeout is `GatewayConfig.events_read_timeout_ms` and the default page is `GatewayConfig.display.events_default_limit`.
 - `merged.plan_sources` / `merged.subscribe_errors`: which Redis channel serves which merged channel, and the error text a failed source gives its channels.
 
 Handlers never replace a stream or a reader on `app.state`: a test serves real Redis and real rows, and reaches a Redis failure with an address nothing listens on (`gateway/tests/events/sse_support.py`).

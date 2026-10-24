@@ -1,4 +1,4 @@
-exports = ["boot.py", "daemon.py", "dispatch_sync.py", "tests"]
+exports = ["boot.py", "daemon.py", "dispatch_sync.py", "in_flight.py", "tests"]
 
 [uses]
 "daemon.py" = ["boot.py", "dispatch_sync.py", "health.py", "in_flight.py", "to_user_resource.py", "to_user_watch.py"]

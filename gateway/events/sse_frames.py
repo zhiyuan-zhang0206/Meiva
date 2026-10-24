@@ -59,19 +59,12 @@ def warm_frame(
 # meiva:note
 # Wrap a data frame per the SSE protocol.
 #
-#     Multi-line payloads must prefix each line with `data:` to be
-#     compliant. Our event JSON is single-line, but we split defensively
-#     and only on "
-# " - never str.splitlines(): that also breaks on
-#     U+0085 / U+2028 / U+2029, which are legal unescaped inside JSON
-#     strings, and the client rejoins data lines with "
-# ", so a split
-#     there plants a raw newline inside the JSON literal and JSON.parse
-#     fails ("Bad control character in string literal"). The trailing
-#     empty line (`
-#
-# `) is the SSE frame separator.
-#
+# Multi-line payloads must prefix each line with `data:` to be compliant. Our event JSON is
+# single-line, but we split defensively and only on "\n" - never str.splitlines(): that also
+# breaks on U+0085 / U+2028 / U+2029, which are legal unescaped inside JSON strings, and the
+# client rejoins data lines with "\n", so a split there plants a raw newline inside the JSON
+# literal and JSON.parse fails ("Bad control character in string literal"). The trailing
+# empty line (`\n\n`) is the SSE frame separator.
 def sse_frame(payload: str) -> bytes:
     lines = payload.split("\n") or [""]
     return ("".join(f"data: {line}\n" for line in lines) + "\n").encode()

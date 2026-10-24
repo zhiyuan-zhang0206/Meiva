@@ -10,7 +10,11 @@ from base.config import settings
 from base.db import create_agent
 from base.host.net.auth import bearer_header
 from gateway.tests.agents.gateway_auth import without_credentials
-from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.auth.gateway_config import (
+    GatewayTestClient,
+    gateway_test_client,
+    reconfigure,
+)
 from gateway.tests.history.test_timeline import CompactHistoryCases
 from gateway.tests.history.test_timeline import test_client as test_client
 from gateway.tests.support.checkpoints.unreadable import put_unreadable_head
@@ -41,7 +45,7 @@ def test_retained_history_can_start_and_page_without_reading_broken_live_head(
     db_conn: psycopg.Connection, test_client: GatewayTestClient
 ) -> None:
     tid = create_agent(db_conn)
-    test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
+    reconfigure(test_client, timeline_compact_history=-1)
     older = _put_boundary(tid, "older", version="1")
     newer = _put_boundary(tid, "newer", version="2")
     # meiva:note
@@ -82,7 +86,7 @@ def test_retained_entry_never_guesses_a_boundary_or_current_cursor(
     status: int,
 ) -> None:
     tid = create_agent(db_conn)
-    test_client.app.state.config_authority.runtime.gateway.timeline_compact_history = -1
+    reconfigure(test_client, timeline_compact_history=-1)
     response = test_client.get(f"/api/agents/{tid}/timeline/retained", params=params)
     assert response.status_code == status
 

@@ -30,7 +30,7 @@ from typing import Any
 
 import redis
 from fastapi import Request
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from redis.exceptions import AuthenticationError, NoPermissionError
 
 from base.events.live.bus import EventBus
@@ -106,49 +106,41 @@ async def close_pubsub(pubsub: Any, client: Any, channels: str | Sequence[str]) 
 
 
 # meiva:note
-# Yield a stream of SSE frames (bytes) until the client disconnects
-#     or Redis goes down.
+# Yield a stream of SSE frames (bytes) until the client disconnects or Redis goes down.
 #
-#     Lifetime defenses:
-#     - `await pubsub.subscribe(...)` runs before the first yield, but
-#       StreamingResponse has already sent HTTP 200 by then. If Redis rejects
-#       the subscription, emit an `error` data frame and close the stream.
-#       The surrounding try/finally still cleans up the pubsub connection.
-#     - The `yield` is inside the try — when a client aborts on the first
-#       frame, `GeneratorExit` is raised; finally must run, otherwise the
-#       Redis pubsub socket leaks and a long run hits maxclients.
-#     - In the `while` loop, when `get_message` / `is_disconnected` raise
-#       (Redis restart / ASGI receive exception): publish a single `error`
-#       event frame to the client and return — the frontend sees a toast
-#       instead of just console noise.
-#     - In finally, each cleanup step is independently suppressed + logged
-#       so one failure does not swallow another.
+# Lifetime defenses:
+# - `await pubsub.subscribe(...)` runs before the first yield, but StreamingResponse has
+#   already sent HTTP 200 by then. If Redis rejects the subscription, emit an `error` data
+#   frame and close the stream. The surrounding try/finally still cleans up the pubsub
+#   connection.
+# - The `yield` is inside the try: when a client aborts on the first frame, `GeneratorExit`
+#   is raised; finally must run, otherwise the Redis pubsub socket leaks and a long run hits
+#   maxclients.
+# - In the `while` loop, when `get_message` / `is_disconnected` raise (Redis restart / ASGI
+#   receive exception): publish a single `error` event frame to the client and return; the
+#   frontend sees a toast instead of just console noise.
+# - In finally, each cleanup step is independently suppressed + logged so one failure does
+#   not swallow another.
 #
-#     Args:
-#         bus: the cluster event bus. Each connection gets its own pubsub socket — FastAPI concurrent
-#             requests are naturally isolated.
-#         agent_id: only forward events where `event.agent_id == agent_id`
-#             (ignored in broadcast mode).
-#         request: Starlette `Request`; use `is_disconnected()` for quick
-#             exit (otherwise pubsub blocking holds until Redis heartbeat
-#             timeout).
-#         channel: Redis channel to subscribe to (default the bus's events channel).
-#         role_filter: only forward events whose role is in this set; None
-#             or empty -> no filter.
-#         broadcast: True -> do not filter by agent_id, forward all.
-#         poll_s: the client-disconnect polling window of one Redis read
-#             (``gateway.sse_disconnect_poll_seconds``).
-#         cadence: when a quiet stream still speaks (heartbeat, keep-alive comment).
-#         validator: the pydantic validator each frame must parse as (default
-#             EVENT_ADAPTER). A non-agent-events channel (e.g. the alerts
-#             stream) passes its own TypeAdapter so frames are validated
-#             against the channel's shape instead of being dropped.
+# Args:
+#   bus: the cluster event bus. Each connection gets its own pubsub socket, so FastAPI
+#     concurrent requests are naturally isolated.
+#   agent_id: only forward events where `event.agent_id == agent_id` (ignored in broadcast
+#     mode).
+#   request: Starlette `Request`; use `is_disconnected()` for quick exit (otherwise pubsub
+#     blocking holds until Redis heartbeat timeout).
+#   channel: Redis channel to subscribe to (default the bus's events channel).
+#   role_filter: only forward events whose role is in this set; None or empty means no filter.
+#   broadcast: True means do not filter by agent_id, forward all.
+#   poll_s: the client-disconnect polling window of one Redis read
+#     (`gateway.sse_disconnect_poll_seconds`).
+#   cadence: when a quiet stream still speaks (heartbeat, keep-alive comment).
+#   validator: the pydantic validator each frame must parse as (default EVENT_ADAPTER). A
+#     non-agent-events channel (e.g. the alerts stream) passes its own TypeAdapter so frames
+#     are validated against the channel's shape instead of being dropped.
 #
-#     Yields:
-#         bytes: SSE frame (`data: ...
-#
-# `).
-#
+# Yields:
+#   bytes: SSE frame (`data: ...\n\n`).
 async def event_stream(
     bus: EventBus,
     agent_id: int,  # ignored in broadcast mode
@@ -157,7 +149,7 @@ async def event_stream(
     channel: str | None = None,
     role_filter: frozenset[str] | None = None,
     broadcast: bool = False,
-    validator: Any = EVENT_ADAPTER,
+    validator: TypeAdapter[Any] = EVENT_ADAPTER,
     poll_s: float,
     cadence: SseCadence,
 ) -> AsyncGenerator[bytes, None]:
@@ -303,35 +295,29 @@ async def _drain_redis_messages(
 # meiva:note
 # Yield a throttled, batched SSE stream of events.
 #
-#     With no ``agent_filter``, every agent's events pass. With a filter,
-#     selected agents and system-level ``agent_id == 0`` events pass. There is
-#     no role filter. Events are drained from Redis in batches and flushed at a
-#     fixed cadence (``1 / throttle_rate`` seconds). Each flush sends a JSON
-#     array of raw event payloads as a single SSE data frame:
+# With no `agent_filter`, every agent's events pass. With a filter, selected agents and
+# system-level `agent_id == 0` events pass. There is no role filter. Events are drained from
+# Redis in batches and flushed at a fixed cadence (`1 / throttle_rate` seconds). Each flush
+# sends a JSON array of raw event payloads as a single SSE data frame:
 #
-#         data: [{...}, {...}, ...]
+#     data: [{...}, {...}, ...]\n\n
 #
+# Lifetime defenses mirror `event_stream`: a subscription failure after HTTP 200 sends a
+# batch-shaped error frame; GeneratorExit-safe finally, Redis-IO recovery, and client
+# disconnect detection also apply.
 #
+# Args:
+#   bus: the cluster event bus.
+#   request: Starlette `Request` for disconnect detection.
+#   channel: Redis channel (default the bus's events channel).
+#   throttle_rate: SSE pushes per second, required (the caller reads
+#     `gateway.sse_throttle_rate`).
+#   cadence: when a quiet stream still speaks.
+#   agent_filter: agent ids to forward. None forwards every agent; system-level
+#     `agent_id == 0` events always pass.
 #
-#     Lifetime defenses mirror ``event_stream``: a subscription failure after
-#     HTTP 200 sends a batch-shaped error frame; GeneratorExit-safe finally,
-#     Redis-IO recovery, and client disconnect detection also apply.
-#
-#     Args:
-#         bus: the cluster event bus.
-#         request: Starlette ``Request`` for disconnect detection.
-#         channel: Redis channel (default the bus's events channel).
-#         throttle_rate: SSE pushes per second — required (the caller reads
-#             ``gateway.sse_throttle_rate``).
-#         cadence: when a quiet stream still speaks.
-#         agent_filter: agent ids to forward. None forwards every agent; system-level
-#             ``agent_id == 0`` events always pass.
-#
-#     Yields:
-#         bytes: SSE frame (``data: [...]
-#
-# ``).
-#
+# Yields:
+#   bytes: SSE frame (`data: [...]\n\n`).
 async def throttled_event_stream(
     bus: EventBus,
     request: Request,

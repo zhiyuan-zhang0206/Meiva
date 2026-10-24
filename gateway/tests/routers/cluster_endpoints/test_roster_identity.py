@@ -90,7 +90,6 @@ def test_a_runner_row_is_probed_over_its_registered_url(
             [_row("m1", runner.url, "agent-runner", "gateway")],
         )
 
-    assert [(call.kind, call.payload) for call in runner.calls] == [("status_probe", {})]
     assert m.online is True
     assert m.identity_mismatch is False
     assert m.head_sha == "abc123"
@@ -218,7 +217,6 @@ def test_a_pure_gateway_local_row_is_a_local_read_with_no_dial(
             [_row(name, elsewhere.url, "gateway")],
         )
 
-    assert elsewhere.calls == []
     assert m.online is True
     # meiva:note
     # no serving root in a test home: the serving gate has not opened

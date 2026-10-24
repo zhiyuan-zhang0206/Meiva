@@ -24,9 +24,9 @@ projection and read/audit/write RPC helpers. The audit fanout uses that same
 app database. Role lookups and ops dispatch go to the registry and
 `ops.cluster.rpc` directly: a runner is a row in `machines` and a listener, so a
 test registers one (`gateway/tests/support/runner_ops`). Tunables (the audit default
-count, the model the resolved view explains) come from the gateway process's own
-configuration view, `gateway.http.config.runtime_view`, never from the global
-`settings`.
+count, the model the resolved view explains) are fields of the `GatewayConfig` the app
+was built with (`gateway_config(request)`), never of the global `settings` and never a
+read of the whole configuration view.
 
 What a PUT may write is decided by pure functions in `write_plan.py` (strict):
 the refusal a parsed plan earns, the candidate `.env` patch a validation judges,

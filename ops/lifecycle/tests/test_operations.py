@@ -1,11 +1,12 @@
 # pyright: reportUnknownArgumentType=warning, reportUnknownLambdaType=warning
-"""The `ops` op clusters — ops-server-callable RPC implementations.
-
-Free functions backing both the gateway FastAPI handlers and the in-process dispatch in
-services/agent_runner/agent_ops/daemon.py. These tests pin the contract independently of either entry point:
-dispatch routing in the ops server has its own coverage in services/agent_runner/agent_ops/tests/test_daemon.py,
-endpoint smoke tests live in tests/components/gateway/test_cluster_endpoints.py.
-"""
+# meiva:note
+# The `ops` op clusters: ops-server-callable RPC implementations.
+#
+# Free functions backing both the gateway FastAPI handlers and the in-process dispatch in
+# services/agent_runner/agent_ops/daemon.py. These tests pin the contract independently of either
+# entry point: dispatch routing in the ops server has its own coverage in
+# services/agent_runner/agent_ops/tests/test_daemon.py, endpoint smoke tests live in
+# gateway/tests/routers/cluster_endpoints/test_cluster_routes.py.
 
 from __future__ import annotations
 

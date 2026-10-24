@@ -23,7 +23,7 @@ from base.events.live.projection import EVENT_ADAPTER, GLOBAL_ROLES
 from base.events.live.redis_client import retry_auth_failures_async
 from gateway.events.sse import REDIS_ACL_ERRORS, REDIS_IO_ERRORS, close_pubsub
 from gateway.events.sse_frames import SseCadence, parse_agent_ids, sse_frame, warm_frame
-from gateway.http.config import runtime_view
+from gateway.http.config import gateway_config
 from gateway.http.middleware import runtime_metrics, stopping
 from ops.alerts import ALERTS_CHANNEL, AlertRow
 
@@ -381,15 +381,15 @@ async def get_merged_stream(
     agents: str | None = None,
     channels: str | None = None,
 ) -> StreamingResponse:
-    gateway = runtime_view(request).gateway
+    sse = gateway_config(request).sse
     return StreamingResponse(
         merged_event_stream(
             request.app.state.bus,
             request,
             channels=parse_channels(channels),
             agent_filter=parse_agents(agents),
-            throttle_rate=gateway.sse_throttle_rate,
-            pending_limit=gateway.sse_channel_pending_limit,
+            throttle_rate=sse.throttle_rate,
+            pending_limit=sse.channel_pending_limit,
             cadence=SseCadence(),
         ),
         media_type="text/event-stream",

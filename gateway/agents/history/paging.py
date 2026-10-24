@@ -1,19 +1,18 @@
 # meiva:note
 # Windowing a rendered timeline: which items a page holds and whether older history remains.
 #
-# The functions take already rendered items and return the page; reading checkpoints and
-# rendering stay in `gateway.agents.history.timeline`. Items are anything with an id, a kind, a
-# source and an impersonation marker, so the rules are asserted with plain stand-ins.
+# The functions take one `Row` of facts per rendered item and return a `Selection`: the indices of
+# the items the page holds, in order. Reading checkpoints, rendering and picking the items stay
+# in `gateway.agents.history.timeline`, so the rules are asserted on plain values.
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol
 
 __all__ = [
-    "Page",
-    "PagedItem",
+    "Row",
+    "Selection",
     "boundary_read_limit",
     "depth_allows",
     "initial_window",
@@ -26,28 +25,27 @@ _REATTACHED_KINDS = frozenset({"system_prompt", "inbound_compact_summary"})
 
 
 # meiva:note
-# What the windowing rules read of a timeline item.
-class PagedItem(Protocol):
-    @property
-    def item_id(self) -> str: ...
-    @property
-    def kind(self) -> str: ...
-    @property
-    def source(self) -> str | None: ...
-    @property
-    def impersonation(self) -> object | None: ...
+# What the windowing rules read of one rendered timeline item.
+#
+# `tagged_plain` is true when the item carries a real source tag and no impersonation marker:
+# the only markers that can be standing head notes.
+@dataclass(frozen=True)
+class Row:
+    item_id: str
+    kind: str
+    tagged_plain: bool
 
 
 # meiva:note
-# One page of a segment, and whether the cursor sat at the segment's head.
+# The items a page holds, as indices into the rows it was planned from, oldest first.
 #
-# `crossed` means everything before the cursor was re-attached context, so the
-# caller appends the next older segment.
+# `has_more` says older history remains. `crossed` means everything before the cursor was
+# re-attached context, so the caller appends the next older segment.
 @dataclass(frozen=True)
-class Page[T: PagedItem]:
-    items: list[T]
+class Selection:
+    indices: tuple[int, ...]
     has_more: bool
-    crossed: bool
+    crossed: bool = False
 
 
 # meiva:note
@@ -86,7 +84,7 @@ def older_segment_available(rank: int, boundary_count: int, depth: int) -> bool:
 # retired markers that old data may still carry right after the prompt —
 # as ``system_marker`` with ``source=None``, and treating those as head
 # notes would re-attach stale rows to every window and skip them in paging.
-def _standing_head_note_ids[T: PagedItem](items: Sequence[T]) -> set[str]:
+def _standing_head_note_ids(items: Sequence[Row]) -> set[str]:
     head: set[str] = set()
     idx = 0
     # meiva:note
@@ -105,12 +103,7 @@ def _standing_head_note_ids[T: PagedItem](items: Sequence[T]) -> set[str]:
         # meiva:note
         # no prompt (historical segment): its notes start at the front
         idx = 0
-    while (
-        idx < len(items)
-        and items[idx].kind == "system_marker"
-        and items[idx].source is not None
-        and items[idx].impersonation is None
-    ):
+    while idx < len(items) and items[idx].kind == "system_marker" and items[idx].tagged_plain:
         head.add(items[idx].item_id)
         idx += 1
     return head
@@ -122,14 +115,12 @@ def _standing_head_note_ids[T: PagedItem](items: Sequence[T]) -> set[str]:
 # `before` is the oldest item_id the frontend currently holds. If it is
 # not found (rolled off / never existed), return an empty window with no
 # more — the frontend stops asking rather than looping.
-def window_before[T: PagedItem](
-    items: Sequence[T], before: str, limit: int
-) -> tuple[list[T], bool]:
+def window_before(items: Sequence[Row], before: str, limit: int) -> Selection:
     idx = next((i for i, it in enumerate(items) if it.item_id == before), None)
     if idx is None:
-        return [], False
+        return Selection((), has_more=False)
     start = max(0, idx - limit) if limit > 0 else 0
-    return list(items[start:idx]), start > 0
+    return Selection(tuple(range(start, idx)), has_more=start > 0)
 
 
 # meiva:note
@@ -141,17 +132,17 @@ def window_before[T: PagedItem](
 # while signaling the caller to append the next older segment.
 # Frontend de-duplication converges repeated standing context, and returning
 # it here guarantees a compact summary cannot fall between page boundaries.
-def window_or_cross[T: PagedItem](
-    items: Sequence[T], before: str, limit: int, *, older_available: bool
-) -> Page[T]:
+def window_or_cross(
+    items: Sequence[Row], before: str, limit: int, *, older_available: bool
+) -> Selection:
     idx = next((i for i, item in enumerate(items) if item.item_id == before), None)
     if idx is None:
-        return Page(items=[], has_more=False, crossed=False)
+        return Selection((), has_more=False)
     head_note_ids = _standing_head_note_ids(items)
     if all(item.kind in _REATTACHED_KINDS or item.item_id in head_note_ids for item in items[:idx]):
-        return Page(items=list(items[:idx]), has_more=older_available, crossed=True)
+        return Selection(tuple(range(idx)), has_more=older_available, crossed=True)
     start = max(0, idx - limit) if limit > 0 else 0
-    return Page(items=list(items[start:idx]), has_more=start > 0 or older_available, crossed=False)
+    return Selection(tuple(range(start, idx)), has_more=start > 0 or older_available)
 
 
 # meiva:note
@@ -168,39 +159,45 @@ def window_or_cross[T: PagedItem](
 # memories · 3 system notes"). Compact summaries are standing context too: once the prompt is
 # re-attached, a cursor can never page to summaries older than it, so every missing summary
 # follows the head notes. Items are deduped by item_id.
-def _missing_standing_context[T: PagedItem](items: Sequence[T], window: Sequence[T]) -> list[T]:
-    in_window = {window_item.item_id for window_item in window}
+def _missing_standing_context(items: Sequence[Row], window: Sequence[int]) -> tuple[int, ...]:
+    in_window = {items[i].item_id for i in window}
     prompt = (
-        [] if "0.0" in in_window else [item for item in items if item.kind == "system_prompt"][:1]
+        []
+        if "0.0" in in_window
+        else [i for i, item in enumerate(items) if item.kind == "system_prompt"][:1]
     )
     head_note_ids = _standing_head_note_ids(items)
     notes = [
-        item for item in items if item.item_id in head_note_ids and item.item_id not in in_window
+        i
+        for i, item in enumerate(items)
+        if item.item_id in head_note_ids and item.item_id not in in_window
     ]
     compact = [
-        item
-        for item in items
+        i
+        for i, item in enumerate(items)
         if item.kind == "inbound_compact_summary" and item.item_id not in in_window
     ]
-    return [*prompt, *notes, *compact]
+    return (*prompt, *notes, *compact)
 
 
 # meiva:note
 # The head window of the current segment, preserving its standing context.
 #
-# `tail` is the newest `limit` items and whether older ones exist. What fell off the tail as
-# standing context is re-attached at the head without counting against `limit` or creating a
-# phantom older-page affordance.
-def initial_window[T: PagedItem](
-    items: Sequence[T],
-    tail: tuple[list[T], bool],
-    limit: int,
+# The tail is the newest `tail_size` items and `tail_has_more` says whether older ones exist.
+# What fell off the tail as standing context is re-attached at the head without counting against
+# `limit` or creating a phantom older-page affordance.
+def initial_window(
+    items: Sequence[Row],
     *,
+    tail_size: int,
+    tail_has_more: bool,
+    limit: int,
     historical_segments_available: bool,
-) -> tuple[list[T], bool]:
-    window, has_more = tail
+) -> Selection:
+    window = tuple(range(len(items) - tail_size, len(items)))
+    has_more = tail_has_more
     reattached = _missing_standing_context(items, window)
     if reattached:
-        window = [*reattached, *window]
+        window = (*reattached, *window)
         has_more = has_more and len(items) - len(reattached) > limit
-    return window, has_more or historical_segments_available
+    return Selection(window, has_more=has_more or historical_segments_available)

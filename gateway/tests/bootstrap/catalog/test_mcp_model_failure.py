@@ -12,11 +12,15 @@ from base.packages.tests.lm.providers.provider_plugin_support import (
 from base.paths import plugins_dir
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client, spawn_via_http
 from gateway.tests.mcp_calls import post_message, tool_call, tool_result
+from gateway.tests.support.runner_ops.ops_stub import RunnerOps
 
 
 @pytest.fixture
 def failed_provider_agent(
-    provider_plugin: Callable[..., None], *, machine_identity: MachineIdentity
+    provider_plugin: Callable[..., None],
+    gateway_local_runner: RunnerOps,
+    *,
+    machine_identity: MachineIdentity,
 ) -> Iterator[tuple[GatewayTestClient, int]]:
     boot = snapshot_process_config()
     boot.set_field("mcp_endpoint_enabled", True)

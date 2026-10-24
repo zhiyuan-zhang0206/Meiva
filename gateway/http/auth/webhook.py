@@ -9,7 +9,7 @@ from starlette.requests import Request
 
 from base.host.net.auth import verify_bearer
 from gateway.http.auth.request_principal import cluster_credential
-from gateway.http.config import GatewayConfig, runtime_view
+from gateway.http.config import GatewayConfig, gateway_config
 
 
 class WebhookAuthentication(NamedTuple):
@@ -22,8 +22,8 @@ class WebhookAuthentication(NamedTuple):
 def authenticate_webhook(request: Request, *, provider: str) -> WebhookAuthentication:
     """Verify the alert-scoped token, a cluster bearer (the human secret or the
     active generation's machine API token), or tokenless loopback."""
-    token = runtime_view(request).alerts.webhook_token
-    token_value = token.get_secret_value() if token is not None else ""
+    config: GatewayConfig = gateway_config(request)
+    token_value = config.alerts.webhook_token
     if token_value:
         presented = request.headers.get("X-Alerts-Token")
         if presented and hmac.compare_digest(presented, token_value):
@@ -39,7 +39,6 @@ def authenticate_webhook(request: Request, *, provider: str) -> WebhookAuthentic
                 authorized=True,
                 source_verified_by=f"webhook:{provider}",
             )
-    config: GatewayConfig = request.app.state.gateway_config
     verified_by = cluster_credential(
         request.headers.get("Authorization"),
         config.cluster_secret,

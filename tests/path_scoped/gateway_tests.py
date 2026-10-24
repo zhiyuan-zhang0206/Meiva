@@ -7,6 +7,9 @@ from gateway.tests.auth.gateway_tests import (
     gateway_local_runner as gateway_local_runner,
 )
 from gateway.tests.auth.gateway_tests import (
+    gateway_tests_data_plane as gateway_tests_data_plane,
+)
+from gateway.tests.auth.gateway_tests import (
     mock_api_keys as mock_api_keys,
 )
 from gateway.tests.auth.gateway_tests import (
@@ -15,6 +18,7 @@ from gateway.tests.auth.gateway_tests import (
 
 __all__ = [
     "gateway_local_runner",
+    "gateway_tests_data_plane",
     "mock_api_keys",
     "model_catalog",
 ]

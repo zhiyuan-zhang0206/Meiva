@@ -6,7 +6,9 @@
 # - `checkout_move <source> <repo>`: import the gateway's first-load image from a
 #   throwaway checkout, move that checkout's HEAD, and print what the image reports.
 # - `server_shutdown`: run the real gateway server child for the SIGTERM tests.
-# - `server_main`: run the real `gateway.cluster.server.main` (the process root) with a probe app.
+# - `server_main`: run the real `gateway.cluster.server.main` (the process root) with a probe app;
+#   the app builder leaves a marker file where `BUILT_ENV` names it, so a parent can tell whether
+#   the root built the app itself.
 # - `app_from_environment`: build the gateway app twice from the environment, as a reload worker does.
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ if TYPE_CHECKING:
 MARKERS_ENV = "GATEWAY_SHUTDOWN_TEST_MARKERS"
 PORT_ENV = "GATEWAY_SHUTDOWN_TEST_PORT"
 REDIS_ENV = "GATEWAY_SHUTDOWN_TEST_REDIS"
+BUILT_ENV = "GATEWAY_ROOT_TEST_BUILT"
 
 
 def _mark(name: str) -> None:
@@ -128,6 +131,11 @@ def probe_app() -> FastAPI:
     return app
 
 
+def _build_marked_probe_app(_process: object) -> FastAPI:
+    Path(os.environ[BUILT_ENV]).write_text("built", encoding="utf-8")
+    return probe_app()
+
+
 def run_main() -> None:
     from base.config import ConfigBoot
     from gateway.cluster import server as _server
@@ -135,7 +143,7 @@ def run_main() -> None:
     config = ConfigBoot()
     config.boot()
     config.ensure_eager()
-    _server.main(config=config, build_app=lambda _process: probe_app())
+    _server.main(config=config, build_app=_build_marked_probe_app)
 
 
 def _app_from_environment() -> None:

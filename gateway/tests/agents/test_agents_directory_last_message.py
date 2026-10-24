@@ -36,6 +36,7 @@ _DIRECTORY_CARD_KEYS = frozenset(
 
 
 class TestList:
+    @pytest.mark.usefixtures("gateway_local_runner")
     def test_get_agents_returns_page_with_status_and_lineage(
         self, db_conn: psycopg.Connection
     ) -> None:
@@ -62,6 +63,7 @@ class TestList:
         assert by_id[a_id]["label"] is None
         assert by_id[b_id]["label"] is None
 
+    @pytest.mark.usefixtures("gateway_local_runner")
     def test_get_agents_scopes_live_and_terminated_in_the_database_contract(
         self,
         db_conn: psycopg.Connection,
@@ -126,6 +128,7 @@ class TestList:
         assert "fork_source_checkpoint_id" in detail.json()
         assert "last_probe_at" in detail.json()
 
+    @pytest.mark.usefixtures("gateway_local_runner")
     def test_directory_page_search_and_cursor(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
             ids = [spawn_via_http(client, {}).json()["id"] for _ in range(4)]
@@ -169,6 +172,7 @@ class TestList:
             "limit",
         }
 
+    @pytest.mark.usefixtures("gateway_local_runner")
     def test_get_agents_joins_thread_label(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
             a_id = spawn_via_http(client, {}).json()["id"]
@@ -178,6 +182,7 @@ class TestList:
         by_id = {r["agent_id"]: r for r in resp.json()["agents"]}
         assert by_id[a_id]["label"] == "\u6211\u7684 agent"
 
+    @pytest.mark.usefixtures("gateway_local_runner")
     def test_get_single_agent_returns_label(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
             a_id = spawn_via_http(client, {}).json()["id"]
@@ -186,6 +191,7 @@ class TestList:
         assert resp.status_code == 200
         assert resp.json()["label"] == "single-x"
 
+    @pytest.mark.usefixtures("gateway_local_runner")
     def test_get_agents_returns_machine_column(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
             a_id = spawn_via_http(client, {}).json()["id"]

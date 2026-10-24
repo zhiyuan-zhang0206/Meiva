@@ -33,7 +33,7 @@ from redis.exceptions import RedisError
 from base.events.live.bus import EventBus
 from base.events.reads import audit_rows
 from base.log import logger
-from gateway.http.config import runtime_view
+from gateway.http.config import gateway_config
 from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 from gateway.routers.fleet.fleet_tokens import AgentTokens, agent_tokens
 from gateway.schemas import FleetGraphEdge, FleetGraphNode, FleetGraphResponse
@@ -227,7 +227,7 @@ def get_fleet_graph(
     decay_lambda: Annotated[float | None, Query(ge=0, le=10)] = None,
 ) -> FleetGraphResponse:
     if decay_lambda is None:
-        decay_lambda = float(runtime_view(request).display.fleet_graph_decay_lambda)
+        decay_lambda = float(gateway_config(request).display.fleet_graph_decay_lambda)
     decay_lambda = round(decay_lambda, 2)
 
     now = datetime.now(UTC)

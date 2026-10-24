@@ -28,7 +28,7 @@ from gateway.events.events_plan import AgentEventsRequest, plan_agent_events
 from gateway.events.schemas import AgentEventRow
 from gateway.events.sse import event_stream
 from gateway.events.sse_frames import SseCadence
-from gateway.http.config import GatewayConfig, runtime_view
+from gateway.http.config import GatewayConfig, gateway_config
 
 router = APIRouter()
 
@@ -57,7 +57,7 @@ async def get_events_stream(agent_id: int, request: Request) -> StreamingRespons
             request.app.state.bus,
             agent_id,
             request,
-            poll_s=runtime_view(request).gateway.sse_disconnect_poll_seconds,
+            poll_s=gateway_config(request).sse.disconnect_poll_seconds,
             cadence=SseCadence(),
         ),
         media_type="text/event-stream",
@@ -124,7 +124,7 @@ def get_agent_events(
             offset=offset,
         ),
         now=datetime.now(UTC),
-        default_limit=runtime_view(request).display.events_default_limit,
+        default_limit=gateway_config(request).display.events_default_limit,
     )
     config: GatewayConfig = request.app.state.gateway_config
     try:

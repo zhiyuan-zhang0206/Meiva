@@ -62,7 +62,7 @@ from gateway.cluster.schemas import (
     StatsTokens,
     SystemStatus,
 )
-from gateway.http.config import GatewayConfig, runtime_view
+from gateway.http.config import GatewayConfig, gateway_config
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from ops.cluster import rpc as cluster_rpc
 from ops.cluster_status import ClusterStatus, check_pidfile, serving_gate_reason
@@ -226,7 +226,7 @@ def roster_env(request: Request) -> RosterEnv:
         image=request.app.state.process_image,
         home=request.app.state.gateway_process.home,
         machine=request.app.state.machine,
-        probe_timeout_s=runtime_view(request).gateway.status_probe_timeout_seconds,
+        probe_timeout_s=gateway_config(request).status_probe_timeout_seconds,
     )
 
 
@@ -260,7 +260,9 @@ def _render_answer(
         )
     else:
         env.identity_log.note_match(row.name)
-    return roster_rows.reported_status(row, status, observed_at=observed_at)
+    return roster_rows.reported_status(
+        row, roster_probe.probed_facts(status), observed_at=observed_at
+    )
 
 
 # meiva:note

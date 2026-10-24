@@ -4,19 +4,18 @@ import asyncio
 import subprocess
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from base.api_contracts.agent_contract import IndexerUnavailable
-from base.config import Settings
 from base.db import Database
+from base.lm.catalog import ModelCatalog
 from base.lm.factory import process_provider_keys
 from base.packages.docs.notes import parse_note
 from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.http.config import runtime_view
+from gateway.http.config import MemorySearchSettings, gateway_config
 from gateway.http.disconnect import run_until_disconnect
 from gateway.http.model_catalog import require_model_catalog
 from gateway.routers.memory_api import memory_plan
@@ -43,43 +42,6 @@ def unreadable_reports() -> rerank.UnreadableReports:
 
 
 # meiva:note
-# The memory-search tunables as the process configuration reads now.
-#
-# Built per request from the gateway's own config view, so an edit to the settings is seen
-# by the next search.
-@dataclass(frozen=True)
-class MemorySearchInputs:
-    # meiva:link gateway/routers/docs/memory.meiva.okf.md
-    embedding_backend: str
-    backend: str
-    uri: str
-    embedding_timeout: float
-    api_key: str | None
-    acquire_timeout: float
-    deadline: float
-    rerank_model: str
-    rerank_candidates: int
-    dedup_candidates: int
-
-    @classmethod
-    def from_view(cls, view: Settings) -> MemorySearchInputs:
-        services = view.services
-        secret = view.lm.gemini_api_key
-        return cls(
-            embedding_backend=services.embedding_backend,
-            backend=services.memory_search_backend,
-            uri=services.memory_search_uri,
-            embedding_timeout=services.memory_embed_timeout_seconds,
-            api_key=None if secret is None else secret.get_secret_value(),
-            acquire_timeout=services.memory_search_acquire_timeout_seconds,
-            deadline=services.memory_search_deadline_seconds,
-            rerank_model=services.memory_rerank_model,
-            rerank_candidates=services.memory_rerank_candidates,
-            dedup_candidates=services.memory_dedup_candidates,
-        )
-
-
-# meiva:note
 # A reader that always answers `value`: the services providers take readers because the
 # indexer daemon rereads live configuration, while one search runs on a fixed snapshot.
 def _constant[T](value: T) -> Callable[[], T]:
@@ -89,6 +51,22 @@ def _constant[T](value: T) -> Callable[[], T]:
 def build_search_gate(max_concurrency: int) -> asyncio.Semaphore:
     # meiva:link gateway/routers/docs/memory.meiva.okf.md
     return asyncio.Semaphore(max_concurrency)
+
+
+# meiva:note
+# The query embedder every search shares: the configured provider holding the root's catalog.
+# The root builds it once when the catalog loaded, so an unknown `embedding_backend` fails the
+# start instead of every search.
+# meiva:link gateway/routers/docs/memory.meiva.okf.md
+def build_embedder(settings: MemorySearchSettings, catalog: ModelCatalog) -> EmbeddingProvider:
+    from services.derived.memory_indexer.embeddings import factory
+
+    return factory.get_provider(
+        settings.embedding_backend,
+        catalog=catalog,
+        timeout_reader=_constant(settings.embedding_timeout),
+        api_key_reader=_constant(settings.api_key),
+    )
 
 
 @asynccontextmanager
@@ -111,7 +89,7 @@ async def _backend_topk(
     deadline: float,
     dim: int,
     fingerprint: str,
-    inputs: MemorySearchInputs,
+    inputs: MemorySearchSettings,
 ) -> list[ChunkHit]:
     # meiva:link gateway/routers/docs/memory.meiva.okf.md
     from services.derived.memory_indexer.backends import factory
@@ -163,15 +141,9 @@ async def _backend_topk(
 )
 async def post_memory_search(request: Request, body: MemorySearchRequest) -> MemorySearchResponse:
     # meiva:link gateway/routers/docs/memory.meiva.okf.md
-    from services.derived.memory_indexer.embeddings import factory as _embedding_factory
-
-    inputs = MemorySearchInputs.from_view(runtime_view(request))
-    provider = _embedding_factory.get_provider(
-        inputs.embedding_backend,
-        catalog=require_model_catalog(request),
-        timeout_reader=_constant(inputs.embedding_timeout),
-        api_key_reader=_constant(inputs.api_key),
-    )
+    inputs = gateway_config(request).memory_search
+    catalog = require_model_catalog(request)
+    provider: EmbeddingProvider = request.app.state.memory_embedder
     plan = memory_plan.search_plan(
         purpose=body.purpose,
         configured_deadline_s=inputs.deadline,
@@ -183,7 +155,7 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
     try:
         async with asyncio.timeout(plan.deadline_s):
             ranked = await run_until_disconnect(
-                _search_and_rank(request, body, provider, inputs, plan),
+                _search_and_rank(request, body, provider, inputs, plan, catalog),
                 request.is_disconnected,
             )
     except TimeoutError as exc:
@@ -210,11 +182,11 @@ async def _search_and_rank(
     request: Request,
     body: MemorySearchRequest,
     provider: EmbeddingProvider,
-    inputs: MemorySearchInputs,
+    inputs: MemorySearchSettings,
     plan: memory_plan.SearchPlan,
+    catalog: ModelCatalog,
 ) -> list[rerank.RankedChunk]:
     hits = await _vector_candidates(request, body, provider, inputs, plan)
-    catalog = require_model_catalog(request)
     return await rerank.rerank(
         body.query,
         hits,
@@ -234,7 +206,7 @@ async def _vector_candidates(
     request: Request,
     body: MemorySearchRequest,
     provider: EmbeddingProvider,
-    inputs: MemorySearchInputs,
+    inputs: MemorySearchSettings,
     plan: memory_plan.SearchPlan,
 ) -> list[ChunkHit]:
     # meiva:link gateway/routers/docs/memory.meiva.okf.md
@@ -289,16 +261,16 @@ async def _vector_candidates(
 )
 async def post_memory_refresh(request: Request) -> MemoryRefreshResponse:
     # meiva:note
-    # Refresh updates the same captured memory_root that the app reads. Its keep-local and track-branch values are read from the existing process configuration for each request. Git runs off the ASGI event loop so another request can complete while a refresh waits.
+    # Refresh updates the same captured memory_root that the app reads. Its keep-local and track-branch values are the ones the gateway was built with. Git runs off the ASGI event loop so another request can complete while a refresh waits.
     # meiva:link gateway/routers/docs/memory.meiva.okf.md
     from base.deploy.git import memory_repo
 
-    config = request.app.state.gateway_process.config.view.general
+    config = gateway_config(request)
     head = await asyncio.to_thread(
         memory_repo.pull_main,
-        root=request.app.state.gateway_config.memory_root,
-        keep_local=config.memory_keep_local,
-        branch=config.track_branch,
+        root=config.memory_root,
+        keep_local=config.memory_pool.keep_local,
+        branch=config.memory_pool.track_branch,
     )
     return MemoryRefreshResponse(head=head)
 

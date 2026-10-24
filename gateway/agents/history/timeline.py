@@ -40,6 +40,8 @@ from gateway.agents.history.cursor import (
     parse_cursor,
 )
 from gateway.agents.history.paging import (
+    Row,
+    Selection,
     boundary_read_limit,
     depth_allows,
     initial_window,
@@ -187,14 +189,14 @@ def _historical_window(
     segment_prefix = f"s{rank}.{checkpoint_id}"
     older_available = older_segment_available(rank, len(boundary_ids), depth)
     page = window_or_cross(
-        segment_items,
+        _rows(segment_items),
         cursor.item_id(segment_prefix),
         limit,
         older_available=older_available,
     )
+    head = _picked(segment_items, page)
     if not page.crossed:
-        return page.items, page.has_more
-    head = page.items
+        return head, page.has_more
     if not older_available:
         return head, False
 
@@ -251,6 +253,21 @@ def _current_items(
     return items, msg_count
 
 
+# meiva:note
+# The facts the windowing rules read of each rendered item, in order.
+def _rows(items: Sequence[TimelineItem]) -> list[Row]:
+    return [
+        Row(item.item_id, item.kind, item.source is not None and item.impersonation is None)
+        for item in items
+    ]
+
+
+# meiva:note
+# The items a windowing plan selected, in the plan's order.
+def _picked(items: Sequence[TimelineItem], selection: Selection) -> list[TimelineItem]:
+    return [items[i] for i in selection.indices]
+
+
 def _head_response(
     request: Request,
     agent_id: int,
@@ -262,13 +279,17 @@ def _head_response(
 ) -> TimelineResponse:
     """The head window (no cursor) of the current segment."""
     items, msg_count = _current_items(request, agent_id, messages, limit, None, read=read)
-    window, has_more = initial_window(
-        items,
-        tail_window(items, limit),
-        limit,
+    tail, tail_has_more = tail_window(items, limit)
+    window = initial_window(
+        _rows(items),
+        tail_size=len(tail),
+        tail_has_more=tail_has_more,
+        limit=limit,
         historical_segments_available=bool(boundary_ids),
     )
-    return TimelineResponse(items=window, msg_count=msg_count, has_more=has_more)
+    return TimelineResponse(
+        items=_picked(items, window), msg_count=msg_count, has_more=window.has_more
+    )
 
 
 def head_timeline(
@@ -300,16 +321,20 @@ def _current_page_before(
     # Depth 0 is the compatibility posture: preserve the exact current-
     # segment paging rule, including pages that contain standing context.
     # No boundary query or history branch runs.
+    rows = _rows(items)
     if depth == 0:
-        window, has_more = window_before(items, cursor.item_id(), limit)
-        return TimelineResponse(items=window, msg_count=msg_count, has_more=has_more)
+        window = window_before(rows, cursor.item_id(), limit)
+        return TimelineResponse(
+            items=_picked(items, window), msg_count=msg_count, has_more=window.has_more
+        )
     older_available = bool(boundary_ids) and depth_allows(1, depth)
-    page = window_or_cross(items, cursor.item_id(), limit, older_available=older_available)
+    page = window_or_cross(rows, cursor.item_id(), limit, older_available=older_available)
+    head = _picked(items, page)
     if not page.crossed:
-        return TimelineResponse(items=page.items, msg_count=msg_count, has_more=page.has_more)
+        return TimelineResponse(items=head, msg_count=msg_count, has_more=page.has_more)
     if not older_available:
-        return TimelineResponse(items=page.items, msg_count=msg_count, has_more=False)
-    return page.items
+        return TimelineResponse(items=head, msg_count=msg_count, has_more=False)
+    return head
 
 
 def _historical_response(

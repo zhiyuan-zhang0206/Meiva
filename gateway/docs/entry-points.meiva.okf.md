@@ -10,7 +10,7 @@ tags: []
 ## Entry points
 
 - `gateway/app.py` — FastAPI application factories (`create_app`, `create_app_from_environment`), cold `openapi_schema()`, lifespan, middleware, route mounting
-- `gateway/http/config.py` — frozen `GatewayConfig` snapshot (`gateway_config_from_boot`) shared across app assembly, auth, CORS, memory reads, and lifespan
+- `gateway/http/config.py` — frozen `GatewayConfig` (`gateway_config_from_boot`, the one place the root reads settings for handlers) shared across app assembly, auth, CORS, memory reads, and lifespan; its groups (`display`, `models`, `sse`, `alerts`, `pages`, `memory_search`, ...) carry the tunables a route reads, and `gateway_config(request)` hands it to a handler
 - `gateway/__main__.py` — `.venv/bin/python -m gateway` → uvicorn
 - `gateway/cluster/server.py` — the process root `main(config=..., build_app=...)`: it reads three facts from the booted config and executes the plan `gateway/cluster/serve_plan.py` returns
 - `services/wake/schedule_manager/engine.py` — the schedule execution engine; the ScheduleManager launches `services/wake/schedule_manager/runner.py` to compose the SDK in an independent process

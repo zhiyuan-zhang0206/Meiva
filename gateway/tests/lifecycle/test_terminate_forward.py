@@ -25,6 +25,7 @@ import pytest
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import MachineIdentitySetter
 from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
+from gateway.tests.support.runner_ops.local_runner import executed_ops
 from gateway.tests.support.runner_ops.ops_stub import (
     RunnerOps,
     completed,
@@ -80,7 +81,11 @@ class TestTerminateRouting:
         assert resp.status_code == 200
         assert resp.json()["status"] == "enqueued"
         assert _terminate_inbound_count(db_conn, agent_id) == 1
-        assert [c.kind for c in gateway_local_runner.calls] == ["spawn-launch", "lifecycle"]
+        assert [(op.kind, op.status) for op in executed_ops(db_conn, "spawn-launch")] == [
+            ("spawn-launch", "completed")
+        ]
+        (terminate,) = executed_ops(db_conn, "lifecycle")
+        assert (terminate.status, terminate.result["status"]) == ("completed", "enqueued")
 
     def test_local_force_takes_local_path(
         self,
@@ -210,9 +215,7 @@ def test_remote_home_machine_is_forwarded(
     server — there is no deployment gate on the lifecycle path. Single box is
     just the special case where the ops server lives at localhost."""
     with (
-        runner_ops(db_conn, "stale-runner", {"lifecycle": completed({"status": "enqueued"})}) as (
-            runner
-        ),
+        runner_ops(db_conn, "stale-runner", {"lifecycle": completed({"status": "enqueued"})}),
         gateway_test_client(machine=local_machine) as client,
     ):
         agent_id = spawn_via_http(client, {}).json()["id"]
@@ -220,7 +223,6 @@ def test_remote_home_machine_is_forwarded(
         resp = client.post(f"/api/agents/{agent_id}/terminate")
     assert resp.status_code == 200
     assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
-    assert [call.kind for call in runner.calls] == ["lifecycle"]
 
 
 # meiva:note

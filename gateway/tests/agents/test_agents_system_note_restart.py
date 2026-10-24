@@ -18,6 +18,8 @@ from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_htt
 from gateway.tests.test_agents_endpoints import inbound_rows, returned_id, terminate_hosted
 from gateway.tests.test_agents_endpoints import withdrawn_model as withdrawn_model
 
+pytestmark = pytest.mark.usefixtures("gateway_local_runner")
+
 
 def _wait_until_task_is_locked(db_conn: psycopg.Connection, task_id: int) -> None:
     deadline = time.monotonic() + 5
