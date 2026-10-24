@@ -10,10 +10,16 @@ from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
+from meizel.graph.imports import Scope, collect_scope, dotted_chain
+from meizel.graph.universe import Universe
+
 __all__ = [
     "Bindings",
+    "ClassFacts",
+    "find_class",
     "is_imported_binding",
     "module_bindings",
+    "overridable_methods",
     "provides",
     "unambiguous_function_lines",
 ]
@@ -21,6 +27,22 @@ __all__ = [
 # Names every module object has, and the builtins its code resolves when it binds no such name.
 _ALWAYS = frozenset(dir(types.ModuleType("m"))) | frozenset(dir(builtins))
 _NESTED = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+_ABSTRACT_BASES = frozenset({"Protocol", "ABC"})
+_REEXPORT_HOPS = 6
+
+
+# meiva:note
+# A class defined at the top level of a module: what it defines, whether it is abstract
+# (`Protocol` or `ABC` among its bases, an `ABCMeta` metaclass, or an `@abstractmethod`), and the
+# dotted origin of each base as the defining module's imports name it.
+@dataclass(frozen=True, slots=True)
+class ClassFacts:
+    module: str
+    name: str
+    methods: frozenset[str]
+    abstract: bool
+    bases: tuple[str, ...]
+    file: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +54,8 @@ class Bindings:
     defined: frozenset[str] = frozenset()
     imported: frozenset[str] = frozenset()
     all_names: frozenset[str] = frozenset()
+    classes: tuple[ClassFacts, ...] = ()
+    reexports: tuple[tuple[str, str], ...] = ()
 
 
 def provides(bindings: Bindings, name: str) -> bool:
@@ -54,11 +78,11 @@ def module_bindings(root: Path, file: str) -> Bindings:
         stat = (root / file).stat()
     except OSError:
         return Bindings(frozenset(), dynamic=True)
-    return _read(str(root / file), stat.st_mtime_ns, stat.st_size)
+    return _read(str(root / file), stat.st_mtime_ns, stat.st_size, file)
 
 
 @cache
-def _read(path: str, mtime_ns: int, size: int) -> Bindings:
+def _read(path: str, mtime_ns: int, size: int, file: str) -> Bindings:
     del mtime_ns, size  # the cache key: a rewritten file is read again
     try:
         tree = ast.parse(Path(path).read_bytes(), filename=path)
@@ -78,12 +102,16 @@ def _read(path: str, mtime_ns: int, size: int) -> Bindings:
     if path.endswith("__init__.py"):
         defined.add("__path__")  # the import system sets it on a package
     names = frozenset(defined | imported)
+    scope = Scope(None)
+    collect_scope(scope, tree.body, file.split("/")[:-1], walrus=False)
     return Bindings(
         names,
         dynamic,
         defined=frozenset(defined),
         imported=frozenset(imported),
         all_names=frozenset(all_names),
+        classes=_class_facts(tree, scope, file),
+        reexports=tuple(scope.imports.items()),
     )
 
 
@@ -166,3 +194,92 @@ def _declared_global(function: ast.AST) -> Iterator[str]:
     for node in ast.walk(function):
         if isinstance(node, ast.Global):
             yield from node.names
+
+
+def _module_name(file: str) -> str:
+    parts = file.removesuffix(".py").split("/")
+    return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+
+
+def _tail(expr: ast.expr) -> str:
+    target = expr.value if isinstance(expr, ast.Subscript) else expr
+    chain = dotted_chain(target)
+    return "" if chain is None else (chain[1] or [chain[0].id])[-1]
+
+
+def _base_origin(scope: Scope, expr: ast.expr, module: str, local: frozenset[str]) -> str | None:
+    target = expr.value if isinstance(expr, ast.Subscript) else expr
+    chain = dotted_chain(target)
+    if chain is None:
+        return None
+    base, attrs = chain
+    origin, _ = scope.find(base.id)
+    if origin is None and base.id in local:
+        origin = f"{module}.{base.id}"
+    return None if origin is None else ".".join([origin, *attrs])
+
+
+def _is_abstract(node: ast.ClassDef) -> bool:
+    if any(_tail(base) in _ABSTRACT_BASES for base in node.bases):
+        return True
+    if any(k.arg == "metaclass" and _tail(k.value) == "ABCMeta" for k in node.keywords):
+        return True
+    return any(
+        isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef)
+        and any(_tail(decorator) == "abstractmethod" for decorator in stmt.decorator_list)
+        for stmt in node.body
+    )
+
+
+def _class_facts(tree: ast.Module, scope: Scope, file: str) -> tuple[ClassFacts, ...]:
+    module = _module_name(file)
+    defined = [node for node in tree.body if isinstance(node, ast.ClassDef)]
+    local = frozenset(node.name for node in defined)
+    facts: list[ClassFacts] = []
+    for node in defined:
+        methods = frozenset(
+            stmt.name
+            for stmt in node.body
+            if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef)
+            and not (stmt.name.startswith("__") and stmt.name.endswith("__"))
+        )
+        bases = tuple(
+            origin
+            for base in node.bases
+            if (origin := _base_origin(scope, base, module, local)) is not None
+        )
+        facts.append(ClassFacts(module, node.name, methods, _is_abstract(node), bases, file))
+    return tuple(facts)
+
+
+# meiva:note
+# The class a dotted name refers to, wherever a chain of re-exports defines it. None when the
+# name is not a first-party class: an unknown module, a name the module does not define, or a
+# chain of re-exports longer than `hops`.
+def find_class(universe: Universe, dotted: str, hops: int = _REEXPORT_HOPS) -> ClassFacts | None:
+    if hops == 0 or not universe.is_first_party_name(dotted):
+        return None
+    owner, _, name = dotted.rpartition(".")
+    module = universe.resolve_module(owner) if owner else None
+    if module is None or module.file is None:
+        return None
+    read = module_bindings(universe.root, module.file)
+    for facts in read.classes:
+        if facts.name == name:
+            return facts
+    origin = dict(read.reexports).get(name)
+    return None if origin is None or origin == dotted else find_class(universe, origin, hops - 1)
+
+
+# meiva:note
+# The methods a class defines or inherits from first-party classes (dunders excluded).
+def overridable_methods(universe: Universe, facts: ClassFacts) -> frozenset[str]:
+    found = set(facts.methods)
+    pending = [(base, _REEXPORT_HOPS) for base in facts.bases]
+    while pending:
+        base, hops = pending.pop()
+        parent = find_class(universe, base)
+        if parent is not None and hops > 0:
+            found |= parent.methods
+            pending.extend((origin, hops - 1) for origin in parent.bases)
+    return frozenset(found)

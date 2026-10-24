@@ -604,15 +604,17 @@ met:
   with a function, scripting a mock with `.side_effect = ...`;
 - swapping a module with `sys.modules[...] = ...` or writing `os.environ` directly;
 - `monkeypatch.setattr(..., raising=False)`, which turns a renamed target into a silent
-  no-op ([patching](../../meizel/docs/checker/patching.meiva.okf.md) records it);
-- a subclass of production code that overrides one method, and an armed flag on a fake
-  that switches a fault on;
+  no-op (meizel records it as `patch-raising-false`);
+- a subclass of production code that overrides one method (meizel records it as
+  `test-subclass-override`), and an armed flag on a fake that switches a fault on;
 - `httpx.MockTransport(...)` where a listener on port 0 could serve the answer, a fixed
   `time.sleep(...)` that waits out a window `now` could set, and `inspect.getsource(...)`
   followed by a string match;
 - asserting how a mock was called (`assert_called_once_with`, `call_args`,
   `call_count`): see form 2 above.
 
+Both codes are recorded debt like a patch ([patching](../../meizel/docs/checker/patching.meiva.okf.md)):
+the existing sites stay until their component is converted, and a new one fails the check.
 A fault has two legitimate routes. A real resource makes it: revoke `INSERT` or `UPDATE`,
 a read-only transaction, a closed pool, a held lock, a trigger that raises, a renamed
 table, an invalid URL, a full or read-only directory, a killed child. For a fault no real
