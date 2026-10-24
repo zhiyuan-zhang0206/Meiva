@@ -3,6 +3,8 @@ from typing import Any, cast
 import pytest
 
 from agent.graph.prompt.conversation import user_reply_section
+from agent.graph.prompt.live import LiveSdk, SectionInputs
+from agent.graph.prompt.skill_selection import SkillView
 from agent.graph.prompt.system_prompt import build_system_prompt
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
@@ -14,13 +16,17 @@ def _slices(**changes: Any) -> AgentSlices:
     return AgentSlices.resolve(default_reader=defaults(**changes))
 
 
+def _inputs(slices: AgentSlices) -> SectionInputs:
+    return SectionInputs(slices, build_model_catalog(), LiveSdk(SkillView((), (), (), ()), (), ()))
+
+
 @pytest.mark.parametrize("style", ["off", "oriented", "concise", "silent"])
 def test_initial_human_response_is_present_without_plugins(style: str) -> None:
     slices = _slices(agent__agent_communication_style=style)
 
     prompt = build_system_prompt(EMPTY, slices, agent_id=1, catalog=build_model_catalog())
 
-    assert prompt.count(user_reply_section(slices)) == 1
+    assert prompt.count(user_reply_section(_inputs(slices))) == 1
     assert (
         "If you can answer directly, give the answer without calling "
         "`execute_code`; no separate acknowledgment is needed. Whenever your first "
@@ -50,7 +56,7 @@ def test_reply_routing_and_handoff_policy_survive_every_style(style: str) -> Non
     assert "when resuming unfinished human requests from a handoff" in prompt
     assert "further investigation should address a concrete remaining question" in prompt
     assert "rather than inventing additional ones" in prompt
-    assert "meiva.ui.notify" not in user_reply_section(slices)
+    assert "meiva.ui.notify" not in user_reply_section(_inputs(slices))
 
 
 @pytest.fixture(

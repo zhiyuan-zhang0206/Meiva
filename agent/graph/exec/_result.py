@@ -59,7 +59,7 @@ class StreamCap:
 # The framework lifecycle signals agent code can raise. The values are the class names the child
 # reports in its result envelope, so the closed enum is the only vocabulary the parent and the
 # dispatcher share and no module here imports the exception classes.
-class LifecycleKind(Enum):
+class ExecLifecycleKind(Enum):
     SYSTEM_HALT = "SystemHalt"
     TERMINATION = "AgentTermination"
     RESTART = "AgentRestart"
@@ -99,7 +99,7 @@ class ExecTimedOut:
 @dataclass(frozen=True)
 class ExecLifecycle:
     output: str
-    kind: LifecycleKind
+    kind: ExecLifecycleKind
     stream_cap: StreamCap | None = None
 
 
@@ -130,9 +130,9 @@ type ExecResult = ExecDone | ExecCancelled | ExecTimedOut | ExecLifecycle | Exec
 # meiva:note
 # The lifecycle kind a child reported by class name, or None for an unknown class so the
 # subprocess parent can surface a protocol crash.
-def lifecycle_kind_from_name(name: str) -> LifecycleKind | None:
+def lifecycle_kind_from_name(name: str) -> ExecLifecycleKind | None:
     try:
-        return LifecycleKind(name)
+        return ExecLifecycleKind(name)
     except ValueError:
         return None
 
@@ -148,14 +148,14 @@ def lifecycle_kind_from_name(name: str) -> LifecycleKind | None:
 # whether the agent-authored code ever started.
 def construct_exec_result(
     output: str,
-    outcome: LifecycleKind | BaseException | None,
+    outcome: ExecLifecycleKind | BaseException | None,
     *,
     cancelled: bool,
     timed_out: bool,
     stream_cap: StreamCap | None = None,
     code_reached: bool | None = None,
 ) -> ExecResult:
-    if isinstance(outcome, LifecycleKind):
+    if isinstance(outcome, ExecLifecycleKind):
         return ExecLifecycle(output=output, kind=outcome, stream_cap=stream_cap)
     if cancelled:
         return ExecCancelled(output=output, stream_cap=stream_cap)

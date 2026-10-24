@@ -5,6 +5,8 @@ from typing import Any
 
 import pytest
 from langchain_core.messages import HumanMessage
+from langgraph.checkpoint.memory import MemorySaver
+from psycopg_pool import AsyncConnectionPool
 
 from agent.impersonation_handoff import (
     deliver_handoff,
@@ -14,7 +16,12 @@ from agent.impersonation_handoff import (
     resume_note_pending,
     start_update,
 )
-from agent.tests.impersonation.lease_support import Cluster, fixed_clock, idle_graph
+from agent.tests.impersonation.lease_support import (
+    Cluster,
+    fixed_clock,
+    flush_fault_saver,
+    idle_graph,
+)
 from agent.tests.impersonation.lease_support import cluster as cluster
 from base.agents.impersonation.notes import HandoffNotes
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
@@ -37,18 +44,8 @@ def _session(number: int = 0) -> dict[str, Any]:
     }
 
 
-class _FlushFailsOnce:
-    def __init__(self) -> None:
-        self.failed = False
-
-    async def __call__(self, _thread_id: str) -> None:
-        if not self.failed:
-            self.failed = True
-            raise RuntimeError("Interrupted flush")
-
-
 async def test_first_takeover_explains_borrowed_identity_and_later_leases_do_not_repeat() -> None:
-    graph, config = await idle_graph(42)
+    graph, config = await idle_graph(42, MemorySaver())
     await ensure_start_marker(graph, _session(), notes=_notes())
     first = await graph.aget_state(config)
     assert first.values["impersonation_introduced"] is True
@@ -72,11 +69,17 @@ async def test_first_takeover_explains_borrowed_identity_and_later_leases_do_not
     assert sum(m.id == "impersonation-start:42:1" for m in messages) == 1
 
 
-async def test_crash_after_checkpoint_before_flush_does_not_repeat_explanation() -> None:
-    graph, config = await idle_graph(42)
-    vars(graph.checkpointer)["_meiva_nstep_flush"] = _FlushFailsOnce()
-    with pytest.raises(RuntimeError, match="Interrupted flush"):
+async def test_a_failed_flush_leaves_nothing_durable_and_the_retry_explains_once(
+    aops_pool: AsyncConnectionPool[Any],
+) -> None:
+    saver = await flush_fault_saver(aops_pool)
+    graph, config = await idle_graph(42, saver)
+    with (
+        saver.failing_writes(OSError("Interrupted flush")),
+        pytest.raises(OSError, match="Interrupted flush"),
+    ):
         await ensure_start_marker(graph, _session(), notes=_notes())
+    assert "impersonation_introduced" not in (await graph.aget_state(config)).values
     await ensure_start_marker(graph, _session(), notes=_notes())
     snapshot = await graph.aget_state(config)
     assert snapshot.values["impersonation_introduced"] is True
@@ -90,7 +93,7 @@ async def test_crash_after_checkpoint_before_flush_does_not_repeat_explanation()
 async def test_old_checkpoint_with_start_marker_gets_explanation_without_rewriting_history() -> (
     None
 ):
-    graph, config = await idle_graph(42)
+    graph, config = await idle_graph(42, MemorySaver())
     stamp = read_note_stamp(_notes())
     [marker] = start_update(_session(), introduced=True, stamp=stamp)["messages"]
     await graph.aupdate_state(
@@ -118,7 +121,7 @@ async def test_all_takeover_notes_stamp_their_real_creation_time(
     cluster.lease(owner, provider="claude", phase="released")
     lease = cluster.status(owner)
     assert lease is not None
-    graph, config = await idle_graph(owner.agent_id)
+    graph, config = await idle_graph(owner.agent_id, MemorySaver())
     await ensure_start_marker(graph, lease, notes=notes)
     await deliver_handoff(
         graph, cluster.database, cluster.event_bus, lease, owner, notes=notes, workspace=tmp_path
@@ -145,7 +148,7 @@ async def test_an_existing_handoff_receipt_keeps_its_original_note(
     cluster.lease(owner, provider="claude", phase="released")
     lease = cluster.status(owner)
     assert lease is not None
-    graph, config = await idle_graph(owner.agent_id)
+    graph, config = await idle_graph(owner.agent_id, MemorySaver())
     for _ in range(2):
         await deliver_handoff(
             graph,

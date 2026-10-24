@@ -12,6 +12,7 @@ share lives in ``goto.py``.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Coroutine
 from typing import Any
 
@@ -116,5 +117,5 @@ async def race_stream_vs_cancel(
         # LLMDone (frontend reload trigger). Not called on cancel path —
         # partial items wait for the next event reload; LLMDone would make
         # frontend pull state not yet committed, causing misalignment
-        handler.finish()
+        handler.finish(time.monotonic())
         return None
