@@ -248,6 +248,12 @@ def _our_chrome_holds_port(port: int, profile: Path, found: list[int]) -> int | 
     return None
 
 
+# meiva:note
+# The pid of this cluster's Chrome owning the LISTEN socket on `port`, if any.
+def our_chrome_holds_port(port: int, profile: Path) -> int | None:
+    return _our_chrome_holds_port(port, profile, find_cluster_chrome(profile))
+
+
 def probe_browser(port: int | None = None, profile: Path | None = None) -> DaemonProbe:
     """Probe the shared headed browser and verify the Chrome answering is ours,
     ALWAYS returning a verdict.

@@ -1,7 +1,7 @@
 exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py", "probe.py", "profile.py", "protocol.py", "session_restore.py", "shutdown_budget.py"]
 
 [uses]
-"daemon.py" = ["macos_readiness.py", "probe.py", "profile.py", "session_restore.py"]
+"daemon.py" = ["macos_readiness.py", "orphan.py", "probe.py", "profile.py", "session_restore.py"]
 "gateway_session.py" = ["mcp_upstream.py", "session.py"]
 "mcp_daemon.py" = ["gateway_session.py", "mcp_upstream.py", "page_lifecycle.py", "protocol.py", "session_restore.py", "tab_groups"]
 "mcp_socket_bridge.py" = ["protocol.py"]

@@ -88,13 +88,19 @@ def _data_plane(roles: frozenset[str], *, keep_infra: bool | None) -> DataPlane:
 
 
 # meiva:note
-# The units this stop leaves running, refusing any it cannot honour.
+# The root-supervised units this stop leaves running, refusing any it cannot honour.
+#
+# `meiva stop --keep-browser` keeps the detached Chrome process (by omitting
+# RecordBrowserSession, StopBrowser and ReapChrome) while stopping the `meiva-browser`
+# keeper unit with the rest of the root service tree so `meiva-root` itself stops and can
+# be replaced across updates. An in-place `meiva restart` sets `keep_browser_unit` so the
+# live root keeps the `browser` unit across its stop and start legs.
 def _preserved(choices: StopChoices, host: StopHost, plane: DataPlane) -> frozenset[str]:
     preserved = choices.preserve_sessions
-    if choices.keep_browser:
-        preserved |= {BROWSER_SESSION}
     if choices.keep_shell_sessions:
         preserved |= {host.pty_unit}
+    if choices.keep_browser_unit:
+        preserved |= {BROWSER_SESSION}
     roster = host.roster
     if roster is None:
         if not choices.force:

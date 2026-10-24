@@ -46,12 +46,14 @@ the operating choices below do not redefine either component.
   profile is deliberately left alone — it cannot be positively identified as ours,
   and the operator's own browser is the thing that must never be killed — so that
   one is still quit by hand.
-- **Browser lifetime**: restart preserves the running `meiva-browser` session; a
+- **Browser lifetime**: restart and `--keep-browser` stops preserve the detached
+  Chrome process while stopping the `meiva-browser` keeper unit so `meiva-root`
+  itself can stop and be replaced across updates; a
   cluster update (`cli.fleet_update down`) keeps or stops it as the operator
   chose with `--keep-browser|--stop-browser`, forwarded unchanged to each host's
   `meiva stop`; the fleet never infers it from the diff. `meiva stop` takes the
   same explicit `--keep-browser|--stop-browser` choice. The profile and its logins survive either choice. `meiva start`
-  reuses a retained session and relaunches a stopped one. Explicit force stop
+  adopts a running cluster Chrome and relaunches a stopped one. Explicit force stop
   and cluster destroy additionally sweep owned Chrome processes outside the
   recorded session tree (`services/desktop/browser/orphan.py`).
 - **Tabs survive a deliberate stop**: `meiva stop --stop-browser` records the

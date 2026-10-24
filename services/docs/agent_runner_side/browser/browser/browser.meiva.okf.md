@@ -13,7 +13,7 @@ A shared headed Chrome management service on agent-runner — a three-component 
 **Role affiliation**: agent-runner side (gateway does not run) — `ServiceSpec.capabilities=AGENT_RUNNER` in `services/supervision/roster/__init__.py`; the roster is derived by `services_for_capabilities` intersecting with the local `machine_role()`.
 
 ## Core Responsibilities
-- **Shared Chrome instance**: `daemon.py` launches a headed Chrome with a CDP remote-debugging port and a dedicated persistent profile. `os.execvp` replaces the supervised session process with Chrome, so the session owns its native PID.
+- **Shared Chrome instance**: `daemon.py` launches a headed Chrome in its own session (`start_new_session=True`) with a CDP remote-debugging port and a dedicated persistent profile, or adopts this cluster's already-running Chrome across a `meiva-root` restart (`--keep-browser`), keeping the `meiva-browser` unit alive while Chrome runs and exiting 0 on `SIGTERM` without terminating Chrome.
 - **Browser liveness uses session and CDP evidence**: the healthcheck requires the session to remain live and Chrome to answer on the bound CDP port. It only reports health and ownership. A `SingletonLock` handoff can leave an orphan Chrome after the session exits; explicit stop uses the profile-scoped orphan sweep.
 - **Shared MCP upstream**: `mcp_daemon.py` shares one `chrome-devtools-mcp` across agents. `gateway_session.py` logs in to the gateway, injects the opaque server session into Chrome over CDP, and refreshes it every six hours.
 - **MCP process composition**: [[services/docs/agent_runner_side/browser/browser/process-composition.meiva.okf.md]] owns the captured image, live readers and lazy logging database.
