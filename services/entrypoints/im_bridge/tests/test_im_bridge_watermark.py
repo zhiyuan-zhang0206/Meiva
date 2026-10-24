@@ -5,9 +5,10 @@ from psycopg_pool import ConnectionPool
 
 from services.entrypoints.im_bridge.cursor_store import CursorStore, PushWatermark
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
-from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
+from services.entrypoints.im_bridge.tests.support import owned_tasks
+from services.entrypoints.im_bridge.tests.test_im_bridge_core import CoreFactory
+from services.entrypoints.im_bridge.tests.test_im_bridge_core import make_core as make_core
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import candidate
-from services.entrypoints.im_bridge.tests.test_timeline_outbox import pool as pool
 
 
 @pytest.mark.parametrize(
@@ -57,15 +58,16 @@ def test_legacy_numbering_rollback_cannot_advance_without_an_intent(pool: Connec
     assert cursors.load_push() == {("telegram", "chat", 7): original}
 
 
-async def test_equal_stamp_blocks_keep_numeric_order_and_distinct_source_ordinals() -> None:
+async def test_equal_stamp_blocks_keep_numeric_order_and_distinct_source_ordinals(
+    make_core: CoreFactory,
+) -> None:
     async with owned_tasks() as _owned_tasks:
         from services.entrypoints.im_bridge.tests.test_im_bridge_core import (
             FakeGateway,
             FakePlainAdapter,
-            create_test_core,
         )
 
-        core = create_test_core(FakeGateway(), tasks=_owned_tasks)
+        core = make_core(FakeGateway(), tasks=_owned_tasks)
         state = core._get_or_create_state("telegram", "chat")
         state.current_agent_id = 7
         stamp = "2026-10-03T11:00:00Z"

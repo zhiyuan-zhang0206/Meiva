@@ -24,7 +24,7 @@ import pytest
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
 from services.entrypoints.im_bridge.config import FeishuCredentialsConfig
 from services.entrypoints.im_bridge.tests.slices import feishu_config
-from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
+from services.entrypoints.im_bridge.tests.support import owned_tasks
 from services.entrypoints.im_bridge.types import InboundMessage
 
 
@@ -52,8 +52,21 @@ class BootAdapter(FeishuAdapter):
         pass
 
 
-def _write_switch_state(tmp_path: Path, state: dict[str, int]) -> None:
-    path = tmp_path / "state" / "im_bridge" / "switch_state.json"
+# meiva:note
+# Records the owner send at the adapter's own `send` seam instead of reaching Feishu.
+class _OwnerSendAdapter(FeishuAdapter):
+    sent: list[tuple[str, str]]
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.sent = []
+
+    async def send(self, chat_id: str, text: str, **_: Any) -> None:
+        self.sent.append((chat_id, text))
+
+
+def _write_switch_state(state_dir: Path, state: dict[str, int]) -> None:
+    path = state_dir / "switch_state.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state), encoding="utf-8")
 
@@ -62,24 +75,24 @@ def _seed_events(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [r["extra"] for r in records if r["extra"].get("event") == "im_feishu_owner_seed_failed"]
 
 
-def _boot_adapter(config: FeishuCredentialsConfig, core: FakeCore | None = None) -> BootAdapter:
-    return BootAdapter(core or FakeCore(), config)
+def _boot_adapter(
+    config: FeishuCredentialsConfig, state_dir: Path, core: FakeCore | None = None
+) -> BootAdapter:
+    return BootAdapter(core or FakeCore(), config, state_dir=state_dir, proxy_configured=False)
 
 
 # -- boot path (start) ------------------------------------------------------
 
 
-async def test_start_seeds_owner_open_id_from_switch_state(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+async def test_start_seeds_owner_open_id_from_switch_state(tmp_path: Path, state_dir: Path) -> None:
     """The restart regression: with exactly one feishu chat recorded, boot
     restores the owner open id before the link goes live."""
     async with owned_tasks() as _owned_tasks:
-        monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-        _write_switch_state(tmp_path, {"feishu:ou_owner_1": 405, "telegram:12345": 405})
+        _write_switch_state(state_dir, {"feishu:ou_owner_1": 405, "telegram:12345": 405})
         core = FakeCore()
         adapter = _boot_adapter(
             feishu_config(feishu_app_id="cli_x", feishu_app_secret="secret_x"),  # noqa: S106
+            state_dir,
             core,
         )
 
@@ -89,15 +102,16 @@ async def test_start_seeds_owner_open_id_from_switch_state(
 
 
 async def test_start_without_credentials_does_not_seed_or_alert(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path, state_dir: Path
 ) -> None:
     """A disabled feishu link (no credentials) has no outbound leg to rescue:
     no seed, no alert — the alert exists for a live-but-blind leg."""
     async with owned_tasks() as _owned_tasks:
-        monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-        _write_switch_state(tmp_path, {"feishu:ou_owner_1": 405})
+        _write_switch_state(state_dir, {"feishu:ou_owner_1": 405})
         core = FakeCore()
-        adapter = _boot_adapter(feishu_config(feishu_app_id="", feishu_app_secret=""), core)
+        adapter = _boot_adapter(
+            feishu_config(feishu_app_id="", feishu_app_secret=""), state_dir, core
+        )
 
         await adapter.start(_owned_tasks)
 
@@ -107,35 +121,27 @@ async def test_start_without_credentials_does_not_seed_or_alert(
 # -- seed semantics ---------------------------------------------------------
 
 
-async def test_seed_lets_send_to_owner_reach_the_seeded_owner(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+async def test_seed_lets_send_to_owner_reach_the_seeded_owner(state_dir: Path) -> None:
     """Positive case: after the seed, send_to_owner resolves the owner instead
     of raising 'no known user chat' (send call stubbed at the seam)."""
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    _write_switch_state(tmp_path, {"feishu:ou_owner_1": 405})
-    adapter = FeishuAdapter(FakeCore(), feishu_config())
+    _write_switch_state(state_dir, {"feishu:ou_owner_1": 405})
+    adapter = _OwnerSendAdapter(
+        FakeCore(), feishu_config(), state_dir=state_dir, proxy_configured=False
+    )
     await adapter._seed_owner_from_switch_state()
 
-    sent: list[tuple[str, str]] = []
-
-    async def fake_send(chat_id: str, text: str, **_: Any) -> None:
-        sent.append((chat_id, text))
-
-    monkeypatch.setattr(adapter, "send", fake_send)
     await adapter.send_to_owner("hi")
 
-    assert sent == [("ou_owner_1", "hi")]
+    assert adapter.sent == [("ou_owner_1", "hi")]
 
 
-async def test_seed_never_overwrites_a_known_owner(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+async def test_seed_never_overwrites_a_known_owner(state_dir: Path) -> None:
     """First-writer: an owner already known (e.g. from an inbound message) is
     never replaced by the persisted state — the rule _register_sent_chat keeps."""
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    _write_switch_state(tmp_path, {"feishu:ou_state": 405})
-    adapter = FeishuAdapter(FakeCore(), feishu_config())
+    _write_switch_state(state_dir, {"feishu:ou_state": 405})
+    adapter = FeishuAdapter(
+        FakeCore(), feishu_config(), state_dir=state_dir, proxy_configured=False
+    )
     adapter._last_open_id = "ou_known"
 
     await adapter._seed_owner_from_switch_state()
@@ -149,17 +155,15 @@ async def test_seed_never_overwrites_a_known_owner(
     ids=["missing-file", "empty-state", "no-feishu-key"],
 )
 async def test_seed_without_a_source_emits_the_failure_event_and_stays_blind(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    state: dict[str, int] | None,
-    loguru_records: list[dict[str, Any]],
+    state: dict[str, int] | None, loguru_records: list[dict[str, Any]], state_dir: Path
 ) -> None:
     """No usable source (state missing / empty / no feishu chat) -> stay empty
     and emit the failure event, so the blind leg is observable."""
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     if state is not None:
-        _write_switch_state(tmp_path, state)
-    adapter = FeishuAdapter(FakeCore(), feishu_config())
+        _write_switch_state(state_dir, state)
+    adapter = FeishuAdapter(
+        FakeCore(), feishu_config(), state_dir=state_dir, proxy_configured=False
+    )
 
     await adapter._seed_owner_from_switch_state()
 
@@ -169,12 +173,13 @@ async def test_seed_without_a_source_emits_the_failure_event_and_stays_blind(
 
 
 async def test_seed_with_multiple_feishu_chats_emits_the_ambiguity_event(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: list[dict[str, Any]]
+    loguru_records: list[dict[str, Any]], state_dir: Path
 ) -> None:
     """Two recorded feishu chats are ambiguous: never guess one — emit instead."""
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    _write_switch_state(tmp_path, {"feishu:ou_a": 405, "feishu:ou_b": 405})
-    adapter = FeishuAdapter(FakeCore(), feishu_config())
+    _write_switch_state(state_dir, {"feishu:ou_a": 405, "feishu:ou_b": 405})
+    adapter = FeishuAdapter(
+        FakeCore(), feishu_config(), state_dir=state_dir, proxy_configured=False
+    )
 
     await adapter._seed_owner_from_switch_state()
 
@@ -184,14 +189,15 @@ async def test_seed_with_multiple_feishu_chats_emits_the_ambiguity_event(
 
 
 async def test_seed_with_invalid_state_fails_without_blind_fallback(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: list[dict[str, Any]]
+    loguru_records: list[dict[str, Any]], state_dir: Path
 ) -> None:
     """An existing invalid switch-state image fails startup."""
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    path = tmp_path / "state" / "im_bridge" / "switch_state.json"
+    path = state_dir / "switch_state.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("[1, 2, 3]", encoding="utf-8")
-    adapter = FeishuAdapter(FakeCore(), feishu_config())
+    adapter = FeishuAdapter(
+        FakeCore(), feishu_config(), state_dir=state_dir, proxy_configured=False
+    )
 
     with pytest.raises(ValueError):
         await adapter._seed_owner_from_switch_state()

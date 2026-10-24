@@ -80,7 +80,3 @@ class PollBinding(BaseModel):
 
 class IngressIdentityConflictError(ValueError):
     """A provider source already identifies another immutable message."""
-
-
-class StalePollBindingError(RuntimeError):
-    """This account generation no longer owns poll admission or checkpoint."""

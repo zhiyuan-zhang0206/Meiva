@@ -3,51 +3,116 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
+import json
 import logging
+import os
+import signal
+import socket
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from collections.abc import Iterator
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, cast
 
+import psycopg
 import pytest
+from psycopg_pool import ConnectionPool
 
-import services.entrypoints.im_bridge.core as im_bridge_core
-from base.cluster.machine.tests.gateway_stubs import (
-    daemon_acceptance_stub,
-    gateway_auth_headers_stub,
-)
-from base.config import ConfigBoot, get_field, settings
-from base.daemon.health import Liveness
+from base.cluster.machine import GatewayAccess, GatewayApiTokenMissing, gateway_auth_headers
+from base.config import ConfigBoot
+from base.daemon.health import Liveness, start_health_server
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
 from services.entrypoints.im_bridge import daemon
-from services.entrypoints.im_bridge.config import (
-    FeishuCredentialsConfig,
-    ImBridgeConfig,
-    TelegramCredentialsConfig,
+from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
+from services.entrypoints.im_bridge.adapters.run_plan import (
+    ADAPTER_NAMES,
+    exit_code,
+    plan_adapters,
 )
-from services.entrypoints.im_bridge.gateway_client import GatewayClient
-from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
+from services.entrypoints.im_bridge.adapters.telegram import TelegramAdapter
+from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter
+from services.entrypoints.im_bridge.tests.slices import im_bridge_config
+from services.entrypoints.im_bridge.tests.support import DurableAdapter, owned_tasks
+from services.entrypoints.im_bridge.tests.test_im_bridge_core import (
+    CoreFactory,
+    FakeGateway,
+)
+from services.entrypoints.im_bridge.tests.test_im_bridge_core import make_core as make_core
+from services.entrypoints.im_bridge.types import IMAdapter
+
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_TIMINGS = daemon.DaemonTimings(liveness_beat_s=0.02, notice_poll_s=0.05, outbound_round_s=0.05)
 
 
-class _FakeServer:
-    def close(self) -> None:
-        pass
-
-    async def wait_closed(self) -> None:
-        pass
+def _free_port() -> int:
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        return reservation.getsockname()[1]
 
 
-def test_liveness_loop_beats_periodically(monkeypatch: pytest.MonkeyPatch) -> None:
+def _get(port: int, path: str = "/healthz") -> tuple[int, dict[str, Any]] | None:
+    try:
+        # meiva:note
+        # a loopback URL built from the daemon's own health port.
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=2) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        return error.code, {}
+    except OSError:
+        return None
 
-    async def parked_outbound(_core: Any, _alerts: Any):
-        await asyncio.Event().wait()
 
-    monkeypatch.setattr(daemon, "timeline_outbound_loop", parked_outbound)
-    monkeypatch.setattr(daemon, "LIVENESS_BEAT_INTERVAL_S", 0.02)
+def _post(port: int, path: str, body: bytes = b"{}") -> int:
+    request = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=body, method="POST")
+    try:
+        # meiva:note
+        # a loopback URL built from the daemon's own health port.
+        with urllib.request.urlopen(request, timeout=2) as response:  # noqa: S310
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+async def _until(predicate: Any, what: str, timeout: float = 15.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if await asyncio.to_thread(predicate):
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"timed out waiting for {what}")
+
+
+@pytest.fixture
+def served_config(process_config: ConfigBoot) -> ConfigBoot:
+    process_config.set_field("im_bridge_health_port", _free_port())
+    process_config.set_field("im_disabled_adapters", list(ADAPTER_NAMES))
+    return process_config
+
+
+def _run(
+    config: ConfigBoot, database: Database, tmp_path: Path, **overrides: Any
+) -> asyncio.Task[None]:
+    return asyncio.create_task(
+        daemon.run(
+            process_config=config,
+            runtime=tmp_path / "run",
+            database=lambda: database,
+            image=LoadedCommit(Path(), None),
+            timings=_TIMINGS,
+            **overrides,
+        )
+    )
+
+
+def test_liveness_loop_beats_periodically() -> None:
     liveness = Liveness(timeout_s=0.2)
 
     async def scenario() -> None:
-        task = asyncio.create_task(daemon.liveness_loop(liveness))
+        task = asyncio.create_task(daemon.liveness_loop(liveness, interval_s=0.02))
         try:
             await asyncio.sleep(0.5)
             assert liveness.is_alive()
@@ -59,188 +124,212 @@ def test_liveness_loop_beats_periodically(monkeypatch: pytest.MonkeyPatch) -> No
     asyncio.run(scenario())
 
 
-def test_run_wires_the_liveness_task(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_run_serves_health_and_the_send_route_then_stops_cleanly(
+    served_config: ConfigBoot, database: Database, tmp_path: Path
+) -> None:
+    port = served_config.get_field("im_bridge_health_port")
+    task = _run(served_config, database, tmp_path)
+    try:
+        await _until(lambda: _get(port) is not None, "the health endpoint")
+        status, health = cast(tuple[int, dict[str, Any]], await asyncio.to_thread(_get, port))
+        assert status == 200 and health["name"] == "im_bridge"
+        assert (tmp_path / "run" / "im_bridge.pid").exists()
+        assert await asyncio.to_thread(_post, port, "/send") == 401, "the send route needs a bearer"
+        await asyncio.sleep(0.2)
+        assert (cast(tuple[int, dict[str, Any]], await asyncio.to_thread(_get, port)))[0] == 200
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    assert await asyncio.to_thread(_get, port) is None
+    assert not (tmp_path / "run" / "im_bridge.pid").exists()
+
+
+async def test_a_child_fault_fails_the_daemon_and_every_resource_is_cleaned_up(
+    served_config: ConfigBoot,
     database: Database,
-    *,
-    process_config: ConfigBoot,
+    db_conn: psycopg.Connection,
     tmp_path: Path,
 ) -> None:
-    captured: list[Liveness] = []
-
-    send_auth: list[frozenset[str] | None] = []
-
-    async def fake_start_health_server(
-        _name: str,
-        _port: int,
-        *,
-        liveness: Liveness | None = None,
-        auth_digests: frozenset[str] | None = None,
-        image: LoadedCommit,
-        **_kwargs: Any,
-    ) -> _FakeServer:
-        assert liveness is not None
-        assert image.sha is None
-        created_cores[-1].notice_bridge.initialize_poll.assert_called_once()
-        captured.append(liveness)
-        send_auth.append(auth_digests)
-        return _FakeServer()
-
-    monkeypatch.setattr(
-        daemon, "daemon_acceptance", daemon_acceptance_stub(frozenset({"digest-of-a-token"}))
-    )
-    monkeypatch.setattr(daemon, "start_health_server", fake_start_health_server)
-
-    created_cores: list[Any] = []
-
-    class _FakeCore:
-        def __init__(
-            self,
-            config: ImBridgeConfig,
-            gateway: Any,
-            db_pool: Any = None,
-            *,
-            tasks: asyncio.TaskGroup,
-        ) -> None:
-            self.config = config
-            self.gateway = gateway
-            self.db_pool = db_pool
-            self.outbound_store = IMOutboxStore(db_pool)
-            self.adapters: dict[str, Any] = {}
-            from unittest.mock import AsyncMock, MagicMock
-
-            self.outbound_worker = MagicMock()
-            self.notice_bridge = MagicMock()
-            self.notice_bridge.poll_once = AsyncMock()
-            created_cores.append(self)
-
-        async def stop(self) -> None:
-            pass
-
-        async def restore_subscriptions(self) -> None:
-            pass
-
-    monkeypatch.setattr(im_bridge_core, "IMBridgeCore", _FakeCore)
-
-    loaded_with: list[frozenset[str]] = []
-
-    def fake_load_adapters(_core: object, disabled: frozenset[str]) -> list[object]:
-        loaded_with.append(disabled)
-        return []
-
-    monkeypatch.setattr(daemon, "load_adapters", fake_load_adapters)
-
-    async def parked_outbound(_core: Any, _alerts: Any):
-        await asyncio.Event().wait()
-
-    monkeypatch.setattr(daemon, "timeline_outbound_loop", parked_outbound)
-    monkeypatch.setattr(daemon, "LIVENESS_BEAT_INTERVAL_S", 0.02)
-
-    async def scenario() -> None:
-        task = asyncio.create_task(
-            daemon.run(
-                process_config=process_config,
-                runtime=tmp_path / "run",
-                database=lambda: database,
-                image=LoadedCommit(Path(), None),
-            )
-        )
-        try:
-            await asyncio.sleep(0.5)
-            assert captured, "run() never started the health server"
-            assert captured[0].is_alive()
-            assert send_auth == [frozenset({"digest-of-a-token"})]
-            assert created_cores[0].config == daemon.im_bridge_config()
-            assert isinstance(created_cores[0].gateway, GatewayClient)
-            assert loaded_with == [frozenset(created_cores[0].config.im_disabled_adapters)]
-        finally:
+    port = served_config.get_field("im_bridge_health_port")
+    task = _run(served_config, database, tmp_path)
+    try:
+        await _until(lambda: _get(port) is not None, "the health endpoint")
+        db_conn.commit()
+        db_conn.execute("ALTER TABLE agent_notices RENAME TO agent_notices_hidden_by_test")
+        db_conn.commit()
+        with pytest.raises(ExceptionGroup) as caught:
+            await asyncio.wait_for(task, timeout=15)
+    finally:
+        db_conn.rollback()
+        db_conn.execute("ALTER TABLE agent_notices_hidden_by_test RENAME TO agent_notices")
+        db_conn.commit()
+        if not task.done():
             task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-
-    asyncio.run(scenario())
-
-
-def test_load_adapters_skips_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    imported: list[str] = []
-
-    def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
-        mod = name.rsplit(".", 1)[-1]
-        imported.append(mod)
-
-        class _FakeAdapter:
-            def __init__(self, core: Any, *config: Any) -> None:
-                pass
-
-        return type("mod", (), {"ADAPTER_CLASS": _FakeAdapter})
-
-    monkeypatch.setattr(daemon, "import_adapter", fake_import)
-
-    class _FakeCore:
-        def __init__(self) -> None:
-            self.registered: list[Any] = []
-
-        def register(self, adapter: Any) -> None:
-            self.registered.append(adapter)
-
-    core = _FakeCore()
-    loaded = daemon.load_adapters(core, frozenset({"weixin", "feishu"}))
-    assert imported == ["telegram"]
-    assert len(loaded) == 1
-    assert len(core.registered) == 1
+    assert caught.group_contains(psycopg.errors.UndefinedTable)
+    assert await asyncio.to_thread(_get, port) is None
+    assert not (tmp_path / "run" / "im_bridge.pid").exists()
 
 
-def test_load_adapters_hands_each_adapter_its_slice(monkeypatch: pytest.MonkeyPatch) -> None:
-    received: dict[str, tuple[Any, ...]] = {}
+async def test_a_startup_fault_still_removes_the_pidfile_and_closes_the_pool(
+    served_config: ConfigBoot, database: Database, tmp_path: Path
+) -> None:
+    served_config.set_field("cluster_secret", "")
+    with pytest.raises(ExceptionGroup) as caught:
+        await asyncio.wait_for(_run(served_config, database, tmp_path), timeout=15)
+    assert caught.group_contains(GatewayApiTokenMissing)
+    assert not (tmp_path / "run" / "im_bridge.pid").exists()
 
-    def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
-        mod = name.rsplit(".", 1)[-1]
 
-        class _FakeAdapter:
-            def __init__(self, core: Any, *config: Any) -> None:
-                received[mod] = config
+class _StopFault(DurableAdapter):
+    channel = "stopfault"
 
-        return type("mod", (), {"ADAPTER_CLASS": _FakeAdapter})
+    def __init__(self, fault: BaseException | None) -> None:
+        super().__init__(core=None)
+        self.fault = fault
+        self.stopped = False
 
-    monkeypatch.setattr(daemon, "import_adapter", fake_import)
+    async def start(self, tasks: asyncio.TaskGroup) -> None:
+        return None
 
-    class _FakeCore:
-        def register(self, adapter: Any) -> None:
-            pass
+    async def stop(self) -> None:
+        self.stopped = True
+        if self.fault is not None:
+            raise self.fault
 
-    daemon.load_adapters(_FakeCore(), frozenset())
-    assert [type(c) for c in received["telegram"]] == [TelegramCredentialsConfig]
-    assert received["weixin"] == ()
-    assert [type(c) for c in received["feishu"]] == [FeishuCredentialsConfig]
+    async def send(
+        self,
+        chat_id: str,
+        text: str,
+        *,
+        buttons: list[tuple[str, str]] | None = None,
+        markdown: bool = False,
+    ) -> None:
+        del chat_id, text, buttons, markdown
+
+
+async def test_cleanup_attempts_every_resource_and_reports_an_unknown_adapter_fault(
+    process_config: ConfigBoot, make_core: CoreFactory, pool: ConnectionPool, tmp_path: Path
+) -> None:
+    fault = RuntimeError("unknown adapter stop fault")
+    broken, healthy = _StopFault(fault), _StopFault(None)
+    health = await start_health_server(
+        "im_bridge", 0, image=LoadedCommit(Path(), None), liveness=Liveness(5.0)
+    )
+    port = health.sockets[0].getsockname()[1]
+    pidfile = tmp_path / "run" / "im_bridge.pid"
+    pidfile.parent.mkdir(parents=True, exist_ok=True)
+    pidfile.write_text("1\n")
+    async with owned_tasks() as tasks:
+        core = make_core(FakeGateway(), tasks=tasks)
+        adapters: list[IMAdapter] = [broken, healthy]
+        errors = await asyncio.wait_for(
+            daemon.stop_resources(
+                core, adapters, health, pool, config=process_config, runtime=tmp_path / "run"
+            ),
+            timeout=5,
+        )
+    assert errors == [fault]
+    assert broken.stopped and healthy.stopped
+    assert await asyncio.to_thread(_get, port) is None
+    assert pool.closed
+    assert not pidfile.exists()
+
+
+def test_the_plan_loads_the_enabled_adapters_in_order() -> None:
+    plan = plan_adapters(frozenset({"weixin", "feishu"}))
+    assert plan.load == ("telegram",)
+    assert plan.disabled == ("weixin", "feishu")
+    assert plan_adapters(frozenset()).load == ADAPTER_NAMES
+    assert plan_adapters(frozenset({"retired-channel"})).load == ADAPTER_NAMES
 
 
 @pytest.mark.parametrize(
-    "build",
-    [daemon.im_bridge_config, daemon.telegram_config, daemon.feishu_config],
+    ("crashed", "interrupted", "drain_failures", "code"),
+    [
+        (False, False, 0, 0),
+        (False, True, 0, 0),
+        (False, True, 2, 1),
+        (True, False, 0, 1),
+        (True, True, 0, 1),
+    ],
 )
-def test_a_built_slice_carries_the_live_value_of_every_field(
-    build: Any, monkeypatch: pytest.MonkeyPatch
+def test_the_exit_status_follows_how_the_run_ended(
+    crashed: bool, interrupted: bool, drain_failures: int, code: int
 ) -> None:
-    monkeypatch.setattr(settings.services, "im_disabled_adapters", ["weixin"])
-    monkeypatch.setattr(settings.services, "im_send_retry_delays", [0.5, 1.5])
-    monkeypatch.setattr(settings.telegram, "telegram_owner_id", 4242)
-    monkeypatch.setattr(settings.feishu, "feishu_app_id", "cli_x")
-    config = build()
+    assert (
+        exit_code(crashed=crashed, interrupted=interrupted, drain_failures=drain_failures) == code
+    )
+
+
+def test_load_adapters_builds_only_the_enabled_ones(
+    process_config: ConfigBoot, make_core: CoreFactory, state_dir: Path
+) -> None:
+    core = make_core(FakeGateway())
+    inputs = daemon.adapter_inputs(process_config, state_dir=state_dir)
+    loaded = daemon.load_adapters(core, plan_adapters(frozenset({"weixin", "feishu"})), inputs)
+    assert [type(adapter) for adapter in loaded] == [TelegramAdapter]
+    assert core.adapters["telegram"] is loaded[0]
+
+
+def test_load_adapters_hands_each_adapter_its_slice(
+    process_config: ConfigBoot, make_core: CoreFactory, state_dir: Path
+) -> None:
+    core = make_core(FakeGateway())
+    inputs = dataclasses.replace(
+        daemon.adapter_inputs(process_config, state_dir=state_dir), proxy_configured=True
+    )
+    telegram, weixin, feishu = daemon.load_adapters(core, plan_adapters(frozenset()), inputs)
+    assert isinstance(telegram, TelegramAdapter) and telegram._config == inputs.telegram
+    assert isinstance(weixin, WeixinAdapter) and weixin._state_dir == state_dir
+    assert isinstance(feishu, FeishuAdapter) and feishu._config == inputs.feishu
+    assert feishu._proxy_configured is True and feishu._state_dir == state_dir
+
+
+def test_invalid_adapter_configuration_is_not_skipped(
+    process_config: ConfigBoot, make_core: CoreFactory, state_dir: Path
+) -> None:
+    state_dir.mkdir(parents=True)
+    (state_dir / "weixin_account.json").write_text(
+        json.dumps({"account_id": "a", "bot_token": "t", "base_url": "http://plain.example"})
+    )
+    core = make_core(FakeGateway())
+    inputs = daemon.adapter_inputs(process_config, state_dir=state_dir)
+    with pytest.raises(ValueError, match="qualified HTTPS namespace"):
+        daemon.load_adapters(core, plan_adapters(frozenset({"telegram", "feishu"})), inputs)
+
+
+@pytest.mark.parametrize("build", ["im_bridge_config", "telegram_config", "feishu_config"])
+def test_a_built_slice_carries_the_live_value_of_every_field(
+    build: str, process_config: ConfigBoot
+) -> None:
+    process_config.set_field("im_disabled_adapters", ["weixin"])
+    process_config.set_field("im_send_retry_delays", [0.5, 1.5])
+    process_config.set_field("telegram_owner_id", 4242)
+    process_config.set_field("feishu_app_id", "cli_x")
+    config = getattr(daemon, build)(process_config)
     for field in dataclasses.fields(config):
-        flat: Any = get_field(field.name)
+        flat: Any = process_config.get_field(field.name)
         expected = tuple(cast(list[Any], flat)) if isinstance(flat, list) else flat
         assert getattr(config, field.name) == expected
 
 
-def test_the_gateway_client_gets_the_gateway_url_and_bearer_from_the_root(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        daemon, "gateway_auth_headers", gateway_auth_headers_stub({"Authorization": "Bearer t"})
+def test_the_gateway_client_gets_the_gateway_url_and_bearer_from_the_root() -> None:
+    # meiva:note
+    # A test credential for a fake account; the S106 suppression is the harness's.
+    access = GatewayAccess(
+        gateway_url="http://gateway.example:8000",
+        cluster_secret="secret-for-the-test",  # noqa: S106
+        remote_plane=True,
+        machine_token=None,
+        launcher_profile=None,
+        gateway_home=False,
     )
-    client = daemon.gateway_client(daemon.im_bridge_config())
-    assert client._base == settings.gateway.gateway_url.rstrip("/")
-    assert client._headers() == {"Authorization": "Bearer t"}
+    client = daemon.gateway_client(
+        im_bridge_config(), gateway_url="http://gateway.example:8000/", access=access
+    )
+    assert client._base == "http://gateway.example:8000"
+    assert client._headers() == gateway_auth_headers(access)
 
 
 def test_httpx_info_logs_gated(caplog: pytest.LogCaptureFixture) -> None:
@@ -269,181 +358,76 @@ def test_httpx_info_logs_gated(caplog: pytest.LogCaptureFixture) -> None:
         httpx_logger.setLevel(previous_level)
 
 
-@pytest.mark.parametrize("cleanup_owner", [None, "core", "adapter"])
-@pytest.mark.parametrize("fault", [RuntimeError("poll bug"), KeyError("missing config")])
-async def test_child_fault_fails_daemon_and_drains_before_resource_cleanup(
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
-    fault: Exception,
-    cleanup_owner: str | None,
-    *,
-    process_config: ConfigBoot,
-    tmp_path: Path,
-) -> None:
-    from unittest.mock import AsyncMock, MagicMock
-
-    cleanup_fault = RuntimeError("unknown cleanup fault")
-    events: list[str] = []
-    sibling_started = asyncio.Event()
-
-    def close_pool() -> None:
-        assert (tmp_path / "run" / "im_bridge.pid").exists()
-        events.append("pool_closed")
-
-    pool = MagicMock()
-    pool.close.side_effect = close_pool
-
-    def make_pool(_self: Database) -> MagicMock:
-        return pool
-
-    monkeypatch.setattr(daemon.Database, "pool", make_pool)
-
-    class Core:
-        def __init__(self, config: Any, gateway: Any, db_pool: Any, *, tasks: asyncio.TaskGroup):
-            self.adapters: dict[str, Any] = {}
-            self.outbound_store = IMOutboxStore(db_pool)
-            self.outbound_worker = MagicMock()
-            self.notice_bridge = MagicMock()
-            self.notice_bridge.poll_once = AsyncMock()
-            self.tasks = tasks
-
-        async def stop(self) -> None:
-            events.append("core_stopped")
-            if cleanup_owner == "core":
-                raise cleanup_fault
-
-        async def restore_subscriptions(self) -> None:
-            pass
-
-    class Adapter:
-        def begin_shutdown(self) -> None:
-            pass
-
-        async def start(self, tasks: asyncio.TaskGroup) -> None:
-            async def sibling() -> None:
-                try:
-                    sibling_started.set()
-                    await asyncio.Event().wait()
-                finally:
-                    events.append("sibling_drained")
-
-            async def broken() -> None:
-                await asyncio.wait_for(sibling_started.wait(), timeout=2)
-                raise fault
-
-            tasks.create_task(sibling())
-            tasks.create_task(broken())
-
-        async def stop(self) -> None:
-            events.append("adapter_stopped")
-            if cleanup_owner == "adapter":
-                raise cleanup_fault
-
-    monkeypatch.setattr(im_bridge_core, "IMBridgeCore", Core)
-
-    def load_adapters(_core: Any, _disabled: frozenset[str]) -> list[Adapter]:
-        return [Adapter()]
-
-    monkeypatch.setattr(daemon, "load_adapters", load_adapters)
-    monkeypatch.setattr(daemon, "start_health_server", AsyncMock(return_value=_FakeServer()))
-
-    async def stop_health(server: Any) -> None:
-        events.append("health_stopped")
-
-    monkeypatch.setattr(daemon, "stop_health_server", stop_health)
-    with pytest.raises(ExceptionGroup) as caught:
-        await asyncio.wait_for(
-            daemon.run(
-                process_config=process_config,
-                runtime=tmp_path / "run",
-                database=lambda: database,
-                image=LoadedCommit(Path(), None),
-            ),
-            timeout=3,
-        )
-    if cleanup_owner is None:
-        assert caught.value.exceptions == (fault,)
-    else:
-        assert isinstance(caught.value.exceptions[0], ExceptionGroup)
-        body = cast(ExceptionGroup[Exception], caught.value.exceptions[0])
-        assert body.exceptions == (fault,)
-        assert caught.value.exceptions[1] is cleanup_fault
-    assert events == [
-        "sibling_drained",
-        "core_stopped",
-        "adapter_stopped",
-        "health_stopped",
-        "pool_closed",
-    ]
-    assert not (tmp_path / "run" / "im_bridge.pid").exists()
-
-
-def test_invalid_adapter_configuration_is_not_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
-    class BrokenAdapter:
-        def __init__(self, core: Any, config: Any) -> None:
-            raise ValueError("invalid adapter configuration")
-
-    def import_adapter(_name: str) -> SimpleNamespace:
-        return SimpleNamespace(ADAPTER_CLASS=BrokenAdapter)
-
-    monkeypatch.setattr(daemon, "import_adapter", import_adapter)
-    with pytest.raises(ValueError, match="invalid adapter configuration"):
-        daemon.load_adapters(object(), frozenset({"weixin", "feishu"}))
-
-
-async def test_cleanup_attempts_every_resource_and_reports_unknown_adapter_fault(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    process_config: ConfigBoot,
-    tmp_path: Path,
-) -> None:
-    from unittest.mock import AsyncMock, MagicMock
-
-    fault = RuntimeError("unknown adapter stop fault")
-    core = SimpleNamespace(stop=AsyncMock())
-    broken = SimpleNamespace(stop=AsyncMock(side_effect=fault))
-    healthy = SimpleNamespace(stop=AsyncMock())
-    health = object()
-    stop_health = AsyncMock()
-    pool = SimpleNamespace(close=MagicMock())
-    pidfile = tmp_path / "run" / "im_bridge.pid"
-    pidfile.parent.mkdir(parents=True, exist_ok=True)
-    pidfile.write_text("1\n")
-    monkeypatch.setattr(daemon, "stop_health_server", stop_health)
-    errors = await asyncio.wait_for(
-        daemon.stop_resources(
-            core, [broken, healthy], health, pool, config=process_config, runtime=tmp_path / "run"
+@pytest.fixture
+def entry_home(tmp_path: Path, db_url: str, redis_url: str) -> Iterator[Path]:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".env").write_text(
+        "\n".join(
+            [
+                f"MEIVA_DB_URL={db_url}",
+                f"MEIVA_REDIS_URL={redis_url}",
+                "MEIVA_MACHINE_NAME=im-entry-test",
+                "MEIVA_CLUSTER_SECRET=im-entry-test-secret",
+                "MEIVA_MACHINE_SERVE_GATEWAY=true",
+                "MEIVA_TIMEZONE=UTC",
+                "MEIVA_TELEMETRY_OTLP_ENABLED=false",
+                f"MEIVA_IM_DISABLED_ADAPTERS={','.join(ADAPTER_NAMES)}",
+                "",
+            ]
         ),
-        timeout=2,
+        encoding="utf-8",
     )
-    assert errors == [fault]
-    core.stop.assert_awaited_once()
-    broken.stop.assert_awaited_once()
-    healthy.stop.assert_awaited_once()
-    stop_health.assert_awaited_once_with(health)
-    pool.close.assert_called_once()
-    assert not pidfile.exists()
+    yield home
 
 
-def test_cleanup_group_with_cancellation_uses_the_bounded_failure_exit(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from unittest.mock import MagicMock
+def _start_entry(home: Path, port: int) -> subprocess.Popen[str]:
+    env = {**os.environ, "MEIVA_HOME": str(home), "MEIVA_IM_BRIDGE_HEALTH_PORT": str(port)}
+    # meiva:note
+    # the interpreter running the tests and the module under test, no shell.
+    return subprocess.Popen(
+        [sys.executable, "-m", "services.entrypoints.im_bridge.daemon"],
+        cwd=_REPO_ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
 
-    fault = RuntimeError("cleanup failed during cancellation")
-    group = BaseExceptionGroup("body and cleanup", [asyncio.CancelledError(), fault])
 
-    def run(coroutine: Any) -> None:
-        coroutine.close()
-        raise group
+def test_the_entry_serves_and_a_stop_signal_ends_it_with_status_zero(entry_home: Path) -> None:
+    port = _free_port()
+    child = _start_entry(entry_home, port)
+    try:
+        deadline = time.monotonic() + 90
+        served = None
+        while served is None and time.monotonic() < deadline:
+            if child.poll() is not None:
+                pytest.fail(f"the entry exited before serving:\n{child.communicate()[0][-3000:]}")
+            served = _get(port)
+            time.sleep(0.1)
+        assert served is not None and served[1]["name"] == "im_bridge"
+        child.send_signal(signal.SIGTERM)
+        output, _ = child.communicate(timeout=60)
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.communicate()
+    assert child.returncode == 0, output
+    assert _get(port) is None
+    assert not (entry_home / "run" / "im_bridge.pid").exists()
 
-    runner = SimpleNamespace(run=run)
-    exit_process = MagicMock()
-    monkeypatch.setattr(daemon.asyncio, "Runner", lambda: runner)
-    monkeypatch.setattr(daemon, "init_gateway_process", MagicMock())
-    monkeypatch.setattr(daemon, "build_pipeline", MagicMock(return_value=object()))
-    monkeypatch.setattr(daemon, "install_graceful_shutdown", MagicMock())
-    monkeypatch.setattr(daemon, "gate_httpx_info_logs", lambda: None)
-    daemon.main(exit_process=exit_process)
-    exit_process.assert_called_once_with(1)
-    assert group.exceptions[1] is fault
+
+def test_the_entry_exits_with_status_one_when_the_run_crashes(entry_home: Path) -> None:
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen()
+        child = _start_entry(entry_home, taken.getsockname()[1])
+        try:
+            output, _ = child.communicate(timeout=90)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.communicate()
+    assert child.returncode == 1, output
+    assert "daemon crashed" in output

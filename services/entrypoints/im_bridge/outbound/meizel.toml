@@ -1,9 +1,12 @@
-exports = ["health.py", "store.py", "types.py", "worker.py"]
+exports = ["claim_fence.py", "health.py", "push_plan.py", "retry.py", "store.py", "types.py", "worker.py"]
 
 [uses]
 "health.py" = ["store.py"]
-"store.py" = ["types.py"]
-"worker.py" = ["store.py", "types.py"]
+"retry.py" = ["push_plan.py"]
+"store.py" = ["claim_fence.py", "types.py"]
+"worker.py" = ["retry.py", "store.py", "types.py"]
 
 [purity]
 "__init__.py" = "strict"
+"claim_fence.py" = "strict"
+"push_plan.py" = "strict"

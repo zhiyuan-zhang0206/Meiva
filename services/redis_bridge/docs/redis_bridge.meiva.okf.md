@@ -65,8 +65,14 @@ best-effort budget; this does not claim the blocked lookup was cancelled. A look
 that returns after stop closes its backend without starting pumps.
 
 The installed module remains pure stdlib and compatible with macOS's Python 3.9.
-Component tests execute a copied source with `/usr/bin/python3`, including idle
-listener polling, byte forwarding, and SIGTERM cleanup. The existing stdlib pump
+Component tests execute the relay file alone under `/usr/bin/python3`, including idle
+listener polling, byte forwarding, and SIGTERM cleanup. The lifecycle tests serve real
+listeners on port 0 and break them for real (closing the listening socket, occupying the
+bind address); the rebind pause is the service's `rebind_delay_s` value (the production
+default doubles to a 30-second cap, a test passes a short one), and `bound_address()`
+reports the port the operating system chose. The one fault no real resource produces
+deterministically is a stalled hostname lookup, so the tests stall the dial through a
+backend address object whose unpacking waits at a gate. The existing stdlib pump
 model remains local to this relay: `socketserver` does not retain daemon request
 threads for joining, while its non-daemon close can wait forever. If connection
 fan-out or repeated lifecycle defects make this model costly, replace it with a
@@ -83,8 +89,8 @@ failure is infrastructure state.
 
 - `services/redis_bridge/relay.py:RelayService` — admission, connection ownership,
   finite stop, and original worker error collection
-- `services/redis_bridge/relay.py:serve_forever()` — listener lifecycle and
-  per-connection forwarding with cleanup on caller exit
+- `services/redis_bridge/relay.py:RelayService.serve_forever()` — listener lifecycle and
+  per-connection forwarding; `run_service()` stops and collects the connections on every exit
 - `services/supervision/roster/__init__.py` (`redis-bridge` unit) and `base/cluster/dataplane/redis_bridge.py` —
   rostered command and listen address
 - `cli/commands/converge/redis_bridge.py:retire_launchd_redis_bridge()` — removes the

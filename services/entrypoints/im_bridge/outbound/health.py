@@ -18,7 +18,6 @@ no delivered push on record reports ``PUSH_HEALTH_NEVER_SENT``.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 from base.log import logger
@@ -56,16 +55,7 @@ async def emit_push_health_once(store: IMOutboxStore, config: ImBridgeConfig) ->
 
 # meiva:note
 # Sample every configured leg each ``im_push_health_interval_seconds``.
-#
-# ``sleep`` is the loop's scheduling boundary: production uses
-# ``asyncio.sleep``; tests pass a fake that ends the loop.
-async def push_health_loop(
-    store: IMOutboxStore,
-    config: ImBridgeConfig,
-    *,
-    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-) -> None:
-
+async def push_health_loop(store: IMOutboxStore, config: ImBridgeConfig) -> None:
     while True:
         await emit_push_health_once(store, config)
-        await sleep(config.im_push_health_interval_seconds)
+        await asyncio.sleep(config.im_push_health_interval_seconds)

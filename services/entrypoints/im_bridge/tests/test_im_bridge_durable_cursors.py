@@ -11,36 +11,18 @@ history (a later snapshot carrying the whole window).
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
+from pathlib import Path
 from typing import Any, cast
 
-import pytest
 from psycopg_pool import ConnectionPool
 
-from base.config import settings
 from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config
-from services.entrypoints.im_bridge.tests.task_scope import owned_tasks
-from services.entrypoints.im_bridge.types import ChatState, IMAdapter, InboundMessage
+from services.entrypoints.im_bridge.tests.support import DurableAdapter, owned_tasks
+from services.entrypoints.im_bridge.types import ChatState, InboundMessage
 
 _KEY = ("telegram", "12345")
-
-
-@pytest.fixture(autouse=True)
-def _own_meiva_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    """The switch state file lives under MEIVA_HOME: keep it per test."""
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-
-
-@pytest.fixture
-def pool(db_url: str) -> Iterator[ConnectionPool[Any]]:
-    """The daemon's shape: one pool on the cluster DB, shared across "restarts"."""
-    p = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2, open=True)
-    try:
-        yield p
-    finally:
-        p.close()
 
 
 def _item(item_id: str, text: str, kind: str = "agent_chat") -> dict[str, Any]:
@@ -75,7 +57,7 @@ class _Gateway:
         yield None  # pragma: no cover - unreachable
 
 
-class _Adapter(IMAdapter):
+class _Adapter(DurableAdapter):
     channel = "telegram"
 
     def __init__(self) -> None:
@@ -102,17 +84,17 @@ class _Adapter(IMAdapter):
 
 def _core(
     gateway: _Gateway,
-    pool: ConnectionPool[Any] | None = None,
+    pool: ConnectionPool,
+    state_dir: Path,
     *,
     tasks: asyncio.TaskGroup | None = None,
 ) -> tuple[IMBridgeCore, _Adapter]:
-    from services.entrypoints.im_bridge.tests import test_im_bridge_core
-
     core = IMBridgeCore(
         im_bridge_config(),
         cast(GatewayClient, gateway),
-        db_pool=pool or test_im_bridge_core.TEST_POOL,
+        db_pool=pool,
         tasks=tasks if tasks is not None else asyncio.TaskGroup(),
+        state_dir=state_dir,
     )
     adapter = _Adapter()
     core.register(adapter)
@@ -126,18 +108,23 @@ def _bound_state(core: IMBridgeCore) -> ChatState:
 
 
 async def test_watermark_survives_restart_so_a_snapshot_pushes_only_what_is_new(
-    pool: ConnectionPool,
+    pool: ConnectionPool, state_dir: Path
 ) -> None:
     async def scenario() -> None:
         async with owned_tasks() as _owned_tasks:
-            core, adapter = _core(_Gateway([_item("1.0", "old")]), pool, tasks=_owned_tasks)
+            core, adapter = _core(
+                _Gateway([_item("1.0", "old")]), pool, state_dir, tasks=_owned_tasks
+            )
             state = _bound_state(core)
             await core._push_snapshot(_KEY, state, {"items": []})
             await core.outbound_worker.run_once()
             assert adapter.sent == ["[Meiva #405] old"]
 
             core2, adapter2 = _core(
-                _Gateway([_item("1.0", "old"), _item("2.0", "new")]), pool, tasks=_owned_tasks
+                _Gateway([_item("1.0", "old"), _item("2.0", "new")]),
+                pool,
+                state_dir,
+                tasks=_owned_tasks,
             )  # daemon restart
             await core2.restore_subscriptions()
             state2 = _bound_state(core2)
@@ -151,11 +138,11 @@ async def test_watermark_survives_restart_so_a_snapshot_pushes_only_what_is_new(
 
 
 async def test_restore_pushes_replies_that_arrived_while_the_bridge_was_down(
-    pool: ConnectionPool,
+    pool: ConnectionPool, state_dir: Path
 ) -> None:
     async def scenario() -> None:
         async with owned_tasks() as _owned_tasks:
-            core, _ = _core(_Gateway([_item("1.0", "seen")]), pool, tasks=_owned_tasks)
+            core, _ = _core(_Gateway([_item("1.0", "seen")]), pool, state_dir, tasks=_owned_tasks)
             state = _bound_state(core)
             core._persist_switch(state)
             await core._push_snapshot(_KEY, state, {"items": []})
@@ -165,7 +152,7 @@ async def test_restore_pushes_replies_that_arrived_while_the_bridge_was_down(
             gateway2 = _Gateway(
                 [_item("1.0", "seen"), _item("2.0", "missed one"), _item("3.0", "missed two")]
             )
-            core2, adapter2 = _core(gateway2, pool, tasks=_owned_tasks)
+            core2, adapter2 = _core(gateway2, pool, state_dir, tasks=_owned_tasks)
             await core2.restore_subscriptions()
             await asyncio.sleep(0.05)
             await core2.outbound_worker.run_once()
@@ -178,13 +165,15 @@ async def test_restore_pushes_replies_that_arrived_while_the_bridge_was_down(
     await scenario()
 
 
-async def test_restore_without_a_saved_watermark_pushes_nothing(pool: ConnectionPool[Any]) -> None:
+async def test_restore_without_a_saved_watermark_pushes_nothing(
+    pool: ConnectionPool, state_dir: Path
+) -> None:
     """A chat that was never pushed to has no position to resume from: the
     catch-up must not dump the timeline window on it."""
 
     async def scenario() -> None:
         async with owned_tasks() as _owned_tasks:
-            core, _ = _core(_Gateway(), pool, tasks=_owned_tasks)
+            core, _ = _core(_Gateway(), pool, state_dir, tasks=_owned_tasks)
             state = _bound_state(core)
             core._persist_switch(state)
 
@@ -193,7 +182,7 @@ async def test_restore_without_a_saved_watermark_pushes_nothing(pool: Connection
             with write_transaction(pool) as conn:
                 conn.execute("INSERT INTO im_bridge_cursors(channel,chat_id) VALUES (%s,%s)", _KEY)
             gateway2 = _Gateway([_item("1.0", "history")])
-            core2, adapter2 = _core(gateway2, pool, tasks=_owned_tasks)
+            core2, adapter2 = _core(gateway2, pool, state_dir, tasks=_owned_tasks)
             await core2.restore_subscriptions()
             await asyncio.sleep(0.05)
 
@@ -206,14 +195,14 @@ async def test_restore_without_a_saved_watermark_pushes_nothing(pool: Connection
     await scenario()
 
 
-async def test_idempotency_key_reaches_the_gateway() -> None:
+async def test_idempotency_key_reaches_the_gateway(pool: ConnectionPool, state_dir: Path) -> None:
     """The adapter's platform-stable key is the gateway delivery key, so a
     message the bridge re-reads after a restart cannot become a second inbound."""
 
     async def scenario() -> None:
         async with owned_tasks() as _owned_tasks:
             gateway = _Gateway()
-            core, _ = _core(gateway, tasks=_owned_tasks)
+            core, _ = _core(gateway, pool, state_dir, tasks=_owned_tasks)
             _bound_state(core)
             await core.handle_inbound(
                 InboundMessage(
