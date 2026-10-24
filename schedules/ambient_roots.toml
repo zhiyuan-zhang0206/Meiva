@@ -1,2 +1,0 @@
-# Direct Python execution owns construction; runner-hosted templates borrow its inputs.
-db = ["jobs/entry.py"]

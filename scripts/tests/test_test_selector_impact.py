@@ -250,3 +250,33 @@ def test_base_archive_cannot_silently_omit_dependency_inputs(tmp_path: Path) -> 
     _git(root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base")
     with pytest.raises(RuntimeError, match=r"Base archive omitted tracked inputs.*base/leaf\.py"):
         test_selector.select_tests(["base/leaf.py"], repo_root=root, base_ref="HEAD")
+
+
+@pytest.mark.parametrize(
+    "legacy",
+    [
+        '[ambient-state]\ndb-modules = ["base.db"]\ndb-primitives = ["connect"]\n'
+        'db-handles = ["base.db:Database"]\nbus-handles = ["base.bus:EventBus"]\n'
+        'endpoint-handles = ["base.endpoints:ServiceEndpoints"]\n',
+        "[ambient-state]\nunknown = []\n",
+        "[ambient-state]\ndb-handles = [3]\n",
+    ],
+)
+def test_base_policy_uses_the_owner_snapshot_decoder(tmp_path: Path, legacy: str) -> None:
+    from meizel.graph.model import MeizelError
+
+    root = _repo(tmp_path)
+    _write(root, "base/leaf.py")
+    _write(root, "tests/consumer/test_old.py", "from base import leaf\n")
+    _write(root, "meizel.policy.toml", legacy)
+    _git(root, "init", "-q")
+    _git(root, "add", ".")
+    _git(root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base")
+    _write(root, "tests/consumer/test_old.py", "def test_old(): pass\n")
+    _write(root, "meizel.policy.toml")
+    if "unknown" in legacy or "[3]" in legacy:
+        with pytest.raises(MeizelError, match="cannot read the manifests"):
+            test_selector.select_tests(["base/leaf.py"], repo_root=root, base_ref="HEAD")
+    else:
+        _assert_selected(root, "base/leaf.py", "tests/consumer/test_old.py", base_ref="HEAD")
+    assert (root / "meizel.policy.toml").read_text() == ""

@@ -10,3 +10,11 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 "runs_export.py" = ["export_process.py", "runs_api.py"]
 "tests" = ["accounting.py", "commands.py", "diagnose.py", "export_process.py", "job_rerun.py", "monitor.py", "owner_operations.py", "runs_api.py", "runs_export.py", "status.py", "trunk_api.py"]
 "watch_pr.py" = ["status.py"]
+
+[roots]
+"commands.py" = { kinds = ["environ"], why = "TRUNK_API_TOKEN optionally adds read-only queue evidence to diagnosis; it is not deployment configuration" }
+
+"export_process.py" = { kinds = ["settings"], why = "Tool entry composes its process resources from the launch configuration" }
+
+[debt.ambient-read]
+"export_process.py#db base.db.Database.from_settings" = 1

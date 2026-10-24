@@ -9,3 +9,6 @@ exports = ["app.py", "config.py", "daemon.py", "run_timeline"]
 [purity]
 "__init__.py" = "strict"
 "config.py" = "strict"
+
+[roots]
+"daemon.py" = ["settings"]

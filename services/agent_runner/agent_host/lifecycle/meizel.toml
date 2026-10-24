@@ -7,3 +7,6 @@ exports = ["cleanup_failures.py", "configuration.py", "graceful_exit.py", "insta
 "__init__.py" = "strict"
 "cleanup_failures.py" = "strict"
 "lease_controls.py" = "strict"
+
+[roots]
+"configuration.py" = { kinds = ["settings"], why = "Agent host process bootstrap constructs configuration and process home" }

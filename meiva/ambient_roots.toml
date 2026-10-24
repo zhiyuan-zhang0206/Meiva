@@ -1,7 +1,0 @@
-# The only modules here that may build the `db` handle from the live settings; the rest takes it
-# from them.
-db = ["sdk_surface/settings.py"]
-
-# The only modules here that may build the `bus` handle from the live settings; the rest takes it
-# from them.
-bus = ["sdk_surface/settings.py"]

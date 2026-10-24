@@ -24,20 +24,23 @@ import tomllib
 from collections import Counter
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
+from meizel.allowances import RETIRED_AMBIENT_SECTIONS, Policy
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.debt import total
 from meizel.contracts.debt_edit import prune as prune_debt
 from meizel.contracts.debt_edit import record
 from meizel.contracts.debt_report import Baselines, changed_under, read_baselines
 from meizel.contracts.declare import declare
-from meizel.contracts.manifest import load_manifests, manifest_path
-from meizel.contracts.manifest_text import set_purity
-from meizel.contracts.sync import prune
-from meizel.graph.model import Code, MeizelError
-from meizel.graph.universe import load_universe
+from meizel.contracts.manifest import Manifest, Root, load_manifests, manifest_path
+from meizel.contracts.manifest_text import set_scope
+from meizel.contracts.sync import prepare_policy_snapshot, prune
+from meizel.graph.model import AmbientKind, Code, MeizelError
+from meizel.graph.universe import Universe, load_universe, parent_of
+from meizel.language.scan import invalidate_policy_caches
 
 __all__ = ["RuleDiff", "purity_changed", "rule_diff"]
 
@@ -225,32 +228,178 @@ def purity_changed(root: Path, ref: str) -> bool:
     return False
 
 
-def _sync_purity_scope(root: Path, ref: str, base_root: Path) -> None:
+# meiva:note
+# Historical comparison migrates only the base's own registry facts. A head root permission
+# never enters this map: adding or widening one remains a real manifest change and debt decrease.
+def _legacy_sources(universe: Universe, policy: Policy) -> dict[str, set[AmbientKind]]:
+    sources: dict[str, set[AmbientKind]] = {}
+    sections = {
+        "config-modules": AmbientKind.SETTINGS,
+        "db-modules": AmbientKind.DB,
+        "db-handles": AmbientKind.DB,
+        "bus-handles": AmbientKind.BUS,
+        "endpoint-handles": AmbientKind.ENDPOINTS,
+    }
+    for section, kind in sections.items():
+        for name in policy.named.get(("ambient-state", section), ()):
+            module = universe.resolve_module(name.partition(":")[0])
+            if module is not None and module.file is not None:
+                sources.setdefault(module.file, set()).add(kind)
+    return sources
+
+
+def _historical_root_modules(
+    path: str, name: str, value: object
+) -> tuple[AmbientKind, tuple[str, ...]]:
+    try:
+        kind = AmbientKind(name)
+    except ValueError as error:
+        raise MeizelError(f"{path}: unknown historical root kind {name!r}") from error
+    held = {AmbientKind.SETTINGS, AmbientKind.DB, AmbientKind.BUS, AmbientKind.ENDPOINTS}
+    if kind not in held:
+        raise MeizelError(f"{path}: unknown historical root kind {name!r}")
+    if (
+        not isinstance(value, list)
+        or not all(isinstance(item, str) for item in cast("list[object]", value))
+        or (not value and kind is AmbientKind.SETTINGS)
+    ):
+        raise MeizelError(f"{path}: {name} must be a list of modules")
+    return kind, tuple(cast("list[str]", value))
+
+
+def _legacy_roots(
+    universe: Universe, policy: Policy, registries: dict[str, str]
+) -> tuple[dict[str, set[AmbientKind]], dict[str, str]]:
+    roots: dict[str, set[AmbientKind]] = {}
+    reasons = policy.reasons("no-os-environ", "files")
+    for path in reasons:
+        if path in universe.files:
+            roots.setdefault(path, set()).add(AmbientKind.ENVIRON)
+    for path, text in sorted(registries.items()):
+        try:
+            document = tomllib.loads(text)
+        except tomllib.TOMLDecodeError as error:
+            raise MeizelError(f"{path}: invalid historical root registry: {error}") from error
+        for name, value in document.items():
+            kind, modules = _historical_root_modules(path, name, value)
+            for item in modules:
+                target = f"{parent_of(path)}/{item}".lstrip("/")
+                if target in universe.files:
+                    roots.setdefault(target, set()).add(kind)
+    return roots, reasons
+
+
+def _merge_kinds(
+    directory: str,
+    declared: dict[str, tuple[AmbientKind, ...]],
+    additions: dict[str, set[AmbientKind]],
+) -> dict[str, tuple[AmbientKind, ...]]:
+    merged = {name: set(kinds) for name, kinds in declared.items()}
+    for path, kinds in additions.items():
+        if parent_of(path) == directory:
+            merged.setdefault(Path(path).name, set()).update(kinds)
+    return {name: tuple(sorted(kinds)) for name, kinds in merged.items()}
+
+
+def _ambient_manifest(
+    manifest: Manifest,
+    sources: dict[str, set[AmbientKind]],
+    roots: dict[str, set[AmbientKind]],
+    reasons: dict[str, str],
+) -> Manifest:
+    allowed = _merge_kinds(
+        manifest.directory, {n: r.kinds for n, r in manifest.roots.items()}, roots
+    )
+    permissions = {
+        name: Root(
+            kinds,
+            manifest.roots.get(name, Root(())).why
+            or reasons.get(f"{manifest.directory}/{name}".lstrip("/"), ""),
+        )
+        for name, kinds in allowed.items()
+    }
+    return replace(
+        manifest, state=_merge_kinds(manifest.directory, manifest.state, sources), roots=permissions
+    )
+
+
+def _ambient_snapshot(
+    universe: Universe, policy: Policy, manifests: dict[str, Manifest], registries: dict[str, str]
+) -> dict[str, Manifest]:
+    if not any(("ambient-state", key) in policy.named for key in RETIRED_AMBIENT_SECTIONS):
+        return manifests
+    prepared = dict(manifests)
+    sources = _legacy_sources(universe, policy)
+    roots, reasons = _legacy_roots(universe, policy, registries)
+    directories = {parent_of(path) for path in sources.keys() | roots.keys()}
+    for directory in sorted(directories):
+        manifest = manifests.get(directory, Manifest(directory))
+        prepared[directory] = _ambient_manifest(manifest, sources, roots, reasons)
+    return prepared
+
+
+def _sync_rule_files(root: Path, ref: str, base_root: Path) -> set[str]:
+    copied: set[str] = set()
     for rel in changed_under(root, ref, [":(glob)meizel/**", "meizel.policy.toml"]):
         src = root / rel
         dst = base_root / rel
         if src.is_file():
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(src, dst)
+            if Path(rel).name == "meizel.toml":
+                copied.add(rel)
         elif dst.is_file():
             dst.unlink()
-    _stage(base_root)
-    tree_manifests, _ = load_manifests(load_universe(root))
-    base_universe = load_universe(base_root)
-    known = base_universe.files | base_universe.dirs
-    for directory, manifest in sorted(tree_manifests.items()):
-        if manifest.purity_default is None and not manifest.purity:
-            continue
-        if directory and directory not in base_universe.dirs:
-            continue
+    return copied
+
+
+def _scope_text(
+    text: str, manifest: Manifest | None, baseline: Manifest, known: frozenset[str]
+) -> str:
+    if manifest is not None and (manifest.purity_default is not None or manifest.purity):
         children = {
             k: v
             for k, v in manifest.purity.items()
-            if (f"{directory}/{k}" if directory else k) in known
+            if (f"{manifest.directory}/{k}" if manifest.directory else k) in known
         }
+        levels = (
+            {".": manifest.purity_default} if manifest.purity_default is not None else {}
+        ) | children
+        text = set_scope(text, "purity", levels, {})
+    text = set_scope(text, "state", baseline.state, {})
+    return set_scope(
+        text,
+        "roots",
+        {n: r.kinds for n, r in baseline.roots.items()},
+        {n: r.why for n, r in baseline.roots.items()},
+    )
+
+
+# meiva:note
+# Rule code and purity scope use the head. Ambient permissions stay the base's own prepared
+# facts, including when a checker manifest is copied with the rule code. All scope edits use
+# this existing manifest effect loop rather than a second migration writer.
+def _sync_purity_scope(
+    root: Path, ref: str, base_root: Path, original: dict[str, Manifest]
+) -> None:
+    tree_manifests, _ = load_manifests(load_universe(root))
+    copied = _sync_rule_files(root, ref, base_root)
+    invalidate_policy_caches()
+    _stage(base_root)
+    base_universe = load_universe(base_root)
+    known = base_universe.files | base_universe.dirs
+    for directory in sorted(tree_manifests.keys() | original.keys()):
+        manifest = tree_manifests.get(directory)
+        baseline = original.get(directory, Manifest(directory))
+        purity = manifest is not None and (manifest.purity_default is not None or manifest.purity)
+        ambient = bool(baseline.state or baseline.roots or manifest_path(directory) in copied)
+        if not purity and not ambient:
+            continue
+        if directory and directory not in base_universe.dirs:
+            continue
         target = base_root / manifest_path(directory)
         old_text = target.read_text(encoding="utf-8") if target.is_file() else ""
-        new_text = set_purity(old_text, manifest.purity_default, children)
+        new_text = _scope_text(old_text, manifest, baseline, known)
         if new_text != old_text:
             target.write_text(new_text, encoding="utf-8")
     _stage(base_root)
@@ -259,7 +408,16 @@ def _sync_purity_scope(root: Path, ref: str, base_root: Path) -> None:
 def rule_diff(root: Path, ref: str, base: Counter[str], jobs: int | None = None) -> RuleDiff:
     """Compare the tree at `root` with `ref`, given the per-code debt the base records (`base`)."""
     with _checkout(root, ref) as checkout:
+        historical = prepare_policy_snapshot(checkout)
         _refuse_unreadable(analyze(checkout, jobs=jobs), ref)
-        _sync_purity_scope(root, ref, checkout)
+        universe = load_universe(checkout)
+        manifests, _ = load_manifests(universe)
+        registries = {
+            path: _base_text(checkout, "HEAD", path)
+            for path in universe.files
+            if Path(path).name == "ambient_roots.toml"
+        }
+        baseline = _ambient_snapshot(universe, historical, manifests, registries)
+        _sync_purity_scope(root, ref, checkout, baseline)
         found = regenerated(checkout, ref, jobs)
     return RuleDiff(base, found, read_baselines(load_universe(root)), ref)

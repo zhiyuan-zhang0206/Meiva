@@ -13,3 +13,6 @@ exports = ["daemon.py", "shells.py"]
 "config.py" = "strict"
 "owner_text.py" = "strict"
 "shell_plan.py" = "strict"
+
+[roots]
+"daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }

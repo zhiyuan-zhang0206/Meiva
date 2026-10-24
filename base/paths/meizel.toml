@@ -3,3 +3,6 @@ exports = ["home.py", "private_dir.py", "tests"]
 [uses]
 "__init__.py" = ["home.py", "private_dir.py"]
 "tests" = ["__init__.py", "home.py", "private_dir.py"]
+
+[roots]
+"home.py" = { kinds = ["environ"], why = "resolve_meiva_home reads MEIVA_HOME: the home is the input that locates the .env Settings is built from, so it is read before (and below) Settings; moved here from dotenv_boot unchanged" }

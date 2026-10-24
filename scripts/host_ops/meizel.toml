@@ -6,3 +6,9 @@ exports = ["check_worktree_remove.py", "onboarding"]
 
 [external]
 "update_schedule_script.py" = "compiles a user-written schedule script before replacing the stored copy"
+
+[roots]
+"guard_editable_venv.py" = { kinds = ["environ"], why = "dependency-free pre-uv preflight must inspect inherited VIRTUAL_ENV before a project environment can be trusted or Settings can import" }
+
+[debt.ambient-read]
+"update_schedule_script.py#db base.db.Database.from_settings" = 1

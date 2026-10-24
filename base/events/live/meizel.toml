@@ -11,3 +11,11 @@ exports = ["announce.py", "bus.py", "coalescer.py", "projection.py", "publisher.
 
 [purity]
 "__init__.py" = "strict"
+
+[state]
+"__init__.py" = ["bus"]
+"bus.py" = ["bus"]
+
+[debt.ambient-read]
+"bus.py#settings base.config.settings" = 1
+"redis_listener.py#settings base.config.settings" = 1

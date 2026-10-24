@@ -12,3 +12,6 @@ exports = ["default_config.py", "inspector.py", "metrics.py", "plugin.py", "task
 "_task_publication.py" = "strict"
 "__init__.py" = "strict"
 "_task_requests.py" = "strict"
+
+[debt.ambient-read]
+"task_registry.py#bus base.events.live.bus.EventBus.from_settings" = 2

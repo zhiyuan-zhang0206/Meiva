@@ -1,3 +1,0 @@
-# This package takes the `db` and `bus` handles and builds neither.
-db = []
-bus = []

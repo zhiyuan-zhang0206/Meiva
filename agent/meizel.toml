@@ -18,3 +18,6 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 "__init__.py" = "strict"
 "nodes.py" = "strict"
 "state_channels.py" = "strict"
+
+[roots]
+"process_boot.py" = { kinds = ["environ"], why = "boot sets os.environ[\"MEIVA_AGENT_ID\"] so child processes inherit the agent identity; the env forward must run before child spawn and cannot route through Settings (the same forward agent/loop.py previously owned)" }

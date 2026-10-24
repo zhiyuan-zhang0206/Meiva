@@ -14,3 +14,6 @@ exports = ["agent_traceback.py", "child.py", "protocol.py"]
 "agent_traceback.py" = "strict"
 "delivery_plan.py" = "strict"
 "result_kind.py" = "strict"
+
+[roots]
+"child.py" = { kinds = ["environ", "settings"], why = "the exec child reads its per-launch protocol env (MEIVA_EXEC_REQUEST_FILE / MEIVA_EXEC_RESULT_FILE, one-shot spawn handoff) and pops the re-emitted per-agent overlay maps before child spawn — the same child-env handoff class as agent/loop.py's pop; Isolated agent execution process boots configuration before constructing its context" }

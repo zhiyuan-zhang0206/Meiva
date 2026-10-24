@@ -18,3 +18,6 @@ exports = ["agents", "alerts", "app.py", "cluster", "events", "http", "mcp_serve
 
 [purity]
 "__init__.py" = "strict"
+
+[roots]
+"app.py" = { kinds = ["settings"], why = "Gateway process and cold schema entry compose their configuration here" }

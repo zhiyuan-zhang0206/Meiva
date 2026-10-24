@@ -14,6 +14,16 @@
 [purity]
 "agent_status_guard.py" = "strict"
 
+[roots]
+"adversarial-eval-weekly-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its scheduler identity before composing the weekly batch loop" }
+"c9-daily-report-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its report recipient and scheduler identity before constructing C9Report" }
+"debt-sweep-daily-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its worker label, report recipient and scheduler identity before constructing the debt-sweep job" }
+"dev-ci-metrics-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its report recipient and scheduler identity before constructing the CI metrics job" }
+"memory-steward-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its scheduler identity before composing the memory maintenance loop" }
+"model-update-tracker-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its subprocess environment, report recipient and scheduler identity before constructing ModelTracker" }
+"self-evolution-daily-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its report recipient and scheduler identity before constructing DailyScan" }
+"self-evolution-weekly-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its event API environment and scheduler identity before composing the weekly job" }
+
 [debt.restricted-python]
 "model-update-tracker-schedule.py#python subprocess that runs something other than a literal repository file" = 1
 "self-evolution-daily-schedule.py#python subprocess that runs something other than a literal repository file" = 1

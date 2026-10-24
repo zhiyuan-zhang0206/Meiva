@@ -1,2 +1,0 @@
-# Operator commands share one explicit database constructor.
-db = ["database/__init__.py"]

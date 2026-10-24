@@ -11,3 +11,6 @@ exports = ["adversarial_batch.py", "adversarial_scenario.py", "adversarial_worke
 "model_tracker.py" = ["agent_directory.py"]
 "self_evolution_scan.py" = ["agent_directory.py"]
 "self_evolution_weekly.py" = ["agent_directory.py", "loop.py"]
+
+[roots]
+"entry.py" = { kinds = ["settings"], why = "Schedule process entry boots configuration before assembling its runtime" }

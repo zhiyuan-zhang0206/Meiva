@@ -24,6 +24,7 @@ from typing import cast
 from meizel.graph.model import Code
 
 __all__ = [
+    "AMBIENT_CODES",
     "CYCLE_EDGE",
     "DEBTABLE",
     "PATCH_CODES",
@@ -69,7 +70,10 @@ PURITY_CODES = (
     Code.WIDE_PARAMS,
     Code.DEEP_ATTR_CHAIN,
 )
-_FILE_CODES = frozenset({Code.RESTRICTED, *PATCH_CODES, *PURITY_CODES})
+# meiva:note
+# The code of an ambient read: the key of an entry is `file#kind target`.
+AMBIENT_CODES = (Code.AMBIENT_READ,)
+_FILE_CODES = frozenset({Code.RESTRICTED, *PATCH_CODES, *PURITY_CODES, *AMBIENT_CODES})
 DEBTABLE = _EDGE_CODES | _FILE_CODES
 TABLE_KEY = "debt"
 

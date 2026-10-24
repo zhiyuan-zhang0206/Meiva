@@ -80,3 +80,22 @@ def test_no_rule_code_holds_an_exemption_of_its_own() -> None:
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
     }
     assert {name: literals[name] for name in exempt & literals.keys()} == {}
+
+
+@pytest.mark.parametrize("section", sorted(allowances.RETIRED_AMBIENT_SECTIONS))
+def test_only_the_snapshot_decoder_accepts_each_retired_names_list(section: str) -> None:
+    text = f'[ambient-state]\n{section} = ["base.db", "base.db:Database"]\n'
+    assert allowances.parse(text)[1]
+    policy, problems = allowances.parse_snapshot(text)
+    assert problems == []
+    assert policy.named[("ambient-state", section)] == ("base.db", "base.db:Database")
+
+
+@pytest.mark.parametrize("value", ["3", '"base.db"', '["base.db", 3]', '[""]', '{x="why"}'])
+def test_snapshot_decoder_preserves_retired_shape_validation(value: str) -> None:
+    assert allowances.parse_snapshot(f"[ambient-state]\ndb-handles = {value}\n")[1]
+
+
+@pytest.mark.parametrize("text", ["[unknown]\n", "[ambient-state]\nunknown = []\n", "["])
+def test_snapshot_decoder_rejects_every_other_unknown_or_malformed_input(text: str) -> None:
+    assert allowances.parse_snapshot(text)[1]

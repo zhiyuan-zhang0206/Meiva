@@ -18,3 +18,6 @@ exports = ["delivery.py", "event_signals.py", "history.py", "host_transport.py",
 
 [purity]
 "status.py" = "strict"
+
+[roots]
+"host_transport.py" = { kinds = ["environ"], why = "CODEX_HOME is provider routing context, not cluster configuration; the shared transport preserves the CLI socket resolution contract" }

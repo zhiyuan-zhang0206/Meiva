@@ -9,3 +9,6 @@ exports = ["daemon.py", "labeler.py", "tests"]
 "__init__.py" = "strict"
 "config.py" = "strict"
 "label_rules.py" = "strict"
+
+[roots]
+"daemon.py" = ["settings"]

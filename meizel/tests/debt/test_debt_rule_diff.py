@@ -181,3 +181,166 @@ def test_comparison_preserves_the_working_tree_and_removes_its_checkout(
         ["git", "-C", str(root), "worktree", "list", "--porcelain"], text=True
     )
     assert worktrees.count("worktree ") == 1
+
+
+LEGACY_POLICY = """
+[ambient-state]
+config-modules = ["base.config"]
+config-readers = ["settings"]
+db-modules = ["base.db"]
+db-primitives = ["connect"]
+db-handles = ["base.db:Database"]
+bus-handles = ["base.events:EventBus"]
+endpoint-handles = ["base.endpoints:ServiceEndpoints"]
+[no-os-environ.files]
+"app/env.py" = "the process environment boundary"
+"""
+AMBIENT_POLICY = """
+[ambient]
+settings = ["settings"]
+db = ["connect()", "Database.from_settings()"]
+bus = ["EventBus.from_settings()"]
+endpoints = ["ServiceEndpoints.from_settings()"]
+"""
+
+
+def ambient_base(make_repo: RepoFactory, policy: str = LEGACY_POLICY) -> Path:
+    return base_repo(
+        make_repo,
+        {
+            "meizel.policy.toml": policy,
+            "meizel.toml": '[roles]\napplication = ["app", "base", "lib"]\ntooling = ["rules"]\n',
+            "base/__init__.py": "",
+            "base/config.py": "settings = None\n",
+            "base/db.py": "def connect(): ...\nclass Database: ...\n",
+            "base/events.py": "class EventBus: ...\n",
+            "base/endpoints.py": "class ServiceEndpoints: ...\n",
+            "app/x.py": "from base.db import connect\nx = connect()\n",
+            "app/bootstrap.py": "from base.db import connect\nx = connect()\n",
+            "app/env.py": "import os\nfrom base.config import settings\nx = os.environ['X']\n",
+            "app/ambient_roots.toml": 'db = ["bootstrap.py"]\nsettings = ["env.py"]\n',
+        },
+    )
+
+
+def ambient_rule_change(root: Path) -> None:
+    rule_change(root)
+    write(
+        root,
+        {
+            "meizel.policy.toml": AMBIENT_POLICY,
+            "base/meizel.toml": '[state]\n"config.py" = ["settings"]\n"db.py" = ["db"]\n'
+            '"events.py" = ["bus"]\n"endpoints.py" = ["endpoints"]\n',
+            "app/meizel.toml": '[roots]\n"bootstrap.py" = ["db"]\n'
+            '"env.py" = { kinds = ["environ", "settings"], why = "the process environment boundary" }\n',
+        },
+    )
+
+
+@pytest.mark.parametrize("added", [False, True])
+def test_retired_schema_comparison_counts_old_reads_but_rejects_new_reads(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str], added: bool
+) -> None:
+    root = ambient_base(make_repo)
+    ambient_rule_change(root)
+    if added:
+        write(root, {"app/x.py": "from base.db import connect\nx = connect()\ny = connect()\n"})
+    record(root)
+    capsys.readouterr()
+    assert diff(root) == (1 if added else 0)
+    out = capsys.readouterr().out
+    row = next(line.split() for line in out.splitlines() if line.startswith("ambient-read"))
+    assert row[1:] == ["0", "1", "2" if added else "1", "+1", "+1" if added else "+0"]
+    if added:
+        assert "2 recorded, 1 found" in out
+
+
+def test_new_root_permission_is_not_copied_into_the_historical_baseline(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = ambient_base(make_repo)
+    ambient_rule_change(root)
+    path = root / "app/meizel.toml"
+    write(root, {"app/meizel.toml": path.read_text() + '"x.py" = ["db"]\n'})
+    record(root)
+    capsys.readouterr()
+    assert diff(root) == 0
+    row = next(
+        line.split()
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("ambient-read")
+    )
+    assert row[1:] == ["0", "1", "0", "+1", "-1"]
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [
+        LEGACY_POLICY + "\n[unknown]\n",
+        LEGACY_POLICY.replace('db-handles = ["base.db:Database"]', "db-handles = [3]"),
+    ],
+)
+def test_retired_schema_never_bypasses_the_unreadable_policy_gate(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str], policy: str
+) -> None:
+    root = ambient_base(make_repo, policy)
+    ambient_rule_change(root)
+    assert diff(root) == 2
+    assert "cannot read the manifests" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("registry", ["unknown = []\n", "db = [3]\n", "settings = []\n"])
+def test_malformed_legacy_root_registry_still_stops_comparison(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str], registry: str
+) -> None:
+    root = ambient_base(make_repo)
+    write(root, {"app/ambient_roots.toml": registry})
+    commit(root)
+    ambient_rule_change(root)
+    assert diff(root) == 2
+    error = capsys.readouterr().err
+    assert "historical root" in error or "list of modules" in error
+
+
+@pytest.mark.parametrize(
+    ("source", "old_policy", "new_policy"),
+    [
+        (
+            {"app/x.py": "import app\napp.after()\n"},
+            '[purity]\nimpure-calls = ["app.before"]\n',
+            '[purity]\nimpure-calls = ["app.after"]\n',
+        ),
+        (
+            {"app/x.py": "", "app/view.ts": "export const value = afterCall();\n"},
+            '[typescript]\nscopes = ["app"]\nimpure-calls = ["beforeCall"]\n',
+            '[typescript]\nscopes = ["app"]\nimpure-calls = ["afterCall"]\n',
+        ),
+    ],
+)
+def test_rule_comparison_refreshes_policy_after_validating_the_old_snapshot(
+    make_repo: RepoFactory,
+    capsys: pytest.CaptureFixture[str],
+    source: dict[str, str],
+    old_policy: str,
+    new_policy: str,
+) -> None:
+    root = base_repo(
+        make_repo,
+        {
+            **source,
+            "app/__init__.py": "def before(): ...\ndef after(): ...\n",
+            "app/meizel.toml": 'purity = "strict-to-be"\n',
+            "meizel.policy.toml": old_policy,
+        },
+    )
+    rule_change(root)
+    write(root, {"meizel.policy.toml": new_policy})
+    record(root)
+    capsys.readouterr()
+    assert diff(root) == 0
+    row = next(
+        line.split()
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("impure-call")
+    )
+    assert row[1:] == ["0", "1", "1", "+1", "+0"]

@@ -6,15 +6,7 @@ from pathlib import Path
 from meizel import allowances, lint_common
 from meizel.roles import packages
 from meizel.state.ambient_state import allowlist as allow
-from meizel.state.ambient_state import (
-    bundle,
-    busrule,
-    dbhandle,
-    endpointrule,
-    scan,
-    sliced,
-)
-from meizel.state.ambient_state.roots import ROOTS_FILE
+from meizel.state.ambient_state import bundle, scan
 
 SECTION = "ambient_state"
 # The rule module path used by integration-test repository fixtures.
@@ -47,11 +39,7 @@ _FIXES: dict[str, str] = {
     scan.SINGLETON: f"a zero-argument cache is a hidden singleton — {_STATE_FIX}; a memoized pure derivation is listed under [ambient-state.sites] with a reason",
     scan.CACHE: "a memoized function is state unless it is pure — a pure derivation is listed under [ambient-state.sites] in meizel.policy.toml with a reason",
     scan.CALL: "a call that runs at import (a registry fill or side effect) — register from a composition root, not at import",
-    dbhandle.AMBIENT_DB: f"an ambient database dial in a package that holds a database handle — {dbhandle.FIX}",
-    busrule.AMBIENT_BUS: f"the event bus built outside a root — {busrule.FIX}",
-    endpointrule.AMBIENT_ENDPOINT: f"the endpoint table built outside a root — {endpointrule.FIX}",
     bundle.BUNDLE_LEAK: f"a root bundle named outside its composition root — {bundle.FIX}",
-    sliced.SETTINGS_READ: f"reads the global configuration in a sliced package — {sliced.FIX}",
     scan.READ: "reads settings, the environment, the clock or the filesystem at import — read it where it is used, or inject it",
     scan.HOST: "a platform constant computed at import — inject a `Platform` instead of recomputing the fact per module",
     scan.TASK: f"a free-floating task — {_BACKGROUND_FIX}",
@@ -86,10 +74,6 @@ def _hits(tree: ast.Module, rel: str, repo_root: Path) -> list[scan.Hit]:
         return []
     return [
         *scan.scan(tree, rel, repo_root),
-        *sliced.hits(tree, rel),
-        *dbhandle.hits(tree, rel),
-        *endpointrule.hits(tree, rel),
-        *busrule.hits(tree, rel),
         *bundle.hits(tree, repo_root),
     ]
 
@@ -135,15 +119,6 @@ def allowlist_errors(tree: ast.Module, rel: str, repo_root: Path) -> list[tuple[
 _LIST_FILE = allowances.POLICY
 
 
-def _missing_roots(repo_root: Path, table: str, registry: dict[str, frozenset[str]]) -> list[str]:
-    return [
-        f"{package}/{ROOTS_FILE}:1: stale {table} entry {package} — {path} does not exist; fix or remove it"
-        for package, roots in sorted(registry.items())
-        for path in sorted(roots)
-        if not (repo_root / path).is_file()
-    ]
-
-
 def missing_allowlist_errors(repo_root: Path) -> list[str]:
     """A listed file or function that no longer exists is stale too."""
     listed_paths = {
@@ -155,18 +130,6 @@ def missing_allowlist_errors(repo_root: Path) -> list[str]:
         for path in sorted(listed_paths)
         if not (repo_root / path).is_file()
     ]
-    for package, roots in sorted(allow.SLICED_PACKAGES.items()):
-        for path in (f"{package}/config.py", *sorted(roots)):
-            if not (repo_root / path).is_file():
-                errors.append(
-                    f"{package}/{ROOTS_FILE}:1: stale SLICED_PACKAGES entry {package} — {path} does not exist; fix or remove it"
-                )
-    for table, registry in (
-        ("DB_HANDLE_PACKAGES", allow.DB_HANDLE_PACKAGES),
-        ("ENDPOINT_PACKAGES", allow.ENDPOINT_PACKAGES),
-        ("BUS_PACKAGES", allow.BUS_PACKAGES),
-    ):
-        errors += _missing_roots(repo_root, table, registry)
     for callee in sorted(allow.PURE_REPO_CALLEES):
         owner, _, name = callee.rpartition(".")
         path = repo_root.joinpath(*owner.split(".")).with_suffix(".py")

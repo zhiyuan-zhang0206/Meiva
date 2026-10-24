@@ -10,6 +10,9 @@ exports = ["admission.py", "attachment.py"]
 "__init__.py" = "strict"
 "admission.py" = "strict"
 
+[roots]
+"attachment.py" = { kinds = ["settings"], why = "External controller attachment owns process bootstrap when no SDK context is bound" }
+
 [debt.impure-call]
 "attachment.py#uuid.uuid4" = 1
 

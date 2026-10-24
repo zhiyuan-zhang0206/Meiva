@@ -148,9 +148,9 @@ CASES = [
     ),
     Case(
         no_os_environ,
-        "base/x.py",
-        "import os\nx = os.environ['A']\n",
-        call=partial(no_os_environ.main, managed_aliases=frozenset),
+        "base/tests/test_x.py",
+        'def test_x(monkeypatch):\n    monkeypatch.setenv("A", "x")\n',
+        call=partial(no_os_environ.main, managed_aliases=lambda: frozenset({"A"})),
     ),
     Case(
         turn_scoped_config,

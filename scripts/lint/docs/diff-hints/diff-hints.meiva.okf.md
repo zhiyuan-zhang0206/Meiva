@@ -47,10 +47,12 @@ Hint-Ack: <hint-id> <path>[:<line>] -- <reason>
   an error that says how to fix it, not a silent non-answer; the same text earlier in the
   message is narrative and is only noted. An answer that matches no open site is reported and
   ignored.
-- Source files carry no inline marker and there is no per-file list. The one built-in
-  exemption is a heuristic stated here: for `ambient-read` and `service-locator` a file named
-  `main.py`, `__main__.py`, `runtime.py` or `app.py` is taken for a composition root. Every
-  other site is answered.
+- Source files carry no inline marker. A directory manifest's `[roots]` declaration exempts
+  only its declared ambient kinds; `service-locator` recognizes a `settings` root. The hint
+  reads roots from the same Git revision as the Python (the index at commit-msg), so an
+  unstaged declaration cannot answer staged code. The legacy filename heuristic remains:
+  `main.py`, `__main__.py`, `runtime.py` and `app.py` are taken for composition roots.
+  Every other site is answered.
 
 ## When it runs
 
