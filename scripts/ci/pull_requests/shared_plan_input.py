@@ -11,7 +11,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 
 @dataclass(frozen=True)
@@ -24,17 +24,25 @@ class PlanRun:
     producer: str
 
 
+def _objects(value: object, field: str) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise TypeError(f"GitHub requires a list of {field} objects")
+    rows = cast("list[object]", value)
+    if not all(isinstance(row, dict) for row in rows):
+        raise TypeError(f"GitHub requires a list of {field} objects")
+    return cast("list[dict[str, Any]]", rows)
+
+
 def records(pages: object, field: str) -> list[dict[str, Any]]:
-    if not isinstance(pages, list) or not pages:
+    native_pages = _objects(pages, "pages")
+    if not native_pages:
         raise ValueError("GitHub pagination must contain at least one page")
     result: list[dict[str, Any]] = []
     totals: set[int] = set()
-    for page in pages:
-        if not isinstance(page, dict) or type(page["total_count"]) is not int:
+    for page in native_pages:
+        if type(page["total_count"]) is not int:
             raise ValueError("GitHub page requires an integer total_count")
-        batch = page[field]
-        if not isinstance(batch, list) or not all(isinstance(row, dict) for row in batch):
-            raise ValueError(f"GitHub page requires a list of {field} objects")
+        batch = _objects(page[field], field)
         totals.add(page["total_count"])
         result.extend(batch)
     if totals != {len(result)}:
@@ -71,11 +79,9 @@ def _producer_versions(jobs: list[dict[str, Any]], run: PlanRun) -> dict[int, di
 
 
 def _successful_generation(job: dict[str, Any], view: int) -> int:
-    steps = job["steps"]
-    if not isinstance(steps, list) or not all(
-        isinstance(step, dict) and isinstance(step["name"], str) for step in steps
-    ):
-        raise ValueError("Successful producer requires native step objects")
+    steps = _objects(job["steps"], "producer steps")
+    if not all(isinstance(step["name"], str) for step in steps):
+        raise ValueError("Successful producer requires native step names")
     markers = [step for step in steps if step["name"].startswith("Shared plan generation ")]
     if len(markers) != 1:
         raise ValueError("Successful producer requires one generation marker")

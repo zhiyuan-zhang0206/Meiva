@@ -180,7 +180,7 @@ def test_repeated_unrelated_row_cannot_hide_a_newer_producer() -> None:
     [None, [], [{}], [{"total_count": True, "jobs": []}], [{"total_count": 1, "jobs": [None]}]],
 )
 def test_malformed_pagination_fails_closed(pages: object) -> None:
-    with pytest.raises((ValueError, KeyError)):
+    with pytest.raises((ValueError, KeyError, TypeError)):
         records(pages, "jobs")
 
 
