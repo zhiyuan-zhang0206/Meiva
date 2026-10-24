@@ -34,7 +34,7 @@ The probe never raises: anything it cannot read is its own fixed failure.
 from __future__ import annotations
 
 from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -46,7 +46,9 @@ from base.cluster.dataplane import pg_admin
 from base.log import logger
 from services.backup.walg import config as walg_config
 from services.backup.walg import state as walg_state
-from services.backup.walg.archive import RPO_OBJECTIVE_S, ExpectedArchive, expected_archive
+from services.backup.walg.archive import expected_for
+from services.backup.walg.archive_plan import RPO_OBJECTIVE_S, ExpectedArchive
+from services.backup.walg.pg_target import PgTarget, pg_target
 
 TICK_PERIOD = timedelta(hours=24)
 """How often the tick is scheduled (one run a day). The only time threshold of the tick
@@ -97,20 +99,25 @@ class ArchiverState:
     oldest_pending_age_s: float | None  # age of the oldest `.ready` marker; None = none pending
 
 
+# meiva:note
+# The home's administrator over its owner-only socket, bound to its postmaster.
 @contextmanager
-def admin_connection() -> Generator[psycopg.Connection[Any]]:
-    """The home's administrator over its owner-only socket, bound to its postmaster."""
-    from base.config import settings
-
-    data_plane = settings.data_plane  # ambient: S
-    authority = pg_admin.local_owner_authority(data_plane.db_url, remote_plane=data_plane.is_remote)
+def admin_connection_to(target: PgTarget) -> Generator[psycopg.Connection[Any]]:
     with pg_admin.connect(
-        authority.admin_url,
-        expected_data_dir=authority.data_dir,
+        target.admin_url,
+        expected_data_dir=target.data_dir,
         autocommit=True,
         connect_timeout=CONNECT_TIMEOUT_S,
     ) as conn:
         conn.execute(f"SET statement_timeout = '{_STATEMENT_TIMEOUT}'")
+        yield conn
+
+
+# meiva:note
+# `admin_connection_to` this home's locally owned Postgres, resolved from its settings.
+@contextmanager
+def admin_connection() -> Generator[psycopg.Connection[Any]]:
+    with admin_connection_to(pg_target()) as conn:
         yield conn
 
 
@@ -150,20 +157,21 @@ def settings_differ(state: ArchiverState, expected: ExpectedArchive) -> bool:
     )
 
 
-def judge(state: ArchiverState, expected: ExpectedArchive) -> str | None:
+def judge(
+    state: ArchiverState, expected: ExpectedArchive, *, rpo_objective_s: float = RPO_OBJECTIVE_S
+) -> str | None:
     """The first broken condition, or None. Later conditions presuppose earlier ones."""
     if settings_differ(state, expected):
         return SETTINGS_DIFFER
     if state.failing_now:
         return ARCHIVER_FAILING
-    if state.oldest_pending_age_s is not None and state.oldest_pending_age_s > RPO_OBJECTIVE_S:
+    if state.oldest_pending_age_s is not None and state.oldest_pending_age_s > rpo_objective_s:
         return ARCHIVE_BEHIND
     return None
 
 
-def configuration_failure(*, path_reader: Callable[[], Path | None]) -> str | None:
+def configuration_failure(path: Path | None) -> str | None:
     """A broken configuration or a swapped key, from the files alone."""
-    path = walg_config.configured_path(path_reader=path_reader)
     if path is None:
         return None
     try:
@@ -222,28 +230,50 @@ def enabled_since() -> datetime | None:
         return None
 
 
-def tick_failure(now: datetime | None = None) -> str | None:
-    """The daily tick's condition from its state file; never raises."""
+# meiva:note
+# The daily tick's condition from its state file at `now`; never raises.
+def tick_failure(now: datetime) -> str | None:
     try:
         recorded = walg_state.read_state()
-        return tick_judge(recorded, now or datetime.now(UTC), enabled_since=enabled_since())
+        return tick_judge(recorded, now, enabled_since=enabled_since())
     except Exception as exc:  # the probe must never raise; the cause is logged
         logger.warning(f"[walg] probe: tick state unreadable: {type(exc).__name__}: {exc}")
         return TICK_STATE_UNREADABLE
 
 
-def failure(*, path_reader: Callable[[], Path | None]) -> str | None:
-    """The first thing wrong with WAL archiving, or None (also None while it is off)."""
-    expected = expected_archive(path_reader=path_reader)
+# meiva:note
+# The first thing wrong with WAL archiving at `now`, or None (also None while it is off).
+#
+# `admin` is the dial to the home's Postgres, entered only while WAL-G is on and its
+# configuration is usable.
+def failure_on(
+    path: Path | None,
+    admin: AbstractContextManager[psycopg.Connection[Any]],
+    *,
+    now: datetime,
+    rpo_objective_s: float = RPO_OBJECTIVE_S,
+) -> str | None:
+    expected = expected_for(path)
     if expected is None:
         return None
-    configuration = configuration_failure(path_reader=path_reader)
+    configuration = configuration_failure(path)
     if configuration is not None:
         return configuration
     try:
-        with admin_connection() as conn:
+        with admin as conn:
             state = read_archiver_state(conn)
-    except Exception as exc:  # the probe must never raise; the cause is logged
+    # meiva:note
+    # the probe must never raise; the cause is logged
+    except Exception as exc:
         logger.warning(f"[walg] probe: archiver state unreadable: {type(exc).__name__}: {exc}")
         return UNREADABLE
-    return judge(state, expected) or tick_failure()
+    return judge(state, expected, rpo_objective_s=rpo_objective_s) or tick_failure(now)
+
+
+# meiva:note
+# The first thing wrong with WAL archiving, or None (also None while it is off).
+def failure(*, path_reader: Callable[[], Path | None]) -> str | None:
+    path = walg_config.configured_path(path_reader=path_reader)
+    if path is None:
+        return None
+    return failure_on(path, admin_connection(), now=datetime.now(UTC))

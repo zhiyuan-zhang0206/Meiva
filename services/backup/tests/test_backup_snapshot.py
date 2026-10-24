@@ -4,77 +4,72 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
+import psutil
 import pytest
 
-from base.config import settings
-from base.db import Database
 from services.backup import dump as backup
+from services.backup.artifact.intermediates import sweep_closed_partials
+from services.backup.layout import BackupTree
+from services.backup.tests.support import held_table_lock, minted_tree, scratch_database
 
 
-def test_interrupted_snapshot_dump_leaves_no_plaintext(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
-) -> None:
-    """A dump interrupted mid-run (stop, Ctrl-C, timeout) kills and reaps
-    its writer before the plaintext partial is removed."""
-    monkeypatch.setattr(backup, "backup_dir", lambda: tmp_path)
+@pytest.fixture
+def tree(tmp_path: Path) -> BackupTree:
+    return minted_tree(tmp_path / "home")
 
-    def composition(_db: Database, _db_url: str | None = None) -> str:
-        return "test"
 
-    monkeypatch.setattr(backup, "db_size_breakdown", composition)
-    writer = (
-        "import sys,time\n"
-        "open(sys.argv[sys.argv.index('--file')+1],'wb').write(b'PLAINTEXT')\n"
-        "time.sleep(60)\n"
-    )
-
-    def dump_argv(_tool: str) -> Path:
-        script = tmp_path / "pg_dump"
-        script.write_text(f"#!{sys.executable}\n{writer}")
-        script.chmod(0o700)
-        return script
-
-    monkeypatch.setattr(backup, "pg_tool", dump_argv)
+# meiva:note
+# A dump interrupted mid-run (stop, Ctrl-C, timeout) kills and reaps its writer before
+# the plaintext partial is removed.
+#
+# The writer is a real `pg_dump` that cannot take its share lock, so it is still running
+# when the first heartbeat reaches the sink and the sink interrupts the run.
+def test_interrupted_snapshot_dump_leaves_no_plaintext(tree: BackupTree, db_url: str) -> None:
 
     def interrupt(line: str) -> None:
-        if "0s" in line or line.endswith("MiB written"):
+        if not line.endswith("min)"):
             raise KeyboardInterrupt
 
-    monkeypatch.setattr(backup, "PROGRESS_INTERVAL_S", 0.2)
-    with pytest.raises(KeyboardInterrupt):
+    before = {child.pid for child in psutil.Process().children(recursive=True)}
+    with (
+        scratch_database(db_url) as url,
+        held_table_lock(url),
+        pytest.raises(KeyboardInterrupt),
+    ):
         backup.run_backup(
-            db_url="dbname=meiva",
-            publish=False,
+            datetime(2026, 8, 8, 10, tzinfo=UTC),
+            tree=tree,
+            db_url=url,
+            keep=7,
+            offsite_target=None,
             progress=interrupt,
-            db=database,
-            is_remote_reader=lambda: settings.data_plane.is_remote,
-            keep_reader=lambda: settings.services.backup_keep,
-            endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
-            bucket_reader=lambda: settings.services.backup_offsite_bucket,
-            credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+            progress_interval_s=0.2,
         )
-    assert not list(tmp_path.glob("*.partial")) and not list(tmp_path.glob(".backup-key-*"))
+
+    leftovers = [
+        child.name()
+        for child in psutil.Process().children(recursive=True)
+        if child.pid not in before and "pg_dump" in child.name()
+    ]
+    assert leftovers == [], "the interrupted run left its pg_dump child running"
+    assert not list(tree.managed.glob("*.partial")) and not list(tree.managed.glob(".backup-key-*"))
 
 
+# meiva:note
+# A killed run's orphaned tool may still hold its partial: it stays until that writer
+# exits, then the next run removes it. The writer is a fixed script of this directory
+# started with the interpreter's own argv, so the subprocess suppression is the harness's.
 def test_stale_partial_waits_for_its_orphaned_writer_to_close(tmp_path: Path) -> None:
-    """A killed run's orphaned tool may still hold its partial: it stays until
-    that writer exits, then the next run removes it."""
-    from services.backup.artifact.intermediates import sweep_closed_partials
-
     held = tmp_path / "meiva-20260926T000000Z.dump.partial"
     closed = tmp_path / "meiva-20260925T000000Z.dump.enc.partial"
     key = tmp_path / ".backup-key-abc"
     for path in (held, closed, key):
         path.write_bytes(b"PLAINTEXT")
-    writer = subprocess.Popen(  # noqa: S603 -- disposable orphan stand-in
-        [
-            sys.executable,
-            "-c",
-            "import sys,time;f=open(sys.argv[1],'ab');print('open',flush=True);time.sleep(60)",
-            str(held),
-        ],
+    writer = subprocess.Popen(  # noqa: S603
+        [sys.executable, str(Path(__file__).with_name("child_partial_holder.py")), str(held)],
         stdout=subprocess.PIPE,
         text=True,
     )
@@ -89,53 +84,32 @@ def test_stale_partial_waits_for_its_orphaned_writer_to_close(tmp_path: Path) ->
     assert not held.exists()
 
 
+# meiva:note
+# A killed run's plaintext partial never outlives the next run: the scheduled (staged)
+# worker run sweeps the backup directory too, and the same sweep removes key files and
+# an abandoned cross-filesystem copy.
 def test_every_backup_run_sweeps_closed_intermediates_from_the_backup_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
+    tree: BackupTree, tmp_path: Path, db_url: str
 ) -> None:
-    """A killed run's plaintext partial never outlives the next run: the
-    scheduled (staged) worker run sweeps the backup directory too, and the same
-    sweep removes key files and an abandoned cross-filesystem copy."""
-    from datetime import UTC, datetime
-
-    published = tmp_path / "db"
-    published.mkdir(mode=0o700)
-    monkeypatch.setattr(backup, "backup_dir", lambda: published)
-
-    def composition(_db: Database, _db_url: str | None = None) -> str:
-        return "test"
-
-    monkeypatch.setattr(backup, "db_size_breakdown", composition)
-    script = tmp_path / "pg_dump"
-    script.write_text(
-        f"#!{sys.executable}\nimport sys\n"
-        "open(sys.argv[sys.argv.index('--file')+1],'wb').write(b'DUMP')\n"
-    )
-    script.chmod(0o700)
-
-    def dump_tool(_tool: str) -> Path:
-        return script
-
-    monkeypatch.setattr(backup, "pg_tool", dump_tool)
+    tree.managed.mkdir(parents=True, mode=0o700)
     stale = [
-        published / "meiva-20260920T030000Z.dump.partial",
-        published / ".backup-key-stale",
-        published / ".meiva-20260925T030000Z.dump.enc.k3y9.copy",
+        tree.managed / "meiva-20260920T030000Z.dump.partial",
+        tree.managed / ".backup-key-stale",
+        tree.managed / ".meiva-20260925T030000Z.dump.enc.k3y9.copy",
     ]
     for path in stale:
         path.write_bytes(b"PLAINTEXT")
     staging = tmp_path / "controls" / "artifact"
+
     artifact = backup.run_backup(
         datetime(2026, 9, 26, 3, tzinfo=UTC),
-        db_url="dbname=meiva",
-        publish=False,
+        tree=tree,
+        db_url=db_url,
+        keep=7,
+        offsite_target=None,
         staging=staging,
-        db=database,
-        is_remote_reader=lambda: settings.data_plane.is_remote,
-        keep_reader=lambda: settings.services.backup_keep,
-        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
-        bucket_reader=lambda: settings.services.backup_offsite_bucket,
-        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
     )
+
     assert artifact.parent == staging
     assert [path.name for path in stale if path.exists()] == []
-    assert list(published.iterdir()) == []
+    assert list(tree.managed.iterdir()) == []

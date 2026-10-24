@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from base.config import settings
 from services.backup.walg import config as walg_config
 from services.backup.walg.tests.support import (
     ACCESS_KEY_ID,
@@ -30,16 +29,16 @@ def _refused(sandbox: Sandbox, match: str) -> str:
 
 
 def test_unset_means_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    make_sandbox(tmp_path, monkeypatch, enabled=False)
+    sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
 
-    assert walg_config.configured_path(path_reader=lambda: settings.walg.walg_config_file) is None
-    assert walg_config.enabled(path_reader=lambda: settings.walg.walg_config_file) is False
+    assert walg_config.configured_path(path_reader=sandbox.path_reader) is None
+    assert walg_config.enabled(path_reader=sandbox.path_reader) is False
     with pytest.raises(walg_config.WalgConfigError, match="MEIVA_WALG_CONFIG_FILE is not set"):
-        walg_config.load_walg_config(path_reader=lambda: settings.walg.walg_config_file)
+        walg_config.load_walg_config(path_reader=sandbox.path_reader)
 
 
 def test_a_valid_configuration_loads_and_exposes_only_non_secret_facts(sandbox: Sandbox) -> None:
-    config = walg_config.load_walg_config(path_reader=lambda: settings.walg.walg_config_file)
+    config = walg_config.load_walg_config(path_reader=sandbox.path_reader)
 
     assert config.path == sandbox.config_file
     assert config.prefix == "oss://meiva-backups/meiva-walg/test-home/pg17/gen1/"
@@ -185,7 +184,7 @@ def test_no_refusal_ever_contains_a_secret(sandbox: Sandbox) -> None:
 def test_the_first_load_pins_the_key_fingerprint(sandbox: Sandbox) -> None:
     assert walg_config.pinned_key_id() is None
 
-    config = walg_config.load_walg_config(path_reader=lambda: settings.walg.walg_config_file)
+    config = walg_config.load_walg_config(path_reader=sandbox.path_reader)
 
     pin = walg_config.key_id_path()
     assert pin == sandbox.home / "backups" / "walg" / "key-id"
@@ -196,21 +195,19 @@ def test_the_first_load_pins_the_key_fingerprint(sandbox: Sandbox) -> None:
 
 
 def test_a_second_load_with_the_same_key_is_idempotent(sandbox: Sandbox) -> None:
-    first = walg_config.load_walg_config(path_reader=lambda: settings.walg.walg_config_file)
+    first = walg_config.load_walg_config(path_reader=sandbox.path_reader)
 
-    assert walg_config.load_walg_config(path_reader=lambda: settings.walg.walg_config_file) == first
+    assert walg_config.load_walg_config(path_reader=sandbox.path_reader) == first
 
 
 def test_a_different_key_is_refused_and_the_pin_is_kept(sandbox: Sandbox) -> None:
-    pinned = walg_config.load_walg_config(
-        path_reader=lambda: settings.walg.walg_config_file
-    ).key_fingerprint
+    pinned = walg_config.load_walg_config(path_reader=sandbox.path_reader).key_fingerprint
     sandbox.key_file.write_text("cd" * 32 + "\n")
 
     with pytest.raises(
         walg_config.WalgConfigError, match="is not the key this home pinned"
     ) as caught:
-        walg_config.load_walg_config(path_reader=lambda: settings.walg.walg_config_file)
+        walg_config.load_walg_config(path_reader=sandbox.path_reader)
 
     assert pinned in str(caught.value)
     assert "cd" * 32 not in str(caught.value)
@@ -227,8 +224,8 @@ def test_reading_never_pins(sandbox: Sandbox) -> None:
 
 
 def test_a_corrupt_pin_is_an_error_not_a_reset(sandbox: Sandbox) -> None:
-    walg_config.load_walg_config(path_reader=lambda: settings.walg.walg_config_file)
+    walg_config.load_walg_config(path_reader=sandbox.path_reader)
     walg_config.key_id_path().write_text("not-a-fingerprint\n")
 
     with pytest.raises(walg_config.WalgConfigError, match="malformed"):
-        walg_config.load_walg_config(path_reader=lambda: settings.walg.walg_config_file)
+        walg_config.load_walg_config(path_reader=sandbox.path_reader)

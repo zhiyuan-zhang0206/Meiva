@@ -1,8 +1,15 @@
-exports = ["artifact", "dump.py", "restore_drill.py", "scheduler", "walg"]
+exports = ["artifact", "dump.py", "layout.py", "restore_drill.py", "scheduler", "walg"]
 
 [uses]
-"dump.py" = ["artifact"]
-"restore_drill.py" = ["dump.py"]
-"scheduler" = ["artifact", "dump.py", "restore_drill.py"]
-"tests" = ["artifact", "dump.py", "restore_drill.py", "walg"]
+"dump.py" = ["artifact", "dump_lines.py", "dump_plan.py", "layout.py"]
+"dump_plan.py" = ["artifact"]
+"restore_drill.py" = ["dump.py", "dump_lines.py", "layout.py"]
+"scheduler" = ["artifact", "dump.py", "layout.py", "restore_drill.py", "schedule.py", "tests"]
+"tests" = ["artifact", "dump.py", "dump_lines.py", "dump_plan.py", "layout.py", "restore_drill.py", "schedule.py", "walg"]
 "walg" = ["artifact", "restore_drill.py"]
+
+[purity]
+"dump_lines.py" = "strict"
+"dump_plan.py" = "strict"
+"layout.py" = "strict"
+"schedule.py" = "strict"

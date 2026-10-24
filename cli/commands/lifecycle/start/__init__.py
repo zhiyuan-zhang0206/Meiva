@@ -375,11 +375,13 @@ def _assert_archive_after_readiness(start: _Start, wait: probe.ReadinessWait) ->
     gateway_unready = any(spec.session == "gateway" for spec in wait.unready)
     if not archive_assertion_needed(start.roles, gateway_unready=gateway_unready):
         return
+    from services.backup.walg import probe
     from services.backup.walg.startup import assert_configured_archive
 
-    walg_config_file = start.config.walg_config_file
     assert_configured_archive(
-        machine=start.command.machine.name(), path_reader=lambda: walg_config_file
+        machine=start.command.machine.name(),
+        path=start.config.walg_config_file,
+        admin=probe.admin_connection(),
     )
 
 

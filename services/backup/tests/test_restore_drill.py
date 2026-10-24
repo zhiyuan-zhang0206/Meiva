@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import subprocess
-import types
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import psycopg
 import pytest
@@ -26,8 +23,10 @@ from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, Groups
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
+from services.backup import dump as backup
 from services.backup import restore_drill
-from services.backup.artifact import offsite, passphrase
+from services.backup.layout import BackupTree
+from services.backup.tests.support import minted_tree
 
 
 def _database_factory() -> Callable[[str], Database]:
@@ -117,12 +116,22 @@ def _grant_prod_roles(db_conn: psycopg.Connection) -> None:
     db_conn.commit()
 
 
+def _seed_conversation(db_conn: psycopg.Connection) -> int:
+    with db_conn.cursor() as cur:
+        cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
+        row = cur.fetchone()
+    assert row is not None
+    agent_id = row[0]
+    db_conn.commit()
+    _write_checkpoint(agent_id)
+    return agent_id
+
+
 @pytest.mark.skipif(not restore_drill.has_pg_tool("pg_dump"), reason="needs native pg_dump")
 def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
     db_conn: psycopg.Connection,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
+    db_url: str,
     throwaway_config: ThrowawayConfig,
 ) -> None:
     """The command path decrypts, restores, and proves a checkpoint
@@ -138,40 +147,17 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
             ([GATEWAY_GROUP, RUNNER_GROUP],),
         )
         assert cur.fetchall() == [(GATEWAY_GROUP, False), (RUNNER_GROUP, False)]
-    with db_conn.cursor() as cur:
-        cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
-        row = cur.fetchone()
-    assert row is not None
-    agent_id = row[0]
-    db_conn.commit()
-    _write_checkpoint(agent_id)
-
-    monkeypatch.setattr(restore_drill.backup, "backup_dir", lambda: tmp_path)
-
-    def _no_publish(
-        _artifact: object,
-        *,
-        endpoint_reader: Callable[[], str],
-        bucket_reader: Callable[[], str],
-        credentials_file_reader: Callable[[], str],
-    ) -> None:
-        return None
-
-    monkeypatch.setattr(offsite, "publish", _no_publish)
-    # The session database is not a born home: dump it through an explicit dial,
-    # under the passphrase a gateway birth pins.
-    passphrase.ensure_minted(meiva_home())
-    artifact = restore_drill.backup.run_backup(
-        db_url=settings.data_plane.db_url,
-        db=database,
-        is_remote_reader=lambda: settings.data_plane.is_remote,
-        keep_reader=lambda: settings.services.backup_keep,
-        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
-        bucket_reader=lambda: settings.services.backup_offsite_bucket,
-        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+    agent_id = _seed_conversation(db_conn)
+    # meiva:note
+    # The session database is not a born home: dump it through an explicit dial, into a
+    # home of this test's own, under the passphrase a gateway birth pins there.
+    tree = minted_tree(tmp_path)
+    artifact = backup.run_backup(
+        datetime.now(UTC), tree=tree, db_url=db_url, keep=7, offsite_target=None
     )
+
     report, elapsed = restore_drill.run_drill(
-        artifact, database_for_url=_database_factory(), throwaway=throwaway_config
+        artifact, tree=tree, database_for_url=_database_factory(), throwaway=throwaway_config
     )
 
     assert report.agents == 1
@@ -179,6 +165,50 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
     assert report.sample_message_count == 1
     assert report.agents_owner == "meiva_main"
     assert elapsed > 0
+
+
+# meiva:note
+# `python -m services.backup.restore_drill ARTIFACT` reads the process home's passphrase,
+# restores into throwaway Postgres and prints one result line.
+def test_the_command_restores_an_artifact_and_prints_its_verdict(
+    db_conn: psycopg.Connection,
+    tmp_path: Path,
+    db_url: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    agent_id = _seed_conversation(db_conn)
+    tree = BackupTree(meiva_home())
+    artifact = backup.run_backup(
+        datetime.now(UTC),
+        tree=tree,
+        db_url=db_url,
+        keep=7,
+        offsite_target=None,
+        staging=tmp_path / "staged",
+    )
+
+    restore_drill.main([str(artifact)])
+
+    out = capsys.readouterr().out
+    assert "restore drill passed" in out
+    assert f"sample_agent={agent_id}" in out
+    assert "messages=1" in out
+
+
+def test_the_newest_managed_artifact_is_the_default_target(tmp_path: Path) -> None:
+    tree = BackupTree(tmp_path)
+    tree.managed.mkdir(parents=True)
+    (tree.managed / "meiva-20260601T100000Z.dump.enc").write_bytes(b"older")
+    newest = tree.managed / "meiva-20260602T100000Z.dump.enc"
+    newest.write_bytes(b"newer")
+    (tree.managed / "notes.txt").write_bytes(b"foreign")
+
+    assert restore_drill.newest_artifact(tree) == newest
+
+
+def test_with_no_managed_artifact_the_default_target_is_a_fault(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="no managed backup artifact"):
+        restore_drill.newest_artifact(BackupTree(tmp_path))
 
 
 def test_scratch_space_requirement_scales_with_the_dump_size(tmp_path: Path) -> None:
@@ -191,78 +221,28 @@ def test_scratch_space_requirement_scales_with_the_dump_size(tmp_path: Path) -> 
     assert restore_drill.scratch_space_requirement(dump) == 3000
 
 
-def test_restore_failure_message_names_the_base_and_the_capacity_knob(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+# meiva:note
+# A restore that fails must carry the diagnosis, not a bare exit code (the 2026-09-14
+# failure): the message names the base, its free space and the knob that moves it.
+def test_a_dump_pg_restore_cannot_read_fails_with_the_base_and_the_capacity_knob(
+    tmp_path: Path, db_url: str
 ) -> None:
-    """A server killed mid-COPY must not surface as a bare exit code (the
-    2026-09-14 failure: `pg_restore exited 1` plus a host-side dmesg signal).
-    The message carries the base, its free space, the stderr tail, and the
-    override knob that moves the base."""
-    base = tmp_path / "fallback"
-    base.mkdir()
-    monkeypatch.setattr(
-        restore_drill.shutil,
-        "disk_usage",
-        lambda _path: types.SimpleNamespace(free=512 * 2**20),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    proc = subprocess.CompletedProcess(
-        args=["pg_restore"],
-        returncode=1,
-        stderr=b"pg_restore: error: PQputCopyData: server closed the connection unexpectedly\n",
-    )
-    message = restore_drill.restore_failure_message(proc, base)
-    assert "pg_restore exited 1" in message
-    assert str(base) in message
-    assert "512 MiB free" in message
+    garbage = tmp_path / "backup.dump"
+    garbage.write_bytes(b"this is not a custom-format archive")
+
+    with pytest.raises(RuntimeError) as failure:
+        restore_drill.restore_dump(garbage, db_url, base=tmp_path)
+
+    message = str(failure.value)
+    assert "pg_restore exited" in message
+    assert str(tmp_path) in message
+    assert " free)" in message
     assert "MEIVA_PG_THROWAWAY_BASE" in message
-    assert "PQputCopyData: server closed the connection" in message
 
 
-def test_standalone_entry_captures_once_and_retains_gate_for_scratch_reads(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    from unittest.mock import Mock
-
-    image = LoadedCommit(tmp_path, "captured-drill")
-    capture = Mock(return_value=image)
-    create = Mock(side_effect=Database)
-    monkeypatch.setattr(LoadedCommit, "capture", capture)
-    monkeypatch.setattr(restore_drill, "Database", create)
-
-    def drill(
-        artifact: Path | None,
-        *,
-        database_for_url: Callable[[str], Database],
-        throwaway: ThrowawayConfig,
-    ) -> tuple[Any, float]:
-        create.assert_not_called()
-        database_for_url("postgresql://scratch.invalid/one")
-        monkeypatch.setattr(settings.data_plane, "db_sslmode", "verify-full")
-        database_for_url("postgresql://scratch.invalid/two")
-        return restore_drill.RestoreReport(1, 2, 3, 4, 5, 6, "owner"), 0.0
-
-    monkeypatch.setattr(restore_drill, "run_drill", drill)
-    restore_drill.main([str(tmp_path / "artifact.dump.enc")])
-    capture.assert_called_once_with()
-    calls = create.call_args_list
-    assert calls[0].kwargs["gate"] is calls[1].kwargs["gate"]
-    assert [call.args[0].db_url for call in calls] == [
-        "postgresql://scratch.invalid/one",
-        "postgresql://scratch.invalid/two",
-    ]
-    assert calls[1].args[0].db_sslmode == "verify-full"
-    assert calls[0].args[0].pgbouncer_enabled == calls[1].args[0].pgbouncer_enabled
-    assert "restore drill passed" in capsys.readouterr().out
-
-
-def test_retired_passphrase_option_is_rejected_before_process_capture(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from unittest.mock import Mock
-
-    capture = Mock()
-    monkeypatch.setattr(LoadedCommit, "capture", capture)
+def test_a_retired_option_is_rejected_by_the_parser(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as error:
         restore_drill.main(["--legacy-empty-secret-passphrase"])
+
     assert error.value.code == 2
-    capture.assert_not_called()
+    assert "--legacy-empty-secret-passphrase" in capsys.readouterr().err

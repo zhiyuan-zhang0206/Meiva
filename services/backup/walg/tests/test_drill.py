@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import tempfile
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,15 +24,13 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 
-from base.cluster.dataplane import pg_admin
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
-from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_settings
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from services.backup.walg import drill, restore
+from services.backup.walg import drill
 from services.backup.walg.backups import Backup, parse_backups
 from services.backup.walg.drill import SourceFacts
 from services.backup.walg.pg_target import PgTarget
@@ -44,6 +42,7 @@ from services.backup.walg.tests.support import (
     archive_current_segment,
     archiving_postgres,
     make_sandbox,
+    refused_target,
     take_basebackup,
 )
 
@@ -180,72 +179,77 @@ def test_a_failed_drill_does_not_postpone_the_next_one_but_a_success_does() -> N
 # ── a failure is a record, never an exception ────────────────────────────────
 
 
-def _target() -> PgTarget:
-    return PgTarget("postgresql://tester@/postgres?host=/s&port=1", Path("/pg"), "meiva_main")
-
-
-def _fail_reading(exc: Exception, monkeypatch: pytest.MonkeyPatch) -> None:
-    def raising(_target: PgTarget, _backup: Backup) -> SourceFacts:
-        raise exc
-
-    monkeypatch.setattr(drill, "read_source_facts", raising)
-
-
-def test_an_expected_failure_is_recorded_with_its_message_and_keeps_the_last_success(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _fail_reading(RuntimeError("no archiver state"), monkeypatch)
-    previous = _record(last_ok_at=T0 - timedelta(days=3))
-
-    record = drill.run_drill(
-        _target(),
+def _run(
+    target: PgTarget, previous: DrillRecord | None, sandbox: Sandbox, tmp_path: Path
+) -> DrillRecord:
+    return drill.run_drill(
+        target,
         _backup(),
         previous,
         lambda _line: None,
-        lambda: T0,
-        path_reader=lambda: settings.walg.walg_config_file,
+        path_reader=sandbox.path_reader,
         database_for_url=_database_factory(),
-        throwaway=ThrowawayConfig(None),
+        throwaway=ThrowawayConfig(tmp_path),
     )
 
-    assert (record.ok, record.detail, record.backup) == (False, "no archiver state", _backup().name)
+
+# meiva:note
+# The source Postgres is not there, so the facts cannot be read: a failure, not an exception.
+def test_an_expected_failure_is_recorded_with_its_message_and_keeps_the_last_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, postgres_access: None
+) -> None:
+    sandbox = make_sandbox(tmp_path, monkeypatch)
+    previous = _record(last_ok_at=T0 - timedelta(days=3))
+    before = datetime.now(UTC)
+
+    record = _run(refused_target(), previous, sandbox, tmp_path)
+
+    assert (record.ok, record.backup) == (False, _backup().name)
+    assert record.detail and record.detail.startswith("connection")
     assert record.last_ok_at == previous.last_ok_at
-    assert record.finished_at == T0
+    assert before <= record.finished_at <= datetime.now(UTC)
 
 
-def test_an_unexpected_failure_names_its_type(monkeypatch: pytest.MonkeyPatch) -> None:
-    _fail_reading(KeyError("boom"), monkeypatch)
+def test_an_unexpected_failure_names_its_type() -> None:
+    assert drill.failure_text(KeyError("boom")) == "KeyError: 'boom'"
+    assert drill.failure_text(ValueError("surprise")) == "ValueError: surprise"
 
-    record = drill.run_drill(
-        _target(),
+
+def test_an_expected_failure_is_recorded_in_its_own_words() -> None:
+    assert drill.failure_text(RuntimeError("no archiver state")) == "no archiver state"
+
+
+def test_a_long_failure_message_is_cut_for_the_state_file() -> None:
+    record = drill.drill_record(
         _backup(),
         None,
-        lambda _line: None,
-        lambda: T0,
-        path_reader=lambda: settings.walg.walg_config_file,
-        database_for_url=_database_factory(),
-        throwaway=ThrowawayConfig(None),
-    )
-
-    assert not record.ok and record.detail == "KeyError: 'boom'"
-    assert record.last_ok_at is None
-
-
-def test_a_long_failure_message_is_cut_for_the_state_file(monkeypatch: pytest.MonkeyPatch) -> None:
-    _fail_reading(RuntimeError("x" * 5000), monkeypatch)
-
-    record = drill.run_drill(
-        _target(),
-        _backup(),
-        None,
-        lambda _line: None,
-        lambda: T0,
-        path_reader=lambda: settings.walg.walg_config_file,
-        database_for_url=_database_factory(),
-        throwaway=ThrowawayConfig(None),
+        reached=None,
+        outcome=(False, "x" * 5000),
+        seconds=1.26,
+        finished=T0,
     )
 
     assert len(record.detail) == drill.DETAIL_CHARS
+    assert (record.ok, record.seconds, record.last_ok_at, record.target_lsn) == (
+        False,
+        1.3,
+        None,
+        None,
+    )
+
+
+def test_a_success_becomes_the_last_success_and_a_failure_keeps_the_previous_one() -> None:
+    previous = _record(last_ok_at=T0 - timedelta(days=3))
+
+    ok = drill.drill_record(
+        _backup(), previous, reached=0x3000028, outcome=(True, "fine"), seconds=2.0, finished=T0
+    )
+    failed = drill.drill_record(
+        _backup(), previous, reached=None, outcome=(False, "bad"), seconds=2.0, finished=T0
+    )
+
+    assert (ok.last_ok_at, ok.target_lsn) == (T0, "0/3000028")
+    assert failed.last_ok_at == previous.last_ok_at
 
 
 # ── the whole drill, on a real Postgres ──────────────────────────────────────
@@ -282,8 +286,8 @@ class Source:
     def __init__(self, sandbox: Sandbox, pg: PgInstance, *, conversations: bool = True) -> None:
         self.sandbox = sandbox
         self.pg = pg
-        self.url = f"postgresql://meiva@/postgres?host={pg.root}&port={pg.port}"
-        self.target = PgTarget(self.url, pg.data, "postgres")
+        self.url = pg.target.admin_url
+        self.target = pg.target
         conn = pg.connect()
         conn.execute("CREATE TABLE agents (id serial PRIMARY KEY)")
         # every pooled session of the production reader reads the code-version gate's row
@@ -328,22 +332,6 @@ class Source:
         return parse_backups((self.sandbox.store_dir / "backups.json").read_text())[-1]
 
 
-@pytest.fixture(autouse=True)
-def uncustodied_admin_dial(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The source here is a test instance with no native launch receipt: dial it without
-    the custody proof the production admin dial demands."""
-
-    @contextmanager
-    def connect(
-        url: str, *, expected_data_dir: Path | None = None, **kwargs: Any
-    ) -> Generator[Any]:
-        assert expected_data_dir is not None  # the drill must still name the data directory
-        with psycopg.connect(url, **kwargs) as conn:
-            yield conn
-
-    monkeypatch.setattr(pg_admin, "connect", connect)
-
-
 @pytest.fixture
 def scratch_base(tmp_path: Path) -> Path:
     base = tmp_path / "scratch-base"
@@ -353,7 +341,12 @@ def scratch_base(tmp_path: Path) -> Path:
 
 
 def _run_drill(
-    source: Source, previous: DrillRecord | None = None, *, scratch_base: Path
+    source: Source,
+    sandbox: Sandbox,
+    previous: DrillRecord | None = None,
+    *,
+    scratch_base: Path,
+    socket_root: Path | None = None,
 ) -> tuple[DrillRecord, list[str]]:
     lines: list[str] = []
     record = drill.run_drill(
@@ -361,10 +354,10 @@ def _run_drill(
         source.newest_backup(),
         previous,
         lines.append,
-        lambda: T0,
-        path_reader=lambda: settings.walg.walg_config_file,
+        path_reader=sandbox.path_reader,
         database_for_url=_database_factory(),
         throwaway=ThrowawayConfig(scratch_base),
+        **({} if socket_root is None else {"socket_root": socket_root}),
     )
     return record, lines
 
@@ -373,10 +366,10 @@ def test_the_drill_restores_the_newest_backup_to_the_newest_archived_segment_and
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_base: Path, postgres_access: None
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
-    with archiving_postgres() as pg:
+    with archiving_postgres(sandbox=sandbox) as pg:
         source = Source(sandbox, pg)
 
-        record, lines = _run_drill(source, scratch_base=scratch_base)
+        record, lines = _run_drill(source, sandbox, scratch_base=scratch_base)
 
     assert record.ok, record.detail
     assert record.target_lsn == drill.format_lsn(
@@ -386,7 +379,8 @@ def test_the_drill_restores_the_newest_backup_to_the_newest_archived_segment_and
     # WAL behind the backup was replayed, not only the base backup restored
     assert f"conversation of agent {source.agent_after_backup} has 1 messages" in record.detail
     assert source.agent_after_backup != source.agent_before_backup
-    assert record.last_ok_at == T0 and record.backup == source.newest_backup().name
+    assert record.last_ok_at == record.finished_at
+    assert record.backup == source.newest_backup().name
     assert any(line.startswith("drill: restoring base_") for line in lines)
     assert list(scratch_base.iterdir()) == []  # the scratch copy is gone
 
@@ -395,40 +389,39 @@ def test_a_missing_segment_after_the_backup_fails_the_drill_and_cleans_up(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_base: Path, postgres_access: None
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
-    sockets: list[Path] = []
-    real_mkdtemp = tempfile.mkdtemp
+    socket_root = Path(tempfile.mkdtemp(prefix="walgsock-", dir="/tmp"))
+    try:
+        with archiving_postgres(sandbox=sandbox) as pg:
+            source = Source(sandbox, pg)
+            (sandbox.store_dir / "store" / source.after_backup_segment).unlink()
 
-    def recording_mkdtemp(prefix: str, dir: str) -> str:
-        path = real_mkdtemp(prefix=prefix, dir=dir)
-        sockets.append(Path(path))
-        return path
+            record, _ = _run_drill(
+                source, sandbox, scratch_base=scratch_base, socket_root=socket_root
+            )
 
-    monkeypatch.setattr(restore.tempfile, "mkdtemp", recording_mkdtemp)
-    with archiving_postgres() as pg:
-        source = Source(sandbox, pg)
-        (sandbox.store_dir / "store" / source.after_backup_segment).unlink()
-
-        record, _ = _run_drill(source, scratch_base=scratch_base)
-
-    assert not record.ok
-    assert "recovery failed" in record.detail
-    assert record.last_ok_at is None
-    assert record.target_lsn is not None  # the target was chosen before the restore failed
-    assert list(scratch_base.iterdir()) == []
-    assert not [path for path in sockets if path.exists() and path.name.startswith("meiva-walg-")]
+        assert not record.ok
+        assert "recovery failed" in record.detail
+        assert record.last_ok_at is None
+        # meiva:note
+        # the target was chosen before the restore failed
+        assert record.target_lsn is not None
+        assert list(scratch_base.iterdir()) == []
+        assert list(socket_root.iterdir()) == []
+    finally:
+        shutil.rmtree(socket_root, ignore_errors=True)
 
 
 def test_without_anything_archived_after_the_backup_the_drill_recovers_to_the_end(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_base: Path, postgres_access: None
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
-    with archiving_postgres() as pg:
+    with archiving_postgres(sandbox=sandbox) as pg:
         source = Source(sandbox, pg)
         listed = json.loads((sandbox.store_dir / "backups.json").read_text())
         listed[0]["finish_lsn"] = 1 << 60  # the backup "ends" after everything archived
         sandbox.put("backups.json", json.dumps(listed))
 
-        record, _ = _run_drill(source, scratch_base=scratch_base)
+        record, _ = _run_drill(source, sandbox, scratch_base=scratch_base)
 
     assert record.ok, record.detail
     assert record.target_lsn is None
@@ -439,10 +432,10 @@ def test_a_database_without_a_conversation_fails_the_content_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_base: Path, postgres_access: None
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
-    with archiving_postgres() as pg:
+    with archiving_postgres(sandbox=sandbox) as pg:
         source = Source(sandbox, pg, conversations=False)
 
-        record, _ = _run_drill(source, scratch_base=scratch_base)
+        record, _ = _run_drill(source, sandbox, scratch_base=scratch_base)
 
     assert not record.ok
     assert "no readable agent conversation" in record.detail

@@ -1,8 +1,9 @@
-exports = ["intermediates.py", "names.py", "offsite.py", "passphrase.py", "tests"]
+exports = ["intermediates.py", "names.py", "offsite.py", "offsite_plan.py", "passphrase.py", "tests"]
 
 [uses]
-"offsite.py" = ["names.py"]
-"tests" = ["names.py", "offsite.py", "passphrase.py"]
+"offsite.py" = ["names.py", "offsite_plan.py"]
+"tests" = ["names.py", "offsite.py", "offsite_plan.py", "passphrase.py"]
 
 [purity]
 "names.py" = "strict"
+"offsite_plan.py" = "strict"

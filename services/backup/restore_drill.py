@@ -32,13 +32,16 @@ from base.cluster.dataplane.pg_tools import pg_tool, throwaway_postgres
 from base.config import ConfigBoot
 from base.db import Database, connect_url
 from base.db.code_version_gate import ProcessDbGate
-from base.db.config import db_config_from_settings
+from base.db.config import db_config_from_boot
 from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP
 from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import meiva_home
 from base.telemetry.delivery.state import process_name
 from services.backup import dump as backup
+from services.backup.dump_lines import restore_failure_message
+from services.backup.layout import BackupTree
 
 
 @dataclass(frozen=True)
@@ -54,8 +57,10 @@ class RestoreReport:
     agents_owner: str
 
 
-def _newest_artifact() -> Path:
-    artifacts = backup.managed_dumps(backup.backup_dir())
+# meiva:note
+# The newest managed artifact of the tree's dump pool.
+def newest_artifact(tree: BackupTree) -> Path:
+    artifacts = backup.managed_dumps(tree.managed)
     if not artifacts:
         raise RuntimeError("no managed backup artifact exists")
     return artifacts[-1][1]
@@ -86,8 +91,9 @@ def _ensure_restore_roles(db_url: str) -> None:
                 conn.execute(pgsql.SQL("CREATE ROLE {} LOGIN").format(pgsql.Identifier(role)))
 
 
-def _restore(raw_dump: Path, db_url: str, *, base: Path) -> None:
-    """Load the custom dump into the disposable target database."""
+# meiva:note
+# Load the custom dump into the disposable target database.
+def restore_dump(raw_dump: Path, db_url: str, *, base: Path) -> None:
     proc = subprocess.run(  # noqa: S603
         [
             str(pg_tool("pg_restore")),
@@ -102,26 +108,11 @@ def _restore(raw_dump: Path, db_url: str, *, base: Path) -> None:
         timeout=backup.DUMP_TIMEOUT_S,
     )
     if proc.returncode != 0:
-        raise RuntimeError(restore_failure_message(proc, base))
-
-
-def restore_failure_message(proc: subprocess.CompletedProcess[bytes], base: Path) -> str:
-    """The pg_restore failure with the capacity context an operator needs.
-
-    A scratch restore that outgrows its base dies server-side mid-COPY, so the
-    client-side failure carries no diagnosis of its own: the 2026-09-14 run
-    surfaced only `pg_restore exited 1` while the postmaster had been killed by
-    the full tmpfs (dmesg signal 6; PQputCopyData: server closed the connection).
-    Naming the base and its free space makes the next occurrence diagnosable from
-    the drill's own output."""
-    hint = (
-        f"pg_restore exited {proc.returncode} against the throwaway cluster on {base} "
-        f"({format_bytes(shutil.disk_usage(base).free)} free). If the server closed "
-        f"the connection mid-copy, the scratch base ran out of room — free space on "
-        f"{base} or point MEIVA_PG_THROWAWAY_BASE at a larger volume."
-    )
-    stderr_tail = "\n".join((proc.stderr or b"").decode(errors="replace").splitlines()[-5:])
-    return f"{hint}\npg_restore stderr tail:\n{stderr_tail}" if stderr_tail else hint
+        raise RuntimeError(
+            restore_failure_message(
+                proc.returncode, proc.stderr, base, format_bytes(shutil.disk_usage(base).free)
+            )
+        )
 
 
 def verify_restored_database(
@@ -194,8 +185,9 @@ def scratch_space_requirement(raw_dump: Path) -> int:
 
 
 def run_drill(
-    artifact: Path | None = None,
+    artifact: Path,
     *,
+    tree: BackupTree,
     database_for_url: Callable[[str], Database],
     throwaway: ThrowawayConfig,
     foreground: bool = False,
@@ -207,14 +199,13 @@ def run_drill(
     directory, so a caller that proves the drill's closure can remove it even
     when the drill was killed before its own cleanup.
     """
-    artifact = artifact or _newest_artifact()
     if not artifact.is_file():
         raise RuntimeError(f"backup artifact does not exist: {artifact.name}")
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="meiva-restore-drill-", dir=scratch_root) as tmp:
         scratch = Path(tmp)
         raw_dump = scratch / "backup.dump"
-        backup.decrypt_artifact(artifact, raw_dump)
+        backup.decrypt_artifact(artifact, raw_dump, tree=tree)
         required = scratch_space_requirement(raw_dump)
         base = select_throwaway_base(required, override=throwaway.override)
         logger.info(
@@ -225,7 +216,7 @@ def run_drill(
             config=throwaway, base=base, foreground=foreground
         ) as scratch_db_url:
             _ensure_restore_roles(scratch_db_url)
-            _restore(raw_dump, scratch_db_url, base=base)
+            restore_dump(raw_dump, scratch_db_url, base=base)
             report = verify_restored_database(scratch_db_url, database_for_url=database_for_url)
     return report, time.monotonic() - started
 
@@ -236,16 +227,18 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     config = ConfigBoot()
     config.read_process_environment()
+    tree = BackupTree(meiva_home())
     throwaway = ThrowawayConfig(configured_base(config.view.data_plane.pg_throwaway_base))
     image = LoadedCommit.capture()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process=process_name())
 
     def database_for_url(url: str) -> Database:
-        return Database(dataclasses.replace(db_config_from_settings(), db_url=url), gate=gate)
+        return Database(dataclasses.replace(db_config_from_boot(config), db_url=url), gate=gate)
 
     report, elapsed = run_drill(
-        args.artifact,
+        args.artifact or newest_artifact(tree),
+        tree=tree,
         throwaway=throwaway,
         database_for_url=database_for_url,
     )

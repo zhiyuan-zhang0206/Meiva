@@ -16,7 +16,7 @@ from collections.abc import Callable, Mapping
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, cast
+from typing import cast
 
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from services.backup.scheduler.operation.staging import (
@@ -30,12 +30,6 @@ from services.backup.scheduler.operation.staging import (
 _log = logging.getLogger(__name__)
 _CODE_ROOT = Path(__file__).resolve().parents[4]
 BOOTSTRAP = Path(__file__).with_name("worker_bootstrap.py")
-
-
-class StopSignal(Protocol):
-    def is_set(self) -> bool: ...
-
-    def wait(self, timeout: float | None = None) -> bool: ...
 
 
 def _interrupt(signum: int, _frame: types.FrameType | None) -> None:
@@ -90,46 +84,6 @@ def _operation_tail(path: Path) -> str:
         return output.read().decode(errors="replace")
 
 
-class _Tail:
-    """Forward the worker's complete stderr lines to an operator sink.
-
-    Progress is a courtesy: a sink that fails (an operator's closed stderr
-    pipe) is dropped and never fails, cancels or loses the operation.
-    """
-
-    def __init__(self, path: Path, sink: Callable[[str], None]) -> None:
-        self._path = path
-        self._sink: Callable[[str], None] | None = sink
-        self._offset = 0
-        self._pending = b""
-
-    def _emit(self, line: bytes) -> None:
-        if self._sink is None:
-            return
-        try:
-            self._sink(line.decode(errors="replace"))
-        except Exception as exc:
-            _log.warning("[backup-operation] progress sink dropped: %r", exc)
-            self._sink = None
-
-    def pump(self) -> None:
-        if self._sink is None:
-            return
-        with self._path.open("rb") as log:
-            log.seek(self._offset)
-            chunk = log.read()
-        self._offset += len(chunk)
-        *lines, self._pending = (self._pending + chunk).split(b"\n")
-        for line in lines:
-            self._emit(line)
-
-    def flush(self) -> None:
-        self.pump()
-        if self._pending:
-            self._emit(self._pending)
-            self._pending = b""
-
-
 async def _to_completion[T](
     step: Callable[[], T],
 ) -> tuple[asyncio.Future[T], BaseException | None]:
@@ -167,9 +121,7 @@ async def run_operation(
     *,
     kind: OperationKind,
     env: dict[str, str],
-    stop: StopSignal | None = None,
     timeout_s: float = 6 * 3600,
-    progress: Callable[[str], None] | None = None,
 ) -> CompletedOperation:
     """Run a trusted worker; accept only zero exit and a valid result object.
 
@@ -195,10 +147,7 @@ async def run_operation(
         future, cancelled = await _to_completion(lambda: _launch(module, work, env))
         process = future.result()
         _raise_stopped(cancelled)
-        tail = None if progress is None else _Tail(work / "stderr.log", progress)
-        await _await_operation(process, stop, time.monotonic() + timeout_s, tail)
-        if tail is not None:
-            tail.flush()
+        await _await_operation(process, time.monotonic() + timeout_s)
         result = _finished_result(process, work)
         return CompletedOperation(kind, work, result, held)
     except BaseException as original:
@@ -255,14 +204,8 @@ def _launch(module: str, work: Path, env: dict[str, str]) -> subprocess.Popen[by
         )
 
 
-async def _await_operation(
-    process: subprocess.Popen[bytes], stop: StopSignal | None, deadline: float, tail: _Tail | None
-) -> None:
+async def _await_operation(process: subprocess.Popen[bytes], deadline: float) -> None:
     while process.poll() is None:
-        if tail is not None:
-            tail.pump()
-        if stop is not None and stop.is_set():
-            raise RuntimeError("operation was stopped")
         if time.monotonic() >= deadline:
             raise TimeoutError("operation exceeded its execution bound")
         await asyncio.sleep(0.05)

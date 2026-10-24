@@ -18,8 +18,8 @@ import socket
 import subprocess
 import tempfile
 import time
-from collections.abc import Generator
-from contextlib import contextmanager, suppress
+from collections.abc import Callable, Generator
+from contextlib import AbstractContextManager, contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,10 +27,12 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.cluster.dataplane import walg_binary
+from base.cluster import postgres as native_postgres
+from base.cluster.dataplane import pg_admin, walg_binary
 from base.cluster.dataplane.pg_tools import pg_shm_args, pg_start_env, pg_tool, pg_tz_args
 from base.config import settings
 from services.backup.walg.archive import archive_pg_args
+from services.backup.walg.pg_target import PgTarget
 
 FAKE_WALG = Path(__file__).with_name("fake_walg.sh")
 FIXTURES = Path(__file__).with_name("fixtures")
@@ -49,6 +51,12 @@ class Sandbox:
     store_dir: Path
     config_file: Path
     key_file: Path
+    enabled: bool = True
+
+    # meiva:note
+    # The configured WAL-G path as this sandbox holds it: its file, or None while off.
+    def path_reader(self) -> Path | None:
+        return self.config_file if self.enabled else None
 
     def config(self) -> dict[str, Any]:
         payload: dict[str, Any] = json.loads(self.config_file.read_text())
@@ -125,9 +133,9 @@ def make_sandbox(
     monkeypatch.setenv("MEIVA_HOME", str(home))
     # The fake is not the pinned build; everything else (path, argv, config) is real.
     monkeypatch.setattr(walg_binary, "installed_problem", lambda: None)
-    sandbox = Sandbox(home, store_dir, config_file, key_file)
+    sandbox = Sandbox(home, store_dir, config_file, key_file, enabled)
     sandbox.write_config(valid_config(key_file))
-    monkeypatch.setattr(settings.walg, "walg_config_file", config_file if enabled else None)
+    monkeypatch.setattr(settings.walg, "walg_config_file", sandbox.path_reader())
     return sandbox
 
 
@@ -139,11 +147,24 @@ class PgInstance:
     root: Path
     data: Path
     port: int
+    socket_dir: Path
 
     def connect(self) -> psycopg.Connection[Any]:
         return psycopg.connect(
-            host=str(self.root), port=self.port, user="meiva", dbname="postgres", autocommit=True
+            host=str(self.socket_dir),
+            port=self.port,
+            user="meiva",
+            dbname="postgres",
+            autocommit=True,
         )
+
+    # meiva:note
+    # This instance as a home's locally owned Postgres: its owner-only admin socket and data
+    # directory, the pair the production custody check binds a connection to.
+    @property
+    def target(self) -> PgTarget:
+        url = f"postgresql://meiva@/postgres?host={self.socket_dir}&port={self.port}"
+        return PgTarget(url, self.data, "postgres")
 
 
 def _free_port() -> int:
@@ -152,32 +173,26 @@ def _free_port() -> int:
         return int(probe.getsockname()[1])
 
 
-def _wait_ready(instance: PgInstance, process: subprocess.Popen[bytes]) -> None:
-    deadline = time.monotonic() + 60
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            log = (instance.root / "pg.log").read_text()
-            raise RuntimeError(f"postgres exited {process.returncode} during start:\n{log[-2000:]}")
-        with suppress(psycopg.OperationalError):
-            instance.connect().close()
-            return
-        time.sleep(0.2)
-    raise RuntimeError("postgres did not accept connections in 60s")
-
-
+# meiva:note
+# initdb + launch a Postgres laid out like a home's: `<root>/data` listening on the
+# canonical owner-only socket directory of the home `<root>`, so the production custody
+# check accepts it. With a `archive` sandbox it carries that sandbox's archive settings.
+#
+# The socket directory is short (`/tmp`), the data is disposable (fsync off), and
+# shutdown is immediate: a test never waits for a hung archive command.
 @contextmanager
-def archiving_postgres(*extra_args: str) -> Generator[PgInstance]:
-    """initdb + launch a Postgres with `archive_pg_args()` on its command line.
-
-    The socket directory is short (`/tmp`), the data is disposable (fsync off), and
-    shutdown is immediate: a test never waits for a hung archive command.
-    """
+def postgres_instance(
+    *extra_args: str, path_reader: Callable[[], Path | None] | None = None
+) -> Generator[PgInstance]:
     root = Path(tempfile.mkdtemp(prefix="meiva-walgpg-", dir="/tmp"))
     data = root / "data"
-    instance = PgInstance(root=root, data=data, port=_free_port())
+    socket_dir = pg_admin.pg_socket_dir(home=root)
+    instance = PgInstance(root=root, data=data, port=_free_port(), socket_dir=socket_dir)
     process: subprocess.Popen[bytes] | None = None
     try:
-        subprocess.run(  # noqa: S603 — argv is the resolved initdb path + static flags
+        # meiva:note
+        # The argv is the resolved initdb path plus static flags.
+        subprocess.run(  # noqa: S603
             [
                 str(pg_tool("initdb")),
                 "-D",
@@ -193,6 +208,7 @@ def archiving_postgres(*extra_args: str) -> Generator[PgInstance]:
             check=True,
             capture_output=True,
         )
+        archive_args = [] if path_reader is None else archive_pg_args(path_reader=path_reader)
         argv = [
             str(pg_tool("postgres")),
             "-D",
@@ -200,9 +216,9 @@ def archiving_postgres(*extra_args: str) -> Generator[PgInstance]:
             "-p",
             str(instance.port),
             "-c",
-            "listen_addresses=",
+            "listen_addresses=127.0.0.1",
             "-c",
-            f"unix_socket_directories={root}",
+            f"unix_socket_directories={socket_dir}",
             "-c",
             "fsync=off",
             "-c",
@@ -211,14 +227,25 @@ def archiving_postgres(*extra_args: str) -> Generator[PgInstance]:
             "synchronous_commit=off",
             *shlex.split(pg_tz_args()),
             *shlex.split(pg_shm_args()),
-            *archive_pg_args(path_reader=lambda: settings.walg.walg_config_file),
+            *archive_args,
             *extra_args,
         ]
-        with (root / "pg.log").open("wb") as log:
-            process = subprocess.Popen(  # noqa: S603 — resolved postgres path + static flags
-                argv, stdout=log, stderr=log, env=pg_start_env(), start_new_session=True
-            )
-        _wait_ready(instance, process)
+        # meiva:note
+        # Launched by the native starter, so the postmaster carries the launch receipt the
+        # production custody check demands of an admin connection.
+        children: list[subprocess.Popen[bytes]] = []
+
+        def ready() -> bool:
+            try:
+                instance.connect().close()
+            except psycopg.OperationalError:
+                return False
+            return True
+
+        native_postgres.start(
+            data, instance.port, argv, pg_start_env(), ready=ready, retained_children=children
+        )
+        process = children[0]
         yield instance
     finally:
         if process is not None and process.poll() is None:
@@ -228,7 +255,22 @@ def archiving_postgres(*extra_args: str) -> Generator[PgInstance]:
             if process.poll() is None:
                 process.kill()
                 process.wait()
+        shutil.rmtree(socket_dir, ignore_errors=True)
         shutil.rmtree(root, ignore_errors=True)
+
+
+# meiva:note
+# `postgres_instance` carrying the sandbox's `archive_pg_args()` on its command line.
+#
+# Without a `sandbox` the archive settings come from the process settings that
+# `make_sandbox` patched (the form the CLI tests use).
+def archiving_postgres(
+    *extra_args: str, sandbox: Sandbox | None = None
+) -> AbstractContextManager[PgInstance]:
+    reader = (
+        sandbox.path_reader if sandbox is not None else (lambda: settings.walg.walg_config_file)
+    )
+    return postgres_instance(*extra_args, path_reader=reader)
 
 
 def wait_for(predicate: Any, *, seconds: float = 60, what: str) -> None:
@@ -271,7 +313,7 @@ def take_basebackup(sandbox: Sandbox, pg: PgInstance, name: str) -> str:
             "-D",
             str(destination),
             "-h",
-            str(pg.root),
+            str(pg.socket_dir),
             "-p",
             str(pg.port),
             "-U",
@@ -286,3 +328,21 @@ def take_basebackup(sandbox: Sandbox, pg: PgInstance, name: str) -> str:
         timeout=120,
     )
     return name
+
+
+# meiva:note
+# A dial to Postgres that must not be entered: entering it fails the test.
+class NeverDialed:
+    def __enter__(self) -> psycopg.Connection[Any]:
+        raise AssertionError("Postgres was dialed")
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+
+# meiva:note
+# A home's Postgres that is not there: its owner-only socket directory does not exist.
+def refused_target() -> PgTarget:
+    return PgTarget(
+        "postgresql://meiva@/postgres?host=/nonexistent&port=1", Path("/nonexistent"), "postgres"
+    )

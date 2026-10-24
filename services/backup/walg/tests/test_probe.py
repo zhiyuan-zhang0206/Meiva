@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Generator
-from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -12,17 +10,20 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.config import settings
 from services.backup.walg import config as walg_config
 from services.backup.walg import probe
 from services.backup.walg import state as walg_state
-from services.backup.walg.archive import ARCHIVE_TIMEOUT_S, RPO_OBJECTIVE_S, expected_archive
+from services.backup.walg.archive import expected_archive
+from services.backup.walg.archive_plan import ARCHIVE_TIMEOUT_S, RPO_OBJECTIVE_S
+from services.backup.walg.pg_target import PgTarget
 from services.backup.walg.tests.support import (
     SECRETS,
+    NeverDialed,
     PgInstance,
     Sandbox,
     archiving_postgres,
     make_sandbox,
+    refused_target,
     wait_for,
     write_some_wal_and_switch,
 )
@@ -49,8 +50,8 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
     return make_sandbox(tmp_path, monkeypatch)
 
 
-def _healthy_state() -> probe.ArchiverState:
-    expected = expected_archive(path_reader=lambda: settings.walg.walg_config_file)
+def _healthy_state(sandbox: Sandbox) -> probe.ArchiverState:
+    expected = expected_archive(path_reader=sandbox.path_reader)
     assert expected is not None
     return probe.ArchiverState(
         archive_mode=expected.mode,
@@ -69,10 +70,10 @@ def test_failure_texts_carry_no_number_that_could_change_between_runs() -> None:
 
 
 def test_a_matching_quiet_archiver_is_healthy(sandbox: Sandbox) -> None:
-    expected = expected_archive(path_reader=lambda: settings.walg.walg_config_file)
+    expected = expected_archive(path_reader=sandbox.path_reader)
     assert expected is not None
 
-    assert probe.judge(_healthy_state(), expected) is None
+    assert probe.judge(_healthy_state(sandbox), expected) is None
 
 
 @pytest.mark.parametrize(
@@ -86,25 +87,25 @@ def test_a_matching_quiet_archiver_is_healthy(sandbox: Sandbox) -> None:
 def test_postgres_running_other_archive_settings_is_reported(
     sandbox: Sandbox, drift: dict[str, Any]
 ) -> None:
-    expected = expected_archive(path_reader=lambda: settings.walg.walg_config_file)
+    expected = expected_archive(path_reader=sandbox.path_reader)
     assert expected is not None
 
-    assert probe.judge(replace(_healthy_state(), **drift), expected) == probe.SETTINGS_DIFFER
+    assert probe.judge(replace(_healthy_state(sandbox), **drift), expected) == probe.SETTINGS_DIFFER
 
 
 def test_a_failing_archiver_is_reported(sandbox: Sandbox) -> None:
-    expected = expected_archive(path_reader=lambda: settings.walg.walg_config_file)
+    expected = expected_archive(path_reader=sandbox.path_reader)
     assert expected is not None
 
-    state = replace(_healthy_state(), failing_now=True)
+    state = replace(_healthy_state(sandbox), failing_now=True)
 
     assert probe.judge(state, expected) == probe.ARCHIVER_FAILING
 
 
 def test_pending_wal_is_late_only_beyond_the_rpo_objective(sandbox: Sandbox) -> None:
-    expected = expected_archive(path_reader=lambda: settings.walg.walg_config_file)
+    expected = expected_archive(path_reader=sandbox.path_reader)
     assert expected is not None
-    healthy = _healthy_state()
+    healthy = _healthy_state(sandbox)
 
     assert probe.judge(replace(healthy, oldest_pending_age_s=0.0), expected) is None
     assert probe.judge(replace(healthy, oldest_pending_age_s=RPO_OBJECTIVE_S), expected) is None
@@ -115,10 +116,10 @@ def test_pending_wal_is_late_only_beyond_the_rpo_objective(sandbox: Sandbox) -> 
 
 
 def test_settings_drift_outranks_the_archiver_conditions(sandbox: Sandbox) -> None:
-    expected = expected_archive(path_reader=lambda: settings.walg.walg_config_file)
+    expected = expected_archive(path_reader=sandbox.path_reader)
     assert expected is not None
     state = replace(
-        _healthy_state(), archive_mode="off", failing_now=True, oldest_pending_age_s=10_000.0
+        _healthy_state(sandbox), archive_mode="off", failing_now=True, oldest_pending_age_s=10_000.0
     )
 
     assert probe.judge(state, expected) == probe.SETTINGS_DIFFER
@@ -127,75 +128,47 @@ def test_settings_drift_outranks_the_archiver_conditions(sandbox: Sandbox) -> No
 def test_off_is_silent_and_never_dials_postgres(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    make_sandbox(tmp_path, monkeypatch, enabled=False)
+    sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
 
-    @contextmanager
-    def explode() -> Generator[psycopg.Connection[Any]]:
-        raise AssertionError("the probe dialed Postgres while WAL-G is off")
-        yield
-
-    monkeypatch.setattr(probe, "admin_connection", explode)
-
-    assert probe.failure(path_reader=lambda: settings.walg.walg_config_file) is None
-    assert probe.configuration_failure(path_reader=lambda: settings.walg.walg_config_file) is None
+    assert probe.failure_on(sandbox.path_reader(), NeverDialed(), now=NOW) is None
+    assert probe.configuration_failure(sandbox.path_reader()) is None
 
 
 def test_a_valid_configuration_is_fine(sandbox: Sandbox) -> None:
-    assert probe.configuration_failure(path_reader=lambda: settings.walg.walg_config_file) is None
+    assert probe.configuration_failure(sandbox.path_reader()) is None
 
 
 def test_an_unusable_configuration_is_reported_without_its_contents(sandbox: Sandbox) -> None:
     sandbox.config_file.write_text("{" + "".join(SECRETS))
 
-    assert (
-        probe.configuration_failure(path_reader=lambda: settings.walg.walg_config_file)
-        == probe.CONFIG_UNUSABLE
-    )
+    assert probe.configuration_failure(sandbox.path_reader()) == probe.CONFIG_UNUSABLE
 
 
 def test_a_swapped_key_is_reported_once_a_key_is_pinned(sandbox: Sandbox) -> None:
     sandbox.key_file.write_text("cd" * 32 + "\n")
-    assert (
-        probe.configuration_failure(path_reader=lambda: settings.walg.walg_config_file) is None
-    ), "nothing is pinned yet: reading never pins"
+    assert probe.configuration_failure(sandbox.path_reader()) is None, (
+        "nothing is pinned yet: reading never pins"
+    )
 
-    walg_config.load_walg_config(path_reader=lambda: settings.walg.walg_config_file)
-    assert probe.configuration_failure(path_reader=lambda: settings.walg.walg_config_file) is None
+    walg_config.load_walg_config(path_reader=sandbox.path_reader)
+    assert probe.configuration_failure(sandbox.path_reader()) is None
 
     sandbox.key_file.write_text("ef" * 32 + "\n")
-    assert (
-        probe.configuration_failure(path_reader=lambda: settings.walg.walg_config_file)
-        == probe.KEY_CHANGED
-    )
+    assert probe.configuration_failure(sandbox.path_reader()) == probe.KEY_CHANGED
 
 
 def test_the_probe_never_raises_when_postgres_cannot_be_read(
-    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
+    sandbox: Sandbox, postgres_access: None
 ) -> None:
-    @contextmanager
-    def unreachable() -> Generator[psycopg.Connection[Any]]:
-        raise psycopg.OperationalError("connection refused")
-        yield
+    unreachable = probe.admin_connection_to(refused_target())
 
-    monkeypatch.setattr(probe, "admin_connection", unreachable)
-
-    assert probe.failure(path_reader=lambda: settings.walg.walg_config_file) == probe.UNREADABLE
-
-
-def _dial(pg: PgInstance, monkeypatch: pytest.MonkeyPatch) -> None:
-    @contextmanager
-    def admin() -> Generator[psycopg.Connection[Any]]:
-        with pg.connect() as conn:
-            yield conn
-
-    monkeypatch.setattr(probe, "admin_connection", admin)
+    assert probe.failure_on(sandbox.path_reader(), unreachable, now=NOW) == probe.UNREADABLE
 
 
 def test_a_healthy_archiver_reads_healthy_and_an_idle_one_is_not_late(
-    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch, postgres_access: None
+    sandbox: Sandbox, postgres_access: None
 ) -> None:
-    with archiving_postgres() as pg, pg.connect() as conn:
-        _dial(pg, monkeypatch)
+    with archiving_postgres(sandbox=sandbox) as pg, pg.connect() as conn:
         write_some_wal_and_switch(conn)
 
         def settled() -> bool:
@@ -203,11 +176,10 @@ def test_a_healthy_archiver_reads_healthy_and_an_idle_one_is_not_late(
             return state.archived_count >= 1 and state.oldest_pending_age_s is None
 
         wait_for(settled, what="the closed segment to be archived")
-        monkeypatch.setattr(probe, "RPO_OBJECTIVE_S", 1)
         time.sleep(2.5)
 
         state = probe.read_archiver_state(conn)
-        expected = expected_archive(path_reader=lambda: settings.walg.walg_config_file)
+        expected = expected_archive(path_reader=sandbox.path_reader)
         assert expected is not None
         assert (state.archive_mode, state.archive_command) == ("on", expected.command)
         assert (state.archive_timeout_s, state.failing_now, state.failed_count) == (
@@ -215,50 +187,41 @@ def test_a_healthy_archiver_reads_healthy_and_an_idle_one_is_not_late(
             False,
             0,
         )
-        assert probe.judge(state, expected) is None
-        assert probe.failure(path_reader=lambda: settings.walg.walg_config_file) is None
+        assert probe.judge(state, expected, rpo_objective_s=1) is None
+        assert _failure(sandbox, pg, rpo_objective_s=1) is None
 
 
 def test_a_failing_archive_command_is_reported_with_work_waiting(
-    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch, postgres_access: None
+    sandbox: Sandbox, postgres_access: None
 ) -> None:
     sandbox.set_mode("fail")
-    with archiving_postgres() as pg, pg.connect() as conn:
-        _dial(pg, monkeypatch)
+    with archiving_postgres(sandbox=sandbox) as pg, pg.connect() as conn:
         write_some_wal_and_switch(conn)
 
         wait_for(lambda: probe.read_archiver_state(conn).failing_now, what="a failure")
 
         state = probe.read_archiver_state(conn)
         assert state.oldest_pending_age_s is not None, "the failed segment stays queued"
-        assert (
-            probe.failure(path_reader=lambda: settings.walg.walg_config_file)
-            == probe.ARCHIVER_FAILING
-        )
+        assert _failure(sandbox, pg) == probe.ARCHIVER_FAILING
 
 
 def test_a_hung_archive_command_is_caught_by_the_age_of_the_waiting_wal(
-    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch, postgres_access: None
+    sandbox: Sandbox, postgres_access: None
 ) -> None:
     sandbox.set_mode("hang")
-    with archiving_postgres() as pg, pg.connect() as conn:
-        _dial(pg, monkeypatch)
-        monkeypatch.setattr(probe, "RPO_OBJECTIVE_S", 2)
+    with archiving_postgres(sandbox=sandbox) as pg, pg.connect() as conn:
         write_some_wal_and_switch(conn)
 
         wait_for(
             lambda: probe.read_archiver_state(conn).oldest_pending_age_s is not None,
             what="the closed segment to be queued",
         )
-        assert probe.failure(path_reader=lambda: settings.walg.walg_config_file) is None, (
+        assert _failure(sandbox, pg, rpo_objective_s=1000) is None, (
             "freshly queued work is not late yet"
         )
 
         wait_for(
-            lambda: (
-                probe.failure(path_reader=lambda: settings.walg.walg_config_file)
-                == probe.ARCHIVE_BEHIND
-            ),
+            lambda: _failure(sandbox, pg, rpo_objective_s=2) == probe.ARCHIVE_BEHIND,
             seconds=30,
             what="the segment to be late",
         )
@@ -270,12 +233,16 @@ def test_a_hung_archive_command_is_caught_by_the_age_of_the_waiting_wal(
 def test_the_application_login_cannot_list_the_archive_queue(
     sandbox: Sandbox, postgres_access: None
 ) -> None:
-    with archiving_postgres() as pg:
+    with archiving_postgres(sandbox=sandbox) as pg:
         with pg.connect() as admin:
             admin.execute("CREATE ROLE app LOGIN")
         with (
             psycopg.connect(
-                host=str(pg.root), port=pg.port, user="app", dbname="postgres", autocommit=True
+                host=str(pg.socket_dir),
+                port=pg.port,
+                user="app",
+                dbname="postgres",
+                autocommit=True,
             ) as app,
             pytest.raises(psycopg.errors.InsufficientPrivilege),
         ):
@@ -283,49 +250,29 @@ def test_the_application_login_cannot_list_the_archive_queue(
 
 
 def test_the_admin_dial_is_custody_checked_and_bounded(
-    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
+    sandbox: Sandbox, tmp_path: Path, postgres_access: None
 ) -> None:
-    from base.cluster.dataplane import pg_admin
-
-    seen: dict[str, Any] = {}
-
-    class _Conn:
-        def execute(self, statement: str) -> None:
-            seen["statement"] = statement
-
-    @contextmanager
-    def connect(url: str, **kwargs: Any) -> Generator[_Conn]:
-        seen["url"], seen["kwargs"] = url, kwargs
-        yield _Conn()
-
-    authority = pg_admin.OwnerAuthority(
-        admin_url="postgresql://zzy@/postgres?host=/sockets/meiva-pg-home&port=5433",
-        database="db",
-        owner="owner",
-        data_dir=sandbox.home / "pg",
-    )
-
-    def owner_authority(db_url: str, *, remote_plane: bool) -> pg_admin.OwnerAuthority:
-        assert db_url == settings.data_plane.db_url
-        assert not remote_plane
-        return authority
-
-    monkeypatch.setattr(pg_admin, "local_owner_authority", owner_authority)
-    monkeypatch.setattr(pg_admin, "connect", connect)
-
-    with probe.admin_connection():
-        pass
-
-    assert seen["url"] == authority.admin_url
-    assert seen["kwargs"] == {
-        "expected_data_dir": sandbox.home / "pg",
-        "autocommit": True,
-        "connect_timeout": probe.CONNECT_TIMEOUT_S,
-    }
-    assert seen["statement"].startswith("SET statement_timeout")
+    with archiving_postgres(sandbox=sandbox) as pg:
+        with probe.admin_connection_to(pg.target) as conn:
+            row = conn.execute("SHOW statement_timeout").fetchone()
+            assert row is not None and row[0] == "10s"
+        foreign = PgTarget(pg.target.admin_url, tmp_path / "another-home" / "pg", "postgres")
+        with pytest.raises((RuntimeError, OSError)), probe.admin_connection_to(foreign):
+            pytest.fail("a data directory that is not this postmaster's must refuse the dial")
 
 
 NOW = datetime(2026, 10, 3, 12, 0, 0, tzinfo=UTC)
+
+
+def _failure(
+    sandbox: Sandbox, pg: PgInstance, *, rpo_objective_s: float = RPO_OBJECTIVE_S
+) -> str | None:
+    return probe.failure_on(
+        sandbox.path_reader(),
+        probe.admin_connection_to(pg.target),
+        now=datetime.now(UTC),
+        rpo_objective_s=rpo_objective_s,
+    )
 
 
 def _run(status: walg_state.RunStatus = "ok", step: str | None = None) -> walg_state.RunRecord:
@@ -430,7 +377,7 @@ def test_before_any_tick_the_time_since_enabling_is_what_counts() -> None:
 
 
 def test_the_enabling_time_is_the_key_pins_mtime(sandbox: Sandbox) -> None:
-    walg_config.load_walg_config(path_reader=lambda: settings.walg.walg_config_file)
+    walg_config.load_walg_config(path_reader=sandbox.path_reader)
     assert probe.enabled_since() is not None
     pinned_at = datetime(2026, 10, 1, 0, 0, tzinfo=UTC).timestamp()
     os.utime(walg_config.key_id_path(), (pinned_at, pinned_at))
@@ -517,22 +464,9 @@ def test_the_tick_conditions_outrank_the_drill_conditions() -> None:
     assert _judge(recorded) == probe.RUN_FAILED_AT[walg_state.STEP_BACKUP]
 
 
-def _healthy_archiver(monkeypatch: pytest.MonkeyPatch, **changes: Any) -> None:
-    @contextmanager
-    def admin() -> Generator[None]:
-        yield None
-
-    def read(_conn: object) -> probe.ArchiverState:
-        return replace(_healthy_state(), **changes)
-
-    monkeypatch.setattr(probe, "admin_connection", admin)
-    monkeypatch.setattr(probe, "read_archiver_state", read)
-
-
 def test_failure_reports_the_tick_when_the_archiver_is_fine(
-    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
+    sandbox: Sandbox, postgres_access: None
 ) -> None:
-    _healthy_archiver(monkeypatch)
     now = datetime.now(UTC)
     walg_state.write_state(
         walg_state.State(
@@ -547,31 +481,28 @@ def test_failure_reports_the_tick_when_the_archiver_is_fine(
         )
     )
 
-    assert (
-        probe.failure(path_reader=lambda: settings.walg.walg_config_file)
-        == probe.RUN_FAILED_AT[walg_state.STEP_RETENTION]
-    )
+    with archiving_postgres(sandbox=sandbox) as pg:
+        assert _failure(sandbox, pg) == probe.RUN_FAILED_AT[walg_state.STEP_RETENTION]
 
 
 def test_an_archiver_failure_outranks_a_tick_failure(
-    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
+    sandbox: Sandbox, postgres_access: None
 ) -> None:
-    _healthy_archiver(monkeypatch, failing_now=True)
+    sandbox.set_mode("fail")
     walg_state.write_state(
         walg_state.State(verify=_verify("FAILURE"), tick=walg_state.TickRecord(started_at=NOW))
     )
 
-    assert (
-        probe.failure(path_reader=lambda: settings.walg.walg_config_file) == probe.ARCHIVER_FAILING
-    )
+    with archiving_postgres(sandbox=sandbox) as pg, pg.connect() as conn:
+        write_some_wal_and_switch(conn)
+        wait_for(lambda: probe.read_archiver_state(conn).failing_now, what="a failure")
+
+        assert _failure(sandbox, pg) == probe.ARCHIVER_FAILING
 
 
 def test_off_does_not_read_the_tick_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    make_sandbox(tmp_path, monkeypatch, enabled=False)
+    sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
+    walg_state.walg_dir().mkdir(parents=True, exist_ok=True)
+    walg_state.state_path().write_text("{broken")
 
-    def explode(*_a: Any, **_k: Any) -> Any:
-        raise AssertionError("read the tick state while WAL-G is off")
-
-    monkeypatch.setattr(walg_state, "read_state", explode)
-
-    assert probe.failure(path_reader=lambda: settings.walg.walg_config_file) is None
+    assert probe.failure_on(sandbox.path_reader(), NeverDialed(), now=NOW) is None

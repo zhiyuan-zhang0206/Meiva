@@ -18,8 +18,12 @@ from __future__ import annotations
 import tempfile
 import uuid
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+
+import psycopg
 
 from base.cluster.dataplane import walg_binary
 from services.backup.walg import config as walg_config
@@ -73,10 +77,14 @@ def _storage_round_trip(*, path_reader: Callable[[], Path | None]) -> str:
     return "put, list, get (encryption round trip), delete, list"
 
 
-def _postgres_facts(*, path_reader: Callable[[], Path | None]) -> str:
+def _postgres_facts(
+    *,
+    path_reader: Callable[[], Path | None],
+    admin: AbstractContextManager[psycopg.Connection[Any]],
+) -> str:
     expected = expected_archive(path_reader=path_reader)
     try:
-        with probe.admin_connection() as conn:
+        with admin as conn:
             state = probe.read_archiver_state(conn)
     except Exception as exc:
         return f"not read ({type(exc).__name__}); the health probe judges it once Postgres is up"
@@ -92,12 +100,27 @@ def _postgres_facts(*, path_reader: Callable[[], Path | None]) -> str:
 
 def run_check(*, path_reader: Callable[[], Path | None]) -> list[Step]:
     """Run the checks in order, stopping at the first failure; the last step is the verdict."""
+    return run_check_on(
+        path_reader=path_reader,
+        binary_problem=walg_binary.installed_problem(),
+        admin=probe.admin_connection(),
+    )
+
+
+# meiva:note
+# `run_check` over the facts it would resolve: why the installed binary is not the pinned
+# build (None when it is) and the dial to the home's Postgres.
+def run_check_on(
+    *,
+    path_reader: Callable[[], Path | None],
+    binary_problem: str | None,
+    admin: AbstractContextManager[psycopg.Connection[Any]],
+) -> list[Step]:
     path = walg_config.configured_path(path_reader=path_reader)
     if path is None:
         return [Step("configured", "MEIVA_WALG_CONFIG_FILE is not set", ok=False)]
     steps = [Step("configured", str(path))]
 
-    binary_problem = walg_binary.installed_problem()
     if binary_problem is not None:
         return [*steps, Step("binary", f"{binary_problem} (meiva converge installs it)", ok=False)]
     steps.append(Step("binary", f"pinned wal-g {walg_binary.WALG_VERSION}"))
@@ -127,4 +150,4 @@ def run_check(*, path_reader: Callable[[], Path | None]) -> list[Step]:
     except WalgCommandError as exc:
         return [*steps, Step("storage", str(exc), ok=False)]
 
-    return [*steps, Step("postgres", _postgres_facts(path_reader=path_reader))]
+    return [*steps, Step("postgres", _postgres_facts(path_reader=path_reader, admin=admin))]

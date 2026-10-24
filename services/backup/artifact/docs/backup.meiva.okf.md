@@ -33,7 +33,7 @@ host's: reading a host timezone can make a current dump appear to be future.
 - **Timeout guard**: `_DUMP_TIMEOUT_S=60min` bounds pg_dump inside the scheduler; a stalled dump cannot freeze watchdog supervision.
 - **Dump authority** (`dump_source`): a locally owned plane dumps as the administrator acting as the schema owner over the home's owner-only socket (`base.cluster.dataplane.pg_admin`), custody-checked first and password-free, so no write-generation login is needed and a rollout revoking one cannot kill a dump; a remote-managed plane dumps through its provider URL (password in the child environment only). The restore drill recreates the capability groups `meiva_gateway`/`meiva_runner` the dump's grants name.
 
-- **Configuration ownership**: dump decisions require hour, retention and remote-plane readers plus a fresh `Clock` factory at each original timezone read. Off-site publication requires endpoint, bucket and credentials-file readers; explicit bucket injection does not read them. Roots bind these readers to their own `ConfigBoot` without moving database or publication authority.
+- **Configuration ownership**: the roots (scheduler daemon, worker, standalone publisher, restore drill) read configuration once and pass values down: `run_backup(now, tree=, db_url=, keep=, offsite_target=)` takes the `BackupTree`, the dial, the retention and the off-site `OssTarget`. Due-ness, names, argv and retention are pure (`schedule.py`, `dump_plan.py`, `dump_lines.py`).
 
 ## Key Dependencies
 - [[meiva_root.meiva.okf.md]] — probes and restarts the scheduler without executing the dump
@@ -41,7 +41,7 @@ host's: reading a host timezone can make a current dump appear to be future.
 
 ## Entry Points
 - `services/backup/scheduler/daemon.py` — scheduled due-check, retry, and health state
-- `services/backup/dump.py` — `run_backup()` dumps, publishes and prunes in-process; `run_backup(staging=...)` writes the scheduler worker's artifact into its private controls. `python -m services.backup.dump --publish-offsite ARTIFACT [--offsite-root PREFIX]` publishes one existing artifact and, like the scheduled leg, prints its result on stderr
+- `services/backup/dump.py` — `run_backup()` dumps, publishes (when handed an off-site target) and prunes in-process; `run_backup(staging=...)` writes the scheduler worker's artifact into its private controls. `python -m services.backup.dump --publish-offsite ARTIFACT [--offsite-root PREFIX]` publishes one existing artifact and, like the scheduled leg, prints its result on stderr
 - `services/backup/restore_drill.py` (`python -m services.backup.restore_drill [ARTIFACT]`) — decrypts a managed database backup, restores it into throwaway Postgres, and verifies schema, table counts, and a readable checkpoint conversation without touching the live database; scratch files and the throwaway cluster are removed afterwards
 - `services/backup/scheduler/worker.py` — the dump and logical restore-drill operation kinds, their sanitizers, and `commit_scheduled_backup()`
 - `services/backup/artifact/intermediates.py` — `sweep_closed_partials()`, the closed-intermediate sweep every backup run applies to the backup directory
