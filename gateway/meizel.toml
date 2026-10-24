@@ -21,3 +21,6 @@ exports = ["agents", "alerts", "app.py", "cluster", "events", "http", "mcp_serve
 
 [roots]
 "app.py" = { kinds = ["settings"], why = "Gateway process and cold schema entry compose their configuration here" }
+
+[debt.ambient-read]
+"app.py#clock time.time" = 1

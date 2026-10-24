@@ -18,6 +18,13 @@ exports = ["atomic_io.py", "brew_pin.py", "config_validators.py", "converge", "d
 "resource_sample.py" = "strict-to-be"
 "verified_file.py" = "strict"
 
+[debt.ambient-read]
+"memory_pressure.py#platform sys.platform" = 1
+"private_storage.py#random uuid.uuid4" = 2
+"proc.py#clock time.monotonic" = 2
+"resource_sample.py#clock time.time" = 1
+"resource_sample.py#platform sys.platform" = 1
+
 [debt.impure-call]
 "resource_sample.py#import subprocess" = 1
 "resource_sample.py#time.time" = 1

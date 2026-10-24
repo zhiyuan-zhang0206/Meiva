@@ -18,7 +18,14 @@ from __future__ import annotations
 import ast
 from collections.abc import Iterator
 
-from meizel.graph.model import INTERVAL_CLOCKS, Acquisition, AmbientKind, Sources, stdlib_kind
+from meizel.graph.model import (
+    INTERVAL_CLOCKS,
+    SEEDABLE_GENERATORS,
+    Acquisition,
+    AmbientKind,
+    Sources,
+    stdlib_kind,
+)
 from meizel.graph.universe import Universe
 from meizel.language.patching import PatchForms
 from meizel.lint_common import is_test_path
@@ -44,6 +51,22 @@ def _sleeps(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
             ):
                 return True
     return False
+
+
+# meiva:note
+# Only a non-None literal proves an independent seed. A dynamic value can be None;
+# unbounded positional or keyword arguments cannot prove that the seed was supplied.
+def _ambient_seed(call: ast.Call) -> bool:
+    if len(call.args) == 1 and not call.keywords:
+        seed = call.args[0]
+    elif not call.args and len(call.keywords) == 1 and call.keywords[0].arg == "x":
+        seed = call.keywords[0].value
+    else:
+        return True
+    try:
+        return ast.literal_eval(seed) is None
+    except (ValueError, TypeError):
+        return True
 
 
 # meiva:note
@@ -87,10 +110,12 @@ class AmbientRecorder:
                 self._add(line, kind, prefix)
                 return
 
-    def called(self, callee: str | None, line: int) -> None:
+    def called(self, callee: str | None, call: ast.Call) -> None:
+        if callee is not None and callee in SEEDABLE_GENERATORS and _ambient_seed(call):
+            self._add(call.lineno, AmbientKind.RANDOM, callee)
         kind = None if callee is None else self.sources.calls.get(callee)
         if kind is not None and callee is not None:
-            self._add(line, kind, callee)
+            self._add(call.lineno, kind, callee)
 
 
 # meiva:note

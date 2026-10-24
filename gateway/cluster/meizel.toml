@@ -17,3 +17,9 @@ exports = ["bootstrap.py", "harness_probe.py", "harness_rows.py", "machine_pause
 "harness_rows.py" = "strict"
 "schemas.py" = "strict"
 "serve_plan.py" = "strict"
+
+[debt.ambient-read]
+"machine_pause.py#clock datetime.datetime.now" = 1
+"router.py#clock datetime.datetime.now" = 1
+"server.py#pid os.getpid" = 1
+"status.py#clock datetime.datetime.now" = 3

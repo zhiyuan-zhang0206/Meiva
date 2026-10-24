@@ -18,3 +18,11 @@ exports = ["daemon.py", "resolution.py", "rollup.py", "token_totals.py"]
 [roots]
 "daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 "rollup.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+
+[debt.ambient-read]
+"alert_reconciler.py#clock datetime.datetime.now" = 2
+"daemon.py#clock datetime.datetime.now" = 2
+"daemon.py#clock time.time" = 1
+"daemon.py#pid os.getpid" = 2
+"rollup.py#clock datetime.datetime.now" = 1
+"telemetry_replay.py#platform socket.gethostname" = 1

@@ -7,4 +7,5 @@ exports = ["agent_usage.py"]
 "agent_usage.py" = ["db"]
 
 [debt.ambient-read]
+"agent_usage.py#clock datetime.datetime.now" = 1
 "watch_idle.py#settings base.config.settings" = 1

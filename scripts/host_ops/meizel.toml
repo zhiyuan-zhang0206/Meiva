@@ -11,4 +11,14 @@ exports = ["check_worktree_remove.py", "onboarding"]
 "guard_editable_venv.py" = { kinds = ["environ"], why = "dependency-free pre-uv preflight must inspect inherited VIRTUAL_ENV before a project environment can be trusted or Settings can import" }
 
 [debt.ambient-read]
+"admission_ledger.py#clock time.monotonic" = 3
+"admission_ledger.py#platform sys.platform" = 1
+"admission_run.py#clock datetime.datetime.now" = 3
+"admission_run.py#home pathlib.Path.home" = 1
+"admission_run.py#pid os.getpid" = 1
+"admission_run.py#platform sys.platform" = 6
+"guard_editable_venv.py#cwd pathlib.Path.cwd" = 1
+"host_memory_sample.py#clock datetime.datetime.now" = 1
+"host_memory_sample.py#home pathlib.Path.home" = 1
+"host_memory_sample.py#pid os.getuid" = 1
 "update_schedule_script.py#db base.db.Database.from_settings" = 1

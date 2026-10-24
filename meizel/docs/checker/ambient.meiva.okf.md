@@ -23,8 +23,8 @@ file is allowed to.
 ## Kinds
 
 A closed vocabulary (`AmbientKind` in `meizel/graph/model.py`); an unknown kind in a manifest is
-`manifest-syntax`. The graph model also owns the standard-library spellings shared by the
-scanner and diff hints, so root exemptions use the same kind classification.
+`manifest-syntax`. The graph model also owns the standard-library spellings used by the scanner.
+Diff hints share the closed kind vocabulary when reading settings roots for `service-locator`.
 
 | kind | acquired by |
 |---|---|
@@ -33,12 +33,19 @@ scanner and diff hints, so root exemptions use the same kind classification.
 | `home`, `cwd` | `Path.home`, `os.path.expanduser`; `os.getcwd`, `Path.cwd` |
 | `platform` | `sys.platform`, `os.name`, `os.uname`, `socket.gethostname`, `platform.*` |
 | `pid` | `os.getpid`, `os.getppid`, `os.getuid`, `os.geteuid`, `os.getgid`, `os.getegid` |
-| `random` | `random.*` (not `random.Random(seed)`), `secrets.*`, `uuid.uuid1`, `uuid.uuid4` |
+| `random` | `random.*` (literal non-None seeded generators and class references excluded), `secrets.*` (not `secrets.compare_digest`), `uuid.uuid1`, `uuid.uuid4` |
 | `settings`, `db`, `endpoints`, `bus` | the state the repository keeps itself, below |
 
 An interval clock read for a deadline, a duration or a TTL is the plain use of `time`; it is a
 window onto the world only where the same function sleeps, because then how long to wait next is
 decided in a loop. The wall clock is always one.
+
+A `random.Random` constructor has an independent seed only when its positional seed or `x=`
+argument is a non-None literal, including zero or an empty string/bytes value. Missing seeds,
+literal `None`, dynamic seeds and unbounded argument expansion conservatively acquire `random`:
+a dynamic value can be `None`, and the checker does not infer its runtime value or type.
+This is static evidence of a possible ambient
+seed, not proof that every execution reads the machine. A class reference alone acquires nothing.
 
 ## State
 
@@ -89,8 +96,6 @@ pass it down, or lift the decision into a pure function of its inputs.
 Only the point of acquisition is recorded; the analysis has no types, so what code does with the
 object after it holds it is not followed (`settings.x.y` after the import is a plain read). A
 name reached through a re-export outside the declared modules, an alias assigned to a variable and
-called later, `Path("~").expanduser()` and a string passed to `getattr` are not seen. The kinds
-judged today are listed in `meizel/contracts/ambient_read.py` (`_JUDGED`); the scanner records all
-of them.
+called later, `Path("~").expanduser()` and a string passed to `getattr` are not seen.
 
 Parent: [[meizel/docs/checker/checker.meiva.okf.md|checker]].

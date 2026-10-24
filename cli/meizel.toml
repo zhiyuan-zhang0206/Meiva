@@ -20,5 +20,13 @@ exports = ["__main__.py", "commands", "database", "fleet_update", "parsers", "st
 "start_intent.py" = { kinds = ["environ"], why = "Identity bootstrap precedes Settings: read the birth inputs and pin the resolved home before config imports." }
 
 [debt.ambient-read]
+"_python_index.py#home pathlib.Path.home" = 1
+"_python_index.py#platform sys.platform" = 1
+"fleet_alert_silence.py#clock datetime.datetime.now" = 1
 "fleet_alert_silence.py#settings base.config.settings" = 1
+"init_intent.py#platform socket.getfqdn" = 1
+"init_intent.py#platform socket.gethostname" = 1
+"python_install.py#cwd pathlib.Path.cwd" = 1
 "python_install.py#environ os.environ" = 1
+"start_identity.py#clock datetime.datetime.now" = 1
+"start_identity.py#random secrets.token_urlsafe" = 3

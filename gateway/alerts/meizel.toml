@@ -5,3 +5,6 @@ exports = ["router.py"]
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.ambient-read]
+"router.py#clock datetime.datetime.now" = 1

@@ -20,3 +20,8 @@ exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "
 
 [roots]
 "boot.py" = { kinds = ["environ", "settings"], why = "launched_context() / has_launched_identity() read os.environ[\"MEIVA_AGENT_ID\"]; the env key is the only channel for child processes (shell sessions, watchers) to discover their parent agent; SDK process bootstrap constructs and binds process-owned contexts" }
+
+[debt.ambient-read]
+"files.py#home pathlib.Path.home" = 1
+"files.py#random uuid.uuid4" = 1
+"ui.py#clock time.monotonic" = 2

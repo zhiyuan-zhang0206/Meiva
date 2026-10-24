@@ -17,3 +17,8 @@ exports = ["cleanup_after.py", "computer.py", "control.py", "impersonation.py", 
 [roots]
 "impersonation.py" = ["bus"]
 "impersonation_relay.py" = ["bus"]
+
+[debt.ambient-read]
+"control.py#random uuid.uuid4" = 1
+"impersonation_relay.py#clock datetime.datetime.now" = 1
+"notices.py#random uuid.uuid4" = 1

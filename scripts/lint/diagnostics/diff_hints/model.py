@@ -16,7 +16,6 @@ from meizel.graph.model import AmbientKind
 # The closed set of hint ids. A trailer names one of these; an unknown id in a
 # `Hint-Ack` line is an error, not a silent no-op.
 class HintId(StrEnum):
-    AMBIENT_READ = "ambient-read"
     CALLABLE_DEFAULT = "callable-default"
     CALLABLE_BAG = "callable-bag"
     NONE_FALLBACK = "none-fallback"

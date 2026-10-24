@@ -26,5 +26,12 @@ exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py
 [debt.ambient-read]
 "daemon.py#settings base.config.settings" = 1
 "gateway_session.py#settings base.config.settings" = 1
+"macos_readiness.py#clock time.monotonic" = 1
+"macos_readiness.py#pid os.getuid" = 3
+"page_lifecycle.py#clock datetime.datetime.now" = 1
 "page_lifecycle.py#settings base.config.settings" = 1
 "probe.py#settings base.config.settings" = 1
+"profile.py#clock time.time" = 1
+"session.py#clock time.time" = 1
+"session_restore.py#clock datetime.datetime.now" = 2
+"session_restore.py#clock time.monotonic" = 4

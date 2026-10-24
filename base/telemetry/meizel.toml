@@ -22,4 +22,9 @@ exports = ["alerts", "audit_events.py", "converge_report.py", "delivery", "emitt
 "tracing.py" = { kinds = ["environ"], why = "sets TRACELOOP_TRACE_CONTENT=false for the traceloop-sdk instrumentors — the SDK's ONLY content-tracing switch (no Python API equivalent); Meiva's own config surface is the MEIVA_TRACE_STRIP_CONTENT settings field, which drives this env translation" }
 
 [debt.ambient-read]
+"emitter.py#clock datetime.datetime.now" = 1
+"event_store.py#clock datetime.datetime.now" = 1
 "lgtm_local.py#settings base.config.settings" = 1
+"process_logging.py#pid os.getpid" = 1
+"trace_mirror.py#clock datetime.datetime.now" = 1
+"trace_mirror.py#clock time.time" = 1

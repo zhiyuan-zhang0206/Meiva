@@ -7,3 +7,6 @@ exports = ["runloop.py", "trace_checkpoint.py"]
 [purity]
 "__init__.py" = "strict"
 "failure_decision.py" = "strict"
+
+[debt.ambient-read]
+"runloop.py#clock datetime.datetime.now" = 2

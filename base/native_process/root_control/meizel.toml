@@ -7,3 +7,12 @@ exports = ["client.py", "instance_lock.py", "ipc.py"]
 [purity]
 "__init__.py" = "strict"
 "ipc.py" = "strict"
+
+[debt.ambient-read]
+"client.py#cwd pathlib.Path.cwd" = 1
+"client.py#pid os.getpid" = 1
+"client.py#pid os.getppid" = 1
+"client.py#pid os.getuid" = 1
+"client.py#platform socket.gethostname" = 1
+"client.py#platform sys.platform" = 3
+"instance_lock.py#pid os.getpid" = 1

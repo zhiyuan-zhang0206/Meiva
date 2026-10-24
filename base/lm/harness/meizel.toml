@@ -20,3 +20,10 @@ exports = ["acp", "antigravity", "bridge.py", "claude", "codex", "deepseek", "en
 [purity]
 "events.py" = "strict"
 "handoff.py" = "strict"
+
+[debt.ambient-read]
+"bridge.py#clock datetime.datetime.now" = 1
+"bridge.py#pid os.getpid" = 1
+"bridge.py#random secrets.token_urlsafe" = 1
+"process.py#clock time.monotonic" = 4
+"registration.py#clock datetime.datetime.now" = 1

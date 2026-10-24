@@ -6,3 +6,6 @@ exports = ["cleanup.py", "filesystem.py", "ledger.py"]
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.ambient-read]
+"filesystem.py#platform sys.platform" = 2

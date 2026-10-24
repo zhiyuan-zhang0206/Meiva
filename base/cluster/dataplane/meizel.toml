@@ -9,3 +9,15 @@ exports = ["direct_url.py", "pg_admin.py", "pg_foreground.py", "pg_runtime.py", 
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.ambient-read]
+"pg_foreground.py#clock time.monotonic" = 2
+"pg_runtime.py#platform sys.platform" = 1
+"pg_stall_watchdog.py#clock datetime.datetime.now" = 1
+"pg_tools.py#pid os.getpid" = 1
+"pg_tools.py#platform sys.platform" = 1
+"redis_bridge.py#platform sys.platform" = 1
+"runtime_binaries.py#platform platform.machine" = 3
+"runtime_binaries.py#platform platform.system" = 2
+"walg_binary.py#platform platform.machine" = 1
+"walg_binary.py#platform platform.system" = 1

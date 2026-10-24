@@ -2,3 +2,7 @@ exports = ["build_okf_data.py", "dump_openapi.py", "gen_config_lite_table.py", "
 
 [uses]
 "tests" = ["build_android_release.py", "build_app_update_manifest.py"]
+
+[debt.ambient-read]
+"build_android_release.py#clock datetime.datetime.now" = 1
+"serve_okf_viz.py#platform socket.gethostname" = 1

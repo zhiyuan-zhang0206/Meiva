@@ -9,3 +9,6 @@ exports = ["client.py", "grants", "wire.py"]
 "__init__.py" = "strict"
 "client_stateful.py" = "strict"
 "wire.py" = "strict"
+
+[debt.ambient-read]
+"client.py#clock time.monotonic" = 4

@@ -12,3 +12,8 @@ exports = ["daemon.py", "settings.py", "worker.py"]
 [roots]
 "daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 "worker.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+
+[debt.ambient-read]
+"daemon.py#clock datetime.datetime.now" = 2
+"daemon.py#clock time.time" = 1
+"daemon.py#pid os.getpid" = 1

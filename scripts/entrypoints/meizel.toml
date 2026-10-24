@@ -3,6 +3,9 @@ purity = "strict-to-be"
 [uses]
 "tests" = ["agent.py"]
 
+[debt.ambient-read]
+"agent.py#random uuid.uuid4" = 1
+
 [debt.impure-call]
 "agent.py#uuid.uuid4" = 1
 

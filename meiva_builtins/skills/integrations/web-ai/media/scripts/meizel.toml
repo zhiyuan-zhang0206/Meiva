@@ -1,0 +1,2 @@
+[debt.ambient-read]
+"generate.py#clock time.monotonic" = 6

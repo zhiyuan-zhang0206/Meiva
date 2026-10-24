@@ -14,3 +14,7 @@ exports = ["creation.py", "eval_guard.py", "history", "inbound_provenance.py", "
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.ambient-read]
+"creation.py#clock datetime.datetime.now" = 2
+"launch_retry.py#random uuid.uuid4" = 1

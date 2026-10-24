@@ -4,4 +4,7 @@ exports = ["rotate_cluster_secret.py", "tests"]
 "tests" = ["rotate_data_plane_secrets.py"]
 
 [debt.ambient-read]
+"rotate_cluster_secret.py#random secrets.token_urlsafe" = 1
+"rotate_data_plane_secrets.py#clock datetime.datetime.now" = 1
+"rotate_data_plane_secrets.py#random secrets.token_urlsafe" = 1
 "rotate_data_plane_secrets.py#settings base.config.settings" = 1

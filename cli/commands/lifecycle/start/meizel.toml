@@ -16,3 +16,6 @@ exports = ["admission.py", "cold_start.py", "cold_start_plan.py", "gateway_hint.
 "preflight_findings.py" = "strict"
 "readiness_plan.py" = "strict"
 "stand_down_gate.py" = "strict"
+
+[debt.ambient-read]
+"__init__.py#clock datetime.datetime.now" = 1

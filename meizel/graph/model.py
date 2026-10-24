@@ -8,6 +8,7 @@ from enum import StrEnum
 
 __all__ = [
     "INTERVAL_CLOCKS",
+    "SEEDABLE_GENERATORS",
     "Acquisition",
     "AmbientKind",
     "Code",
@@ -146,15 +147,18 @@ _STDLIB: dict[str, AmbientKind] = {
     **dict.fromkeys(("uuid.uuid1", "uuid.uuid4"), AmbientKind.RANDOM),
 }
 # meiva:note
-# Modules every public name of which reaches the machine or draws randomness.
+# Module-wide ambient vocabularies, narrowed by deterministic members below.
 _WHOLE_MODULES = {
     "platform": AmbientKind.PLATFORM,
     "random": AmbientKind.RANDOM,
     "secrets": AmbientKind.RANDOM,
 }
 # meiva:note
-# A generator built from an explicit seed is a value, not a window onto the process.
-_SEEDED = frozenset({"random.Random"})
+# Constructors whose seed must be inspected at the call, rather than at a class reference.
+SEEDABLE_GENERATORS = frozenset({"random.Random"})
+# meiva:note
+# Class references and constant-time comparison do not themselves acquire randomness.
+_DETERMINISTIC = SEEDABLE_GENERATORS | frozenset({"secrets.compare_digest"})
 
 
 # meiva:note
@@ -166,7 +170,7 @@ def stdlib_kind(dotted: str) -> tuple[AmbientKind, str] | None:
         if prefix in _STDLIB:
             return _STDLIB[prefix], prefix
     whole = _WHOLE_MODULES.get(parts[0])
-    if whole is not None and len(parts) > 1 and ".".join(parts[:2]) not in _SEEDED:
+    if whole is not None and len(parts) > 1 and ".".join(parts[:2]) not in _DETERMINISTIC:
         return whole, ".".join(parts[:2])
     return None
 

@@ -9,3 +9,6 @@ exports = ["daemon.py", "tests"]
 
 [roots]
 "daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+
+[debt.ambient-read]
+"daemon.py#pid os.getpid" = 1

@@ -9,3 +9,6 @@ exports = ["agent_runtime.py", "hint_selection.py"]
 "_state.py" = "strict"
 "hint_selection.py" = "strict"
 "plugin.py" = "strict"
+
+[debt.ambient-read]
+"agent_runtime.py#clock datetime.datetime.now" = 2

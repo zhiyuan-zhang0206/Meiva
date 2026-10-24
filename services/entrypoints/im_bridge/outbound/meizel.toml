@@ -10,3 +10,8 @@ exports = ["claim_fence.py", "health.py", "push_plan.py", "retry.py", "store.py"
 "__init__.py" = "strict"
 "claim_fence.py" = "strict"
 "push_plan.py" = "strict"
+
+[debt.ambient-read]
+"health.py#clock datetime.datetime.now" = 1
+"retry.py#random random.random" = 1
+"store.py#random uuid.uuid4" = 1

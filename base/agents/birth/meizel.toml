@@ -6,3 +6,8 @@ exports = ["creation_identity.py", "harness.py", "spawn.py", "transaction.py"]
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.ambient-read]
+"harness.py#clock datetime.datetime.now" = 1
+"harness.py#home pathlib.Path.home" = 1
+"transaction.py#random uuid.uuid4" = 1

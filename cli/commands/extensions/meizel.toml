@@ -17,3 +17,12 @@ exports = ["external_skills.py", "materialize.py", "memory.py", "parsers", "plug
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.ambient-read]
+"external_skills.py#random uuid.uuid4" = 2
+"mcp.py#clock datetime.datetime.now" = 2
+"plugins.py#clock datetime.datetime.now" = 1
+"plugins.py#pid os.getpid" = 1
+"skill.py#clock datetime.datetime.now" = 4
+"skill_package.py#clock datetime.datetime.now" = 1
+"skills_sync.py#clock datetime.datetime.now" = 1

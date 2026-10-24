@@ -1,0 +1,8 @@
+[debt.ambient-read]
+"codebase_sweep_orchestrator.py#clock datetime.datetime.now" = 1
+"codebase_sweep_orchestrator.py#home pathlib.Path.home" = 1
+"codebase_sweep_orchestrator.py#random uuid.uuid4" = 1
+"deep_research_orchestrator.py#clock datetime.datetime.now" = 1
+"deep_research_orchestrator.py#random uuid.uuid4" = 1
+"minimal_dispatch.py#random uuid.uuid4" = 1
+"orchestrator_template.py#random uuid.uuid4" = 1
