@@ -316,12 +316,12 @@ def test_repo_moonshot_provider_is_enabled_and_registers_complete_contract() -> 
         "kimi-k3.1-pro",
         "kimi-k3.1-pro-highspeed",
     }
-    assert pricing.model_vendor("kimi-k3", prices=catalog.prices) == "moonshot"
-
     from base.lm.factory import provider_key_map, provider_key_of_model
 
     assert provider_key_map(catalog=catalog)["kimi-"] == ("Moonshot", "MOONSHOT_API_KEY")
-    assert provider_key_of_model("kimi-k3", catalog=catalog) == "kimi"
+    for model in ("kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"):
+        assert pricing.model_vendor(model, prices=catalog.prices) == "moonshot"
+        assert provider_key_of_model(model, catalog=catalog) == "kimi"
     binding = catalog.bindings["kimi-"]
     assert binding.prefix == "kimi-"
     assert binding.provider_key is None

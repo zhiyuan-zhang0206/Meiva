@@ -33,31 +33,22 @@ from base.packages.plugins.extensions import PluginContributions
 _KIMI_EFFORT_LEVELS = ("low", "high", "max")
 
 
+# meiva:note
+# Moonshot Kimi (`https://api.moonshot.ai/v1`) streams reasoning in `delta.reasoning_content`,
+# which `ChatMoonshot` records on `additional_kwargs["reasoning_content"]` for the fan-out and
+# timeline readers. K3-series thinking (`kimi-k3`, `kimi-k3.1-pro*`) is always on and rejects
+# the legacy K2.x `thinking` request field (`ChatMoonshot.thinking` is deliberately left unset),
+# so `thinking={"type": "disabled"}` logs a warning while graded effort (`low`/`high`/`max`,
+# default `max`) rides top-level `reasoning_effort` via `extra_body`.
+# meiva:link base/lm/docs/lm/lm.meiva.okf.md
 def build(ctx: BuildContext) -> BaseChatModel:
-    """kimi-* branch: ChatMoonshot (OpenAI-compatible). K3's thinking is
-    always on — a caller disabling it gets a warning. Reasoning effort
-    rides the top-level `reasoning_effort` body field via extra_body."""
     from langchain_moonshot import ChatMoonshot
 
-    # Moonshot Kimi API is OpenAI-compatible (https://api.moonshot.ai/v1),
-    # standard `Authorization: Bearer` auth. K2.7 thinking is on by default,
-    # streamed in the delta's `reasoning_content` field. ChatMoonshot captures
-    # reasoning in `additional_kwargs["reasoning_content"]`; the streaming
-    # fan-out (`RedisStreamHandler`) and timeline (`base/agents/history/timeline.py`) both
-    # read that key so reasoning renders through the same path as every other
-    # provider.
     api_key = ctx.keys.require("MOONSHOT_API_KEY")
-    # K3's thinking is always on and cannot be turned off, and the
-    # K2.x-era `thinking` request parameter is not accepted by K3 — warn
-    # instead of silently dropping the caller's intent. (Do NOT wire
-    # ChatMoonshot's `thinking` field: it emits that K2.x parameter.)
     if ctx.thinking is not None and ctx.thinking.get("type") == "disabled":
         logger.warning(
             f"{ctx.model} cannot disable thinking; thinking={{'type': 'disabled'}} ignored"
         )
-    # Reasoning effort rides the top-level `reasoning_effort` body field,
-    # delivered via extra_body (Kimi's enum is low/high/max, default max —
-    # the only way to run K3 below its most expensive tier).
     kimi_kwargs: dict[str, Any] = {}
     if ctx.resolved_effort:
         kimi_kwargs["extra_body"] = {
@@ -105,6 +96,7 @@ PROVIDER = ProviderContribution(
             knowledge_cutoff="2025-12",
             model_identity="You are running on Kimi K3 (Moonshot).",
             effort_levels=("low", "high", "max"),
+            thinking_always_on=True,
             # Streams (the registry default). The former streaming=False carried
             # "streaming returns ~40% 429" — no incident record backs the asymmetry,
             # and Moonshot's own troubleshooting page recommends stream=True
