@@ -485,7 +485,9 @@ def test_understand_wrap_forwards_effort(
                     "type": "message",
                     "status": "completed",
                     "role": "assistant",
-                    "content": [{"type": "output_text", "text": "ok", "annotations": []}],
+                    "content": [
+                        {"type": "output_text", "text": "ok", "annotations": list[object]()}
+                    ],
                 }
             ],
             "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},

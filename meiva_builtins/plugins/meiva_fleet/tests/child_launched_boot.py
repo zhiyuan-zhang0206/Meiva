@@ -28,12 +28,13 @@ def launched_imports_share_boot() -> None:
     _pin_fleet_cluster_config()
     import meiva
     from base.agents.context import MeivaContext
+    from base.agents.context.clients import ClientSet
     from meiva.agents import spawn
     from meiva.sdk_surface.installation import Installation, installed
 
     def _assert_runtime_resources_cold(context: MeivaContext, installation: Installation) -> None:
         bare = installation.clients
-        assert bare is not None
+        assert isinstance(bare, ClientSet)
         assert bare is not context.clients
         for clients in (context.clients, bare):
             assert clients._sql is None
