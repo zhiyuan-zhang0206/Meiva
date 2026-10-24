@@ -13,12 +13,12 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
-from typing import Any, Literal, cast
+from typing import Any, Literal, Protocol, cast
 
 import psutil
 from pydantic import Field, model_validator
@@ -113,7 +113,33 @@ def read_receipt(data: Path) -> Receipt | None:
 _read = read_receipt
 
 
-def _directory_matches(process: psutil.Process, data: Path, receipt: Receipt | None) -> bool:
+# meiva:note
+# What `require_closed` asks of one process: `psutil.Process` is one, a scripted process that
+# exits or refuses to be read mid-look is the other.
+class ProcessView(Protocol):
+    @property
+    def pid(self) -> int: ...
+
+    def uids(self) -> Any: ...
+
+    def status(self) -> str: ...
+
+    def name(self) -> str: ...
+
+    def cwd(self) -> str: ...
+
+    def cmdline(self) -> list[str]: ...
+
+    def is_running(self) -> bool: ...
+
+
+# meiva:note
+# The processes this user can see right now, for `require_closed` to judge.
+def live_processes() -> Iterable[ProcessView]:
+    return psutil.process_iter(["pid"])
+
+
+def _directory_matches(process: ProcessView, data: Path, receipt: Receipt | None) -> bool:
     cwd = Path(process.cwd())
     if cwd.resolve() == data:
         return True
@@ -123,14 +149,30 @@ def _directory_matches(process: psutil.Process, data: Path, receipt: Receipt | N
     return "-D" in argv and Path(argv[argv.index("-D") + 1]).resolve() == data
 
 
-def require_closed(data: Path, receipt: Receipt | None) -> None:
+# meiva:note
+# Whether a process that refused a read is simply gone: macOS answers the argv read of a process
+# that is exiting with "access denied", so the refusal alone says nothing about custody. A
+# process that is still running and unreadable is not excused.
+def _vanished(process: ProcessView) -> bool:
+    try:
+        return not process.is_running() or process.status() in {
+            psutil.STATUS_ZOMBIE,
+            psutil.STATUS_DEAD,
+        }
+    except psutil.NoSuchProcess:
+        return True
+
+
+def require_closed(
+    data: Path, receipt: Receipt | None, *, processes: Iterable[ProcessView]
+) -> None:
     """A dead postmaster alone cannot prove that its old workers have closed."""
     session = (
         receipt.owner.pid
         if receipt is not None and receipt.owner is not None and receipt.boot_id == boot_id()
         else None
     )
-    for process in psutil.process_iter(["pid"]):
+    for process in processes:
         try:
             if process.uids().real != os.getuid() or process.status() in {
                 psutil.STATUS_ZOMBIE,
@@ -146,6 +188,10 @@ def require_closed(data: Path, receipt: Receipt | None) -> None:
                 raise RuntimeError("PostgreSQL descendants or an unrecorded process retain custody")
         except (psutil.NoSuchProcess, ProcessLookupError):
             continue
+        except psutil.AccessDenied:
+            if _vanished(process):
+                continue
+            raise
 
 
 def read_pidfile(data: Path, receipt: Receipt) -> tuple[tuple[int, int], tuple[str, ...]]:
@@ -194,12 +240,12 @@ def observe(data: Path) -> OwnedProcess | None:
     if receipt is None:
         if (data / "postmaster.pid").exists():
             raise RuntimeError("PostgreSQL pidfile has no native launch receipt; reconcile custody")
-        require_closed(data, None)
+        require_closed(data, None, processes=live_processes())
         return None
     if receipt.state == "pending":
         raise RuntimeError("PostgreSQL launch custody is unresolved; reconcile pending receipt")
     if receipt.boot_id != boot_id() or receipt.owner is None or not receipt.process().live():
-        require_closed(data, receipt)
+        require_closed(data, receipt, processes=live_processes())
         return None
     owner = _require_process(data, receipt)
     read_pidfile(data, receipt)
@@ -295,7 +341,7 @@ def _complete_start(
                 write(data, admitted)
             return owner
         time.sleep(0.05)
-    require_closed(data, receipt)
+    require_closed(data, receipt, processes=live_processes())
     raise RuntimeError(f"PostgreSQL exited before readiness; inspect {data / 'pg.log'}")
 
 
@@ -462,7 +508,7 @@ def stop(
                 escalation = _escalate(owner, tree, timeout, immediate_wait, kill_wait)
                 break
             time.sleep(0.05)
-        require_closed(data, receipt)
+        require_closed(data, receipt, processes=live_processes())
         require_listener(None, receipt.port, required=False)
         if retained_children is not None:
             for child in tuple(retained_children):

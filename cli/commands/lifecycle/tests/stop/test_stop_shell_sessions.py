@@ -34,6 +34,7 @@ import pytest
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import ledger_path
+from base.sessions.pty.survivor_role import SurvivorRole
 from base.sessions.pty.tests import pty_jobs as jobs
 from base.sessions.pty.tests import pty_shells as support
 from base.sessions.pty.tests.pty_reaper import PtyReaper
@@ -244,7 +245,7 @@ def test_incomplete_stop_still_records_the_sessions_it_closed(
     shell = identity_of(launch(stuck, term="ignore", ignore_hangup=True))
     first = closure.Outcome(
         closed=(closed_session(closed),),
-        survivors=(closure.Survivor(stuck, shell, "shell"),),
+        survivors=(closure.Survivor(stuck, shell, SurvivorRole.SHELL),),
     )
 
     with pytest.raises(StopIncompleteError) as incomplete:
@@ -279,7 +280,7 @@ def test_known_job_leftover_is_reported_without_failing_stop(
     job = launch("private-job", term="ignore", ignore_hangup=True)
     outcome = closure.Outcome(
         closed=(closed_session(name, ((job.pid, "python3"),)),),
-        survivors=(closure.Survivor(name, identity_of(job), "job"),),
+        survivors=(closure.Survivor(name, identity_of(job), SurvivorRole.JOB),),
     )
 
     settle(outcome, stop_runtime, operator_database)
@@ -308,7 +309,7 @@ def test_a_survivor_that_died_before_the_report_does_not_fail_the_stop(
     proc.kill()
     proc.wait(timeout=5)
     settle(
-        closure.Outcome(survivors=(closure.Survivor("gone", gone, "shell"),)),
+        closure.Outcome(survivors=(closure.Survivor("gone", gone, SurvivorRole.SHELL),)),
         stop_runtime,
         operator_database,
     )
@@ -476,36 +477,23 @@ def test_force_close_reports_known_job_without_failing(
     name = "meiva-agent-987-shell-2055-denied"
     job = launch("private-job", term="ignore", ignore_hangup=True)
     shells.settle_forced_closure(
-        closure.Outcome(survivors=(closure.Survivor(name, identity_of(job), "job"),))
+        closure.Outcome(survivors=(closure.Survivor(name, identity_of(job), SurvivorRole.JOB),))
     )
     assert name in capsys.readouterr().err
 
 
 # meiva:note
 # A survivor whose role the closure's vocabulary does not name is not a job to report and move on
-# from: the outcome is refused before any survivor is judged, on a forced and a normal closure.
-@pytest.mark.parametrize("forced", [False, True])
-def test_a_closure_outcome_with_an_unknown_survivor_role_is_refused(
-    forced: bool,
-    launch: Launcher,
-    operator_database: OperatorDatabaseFactory,
-    stop_runtime: CommandRuntime,
-) -> None:
+# from: the outcome is refused where the wire outcome is read, before any survivor is judged.
+def test_a_closure_outcome_with_an_unknown_survivor_role_is_refused(launch: Launcher) -> None:
     name = "meiva-agent-987-shell-2055-odd"
     survivor = launch("private-odd", term="ignore", ignore_hangup=True)
-    outcome = closure.Outcome(survivors=(closure.Survivor(name, identity_of(survivor), "helper"),))
+    wire = closure.Outcome(
+        survivors=(closure.Survivor(name, identity_of(survivor), SurvivorRole.JOB),)
+    ).to_wire()
+    wire["survivors"][0]["role"] = "helper"
     with pytest.raises(ValueError, match="'helper' is not a valid SurvivorRole"):
-        if forced:
-            shells.settle_forced_closure(outcome)
-        else:
-            shells.settle_closure(
-                outcome,
-                "stop",
-                deadline=time.monotonic() + 1,
-                direct_db=False,
-                database_factory=operator_database,
-                command=stop_runtime,
-            )
+        closure.Outcome.from_wire(wire)
 
 
 def test_force_close_still_fails_when_known_shell_survives(launch: Launcher) -> None:
@@ -513,7 +501,9 @@ def test_force_close_still_fails_when_known_shell_survives(launch: Launcher) -> 
     shell = launch(name, term="ignore", ignore_hangup=True)
     with pytest.raises(RuntimeError, match=name):
         shells.settle_forced_closure(
-            closure.Outcome(survivors=(closure.Survivor(name, identity_of(shell), "shell"),))
+            closure.Outcome(
+                survivors=(closure.Survivor(name, identity_of(shell), SurvivorRole.SHELL),)
+            )
         )
 
 

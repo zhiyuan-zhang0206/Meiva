@@ -1,11 +1,12 @@
-exports = ["allocation_freeze.py", "client.py", "closure.py", "keys.py", "paths.py", "process_groups.py", "protocol.py", "screen.py", "tests"]
+exports = ["allocation_freeze.py", "client.py", "closure.py", "keys.py", "paths.py", "process_groups.py", "protocol.py", "screen.py", "survivor_role.py", "tests"]
 
 [uses]
 "client.py" = ["closure.py", "paths.py", "protocol.py"]
-"closure.py" = ["process_groups.py"]
+"closure.py" = ["process_groups.py", "survivor_role.py"]
 "screen.py" = ["paths.py"]
-"tests" = ["allocation_freeze.py", "client.py", "closure.py", "keys.py", "paths.py", "process_groups.py", "protocol.py", "screen.py"]
+"tests" = ["allocation_freeze.py", "client.py", "closure.py", "keys.py", "paths.py", "process_groups.py", "protocol.py", "screen.py", "survivor_role.py"]
 
 [purity]
 "__init__.py" = "strict"
 "keys.py" = "strict"
+"survivor_role.py" = "strict"

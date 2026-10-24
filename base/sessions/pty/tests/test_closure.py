@@ -15,6 +15,7 @@ from base.native_process.ownership import OwnedProcess
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.native_process.tests.fake_process_control import FakeProcessControl, Signalled
 from base.sessions.pty import closure, process_groups
+from base.sessions.pty.survivor_role import SurvivorRole
 
 
 @pytest.fixture
@@ -94,7 +95,7 @@ def test_known_shell_survivor_is_reported_not_closed(
     control = FakeProcessControl(groups={target.shell.pid: target.shell.pid})
     outcome = closure.close_sessions([target], grace_s=0, kill_s=0, process_control=control)
     assert outcome.closed == ()
-    assert outcome.survivors == (closure.Survivor(target.name, target.shell, "shell"),)
+    assert outcome.survivors == (closure.Survivor(target.name, target.shell, SurvivorRole.SHELL),)
 
 
 def test_known_job_survivor_is_diagnostic_after_shell_closes(
@@ -114,7 +115,7 @@ def test_known_job_survivor_is_diagnostic_after_shell_closes(
         kill_s=0.2,
         process_control=control,
     )
-    assert outcome.survivors == (closure.Survivor(target.name, job.shell, "job"),)
+    assert outcome.survivors == (closure.Survivor(target.name, job.shell, SurvivorRole.JOB),)
     assert outcome.closed == (
         closure.ClosedSession(target.name, target.shell, ((job.shell.pid, "sleep"),)),
     )
@@ -137,7 +138,7 @@ def test_wire_outcome_round_trips_known_survivors() -> None:
     job = OwnedProcess(4243, 12.75, None)
     outcome = closure.Outcome(
         (closure.ClosedSession("meiva-agent-1-shell-1-wire", shell, ((4243, "sleep"),)),),
-        (closure.Survivor("meiva-agent-1-shell-1-wire", job, "job"),),
+        (closure.Survivor("meiva-agent-1-shell-1-wire", job, SurvivorRole.JOB),),
     )
     assert closure.Outcome.from_wire(outcome.to_wire()) == outcome
 

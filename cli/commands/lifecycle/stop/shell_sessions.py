@@ -25,6 +25,7 @@ from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.paths import run_dir
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import ledger_path, service_socket_path
+from base.sessions.pty.survivor_role import SurvivorRole
 from cli.commands.data_plane.maintenance.survivors import SurvivorInventory
 from cli.commands.data_plane.maintenance_stop_report import (
     StopIncompleteError,
@@ -43,7 +44,6 @@ from cli.commands.lifecycle.stop.closure_plan import (
     FailShells,
     ReportJobLeftover,
     SurvivorFact,
-    SurvivorRole,
     WriteNotices,
     forced_failure_message,
     job_leftover_line,
@@ -118,7 +118,7 @@ def _survivor_facts(outcome: closure.Outcome) -> tuple[SurvivorFact, ...]:
     return tuple(
         SurvivorFact(
             session=survivor.session,
-            role=SurvivorRole(survivor.role),
+            role=survivor.role,
             pid=survivor.process.pid,
             alive=bool(live_identities([survivor.process])),
         )
@@ -134,10 +134,10 @@ def _shell_sessions_incomplete(
     live = {
         s.process: s
         for s in outcome.survivors
-        if SurvivorRole(s.role) is SurvivorRole.SHELL and live_identities([s.process])
+        if s.role is SurvivorRole.SHELL and live_identities([s.process])
     }
     report = [
-        capture_survivor(identity, service=found.session, role=found.role)
+        capture_survivor(identity, service=found.session, role=found.role.value)
         for identity, found in sorted(live.items(), key=lambda item: item[0].pid)
     ]
     inventory = SurvivorInventory(survivors=tuple(report))

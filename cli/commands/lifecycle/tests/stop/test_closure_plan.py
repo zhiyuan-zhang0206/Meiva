@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import pytest
 
+from base.sessions.pty.survivor_role import SurvivorRole
 from cli.commands.lifecycle.stop.closure_plan import (
     AwaitNoSessions,
     FailShells,
     ReportJobLeftover,
     SurvivorFact,
-    SurvivorRole,
     WriteNotices,
     forced_failure_message,
     job_leftover_line,
