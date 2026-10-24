@@ -9,6 +9,7 @@ import itertools
 import pytest
 
 from cli.commands.data_plane.maintenance.plan import (
+    RedisShutdownMode,
     ShutdownRedis,
     StopPooler,
     StopPostgres,
@@ -24,7 +25,11 @@ _ALL = frozenset({"pgbouncer", "postgres", "redis"})
 # The pooler first so its clients are disconnected before Postgres goes down, Postgres second,
 # and Redis last, whatever order the services were captured in.
 def test_the_pooler_stops_before_postgres_and_postgres_before_redis() -> None:
-    assert plan_stop(_ALL, save=True) == (StopPooler(), StopPostgres(), ShutdownRedis("SAVE"))
+    assert plan_stop(_ALL, save=True) == (
+        StopPooler(),
+        StopPostgres(),
+        ShutdownRedis(RedisShutdownMode.SAVE),
+    )
 
 
 @pytest.mark.parametrize(
@@ -37,8 +42,8 @@ def test_only_the_captured_services_are_stopped(captured: frozenset[str]) -> Non
 
 
 def test_redis_saves_its_data_unless_the_caller_proved_a_final_snapshot() -> None:
-    assert plan_stop(frozenset({"redis"}), save=True) == (ShutdownRedis("SAVE"),)
-    assert plan_stop(frozenset({"redis"}), save=False) == (ShutdownRedis("NOSAVE"),)
+    assert plan_stop(frozenset({"redis"}), save=True) == (ShutdownRedis(RedisShutdownMode.SAVE),)
+    assert plan_stop(frozenset({"redis"}), save=False) == (ShutdownRedis(RedisShutdownMode.NOSAVE),)
 
 
 def test_a_service_the_stop_does_not_know_is_a_bug_in_the_caller() -> None:

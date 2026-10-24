@@ -15,10 +15,13 @@ from cli.commands.cluster.plans.destroy_plan import (
     DestroyFacts,
     DestroyPlan,
     DropData,
+    HostSystem,
+    IntentState,
     PublishIntent,
     RetireHelper,
     RetireJobs,
     StopCluster,
+    StopMode,
     answer_confirms,
     cleanup_incomplete,
     destroy_prompt,
@@ -34,10 +37,10 @@ def _facts(**changes: Any) -> DestroyFacts:
     facts = DestroyFacts(
         home="/home/u/.meiva",
         roles=("agent-runner",),
-        stop_mode="smooth",
+        stop_mode=StopMode.SMOOTH,
         stop_timeout_s=300.0,
         meiva_executable="/src/.venv/bin/meiva",
-        platform="linux",
+        platform=HostSystem.LINUX,
         helper_port=8181,
         drop_dirs=(),
     )
@@ -47,8 +50,8 @@ def _facts(**changes: Any) -> DestroyFacts:
 def test_destroy_stops_everything_with_the_operators_mode_and_budget() -> None:
     # meiva:note
     # A detach stops every component; only a gateway names its data plane.
-    gateway = stop_argv("/src/.venv/bin/meiva", ["gateway"], "force", 120.0)
-    runner = stop_argv("/src/.venv/bin/meiva", ["agent-runner"], "smooth", 60.0)
+    gateway = stop_argv("/src/.venv/bin/meiva", ["gateway"], StopMode.FORCE, 120.0)
+    runner = stop_argv("/src/.venv/bin/meiva", ["agent-runner"], StopMode.SMOOTH, 60.0)
 
     assert gateway == (
         "/src/.venv/bin/meiva",
@@ -74,7 +77,7 @@ def test_destroy_stops_everything_with_the_operators_mode_and_budget() -> None:
 
 
 def test_a_fractional_budget_keeps_its_fraction() -> None:
-    assert stop_argv("m", ["agent-runner"], "smooth", 7.5)[-1] == "7.5"
+    assert stop_argv("m", ["agent-runner"], StopMode.SMOOTH, 7.5)[-1] == "7.5"
 
 
 def test_the_terminal_intent_is_published_first_and_detached_only_after_everything_retired() -> (
@@ -84,17 +87,21 @@ def test_the_terminal_intent_is_published_first_and_detached_only_after_everythi
 
     assert plan == DestroyPlan(
         under_lock=(
-            PublishIntent("destroying", announce=None),
-            StopCluster(stop_argv("/src/.venv/bin/meiva", ["agent-runner"], "smooth", 300.0)),
+            PublishIntent(IntentState.DESTROYING, announce=None),
+            StopCluster(
+                stop_argv("/src/.venv/bin/meiva", ["agent-runner"], StopMode.SMOOTH, 300.0)
+            ),
             RetireJobs(),
-            PublishIntent("detached", announce="detached /home/u/.meiva after exact cleanup"),
+            PublishIntent(
+                IntentState.DETACHED, announce="detached /home/u/.meiva after exact cleanup"
+            ),
         ),
         afterwards=(),
     )
 
 
 def test_only_a_macos_host_has_a_permissions_helper_to_retire() -> None:
-    darwin = plan_destroy(_facts(platform="darwin")).under_lock
+    darwin = plan_destroy(_facts(platform=HostSystem.DARWIN)).under_lock
 
     assert darwin[2:4] == (RetireJobs(), RetireHelper(8181))
     assert not any(isinstance(step, RetireHelper) for step in plan_destroy(_facts()).under_lock)
@@ -116,8 +123,13 @@ def test_the_data_directories_go_last_and_only_when_asked() -> None:
 
 
 def test_the_intent_marker_is_a_versioned_state() -> None:
-    assert PublishIntent("destroying", None).marker() == b'{"version":1,"state":"destroying"}\n'
-    assert PublishIntent("detached", "x").marker() == b'{"version":1,"state":"detached"}\n'
+    assert (
+        PublishIntent(IntentState.DESTROYING, None).marker()
+        == b'{"version":1,"state":"destroying"}\n'
+    )
+    assert (
+        PublishIntent(IntentState.DETACHED, "x").marker() == b'{"version":1,"state":"detached"}\n'
+    )
 
 
 def test_the_prompt_says_what_happens_without_listing_a_deletion() -> None:

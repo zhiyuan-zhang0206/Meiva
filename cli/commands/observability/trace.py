@@ -22,7 +22,6 @@ import json
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import httpx
 
@@ -30,7 +29,7 @@ from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
 from base.host.db_authority.unit import telemetry_bearer
 from base.telemetry.trace_mirror import mirror_day, mirror_sort_key
-from cli.commands.observability.inputs import observability_config
+from cli.commands.observability.inputs import observability_config_from_boot
 from cli.commands.observability.plans.observability_config import ObservabilityConfig
 from cli.commands.observability.plans.trace_ship.files import (
     ShipTotals,
@@ -46,6 +45,7 @@ from cli.commands.observability.plans.trace_ship.target import (
     ShipTarget,
     plan_ship_target,
 )
+from cli.commands.observability.url_split import split_url
 
 _WATERMARK_NAME = ".ship-watermark.json"
 _SPAN_ID_LENGTHS = (("trace_id", 16), ("span_id", 8), ("parent_span_id", 8))
@@ -72,7 +72,7 @@ def resolve_ship_target(
         roles=roles,
         tempo_endpoint=observability.telemetry_tempo_endpoint,
         gateway_endpoint=gateway,
-        gateway=urlsplit(gateway),
+        gateway=split_url(gateway),
         token=telemetry_bearer(home.resolve(), cluster_secret) if runner else None,
     )
 
@@ -253,7 +253,7 @@ def cmd_trace_ship(
     if not dry_run:
         view = config.view
         target = resolve_ship_target(
-            observability_config(view.observability),
+            observability_config_from_boot(config),
             cluster_secret=view.data_plane.cluster_secret,
             machine=machine,
             home=home,

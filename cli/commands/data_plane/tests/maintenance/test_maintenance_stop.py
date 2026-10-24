@@ -34,7 +34,7 @@ from base.telemetry.tests.capture.event_capture import emitted_events as emitted
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import maintenance_stop
 from cli.commands.data_plane.config import DataPlaneConfig
-from cli.commands.data_plane.maintenance.plan import ShutdownRedis, StopPostgres
+from cli.commands.data_plane.maintenance.plan import RedisShutdownMode, ShutdownRedis, StopPostgres
 from cli.commands.data_plane.maintenance.process_scan import judge, refusal
 from cli.commands.data_plane.stop_waits import StopLegs, deadline_after
 from cli.commands.data_plane.tests.native_processes import (
@@ -187,7 +187,11 @@ def test_a_redis_connection_ended_after_capture_cannot_shut_down_another_connect
             try:
                 with pytest.raises(RuntimeError, match="connection changed"):
                     await maintenance_stop.request_stop(
-                        ShutdownRedis("SAVE"), identity, dedicated, deadline, context
+                        ShutdownRedis(RedisShutdownMode.SAVE),
+                        identity,
+                        dedicated,
+                        deadline,
+                        context,
                     )
             finally:
                 await dedicated.aclose()

@@ -5,11 +5,4 @@ exports = ["converge_host", "startup", "stop"]
 "root_control" = ["runtime_at.py", "scripted_root.py"]
 "startup" = ["runtime_at.py", "scripted_root.py", "stop"]
 "stop" = ["runtime_at.py", "scripted_root.py"]
-"test_collector_admission.py" = ["scripted_root.py"]
-
-[debt.env-patch]
-"test_collector_admission.py#monkeypatch.delitem os.environ.MEIVA_TELEMETRY_OTLP_ENDPOINT" = 3
-"test_collector_admission.py#monkeypatch.setitem os.environ.MEIVA_TELEMETRY_OTLP_ENDPOINT" = 1
-
-[debt.first-party-patch]
-"test_collector_admission.py#monkeypatch.setattr cli.commands.observability.otel_collector.ensure_otel_collector" = 4
+"test_collector_root_isolation.py" = ["scripted_root.py"]

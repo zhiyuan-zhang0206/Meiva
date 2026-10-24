@@ -10,7 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from cli.commands.data_plane.host_dependencies.table import provision_label, provision_script
+from cli.commands.data_plane.host_dependencies.table import (
+    Component,
+    provision_label,
+    provision_script,
+)
 
 __all__ = [
     "InstallStep",
@@ -32,7 +36,7 @@ class InstallStep:
 
 # meiva:note
 # The install of `group` from the checkout at `repo`.
-def plan_install(group: str, *, repo: Path, macos: bool) -> InstallStep:
+def plan_install(group: Component, *, repo: Path, macos: bool) -> InstallStep:
     script = repo / "scripts" / "provision" / provision_script(group)
     manager = "Homebrew" if macos else "apt"
     return InstallStep(

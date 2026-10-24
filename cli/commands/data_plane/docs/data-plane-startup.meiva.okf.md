@@ -23,9 +23,13 @@ The composition roots build it once with `data_plane_config_from_boot(command.co
 `meiva start`, `meiva stop` and `meiva status` steps in `cli/commands/lifecycle`, and the pooler
 converge step (`ensure_pgbouncer_step`). Every function below them takes it as the first
 parameter and the home it works in as a keyword (`home=command.home`); `ensure_cluster_storage`,
-`start_pg`, `start_redis` and the three gateway entries derive every path from that home. A test
+`start_pg`, `start_redis` and the three gateway entries derive every path from that home, except
+the pooler's files, which `base/cluster/dataplane/pooler.py` places under the process's
+`meiva_home()` until its functions take the home. The host platform arrives the same way, as the
+`macos` value the gateway entries and `stop_cluster_instance` take. A test
 builds the same value with `data_plane_config_from_boot` and changes a field with
-`dataclasses.replace`.
+`dataclasses.replace`. The `meiva backup walg` verbs get theirs from `walg_plane(args.runtime.config)` at the parser
+handler; `walg_config_file` is carried by this value and nowhere else.
 
 What a service launch is delivered is `cli/commands/data_plane/instance/launch_delivery.py:LaunchDelivery`, read once at
 the start entry (`bringup.read_launch_delivery`): the home, whether the plane is remote-managed,
@@ -44,12 +48,19 @@ completion), `status_lines.py`, `stop_plan.py` and `bringup_lines.py` (what stat
 the remote probes print and do). `cluster_instance.py`, `bringup.py` (the entry, the probes,
 status, stop, the launch deliveries) and `completion.py` (the final grants, the write generation,
 the pooler and the consumer checks) are their shells: they read the OS user, the platform, the
-machine's addresses and the binaries (`pg_tool`, `redis_*_bin`), execute each step and stop at
-the first one that fails. The bounds a test must
+machine's addresses and the binaries (`pg_tool`, `redis_*_bin`) and are given the platform,
+execute each step and stop at the first one that fails. A shell `match` over a plan's steps ends
+in `assert_never`, so a step without a branch fails type checking. The bounds a test must
 shorten (the reachable-address wait, the postmaster start, one readiness probe) are the fields
 of `StartTuning`, each defaulting to its production constant. The shell tests run the real
 `postgres` and `redis-server` in the test's own home (`../tests/native_cluster.py`); the plans
 are asserted as values in `../tests/instance/`.
+
+The completion shell takes its plan as an argument: `completion.complete_gateway_data_plane`
+reads the facts, asks `plan_completion` and hands the result to `completion.execute_completion`,
+which also runs a prefix of a plan. An interrupted-birth test runs a prefix of the plan against the real pooler
+(`test_single_box.py`). What the steps hand each other (the administrator connection, the settled
+write generation) travels as the value each step returns.
 
 ## Identity
 

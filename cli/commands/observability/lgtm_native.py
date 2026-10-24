@@ -19,8 +19,7 @@ import time
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
-from urllib.parse import urlsplit
+from typing import assert_never, cast
 
 import yaml
 from dotenv import dotenv_values
@@ -28,6 +27,7 @@ from dotenv import dotenv_values
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentity
 from base.host.net.ports import SYSTEM_URL_OPENER
+from base.host.net.resilience import Policy, retry
 from base.host.system.hostport import Host
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS, binary_path
@@ -37,7 +37,7 @@ from base.telemetry.station_endpoint import validated_observability_base
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability._lgtm_assets import NATIVE_CONSTANTS, load_versions
 from cli.commands.observability._lgtm_provisioning import render_dashboard, render_provisioning
-from cli.commands.observability.inputs import LgtmSettings, lgtm_settings
+from cli.commands.observability.inputs import LgtmSettings, lgtm_settings_from_boot
 from cli.commands.observability.plans.lgtm.archive import (
     ExtractMember,
     ExtractTree,
@@ -65,6 +65,7 @@ from cli.commands.observability.plans.lgtm.download_retry import (
 from cli.commands.observability.plans.lgtm.install import (
     InstallBackend,
     InstalledMarkers,
+    KeepBackend,
     plan_backend_installs,
     platform_tag,
     require_backend_selection,
@@ -86,6 +87,7 @@ from cli.commands.observability.plans.lgtm.urls import (
     normalize_gateway_base,
     pg_datasource,
 )
+from cli.commands.observability.url_split import split_url
 
 
 # meiva:note
@@ -144,33 +146,63 @@ def _bytes_on_disk(path: Path) -> int:
 
 
 # meiva:note
+# Every failure of one attempt is retriable here: network and filesystem failures alike.
+def _always_retriable(_error: Exception) -> bool:
+    return True
+
+
+# meiva:note
+# The shared retry policy of one download: the configured attempts, the linear backoff cut to the
+# budget that remains at the moment it is asked for, and no jitter (one mirror, one caller).
+def _download_policy(limits: DownloadLimits, *, deadline: float) -> Policy:
+    def backoff(attempt: int) -> float:
+        return retry_wait(limits, attempt=attempt, remaining_s=_remaining(deadline))
+
+    return Policy(
+        max_attempts=limits.attempts,
+        backoff=backoff,
+        jitter="none",
+        jitter_span=1.0,
+        classify=_always_retriable,
+        idempotent=True,
+        respect_retry_after=False,
+        on_final_failure=None,
+    )
+
+
+# meiva:note
 # Download `url` to `archive`, retrying until the attempts or the single deadline are spent.
 #
-# Network and filesystem failures are all retriable here. Each attempt starts from an empty file,
-# so the bytes reported for a failed attempt are the ones that attempt received.
+# Each attempt starts from an empty file, so the bytes reported for a failed attempt are the ones
+# that attempt received.
 # meiva:link cli/commands/observability/docs/lgtm/lgtm.meiva.okf.md
 def download_with_retry(url: str, archive: Path, *, limits: DownloadLimits) -> None:
     started = time.monotonic()
     deadline = started + limits.total_budget_s
     attempt = 0
-    while True:
+
+    def state() -> AttemptState:
+        return AttemptState(
+            attempt=attempt,
+            used_s=time.monotonic() - started,
+            remaining_s=_remaining(deadline),
+            received=_bytes_on_disk(archive),
+        )
+
+    def download_once() -> None:
+        nonlocal attempt
         attempt += 1
         archive.unlink(missing_ok=True)
         try:
             stream_download(url, archive, limits=limits, deadline=deadline)
-            return
         except Exception as exc:
-            state = AttemptState(
-                attempt=attempt,
-                used_s=time.monotonic() - started,
-                remaining_s=_remaining(deadline),
-                received=_bytes_on_disk(archive),
-            )
-            print(attempt_failure_line(limits, state, error=str(exc)), file=sys.stderr)
-            wait = retry_wait(limits, attempt=attempt, remaining_s=state.remaining_s)
-            if wait is None:
-                raise RuntimeError(give_up_message(limits, state, url=url, error=str(exc))) from exc
-            time.sleep(wait)
+            print(attempt_failure_line(limits, state(), error=str(exc)), file=sys.stderr)
+            raise
+
+    try:
+        retry(_download_policy(limits, deadline=deadline))(download_once)
+    except Exception as exc:
+        raise RuntimeError(give_up_message(limits, state(), url=url, error=str(exc))) from exc
 
 
 # meiva:note
@@ -247,15 +279,18 @@ def download_and_verify(
         if problem is not None:
             raise RuntimeError(problem)
         service = NATIVE_CONSTANTS[name]
-        match extraction_plan(
+        extraction = extraction_plan(
             archive_member=service.archive_member,
             asset_member=asset["member"],
             binary_path=service.binary_path,
-        ):
+        )
+        match extraction:
             case ExtractTree(destination=destination):
                 _extract_tree(name, archive, native_dir / destination)
             case ExtractMember(member=member, destination=destination):
                 _extract_member(name, archive, native_dir / destination, member)
+            case _:
+                assert_never(extraction)
     for filename, content in install_markers(name, version=version, tag=tag):
         (native_dir / filename).write_text(content, encoding="utf-8")
 
@@ -298,12 +333,12 @@ def _render_warnings(settings: LgtmSettings) -> tuple[str, ...]:
     intake_endpoint = obs.telemetry_tempo_endpoint.rstrip("/")
     topology = tempo_topology_warning(
         query_url=query_url,
-        query=urlsplit(query_url),
+        query=split_url(query_url),
         intake_endpoint=intake_endpoint,
-        intake=urlsplit(intake_endpoint),
+        intake=split_url(intake_endpoint),
     )
     surfaces = tuple(
-        ReadSurface(backend, env_var, listen_host, read_url, urlsplit(read_url))
+        ReadSurface(backend, env_var, listen_host, read_url, split_url(read_url))
         for backend, env_var, listen_host, read_url in (
             ("loki", "MEIVA_TELEMETRY_LOKI_URL", obs.lgtm_listen_host, obs.telemetry_loki_url),
             (
@@ -353,7 +388,7 @@ def _grafana_endpoints(
     webhook = alerts_webhook(
         remote_observatory=bool(obs.observability_url),
         gateway_base=gateway_base,
-        gateway=urlsplit(gateway_base),
+        gateway=split_url(gateway_base),
         gateway_port=settings.webhook.gateway_port,
         machine_host=machine.host(),
     )
@@ -519,18 +554,21 @@ def ensure_lgtm_native(
     )
     for step in plan:
         asset = assets[step.name]
-        if not isinstance(step, InstallBackend):
-            print(f"  · lgtm native: {step.name} {asset['version']} present")
-            continue
-        download_and_verify(
-            step.name,
-            asset["version"],
-            asset,
-            native_dir,
-            tag=tag,
-            limits=settings.download,
-        )
-        print(f"  · lgtm native: installed {step.name} {asset['version']} ({tag})")
+        match step:
+            case KeepBackend():
+                print(f"  · lgtm native: {step.name} {asset['version']} present")
+            case InstallBackend():
+                download_and_verify(
+                    step.name,
+                    asset["version"],
+                    asset,
+                    native_dir,
+                    tag=tag,
+                    limits=settings.download,
+                )
+                print(f"  · lgtm native: installed {step.name} {asset['version']} ({tag})")
+            case _:
+                assert_never(step)
     render_configs(
         repo,
         native_dir,
@@ -577,17 +615,11 @@ def ensure_lgtm_native_step(ctx: ConvergeCtx) -> None:
     )
     if not selected:
         return
-    view = ctx.read_config().view
     ensure_lgtm_native(
         ctx.repo,
         ctx.meiva_home,
         services=selected,
-        settings=lgtm_settings(
-            observability=view.observability,
-            gateway=view.gateway,
-            alerts=view.alerts,
-            telegram=view.telegram,
-        ),
+        settings=lgtm_settings_from_boot(ctx.read_config()),
         storage_dir=_storage_dir(ctx.meiva_home),
         database_factory=ctx.database_factory,
         producer=ctx.producer,

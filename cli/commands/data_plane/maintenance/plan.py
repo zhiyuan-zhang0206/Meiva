@@ -10,9 +10,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import ClassVar
 
 __all__ = [
+    "RedisShutdownMode",
     "ShutdownRedis",
     "StopPooler",
     "StopPostgres",
@@ -41,13 +43,20 @@ class StopPostgres:
 
 
 # meiva:note
-# Redis' own SHUTDOWN with `mode` (SAVE or NOSAVE). redis-py's shutdown helper accepts any
-# connection error as success, so the shell sends the command itself and accepts the expected
-# EOF only if the exact PID then exits.
+# What Redis' SHUTDOWN does with the dataset: the argument the command takes, which is the value.
+class RedisShutdownMode(Enum):
+    SAVE = "SAVE"
+    NOSAVE = "NOSAVE"
+
+
+# meiva:note
+# Redis' own SHUTDOWN with `mode`. redis-py's shutdown helper accepts any connection error as
+# success, so the shell sends the command itself and accepts the expected EOF only if the exact
+# PID then exits.
 @dataclass(frozen=True)
 class ShutdownRedis:
     service: ClassVar[str] = "redis"
-    mode: str
+    mode: RedisShutdownMode
 
 
 StopStep = StopPooler | StopPostgres | ShutdownRedis
@@ -66,7 +75,7 @@ def plan_stop(captured: frozenset[str], *, save: bool) -> tuple[StopStep, ...]:
     if StopPostgres.service in captured:
         steps.append(StopPostgres())
     if ShutdownRedis.service in captured:
-        steps.append(ShutdownRedis("SAVE" if save else "NOSAVE"))
+        steps.append(ShutdownRedis(RedisShutdownMode.SAVE if save else RedisShutdownMode.NOSAVE))
     return tuple(steps)
 
 

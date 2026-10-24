@@ -30,6 +30,7 @@ from cli.commands.cluster.control import cmd_db_authority_install_unit, cmd_db_a
 from cli.commands.cluster.tests.gateway_server import Reply, serving
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane.instance.launch_delivery import LaunchDelivery
+from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 from cli.commands.tests import test_single_box as _single_box
 from cli.commands.tests.test_single_box import Born
 from cli.database.runtime import CommandRuntime

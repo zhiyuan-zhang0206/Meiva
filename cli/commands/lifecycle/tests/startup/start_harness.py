@@ -3,17 +3,18 @@
 #
 # What a start decides is asserted on the plans in `../start_plans`. These tests run the shell:
 # a home under a short temp directory, a real root-control socket (`scripted_root`) answering as
-# the application root, the suite's throwaway Postgres for the schema check and the machine
-# registration, a source checkout in a temporary git repo, and a real local listener standing in
-# for the gateway a pure runner probes. A cold start's preparation (converge, storage, migrations)
+# the application root (it reports the birth evidence of a root launched from the checkout, so the
+# start publishes serving against the real `observe_root`), the suite's throwaway Postgres for the
+# schema check and the machine registration, a source checkout in a temporary git repo, and a real
+# local listener standing in for the gateway a pure runner probes. A cold start's preparation (converge, storage, migrations)
 # is not run here: the plan says what it is, and each step has its own tests.
 
 from __future__ import annotations
 
 import dataclasses
 import subprocess
-from collections.abc import Callable, Generator, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Generator, Iterable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -22,7 +23,8 @@ from threading import Thread
 import pytest
 
 from base.cluster.machine import MachineRoles
-from base.deploy.lifecycle.start_serving import RootBirth
+from base.deploy.lifecycle import start_serving
+from base.host.runtime_interpreter import LoadedRuntimeIdentity, source_digest
 from base.sessions.env_forwarding import managed_service_env
 from base.telemetry import EventPipeline
 from cli.commands.data_plane.bringup import read_launch_delivery
@@ -32,6 +34,7 @@ from cli.commands.lifecycle.start import cmd_start_body, launch_roster
 from cli.commands.lifecycle.start.start_config import read_start_config
 from cli.commands.lifecycle.stop.restart import cmd_restart
 from cli.commands.lifecycle.tests.runtime_at import runtime_at
+from cli.commands.lifecycle.tests.scripted_root import ScriptedRoot, UnitRow, scripted_root
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.start_runtime import StartRuntime
@@ -74,6 +77,39 @@ class StartRun:
     @property
     def home(self) -> Path:
         return self.command.home
+
+    # meiva:note
+    # Whether this start published serving: the receipt in the home's serving state.
+    #
+    # `start_serving.is_serving` observes the root again to prove it is the one the receipt names,
+    # so it answers only while the root of `run.root` is up. This reads the receipt itself, for an
+    # assertion made after the root is gone; a test that wants the proof asks `is_serving` inside
+    # the block.
+    @property
+    def serving_published(self) -> bool:
+        path = start_serving.state_path(self.home)
+        if not path.exists():
+            return False
+        return start_serving.ServingState.model_validate_json(path.read_bytes()).state == "serving"
+
+    # meiva:note
+    # The application root for the block: a real control socket at this home whose units are
+    # `units`, launched from this run's checkout as it stands when the block opens. A real root
+    # captures the identity of its source at launch, so it reports `identity_now()` unless the
+    # test names another.
+    def root(
+        self,
+        units: Iterable[UnitRow] = (),
+        *,
+        launch_digest: str | None = None,
+        runtime: LoadedRuntimeIdentity | None = None,
+    ) -> AbstractContextManager[ScriptedRoot]:
+        return scripted_root(
+            self.home,
+            units,
+            launch_digest=launch_digest,
+            runtime=self.runtime.identity_now() if runtime is None else runtime,
+        )
 
     # meiva:note
     # Give the unit the identity `meiva init` would have written to its `.env`.
@@ -200,6 +236,7 @@ class StartRun:
 def _commit(path: Path) -> Path:
     path.mkdir()
     (path / "app.py").write_text("value = 1\n")
+    (path / ".gitignore").write_text("ignored/\n")
     # meiva:note
     # The interpreter every service session launches through: the restart's readiness gate
     # refuses a checkout whose `.venv/bin/python` cannot run.
@@ -220,7 +257,6 @@ def start_run(
     short_tmp: Path,
     tmp_path: Path,
     unit_home: Path,
-    serving_root: RootBirth,
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     command_runtime: CommandRuntime,
@@ -233,8 +269,13 @@ def start_run(
     del redis_url, db_url
     checkout = _commit(tmp_path / "checkout")
     # meiva:note
-    # The identity the start admitted is the one the serving-root double reports as its root's.
-    runtime = dataclasses.replace(runtime_at(checkout), loaded=serving_root.runtime)
+    # The identity the start admitted names the checkout's real source digest, which is what a
+    # root launched from it reports and what the start reads again when it publishes serving.
+    base_runtime = runtime_at(checkout)
+    runtime = dataclasses.replace(
+        base_runtime,
+        loaded=base_runtime.loaded.model_copy(update={"source_digest": source_digest(checkout)}),
+    )
     run = StartRun(
         # meiva:note
         # No helper: the platform of this run has none (Linux), so root custody is its own birth.

@@ -3,7 +3,7 @@
 #
 # What each leg means for the next (`restart_plan`) and which units a stop touches
 # (`reconcile_plan.plan_tree_stop`) are asserted on values. These tests run the whole command:
-# the root is a real control socket (`scripted_root`) whose own record of the verbs it served is
+# the root is a real control socket (`run.root`) whose own record of the verbs it served is
 # the evidence of what the restart did, the lifecycle journal is the real file under the process
 # home, and the start leg publishes serving only through the suite's Postgres and a local gateway.
 
@@ -17,12 +17,11 @@ from typing import Any
 
 import pytest
 
-from base.deploy.lifecycle import start_serving
 from base.deploy.tests.containers import free_port
 from base.host.db_authority.tests.generation import (
     seed_write_generation as seed_write_generation,
 )
-from cli.commands.lifecycle.tests.scripted_root import UnitRow, scripted_root
+from cli.commands.lifecycle.tests.scripted_root import UnitRow
 from cli.commands.lifecycle.tests.startup.start_harness import (
     STATUS_PATH,
     StartRun,
@@ -75,7 +74,7 @@ def test_a_restart_stops_the_tree_but_the_browser_and_brings_the_selection_back(
         run.declare(gateway=False, agent_runner=True, gateway_url=gateway.url)
         rows, launch_digest = _tree(run)
 
-        with scripted_root(run.home, rows, launch_digest=launch_digest) as root:
+        with run.root(rows, launch_digest=launch_digest) as root:
             assert run.restart(only=("pty-sessions",)) == 0
 
     served = _served(root.calls)
@@ -95,7 +94,7 @@ def test_a_restart_stops_the_tree_but_the_browser_and_brings_the_selection_back(
         "the gateway was dialled by the preflight probe before anything stopped, by the start "
         "leg's own probe and by the start leg's status block"
     )
-    assert start_serving.is_serving(run.home), "the start leg published serving again"
+    assert run.serving_published, "the start leg published serving again"
     journal = _journal(run.home)
     assert journal["complete"] and journal["result"] == {"rc": 0, "error": None}
     assert [phase["name"] for phase in journal["phases"]] == [
@@ -138,7 +137,7 @@ def test_the_start_leg_waits_only_as_long_as_the_operators_start_timeout(
             UnitRow("browser"),
         ]
         started = time.monotonic()
-        with scripted_root(run.home, rows, launch_digest=generation.launch_digest) as root:
+        with run.root(rows, launch_digest=generation.launch_digest) as root:
             rc = run.restart(only=("gate",), start_timeout=0.2)
         elapsed = time.monotonic() - started
 
@@ -151,7 +150,7 @@ def test_the_start_leg_waits_only_as_long_as_the_operators_start_timeout(
         "rc": rc,
         "error": f"start leg failed with rc={rc}",
     }
-    assert not start_serving.is_serving(run.home)
+    assert not run.serving_published
     err = capsys.readouterr().err
     assert "1 service(s) not ready" in err and "meiva-gate" in err
     assert "the 0s readiness bound" in err, "the wait was bounded by the operator's start timeout"
@@ -172,7 +171,7 @@ def test_a_launcher_the_restart_never_execs_does_not_refuse_it(
         run.declare(gateway=False, agent_runner=True, gateway_url=gateway.url)
         rows, launch_digest = _tree(run)
 
-        with scripted_root(run.home, rows, launch_digest=launch_digest) as root:
+        with run.root(rows, launch_digest=launch_digest) as root:
             assert run.restart(only=("pty-sessions",)) == 0
 
     assert [call for call in _served(root.calls) if call[0] == "up"] == [("up", "pty-sessions")]
@@ -188,7 +187,7 @@ def test_a_restart_that_the_probes_decline_stops_nothing_and_leaves_the_root_alo
     run = start_run
     rows, launch_digest = _tree(run)
 
-    with scripted_root(run.home, rows, launch_digest=launch_digest) as root:
+    with run.root(rows, launch_digest=launch_digest) as root:
         rc = run.restart(only=("pty-sessions",))
 
     assert rc != 0
@@ -227,7 +226,7 @@ def test_a_restart_on_a_gateway_host_leaves_its_data_plane_running(
             UnitRow("browser"),
         ]
 
-        with scripted_root(run.home, rows, launch_digest=generation.launch_digest) as root:
+        with run.root(rows, launch_digest=generation.launch_digest) as root:
             assert run.restart(only=("pty-sessions",)) == 0
 
         assert redis_answers(port), "the restart did not stop the cluster's own redis"

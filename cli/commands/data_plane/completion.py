@@ -5,17 +5,26 @@
 # `instance/storage_plan.py:plan_completion` orders the steps; this module is their shell. It reads
 # the few facts the plan needs (is this the home's first start, does its authority ledger exist),
 # executes each step in order against the home's own Postgres and stops at the first failure.
-# Every function takes the home it works in.
+# `execute_completion` runs any plan or prefix of one, so a test can stop a birth between two steps
+# without replacing a function.
+#
+# Everything here that names a home takes it as a value, except the pooler's files
+# (`pgbouncer.ini`, `userlist.txt`, the pidfile and the log): they live under the process's
+# `meiva_home()` because `base/cluster/dataplane/pooler.py` derives them from it. So
+# `ensure_pooler` renders the userlist for `home` but writes it under the process home, and
+# `stop_pgbouncer` and the maintenance stop find the pooler there too. Those paths move to `home`
+# when base's `pooler.*` functions take it.
+# meiva:link cli/commands/data_plane/docs/data-plane-pooler-and-stop.meiva.okf.md
 
 from __future__ import annotations
 
 import os
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, assert_never
 
 import psycopg
 from psycopg.conninfo import make_conninfo
@@ -89,6 +98,7 @@ def ensure_pooler(
     generation: Generation,
     *,
     machine: MachineIdentity,
+    macos: bool,
 ) -> None:
     if not config.pgbouncer_enabled:
         return
@@ -105,6 +115,7 @@ def ensure_pooler(
         admin_password=db_delivery_files.read_pooler_admin(home).password,
         binary=pooler.pgbouncer_bin(),
         daemon_env=daemon_process_env(),
+        macos=macos,
         bind_wait_s=instance.BIND_WAIT_TIMEOUT_S,
     )
     rc = pgbouncer.ensure_pgbouncer(spec)
@@ -133,9 +144,10 @@ def adopt_gateway_login(
     home: Path, endpoint: str, *, database_factory: OperatorDatabaseFactory
 ) -> None:
     grant = db_delivery_files.write_grant(home, "gateway")
-    os.environ["MEIVA_DB_URL"] = grant.dsn(endpoint)
+    dsn = grant.dsn(endpoint)
+    os.environ["MEIVA_DB_URL"] = dsn
     os.environ[db_delivery_files.GENERATION_ENV] = str(grant.number)
-    database_factory.adopt_login(os.environ["MEIVA_DB_URL"])
+    database_factory.adopt_login(dsn)
 
 
 # meiva:note
@@ -181,56 +193,82 @@ def _admitted_generation(
 
 
 # meiva:note
-# The state one completion carries from step to step: the home's record and database, the
-# endpoint consumers dial, the administrator connection while it is open and the generation the
-# birth or admission settled on.
-@dataclass
+# The home's own database as a local plane's steps read it: its registry record, the database name
+# and the endpoint consumers dial.
+#
+# A home without a registry record is refused where the first step needs the record, so a legacy
+# home still reports its own refusal first.
+@dataclass(frozen=True)
+class _LocalPlane:
+    record: ClusterRecord | None
+    database: str
+    endpoint: str
+
+
+# meiva:note
+# What one completion carries from step to step: the administrator connection while its session is
+# open and the generation the birth or admission settled on. A step returns the stage the next step
+# starts from; none of it is changed in place.
+@dataclass(frozen=True)
+class _Stage:
+    conn: psycopg.Connection[Any] | None = None
+    generation: Generation | None = None
+
+
+# meiva:note
+# What every step of one completion reads and never changes. `local` is None on a remote plane,
+# whose steps touch no database of this home.
+@dataclass(frozen=True)
 class _Completion:
     config: DataPlaneConfig
     home: Path
     environment: Mapping[str, str]
     database_factory: OperatorDatabaseFactory
     machine: MachineIdentity
-    rec: ClusterRecord | None = None
-    database: str = ""
-    endpoint: str = ""
-    conn: psycopg.Connection[Any] | None = None
-    generation: Generation | None = None
+    macos: bool
+    local: _LocalPlane | None
 
-    def run(self, steps: tuple[CompletionStep, ...]) -> None:
+    def run(self, steps: tuple[CompletionStep, ...], stage: _Stage) -> _Stage:
         for step in steps:
-            self._execute(step)
+            stage = self._execute(step, stage)
+        return stage
+
+    def _plane(self) -> _LocalPlane:
+        if self.local is None:
+            raise RuntimeError("a remote-managed plane has no local database to complete")
+        return self.local
 
     def _record(self) -> ClusterRecord:
-        if self.rec is None:
+        record = self._plane().record
+        if record is None:
             raise RuntimeError("start lost its port reservation")
-        return self.rec
+        return record
 
-    def _admin(self) -> psycopg.Connection[Any]:
-        if self.conn is None:
+    @staticmethod
+    def _admin(stage: _Stage) -> psycopg.Connection[Any]:
+        if stage.conn is None:
             raise RuntimeError("the administrator session is not open")
-        return self.conn
+        return stage.conn
 
-    def _generation(self) -> Generation:
-        if self.generation is None:
+    @staticmethod
+    def _generation(stage: _Stage) -> Generation:
+        if stage.generation is None:
             raise RuntimeError("no write generation has been settled")
-        return self.generation
+        return stage.generation
 
     def _runner_url(self) -> str:
         env_file = read_env_aliases(env_file_path(self.home))
         return runner_db_url_projection(self.environment, env_file=env_file)
 
-    def _execute(self, step: CompletionStep) -> None:
+    def _execute(self, step: CompletionStep, stage: _Stage) -> _Stage:
         match step:
             case EnsureExtension() | PrepareVectors() | RefuseLegacy():
                 self._prepare(step)
+                return stage
             case InAdminSession(steps=inner):
-                with admin_session(self._record(), self.database, home=self.home) as conn:
-                    self.conn = conn
-                    try:
-                        self.run(inner)
-                    finally:
-                        self.conn = None
+                with admin_session(self._record(), self._plane().database, home=self.home) as conn:
+                    settled = self.run(inner, replace(stage, conn=conn))
+                return replace(settled, conn=None)
             case (
                 BirthGeneration()
                 | AdmitGeneration()
@@ -238,17 +276,21 @@ class _Completion:
                 | ProveLogins()
                 | ActivateGeneration()
             ):
-                self._generation_step(step)
+                return self._generation_step(step, stage)
             case AdoptLogin() | ReportAdmitted():
-                self._report(step)
+                self._report(step, stage)
+                return stage
             case ProbeConsumerDatabases() | ProbeRedis() | MarkProvisioned():
                 self._verify(step)
+                return stage
+            case _:
+                assert_never(step)
 
     def _prepare(self, step: EnsureExtension | PrepareVectors | RefuseLegacy) -> None:
         match step:
             case EnsureExtension():
                 cluster.ensure_pgvector_extension(
-                    self.database,
+                    self._plane().database,
                     base_admin_url=pg_admin.pg_admin_url(self._record().ports["postgres"]),
                     expected_data_dir=instance.pg_data_dir(self.home),
                 )
@@ -256,42 +298,61 @@ class _Completion:
                 prepare_memory_vectors(self.config, database_factory=self.database_factory)
             case RefuseLegacy(message=message):
                 raise RuntimeError(message)
+            case _:
+                assert_never(step)
 
     def _generation_step(
         self,
         step: BirthGeneration | AdmitGeneration | EnsurePooler | ProveLogins | ActivateGeneration,
-    ) -> None:
+        stage: _Stage,
+    ) -> _Stage:
         home = self.home.resolve()
+        database = self._plane().database
         match step:
             case BirthGeneration():
-                self.generation = _birth_generation(self._admin(), home, self.database)
+                return replace(
+                    stage, generation=_birth_generation(self._admin(stage), home, database)
+                )
             case AdmitGeneration(refresh=refresh):
-                self.generation = _admitted_generation(
-                    self._admin(), home, self.database, refresh=refresh
+                return replace(
+                    stage,
+                    generation=_admitted_generation(
+                        self._admin(stage), home, database, refresh=refresh
+                    ),
                 )
             case EnsurePooler():
                 ensure_pooler(
                     self.config,
                     self._record(),
-                    self.database,
+                    database,
                     home,
-                    self._generation(),
+                    self._generation(stage),
                     machine=self.machine,
+                    macos=self.macos,
                 )
+                return stage
             case ProveLogins():
-                prove_generation_logins(home, self._generation(), self.endpoint)
+                prove_generation_logins(home, self._generation(stage), self._plane().endpoint)
+                return stage
             case ActivateGeneration():
                 if ledger.require_ledger(home).active is None:
-                    ledger.activate(home, authority.verify_generation(self._admin(), home))
+                    ledger.activate(home, authority.verify_generation(self._admin(stage), home))
+                return stage
+            case _:
+                assert_never(step)
 
-    def _report(self, step: AdoptLogin | ReportAdmitted) -> None:
+    def _report(self, step: AdoptLogin | ReportAdmitted, stage: _Stage) -> None:
         match step:
             case AdoptLogin():
                 adopt_gateway_login(
-                    self.home.resolve(), self.endpoint, database_factory=self.database_factory
+                    self.home.resolve(),
+                    self._plane().endpoint,
+                    database_factory=self.database_factory,
                 )
             case ReportAdmitted():
-                print(f"  ✓ database write generation {self._generation().number} admitted")
+                print(f"  ✓ database write generation {self._generation(stage).number} admitted")
+            case _:
+                assert_never(step)
 
     def _verify(self, step: ProbeConsumerDatabases | ProbeRedis | MarkProvisioned) -> None:
         match step:
@@ -304,6 +365,46 @@ class _Completion:
                     raise RuntimeError(f"consumer Redis readiness failed: {error}")
             case MarkProvisioned():
                 mark_phase(self.home, "provisioned")
+            case _:
+                assert_never(step)
+
+
+# meiva:note
+# Execute `steps` for a gateway's data plane, in order, stopping at the first failure.
+#
+# `complete_gateway_data_plane` runs the whole plan; a caller that wants to stop a completion at
+# a step hands in a prefix of it (`InAdminSession` carries its own steps, so a prefix of the
+# session is a session of that prefix). A local plane reads its record, database name and
+# consumer endpoint here, before the first step, so a missing `MEIVA_DB_URL` fails the same way
+# whatever the steps are.
+def execute_completion(
+    steps: tuple[CompletionStep, ...],
+    config: DataPlaneConfig,
+    *,
+    home: Path,
+    environment: Mapping[str, str],
+    database_factory: OperatorDatabaseFactory,
+    machine: MachineIdentity,
+    macos: bool,
+) -> None:
+    local = (
+        None
+        if config.is_remote
+        else _LocalPlane(
+            record=cluster.get_record(home),
+            database=cluster.db_identity(config.db_url),
+            endpoint=db_endpoint(home),
+        )
+    )
+    _Completion(
+        config=config,
+        home=home,
+        environment=environment,
+        database_factory=database_factory,
+        machine=machine,
+        macos=macos,
+        local=local,
+    ).run(steps, _Stage())
 
 
 # meiva:note
@@ -316,7 +417,8 @@ class _Completion:
 # re-granted after migrations, then the fail-closed catalog invariant; the pooler serves the
 # active pair (restarted only when its bytes change). A home without a ledger is a legacy home
 # and refuses (`legacy_home_refusal`) — never converted here. `environment` is the launch
-# environment a remote plane's runner login is projected from.
+# environment a remote plane's runner login is projected from; `macos` words the pooler's install
+# hint.
 def complete_gateway_data_plane(
     config: DataPlaneConfig,
     *,
@@ -325,6 +427,7 @@ def complete_gateway_data_plane(
     refresh_schema: bool = True,
     database_factory: OperatorDatabaseFactory,
     machine: MachineIdentity,
+    macos: bool,
 ) -> None:
     local = not config.is_remote
     facts = CompletionFacts(
@@ -334,15 +437,12 @@ def complete_gateway_data_plane(
         birth=local and needs_provision(home),
         ledger_present=local and ledger.load_ledger(home.resolve()) is not None,
     )
-    run = _Completion(
-        config=config,
+    execute_completion(
+        plan_completion(facts),
+        config,
         home=home,
         environment=environment,
         database_factory=database_factory,
         machine=machine,
+        macos=macos,
     )
-    if local:
-        run.rec = cluster.get_record(home)
-        run.database = cluster.db_identity(config.db_url)
-        run.endpoint = db_endpoint(home)
-    run.run(plan_completion(facts))

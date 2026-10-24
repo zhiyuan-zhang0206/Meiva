@@ -60,6 +60,7 @@ from cli.commands.cluster.plans.service_probe_plan import (
     sessions_to_probe,
 )
 from cli.commands.converge.redis_bridge import probe_redis_bridge
+from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.probe import probe_service
 from cli.database.runtime import CommandRuntime
 from services.backup.walg import probe as walg_probe
@@ -78,6 +79,7 @@ _LIVE_AGENTS = (
 #
 # `gateway_url` is where the gateway answers; `source_root` is the prod source checkout the
 # editable-install and source-tree guards inspect (None when the home has none to guard);
+# `data_plane` is the data plane's configuration, the one owner of the WAL-G configuration file;
 # `data_volume` is the volume whose usage the disk check measures; `checkout_refusal` is why
 # this checkout must not drive the probe at all (the 2026-08-07 accident, task #1025: worktree
 # code misjudging schema health against prod data), None when it may. The liveness retry
@@ -89,7 +91,7 @@ class HealthOptions:
     provider: ProviderGuardConfig
     source_root: Path | None
     editable_allowed_roots: tuple[Path, ...]
-    walg_config_file: Path | None
+    data_plane: DataPlaneConfig
     data_volume: Path
     checkout_refusal: str | None
     liveness_attempts: int = 3
@@ -213,7 +215,9 @@ def read_service_failures(command: CommandRuntime, launched: LaunchRecord) -> tu
     failing = failing_services(outcomes)
     if not expects_redis_bridge(roles):
         return failing
-    status = probe_redis_bridge(command.home, machine=command.machine, config=command.config)
+    status = probe_redis_bridge(
+        command.home, host=command.host, machine=command.machine, config=command.config
+    )
     bridge = bridge_failure(
         required=status.required,
         serving=status.serving,
@@ -245,10 +249,7 @@ def disk_usage_fraction(volume: Path) -> float | None:
 # The first broken WAL-archiving condition, or None (also None while WAL-G is off), and whether
 # WAL-G is on. The path is the configuration's WAL-G config file, read once by the root.
 def read_walg(config_file: Path | None) -> tuple[str | None, bool]:
-    return (
-        walg_probe.failure(path=config_file),
-        config_file is not None,
-    )
+    return walg_probe.failure(path=config_file), config_file is not None
 
 
 # meiva:note
@@ -291,7 +292,7 @@ def read_health(
     options: HealthOptions, *, database_factory: DatabaseFactory, command: CommandRuntime
 ) -> HealthReadings:
     launched = read_launch_record(command.home)
-    walg_failure, walg_on = read_walg(options.walg_config_file)
+    walg_failure, walg_on = read_walg(options.data_plane.walg_config_file)
     return HealthReadings(
         disk_fraction=disk_usage_fraction(options.data_volume),
         gateway=read_gateway(options, command.config, database_factory),

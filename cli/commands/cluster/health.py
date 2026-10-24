@@ -24,7 +24,7 @@ from pathlib import Path
 
 from base import telemetry
 from base.agents.context.clients import DatabaseFactory
-from base.paths import prod_service_checkout_error, repo_root
+from base.paths.home import home_checkout_error
 from base.telemetry import EventPipeline
 from cli.commands.cluster._provider_guard import provider_guard_config
 from cli.commands.cluster.health_readings import HealthOptions, read_health
@@ -33,6 +33,7 @@ from cli.commands.cluster.plans.health_verdicts import (
     HealthRules,
     judge_health,
 )
+from cli.commands.data_plane.config import data_plane_config_from_boot
 from cli.database.runtime import CommandRuntime
 
 # meiva:note
@@ -119,8 +120,10 @@ def run_health_probe(
 # the host: the gateway's address, the agent floor (`MEIVA_HEALTH_PROBE_AGENT_MIN`: a test/QA
 # cluster with no resident agents sets it to 0 or the check otherwise reports a permanent
 # population outage), the prod checkout (every unit runs from its own `<home>/source`) and its
-# allowlist, the WAL-G configuration file, the volume the disk check measures and whether this
-# checkout may drive the probe at all.
+# allowlist, the data plane's configuration (the WAL-G configuration file is read from it and
+# nowhere else), the volume the disk check measures (macOS keeps user data on its own volume) and
+# whether this checkout may drive the probe at all. The user's home, the checkout and the
+# platform are the invocation's, read once by the entry into `command`.
 def health_options(command: CommandRuntime, *, check_schema: bool) -> HealthOptions:
     view = command.config.view
     return HealthOptions(
@@ -132,10 +135,10 @@ def health_options(command: CommandRuntime, *, check_schema: bool) -> HealthOpti
         ),
         provider=provider_guard_config(command.config),
         source_root=command.home / "source",
-        editable_allowed_roots=(Path.home() / "Meiva",),
-        walg_config_file=view.walg.walg_config_file,
-        data_volume=_MACOS_DATA_VOLUME if _MACOS_DATA_VOLUME.is_dir() else Path("/"),
-        checkout_refusal=prod_service_checkout_error(repo_root()),
+        editable_allowed_roots=(command.session.user_home / "Meiva",),
+        data_plane=data_plane_config_from_boot(command.config),
+        data_volume=_MACOS_DATA_VOLUME if command.host.platform.system == "darwin" else Path("/"),
+        checkout_refusal=home_checkout_error(command.checkout, home=command.home),
     )
 
 

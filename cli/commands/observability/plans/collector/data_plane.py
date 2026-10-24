@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from cli.commands.observability.plans.collector.text import yaml_quote
-from cli.commands.observability.plans.url_view import UrlView
+from cli.commands.observability.plans.url_parts import UrlParts
 
 __all__ = [
     "PEER_PLACEHOLDER",
@@ -98,7 +98,7 @@ def plan_data_plane_receivers(
 #
 # A connection URL with no port cannot be scraped, and guessing the default would point the
 # receiver at whatever else listens there.
-def receiver_endpoint(url: UrlView, what: str) -> str:
+def receiver_endpoint(url: UrlParts, what: str) -> str:
     if url.hostname is None or url.port is None:
         raise RuntimeError(
             f"cannot build the otel-collector {what} receiver: {what} URL has no "

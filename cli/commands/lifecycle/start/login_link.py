@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Collection
+from typing import assert_never
 from urllib.parse import quote
 
 from cli.commands.lifecycle.start.login_link_plan import (
     LinkFacts,
     MintLink,
+    NoLink,
     SkipLink,
     link_lines,
     mint_failure_line,
@@ -66,13 +68,18 @@ def print_login_link(sessions: Collection[str], *, config: StartConfig, at_termi
             at_terminal=at_terminal,
         )
     )
-    if isinstance(step, SkipLink):
-        print(step.line)
-    elif isinstance(step, MintLink):
-        try:
-            ticket = _issue_ticket(config)
-        except (httpx.HTTPError, ValueError) as exc:
-            print(mint_failure_line(str(exc)), file=sys.stderr)
+    match step:
+        case NoLink():
             return
-        for line in link_lines(step.base, quote(ticket, safe=".-_")):
+        case SkipLink(line=line):
             print(line)
+        case MintLink(base=base):
+            try:
+                ticket = _issue_ticket(config)
+            except (httpx.HTTPError, ValueError) as exc:
+                print(mint_failure_line(str(exc)), file=sys.stderr)
+                return
+            for line in link_lines(base, quote(ticket, safe=".-_")):
+                print(line)
+        case _:
+            assert_never(step)

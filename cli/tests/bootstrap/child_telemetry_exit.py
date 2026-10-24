@@ -71,7 +71,7 @@ def _build_parser(*, retained_children: object) -> argparse.ArgumentParser:
 
 
 def _producer(
-    database_factory: OperatorDatabaseFactory, *, machine: MachineIdentity, home: Path
+    database_factory: OperatorDatabaseFactory, machine: MachineIdentity, home: Path
 ) -> OperatorEventPipeline:
     del database_factory
     return OperatorEventPipeline(

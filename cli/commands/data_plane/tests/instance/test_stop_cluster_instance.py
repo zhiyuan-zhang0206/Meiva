@@ -8,8 +8,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
-from collections.abc import Callable
+import socket
+import threading
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 import pytest
@@ -26,6 +29,7 @@ from cli.commands.data_plane.tests.data_plane_records import (
 from cli.commands.data_plane.tests.data_plane_records import with_redis_admin
 from cli.commands.data_plane.tests.native_cluster import (
     ADMIN_PASSWORD,
+    NATIVE_TEST_MACOS,
     RUNTIME_PASSWORD,
     NativeCluster,
 )
@@ -51,6 +55,7 @@ def _start(cluster: NativeCluster, machine: MachineIdentity) -> None:
         redis_user=cluster.identity,
         retained_children=cluster.retained_children,
         machine=machine,
+        macos=NATIVE_TEST_MACOS,
     )
     assert rc == 0
 
@@ -61,6 +66,7 @@ def _stop(cluster: NativeCluster, producer: Callable[[], EventPipeline]) -> int:
         home=cluster.home,
         retained_children=cluster.retained_children,
         producer=producer,
+        macos=NATIVE_TEST_MACOS,
     )
 
 
@@ -128,12 +134,61 @@ def test_a_redis_that_the_admin_cannot_shut_down_is_a_failed_stop(
         home=native_cluster.home,
         retained_children=native_cluster.retained_children,
         producer=operator_pipeline,
+        macos=NATIVE_TEST_MACOS,
     )
 
     assert rc == 1
     err = capsys.readouterr().err
     assert f"redis still answers on 127.0.0.1:{native_cluster.redis_port} after shutdown" in err
     assert cluster_instance.redis_reachable(ADMIN_PASSWORD, native_cluster.redis_port, "127.0.0.1")
+
+
+# meiva:note
+# A real listener that accepts and drops every connection, on the port a cluster's Redis owns:
+# `redis-cli` reaches it and gets nothing back, the way it would reach a stranger.
+@contextlib.contextmanager
+def _stranger_listening(port: int) -> Generator[None]:
+    server = socket.create_server(("127.0.0.1", port))
+    server.settimeout(0.1)
+    done = threading.Event()
+
+    def drop_connections() -> None:
+        while not done.is_set():
+            try:
+                connection, _ = server.accept()
+            except TimeoutError:
+                continue
+            connection.close()
+
+    thread = threading.Thread(target=drop_connections)
+    thread.start()
+    try:
+        yield
+    finally:
+        done.set()
+        thread.join()
+        server.close()
+
+
+# meiva:note
+# The port decides whether the stop failed; who holds it decides what the failure says. Another
+# process on the cluster's Redis port fails the stop, and names itself as another process instead
+# of passing for this home's Redis.
+def test_a_stranger_on_the_redis_port_fails_the_stop_as_another_process(
+    native_cluster: NativeCluster,
+    operator_pipeline: Callable[[], EventPipeline],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with _stranger_listening(native_cluster.redis_port):
+        rc = _stop(native_cluster, operator_pipeline)
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert (
+        f"127.0.0.1:{native_cluster.redis_port} still accepts connections after shutdown, "
+        "held by a process other than this home's redis"
+    ) in err
+    assert "redis still answers" not in err
 
 
 # meiva:note
@@ -147,7 +202,10 @@ def test_a_remote_plane_stops_nothing_and_says_so(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     rc = bringup.stop_cluster_instance(
-        remote_data_plane_config, home=unit_home, producer=operator_pipeline
+        remote_data_plane_config,
+        home=unit_home,
+        producer=operator_pipeline,
+        macos=NATIVE_TEST_MACOS,
     )
 
     assert rc == 0
@@ -178,7 +236,10 @@ def test_a_local_instance_left_behind_by_a_switch_to_remote_is_named_and_not_tou
     capsys.readouterr()
 
     rc = bringup.stop_cluster_instance(
-        switched, home=native_cluster.home, producer=operator_pipeline
+        switched,
+        home=native_cluster.home,
+        producer=operator_pipeline,
+        macos=NATIVE_TEST_MACOS,
     )
 
     assert rc == 0

@@ -32,6 +32,7 @@ from cli.commands.data_plane.config import DataPlaneConfig
 __all__ = [
     "ADMIN_PASSWORD",
     "BEARER",
+    "NATIVE_TEST_MACOS",
     "RUNTIME_PASSWORD",
     "NativeCluster",
     "free_port",
@@ -47,6 +48,14 @@ BEARER = "test_bearer_abc123"
 ADMIN_PASSWORD = "test_redis_admin_abc123"  # noqa: S105
 RUNTIME_PASSWORD = "test_redis_runtime_abc123"  # noqa: S105
 _IDENTITY = "meiva_tinst"
+
+# meiva:note
+# The platform value these tests start and stop a cluster with. They run the test environment's
+# own `redis-server` and `redis-cli`, found through PATH like the other throwaway servers of the
+# suite, which is the non-macOS branch of binary resolution; the macOS branch (the Homebrew keg,
+# loopback-only Redis) is asserted as values in `instance/test_redis_plan.py` and
+# `instance/test_redis_launch_argv.py`.
+NATIVE_TEST_MACOS = False
 
 
 def free_port() -> int:

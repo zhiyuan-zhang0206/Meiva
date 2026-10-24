@@ -436,6 +436,8 @@ rule-inputs = [
 "base/lm/content.py" = "LangChain message-stack trim on the same registration path: message types appear in annotations only, or (pricing) import at the call site of a runtime isinstance (task #3633)."
 "base/lm/factory.py" = "LM provider registration surface: the chat-model stack is a heavy import on the exec-child boot path, which never uses the type (annotation-only references; task #3633)."
 "base/lm/pricing/__init__.py" = "LangChain message-stack trim on the same registration path: message types appear in annotations only, or (pricing) import at the call site of a runtime isinstance (task #3633)."
+"cli/main.py" = "Settings-free entry: importing cli.main must not import base.log or base.config (the cli/tests/bootstrap defer_logging probe); the producer-factory and database-opener types of run_command are annotation-only here."
+"cli/database/__init__.py" = "`meiva --help` must not load the configuration chain: Database, DbConfig, ProcessDbGate and ClusterDirectUrl are annotation-only in the OpenDatabase alias."
 
 [path-imports]
 scope = [

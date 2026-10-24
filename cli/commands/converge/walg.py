@@ -8,6 +8,9 @@ development home installs nothing and registers nothing.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import assert_never
+
 from base.cluster.dataplane.walg_binary import ensure_walg_binary
 from base.paths.private_dir import ensure_private_dir
 from cli.commands.converge.plans.walg_plan import (
@@ -30,14 +33,25 @@ def converge_walg(ctx: ConvergeCtx) -> None:
             wal-g, the download failed its checksum, or the configuration is unusable
             (`WalgConfigError` names the file and the setting, never a value).
     """
-    configured = ctx.read_config().view.walg.walg_config_file is not None
-    remote_plane = configured and ctx.read_config().view.data_plane.is_remote
-    execute_walg_plan(plan_walg_converge(configured=configured, remote_plane=remote_plane), ctx)
+    view = ctx.read_config().view
+    walg_config_file: Path | None = view.walg.walg_config_file
+    configured = walg_config_file is not None
+    remote_plane = configured and view.data_plane.is_remote
+    execute_walg_plan(
+        plan_walg_converge(configured=configured, remote_plane=remote_plane),
+        ctx,
+        walg_config_file=walg_config_file,
+    )
 
 
 # meiva:note
 # Run `plan` in order; the first failing step raises.
-def execute_walg_plan(plan: tuple[WalgStep, ...], ctx: ConvergeCtx) -> None:
+#
+# The services' WAL-G API takes the configuration path as a reader, so the already-read path is
+# wrapped once, at the one step that needs it.
+def execute_walg_plan(
+    plan: tuple[WalgStep, ...], ctx: ConvergeCtx, *, walg_config_file: Path | None
+) -> None:
     for step in plan:
         match step:
             case RefuseWalg(message=message):
@@ -45,6 +59,8 @@ def execute_walg_plan(plan: tuple[WalgStep, ...], ctx: ConvergeCtx) -> None:
             case InstallWalgBinary():
                 ensure_walg_binary()
             case LoadWalgConfig():
-                walg_config.load_walg_config(path=ctx.read_config().view.walg.walg_config_file)
+                walg_config.load_walg_config(path=walg_config_file)
             case PrepareWalgStateDir():
                 ensure_private_dir(ctx.meiva_home / "backups" / "walg")
+            case _:
+                assert_never(step)

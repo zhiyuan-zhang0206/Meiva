@@ -9,8 +9,10 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import Enum
 
 __all__ = [
     "CONFIRMATION_PROMPT",
@@ -20,10 +22,13 @@ __all__ = [
     "DestroyPlan",
     "DestroyStep",
     "DropData",
+    "HostSystem",
+    "IntentState",
     "PublishIntent",
     "RetireHelper",
     "RetireJobs",
     "StopCluster",
+    "StopMode",
     "answer_confirms",
     "cleanup_incomplete",
     "destroy_prompt",
@@ -45,6 +50,21 @@ NO_TERMINAL_REFUSAL = (
 
 
 # meiva:note
+# The interruption mode of the child `meiva stop`, spelled as its `--mode` flag takes it.
+class StopMode(Enum):
+    SMOOTH = "smooth"
+    FORCE = "force"
+
+
+# meiva:note
+# The operating systems a destroy runs on: the two `base.native_process.os_platform.Platform`
+# names, so an unknown system fails when the shell builds the facts and not mid-teardown.
+class HostSystem(Enum):
+    LINUX = "linux"
+    DARWIN = "darwin"
+
+
+# meiva:note
 # Everything the plan depends on, read by the shell: the home destroy acts on, the
 # capabilities its start intent records, the stop's mode and budget, the `meiva` of this
 # checkout, the host's platform and the data directories `--drop-db` would delete.
@@ -52,26 +72,34 @@ NO_TERMINAL_REFUSAL = (
 class DestroyFacts:
     home: str
     roles: tuple[str, ...]
-    stop_mode: str
+    stop_mode: StopMode
     stop_timeout_s: float
     meiva_executable: str
-    platform: str
+    platform: HostSystem
     helper_port: int
     drop_dirs: tuple[str, ...]
 
 
 # meiva:note
-# Write the destroy-intent marker with this state ("destroying" or "detached"), then say
-# `announce` if there is something to say.
+# The two states the destroy-intent marker records: teardown has begun, or the home is detached.
+class IntentState(Enum):
+    DESTROYING = "destroying"
+    DETACHED = "detached"
+
+
+# meiva:note
+# Write the destroy-intent marker with this state, then say `announce` if there is something
+# to say.
 @dataclass(frozen=True)
 class PublishIntent:
-    state: str
+    state: IntentState
     announce: str | None
 
     # meiva:note
-    # The marker file's content.
+    # The marker file's content: one compact JSON line.
     def marker(self) -> bytes:
-        return f'{{"version":1,"state":"{self.state}"}}\n'.encode()
+        document = {"version": 1, "state": self.state.value}
+        return (json.dumps(document, separators=(",", ":")) + "\n").encode()
 
 
 # meiva:note
@@ -124,7 +152,7 @@ class DestroyPlan:
 # a live one. `--yes` because the child has no terminal to confirm on (destroy confirmed
 # already).
 def stop_argv(
-    meiva_executable: str, roles: Sequence[str], mode: str, timeout_s: float
+    meiva_executable: str, roles: Sequence[str], mode: StopMode, timeout_s: float
 ) -> tuple[str, ...]:
     return (
         meiva_executable,
@@ -135,7 +163,7 @@ def stop_argv(
         "--stop-extras",
         "--keep-no-services",
         "--mode",
-        mode,
+        mode.value,
         "--timeout",
         f"{timeout_s:g}",
         *(("--stop-infra",) if "gateway" in roles else ()),
@@ -146,15 +174,17 @@ def plan_destroy(facts: DestroyFacts) -> DestroyPlan:
     stop = StopCluster(
         stop_argv(facts.meiva_executable, facts.roles, facts.stop_mode, facts.stop_timeout_s)
     )
-    helper = (RetireHelper(facts.helper_port),) if facts.platform == "darwin" else ()
+    helper = (RetireHelper(facts.helper_port),) if facts.platform is HostSystem.DARWIN else ()
     dropped = f"✓ removed '{facts.home}' per-cluster data plane (pg + redis data dirs)"
     return DestroyPlan(
         under_lock=(
-            PublishIntent("destroying", announce=None),
+            PublishIntent(IntentState.DESTROYING, announce=None),
             stop,
             RetireJobs(),
             *helper,
-            PublishIntent("detached", announce=f"detached {facts.home} after exact cleanup"),
+            PublishIntent(
+                IntentState.DETACHED, announce=f"detached {facts.home} after exact cleanup"
+            ),
         ),
         afterwards=(DropData(facts.drop_dirs, announce=dropped),) if facts.drop_dirs else (),
     )

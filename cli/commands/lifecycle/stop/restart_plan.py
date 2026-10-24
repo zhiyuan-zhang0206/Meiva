@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import assert_never
 
 from base.host.exit_codes import RESTART_DECLINED_EXIT_CODE
 from cli.commands.lifecycle.stop.choices import StopChoices, StopRequest, StopWindow
@@ -227,6 +228,8 @@ def settle_leg(leg: Leg, rc: int) -> Continue | Finish:
             return Continue() if rc == 0 else Finish(rc, "stop leg failed", None)
         case Leg.START:
             return Finish(rc, None if rc == 0 else f"start leg failed with rc={rc}", None)
+        case _:
+            assert_never(leg)
 
 
 NO_ROOT_REFUSAL = (

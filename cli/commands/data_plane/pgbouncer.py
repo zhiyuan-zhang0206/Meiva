@@ -45,13 +45,12 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, assert_never
 
 import psutil
 
 from base.cluster import ownership, port_preflight
 from base.cluster.dataplane import pooler as pooler_files
-from base.cluster.dataplane.pg_tools import is_macos
 from base.cluster.machine import MachineIdentity
 from base.host.db_authority.delivery import POOLER_ADMIN
 from base.host.private_storage import write_private_bytes
@@ -122,7 +121,8 @@ class PoolerShape:
 # carries. `binary` is the resolved pgbouncer path and `daemon_env` the environment the daemon
 # is born with (only process mechanics, never configuration or a credential: the boot pass may
 # have put the gateway login, the write generation and its API token into the launching process,
-# and a daemon would keep them until it restarts). The waits are tuning values: how long the
+# and a daemon would keep them until it restarts). `macos` is the host platform, which words the
+# install hint of a pooler that is not installed. The waits are tuning values: how long the
 # reachable address may take to appear, the running pooler's safe shutdown, and the new
 # pooler's first answer.
 @dataclass(frozen=True)
@@ -132,6 +132,7 @@ class PoolerSpec:
     admin_password: str = field(repr=False)
     binary: str
     daemon_env: Mapping[str, str] = field(repr=False)
+    macos: bool
     bind_wait_s: float
     stop_wait_s: float = RESTART_STOP_WAIT_S
     ready_wait_s: float = READY_WAIT_S
@@ -268,11 +269,14 @@ def binary_installed(binary: str) -> bool:
     return Path(binary).exists() or shutil.which(binary) is not None
 
 
-def _install_hint() -> str:
+# meiva:note
+# How to install pgbouncer on this platform. The provisioning script is located through the
+# process's checkout (`repo_root()`), the one read here that still comes from the process.
+def _install_hint(*, macos: bool) -> str:
     from base.paths import repo_root
 
     return install_command(
-        macos=is_macos(), provision_script=str(repo_root() / "scripts/provision/database.sh")
+        macos=macos, provision_script=str(repo_root() / "scripts/provision/database.sh")
     )
 
 
@@ -368,6 +372,8 @@ def _perform(step: PoolerStep, run: _Run) -> int:
                 return 1
         case Launch():
             return _launch(run)
+        case _:
+            assert_never(step)
     return 0
 
 
@@ -390,7 +396,7 @@ def _perform(step: PoolerStep, run: _Run) -> int:
 def ensure_pgbouncer(spec: PoolerSpec) -> int:
     shape = spec.shape
     if not binary_installed(spec.binary):
-        print(not_installed_error(spec.binary, _install_hint()), file=sys.stderr)
+        print(not_installed_error(spec.binary, _install_hint(macos=spec.macos)), file=sys.stderr)
         return 1
     custodian = _accepting_pooler(shape.listen_port)
     public = custodian is not None and pooler_files.pgbouncer_public_listener_reachable(
@@ -483,12 +489,17 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
     # A missing pooler binary is reported here and refused by data-plane bring-up; the
     # start-wide host dependency preflight installs it before converge.
     # meiva:link cli/commands/data_plane/docs/data-plane-startup.meiva.okf.md
-    converge_pgbouncer(data_plane_config_from_boot(ctx.read_config()), ctx.meiva_home)
+    missing = converge_pgbouncer(data_plane_config_from_boot(ctx.read_config()), ctx.meiva_home)
+    if missing is not None:
+        hint = _install_hint(macos=ctx.host.platform.system == "darwin")
+        print(not_installed_warning(missing, hint), file=sys.stderr)
 
 
 # meiva:note
-# The converge step's work for `home` under `config` (see `ensure_pgbouncer_step`).
-def converge_pgbouncer(config: DataPlaneConfig, home: Path) -> None:
+# The converge step's work for `home` under `config` (see `ensure_pgbouncer_step`): the port
+# rewrite, and the pooler binary the step should warn about, or None when there is nothing to
+# warn about (no pooler, a remote plane, or the binary is installed).
+def converge_pgbouncer(config: DataPlaneConfig, home: Path) -> str | None:
     from dotenv import dotenv_values
 
     from base.cluster import get_record
@@ -500,10 +511,10 @@ def converge_pgbouncer(config: DataPlaneConfig, home: Path) -> None:
         # The pooler is a local-instance component; a remote/SaaS plane's URL is the
         # provider's (its port is not this cluster's), so converge must neither rewrite it nor
         # preflight the local binary.
-        return
+        return None
     rec = get_record(home)
     if rec is None:
-        return
+        return None
     env_path = home / ".env"
     current = (dotenv_values(env_path).get("MEIVA_DB_URL") or "").strip()
     normalized = _normalized_db_url(
@@ -517,8 +528,6 @@ def converge_pgbouncer(config: DataPlaneConfig, home: Path) -> None:
             env_path, {"MEIVA_DB_URL": normalized}, audit=EnvWriteAudit(site="converge_pgbouncer")
         )
     if not config.pgbouncer_enabled:
-        return
+        return None
     binary = pooler_files.pgbouncer_bin()
-    if binary_installed(binary):
-        return
-    print(not_installed_warning(binary, _install_hint()), file=sys.stderr)
+    return None if binary_installed(binary) else binary

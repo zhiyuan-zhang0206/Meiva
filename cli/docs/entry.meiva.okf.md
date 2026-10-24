@@ -26,7 +26,7 @@ again under its lifecycle lock. `main()` is the composition root of both: after 
 checkout gate it reads the home and the checkout once into a `HomeSite`
 (`cli/start_runtime.py`) and, for `init`, the caller's host facts (`CallerHost`: its
 tool directories, which ports of the fixed table something already holds and the transport key
-of a database-capability bundle, which leaves the environment there), and
+of a database-capability bundle, which leaves the environment there before any step runs), and
 hands them to the handler. `run_init` and `run_start` take those values; neither reads
 the environment, `__file__` or a port, and neither repeats the checkout gate. A test
 therefore creates a real home and checkout under `tmp_path` and passes them. The faults it
@@ -48,12 +48,15 @@ that opens one, `cli/startup/service_path.py` chooses the tool directories a new
 declares, and `cli/startup/settings_failure.py` words an unconfigured home's Settings
 failure. The shells read the files, print and execute what those return. Other parsed runtime commands create one
 `cli.database.runtime.CommandRuntime` with a zero-read `ConfigBoot` and its lazy
-`MachineIdentity`. Its `home` is `resolve_meiva_home().resolve()`, the same pure read and the
-same spelling as the `HomeSite` of init and start; `create` only reads it, and `main()` is where the
-private home directory is created (a symlinked home is refused there) before the runtime is built.
-Its `session` (`UserSession`: the user's home directory, the login shell, whether a person is at
-the terminal) is read once in `create` too, so a converge step never reads `Path.home()`, `$SHELL`
-or the TTY. Dispatch, embedded
+`MachineIdentity`. Its `home` is the `resolve_meiva_home().resolve()` that `main()` reads once and
+hands to `create(home)`, the same value and spelling as the `HomeSite` of init and start; `create`
+only holds it, and `main()` is where the private home directory is created (a symlinked home is
+refused there) before the runtime is built. Its `session` (`UserSession`: the user's home
+directory, the login shell, whether a person is at the terminal), its `checkout` (the checkout
+whose code runs) and its `terminal` (the three process streams) are read once in `create` too, so
+a command never reads `Path.home()`, `$SHELL`, `repo_root()` or `sys.stdin`. The transport key
+of a database-capability bundle is the one environment value `main()` takes out for a verb
+(`meiva init` and `meiva cluster db-authority install-unit`, as `args.transport_key`). Dispatch, embedded
 lifecycle legs, logging, database host resolution and telemetry borrow that same
 identity, and with `CommandRuntime.helper`, the one place the real permissions-helper
 factory is chosen: `base.sessions.helperproc.helper_for(host.platform)` returns

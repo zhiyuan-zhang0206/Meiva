@@ -4,7 +4,9 @@
 # The lifecycle drivers dial `<root run dir>/meiva-root.sock` through the real `RootClient`.
 # This listener sits where the real root would: a unix socket under the test's home that
 # speaks the K1 wire (`base.native_process.root_control.ipc`), keeps a unit table the verbs
-# change, and names this test process as the root so the client's exact-peer check passes.
+# change, and names this test process as the root so the client's exact-peer check passes. With a
+# `launch_digest` and a `runtime` it reports the whole birth evidence a real root reports, so
+# `start_serving.observe_root` reads it unpatched: a start can publish serving against it.
 # Use it to test the shell that talks to the root; a test of what to *do* about a root
 # status asserts the pure plan instead and needs no listener.
 
@@ -22,6 +24,7 @@ from pathlib import Path
 import psutil
 
 from base.deploy.lifecycle import start_serving
+from base.host.runtime_interpreter import LoadedRuntimeIdentity
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import (
     ErrorCode,
@@ -61,6 +64,10 @@ class UnitRow:
     # Another `meiva start` begins at the moment the root receives this unit's `up`: the race a
     # start that is still launching loses its serving generation to.
     begins_rival_start: bool = False
+    # meiva:note
+    # A file the launching unit writes at the moment the root receives its `up`: the source
+    # changing under a start after the root was born.
+    writes_on_up: Path | None = None
 
     def wire(self) -> dict[str, object]:
         row: dict[str, object] = {
@@ -81,6 +88,9 @@ class ScriptedRoot:
     home: Path
     units: dict[str, UnitRow] = field(default_factory=dict[str, UnitRow])
     launch_digest: str | None = None
+    # meiva:note
+    # The loaded-source identity this root reports as its own; a real root captures it at launch.
+    runtime: LoadedRuntimeIdentity | None = None
     calls: list[tuple[str, str | None]] = field(default_factory=list[tuple[str, str | None]])
     # meiva:note
     # The wall-clock time each entry of `calls` was received, at the same index.
@@ -96,12 +106,16 @@ class ScriptedRoot:
     def status(self) -> dict[str, object]:
         me = OwnedProcess.capture(psutil.Process())
         root: dict[str, object] = {
+            "home": str(self.home.resolve()),
+            "running": True,
             "pid": me.pid,
             "create_time": me.birth,
             "starttime": me.starttime,
         }
         if self.launch_digest is not None:
             root["launch_digest"] = self.launch_digest
+        if self.runtime is not None:
+            root["runtime"] = self.runtime.model_dump(mode="json")
         return {
             "root": root,
             "units": (
@@ -127,6 +141,9 @@ class ScriptedRoot:
         if verb == "up":
             if row.begins_rival_start:
                 start_serving.begin_start(self.home)
+            if row.writes_on_up is not None:
+                row.writes_on_up.parent.mkdir(parents=True, exist_ok=True)
+                row.writes_on_up.write_text("written while the unit launched\n")
             if row.refuse_up:
                 return dict(error_response(ErrorCode.INTERNAL, f"refused to bring up {name!r}"))
             row.intent = "running"
@@ -163,12 +180,17 @@ class _Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 # Serve `units` at the home's root control socket until the block ends.
 @contextmanager
 def scripted_root(
-    home: Path, units: Iterable[UnitRow] = (), *, launch_digest: str | None = None
+    home: Path,
+    units: Iterable[UnitRow] = (),
+    *,
+    launch_digest: str | None = None,
+    runtime: LoadedRuntimeIdentity | None = None,
 ) -> Generator[ScriptedRoot]:
     tree = ScriptedRoot(
         home=home,
         units={row.unit_id: row for row in units},
         launch_digest=launch_digest,
+        runtime=runtime,
     )
     run_dir = root_run_dir(home)
     run_dir.mkdir(parents=True, exist_ok=True)

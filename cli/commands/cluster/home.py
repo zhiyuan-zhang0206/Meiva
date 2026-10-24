@@ -12,7 +12,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
+from typing import assert_never
 
 from base.cluster.dataplane.pg_admin import pg_socket_path
 from base.host.permissions_helper.client import PermissionsHelperClient
@@ -32,44 +32,34 @@ from cli.commands.cluster.plans.destroy_plan import (
     DestroyFacts,
     DestroyStep,
     DropData,
+    HostSystem,
     PublishIntent,
     RetireHelper,
     RetireJobs,
     StopCluster,
+    StopMode,
     answer_confirms,
     cleanup_incomplete,
     destroy_prompt,
     plan_destroy,
     scheduled_jobs_failure,
 )
+from cli.database.runtime import Terminal
 from cli.start_identity import read_intent
 from services.desktop.permissions_helper.launchd_job import unregister_helper
-
-
-# meiva:note
-# The three streams a person sits at. Destroy asks for a typed confirmation, so it needs
-# them as values: only a terminal on both ends can answer it.
-@dataclass(frozen=True)
-class Terminal:
-    stdin: TextIO
-    stdout: TextIO
-    stderr: TextIO
-
-    @property
-    def interactive(self) -> bool:
-        return self.stdin.isatty() and self.stdout.isatty()
 
 
 # meiva:note
 # What the operator asked destroy to do, with the facts of this checkout and configuration
 # that the composition root reads once: the home it acts on (this process's home, the default
 # production home included), the checkout whose `meiva` runs the stop, and the registered
-# permissions-helper port.
+# permissions-helper port. The terminal the person answers at travels beside it, in the
+# command's runtime.
 @dataclass(frozen=True)
 class DestroyRequest:
     home: Path
     drop_db: bool
-    stop_mode: str
+    stop_mode: StopMode
     stop_timeout_s: float
     checkout: Path
     helper_port: int
@@ -107,7 +97,7 @@ def cmd_cluster_destroy(request: DestroyRequest, *, host: Host, terminal: Termin
         stop_mode=request.stop_mode,
         stop_timeout_s=request.stop_timeout_s,
         meiva_executable=str(request.checkout / ".venv" / "bin" / "meiva"),
-        platform=host.platform.system,
+        platform=HostSystem(host.platform.system),
         helper_port=request.helper_port,
         drop_dirs=tuple(str(directory) for directory in _drop_dirs(home))
         if request.drop_db
@@ -182,6 +172,8 @@ def _execute(
             for directory in directories:
                 shutil.rmtree(directory, ignore_errors=True)
             print(announce, file=terminal.stdout)
+        case _:
+            assert_never(step)
     return None
 
 

@@ -2,7 +2,7 @@
 # meiva:note
 # The native LGTM archive download and install against real HTTP listeners on port 0.
 #
-# A mirror that answers 503, drops the connection, drips a body or never answers is a real
+# A mirror that answers 503, drops the connection, drips a body or answers too late is a real
 # listener the shell dials through its real opener, and the archive it installs is a real zip or
 # tarball under `tmp_path`. What the shell waits between attempts and says is decided in
 # `plans/lgtm/download_retry.py` and tested there; these cases prove the loop, the deadline and the
@@ -11,14 +11,10 @@
 from __future__ import annotations
 
 import hashlib
-import http.server
 import re
-import socketserver
-import threading
 import time
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
 
 import pytest
 
@@ -26,111 +22,13 @@ from cli.commands.observability import lgtm_native
 from cli.commands.observability.plans.lgtm.download_retry import DownloadLimits
 from cli.commands.observability.tests.lgtm.lgtm_harness import tar_bytes, zip_bytes
 from cli.commands.observability.tests.observability_inputs import FAST_DOWNLOADS
-from cli.commands.observability.tests.scripted_http import Reply, serve
+from cli.commands.observability.tests.scripted_http import Drip, Reply, serve
 
 LIMITS = replace(FAST_DOWNLOADS, retry_backoff_s=0.01)
 
 
 def limits(**changes: float) -> DownloadLimits:
     return replace(LIMITS, **changes)
-
-
-class DripServer(socketserver.ThreadingTCPServer):
-    # meiva:note
-    # A mirror that sends `body_len` bytes in `chunk_size` pieces `interval_s` apart, so a client
-    # that checks no deadline would follow it for as long as it drips. `close_delimited` omits the
-    # Content-Length; `stop_after_s` ends the stream early; `hold_open_s` keeps the connection open
-    # after the last byte.
-    daemon_threads = True
-    allow_reuse_address = True
-
-    def __init__(
-        self,
-        *,
-        body_len: int,
-        chunk_size: int,
-        interval_s: float,
-        hold_open_s: float = 0.0,
-        close_delimited: bool = False,
-        stop_after_s: float | None = None,
-    ) -> None:
-        super().__init__(("127.0.0.1", 0), _DripHandler)
-        self.body_len = body_len
-        self.chunk_size = chunk_size
-        self.interval_s = interval_s
-        self.hold_open_s = hold_open_s
-        self.close_delimited = close_delimited
-        self.stop_after_s = stop_after_s
-        self.bytes_sent = 0
-
-    @property
-    def url(self) -> str:
-        return f"http://127.0.0.1:{self.server_address[1]}/loki.zip"
-
-    def __enter__(self) -> DripServer:
-        threading.Thread(target=self.serve_forever, daemon=True).start()
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self.shutdown()
-        self.server_close()
-
-
-class _DripHandler(http.server.BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
-
-    def log_message(self, format: str, *args: object) -> None:
-        pass
-
-    def do_GET(self) -> None:
-        server = cast(DripServer, self.server)
-        started = time.monotonic()
-        self.send_response(200)
-        if server.close_delimited:
-            self.send_header("Connection", "close")
-        else:
-            self.send_header("Content-Length", str(server.body_len))
-        self.end_headers()
-        sent = 0
-        while sent < server.body_len:
-            if server.stop_after_s is not None and time.monotonic() - started > server.stop_after_s:
-                return
-            size = min(server.chunk_size, server.body_len - sent)
-            self.wfile.write(b"x" * size)
-            self.wfile.flush()
-            sent += size
-            server.bytes_sent = sent
-            time.sleep(server.interval_s)
-        if server.hold_open_s:
-            time.sleep(server.hold_open_s)
-
-
-class SilentServer(socketserver.ThreadingTCPServer):
-    # meiva:note
-    # A mirror that accepts the connection and never answers, for `stop_after_s` seconds.
-    daemon_threads = True
-    allow_reuse_address = True
-
-    def __init__(self, *, stop_after_s: float) -> None:
-        super().__init__(("127.0.0.1", 0), _SilentHandler)
-        self.stop_after_s = stop_after_s
-
-    @property
-    def url(self) -> str:
-        return f"http://127.0.0.1:{self.server_address[1]}/loki.zip"
-
-    def __enter__(self) -> SilentServer:
-        threading.Thread(target=self.serve_forever, daemon=True).start()
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self.shutdown()
-        self.server_close()
-
-
-class _SilentHandler(socketserver.BaseRequestHandler):
-    def handle(self) -> None:
-        time.sleep(cast(SilentServer, self.server).stop_after_s)
 
 
 def asset_for(url: str, body: bytes, member: str = "") -> dict[str, str]:
@@ -169,6 +67,32 @@ def test_a_mirror_that_recovers_is_followed_to_the_archive(tmp_path: Path) -> No
     assert len(mirror.received) == 3
 
 
+def test_the_attempt_count_is_the_retry_policys_not_the_shells(tmp_path: Path) -> None:
+    with serve({"/loki.zip": Reply(status=503)}) as mirror, pytest.raises(RuntimeError) as caught:
+        lgtm_native.download_with_retry(
+            f"{mirror.url}/loki.zip", tmp_path / "loki.zip", limits=limits(attempts=2)
+        )
+
+    assert len(mirror.received) == 2
+    assert "after 2 attempt(s)" in str(caught.value)
+
+
+def test_one_attempt_is_one_request_and_no_wait(tmp_path: Path) -> None:
+    started = time.monotonic()
+    with (
+        serve({"/loki.zip": Reply(status=503)}) as mirror,
+        pytest.raises(RuntimeError, match=r"after 1 attempt\(s\)"),
+    ):
+        lgtm_native.download_with_retry(
+            f"{mirror.url}/loki.zip",
+            tmp_path / "loki.zip",
+            limits=limits(attempts=1, retry_backoff_s=30.0),
+        )
+
+    assert len(mirror.received) == 1
+    assert time.monotonic() - started < 5.0
+
+
 def test_the_backoff_is_a_real_wait_that_grows_by_one_step_per_attempt(tmp_path: Path) -> None:
     started = time.monotonic()
     with serve({"/loki.zip": Reply(status=503)}) as mirror, pytest.raises(RuntimeError):
@@ -197,30 +121,34 @@ def test_a_dripping_mirror_cannot_outlive_the_asset_deadline(
     tmp_path: Path, close_delimited: bool
 ) -> None:
     budget = limits(total_budget_s=0.5, socket_timeout_s=1.0, retry_backoff_s=0.05)
-    drip = DripServer(
-        body_len=1 << 20,
-        chunk_size=1,
-        interval_s=0.02,
-        close_delimited=close_delimited,
-        stop_after_s=3.0,
-    )
+    body = b"x" * (1 << 20)
+    drip = Drip(chunk_size=1, interval_s=0.02, close_delimited=close_delimited, stop_after_s=3.0)
     started = time.monotonic()
-    with drip, pytest.raises(RuntimeError, match="budget") as caught:
-        lgtm_native.download_with_retry(drip.url, tmp_path / "loki.zip", limits=budget)
+    with (
+        serve({"/loki.zip": Reply(body=body, drip=drip)}) as mirror,
+        pytest.raises(RuntimeError, match="budget") as caught,
+    ):
+        lgtm_native.download_with_retry(
+            f"{mirror.url}/loki.zip", tmp_path / "loki.zip", limits=budget
+        )
 
     elapsed = time.monotonic() - started
     assert elapsed >= budget.total_budget_s
     assert elapsed <= budget.total_budget_s + budget.socket_timeout_s + 0.3
     assert isinstance(caught.value.__cause__, TimeoutError)
-    assert drip.bytes_sent < drip.body_len
+    assert mirror.bytes_sent < len(body)
 
 
 def test_a_connection_that_never_sends_headers_ends_within_the_socket_guard(tmp_path: Path) -> None:
     budget = limits(total_budget_s=0.6, socket_timeout_s=0.2, retry_backoff_s=5.0)
-    server = SilentServer(stop_after_s=3.0)
     started = time.monotonic()
-    with server, pytest.raises(RuntimeError, match="budget") as caught:
-        lgtm_native.download_with_retry(server.url, tmp_path / "loki.zip", limits=budget)
+    with (
+        serve({"/loki.zip": Reply(delay_s=3.0)}) as mirror,
+        pytest.raises(RuntimeError, match="budget") as caught,
+    ):
+        lgtm_native.download_with_retry(
+            f"{mirror.url}/loki.zip", tmp_path / "loki.zip", limits=budget
+        )
 
     assert time.monotonic() - started <= budget.total_budget_s + budget.socket_timeout_s + 0.3
     assert isinstance(caught.value.__cause__, TimeoutError)
@@ -228,39 +156,38 @@ def test_a_connection_that_never_sends_headers_ends_within_the_socket_guard(tmp_
 
 def test_a_body_that_closes_after_the_deadline_is_not_a_success(tmp_path: Path) -> None:
     budget = limits(total_budget_s=1.0, socket_timeout_s=1.0)
-    drip = DripServer(
-        body_len=2,
-        chunk_size=1,
-        interval_s=0.5,
-        hold_open_s=0.2,
-        close_delimited=True,
-        stop_after_s=3.0,
+    body = b"xx"
+    drip = Drip(
+        chunk_size=1, interval_s=0.5, close_delimited=True, stop_after_s=3.0, hold_open_s=0.2
     )
     destination = tmp_path / "loki.zip"
-    with drip, pytest.raises(TimeoutError, match="budget"):
+    with (
+        serve({"/loki.zip": Reply(body=body, drip=drip)}) as mirror,
+        pytest.raises(TimeoutError, match="budget"),
+    ):
         lgtm_native.stream_download(
-            drip.url,
+            f"{mirror.url}/loki.zip",
             destination,
             limits=budget,
             deadline=time.monotonic() + budget.total_budget_s,
         )
 
-    assert destination.stat().st_size == drip.body_len
-    assert drip.bytes_sent == drip.body_len
+    assert destination.stat().st_size == len(body)
+    assert mirror.bytes_sent == len(body)
 
 
 def test_the_progress_heartbeat_follows_the_configured_interval(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     budget = limits(total_budget_s=30.0, progress_interval_s=0.1)
-    drip = DripServer(body_len=10, chunk_size=1, interval_s=0.06)
+    body = b"x" * 10
     destination = tmp_path / "loki.zip"
-    with drip:
+    with serve({"/loki.zip": Reply(body=body, drip=Drip(chunk_size=1, interval_s=0.06))}) as mirror:
         lgtm_native.stream_download(
-            drip.url, destination, limits=budget, deadline=time.monotonic() + 30.0
+            f"{mirror.url}/loki.zip", destination, limits=budget, deadline=time.monotonic() + 30.0
         )
 
-    assert destination.read_bytes() == b"x" * 10
+    assert destination.read_bytes() == body
     out = capsys.readouterr().out
     assert re.search(r"  · lgtm native: 0\.0 MB \(\d+%\) in \d+s\n", out)
     assert re.search(r"  · lgtm native: downloaded 0\.0 MB in \d+s\n\Z", out)

@@ -25,12 +25,12 @@ from base.paths.tests.homes import unit_home as unit_home
 from cli import start_identity
 from cli.commands.cluster.home import (
     DestroyRequest,
-    Terminal,
     cmd_cluster_destroy,
     unregister_scheduled_jobs,
 )
-from cli.commands.cluster.plans.destroy_plan import STOP_INCOMPLETE
+from cli.commands.cluster.plans.destroy_plan import STOP_INCOMPLETE, StopMode
 from cli.commands.cluster.plans.destroy_plan import stop_argv as stop_argv
+from cli.database.runtime import Terminal
 
 
 # meiva:note
@@ -120,7 +120,7 @@ def _request(home: Path, checkout: Path, *, drop_db: bool = False) -> DestroyReq
     return DestroyRequest(
         home=home,
         drop_db=drop_db,
-        stop_mode="smooth",
+        stop_mode=StopMode.SMOOTH,
         stop_timeout_s=300.0,
         checkout=checkout,
         helper_port=8181,
@@ -158,7 +158,7 @@ def test_a_confirmed_destroy_stops_the_cluster_from_its_checkout_and_marks_the_h
     ran = _stop_ran(checkout)
     assert ran == [
         str(checkout.resolve()),
-        *stop_argv("meiva", ["agent-runner"], "smooth", 300.0)[1:],
+        *stop_argv("meiva", ["agent-runner"], StopMode.SMOOTH, 300.0)[1:],
     ]
     out = session.stdout.getvalue()
     assert f"will decommission the cluster at {home} (agent-runner)" in out

@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 import yaml
@@ -16,23 +15,30 @@ from base.cluster.machine import MachineIdentity
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import service_argv, storage_dir
 from cli.commands.observability import lgtm_native
-from cli.commands.observability.inputs import lgtm_settings
+from cli.commands.observability.inputs import LgtmSettings
 from cli.commands.observability.plans.lgtm.dashboard_plan import RenderedDashboard
+from cli.commands.observability.tests.observability_inputs import lgtm_settings, observability
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from tests.path_scoped.cli_tests import operator_database as operator_database
 from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 
 _STUB_RENDER = '{"title": "Meiva Ops", "panels": []}\n'
 
+# meiva:note
+# The deployment these cases render for: a loopback Postgres on 5433, whose host:port the Grafana
+# SQL datasource carries.
+_DIRECT_DB_URL = "postgresql://reader@127.0.0.1:5433/meiva"
+
 
 # meiva:note
-# Render with the process-wide settings these cases pin.
+# Render the native configs for the observability values these cases pin, over the default gateway
+# (no base URL, port 8000) and the loopback database.
 def _render_configs(
     repo: Path,
     native_dir: Path,
     home: Path,
     *,
+    settings: LgtmSettings,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentity,
 ) -> None:
@@ -40,34 +46,18 @@ def _render_configs(
         repo,
         native_dir,
         home,
-        settings=lgtm_settings(
-            observability=config.settings.observability,
-            gateway=config.settings.gateway,
-            alerts=config.settings.alerts,
-            telegram=config.settings.telegram,
-        ),
+        settings=settings,
         storage_dir=storage_dir(home),
-        direct_db_url=config.settings.data_plane.db_url,
+        direct_db_url=_DIRECT_DB_URL,
         dashboard=RenderedDashboard(_STUB_RENDER, ()),
         producer=producer,
         machine=machine,
     )
 
 
-@pytest.fixture(autouse=True)
-def _default_provisioning_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Default-render assertions use an explicit default deployment configuration."""
-    monkeypatch.setattr(
-        config.settings.data_plane, "db_url", "postgresql://reader@127.0.0.1:5433/meiva"
-    )
-    monkeypatch.setattr(config.settings.gateway, "gateway_url", "")
-    monkeypatch.setattr(config.settings.gateway, "gateway_port", 8000)
-
-
 def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_defaults(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_machine: MachineIdentity,
@@ -91,32 +81,37 @@ def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_default
     repo = Path(__file__).resolve().parents[3]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
-    monkeypatch.setattr(config.settings.observability, "lgtm_listen_host", "127.0.0.1")
     _render_configs(
         repo,
         native_dir,
         home,
+        settings=lgtm_settings(observability=observability(lgtm_listen_host="127.0.0.1")),
         producer=operator_pipeline,
         machine=command_machine,
     )
     rendered_loki = (native_dir / "config/loki.yaml").read_text(encoding="utf-8")
     assert "http_listen_address: 127.0.0.1" in rendered_loki
     assert "grpc_listen_address: 127.0.0.1" in rendered_loki
+    # meiva:note
+    # The Prometheus unit's argv is `base.telemetry.lgtm_local.service_argv`, which reads the
+    # process-wide listen host instead of taking it as a value; it is pinned here for the argv only.
+    monkeypatch.setattr(config.settings.observability, "lgtm_listen_host", "127.0.0.1")
     prometheus_argv = service_argv(home, "prometheus")
     assert "--web.listen-address=127.0.0.1:9090" in prometheus_argv
 
     # A non-loopback setting flows through to the rendered listeners.
-    monkeypatch.setattr(config.settings.observability, "lgtm_listen_host", "10.0.0.5")
     _render_configs(
         repo,
         native_dir,
         home,
+        settings=lgtm_settings(observability=observability(lgtm_listen_host="10.0.0.5")),
         producer=operator_pipeline,
         machine=command_machine,
     )
     rendered_loki = (native_dir / "config/loki.yaml").read_text(encoding="utf-8")
     assert "http_listen_address: 10.0.0.5" in rendered_loki
     assert "grpc_listen_address: 10.0.0.5" in rendered_loki
+    monkeypatch.setattr(config.settings.observability, "lgtm_listen_host", "10.0.0.5")
     prometheus_argv = service_argv(home, "prometheus")
     assert "--web.listen-address=10.0.0.5:9090" in prometheus_argv
 
@@ -162,9 +157,7 @@ def _assert_contains(text: str, *needles: str) -> None:
 
 
 def test_native_grafana_renders_from_the_repo_and_host_setting(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_machine: MachineIdentity,
@@ -172,21 +165,17 @@ def test_native_grafana_renders_from_the_repo_and_host_setting(
     repo = Path(__file__).resolve().parents[3]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
-    monkeypatch.setattr(
-        config.settings.observability,
-        "telemetry_tempo_query_url",
-        "http://tempo.test:3200/",
-    )
-    monkeypatch.setattr(
-        config.settings.observability,
-        "telemetry_tempo_endpoint",
-        "http://tempo.test:14318/",
-    )
 
     _render_configs(
         repo,
         native_dir,
         home,
+        settings=lgtm_settings(
+            observability=observability(
+                telemetry_tempo_query_url="http://tempo.test:3200/",
+                telemetry_tempo_endpoint="http://tempo.test:14318/",
+            )
+        ),
         producer=operator_pipeline,
         machine=command_machine,
     )

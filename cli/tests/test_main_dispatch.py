@@ -10,6 +10,7 @@ bindings to record routing without invoking real cmd_start / cmd_cluster_status.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import socket
 import subprocess
@@ -21,7 +22,9 @@ from typing import cast
 import pytest
 
 from base import cluster
+from base.host.db_authority.unit import CAPABILITY_KEY_ENV
 from base.host.env.dotenv_boot import LAUNCHER_PROFILE_ENV_KEY
+from base.paths.tests.homes import point_home
 from cli import main as _main
 from cli import parsers as _parsers
 from cli.commands.agents import parsers as _agents
@@ -384,9 +387,69 @@ def test_init_receives_its_site_and_the_hosts_facts(
     assert isinstance(ns.caller_host, CallerHost)
 
 
+# meiva:note
+# The transport key of a capability bundle leaves the environment at the entry, once, for the two
+# verbs that carry a bundle; every other verb leaves the variable where it found it. A fresh
+# process runs the entry with the key in its environment and reports what the verb received.
+@pytest.mark.parametrize(
+    ("argv", "received", "left_in_environment"),
+    [
+        (["init"], "sealed-key", None),
+        (["cluster", "db-authority", "install-unit", "bundle.sealed"], "sealed-key", None),
+        (["doctor"], None, "sealed-key"),
+    ],
+)
+def test_the_transport_key_leaves_the_environment_at_the_entry_for_the_verbs_that_carry_one(
+    argv: list[str], received: str | None, left_in_environment: str | None, tmp_path: Path
+) -> None:
+    # meiva:note
+    # The child is this repository's own fixed probe script, run with the current interpreter.
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-B", str(_CHILD), "transport_key", *argv],
+        cwd=Path(__file__).resolve().parents[2],
+        env={**os.environ, "HOME": str(tmp_path), CAPABILITY_KEY_ENV: "sealed-key"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    seen = json.loads(result.stdout.splitlines()[-1])
+    assert seen["arg"] == received
+    assert seen["environment"] == left_in_environment
+    if argv[0] == "init":
+        assert seen["caller"] == "sealed-key"
+
+
+# meiva:note
+# The entry reads the home once and hands every owner the same resolved path: the command runtime
+# and the producer name the home behind a symlink, and the directory is created owner-only.
+def test_the_entry_resolves_a_symlinked_home_once_for_the_runtime_and_the_producer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    real = tmp_path.resolve() / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    point_home(monkeypatch, link / "home")
+    homes: list[Path] = []
+
+    def _fake(args: argparse.Namespace) -> int:
+        homes.append(args.runtime.home)
+        return 0
+
+    _stub_dispatch(monkeypatch, "status", _fake)
+    assert _main.main(["status"]) == 0
+
+    assert homes == [real / "home"]
+    assert (real / "home").stat().st_mode & 0o777 == 0o700
+
+
 def test_init_learns_which_fixed_ports_something_already_holds(unit_home: Path) -> None:
     held = cluster.new_home_ports()["gateway"]
     args = build_parser().parse_args(["init", "--machine-name", "probe", "--serve-gateway"])
+    args.transport_key = ""
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", held))
         listener.listen()

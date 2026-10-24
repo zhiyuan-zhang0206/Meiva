@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, assert_never
 
 import httpx
 
@@ -38,7 +38,7 @@ from base.deploy.git import cluster_drift
 from base.host.env.registry import process_environment
 from base.host.resource_sample import resource_sample
 from base.paths import root_manifests_path
-from cli.commands._repo import repo_root, roles_or_none
+from cli.commands._repo import roles_or_none
 from cli.commands.cluster.control import fetch_gateway_cluster_status
 from cli.commands.converge import incomplete
 from cli.commands.converge.redis_bridge import print_redis_bridge_status
@@ -89,7 +89,7 @@ from services.supervision.roster.spec import services_for_capabilities_annotated
 
 
 def cmd_status(*, database_factory: DatabaseFactory, command: CommandRuntime) -> int:
-    repo = repo_root()
+    repo = command.checkout
     roles = roles_or_none(machine=command.machine)
     roster = _roster(roles, command)
     facts = StatusFacts(
@@ -144,7 +144,9 @@ def _execute(
         case ProbeLgtm():
             print_lgtm_status()
         case ProbeRedisBridge():
-            print_redis_bridge_status(machine=command.machine, config=command.config)
+            print_redis_bridge_status(
+                command.home, host=command.host, machine=command.machine, config=command.config
+            )
         case ReadSourceDrift():
             _emit(
                 source_drift_lines(
@@ -164,6 +166,8 @@ def _execute(
             )
         case ReadGateway():
             _emit(gateway_status_lines(read_gateway_outcome(command.config)))
+        case _:
+            assert_never(step)
 
 
 def _emit(lines: tuple[str, ...]) -> None:

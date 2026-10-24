@@ -176,7 +176,7 @@ def _init_and_start_settings_free() -> None:
     assert "base.config" not in sys.modules
     if not authority or scenario == "start_delivery_foreign":
         _boot_start_delivery(scenario, home)
-    command, factory = _operator_handles()
+    command, factory = _operator_handles(home)
     with start_intent.admitted_home(home):
         assert not command.config.prepared
         configured()
@@ -187,11 +187,11 @@ def _init_and_start_settings_free() -> None:
 
 # meiva:note
 # The command runtime and database factory `cli.main` gives a start, before it enters its home.
-def _operator_handles() -> "tuple[CommandRuntime, OperatorDatabaseFactory]":
+def _operator_handles(home: Any) -> "tuple[CommandRuntime, OperatorDatabaseFactory]":
     from cli.database import open_operator_database, operator_database_factory
     from cli.database.runtime import CommandRuntime
 
-    command = CommandRuntime.create()
+    command = CommandRuntime.create(home)
     factory = operator_database_factory(
         local_host=command.machine.host, open_database=open_operator_database
     )
@@ -203,7 +203,7 @@ def _boot_start_delivery(scenario: str, home: Any) -> None:
     from base.config import ConfigBoot
     from cli.database.runtime import CommandRuntime
 
-    assert not CommandRuntime.create().config.prepared
+    assert not CommandRuntime.create(home).config.prepared
     if scenario != "init_and_start_settings_free":
         _inherit_foreign_delivery(home)
         return
@@ -297,11 +297,14 @@ def _help_admission() -> None:
         raise AssertionError("help must exit")
     assert "base.config" not in sys.modules
     from base.cluster.dataplane.direct_url import ClusterDirectUrl
+    from base.db import Database
     from base.db.code_version_gate import ProcessDbGate
-    from cli.database import operator_database_factory
+    from base.db.config import DbConfig
+    from base.paths.home import resolve_meiva_home
+    from cli.database import open_operator_database, operator_database_factory
     from cli.database.runtime import CommandRuntime
 
-    command = CommandRuntime.create()
+    command = CommandRuntime.create(resolve_meiva_home().resolve())
 
     def unavailable() -> int:
         raise AssertionError("help and operator admission must not read a Git version")
@@ -310,12 +313,14 @@ def _help_admission() -> None:
     assert service.min_read_due() is True
     seen: list[ProcessDbGate] = []
 
-    def open_database(config: object, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> object:
+    def open_database(
+        config: DbConfig, gate: ProcessDbGate, direct_url: ClusterDirectUrl
+    ) -> Database:
         assert direct_url.local_host == command.machine.host
         assert gate.application_name() == "meiva:cli"
         assert gate.min_read_due() is False
         seen.append(gate)
-        return object()
+        return open_operator_database(config, gate, direct_url)
 
     factory = operator_database_factory(
         local_host=command.machine.host,
@@ -328,6 +333,33 @@ def _help_admission() -> None:
     assert service.min_read_due() is True
 
 
+# meiva:note
+# Bind the entry facts of `argv` and report the transport key the verb would receive.
+def _transport_key(argv: list[str]) -> None:
+    import argparse
+    import json
+    import os
+    from pathlib import Path
+
+    from base.host.db_authority.unit import CAPABILITY_KEY_ENV
+    from cli import main
+
+    args = argparse.Namespace(ssl_cert_file=None)
+    main.bind_entry_facts(args, argv, home=Path("/unit/home"), checkout=Path("/unit/checkout"))
+    if argv[:1] == ["init"]:
+        main.bind_init_inputs(args)
+    caller: Any = getattr(args, "caller_host", None)
+    print(
+        json.dumps(
+            {
+                "arg": getattr(args, "transport_key", None),
+                "caller": None if caller is None else caller.transport_key,
+                "environment": os.environ.get(CAPABILITY_KEY_ENV),
+            }
+        )
+    )
+
+
 if __name__ == "__main__":
     if sys.argv[1] == "defer_logging":
         _defer_logging()
@@ -337,5 +369,7 @@ if __name__ == "__main__":
         _init_and_start_settings_free()
     elif sys.argv[1] == "help_admission":
         _help_admission()
+    elif sys.argv[1] == "transport_key":
+        _transport_key(sys.argv[2:])
     else:
         raise SystemExit(f"unknown scenario {sys.argv[1]!r}")

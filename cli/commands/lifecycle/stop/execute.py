@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TextIO
+from typing import TextIO, assert_never
 
 from base.agents.context.clients import DatabaseFactory
 from base.deploy.lifecycle import start_serving
@@ -168,6 +168,7 @@ def _perform(
                     stop_cluster_instance(
                         config,
                         home=command.home,
+                        macos=command.host.platform.system == "darwin",
                         retained_children=retained_children,
                         producer=env.producer,
                     )
@@ -185,4 +186,6 @@ def _perform(
                 return StopOutcome(stopped.notes, stopped.clients)
         case SkipDataPlane(plane):
             print(data_plane_skip_line(plane))
+        case _:
+            assert_never(step)
     return None
