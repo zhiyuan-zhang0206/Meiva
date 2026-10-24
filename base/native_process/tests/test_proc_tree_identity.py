@@ -11,8 +11,9 @@ from types import SimpleNamespace
 import psutil
 import pytest
 
-from base.native_process import native_boot_id, pidfd
 from base.native_process import ownership as proc_tree
+from base.native_process import pidfd
+from base.native_process.kernel_identity import native_boot_id
 from base.native_process.ownership import OwnedProcess
 
 

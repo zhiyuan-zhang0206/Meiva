@@ -12,7 +12,7 @@ from collections.abc import Iterable
 
 import psutil
 
-from base.native_process import pid_starttime_ticks
+from base.native_process.kernel_identity import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
 from cli.commands.data_plane.maintenance.survivors import StopSurvivor, SurvivorRole
 

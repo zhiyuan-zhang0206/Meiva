@@ -43,7 +43,7 @@ from pathlib import Path
 import psutil
 
 from base.log import logger
-from base.native_process import pid_starttime_ticks
+from base.native_process.kernel_identity import pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
 from base.paths import logs_dir, meiva_home, run_dir
 from base.sessions.record import SessionRecord

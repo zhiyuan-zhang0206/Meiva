@@ -17,7 +17,9 @@ from typing import Any, cast
 
 import psutil
 
-from base.native_process import native_boot_id, pid_starttime_ticks, pidfd, process_birth_key
+from base.native_process import pidfd
+from base.native_process.birth_key import process_birth_key
+from base.native_process.kernel_identity import native_boot_id, pid_starttime_ticks
 
 # Identity reads use the stable start timestamp (stable_create_time): on macOS
 # the uncorrected kernel value, elsewhere the public create_time(). The public

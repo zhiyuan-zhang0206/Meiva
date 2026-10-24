@@ -31,7 +31,7 @@ import psycopg
 import pytest
 
 from base.agents.context.clients import DatabaseFactory
-from base.native_process import pid_starttime_ticks
+from base.native_process.kernel_identity import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
 from base.sessions.posixproc import process_group_has_live_members
 from base.sessions.pty import closure, protocol
