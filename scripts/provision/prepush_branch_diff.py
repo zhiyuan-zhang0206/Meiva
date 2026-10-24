@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import TextIO, cast
 
@@ -26,8 +27,33 @@ def _repository() -> Path:
     return Path(query.stdout.strip())
 
 
-def _checkout(root: Path) -> Path:
-    directory = Path(tempfile.mkdtemp(prefix="meiva-branch-diff-"))
+# meiva:note
+# Staging is the one step that can fail AFTER `git worktree add` registered the checkout: a path
+# the checkout cannot host (`ui/web` occupied by something that is not a directory, a read-only
+# temp root, an exhausted fd budget) raises OSError here. It is a parameter of `checkout_scratch`
+# so a test can hand in that failure instead of arranging one on disk.
+def stage_toolchain(root: Path, directory: Path) -> None:
+    for relative in _TOOLCHAIN:
+        source = root / relative
+        if source.exists():
+            (directory / relative).symlink_to(source, target_is_directory=True)
+
+
+# meiva:note
+# The throwaway checkout the branch diff is judged in. `scratch` is where it is made (the system
+# temp root by default), and both failure paths give the directory back: without the guard on
+# `stage`, an OSError escaped `main`'s `except SkipError` and left two artifacts behind - a
+# directory under the temp root, invisible to every sweep that looks in `~/Meiva/.worktrees`, and
+# a `.git/worktrees/<name>` entry pointing at it. The next run's `git worktree prune` reaped the
+# entry while the bytes stayed, so the leak was silent from both sides. `_discard` is the same
+# teardown the judged paths use, and the run reports itself skipped rather than crashing a push.
+def checkout_scratch(
+    root: Path,
+    *,
+    stage: Callable[[Path, Path], None] = stage_toolchain,
+    scratch: Path | None = None,
+) -> Path:
+    directory = Path(tempfile.mkdtemp(prefix="meiva-branch-diff-", dir=scratch))
     added = subprocess.run(
         ["git", "worktree", "add", "--detach", "--quiet", str(directory), "HEAD"],
         cwd=root,
@@ -36,15 +62,35 @@ def _checkout(root: Path) -> Path:
         check=False,
     )
     if added.returncode:
-        shutil.rmtree(directory, ignore_errors=True)
+        _discard(root, directory)
         raise SkipError(f"cannot check out HEAD into {directory}: {added.stderr.strip()}")
-    for relative in _TOOLCHAIN:
-        source = root / relative
-        if source.exists():
-            (directory / relative).symlink_to(source, target_is_directory=True)
+    try:
+        stage(root, directory)
+    except OSError as error:
+        _discard(root, directory)
+        raise SkipError(f"cannot stage the toolchain into {directory}: {error}") from error
     return directory
 
 
+# meiva:note
+# A checkout whose process was killed (SIGTERM, `kill -9`) stays behind, and NOTHING in this
+# script reaps it on the next run - deliberately. This machine runs several agents at once, and
+# another agent's live scratch checkout is indistinguishable from a leftover by name; a reaper
+# on the push path would trade a rare orphan for a regular chance of deleting live work. When
+# you do suspect an orphan, run this by hand. All four conditions are load-bearing - drop one and
+# the loop can remove somebody's running checkout:
+#
+#   scratch="${TMPDIR:-/tmp}"; repo=~/Meiva
+#   for d in "$scratch"/meiva-branch-diff-*; do
+#     [ -d "$d" ] || continue
+#     [ -n "$(find "$d" -maxdepth 0 -mmin +60)" ] || continue   # 1. name matched above, 2. older than an hour
+#     [ -z "$(lsof +D "$d" 2>/dev/null)" ] || continue          # 3. no process holds a file in it
+#     git -C "$repo" worktree remove --force "$d"               # 4. per directory, never a global `git worktree prune`
+#   done
+#
+# `git worktree prune` is global: it drops every entry whose directory is gone, which is right for
+# an entry this script registered and wrong as a sweeping action while another push is running.
+# Removing one directory at a time keeps the blast radius to the path you inspected.
 def _discard(root: Path, directory: Path) -> None:
     dropped = subprocess.run(
         ["git", "worktree", "remove", "--force", str(directory)],
@@ -201,7 +247,7 @@ def main(argv: list[str]) -> int:
     pushed = argv[2] if len(argv) == 3 else ""
     try:
         root = _repository()
-        directory = _checkout(root)
+        directory = checkout_scratch(root)
     except SkipError as error:
         print(
             f"WARNING: PRE-PUSH SKIPPED [branch-lint]: {error}. CI must pass before merge.",
