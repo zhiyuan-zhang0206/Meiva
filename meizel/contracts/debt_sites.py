@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass
 
 from meizel.contracts.analysis import scan_all
 from meizel.contracts.debt import PATCH_CODES
-from meizel.graph.model import Code, MeizelError
+from meizel.graph.model import Code, MeizelError, Sources
 from meizel.graph.universe import Universe
 
 __all__ = ["Site", "format_sites", "sites", "target_under"]
@@ -61,7 +61,7 @@ def sites(
     scopes = [p.rstrip("/") for p in paths]
     files = [p for p in (*universe.python_files, *universe.typescript_files) if _within(p, scopes)]
     found: list[Site] = []
-    for path, scan in sorted(scan_all(universe, jobs, files).items()):
+    for path, scan in sorted(scan_all(universe, Sources(), jobs, files).items()):
         found.extend(
             Site(path, patch.line, wanted.value, patch.form, patch.target)
             for patch in scan.patches

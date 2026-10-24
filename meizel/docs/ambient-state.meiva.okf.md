@@ -34,9 +34,13 @@ Only the closed lists in the `[ambient-state]` tables of `meizel.policy.toml` (`
 
 Governed: the framework packages plus `schedules/`. Out of scope: tests, `__main__.py`, an `if __name__ == "__main__":` block, and skill scripts (`meiva_builtins/skills/**`, `meiva_builtins/plugins/*/**/skills/**`), which run as programs. Today's sites are frozen in the `ambient_state` section of the baseline shards as `path::rule:name -> site count`, matched exactly in both directions. Against the base revision the section is shrink-only with no pairing, so a renamed or moved site is fixed, not carried (a `git -M` rename carries keys once migrated). Adding a lint or changing its measurement rule does not permit freezing new exemptions; every key remains shrink-only.
 
-## Library-layer ratchet
+## Where the world is read
 
-Packages outside `DB_HANDLE_PACKAGES` are checked by `meizel/state/ambient_state/handle_ratchet.py`: every detected shim dial or self-built `Database.from_settings()` call fails, as does each self-built `EventBus.from_settings()` call outside `BUS_PACKAGES`. Library components receive these handles from a composition root. The scanner retains the governed package boundaries; no stored baseline, write mode or count allowance exists.
+Reads of the configuration, the database, the event bus and the service endpoints, and of the
+clock and the environment, are not decided here. They are the `ambient-read` code of
+`meizel check`: a file declares under `[roots]` in its directory's `meizel.toml` what it may read
+([[meizel/docs/checker/ambient.meiva.okf.md|ambient reads]]). This rule keeps the module-level state
+a file holds and the background work it starts.
 
 ## Known gaps
 

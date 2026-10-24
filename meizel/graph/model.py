@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 __all__ = [
+    "Acquisition",
+    "AmbientKind",
     "Code",
     "DebtKey",
     "Diagnostic",
@@ -17,6 +19,7 @@ __all__ = [
     "Problem",
     "PurityItem",
     "Restricted",
+    "Sources",
 ]
 
 
@@ -64,6 +67,8 @@ class Code(StrEnum):
     MISSING_PATCH_TARGET = "missing-patch-target"
     PATCH_RAISING_FALSE = "patch-raising-false"
     TEST_SUBCLASS_OVERRIDE = "test-subclass-override"
+    AMBIENT_READ = "ambient-read"
+    STALE_ROOT = "stale-root"
     IMPURE_EDGE = "impure-edge"
     IMPURE_CALL = "impure-call"
     UNFROZEN_VALUE = "unfrozen-value"
@@ -79,6 +84,25 @@ class Code(StrEnum):
     WIDE_PUBLIC_SURFACE = "wide-public-surface"
     WIDE_PARAMS = "wide-params"
     DEEP_ATTR_CHAIN = "deep-attr-chain"
+
+
+# meiva:note
+# What a process reads from the world it runs in, as a closed vocabulary.
+#
+# The first four are state a repository holds itself (declared under `[state]` and named in
+# the policy); the rest are the standard library's windows onto the process and the machine.
+class AmbientKind(StrEnum):
+    SETTINGS = "settings"
+    DB = "db"
+    ENDPOINTS = "endpoints"
+    BUS = "bus"
+    ENVIRON = "environ"
+    CLOCK = "clock"
+    HOME = "home"
+    CWD = "cwd"
+    PLATFORM = "platform"
+    PID = "pid"
+    RANDOM = "random"
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +138,26 @@ class Patch:
     target: str
     code: Code
     imported: bool = False
+
+
+# meiva:note
+# The point where a file reaches the ambient world: `target` is the dotted name it reads.
+@dataclass(frozen=True, slots=True)
+class Acquisition:
+    line: int
+    kind: AmbientKind
+    target: str
+
+
+# meiva:note
+# The state a repository keeps itself: dotted name -> kind.
+#
+# `names` acquire the state when imported or read as an attribute of their module; `calls` only
+# when called, so that importing a class for an annotation acquires nothing.
+@dataclass(frozen=True, slots=True)
+class Sources:
+    names: dict[str, AmbientKind] = field(default_factory=dict[str, AmbientKind])
+    calls: dict[str, AmbientKind] = field(default_factory=dict[str, AmbientKind])
 
 
 @dataclass(frozen=True, slots=True)

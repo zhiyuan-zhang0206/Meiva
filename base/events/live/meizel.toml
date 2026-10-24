@@ -11,3 +11,7 @@ exports = ["announce.py", "bus.py", "coalescer.py", "projection.py", "publisher.
 
 [purity]
 "__init__.py" = "strict"
+
+[state]
+"__init__.py" = ["bus"]
+"bus.py" = ["bus"]

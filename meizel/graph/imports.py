@@ -14,7 +14,14 @@ from meizel.graph.scopes import (
 )
 from meizel.graph.universe import Universe
 
-__all__ = ["ImportAccess", "Scope", "collect_scope", "dotted_chain", "parameter_names"]
+__all__ = [
+    "ImportAccess",
+    "Scope",
+    "absolute_base",
+    "collect_scope",
+    "dotted_chain",
+    "parameter_names",
+]
 
 
 class ImportAccess:

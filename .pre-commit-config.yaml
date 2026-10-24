@@ -114,11 +114,11 @@ repos:
         # A package's own tests/ directory is not scanned by the lint, so it does not trigger it.
         files: ^((gateway|ops)/(?!(?:.*/)?tests/).*|scripts/lint/async_no_sync_blocking)\.py$
 
-      # Ban raw os.environ / os.getenv — runtime config must go through base.config.settings.
-      # Legitimate exceptions (3rd-party secret / IPC handoff / container entrypoints)
-      # use an inline `# env-ok: <reason>` exemption, see scripts/lint/no_os_environ.py header.
+      # A test does not set an environment variable that Settings models: Settings is built once, so
+      # the change reaches nothing (scripts/lint/no_os_environ.py). Production reads of the
+      # environment are `ambient-read` in `meizel check`, declared under [roots].
       - id: lint-no-os-environ
-        name: lint os.environ (force settings)
+        name: lint setenv in tests (force settings)
         entry: .venv/bin/python scripts/lint/no_os_environ.py --only
         language: system
         files: ^(meizel\.policy\.toml|.*\.py)$
@@ -349,25 +349,6 @@ repos:
         entry: .venv/bin/python -m meizel roles check
         language: system
         files: ^(meizel\.toml|pyproject\.toml|\.pre-commit-config\.yaml|.*\.(py|sh|toml|yaml|yml))$
-        pass_filenames: false
-        require_serial: true
-
-      # Library components receive database and event-bus handles from composition roots.
-      # Every detected library-built handle fails; no baseline or write mode exists.
-      - id: lint-handle-ratchet
-        name: lint library-built database and event-bus handles
-        entry: .venv/bin/python -m meizel.state.ambient_state.handle_ratchet
-        language: system
-        # A verbose regex: the package alternation is generated from the roles.
-        files: |-
-          (?x)^(
-            (
-              # meizel:roles BEGIN regex-names application templates
-              agent|meiva|meiva_builtins|base|cli|gateway|ops|services|schedules
-              # meizel:roles END
-            )/.*\.py
-            |meizel/state/ambient_state/handle_ratchet\.py
-          )$
         pass_filenames: false
         require_serial: true
 

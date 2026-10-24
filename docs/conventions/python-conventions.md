@@ -572,11 +572,23 @@ it from there.
 
 A composition root is where a process builds its parts: a process entry point, a CLI
 command's `CommandRuntime.create()`, or a component's wiring module. It is the only
-code that reads `settings`, the environment or `.env`, and it constructs configs,
-clients and the system implementations of ports, then passes them down as arguments.
-That `settings` is read only there is a convention that reviewers hold, not a lint
-(decided deliberately): a component that imports `settings` is a defect even though no
-check reports it.
+code that reads the world: `settings`, the environment or `.env`, the clock, the home
+and working directory, the platform, process ids and randomness, and the process's own
+database, event bus and service endpoints. It constructs configs, clients and the system
+implementations of ports, then passes them down as arguments.
+
+That is checked, not held by reviewers: a file that is not a root and reaches one of
+those is an `ambient-read` of `meizel check`
+([ambient reads](../../meizel/docs/checker/ambient.meiva.okf.md)). A root declares itself
+under `[roots]` in its directory's `meizel.toml` with the kinds it reads (`settings`, `db`,
+`endpoints`, `bus` and `environ` are checked; the clock, home and working directory, platform,
+process ids and randomness are recorded by the scanner and not yet checked), and says why when the
+reason is not plain. The existing reads are recorded debt of the directory
+that holds them and may only shrink; a file under `purity = "strict"` has none. This reverses
+the earlier decision to leave `settings` to reviewers: a component that imports `settings`
+is no longer a defect only a reader notices. Only the point where a file takes the value is
+recorded; what it does with the object afterwards is not followed, so a root that hands its
+`settings` down whole is still a service locator and review catches that.
 
 A dependency is a required parameter. A default (`client: Client = Client()`), a
 module-level instance, or a function that builds its own client when none is passed puts

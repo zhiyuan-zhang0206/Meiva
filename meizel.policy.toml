@@ -78,6 +78,31 @@
 # format); `python -m meizel policy diff` reports every change to any of them.
 # ---------------------------------------------------------------------------------------------
 
+# ambient (meizel/contracts/ambient_read.py): the names through which the state a repository
+# keeps itself is reached. A module declares under [state] in its meizel.toml that it holds state
+# of a kind; the names below, resolved against those modules, are the points where a file acquires
+# it. A bare name acquires when imported or read as an attribute, `name()` only when called.
+[ambient]
+settings = [
+    "settings",
+    "get_field()",
+    "set_field()",
+    "ensure_eager()",
+    "ConfigBoot()",
+]
+db = [
+    "connect()",
+    "pool()",
+    "async_pool()",
+    "Database.from_settings()",
+]
+endpoints = [
+    "ServiceEndpoints.from_settings()",
+]
+bus = [
+    "EventBus.from_settings()",
+]
+
 # ambient-state (meizel/state/ambient_state): what module-level state may be let through.
 # Callees that build a write-only handle, framework wiring, or a constant fixed by its literals.
 [ambient-state]
@@ -192,26 +217,6 @@ config-readers = [
     "get_field",
     "set_field",
     "ensure_eager",
-]
-db-modules = [
-    "base.db",
-    "base.db.connections",
-]
-db-primitives = [
-    "connect",
-    "pool",
-    "async_pool",
-]
-db-handles = [
-    "base.db:Database",
-    "base.db.handle:Database",
-]
-bus-handles = [
-    "base.events.live:EventBus",
-    "base.events.live.bus:EventBus",
-]
-endpoint-handles = [
-    "base.daemon.endpoints:ServiceEndpoints",
 ]
 
 # Files that ARE a sink facade: the module-level state in them is the facade's own write-only

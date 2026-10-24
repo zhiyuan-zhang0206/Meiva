@@ -109,10 +109,17 @@ violations pass, anything new fails, and the debt may only shrink
   `debt carry --move-symbol OLD_FILE::NAME=NEW_FILE` does. `debt sites --code <patch code>
   --target-prefix <prefix>` lists where a target is patched (file, line, form), and `debt diff
   --by-target` reports what a change paid down per target; a codemod PR pastes the latter.
+- Only a composition root reads the world. A file that takes `settings`, the environment, or the
+  process's own database, event bus or service endpoints is an `ambient-read` unless its directory's
+  `meizel.toml` declares it under `[roots]` with that kind. Pass the value in from the root; a
+  decision in the middle becomes a pure function of its inputs. Declare a file a root only when
+  it is one, and a root that stops reading a kind fails as `stale-root`
+  ([ambient reads](../meizel/docs/checker/ambient.meiva.okf.md)).
 - `meizel.policy.toml` lists every allowance a manifest cannot grant itself (`[external]` sites,
   `[loads]` sites, default-argument injections) and every exemption of the lint rules in
-  `meizel/` (ambient state, clock lattice, single owners, `os.environ`, per-agent settings,
-  `TYPE_CHECKING`). Rule code holds no exemption of its own. Do not edit the file unless the task
+  `meizel/` (ambient state, clock lattice, single owners, setenv in tests, per-agent settings,
+  `TYPE_CHECKING`) and the names through which the repository's own state is reached
+  (`[ambient]`). Rule code holds no exemption of its own. Do not edit the file unless the task
   names the entry; CI prints every change to it
   ([the policy file](../meizel/docs/checker/policy.meiva.okf.md)).
 

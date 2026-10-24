@@ -1,3 +1,11 @@
+# meiva:note
+# Tests do not set an environment variable that `Settings` models.
+#
+# `Settings` is built once, so `monkeypatch.setenv` on a variable it owns changes nothing the code
+# under test reads. A test sets the field on the settings object instead. Reading the environment
+# from production code is not judged here: that is the `ambient-read` rule of `meizel check`, where
+# the files that may read it are declared under `[roots]`.
+
 from __future__ import annotations
 
 import re
@@ -15,9 +23,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # Everything below is listed in meizel.policy.toml under [no-os-environ], each entry with its reason.
 _POLICY = allowances.load(_REPO_ROOT)
 
-# Framework dirs Rule 1 does not scan. A test file under them (a package's own
-# `<pkg>/**/tests/`) is still read for Rule 2, so the default scan visits their
-# test files only.
+# meiva:note
+# Framework dirs whose production code the default scan skips; their own test files are read.
 _TEST_ONLY_DIRS = _POLICY.names("no-os-environ", "test-only-dirs")
 
 # Scan directories — only OUR code, do not scan .venv / vendor / node_modules.
@@ -33,8 +40,8 @@ _PROVIDER_KEY_ENV_VARS = frozenset(_POLICY.reasons("no-os-environ", "provider-ke
 # the same class as the provider keys above. Every entry must have its reader file in _ALLOWED_FILES.
 _LIVE_READ_ENV_VARS = frozenset(_POLICY.reasons("no-os-environ", "live-read-vars"))
 
-# File-level exemption — must demonstrate "cannot go through Settings": bootstrap ordering /
-# dynamic env enumeration. A new entry is a policy change with a one-line reason.
+# meiva:note
+# Test files that exercise the settings-free boundary, where the environment is the actual input.
 _ALLOWED_FILES = frozenset(_POLICY.reasons("no-os-environ", "files"))
 
 # Test files — pytest fixtures mocking env is a legitimate use
@@ -43,9 +50,6 @@ _TEST_PATTERNS = (
     re.compile(r"(^|/)test_[^/]+\.py$"),
     re.compile(r"_test\.py$"),
 )
-
-# Match os.environ. / os.environ[ / os.getenv(  (word boundary on both sides).
-_OS_ENV_PATTERN = re.compile(r"\bos\.(environ|getenv)\b")
 
 # Match only `monkeypatch.setenv("X"...)` / `monkeypatch.delenv("X"...)` —
 # pytest fixture calls, which always happen after Settings import (inside
@@ -63,16 +67,15 @@ def _is_test_file(rel_path: str) -> bool:
     return any(p.search(rel_path) for p in _TEST_PATTERNS)
 
 
+# meiva:note
+# Return error list [(lineno, line_stripped, error_kind), ...].
+#
+# error_kind = "setenv-managed:<name>".
 def _scan_file(
     path: Path, rel_path: str, managed_envs: frozenset[str]
 ) -> list[tuple[int, str, str]]:
-    """Return error list [(lineno, line_stripped, error_kind), ...].
-
-    error_kind = "naked-env" (Rule 1) | "setenv-managed" (Rule 2).
-    """
-    if rel_path in _ALLOWED_FILES:
+    if rel_path in _ALLOWED_FILES or not _is_test_file(rel_path):
         return []
-    is_test = _is_test_file(rel_path)
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -93,19 +96,14 @@ def _scan_file(
             continue
         # `#` splits the line into code and comment; only check the code part.
         code, _, _ = line.partition("#")
-        if is_test:
-            # Rule 2: monkeypatch.setenv/delenv in tests changing a Settings-managed env (silent no-op).
-            for m in _TEST_SETENV_PATTERN.finditer(code):
-                env_name = m.group(1)
-                if (
-                    env_name in managed_envs
-                    and env_name not in _PROVIDER_KEY_ENV_VARS
-                    and env_name not in _LIVE_READ_ENV_VARS
-                ):
-                    violations.append((lineno, line.strip(), f"setenv-managed:{env_name}"))
-        elif _OS_ENV_PATTERN.search(code):
-            # Rule 1: bare os.environ in non-test code.
-            violations.append((lineno, line.strip(), "naked-env"))
+        for m in _TEST_SETENV_PATTERN.finditer(code):
+            env_name = m.group(1)
+            if (
+                env_name in managed_envs
+                and env_name not in _PROVIDER_KEY_ENV_VARS
+                and env_name not in _LIVE_READ_ENV_VARS
+            ):
+                violations.append((lineno, line.strip(), f"setenv-managed:{env_name}"))
     return violations
 
 
@@ -163,7 +161,8 @@ def main(
     root = repo_root if repo_root is not None else _REPO_ROOT
     argv = argv if argv is not None else sys.argv[1:]
     argv, only = lint_common.split_only(argv)
-    # argv non-empty = explicit paths; empty = default scan of all _SCAN_DIRS + tests/, or
+    # meiva:note
+    # argv non-empty = explicit paths; empty = the test files of all _SCAN_DIRS + tests/, or
     # the `--only` changed files (the commit hook) under that same scope.
     if argv:
         missing = [arg for arg in argv if not Path(arg).exists()]
@@ -172,8 +171,8 @@ def main(
             return 1
     scope = lint_common.changed_scope(only, root, inputs=_RULE_INPUTS)
     py_files = _files_to_scan(argv, scope, root)
-    # Only Rule 2 (tests) reads the config registry, and importing it is the slow part of a
-    # run that judges a few non-test files.
+    # meiva:note
+    # Importing the config registry is the slow part of a run that judges no test file.
     managed_envs: frozenset[str] = (
         managed_aliases()
         if any(_is_test_file(_rel_label(path, root)) for path in py_files)
@@ -186,17 +185,12 @@ def main(
         violations = _scan_file(path, rel, managed_envs)
         for lineno, content, kind in violations:
             total_violations += 1
-            if kind.startswith("setenv-managed:"):
-                env = kind.split(":", 1)[1]
-                print(
-                    f"{rel}:{lineno}: monkeypatch.setenv/delenv on `{env}` — Settings is a singleton "
-                    f"built once; env changes do not reach the settings instance field. Use "
-                    f'`monkeypatch.setattr(settings, "<field_name>", value)` instead.'
-                )
-            else:
-                print(
-                    f"{rel}:{lineno}: bare os.environ/getenv usage -> route through the Settings aggregate"
-                )
+            env = kind.split(":", 1)[1]
+            print(
+                f"{rel}:{lineno}: monkeypatch.setenv/delenv on `{env}` — Settings is a singleton "
+                f"built once; env changes do not reach the settings instance field. Use "
+                f'`monkeypatch.setattr(settings, "<field_name>", value)` instead.'
+            )
             print(f"    {content}")
 
     if total_violations:
