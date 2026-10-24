@@ -38,15 +38,15 @@
 # TEST SELECTION (TEST_SELECTION_MODE, default enforce): a real PR runs the selected
 # subset whenever its impact is computable; the Trunk merge queue runs the full suite and
 # is the backstop. When the runtime-impact selector returns SELECTED, backend-selected
-# runs that subset as the backend pytest gate and backend-shard (the 8-way fan-out) is
-# skipped. Every other decision — FULL, SKIP, selector failure — keeps the
-# full fan-out. FULL means the impact is unknown (a global, unmapped or deleted-path
-# change), never that the subset is large: no size or time threshold decides anything.
-# Trunk merge-tree branches (trunk-merge/*, trunk-temp/*)
-# always choose FULL by the selector's first rule, so branch protection, the
-# coverage gate, and batched-tree safety are untouched by enforcement. In
-# shadow mode nothing gates on the subset: the fan-out gates and the subset
-# plus comparison report run informational beside it.
+# runs that subset as the backend pytest gate, on as many shards (1 to 8) as its share of
+# the suite needs, and backend-shard (the 8-way fan-out) is skipped. Every other decision
+# — FULL, SKIP, selector failure — keeps the full fan-out. FULL means the impact is
+# unknown (a global, unmapped or deleted-path change), never that the subset is large: no
+# size or time threshold decides anything. Trunk merge-tree branches (trunk-merge/*,
+# trunk-temp/*) always choose FULL by the selector's first rule, so branch protection, the
+# coverage gate, and batched-tree safety are untouched by enforcement. In shadow mode
+# nothing gates on the subset: the fan-out gates and the subset plus comparison report run
+# informational beside it.
 #
 # MEIVA_DB_URL / MEIVA_REDIS_URL are pointed at unreachable sentinel ports on
 # purpose. The suite must provision its own throwaway cluster; a sentinel turns
@@ -148,7 +148,8 @@ jobs:
       selector: ${{ steps.selector.outcome }}
       mode: ${{ steps.selector.outputs.mode }}
       decision: ${{ steps.selector.outputs.decision }}
-      tests: ${{ steps.selector.outputs.tests }}
+      shards: ${{ steps.selector.outputs.shards }}
+      groups: ${{ steps.selector.outputs.groups }}
       count: ${{ steps.selector.outputs.count }}
       est_seconds: ${{ steps.selector.outputs.est_seconds }}
       full_est_seconds: ${{ steps.selector.outputs.full_est_seconds }}
@@ -242,10 +243,41 @@ jobs:
               f"reason={selection['reason']}",
           ]
           if selection["decision"] == "SELECTED":
-              lines.append(f"tests={' '.join(selection['tests'])}")
+              # The list travels as an artifact: a job output or an env value that holds
+              # the whole suite sits at Linux's 128 KB limit for one environment string.
+              shards = selection["shards"]
+              lines.append(f"shards={shards}")
+              lines.append(f"groups={json.dumps(list(range(1, shards + 1)))}")
+              listing = Path(os.environ["RUNNER_TEMP"]) / "selected-tests" / "tests.txt"
+              listing.parent.mkdir(parents=True, exist_ok=True)
+              listing.write_text("".join(f"{test}\n" for test in selection["tests"]))
           with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
               output.write("\n".join(lines) + "\n")
           PY
+
+      # The shards of the selected subset read the list from here. Artifact transport is not a
+      # gate for classify (a failed upload must not red the required classify check): the shard
+      # that cannot download the list is the one that goes red, and it reruns on its own.
+      - name: Publish the selected test list
+        id: selected-list
+        if: ${{ steps.selector.outputs.decision == 'SELECTED' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: selected-tests
+          path: ${{ runner.temp }}/selected-tests/tests.txt
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Retry the selected test list upload
+        if: ${{ steps.selected-list.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: selected-tests
+          path: ${{ runner.temp }}/selected-tests/tests.txt
+          if-no-files-found: error
+          overwrite: true
 
       # The e2e jobs are the integration net for product behavior; a change that only edits
       # unit tests inside packages cannot change it. The rule is fixed in scripts/ci/e2e_scope.py
@@ -1218,7 +1250,13 @@ jobs:
     # exactly the continue-on-error expression below. It never contributes
     # coverage artifacts: the coverage gate lives on the full fan-out, which
     # every queue test branch still runs.
-    name: backend selected subset
+    #
+    # The subset runs on as many shards as its share of the suite needs at the size of
+    # one full shard (classify publishes `shards` and `groups`; the selector owns the
+    # arithmetic), so a subset that is the whole suite is as wide as the fan-out above
+    # and a small one is a single short job. Each shard splits the list with the same
+    # whole-file planner the full fan-out uses, restricted to the selected files.
+    name: backend selected subset (${{ matrix.group }}/${{ needs.classify.outputs.shards }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     # In shadow mode checkout, provisioning, and artifact faults stay
@@ -1226,15 +1264,22 @@ jobs:
     continue-on-error: ${{ needs.classify.outputs.mode != 'enforce' }}
     needs: [classify]
     if: ${{ github.event_name == 'pull_request' && needs.classify.outputs.backend == 'true' && needs.classify.outputs.decision == 'SELECTED' }}
-    outputs:
-      subset_status: ${{ steps.run-subset.outputs.subset_status }}
-      subset_duration_secs: ${{ steps.run-subset.outputs.subset_duration_secs }}
+    strategy:
+      fail-fast: false
+      # `groups` is empty on every run that selects nothing; the job `if` above skips those
+      # before the matrix is used, and the fallback only keeps the expression valid.
+      matrix:
+        group: ${{ fromJSON(needs.classify.outputs.groups || '[1]') }}
     env:
       MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       MEIVA_REDIS_URL: redis://127.0.0.1:1/0
-      TESTS: ${{ needs.classify.outputs.tests }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore the test durations
+        uses: ./.github/actions/restore-test-durations
+        with:
+          key: ${{ needs.classify.outputs.durations_key }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
@@ -1262,6 +1307,12 @@ jobs:
         working-directory: ui/web
         run: npm ci
 
+      - name: Download the selected test list
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: selected-tests
+          path: tmp/selected
+
       - name: Prepare selected-test Postgres scratch
         id: prepare-pg-scratch
         shell: bash
@@ -1273,28 +1324,32 @@ jobs:
 
       - name: Run selected pytest subset
         id: run-subset
-        # Record the native exit for the selector report and propagate it.
-        # Only the existing shadow job remains informational; enforce is strict.
+        # Native pytest failure makes this job red; JUnit validation also catches
+        # missing evidence. Only the existing shadow mode keeps it informational.
+        # The planner collects just the selected files and splits them into this
+        # run's shard count with the full fan-out's duration-balanced file planner;
+        # its pytest overrides, markers and options must equal the execute step's,
+        # which the plan digest enforces. Planning or collection errors cannot fall
+        # back to a different split.
         shell: bash
         run: |
-          mkdir -p tmp
-          started=$(date +%s)
-          if [ -n "$TESTS" ]; then
-            mapfile -t selected_tests < <(tr ' ' '\n' <<< "$TESTS")
-            set +e
-            set -o pipefail
-            uv run pytest "${selected_tests[@]}" --omit-static-tests -q -m "not flaky" -n 4 \
-              --junit-xml=tmp/junit-backend-selected.xml -o junit_family=xunit1 \
-              2>&1 | tee tmp/test-selection-subset.log
-            status=$?
-          else
-            status=5
-            echo "pytest was not invoked because no selected tests were supplied" \
-              | tee tmp/test-selection-subset.log
-          fi
-          finished=$(date +%s)
-          echo "subset_status=$status" >> "$GITHUB_OUTPUT"
-          echo "subset_duration_secs=$((finished - started))" >> "$GITHUB_OUTPUT"
+          set -e
+          set -o pipefail
+          mkdir -p tmp/file-shards
+          timeout --kill-after=15s 4m uv run python -u -m scripts.ci.pull_requests.plan_file_shards \
+            --count ${{ needs.classify.outputs.shards }} --files-from tmp/selected/tests.txt \
+            --plan tmp/file-shards/plan.json --stacks tmp/file-shards/plan-stacks.log \
+            2>&1 | tee tmp/file-shards/plan-collection.log
+          set +e
+          uv run pytest -c pyproject.toml --rootdir=. -q --omit-static-tests --ignore=tests/e2e -m "not flaky" -n 4 \
+            -p scripts.ci.file_shard_shadow --file-shard-execute \
+            --file-shard-check=tmp/file-shards/plan.json --file-shard-group=${{ matrix.group }} \
+            --file-shard-report=tmp/file-shards/collection.json \
+            --file-shard-runtime-report=tmp/file-shards/runtime.json \
+            --junit-xml=tmp/junit-backend-selected-${{ matrix.group }}.xml -o junit_family=xunit1 \
+            -o faulthandler_timeout=300 \
+            2>&1 | tee tmp/test-selection-subset-${{ matrix.group }}.log
+          status=$?
           exit "$status"
 
       - name: Validate native test results
@@ -1302,16 +1357,17 @@ jobs:
         uses: ./.github/actions/require-test-gate
         with:
           test-outcome: ${{ steps.run-subset.outcome }}
-          junit-patterns: '["tmp/junit-backend-selected.xml"]'
+          junit-patterns: '["tmp/junit-backend-selected-${{ matrix.group }}.xml"]'
 
       - name: Upload native test reports
         if: ${{ !cancelled() }}
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: test-results-backend-selected
+          name: test-results-backend-selected-${{ matrix.group }}
           path: |
-            tmp/junit-backend-selected.xml
+            tmp/junit-backend-selected-${{ matrix.group }}.xml
+            tmp/file-shards/
           if-no-files-found: warn
 
       - name: Report selected-test Postgres scratch capacity
@@ -1328,8 +1384,8 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: test-selection-subset-log
-          path: tmp/test-selection-subset.log
+          name: test-selection-subset-log-${{ matrix.group }}
+          path: tmp/test-selection-subset-${{ matrix.group }}.log
           if-no-files-found: ignore
 
   backend-serial:
@@ -1838,7 +1894,7 @@ jobs:
         env:
           FULL_BACKEND_RESULT: ${{ needs.backend.result }}
           FULL_PYTEST_RESULT: ${{ needs.backend-shard.result }}
-          SUBSET_STATUS: ${{ needs.backend-selected.outputs.subset_status }}
+          SUBSET_RESULT: ${{ needs.backend-selected.result }}
           DECISION: ${{ needs.classify.outputs.decision }}
           REASON: ${{ needs.classify.outputs.reason }}
           EST_SECONDS: ${{ needs.classify.outputs.est_seconds }}
@@ -1848,6 +1904,13 @@ jobs:
         run: |
           set +e
           mkdir -p tmp
+          # A sharded subset has no single exit status: its job result is the verdict.
+          case "$SUBSET_RESULT" in
+            success) SUBSET_STATUS=0 ;;
+            failure) SUBSET_STATUS=1 ;;
+            *) SUBSET_STATUS="" ;;
+          esac
+          export SUBSET_STATUS
           false_green=0
           if [ "$DECISION" != "SELECTED" ]; then
             echo "no comparison this run (decision=$DECISION)"
@@ -1890,7 +1953,7 @@ jobs:
               "full_backend_result": os.environ["FULL_BACKEND_RESULT"],
               "full_pytest_result": os.environ["FULL_PYTEST_RESULT"],
               "false_green": os.environ["FALSE_GREEN"] == "1",
-              "subset_log": "test-selection-subset-log",
+              "subset_log": "test-selection-subset-log-*",
           }
           Path("tmp/test-selection-shadow-report.json").write_text(
               json.dumps(report, sort_keys=True) + "\n"

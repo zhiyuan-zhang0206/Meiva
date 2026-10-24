@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import math
 import os
 import re
 import sys
@@ -28,6 +29,7 @@ from scripts.ci.test_impact import (  # noqa: E402 - standalone script
     code_names,
     module_files,
     plugin_modules,
+    pyproject_change_is_local,
     python_files,
     unknown_diagnostics,
 )
@@ -56,6 +58,11 @@ _GLOBAL_PREFIXES = (
     "deploy/",  # operational configuration that tests read by path, not by import
     "commands/",  # slash-command prompt data read at runtime and by tests by path
 )
+# meiva:note
+# Prose under a global prefix is no global input: only its recognized readers can observe it.
+# meiva:link docs/conventions/engineering/test-selection.md
+_PROSE_SUFFIXES = (".md",)
+
 # The root meizel manifests are declarations: `[roles]` names the top-level packages the
 # selector classifies by, `[uses]`/`[debt.*]` and the policy feed the meizel checks (the
 # structure job runs them over the whole tree on every CI run). No runtime behavior reads
@@ -140,6 +147,7 @@ class SelectionResult:
     forced_roots: tuple[str, ...] = ()
     map_source_count: int = 0
     diagnostics: tuple[str, ...] = ()
+    shards: int = 0
 
     @property
     def count(self) -> int:
@@ -160,6 +168,7 @@ class SelectionResult:
             "forced_roots": list(self.forced_roots),
             "map_source_count": self.map_source_count,
             "diagnostics": list(self.diagnostics),
+            "shards": self.shards,
         }
 
 
@@ -172,6 +181,11 @@ class Checkout:
     collectable: frozenset[str]
     test_dirs: frozenset[str]  # `tests` directories that contain a collectable test
     global_files: frozenset[str]  # root-conftest plugin modules and their package inits
+
+
+# meiva:note
+# The width of the full backend fan-out in ci.yml: its matrix, `--count` and job names.
+FULL_FANOUT_SHARDS = 8
 
 
 def selection_mode() -> str:
@@ -279,8 +293,10 @@ def _repository_class(path: str, checkout: Checkout) -> PathClass:
     """The class of an existing, non-test, non-conftest path."""
     if path in _MANIFEST_FILES:
         return PathClass.MANIFEST
-    if path in _GLOBAL_FILES or path in checkout.global_files or path.startswith(_GLOBAL_PREFIXES):
+    if path in _GLOBAL_FILES or path in checkout.global_files:
         return PathClass.GLOBAL
+    if path.startswith(_GLOBAL_PREFIXES):
+        return PathClass.TREE_SCAN_ONLY if path.endswith(_PROSE_SUFFIXES) else PathClass.GLOBAL
     if path in _TREE_SCAN_ONLY_FILES or path.startswith(_TREE_SCAN_ONLY_PREFIXES):
         return PathClass.TREE_SCAN_ONLY
     root = path.split("/", maxsplit=1)[0]
@@ -447,10 +463,9 @@ def _owner_tests(
 
 
 # meiva:note
-# Only an impact that cannot be computed returns FULL: a queue branch or non-PR event, a global
-# path, an unmapped path, or a deleted path without base facts. A large impact is still
-# SELECTED, because the Trunk merge queue runs the full suite before anything reaches main, so
-# no threshold on the subset's estimated time decides anything. The estimates are reporting.
+# Only an impact that cannot be computed returns FULL: a queue branch or non-PR event, a global,
+# unmapped or deleted-without-base path. A large impact is still SELECTED, because the merge
+# queue runs the full suite before anything reaches main; the estimates only report and size.
 # meiva:link docs/conventions/engineering/test-selection.md
 def select_tests(
     changed_files: list[str],
@@ -474,12 +489,13 @@ def select_tests(
     ) and not documentation_runtime_tests(list(changed), repo_root=repo_root, base_ref=base_ref):
         return _result("SKIP", "docs-only", full_estimate=full_estimate)
 
-    classes = {path: classify_path(path, checkout) for path in changed}
+    local = _local_config_paths(changed, checkout, base_ref)
+    classes = _classify_changed(changed, checkout, local)
     forced = _forced_full(classes, full_estimate)
     if forced is not None:
         return forced
 
-    candidates = _runtime_candidates(classes, checkout, base_ref, full_estimate)
+    candidates = _runtime_candidates(classes, checkout, base_ref, full_estimate, local)
     if isinstance(candidates, SelectionResult):
         return candidates
     candidate_tests, source_count, diagnostics = candidates
@@ -495,7 +511,30 @@ def select_tests(
         full_estimate=full_estimate,
         map_source_count=source_count,
         diagnostics=diagnostics,
+        shards=subset_shard_count(len(tests), estimate, full_estimate, len(checkout.collectable)),
     )
+
+
+def _classify_changed(
+    paths: tuple[str, ...], checkout: Checkout, local: frozenset[str]
+) -> dict[str, PathClass]:
+    classes: dict[str, PathClass] = {}
+    for path in paths:
+        kind = classify_path(path, checkout)
+        classes[path] = (
+            PathClass.TREE_SCAN_ONLY if path in local and kind is PathClass.GLOBAL else kind
+        )
+    return classes
+
+
+# meiva:note
+# The changed global paths whose change is confined to configuration no test run loads.
+def _local_config_paths(
+    changed: tuple[str, ...], checkout: Checkout, base_ref: str | None
+) -> frozenset[str]:
+    if "pyproject.toml" in changed and pyproject_change_is_local(checkout.repo_root, base_ref):
+        return frozenset({"pyproject.toml"})
+    return frozenset()
 
 
 # meiva:note
@@ -508,6 +547,7 @@ def _runtime_candidates(
     checkout: Checkout,
     base_ref: str | None,
     full_estimate: float,
+    local: frozenset[str],
 ) -> tuple[set[str], int, tuple[str, ...]] | SelectionResult:
     impact = build_impact(checkout.repo_root, checkout.collectable)
     reverse_map = impact.tests_by_input
@@ -525,7 +565,7 @@ def _runtime_candidates(
                 unknown_diagnostics(_blocking(old_impact, data_changed=data_changed), tree="base")
             )
             tainted.update(_unbounded_tests(old_impact, data_changed=data_changed))
-            old_classes = {path: classify_path(path, base) for path in classes}
+            old_classes = _classify_changed(tuple(classes), base, local)
             old_forced = _forced_full(old_classes, full_estimate)
             if old_forced is not None:
                 return old_forced
@@ -719,6 +759,14 @@ def estimate_seconds(
     )
 
 
+# meiva:note
+# The shards a SELECTED subset runs on: its share of the suite in units of one full shard, by
+# estimated time (by file count without timings), rounded up, at most the fan-out and the files.
+def subset_shard_count(tests: int, estimate: float, full_estimate: float, collectable: int) -> int:
+    share = estimate / full_estimate if full_estimate > 0 else tests / max(collectable, 1)
+    return max(1, min(FULL_FANOUT_SHARDS, tests, math.ceil(round(share * FULL_FANOUT_SHARDS, 6))))
+
+
 def _result(
     decision: str,
     reason: str,
@@ -730,6 +778,7 @@ def _result(
     forced_roots: tuple[str, ...] = (),
     map_source_count: int = 0,
     diagnostics: tuple[str, ...] = (),
+    shards: int = 0,
 ) -> SelectionResult:
     return SelectionResult(
         decision=decision,
@@ -741,6 +790,7 @@ def _result(
         forced_roots=forced_roots,
         map_source_count=map_source_count,
         diagnostics=diagnostics,
+        shards=shards,
     )
 
 

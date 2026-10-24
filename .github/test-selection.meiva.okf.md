@@ -28,8 +28,10 @@ run informational beside it. The workflow-level `TEST_SELECTION_MODE` value in
    empty, which degrades to the full fan-out, and the step's outcome (the
    `selector` output) fails the backend aggregator rather than the classify check.
    It lives in classify so the shards wait on one job, not two.
-2. `backend-selected` runs only a SELECTED list and is informational in shadow.
-   In enforce it is the gate: the native pytest result and shared JUnit
+2. `backend-selected` runs only a SELECTED list, as a matrix of 1 to 8 shards sized from the
+   subset's estimated time (classify publishes `shards`, `groups` and the list as the
+   `selected-tests` artifact; each shard splits the list with the full fan-out's file
+   planner). It is informational in shadow. In enforce it is the gate: the native pytest result and shared JUnit
    validator reject failed, missing, malformed or unexecuted reports, just
    like the shards. No external quarantine service determines the verdict.
    `backend-shard` is skipped exactly when enforce + SELECTED; it runs the

@@ -132,8 +132,14 @@ def test_frame_churn_finishes_with_complete_tracebacks(
     assert "churn" in trace
 
 
-@pytest.mark.parametrize(("workflow", "count"), [("ci.yml", 8), ("file-shard-proof.yml", 16)])
-def test_workflow_runs_the_planner_module(workflow: str, count: int) -> None:
+@pytest.mark.parametrize(
+    ("workflow", "counts"),
+    [
+        ("ci.yml", ["8", "${{ needs.classify.outputs.shards }}"]),
+        ("file-shard-proof.yml", ["16"]),
+    ],
+)
+def test_workflow_runs_the_planner_module(workflow: str, counts: list[str]) -> None:
     jobs = yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text())["jobs"]
     scripts = [
         step["run"]
@@ -141,9 +147,10 @@ def test_workflow_runs_the_planner_module(workflow: str, count: int) -> None:
         for step in job.get("steps", [])
         if "plan_file_shards" in step.get("run", "")
     ]
-    assert len(scripts) == 1
-    assert "-m scripts.ci.pull_requests.plan_file_shards" in scripts[0]
-    assert f"--count {count} " in scripts[0]
+    assert len(scripts) == len(counts)
+    for script, count in zip(scripts, counts, strict=True):
+        assert "-m scripts.ci.pull_requests.plan_file_shards" in script
+        assert f"--count {count} " in script
 
 
 @pytest.mark.parametrize("exit_code", [0, 4])

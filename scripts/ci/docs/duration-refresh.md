@@ -63,9 +63,10 @@ The selector never declines a subset for its size or estimated time
 unknown or the run is a queue branch. `classify change` prints one `test-selection:` line
 with the decision, the reason, the count, the estimated seconds of the subset and of the
 whole suite and a hash of the list, because the values otherwise live only in step outputs.
-A subset can be the whole suite, so the `backend selected subset` job's limits (four workers,
-its `timeout-minutes`) have to cover that; a 12,125-test selection (48% of 25,291) reached 89%
-of a twenty-minute job in 19 minutes (`#5500`).
+A subset can be the whole suite, so it is sharded by its estimated time: `ceil(est / full * 8)`
+shards, at most the 8 of the full fan-out, each with the full shards' 20-minute limit (a
+12,125-test selection, 48% of 25,291, once reached 89% of a single twenty-minute job in 19
+minutes, `#5500`). The shards need the same timing cache as the full fan-out for the split.
 
 ## Tool input boundary
 

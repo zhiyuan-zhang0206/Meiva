@@ -241,6 +241,41 @@ def test_a_large_subset_is_still_selected_because_the_queue_is_the_backstop(
     assert (result.est_seconds, result.full_est_seconds) == (estimate, full_estimate)
 
 
+@pytest.mark.parametrize(
+    ("tests", "estimate", "full_estimate", "collectable", "shards"),
+    [
+        pytest.param(40, 10.0, 1000.0, 100, 1, id="small-subset-is-one-shard"),
+        pytest.param(40, 125.0, 1000.0, 100, 1, id="exactly-one-full-shard-is-one-shard"),
+        pytest.param(40, 126.0, 1000.0, 100, 2, id="just-over-one-full-shard-is-two"),
+        pytest.param(40, 500.0, 1000.0, 100, 4, id="half-the-suite-is-half-the-fanout"),
+        pytest.param(100, 1000.0, 1000.0, 100, 8, id="the-whole-suite-is-the-whole-fanout"),
+        pytest.param(40, 1500.0, 1000.0, 100, 8, id="never-wider-than-the-fanout"),
+        pytest.param(50, 0.0, 0.0, 100, 4, id="no-timings-count-files"),
+        pytest.param(3, 900.0, 1000.0, 100, 3, id="never-more-shards-than-files"),
+        pytest.param(0, 0.0, 0.0, 100, 1, id="nothing-selected-is-one-shard"),
+    ],
+)
+def test_a_subset_runs_on_its_share_of_the_full_fanout(
+    tests: int, estimate: float, full_estimate: float, collectable: int, shards: int
+) -> None:
+    assert test_selector.FULL_FANOUT_SHARDS == 8
+    assert test_selector.subset_shard_count(tests, estimate, full_estimate, collectable) == shards
+
+
+def test_only_a_selected_subset_has_shards(tmp_path: Path) -> None:
+    repo_root = _selector_repo(tmp_path)
+
+    selected = test_selector.select_tests(["cli/commands.py"], repo_root=repo_root)
+    full = test_selector.select_tests(["pyproject.toml"], repo_root=repo_root)
+    skipped = test_selector.select_tests(["docs/conventions/guide.md"], repo_root=repo_root)
+
+    assert selected.decision == "SELECTED"
+    assert 1 <= selected.shards <= selected.count
+    assert selected.as_json()["shards"] == selected.shards
+    assert (full.decision, full.shards) == ("FULL", 0)
+    assert (skipped.decision, skipped.shards) == ("SKIP", 0)
+
+
 def test_uses_average_duration_for_a_new_test_without_a_timing_entry(tmp_path: Path) -> None:
     """A missing timing must cost the known average instead of being free."""
     repo_root = _selector_repo(tmp_path)
