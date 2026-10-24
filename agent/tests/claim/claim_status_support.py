@@ -11,7 +11,6 @@ from langchain_core.messages import AnyMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph.node_log.tests.live_events import LiveEvents
 from agent.state import ContextReset
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentity
