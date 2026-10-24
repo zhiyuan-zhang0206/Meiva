@@ -17,10 +17,6 @@ pytest_plugins = [
     "tests.fixtures.guards",
 ]
 
-def pytest_collection_modifyitems(items):
-    # The door is loaded by collection, as the CLI conftest does; the guard refuses a loaded door.
-    import services.desktop.permissions_helper
-
 @pytest.fixture
 def failed_database(db_url):
     import psycopg
