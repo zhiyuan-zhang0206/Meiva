@@ -3,3 +3,6 @@ exports = ["ownership_support.py"]
 [uses]
 "conftest.py" = ["ownership_support.py"]
 "test_hosted_ownership.py" = ["ownership_support.py"]
+
+[debt.test-subclass-override]
+"ownership_support.py#subclass base.events.live.bus.EventBus.publish_best_effort" = 1

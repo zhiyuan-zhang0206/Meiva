@@ -14,5 +14,3 @@ exports = ["stop_support.py"]
 "test_stop_initialization.py" = ["stop_support.py"]
 "test_stop_root_tree.py" = ["stop_support.py"]
 "test_stop_shell_sessions.py" = ["_child.py", "stop_support.py"]
-
-[debt.first-party-patch]

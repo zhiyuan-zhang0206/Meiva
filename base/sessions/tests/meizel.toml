@@ -32,5 +32,14 @@ exports = ["poll_until.py", "refuse_helper.py", "scripted_helper.py"]
 "test_posixproc_expected_signal.py#python -c" = 2
 "test_posixproc_liveness.py#python -c" = 1
 
+[debt.test-subclass-override]
+"scripted_helper.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.check_accessibility" = 1
+"scripted_helper.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.check_screen_capture" = 1
+"scripted_helper.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.ping" = 1
+"scripted_helper.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.root_status" = 1
+"scripted_helper.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.seed_root" = 1
+"scripted_helper.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.shutdown_helper" = 1
+"scripted_helper.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.stop_root" = 1
+
 [debt.unresolved-patch]
 "test_posixproc.py#monkeypatch.setattr psosx.INIT_BOOT_TIME" = 2

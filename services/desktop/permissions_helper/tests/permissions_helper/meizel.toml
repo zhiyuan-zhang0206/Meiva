@@ -15,3 +15,6 @@ exports = ["native_io_guard.py"]
 "test_source_content_change_forces_rebuild.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_source_content_change_forces_rebuild.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.run_bounded" = 1
 "test_source_content_change_forces_rebuild.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.run_bounded" = 1
+
+[debt.test-subclass-override]
+"test_root_keeper_method_requests_and_results.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.ping" = 1

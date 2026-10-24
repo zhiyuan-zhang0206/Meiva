@@ -52,6 +52,9 @@ exports = ["capture"]
 "test_tracing_lifecycle.py#monkeypatch.setattr base.telemetry.tracing.arm_tracing" = 2
 "test_tracing_lifecycle.py#monkeypatch.setattr base.telemetry.tracing.state" = 1
 
+[debt.patch-raising-false]
+"test_tracing.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.production_identity" = 1
+
 [debt.restricted-python]
 "test_telemetry_otlp_exit_delivery.py#python -c" = 1
 

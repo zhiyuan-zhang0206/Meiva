@@ -3,3 +3,6 @@
 
 [external]
 "test_watcher_wake_delivery.py" = "executes skill reference scripts up to a marker assignment"
+
+[debt.patch-raising-false]
+"test_watcher_wake_delivery.py#monkeypatch.setattr meiva.self" = 1
