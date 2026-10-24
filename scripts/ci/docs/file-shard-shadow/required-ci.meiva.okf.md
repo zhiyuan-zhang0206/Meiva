@@ -51,7 +51,9 @@ plugin-autoload, locale/timezone and runner-image controls must match as well.
 Application environment isolation remains owned by the same tree's pytest
 bootstrap: worker-specific homes, leased ports and event channels are resources,
 not shared plan inputs. Untracked diagnostics and generated test artifacts do
-not count as tracked source drift.
+not count as tracked source drift. Admission errors identify each differing
+identity field, declared environment values, and missing or unexpected plugins
+or collection roots; the equality requirement remains unchanged.
 
 Every real worker still collects its group's files and compares every node and
 fixture closure before executing bodies. Invalid/missing identity, tracked drift,

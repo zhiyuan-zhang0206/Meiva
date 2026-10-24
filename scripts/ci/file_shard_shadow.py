@@ -281,6 +281,25 @@ def _configuration_digest(config: pytest.Config) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _identity_difference(expected: CollectionIdentity, actual: CollectionIdentity) -> str:
+    observed = actual.model_dump()
+    differences: dict[str, object] = {}
+    for name, before in expected.model_dump().items():
+        after = observed[name]
+        if before == after:
+            continue
+        if isinstance(before, list) and isinstance(after, list):
+            planned = set(cast("list[str]", before))
+            collected = set(cast("list[str]", after))
+            differences[name] = {
+                "missing": sorted(planned - collected),
+                "unexpected": sorted(collected - planned),
+            }
+        else:
+            differences[name] = {"expected": before, "actual": after}
+    return json.dumps(differences, sort_keys=True)
+
+
 def _validate_plan_inputs(config: pytest.Config, plan: Plan) -> None:
     if (plan.pytest_version, plan.pytest_split_version) != (
         pytest.__version__,
@@ -300,7 +319,10 @@ def _validate_plan_inputs(config: pytest.Config, plan: Plan) -> None:
     if plan.identity is not None:
         actual = _read_collection_identity(config)
         if plan.identity != actual:
-            raise pytest.UsageError("Shared plan requires identical source, runtime and population")
+            raise pytest.UsageError(
+                "Shared plan requires identical source, runtime and population; identity differences: "
+                + _identity_difference(plan.identity, actual)
+            )
         if config.getoption("file_shard_count") != len(plan.groups):
             raise pytest.UsageError("Shared plan requires the same group count")
 

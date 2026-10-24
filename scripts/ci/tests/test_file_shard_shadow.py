@@ -532,6 +532,8 @@ def test_shared_identity_drift_is_rejected_before_collection(tmp_path: Path, fie
     result = shared_check(tmp_path, manifest)
     assert result.returncode == 4
     assert "identical source, runtime and population" in result.stderr
+    assert field in result.stderr
+    assert "identity differences:" in result.stderr
     assert not (tmp_path / "check.json").exists()
 
 
@@ -567,10 +569,11 @@ def test_failed_shared_planning_removes_a_previous_successful_plan(tmp_path: Pat
 
 
 # meiva:note
-# The child interpreter receives an explicit hash seed; the parent environment stays unchanged.
-def test_actual_collection_environment_drift_is_rejected(tmp_path: Path) -> None:
+# The child receives a collection control explicitly; the parent environment stays unchanged.
+@pytest.mark.parametrize("control", ["PYTHONHASHSEED", "ImageVersion"])
+def test_actual_collection_environment_drift_is_rejected(tmp_path: Path, control: str) -> None:
     manifest, _ = shared_plan(tmp_path)
-    seed = "17" if os.environ.get("PYTHONHASHSEED") != "17" else "23"
+    value = "17" if os.environ.get(control) != "17" else "23"
     result = subprocess.run(  # noqa: S603
         [
             sys.executable,
@@ -594,7 +597,7 @@ def test_actual_collection_environment_drift_is_rejected(tmp_path: Path) -> None
             str(tmp_path / "check.json"),
         ],
         cwd=tmp_path,
-        env={**os.environ, "PYTHONPATH": str(ROOT), "PYTHONHASHSEED": seed},
+        env={**os.environ, "PYTHONPATH": str(ROOT), control: value},
         text=True,
         capture_output=True,
         check=False,
@@ -602,6 +605,8 @@ def test_actual_collection_environment_drift_is_rejected(tmp_path: Path) -> None
     )
     assert result.returncode == 4
     assert "identical source, runtime and population" in result.stderr
+    assert control in result.stderr
+    assert f'"{control}": "{value}"' in result.stderr
 
 
 @pytest.mark.parametrize("field", ["nodeid", "fixtures"])
