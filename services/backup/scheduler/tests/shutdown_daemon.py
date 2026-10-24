@@ -11,11 +11,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import socket
 import sys
 from pathlib import Path
 
 from base.config import ConfigBoot, ensure_eager
+from base.host.env import port_lease
 from base.native_process.child_env import inherited_process_env
 from base.native_process.loaded_commit import LoadedCommit
 from services.backup.layout import BackupTree
@@ -26,10 +26,12 @@ from services.backup.scheduler.worker import WorkerLaunch
 _WORKER = "services.backup.scheduler.tests.shutdown_worker"
 
 
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to
+# every other live holder on the host, so two workers — or two runs of one shard on
+# one machine — cannot be given it.
 def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+    return port_lease.lease_ports(1)[0]
 
 
 def main(root: Path, mode: str, postgres_base: Path) -> None:

@@ -11,7 +11,6 @@ import base64
 import json
 import os
 import shutil
-import socket
 import subprocess
 import time
 import urllib.error
@@ -22,6 +21,8 @@ from typing import Any
 
 import pytest
 import yaml
+
+from base.host.env import port_lease
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NATIVE_DIR = REPO_ROOT / "deploy/lgtm/native"
@@ -102,10 +103,12 @@ def _shipped_alert_rule_uids() -> set[str]:
     return {rule["uid"] for group in document["groups"] for rule in group["rules"]}
 
 
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to
+# every other live holder on the host, so two workers — or two runs of one shard on
+# one machine — cannot be given it.
 def _free_port() -> int:
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        return int(listener.getsockname()[1])
+    return port_lease.lease_ports(1)[0]
 
 
 def _request(

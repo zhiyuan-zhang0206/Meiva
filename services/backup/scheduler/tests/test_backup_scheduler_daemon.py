@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import json
 import os
-import socket
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -15,6 +14,7 @@ import pytest
 
 from base.daemon import health, health_schema
 from base.daemon.tests.health_support import unknown_image
+from base.host.env import port_lease
 from base.native_process.os_platform import file_lock
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
@@ -31,10 +31,12 @@ from services.backup.scheduler.worker import WorkerLaunch, run_job
 _SUNDAY_WINDOW = datetime(2026, 8, 30, 3, tzinfo=UTC)
 
 
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to
+# every other live holder on the host, so two workers — or two runs of one shard on
+# one machine — cannot be given it.
 def _find_free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+    return port_lease.lease_ports(1)[0]
 
 
 def _settings(*, hour: int = 0) -> SchedulerSettings:

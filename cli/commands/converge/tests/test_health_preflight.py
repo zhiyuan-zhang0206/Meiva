@@ -16,6 +16,7 @@ import pytest
 from base.agents.context.clients import DatabaseFactory
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineRoles
+from base.host.env import port_lease
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
@@ -57,15 +58,12 @@ def _preflight_ctx(
     )
 
 
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to
+# every other live holder on the host, so two workers — or two runs of one shard on
+# one machine — cannot be given it.
 def _free_port() -> int:
-    """An unbound port (bind port 0, note it, release)."""
-    import socket
-
-    sock = socket.socket()
-    sock.bind(("127.0.0.1", 0))
-    port = sock.getsockname()[1]
-    sock.close()
-    return port
+    return port_lease.lease_ports(1)[0]
 
 
 @pytest.fixture

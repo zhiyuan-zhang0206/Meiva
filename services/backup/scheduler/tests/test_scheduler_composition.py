@@ -25,6 +25,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.env import port_lease
 from base.native_process.loaded_commit import LoadedCommit
 from services.backup.layout import BackupTree
 from services.backup.scheduler import daemon, worker
@@ -91,10 +92,12 @@ def test_a_scratch_handle_reads_the_owners_ssl_policy_when_it_is_built(
         strict.connect()
 
 
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to
+# every other live holder on the host, so two workers — or two runs of one shard on
+# one machine — cannot be given it.
 def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+    return port_lease.lease_ports(1)[0]
 
 
 async def _healthz(port: int) -> tuple[int, dict[str, object]]:

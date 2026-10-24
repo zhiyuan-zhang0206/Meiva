@@ -33,12 +33,15 @@ import redis
 from base.cluster import inbound_channel
 from base.config import settings
 from base.events.live.redis_listener import RedisInboundListener
+from base.host.env import port_lease
 
 
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to
+# every other live holder on the host, so two workers — or two runs of one shard on
+# one machine — cannot be given it.
 def _free_port() -> int:
-    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    return port_lease.lease_ports(1)[0]
 
 
 def _start_redis(port: int, datadir: Path) -> subprocess.Popen[bytes]:

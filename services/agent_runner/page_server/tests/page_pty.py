@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import os
-import socket
 import subprocess
 import sys
 from collections.abc import Generator
@@ -24,6 +23,7 @@ from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 from base.events.live.bus import EventBus
+from base.host.env import port_lease
 from base.sessions.backend import PtySessionBackend
 from base.sessions.pty import client
 from base.sessions.pty.tests.pty_service import service_socket
@@ -57,10 +57,12 @@ _REPO = Path(__file__).resolve().parents[4]
 
 # meiva:note
 # A port nothing listens on right now.
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to
+# every other live holder on the host, so two workers — or two runs of one shard on
+# one machine — cannot be given it.
 def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind((HOST, 0))
-        return int(sock.getsockname()[1])
+    return port_lease.lease_ports(1)[0]
 
 
 # meiva:note

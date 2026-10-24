@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import socket
 import subprocess
 from collections.abc import Iterator, Mapping
 from pathlib import Path
@@ -18,6 +17,7 @@ from psycopg.conninfo import make_conninfo
 
 from base.cluster.dataplane.pg_admin import pg_admin_url
 from base.cluster.dataplane.pg_tools import pg_tool
+from base.host.env import port_lease
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.lifecycle.start.migrations import cmd_migrations_apply
@@ -27,10 +27,12 @@ from cli.database.runtime import CommandRuntime
 __all__ = ["Plane", "free_port", "owned_pg", "plane", "write_record"]
 
 
+# meiva:note
+# One port this session holds, from the host-wide lease: the number is refused to
+# every other live holder on the host, so two workers — or two runs of one shard on
+# one machine — cannot be given it.
 def free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    return port_lease.lease_ports(1)[0]
 
 
 # meiva:note
