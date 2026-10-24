@@ -16,7 +16,9 @@ from base.packages.plugin_config_images import (
     image_digest,
     write_config_image,
 )
+from base.packages.plugins.config_registration import disk_image_path
 from base.packages.plugins.plugin_errors import InvalidConfigOverlay
+from base.paths import plugins_dir
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 
 
@@ -64,17 +66,31 @@ def test_unknown_patch_field_is_a_request_rejection() -> None:
         patch_owner({"unknown_plugin_config_field"})
 
 
-def test_duplicate_declaration_is_not_a_request_rejection(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from base.packages import plugin_config_admin as plugin_config
+_SECOND_FACE = """
+from pydantic import BaseModel, Field
 
-    first = PluginConfigOwner("first", FleetConfig, tmp_path / "first.json")
-    second = PluginConfigOwner("second", FleetConfig, tmp_path / "second.json")
-    monkeypatch.setattr(plugin_config, "config_owners", lambda: {"first": first, "second": second})
-    with pytest.raises(ValueError, match="more than one declaration owner"):
+from base.packages.plugins.extensions import PluginContributions
+
+
+class SecondFleetConfig(BaseModel):
+    task_escalate_n: int = Field(default=3, json_schema_extra={"scope": "cluster-pinned"})
+
+
+def contribute() -> PluginContributions:
+    return PluginContributions(config=SecondFleetConfig)
+"""
+
+
+def test_duplicate_declaration_is_not_a_request_rejection(unit_home: Path) -> None:
+    second = plugins_dir() / "second_fleet"
+    second.mkdir(parents=True)
+    (second / "plugin.py").write_text("")
+    (second / "default_config.py").write_text(_SECOND_FACE)
+    with pytest.raises(ValueError, match="more than one declaration owner") as refused:
         patch_owner({"task_escalate_n"})
-    assert not first.path.exists() and not second.path.exists()
+    assert not isinstance(refused.value, InvalidConfigOverlay)
+    assert not disk_image_path("meiva_fleet").exists()
+    assert not disk_image_path("second_fleet").exists()
 
 
 def test_image_patch_validates_whole_candidate_and_cas(tmp_path: Path) -> None:

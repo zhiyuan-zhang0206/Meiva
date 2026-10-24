@@ -1,13 +1,12 @@
 from concurrent.futures import ThreadPoolExecutor
 from time import monotonic, sleep
-from typing import Any
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from meiva_builtins.plugins.meiva_fleet.task_maintenance import escalation
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.escalation import accept_escalations
+from meiva_builtins.plugins.meiva_fleet.task_maintenance.tests.failing_writes import inserts_failing
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.tests.test_task_maintenance_escalation import (
     escalated_at,
     inbound_messages,
@@ -123,26 +122,15 @@ def test_human_notice_shares_creator_lock(
 
 
 def test_acceptance_failure_rolls_back_entire_batch(
-    pool: ConnectionPool,
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    pool: ConnectionPool, db_conn: psycopg.Connection
 ) -> None:
     first, _, one = stalled_subtask(db_conn)
     second, _, two = stalled_subtask(db_conn)
-    real = escalation.insert_inbound_message_in_transaction
-    attempts = 0
-
-    def fail_second(*args: Any, **kwargs: Any) -> Any:
-        nonlocal attempts
-        attempts += 1
-        if attempts == 2:
-            raise psycopg.OperationalError("second digest rejected")
-        return real(*args, **kwargs)
-
-    with monkeypatch.context() as injected:
-        injected.setattr(escalation, "insert_inbound_message_in_transaction", fail_second)
-        with pytest.raises(psycopg.OperationalError):
-            accept_escalations(pool, 3)
+    with (
+        inserts_failing(db_conn, "inbound_messages", for_agent=second),
+        pytest.raises(psycopg.errors.RaiseException, match="inbound_messages inserts refused"),
+    ):
+        accept_escalations(pool, 3)
     assert inbound_messages(db_conn, first) == []
     assert inbound_messages(db_conn, second) == []
     assert escalated_at(db_conn, one) is None and escalated_at(db_conn, two) is None

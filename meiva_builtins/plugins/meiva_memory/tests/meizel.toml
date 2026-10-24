@@ -1,8 +1,5 @@
 [uses]
+"test_memory_write_wraps.py" = ["child_face_boundary.py"]
 "test_meiva_memory_pool_ops_home.py" = ["child_pool_ops.py"]
 "test_process_boot.py" = ["child_eval_isolation.py"]
 "test_template_validate.py" = ["child_note_cap.py"]
-
-[debt.restricted-python]
-"test_meiva_memory_steward_guard.py#python subprocess that runs something other than a literal repository file" = 1
-"test_memory_write_wraps.py#python -c" = 1

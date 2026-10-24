@@ -2,31 +2,36 @@
 
 from __future__ import annotations
 
+import inspect
+import json
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 import meiva
+from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
-from base.lm import factory
-from base.packages.plugin_config_images import DiskPluginConfigImages
+from base.lm.catalog import ModelCatalog
+from base.lm.effort import ReasoningEffort
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import PluginContributions, SdkNamespace, SdkWrap
-from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install, process_context
-from meiva.sdk_surface.tests.installation_holder import inert_sampling
-from meiva_builtins.plugins.meiva_code.tests.surface_support import code_registry
+from meiva.tests.fixtures.scripted_chat_model import Script
+from meiva_builtins.plugins.meiva_code.tests.surface_support import install_code_surface
 from meiva_builtins.plugins.meiva_code.tests.test_meiva_code_plugin import (
     get_injected_context_notes,
     make_git_repo,
     make_state_with_cwd,
-    stub_understand_text_path,
 )
 from meiva_builtins.plugins.meiva_code.tests.test_meiva_code_plugin import (
     load_meiva_code_plugin as load_meiva_code_plugin,
+)
+from meiva_builtins.plugins.meiva_code.tests.test_meiva_code_plugin import (
+    understand_script as understand_script,
 )
 
 
@@ -102,7 +107,9 @@ def test_uninstall_restores_original(tmp_path: Path):
     assert not hasattr(meiva, "cwd")
 
 
-def test_duplicate_namespace_refuses_the_second_plugin_whole():
+def test_duplicate_namespace_refuses_the_second_plugin_whole(
+    model_catalog: ModelCatalog, config_authority: ConfigAuthority
+):
     """A second plugin declaring `cwd` is refused and rolled back whole: its earlier namespace and
     its wrap are not installed, and meiva_code's own surface is untouched."""
     from meiva_builtins.plugins.meiva_code import _code_namespace
@@ -118,18 +125,16 @@ def test_duplicate_namespace_refuses_the_second_plugin_whole():
         ),
         sdk_wraps=(SdkWrap("files.read", _other_wrap),),
     )
-    admitted = install.install(
-        code_registry(("other_plugin", other)),
-        config_images=DiskPluginConfigImages(resolve_meiva_home()),
-        sampling=inert_sampling(),
-    )
+    admitted = install_code_surface(model_catalog, config_authority, ("other_plugin", other))
 
     assert [name for name, _ in admitted.plugins] == ["meiva_code"]
     assert not hasattr(meiva, "other_ns")
     assert [p for p, _ in meiva.extend.stack("files.read")] == ["meiva_code"]
 
 
-def test_second_wrap_stacks_instead_of_asserting():
+def test_second_wrap_stacks_instead_of_asserting(
+    model_catalog: ModelCatalog, config_authority: ConfigAuthority
+):
     """A second wrapper on meiva.files.read stacks on top of meiva_code's, in
     deterministic registration order — the retired exclusivity assert used to
     reject this. `meiva.extend.stack` shows both layers; the dedup that used to
@@ -143,15 +148,10 @@ def test_second_wrap_stacks_instead_of_asserting():
         return inner(path, *args, **kwargs)
 
     install.uninstall()
-    install.install(
-        code_registry(
-            (
-                "other_plugin",
-                PluginContributions(sdk_wraps=(SdkWrap("files.read", _external_wrap),)),
-            )
-        ),
-        config_images=DiskPluginConfigImages(resolve_meiva_home()),
-        sampling=inert_sampling(),
+    install_code_surface(
+        model_catalog,
+        config_authority,
+        ("other_plugin", PluginContributions(sdk_wraps=(SdkWrap("files.read", _external_wrap),))),
     )
 
     after = meiva.extend.stack("files.read")
@@ -183,6 +183,10 @@ def test_plugin_wraps_all_files_ops_for_cwd():
         assert [p for p, _ in stack] == ["meiva_code"], target
 
 
+def echo_run(cmd: str, *, cwd: str | None, timeout: float) -> str:
+    return json.dumps([cmd, cwd, timeout])
+
+
 def test_shell_run_wrap_passes_logical_cwd_without_changing_process_cwd(tmp_path: Path):
     """The shell wrapper passes logical state as an explicit subprocess cwd;
     it never relies on or mutates the Python process cwd."""
@@ -191,49 +195,65 @@ def test_shell_run_wrap_passes_logical_cwd_without_changing_process_cwd(tmp_path
     logical_cwd = tmp_path / "logical"
     logical_cwd.mkdir()
     process_cwd = Path.cwd()
-    captured: dict[str, object] = {}
-
-    def fake_inner(cmd: str, *, cwd: str | None, timeout: float) -> str:
-        captured.update(cmd=cmd, cwd=cwd, timeout=timeout)
-        return "ok"
 
     process_context.set_state(make_state_with_cwd(str(logical_cwd)))
     process_context.set_state_update({})
     try:
-        assert wrapped_shell_run(fake_inner, "pwd", timeout=7.0) == "ok"
-        assert captured == {"cmd": "pwd", "cwd": str(logical_cwd), "timeout": 7.0}
+        assert json.loads(wrapped_shell_run(echo_run, "pwd", timeout=7.0)) == [
+            "pwd",
+            str(logical_cwd),
+            7.0,
+        ]
         assert Path.cwd() == process_cwd
     finally:
         process_context.unbind_exec_turn()
 
 
+# meiva:note
+# The wrapped `meiva.shell.run` starts the command in the tracked directory.
+def test_shell_run_wrap_runs_in_the_logical_cwd(tmp_path: Path):
+    logical_cwd = tmp_path / "logical"
+    logical_cwd.mkdir()
+
+    process_context.set_state(make_state_with_cwd(str(logical_cwd)))
+    process_context.set_state_update({})
+    try:
+        assert Path(str(meiva.shell.run("pwd", timeout=30.0)).strip()).resolve() == (
+            logical_cwd.resolve()
+        )
+        other = tmp_path / "explicit"
+        other.mkdir()
+        assert Path(
+            str(meiva.shell.run("pwd", cwd=str(other), timeout=30.0)).strip()
+        ).resolve() == (other.resolve())
+    finally:
+        process_context.unbind_exec_turn()
+
+
+def echo_serve(
+    dir: str,
+    name: str,
+    port: int | None = None,
+    title: str | None = None,
+    *,
+    ttl: float | None = None,
+) -> tuple[str, str, int | None, str | None, float | None]:
+    return dir, name, port, title, ttl
+
+
 def test_serve_wrap_resolves_relative_dir_against_cwd(tmp_path: Path):
     from meiva_builtins.plugins.meiva_code.plugin import wrapped_serve
-
-    captured: dict[str, object] = {}
-
-    def fake_inner(
-        dir: str,
-        name: str,
-        port: int | None = None,
-        title: str | None = None,
-        *,
-        ttl: float | None = None,
-    ) -> str:
-        captured.update(dir=dir, name=name, port=port, title=title, ttl=ttl)
-        return "served"
 
     process_context.set_state(make_state_with_cwd(str(tmp_path)))
     process_context.set_state_update({})
     try:
-        assert wrapped_serve(fake_inner, "site", "preview", port=8123, title="Preview") == "served"
-        assert captured == {
-            "dir": str((tmp_path / "site").resolve()),
-            "name": "preview",
-            "port": 8123,
-            "title": "Preview",
-            "ttl": None,
-        }
+        assert wrapped_serve(echo_serve, "site", "preview", port=8123, title="Preview") == (
+            str((tmp_path / "site").resolve()),
+            "preview",
+            8123,
+            "Preview",
+            None,
+        )
     finally:
         process_context.unbind_exec_turn()
 
@@ -241,27 +261,14 @@ def test_serve_wrap_resolves_relative_dir_against_cwd(tmp_path: Path):
 def test_serve_wrap_passes_absolute_dir_through(tmp_path: Path):
     from meiva_builtins.plugins.meiva_code.plugin import wrapped_serve
 
-    captured: dict[str, object] = {}
-
-    def fake_inner(
-        dir: str,
-        name: str,
-        port: int | None = None,
-        title: str | None = None,
-        *,
-        ttl: float | None = None,
-    ) -> str:
-        captured.update(dir=dir, name=name, port=port, title=title, ttl=ttl)
-        return "served"
-
     logical_cwd = tmp_path / "cwd"
     logical_cwd.mkdir()
     absolute_dir = tmp_path / "site"
     process_context.set_state(make_state_with_cwd(str(logical_cwd)))
     process_context.set_state_update({})
     try:
-        assert wrapped_serve(fake_inner, str(absolute_dir), "preview") == "served"
-        assert captured["dir"] == str(absolute_dir.resolve())
+        served = wrapped_serve(echo_serve, str(absolute_dir), "preview")
+        assert served[0] == str(absolute_dir.resolve())
     finally:
         process_context.unbind_exec_turn()
 
@@ -351,17 +358,27 @@ def test_coding_tools_section_all_expanded_keeps_preamble_only():
     assert not text.endswith("\n\n")
 
 
-def test_understand_wrap_resolves_paths_against_cwd(tmp_path: Path, monkeypatch):
+def echo_understand(
+    targets: list[dict[str, str | list[str]]], *, effort: str, max_concurrent: int | None
+) -> list[str]:
+    return [json.dumps({"targets": targets, "effort": effort, "max_concurrent": max_concurrent})]
+
+
+def forwarded(inner_result: list[str]) -> dict[str, Any]:
+    [encoded] = inner_result
+    return json.loads(encoded)
+
+
+def test_understand_wrap_resolves_paths_against_cwd(tmp_path: Path, understand_script: Script):
     """In-turn relative paths= resolved against tracked cwd — same string same file as files.read."""
-    captured = stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     (tmp_path / "rel.txt").write_text("cwd material", encoding="utf-8")
     process_context.set_state(make_state_with_cwd(str(tmp_path)))
     process_context.set_state_update({})
     try:
         [out] = meiva.understand([{"prompt": "p", "paths": ["rel.txt"]}])
         assert out == "ok"
-        sent = captured["llm"].invoke.call_args[0][0][0].content  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-        assert sent[0] == {"type": "text", "text": "cwd material"}
+        [message] = understand_script.requests[-1]
+        assert message.content[0] == {"type": "text", "text": "cwd material"}
     finally:
         process_context.unbind_exec_turn()
 
@@ -380,15 +397,16 @@ def test_understand_wrap_missing_paths_raises_with_cwd_location(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def test_understand_wrap_outside_turn_defers_to_workspace(workspace: Path, monkeypatch):
+def test_understand_wrap_outside_turn_defers_to_workspace(
+    workspace: Path, understand_script: Script
+):
     """Outside turn (not in_exec_turn) → workspace baseline resolution (via _resolve_for_cwd passthrough)."""
-    captured = stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     assert not process_context.in_exec_turn()
     workspace.mkdir(parents=True)
     (workspace / "f.txt").write_text("ws material", encoding="utf-8")
     meiva.understand([{"prompt": "p", "paths": ["f.txt"]}])
-    sent = captured["llm"].invoke.call_args[0][0][0].content  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    assert sent[0] == {"type": "text", "text": "ws material"}
+    [message] = understand_script.requests[-1]
+    assert message.content[0] == {"type": "text", "text": "ws material"}
 
 
 def test_understand_wrap_keeps_error_attribute_and_doc():
@@ -419,71 +437,52 @@ def test_understand_wrap_passes_invalid_combo_to_core(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def test_understand_wrap_forwards_effort(monkeypatch):
-    """The effort knob reaches the core through the wrap: the default (max) and
-    an explicit value both arrive at build_chat_model(reasoning_effort=...), and
-    the advertised signature exposes the parameter."""
-    import inspect
-    from unittest.mock import MagicMock
+# meiva:note
+# The effort knob reaches the core through the wrap: the default (max) and an explicit value both
+# arrive as given, and the advertised signature exposes the parameter.
+def test_understand_wrap_forwards_effort():
+    from meiva_builtins.plugins.meiva_code.plugin import wrapped_understand
 
-    llm = MagicMock()
-    response = MagicMock()
-    response.content = "ok"
-    response.response_metadata = {}
-    llm.invoke.return_value = response
-    efforts: list = []
-
-    def _fake_build(_model: str, **kw):
-        efforts.append(kw.get("reasoning_effort"))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-        return llm
-
-    monkeypatch.setattr(factory, "build_chat_model", _fake_build)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    meiva.understand([{"prompt": "p", "text": "t"}])
-    meiva.understand([{"prompt": "p", "text": "t"}], effort="low")
-    assert efforts == ["max", "low"]
+    targets: list[dict[str, str | list[str]]] = [{"prompt": "p", "text": "t"}]
+    default = forwarded(wrapped_understand(echo_understand, targets))
+    assert (default["effort"], default["targets"]) == ("max", targets)
+    assert forwarded(wrapped_understand(echo_understand, targets, effort="low"))["effort"] == "low"
+    assert inspect.signature(wrapped_understand).parameters["effort"].default == ReasoningEffort.MAX
     assert "effort" in inspect.signature(meiva.understand).parameters
 
 
-def test_understand_wrap_resolves_every_target_in_a_batch(tmp_path: Path, monkeypatch):
+def test_understand_wrap_resolves_every_target_in_a_batch(tmp_path: Path):
     """The wrap walks the whole batch: each `paths` target is resolved against the
     tracked cwd, while a `text` target passes through untouched."""
-    from unittest.mock import MagicMock
+    from meiva_builtins.plugins.meiva_code.plugin import wrapped_understand
 
-    captured = stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    materials: list[str] = []
-
-    def _record(messages):
-        materials.append(messages[0].content[0]["text"])  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-        response = MagicMock()
-        response.content = "ok"
-        response.response_metadata = {}
-        return response
-
-    captured["llm"].invoke.side_effect = _record  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    (tmp_path / "a.txt").write_text("material A", encoding="utf-8")
-    (tmp_path / "b.txt").write_text("material B", encoding="utf-8")
     process_context.set_state(make_state_with_cwd(str(tmp_path)))
     process_context.set_state_update({})
     try:
-        out = meiva.understand(
-            [
-                {"prompt": "p1", "paths": ["a.txt"]},
-                {"prompt": "p2", "text": "inline"},
-                {"prompt": "p3", "paths": ["b.txt"]},
-            ]
-        )
+        resolved = forwarded(
+            wrapped_understand(
+                echo_understand,
+                [
+                    {"prompt": "p1", "paths": ["a.txt"]},
+                    {"prompt": "p2", "text": "inline"},
+                    {"prompt": "p3", "paths": ["b.txt"]},
+                ],
+            )
+        )["targets"]
     finally:
         process_context.unbind_exec_turn()
-    assert out == ["ok", "ok", "ok"]
-    assert sorted(materials) == ["inline", "material A", "material B"]
+    assert resolved == [
+        {"prompt": "p1", "paths": [str((tmp_path / "a.txt").resolve())]},
+        {"prompt": "p2", "text": "inline"},
+        {"prompt": "p3", "paths": [str((tmp_path / "b.txt").resolve())]},
+    ]
 
 
 def test_understand_wrap_resolves_every_entry_in_a_paths_list(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, understand_script: Script
 ):
     """Each entry of a multi-file `paths` target is resolved against the tracked
     cwd — the wrap walks the list, not just the first file."""
-    captured = stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     (tmp_path / "a.txt").write_text("material A", encoding="utf-8")
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "b.txt").write_text("material B", encoding="utf-8")
@@ -492,19 +491,28 @@ def test_understand_wrap_resolves_every_entry_in_a_paths_list(
     try:
         [out] = meiva.understand([{"prompt": "p", "paths": ["a.txt", "sub/b.txt"]}])
         assert out == "ok"
-        sent = captured["llm"].invoke.call_args[0][0][0].content  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-        assert sent[0] == {"type": "text", "text": "material A"}
-        assert sent[1] == {"type": "text", "text": "material B"}
-        assert sent[2] == {"type": "text", "text": "p"}
+        [message] = understand_script.requests[-1]
+        assert message.content[:3] == [
+            {"type": "text", "text": "material A"},
+            {"type": "text", "text": "material B"},
+            {"type": "text", "text": "p"},
+        ]
     finally:
         process_context.unbind_exec_turn()
 
 
-def test_understand_wrap_forwards_max_concurrent(tmp_path: Path, monkeypatch):
+def test_understand_wrap_forwards_max_concurrent(tmp_path: Path, understand_script: Script):
     """`max_concurrent` passes through the wrap to the core — a call with the
     knob completes, and the core's own validation still fires on a bad value
     (regression: the wrap used to drop the keyword and raise TypeError)."""
-    stub_understand_text_path(monkeypatch)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    from meiva_builtins.plugins.meiva_code.plugin import wrapped_understand
+
+    targets: list[dict[str, str | list[str]]] = [{"prompt": "p", "text": "t"}]
+    assert forwarded(wrapped_understand(echo_understand, targets, max_concurrent=2)) == {
+        "targets": targets,
+        "effort": "max",
+        "max_concurrent": 2,
+    }
     (tmp_path / "rel.txt").write_text("cwd material", encoding="utf-8")
     process_context.set_state(make_state_with_cwd(str(tmp_path)))
     process_context.set_state_update({})

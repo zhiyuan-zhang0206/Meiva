@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 __description__ = "Meiva Code conventions — maintains cwd and auto-injects project AGENTS.md / CLAUDE.md (walking up from meiva.files.read paths)"
 
@@ -51,8 +51,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 import meiva.files as _meiva_files_mod
-from base.clock import Clock
-from base.config import settings
 from base.log import logger
 from base.packages.plugins.extensions import PluginContributions, SdkNamespace, SdkWrap
 from base.packages.skills import project_skill_roots
@@ -97,6 +95,7 @@ def _process_context_file(
     *,
     injected: set[str],
     hashes: set[str],
+    max_chars: int,
 ) -> bool:
     """Process one candidate context file for auto-injection.
 
@@ -109,6 +108,7 @@ def _process_context_file(
     # surface boot (task #3633).
     from agent.graph.exec.output import overflow_dir, truncate_both_ends
     from agent.messages import NoteTag, system_note_message
+    from meiva.sdk_surface import settings as sdk_settings
     from meiva.security import scan_content
 
     ctx_file_str = str(ctx_file)
@@ -158,11 +158,11 @@ def _process_context_file(
     # (user ruling 2026-08-11: files only for archiving / oversized
     # content); the archive path rides in the injected note.
     note_body = content
-    if len(note_body) > settings.sandbox.exec_output_max_chars:
-        clock = Clock.from_settings()
+    if len(note_body) > max_chars:
+        clock = sdk_settings.clock()
         note_body = truncate_both_ends(
             note_body,
-            settings.sandbox.exec_output_max_chars,
+            max_chars,
             archive_dir=overflow_dir(require_agent_id()),
             now=clock.now().astimezone(clock.explicit_zone()),
         )
@@ -243,8 +243,11 @@ def _wrapped_read(
     # 4. Inject / mark walk results. For multiple reads in the same turn,
     # read_state() reflects values updated earlier (update_state
     # synchronously mutates the meiva.state working copy); no extra cache needed.
+    from meiva.sdk_surface import settings as sdk_settings
+
+    max_chars = cast("int", sdk_settings.agent_setting("exec_output_max_chars"))
     for ctx_file in candidates:
-        _process_context_file(ctx_file, p, injected=injected, hashes=hashes)
+        _process_context_file(ctx_file, p, injected=injected, hashes=hashes, max_chars=max_chars)
 
     # 5. Commit state. injected_paths has no reducer, so it follows
     # last-value semantics — the wrap is the sole writer, so just pass the
@@ -369,25 +372,23 @@ def _wrapped_glob(inner: Callable[..., list[Path]], pattern: str = "*") -> list[
 # contract the rendered SDK should state.
 
 
-# ── wrap meiva.understand ───────────────────────────────────────────────────
-# Same shape as the meiva.files wraps, applied per target: each target's `paths`
-# entries are resolved against the tracked cwd during a turn (workspace /
-# pre-identity HOME otherwise, via _resolve_for_cwd), then handed to `inner`
-# (the wrapped understand) as absolute paths. A `text` target has no paths to
-# resolve and passes through untouched. `effort` mirrors the core signature
-# (default "max", forwarded verbatim — the core validates it). `UnderstandError`
-# rides on the function object; the wrap install carries it (and the
+# meiva:note
+# The wrap of meiva.understand, shaped like the meiva.files wraps and applied per target: each
+# target's `paths` entries are resolved against the tracked cwd during a turn (workspace or
+# pre-identity HOME otherwise, via _resolve_for_cwd), then handed to `inner` (the wrapped
+# understand) as absolute paths. A `text` target has no paths to resolve and passes through
+# untouched. Anything malformed (a non-list batch, a target carrying both `paths` and `text`, a
+# `paths` value that is not a list of path strings) also passes through untouched, so the wrapped
+# function's canonical TypeError / ValueError fires before any path resolution. `effort` mirrors
+# the core signature (default "max", forwarded verbatim; the core validates it).
+# `UnderstandError` rides on the function object; the wrap install carries it (and the
 # docstring) forward, so `meiva.understand.UnderstandError` survives the wrap.
-def _wrapped_understand(
+def wrapped_understand(
     inner: Callable[..., list[str]],
     targets: list[dict[str, str | list[str]]],
     effort: str = "max",
     max_concurrent: int | None = None,
 ) -> list[str]:
-    # Anything malformed passes through untouched so the wrapped function's
-    # canonical TypeError / ValueError fires before any path resolution — that
-    # includes a target carrying both `paths` and `text`, or a `paths` value
-    # that is not a list of path strings.
     if not isinstance(targets, list):
         return inner(targets, effort=effort, max_concurrent=max_concurrent)
     resolved: list[dict[str, str | list[str]]] = []
@@ -397,7 +398,6 @@ def _wrapped_understand(
             continue
         paths = t["paths"]
         if not isinstance(paths, list) or not all(isinstance(p, (str, Path)) for p in paths):
-            # Malformed paths value — leave for the core's canonical TypeError.
             resolved.append(t)
             continue
         resolved.append({**t, "paths": [str(_resolve_for_cwd(p)) for p in paths]})
@@ -436,7 +436,7 @@ def contribute() -> PluginContributions:
             SdkWrap("files.append", _wrapped_append),
             SdkWrap("files.delete", _wrapped_delete),
             SdkWrap("files.glob", _wrapped_glob),
-            SdkWrap("understand", _wrapped_understand),
+            SdkWrap("understand", wrapped_understand),
             SdkWrap("ui.serve", wrapped_serve),
         ),
         skill_sources=(_project_skill_source,),

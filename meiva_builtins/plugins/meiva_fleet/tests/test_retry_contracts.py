@@ -101,18 +101,8 @@ def _assert_one_logical_key(requests: list[httpx.Request], key: str | None = Non
 
 @pytest.mark.parametrize("failure", ["timeout", "server_error"])
 @pytest.mark.usefixtures("retry_waits")
-def test_keyed_route_retries_an_ambiguous_outcome_under_one_key(
-    monkeypatch: pytest.MonkeyPatch, failure: str
-) -> None:
-    from base.api_contracts import contracts
-    from base.api_contracts.contracts import Idempotency, RouteContract
-
-    path = "/api/new-keyed-effect"
-    monkeypatch.setitem(
-        contracts.ROUTE_CONTRACTS,
-        ("POST", path),
-        RouteContract(Idempotency.AT_LEAST_ONCE_WITH_KEY),
-    )
+def test_keyed_route_retries_an_ambiguous_outcome_under_one_key(failure: str) -> None:
+    path = "/api/keyed/v1/agents"
     requests: list[httpx.Request] = []
     with (
         httpx.Client(

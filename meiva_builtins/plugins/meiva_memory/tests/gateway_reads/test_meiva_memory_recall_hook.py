@@ -5,6 +5,7 @@
 # is owned by `agent/graph/tests/prompt/test_memory_recall.py`.
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import pytest
@@ -22,8 +23,8 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import EMPTY
 from base.paths import memory_dir
+from meiva.tests.fixtures.gateway_wire import GatewayWire, Reply
 from meiva_builtins.plugins.meiva_memory import agent_runtime
-from meiva_builtins.plugins.meiva_memory.tests.gateway_reads.gateway_stub import GatewayStub
 
 pytestmark = pytest.mark.usefixtures("unit_home")
 
@@ -35,26 +36,26 @@ def _hit(path: str) -> dict[str, object]:
     return {"path": path, "description": "", "tags": [], "score": 0.9, "chunk": ""}
 
 
-def _answer(gateway: GatewayStub, *paths: str) -> None:
+def _answer(wire: GatewayWire, *paths: str) -> None:
     for path in paths:
         note = memory_dir() / path
         note.parent.mkdir(parents=True, exist_ok=True)
         note.write_text("note", encoding="utf-8")
-    gateway.reply("POST", _SEARCH, {"results": [_hit(path) for path in paths]})
+    wire.stub.reply("POST", _SEARCH, {"results": [_hit(path) for path in paths]})
 
 
 def _state(messages: list[AnyMessage], **fields: Any):
     return build_agent_state(EMPTY)(messages=messages, **fields)
 
 
-def _runtime(catalog: ModelCatalog, gateway: GatewayStub, **pins: Any) -> Runtime[MeivaContext]:
+def _runtime(catalog: ModelCatalog, wire: GatewayWire, **pins: Any) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
             agent=AgentSlices.resolve(
                 {"passive_memory_recall_enabled": True, **pins}, default_reader=defaults()
             ),
             catalog=catalog,
-            clients=gateway.clients(),
+            clients=wire.context.clients,
             clock_factory=Clock.from_settings,
         )
     )
@@ -64,8 +65,8 @@ def _inbound(source: str) -> AnyMessage:
     return inbound_message(content="hello", source=source, inbound_id=1, body_start=0)
 
 
-def _excluded(gateway: GatewayStub) -> list[set[str]]:
-    return [set(request.body.get("exclude", [])) for request in gateway.received]
+def _excluded(wire: GatewayWire) -> list[set[str]]:
+    return [set(request.body.get("exclude", [])) for request in wire.stub.received]
 
 
 @pytest.mark.parametrize(
@@ -74,14 +75,14 @@ def _excluded(gateway: GatewayStub) -> list[set[str]]:
     ids=["user", "agent", "schedule", "system"],
 )
 async def test_fires_on_real_inbound_sources(
-    source: str, model_catalog: ModelCatalog, gateway: GatewayStub
+    source: str, model_catalog: ModelCatalog, wire: GatewayWire
 ) -> None:
-    _answer(gateway, "a.md")
+    _answer(wire, "a.md")
     state = _state([AIMessage(content="prev", id="a0"), _inbound(source)])
 
-    result = await _HOOK(state, _runtime(model_catalog, gateway), RunnableConfig())
+    result = await _HOOK(state, _runtime(model_catalog, wire), RunnableConfig())
 
-    assert len(gateway.received) == 1
+    assert len(wire.stub.received) == 1
     assert result is not None
     assert "a.md" in result["memory"].injected_paths
 
@@ -92,21 +93,21 @@ async def test_fires_on_real_inbound_sources(
     ids=["watcher", "shell"],
 )
 async def test_skips_machine_wakeups(
-    source: str, model_catalog: ModelCatalog, gateway: GatewayStub
+    source: str, model_catalog: ModelCatalog, wire: GatewayWire
 ) -> None:
-    _answer(gateway, "a.md")
+    _answer(wire, "a.md")
     state = _state([AIMessage(content="prev", id="a0"), _inbound(source)])
 
-    result = await _HOOK(state, _runtime(model_catalog, gateway), RunnableConfig())
+    result = await _HOOK(state, _runtime(model_catalog, wire), RunnableConfig())
 
-    assert gateway.received == []
+    assert wire.stub.received == []
     assert result is None
 
 
 async def test_fires_when_a_real_inbound_sits_among_wakeups(
-    model_catalog: ModelCatalog, gateway: GatewayStub
+    model_catalog: ModelCatalog, wire: GatewayWire
 ) -> None:
-    _answer(gateway, "a.md")
+    _answer(wire, "a.md")
     state = _state(
         [
             AIMessage(content="prev", id="a0"),
@@ -115,107 +116,111 @@ async def test_fires_when_a_real_inbound_sits_among_wakeups(
         ]
     )
 
-    result = await _HOOK(state, _runtime(model_catalog, gateway), RunnableConfig())
+    result = await _HOOK(state, _runtime(model_catalog, wire), RunnableConfig())
 
-    assert len(gateway.received) == 1
+    assert len(wire.stub.received) == 1
     assert result is not None
 
 
 async def test_gateway_error_leaves_the_turn_running(
-    model_catalog: ModelCatalog, gateway: GatewayStub
+    model_catalog: ModelCatalog, wire: GatewayWire
 ) -> None:
-    gateway.reply("POST", _SEARCH, "Server error", status=500)
+    wire.stub.reply("POST", _SEARCH, "Server error", status=500)
     state = _state([AIMessage(content="prev", id="a0"), _inbound("user")])
 
-    result = await _HOOK(state, _runtime(model_catalog, gateway), RunnableConfig())
+    result = await _HOOK(state, _runtime(model_catalog, wire), RunnableConfig())
 
     assert result is None
-    assert len(gateway.received) == 1
+    assert len(wire.stub.received) == 1
 
 
 async def test_recall_deadline_exceeded_skips_recall_this_turn(
-    model_catalog: ModelCatalog, gateway: GatewayStub
+    model_catalog: ModelCatalog, wire: GatewayWire
 ) -> None:
-    gateway.reply_slowly("POST", _SEARCH, {"results": [_hit("late.md")]}, delay_seconds=0.5)
+    release = threading.Event()
+    wire.stub.hold("POST", _SEARCH, release, {"results": [_hit("late.md")]})
     state = _state([AIMessage(content="prev", id="a0"), _inbound("user")])
-    runtime = _runtime(model_catalog, gateway, memory_recall_deadline_seconds=0.05)
+    runtime = _runtime(model_catalog, wire, memory_recall_deadline_seconds=0.05)
 
-    assert await _HOOK(state, runtime, RunnableConfig()) is None
+    try:
+        assert await _HOOK(state, runtime, RunnableConfig()) is None
+    finally:
+        release.set()
 
 
-async def test_no_inbound_tail_is_a_noop(model_catalog: ModelCatalog, gateway: GatewayStub) -> None:
-    _answer(gateway, "a.md")
+async def test_no_inbound_tail_is_a_noop(model_catalog: ModelCatalog, wire: GatewayWire) -> None:
+    _answer(wire, "a.md")
     state = _state([AIMessage(content="idle", id="a0")])
 
-    result = await _HOOK(state, _runtime(model_catalog, gateway), RunnableConfig())
+    result = await _HOOK(state, _runtime(model_catalog, wire), RunnableConfig())
 
-    assert gateway.received == []
+    assert wire.stub.received == []
     assert result is None
 
 
 async def test_a_disabled_feature_never_searches(
-    model_catalog: ModelCatalog, gateway: GatewayStub
+    model_catalog: ModelCatalog, wire: GatewayWire
 ) -> None:
-    _answer(gateway, "a.md")
+    _answer(wire, "a.md")
     state = _state([AIMessage(content="prev", id="a0"), _inbound("user")])
-    runtime = _runtime(model_catalog, gateway, passive_memory_recall_enabled=False)
+    runtime = _runtime(model_catalog, wire, passive_memory_recall_enabled=False)
 
     assert await _HOOK(state, runtime, RunnableConfig()) is None
-    assert gateway.received == []
+    assert wire.stub.received == []
 
 
 async def test_the_record_is_kept_while_the_window_is_unchanged(
-    model_catalog: ModelCatalog, gateway: GatewayStub
+    model_catalog: ModelCatalog, wire: GatewayWire
 ) -> None:
-    _answer(gateway, "a.md")
+    _answer(wire, "a.md")
     state = _state(
         [AIMessage(content="prev", id="a0"), _inbound("user")],
         memory=MemoryState(injected_paths={"seen.md"}, window=1),
         compact=CompactState(version=1),
     )
 
-    result = await _HOOK(state, _runtime(model_catalog, gateway), RunnableConfig())
+    result = await _HOOK(state, _runtime(model_catalog, wire), RunnableConfig())
 
-    assert _excluded(gateway) == [{"seen.md"}]
+    assert _excluded(wire) == [{"seen.md"}]
     assert result is not None
     assert result["memory"] == MemoryState(injected_paths={"a.md"}, window=1)
 
 
 async def test_a_compaction_summarizes_the_injected_notes_away_so_none_is_excluded(
-    model_catalog: ModelCatalog, gateway: GatewayStub
+    model_catalog: ModelCatalog, wire: GatewayWire
 ) -> None:
-    _answer(gateway, "a.md")
+    _answer(wire, "a.md")
     state = _state(
         [AIMessage(content="prev", id="a0"), _inbound("user")],
         memory=MemoryState(injected_paths={f"note-{i}.md" for i in range(2088)}),
         compact=CompactState(version=3),
     )
 
-    result = await _HOOK(state, _runtime(model_catalog, gateway), RunnableConfig())
+    result = await _HOOK(state, _runtime(model_catalog, wire), RunnableConfig())
 
-    assert _excluded(gateway) == [set()]
+    assert _excluded(wire) == [set()]
     assert result is not None
     assert result["memory"] == MemoryState(injected_paths={"a.md"}, window=3)
 
 
 async def test_a_compaction_resets_the_record_even_when_nothing_is_recalled(
-    model_catalog: ModelCatalog, gateway: GatewayStub
+    model_catalog: ModelCatalog, wire: GatewayWire
 ) -> None:
-    gateway.reply("POST", _SEARCH, {"results": []})
+    wire.stub.reply("POST", _SEARCH, {"results": []})
     state = _state(
         [AIMessage(content="prev", id="a0"), _inbound("user")],
         memory=MemoryState(injected_paths={"old.md"}, window=0),
         compact=CompactState(version=2),
     )
 
-    result = await _HOOK(state, _runtime(model_catalog, gateway), RunnableConfig())
+    result = await _HOOK(state, _runtime(model_catalog, wire), RunnableConfig())
 
-    assert _excluded(gateway) == [set()]
+    assert _excluded(wire) == [set()]
     assert result == {"memory": MemoryState(window=2)}
 
 
 async def test_a_compaction_resets_the_record_on_a_turn_that_does_not_recall(
-    model_catalog: ModelCatalog, gateway: GatewayStub
+    model_catalog: ModelCatalog, wire: GatewayWire
 ) -> None:
     state = _state(
         [AIMessage(content="prev", id="a0"), _inbound("watcher:3")],
@@ -223,24 +228,24 @@ async def test_a_compaction_resets_the_record_on_a_turn_that_does_not_recall(
         compact=CompactState(version=1),
     )
 
-    result = await _HOOK(state, _runtime(model_catalog, gateway), RunnableConfig())
+    result = await _HOOK(state, _runtime(model_catalog, wire), RunnableConfig())
 
-    assert gateway.received == []
+    assert wire.stub.received == []
     assert result == {"memory": MemoryState(window=1)}
 
 
 async def test_after_a_compaction_only_notes_injected_since_are_excluded(
-    model_catalog: ModelCatalog, gateway: GatewayStub
+    model_catalog: ModelCatalog, wire: GatewayWire
 ) -> None:
     for name in ("a.md", "b.md", "c.md"):
         (memory_dir() / name).parent.mkdir(parents=True, exist_ok=True)
         (memory_dir() / name).write_text("note", encoding="utf-8")
-    gateway.reply_in_turn(
+    wire.stub.reply_in_turn(
         "POST",
         _SEARCH,
-        [{"results": [_hit("a.md")]}, {"results": [_hit("b.md")]}, {"results": [_hit("c.md")]}],
+        [Reply(200, {"results": [_hit(name)]}) for name in ("a.md", "b.md", "c.md")],
     )
-    runtime = _runtime(model_catalog, gateway)
+    runtime = _runtime(model_catalog, wire)
     state_cls = build_agent_state(EMPTY)
 
     async def recall_pass(state: Any) -> dict[str, Any] | None:
@@ -269,5 +274,5 @@ async def test_after_a_compaction_only_notes_injected_since_are_excluded(
         )
     )
 
-    assert _excluded(gateway) == [set(), set(), {"b.md"}]
+    assert _excluded(wire) == [set(), set(), {"b.md"}]
     assert final.memory == MemoryState(injected_paths={"b.md", "c.md"}, window=1)

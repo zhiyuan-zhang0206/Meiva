@@ -5,7 +5,7 @@ task; owners are reminded periodically, and a task may nest under a parent.
 from __future__ import annotations
 
 import builtins
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 import meiva
@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from base.telemetry import Event
 
 from ._task_assignment import TaskAssignment, create_and_assign_guarded
+from ._task_requests import creation_request, effective_owner, update_request
 from ._task_update import (
     DEFAULT_PRIORITY,
     TASK_STATUS_VALUES,
@@ -90,6 +91,18 @@ def create(
     )
 
 
+# meiva:note
+# What one task creation leaves after its transaction: the snapshot the caller gets, the events the
+# transaction recorded (emitted only once it has committed, in this order), and whether the
+# operation key replayed an earlier acceptance, which has nothing left to publish.
+@dataclass(frozen=True)
+class CreationCommit:
+    task: Task
+    actor: int
+    events: tuple[Event, ...]
+    replayed: bool
+
+
 def create_in_context(
     context: MeivaContext,
     title: str,
@@ -102,6 +115,36 @@ def create_in_context(
     operation_key: str,
 ) -> Task:
     """Apply create with one explicit context, including admission revalidation."""
+    committed = commit_creation(
+        context,
+        title,
+        description,
+        parent=parent,
+        remind_interval_seconds=remind_interval_seconds,
+        owner=owner,
+        priority=priority,
+        operation_key=operation_key,
+    )
+    publish_creation(committed)
+    return committed.task
+
+
+# meiva:note
+# The transaction half of a creation: replay an earlier acceptance of the operation key, or insert
+# the task with its audit fact, owner notifications and receipt, and commit them together. Nothing
+# leaves the process here; a caller that stops after this has a committed task whose events were
+# never emitted, which is the state a crash between commit and emission leaves.
+def commit_creation(
+    context: MeivaContext,
+    title: str,
+    description: str,
+    *,
+    parent: int,
+    remind_interval_seconds: int | None = None,
+    owner: int | None = None,
+    priority: str = DEFAULT_PRIORITY,
+    operation_key: str,
+) -> CreationCommit:
     from base.agents.tasks.creation import create_task_in_transaction
     from base.api_contracts.idempotency import validate_idempotency_key
 
@@ -117,42 +160,49 @@ def create_in_context(
     owner = coerce_typed(owner, "owner", int, allow_none=True)
     priority = coerce_str(priority, "priority")
     actor = meiva.sdk_surface.agent_identity.require_agent_id(context)
-    effective_owner = owner if owner is not None else actor
-    request: dict[str, object] = {
-        "title": title,
-        "description": description,
-        "parent": parent,
-        "owner": effective_owner,
-        "priority": priority,
-        "remind_interval_seconds": remind_interval_seconds,
-    }
+    task_owner = effective_owner(owner, actor)
+    request = creation_request(
+        title=title,
+        description=description,
+        parent=parent,
+        owner=task_owner,
+        priority=priority,
+        remind_interval_seconds=remind_interval_seconds,
+    )
     with context.sql.transaction(), context.sql.cursor() as cur:
         snapshot = replay_creation(cur, actor, operation_key, request, context=context)
         if snapshot is not None:
-            return Task(**snapshot)
+            return CreationCommit(Task(**snapshot), actor, (), replayed=True)
         task, created_event, note_events = create_task_in_transaction(
             cur,
             title,
             description,
             parent=parent,
-            owner=effective_owner,
+            owner=task_owner,
             actor=actor,
             priority=priority,
             remind_interval_seconds=remind_interval_seconds,
         )
         record_creation(cur, actor, operation_key, request, asdict(task))
-    from base import telemetry  # deferred (task #3816)
+    return CreationCommit(task, actor, (created_event, *note_events), replayed=False)
 
-    telemetry.emit_prepared(created_event)
 
-    for event in note_events:
+# meiva:note
+# The emission half of a creation: the recorded events, then a live refresh of every open task
+# board. A replayed acceptance publishes nothing.
+def publish_creation(committed: CreationCommit) -> None:
+    if committed.replayed:
+        return
+    # meiva:note
+    # Deferred imports keep the psycopg stack off plugin autoload (task #3816).
+    from base import telemetry
+    from base.events.live import announce, bus
+
+    for event in committed.events:
         telemetry.emit_prepared(event)
-
-    # Live-refresh every open task board (fleet-wide invalidate + refetch).
-    from base.events.live import announce, bus  # deferred (task #3816)
-
-    announce.publish_task_created_sync(bus.EventBus.from_settings(), actor, task.id)
-    return task
+    announce.publish_task_created_sync(
+        bus.EventBus.from_settings(), committed.actor, committed.task.id
+    )
 
 
 def create_and_assign(
@@ -255,6 +305,19 @@ def _update_value(value: int | Unset | None) -> int | None:
     return None if isinstance(value, Unset) else value
 
 
+# meiva:note
+# What one task update leaves after its transaction: the events the transaction recorded (emitted
+# only once it has committed, in this order), the title of the task when this update closed it, and
+# whether the operation key replayed an earlier commit, which has nothing left to publish.
+@dataclass(frozen=True)
+class UpdateCommit:
+    task_id: int
+    actor: int
+    events: tuple[Event, ...]
+    closed_title: str | None
+    replayed: bool
+
+
 def update_in_context(
     context: MeivaContext,
     task_id: int,
@@ -271,6 +334,44 @@ def update_in_context(
     operation_key: str,
 ) -> None:
     """Apply update with one explicit context, including admission revalidation."""
+    publish_update(
+        commit_update(
+            context,
+            task_id,
+            status=status,
+            title=title,
+            description=description,
+            results=results,
+            owner=owner,
+            remind_interval_seconds=remind_interval_seconds,
+            priority=priority,
+            parent_id=parent_id,
+            note=note,
+            operation_key=operation_key,
+        )
+    )
+
+
+# meiva:note
+# The transaction half of an update: replay an earlier commit of the operation key, or write the
+# task row, its audit fact, the owner notifications and the receipt, and commit them together.
+# Nothing leaves the process here; a caller that stops after this has a committed update whose
+# events were never emitted, which is the state a crash between commit and emission leaves.
+def commit_update(
+    context: MeivaContext,
+    task_id: int,
+    *,
+    status: str | None = None,
+    title: str | None = None,
+    description: str | None = None,
+    results: str | None = None,
+    owner: int | Unset | None = UNSET_FIELD,
+    remind_interval_seconds: int | Unset | None = UNSET_FIELD,
+    priority: str | None = None,
+    parent_id: int | Unset | None = UNSET_FIELD,
+    note: str | None = None,
+    operation_key: str,
+) -> UpdateCommit:
     task_id = coerce_typed(task_id, "task_id", int)
     status = coerce_str(status, "status", allow_none=True)
     title = coerce_str(title, "title", allow_none=True)
@@ -303,21 +404,22 @@ def update_in_context(
             "update needs at least one of status, title, description, results, "
             "owner, remind_interval_seconds, priority, parent_id, note to change"
         )
-    # A parent-only reparent (no business field changed, no note) is structural
-    # tree maintenance — moving a task between parents, not changing its work —
-    # so it must not notify — and therefore must not resurrect — the owner.
-    # Batch reparenting used to fire one owner notification per move, each
-    # auto-resurrecting a terminated owner (62-agent wake storm, 2026-08-27).
+    # meiva:note
+    # A parent-only reparent (no business field changed, no note) is structural tree maintenance,
+    # moving a task between parents without changing its work, so it must not notify, and
+    # therefore must not resurrect, the owner. Batch reparenting used to fire one owner
+    # notification per move, each auto-resurrecting a terminated owner (62-agent wake storm,
+    # 2026-08-27).
     parent_only = parent_id is not UNSET_FIELD and nothing_to_update(sets, note)
-    # Reset the reminder counters on any update — a fresh overdue window starts
-    # from this update, so any previous reminder is stale. The delegator
-    # escalation marker goes with them: clearing it lets the fresh window
-    # escalate on its own.
+    # meiva:note
+    # Every update resets the reminder counters: a fresh overdue window starts from this update, so
+    # any previous reminder is stale. The delegator escalation marker goes with them, which lets
+    # the fresh window escalate on its own.
     sets.append("last_reminded_at = NULL")
     sets.append("reminder_count = 0")
     sets.append("escalated_at = NULL")
 
-    from ._task_receipts import record_update, replay_update, update_identity, update_request
+    from ._task_receipts import record_update, replay_update, update_identity
 
     actor, operation_key = update_identity(operation_key, context=context)
     request_body = update_request(
@@ -331,11 +433,12 @@ def update_in_context(
             "priority": priority,
             "parent_id": parent_id,
             "note": note,
-        }
+        },
+        unchanged=UNSET_FIELD,
     )
     with context.sql.transaction(), context.sql.cursor() as cur:
         if replay_update(cur, actor, task_id, operation_key, request_body, context=context):
-            return
+            return UpdateCommit(task_id, actor, (), None, replayed=True)
         if parent_id is not UNSET_FIELD:
             sets.append("parent_id = %s")
             params.append(resolve_reparent(cur, task_id, cast(int | None, parent_id)))
@@ -355,10 +458,11 @@ def update_in_context(
         )
         if parent_id is not UNSET_FIELD:
             changes.append("parent → root" if parent_id is None else f"parent → #{parent_id}")
+        task_title = title if title is not None else current_title
         note_events = _queue_after_update(
             cur,
             task_id,
-            title if title is not None else current_title,
+            task_title,
             old_owner,
             new_owner,
             actor,
@@ -367,17 +471,33 @@ def update_in_context(
             parent_only=parent_only,
         )
         record_update(cur, actor, task_id, operation_key, request_body)
+    return UpdateCommit(
+        task_id,
+        actor,
+        (updated_event, *note_events),
+        task_title if status == "done" else None,
+        replayed=False,
+    )
 
-    from base import telemetry  # deferred (task #3816)
 
-    telemetry.emit_prepared(updated_event)
+# meiva:note
+# The emission half of an update: the recorded events, a live refresh of every open task board and,
+# when the update closed the task, one log line. A replayed commit publishes nothing.
+def publish_update(committed: UpdateCommit) -> None:
+    if committed.replayed:
+        return
+    # meiva:note
+    # Deferred imports keep the psycopg stack off plugin autoload (task #3816).
+    from base import telemetry
+    from base.events.live import announce, bus
 
-    for event in note_events:
+    for event in committed.events:
         telemetry.emit_prepared(event)
-    from base.events.live import announce, bus  # deferred (task #3816)
-
-    announce.publish_task_updated_sync(bus.EventBus.from_settings(), actor, task_id)
-    _log_if_closed(status, actor, task_id, title if title is not None else current_title)
+    announce.publish_task_updated_sync(
+        bus.EventBus.from_settings(), committed.actor, committed.task_id
+    )
+    if committed.closed_title is not None:
+        _log_closed(committed.actor, committed.task_id, committed.closed_title)
 
 
 # meiva:note
@@ -385,9 +505,7 @@ def update_in_context(
 # the task board, the committed row and its `task_updated` event already record
 # the close.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-def _log_if_closed(status: str | None, actor: int, task_id: int, title: str) -> None:
-    if status != "done":
-        return
+def _log_closed(actor: int, task_id: int, title: str) -> None:
     logger.info(
         "task #{task_id} closed by agent {actor}: {title}",
         task_id=task_id,

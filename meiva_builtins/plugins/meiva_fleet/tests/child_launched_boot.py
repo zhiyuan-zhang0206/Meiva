@@ -1,4 +1,7 @@
+import gc
 from typing import Any, cast
+
+from base.config import ConfigBoot
 
 
 def _assert_runtime_resources_cold(context: Any, installation: Any) -> None:
@@ -30,27 +33,17 @@ def _pin_fleet_cluster_config() -> None:
     os.environ[PLUGIN_CLUSTER_CONFIG_ENV] = json.dumps({"meiva_fleet": projection})
 
 
-def _record_boot_reads() -> list[Any]:
-    from base.config import ConfigBoot
-
-    reads: list[ConfigBoot] = []
-    read = ConfigBoot.read_process_environment
-
-    def capture(self: ConfigBoot) -> None:
-        read(self)
-        reads.append(self)
-
-    ConfigBoot.read_process_environment = capture
-    return reads
+def _live_boots() -> list[ConfigBoot]:
+    return [candidate for candidate in gc.get_objects() if type(candidate) is ConfigBoot]
 
 
-def _assert_shared_boot(context: Any, installation: Any, reads: list[Any]) -> None:
+def _assert_shared_boot(context: Any, installation: Any) -> None:
     assert not installation.faces
     assert context.catalog is installation.catalog
     assert installation.clock is not None
-    assert len(reads) == 1, reads
-    boot = reads[0]
-    boot.set_field("timezone", "Asia/Tokyo")
+    boots = _live_boots()
+    assert len(boots) == 1, boots
+    boots[0].set_field("timezone", "Asia/Tokyo")
     assert context.require_clock().authoritative_timezone == "Asia/Tokyo"
 
 
@@ -60,7 +53,6 @@ def launched_imports_share_boot() -> None:
     import os
 
     _pin_fleet_cluster_config()
-    reads = _record_boot_reads()
     os.environ["MEIVA_AGENT_ID"] = "7123"
     import meiva
     from meiva.agents import spawn
@@ -76,14 +68,14 @@ def launched_imports_share_boot() -> None:
     context = meiva.context
     installation = installed()
     assert installation is not None
-    _assert_shared_boot(context, installation, reads)
+    _assert_shared_boot(context, installation)
     _assert_runtime_resources_cold(context, installation)
     assert installation.sampling.worker is None
     importlib.reload(meiva)
     assert meiva.context is context
     assert installed() is installation
     assert meiva.agents.spawn is spawn
-    assert len(reads) == 1
+    assert len(_live_boots()) == 1
 
 
 launched_imports_share_boot()

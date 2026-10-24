@@ -28,6 +28,6 @@ commit into it. The plugin as a whole — hooks, SDK surface, configuration — 
 ## Entry Points
 
 - `meiva_builtins/plugins/meiva_memory/setup.py` — `scaffold`, the host-side pool bring-up
-- `meiva_builtins/plugins/meiva_memory/template/validate.py` — the pool validator (`validate_note` is the single-note check the write check reuses, see [[meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md]])
+- `meiva_builtins/plugins/meiva_memory/template/validate.py` — the pool validator (`validate_bundle` checks a whole pool directory and `main` prints its findings; `validate_note` is the single-note check the write check reuses, see [[meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md]])
 
 Parent: [[meiva_builtins/plugins/meiva_memory/docs/meiva_memory.meiva.okf.md|meiva_memory]].
