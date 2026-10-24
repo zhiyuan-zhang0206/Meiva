@@ -45,10 +45,13 @@ when it uses the same cached model.
 
 ## Remaining boundary
 
-A host that dies with an exec running does not strand that exec. The child holds
-the read end of a pipe whose write end the host kept, reads end-of-file when the
-host disappears, and kills its own process group. A restarted agent host also
-empties `run/exec` before it serves. A descendant that left the group with
+A host that dies with a direct exec running does not strand that exec: its child
+reads end-of-file on the parent-held control pipe and kills its own process group.
+For delegated runs, exec-host closes the domain when the caller socket disconnects.
+Neither daemon deletes the shared `run/exec` tree at startup, because independent
+clients can still own live envelopes there. The launching client's normal cleanup
+removes its exact request and result paths; abrupt client death can leave residue
+without a complete automatic collector. A descendant that left the group with
 `setsid` survives, as it always could.
 Persistent shell sessions deliberately retain their separate ownership and are
 not disposable exec descendants to kill wholesale.

@@ -810,12 +810,18 @@ interrupt and control belong to [the agent graph](../../agent/graph/docs/graph.m
 ### Exec run-directory hygiene
 
 `run/exec/<agent>/` holds one request and one result file for each running exec.
-The agent host deletes both once the exec's process group is closed, and it empties
-the whole `run/exec` tree before it starts serving. Every exec child of the previous
-host has by then killed its own group: it reads end-of-file on the control pipe the
-dead host held. Nothing in this tree needs cleaning by hand. Do not delete files
-there while a host runs: removing a live request envelope fails the exec it
-belongs to.
+The launching client deletes its exact request and result paths once the exec's
+process group is closed. Neither agent-host nor exec-host clears the shared tree
+at startup: independent clients, including direct fallback runs, can still own
+live envelopes while either daemon starts. Their instance locks do not cover
+those clients.
+
+An abruptly killed client can leave files behind. Allocating another request for
+the same agent prunes result and atomic temporary files older than one hour; it
+retains request evidence. Requests, unconsumed memory-guard notices and unused
+agent directories have no complete automatic collector. Manual recovery must
+first establish that no client or run uses this home. Stopping only one daemon
+does not prove the shared tree is unused. Removing a live envelope fails its exec.
 
 
 
