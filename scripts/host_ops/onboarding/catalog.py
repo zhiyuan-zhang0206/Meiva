@@ -150,6 +150,25 @@ CATALOG: dict[str, HarnessSpec] = {
         ),
         needs_node=True,
     ),
+    "kimi": HarnessSpec(
+        cli="kimi",
+        runtime="kimi_code",
+        binary="kimi",
+        pinned_version="0.12.0",
+        installer=Installer(kind="npm", target="@moonshot-ai/kimi-code", pin_template="{version}"),
+        config=("${KIMI_CODE_HOME:-~/.kimi-code}/config.toml",),
+        stores=(
+            Store(
+                path="${KIMI_CODE_HOME:-~/.kimi-code}/credentials/kimi-code.json",
+                rotation="rotating",
+                why=(
+                    "OAuth access+refresh token pair (~15m access JWT renewed by a rotating "
+                    "refresh token); copying it can invalidate the source machine on refresh."
+                ),
+            ),
+        ),
+        needs_node=True,
+    ),
 }
 
 CLI_NAMES: tuple[str, ...] = tuple(CATALOG)

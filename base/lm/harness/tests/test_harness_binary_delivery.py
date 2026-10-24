@@ -3,6 +3,7 @@ from pathlib import Path
 
 from base.lm.harness import wiring
 from base.lm.harness.codex import CodexConfig
+from base.lm.harness.kimi import KimiConfig
 
 
 def _install(root: Path, name: str) -> Path:
@@ -24,6 +25,19 @@ def test_a_codex_session_resolves_the_cli_it_spawns(tmp_path: Path) -> None:
     empty.mkdir()
 
     resolved = CodexConfig(cwd=tmp_path).resolved_binary(
+        {"HOME": str(tmp_path), "PATH": str(empty)},
+        bin_dirs=(str(installed.parent),),
+    )
+
+    assert resolved == str(installed)
+
+
+def test_a_kimi_session_resolves_the_cli_it_spawns(tmp_path: Path) -> None:
+    installed = _install(tmp_path / "bin", "kimi")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+
+    resolved = KimiConfig(cwd=tmp_path).resolved_binary(
         {"HOME": str(tmp_path), "PATH": str(empty)},
         bin_dirs=(str(installed.parent),),
     )

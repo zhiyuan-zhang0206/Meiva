@@ -103,10 +103,9 @@ Creation HTTP calls send one operation key with the `principal-v1` scope. Spawn/
 
 ## Harness choice
 
-A spawn names its harness (`meiva` by default; `claude_code`, `codex`,
-`antigravity` for the external CLIs). It is a birth attribute: the row records
-it once and a fork inherits its source's value, so the fork dialog says so
-instead of offering a choice the backend would refuse with
+A spawn names its harness (`meiva` by default, or an external CLI). It is a birth attribute: the
+row records it once and a fork inherits its source's value, so the fork dialog
+says so instead of offering a choice the backend would refuse with
 `fork_harness_mismatch`.
 
 The picker reads `GET /api/cluster/machines/{name}/harnesses` for the machine

@@ -116,19 +116,25 @@ class TestProviderConstruction:
                 overrides=model_overrides(),
             )
 
+    @pytest.mark.parametrize(
+        "model",
+        ("kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"),
+    )
     def test_kimi_returns_chat_moonshot(
-        self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+        self, monkeypatch: pytest.MonkeyPatch, model: str, *, model_catalog: ModelCatalog
     ) -> None:
         from langchain_moonshot import ChatMoonshot
 
         m = build_chat_model(
-            "kimi-k3",
+            model,
             catalog=model_catalog,
             keys=ProviderKeys({"MOONSHOT_API_KEY": "sk-kimi"}),
             llm_override="",
             overrides=model_overrides(),
         )
         assert isinstance(m, ChatMoonshot)
+        assert m.model_name == model
+        assert m.stream_usage is True
 
     def test_kimi_missing_key_raises(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
@@ -282,13 +288,17 @@ class TestProviderConstruction:
                 overrides=model_overrides(),
             )
 
+    @pytest.mark.parametrize(
+        "model",
+        ("kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"),
+    )
     def test_kimi_defaults_to_streaming(
-        self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+        self, monkeypatch: pytest.MonkeyPatch, model: str, *, model_catalog: ModelCatalog
     ) -> None:
         from langchain_moonshot import ChatMoonshot
 
         m = build_chat_model(
-            "kimi-k3",
+            model,
             catalog=model_catalog,
             keys=ProviderKeys({"MOONSHOT_API_KEY": "sk-test"}),
             llm_override="",

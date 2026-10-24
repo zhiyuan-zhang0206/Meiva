@@ -48,6 +48,7 @@ describe("harnessRows", () => {
     const rows = harnessRows([row("codex", "available", false)]);
     expect(rows.find((r) => r.harness === "codex")).toMatchObject({ status: "available", launchable: false });
     expect(rows.find((r) => r.harness === "claude_code")?.status).toBe("unknown");
+    expect(rows.find((r) => r.harness === "kimi_code")?.status).toBe("unknown");
   });
 });
 
