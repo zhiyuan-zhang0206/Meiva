@@ -275,8 +275,9 @@ def run_command(
         return rc
     _opt_into_lite_config(args_in)
 
-    children = [] if retained_children is None else retained_children
-    args = parsers.parse_args(args_in, retained_children=children)
+    args = parsers.parse_args(
+        args_in, retained_children=[] if retained_children is None else retained_children
+    )
     # meiva:note
     # The home this command acts on is read here, once, behind the gate above. `declared` is the
     # path as the environment spells it (a symlinked home is refused when it is created); `home`
@@ -298,6 +299,7 @@ def run_command(
         except (ValueError, TypeError, RuntimeError, OSError) as exc:
             print(f"meiva start: {exc}", file=sys.stderr)
             return 1
+    from base.cluster.machine import MachineRoleInvalid
     from base.paths.private_dir import ensure_private_dir
     from cli.database import operator_database_factory
     from cli.database.runtime import CommandRuntime
@@ -329,9 +331,7 @@ def run_command(
         return 1
     except ValidationError as exc:
         return print_settings_load_failure(exc)
-    except BootstrapFetchError as exc:
-        # A pure agent-runner whose gateway is unreachable (or which was never
-        # enrolled) fails fast with an actionable message.
+    except (BootstrapFetchError, MachineRoleInvalid) as exc:
         print(f"✗ meiva: {exc}", file=sys.stderr)
         return 1
     finally:

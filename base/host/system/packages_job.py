@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import shlex
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -134,33 +135,49 @@ def unregister_linux(*, host: Host) -> int:
     )
 
 
-def register_packages_job(
-    *,
-    enabled: bool,
-    refresh_enabled: bool,
-    tick_seconds: int,
-    host: Host,
-) -> None:
-    """Register the recurring refresh pass (idempotent).
+# meiva:note
+# The refresh policy a registration needs: whether the channel is switched on and the tick it runs.
+#
+# The root reads it only for an enabled job in the owning home. A disabled channel has no tick;
+# its early exit must not read or validate a scheduler interval it will never use.
+@dataclass(frozen=True)
+class RefreshSchedule:
+    refresh_enabled: bool
+    tick_seconds: int | None
 
-    Readers remain live through platform dispatch. The refresh switch is read
-    after home ownership; the tick is read only while generating the job spec
-    (and the existing macOS success log). No policy snapshot is retained.
+    def __post_init__(self) -> None:
+        if not isinstance(self.refresh_enabled, bool):
+            raise TypeError("the packages refresh switch must be a boolean")
+        tick = self.tick_seconds
+        if (tick is None and self.refresh_enabled) or (
+            tick is not None and (not isinstance(tick, int) or isinstance(tick, bool) or tick <= 0)
+        ):
+            raise ValueError("registering the packages refresh job needs a positive tick")
 
-    Skipped when OS jobs are off (`MEIVA_OS_JOBS_ENABLED`), when this home is not
-    the default home (`owns_os_jobs`) or the refresh channel itself is off — the converge step is the only caller, so a disabled switch
-    simply leaves no job behind on machines that never registered one.
-    """
+
+# meiva:note
+# Register the recurring refresh pass (idempotent).
+#
+# The owning home needs `schedule` only when enabled, and its tick only for an enabled channel.
+# Skipped when OS jobs are off (`MEIVA_OS_JOBS_ENABLED`), when this home is not
+# the default home (`owns_os_jobs`) or the refresh channel itself is off — the converge step is the only caller, so a disabled switch
+# simply leaves no job behind on machines that never registered one.
+def register_packages_job(*, enabled: bool, schedule: RefreshSchedule | None, host: Host) -> None:
     if not enabled:
         base.host.system.cron.skip_os_job("packages refresh")
         return
     if not base.host.system.cron.owns_os_jobs("packages refresh"):
         return
-    if not refresh_enabled:
+    if schedule is None:
+        raise ValueError("registering the packages refresh job needs its schedule")
+    if not schedule.refresh_enabled:
         logger.info(
             "packages refresh disabled (MEIVA_PACKAGES_REFRESH_ENABLED=false) — not registering"
         )
         return
+    tick_seconds = schedule.tick_seconds
+    if tick_seconds is None:
+        raise ValueError("registering the packages refresh job needs its tick")
     base.host.system.cron.register_platform_job(
         "packages-refresh",
         macos=lambda: register_macos(tick_seconds=tick_seconds, host=host),

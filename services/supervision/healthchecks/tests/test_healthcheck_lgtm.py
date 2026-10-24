@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from base.cluster.machine import MachineIdentity, MachineRoleInvalid, roles_from_flags
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.paths.tests.homes import unit_home as unit_home
@@ -187,3 +188,28 @@ def test_an_unreachable_backend_reads_down() -> None:
         url = f"{backend.url}/ready"
 
     assert not hc.readiness_at("loki", url).alive
+
+
+def test_the_roles_lgtm_decides_on_are_none_only_while_no_capability_is_configured(
+    machine_identity: MachineIdentity,
+) -> None:
+    unconfigured = MachineIdentity(
+        name=lambda: "m",
+        role=lambda: roles_from_flags(
+            serve_gateway=False, serve_agent_runner=False, serve_observability_station=False
+        ),
+        host=lambda: "localhost",
+        description=lambda: None,
+    )
+    invalid = MachineIdentity(
+        name=lambda: "m",
+        role=lambda: frozenset({"not-a-capability"}),
+        host=lambda: "localhost",
+        description=lambda: None,
+    )
+
+    assert hc.lgtm_roles(unconfigured) is None
+    with pytest.raises(MachineRoleInvalid, match="not-a-capability"):
+        hc.lgtm_roles(invalid)
+    machine_identity.set(role="observability-station")
+    assert hc.lgtm_roles(machine_identity) == frozenset({"observability-station"})

@@ -105,6 +105,14 @@
       4318,
       "port"
     ],
+    "refresh_enabled": [
+      "packages",
+      "MEIVA_PACKAGES_REFRESH_ENABLED",
+      "bool",
+      "literal",
+      true,
+      null
+    ],
     "timezone": [
       "general",
       "MEIVA_TIMEZONE",
@@ -119,6 +127,14 @@
       "bool",
       "literal",
       false,
+      null
+    ],
+    "os_jobs_enabled": [
+      "general",
+      "MEIVA_OS_JOBS_ENABLED",
+      "bool",
+      "literal",
+      true,
       null
     ],
     "machine_name": [

@@ -151,26 +151,28 @@ def unregister_linux(*, host: Host) -> int:
     )
 
 
-def register_walg_job(*, enabled: bool, backup_hour: int, host: Host) -> None:
-    """Register the daily WAL-G tick (idempotent).
-
-    The composition root supplies live readers. The backup hour reaches the
-    platform unchanged and is read while generating the job spec and the
-    existing macOS success log, preserving the three-hour offset.
-
-    Skipped when OS jobs are off (`MEIVA_OS_JOBS_ENABLED`) or this home is not the
-    default home (`owns_os_jobs`). Whether WAL-G is switched on is the converge
-    step's decision (`ensure_walg_job`), not this registrar's.
-    """
+# meiva:note
+# Register the daily WAL-G tick (idempotent).
+#
+# An enabled job in the owning home requires `backup_hour`; it reaches the platform unchanged and
+# keeps the three-hour offset from the logical dump.
+#
+# Skipped when OS jobs are off (`MEIVA_OS_JOBS_ENABLED`) or this home is not the
+# default home (`owns_os_jobs`). Whether WAL-G is switched on is the converge
+# step's decision (`ensure_walg_job`), not this registrar's.
+def register_walg_job(*, enabled: bool, backup_hour: int | None, host: Host) -> None:
     if not enabled:
         base.host.system.cron.skip_os_job("WAL-G tick")
         return
     if not base.host.system.cron.owns_os_jobs("WAL-G tick"):
         return
+    if backup_hour is None:
+        raise ValueError("registering the WAL-G tick needs the backup hour")
+    hour_of_dump = backup_hour
     base.host.system.cron.register_platform_job(
         "WAL-G tick",
-        macos=lambda: register_macos(backup_hour=backup_hour, host=host),
-        linux=lambda: register_linux(backup_hour=backup_hour, host=host),
+        macos=lambda: register_macos(backup_hour=hour_of_dump, host=host),
+        linux=lambda: register_linux(backup_hour=hour_of_dump, host=host),
         host=host,
     )
 
