@@ -20,8 +20,8 @@ from base.agents.impersonation.manifest import (
     close_local_participant_admission,
     seal_local_participant,
 )
-from base.agents.sdk import call_policy
 from base.agents.sdk.tally import SdkCallTally
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.agents.tests.capture_inputs import capture_rows, capture_state, open_capture, sdk_event
 from base.agents.tests.capture_inputs import lease as lease
 from base.agents.tests.capture_inputs import owner as owner
@@ -85,7 +85,7 @@ async def test_concurrent_calls_capture_the_original_gate_after_context_rebind(
         sdk_capture=_CaptureOwner(previous_gate),
     )
     process_context.bind_context(context)
-    sampling = call_policy.SamplingPolicyOwner(reader=call_policy.SamplingPolicy)
+    sampling = fixed_sampling_owner()
     ledger = metering.install(sampling, clients=None, surface=metering.read_surface(root))
     calls = [asyncio.create_task(namespace.held()) for _ in range(2)]
     try:

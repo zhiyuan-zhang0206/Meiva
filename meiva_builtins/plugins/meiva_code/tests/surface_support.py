@@ -1,6 +1,6 @@
 from typing import Any
 
-from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.config.service_read import FIELD_DOMAINS, ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_config_images import DiskPluginConfigImages
@@ -33,7 +33,7 @@ def install_code_surface(
         provider_keys=inert_keys(catalog),
         authority=authority,
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
-        sampling=SamplingPolicyOwner(reader=SamplingPolicy),
+        sampling=fixed_sampling_owner(),
     )
 
 

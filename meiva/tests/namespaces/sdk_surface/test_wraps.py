@@ -25,7 +25,7 @@ from typing import Any
 
 import pytest
 
-from base.agents.sdk import call_policy
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from meiva.sdk_surface import install, wraps
 from meiva.sdk_surface.installation import WrapAdded
 
@@ -372,7 +372,7 @@ def test_wrap_captures_the_base_callable_below_a_metering_recorder(
     from meiva.sdk_surface import metering
 
     _root, ns, fn = probe
-    sampling = call_policy.SamplingPolicyOwner(reader=call_policy.SamplingPolicy)
+    sampling = fixed_sampling_owner()
     ns.fn = metering.make_recorder(fn, "probe.fn", sampling, None)
 
     added = apply(lambda inner, *a, **kw: inner(*a, **kw))

@@ -41,7 +41,7 @@ async def test_sampling_failure_is_collected_before_pools_and_pidfile_cleanup(
         assert release.wait(5)
         raise original
 
-    sampling = call_policy.SamplingPolicyOwner(reader=read)
+    sampling = call_policy.SamplingPolicyOwner(initial=call_policy.SamplingPolicy(), fetch=read)
     sampling.read()
     assert entered.wait(2)
     release.set()

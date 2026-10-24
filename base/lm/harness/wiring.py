@@ -7,7 +7,6 @@ from pathlib import Path
 
 from base.api_contracts.agent_contract import Harness
 from base.host.env.harness_binaries import with_harness_path
-from base.host.env.registry import child_env, process_environment
 from base.lm.harness.antigravity import AgySession, AntigravityConfig
 from base.lm.harness.antigravity import build_handoff as antigravity_handoff
 from base.lm.harness.bridge import HarnessBridge, HarnessSession, ScopedSessionRegistry
@@ -42,8 +41,8 @@ HANDOFF_INSTRUCTION = (
 # from is a positive allowlist that carries no PATH, and a session delivery point is where
 # it is rebuilt — the CLI and everything it runs resolve through this (#5491).
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
-def session_environ(environ: Mapping[str, str] | None) -> dict[str, str]:
-    base = dict(child_env("runner", process_environment()) if environ is None else environ)
+def session_environ(environ: Mapping[str, str]) -> dict[str, str]:
+    base = dict(environ)
     venv_bin = str(Path(sys.executable).parent)
     existing = base.get("PATH")
     base["PATH"] = f"{venv_bin}{os.pathsep}{existing}" if existing else venv_bin
@@ -56,7 +55,7 @@ def open_session(
     agent_id: int,
     cwd: Path,
     registry: SessionRegistry,
-    environ: Mapping[str, str] | None = None,
+    environ: Mapping[str, str],
     skip_permissions: bool = True,
 ) -> HarnessSession:
     if harness is Harness.CLAUDE_CODE:
@@ -146,7 +145,7 @@ def bridge_for(
     registry: SessionRegistry,
     registrations: RegistrationStore | None = None,
     registration_ttl_seconds: float,
-    environ: Mapping[str, str] | None = None,
+    environ: Mapping[str, str],
     skip_permissions: bool = True,
     contributions: Iterable[HarnessContribution] = (),
 ) -> HarnessBridge | None:

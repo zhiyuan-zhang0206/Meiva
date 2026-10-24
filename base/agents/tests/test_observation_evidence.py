@@ -53,9 +53,7 @@ def test_snapshot_retains_the_machine_probe_clock(
                 ("observation-test", probe),
             )
     db_conn.commit()
-    full = select_one(
-        db_conn, aid, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
-    )
+    full = select_one(db_conn, aid, catalog=model_catalog, default_model=settings.lm.llm_model)
     assert full is not None and full.observation is not None
     evidence = full.observation
     assert evidence.runtime_owner == "unknown"
@@ -68,7 +66,7 @@ def test_snapshot_retains_the_machine_probe_clock(
     summary = next(
         row
         for row in select_roster(
-            db_conn, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
+            db_conn, catalog=model_catalog, default_model=settings.lm.llm_model
         ).agents
         if row.agent_id == aid
     )
@@ -167,13 +165,11 @@ def test_launch_failure_projects_on_card_and_detail(
     card = next(
         row
         for row in select_roster(
-            db_conn, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
+            db_conn, catalog=model_catalog, default_model=settings.lm.llm_model
         ).agents
         if row.agent_id == aid
     )
-    detail = select_one(
-        db_conn, aid, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
-    )
+    detail = select_one(db_conn, aid, catalog=model_catalog, default_model=settings.lm.llm_model)
     assert detail is not None
     assert card.availability is not None and detail.availability is not None
     assert (
@@ -200,12 +196,12 @@ def test_snapshot_and_roster_share_machine_verdict(
     card = next(
         card
         for card in select_roster(
-            db_conn, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
+            db_conn, catalog=model_catalog, default_model=settings.lm.llm_model
         ).agents
         if card.agent_id == agent_id
     )
     detail = select_one(
-        db_conn, agent_id, catalog=model_catalog, default_model_reader=lambda: settings.lm.llm_model
+        db_conn, agent_id, catalog=model_catalog, default_model=settings.lm.llm_model
     )
     assert detail is not None
     assert card.status.value == detail.status.value == "idling"

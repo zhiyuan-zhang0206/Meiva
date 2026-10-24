@@ -17,10 +17,10 @@ __all__ = ["held_installation", "inert_sampling"]
 
 
 # meiva:note
-# A sampling owner for the installation a test builds: the real owner, reading the default policy
-# instead of the settings and the gateway, so nothing refreshes over the network.
+# A sampling owner for the installation a test builds: the real owner, serving the default policy
+# and refreshing to the same default, so nothing reads the settings or the gateway.
 def inert_sampling() -> SamplingPolicyOwner:
-    return SamplingPolicyOwner(reader=SamplingPolicy)
+    return SamplingPolicyOwner(initial=SamplingPolicy(), fetch=SamplingPolicy)
 
 
 @contextmanager

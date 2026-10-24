@@ -21,7 +21,7 @@ from base.agents.context.external_attachment.plugin_state_codec import (
 )
 from base.agents.impersonation import history
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
-from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentity
 from base.config import settings
@@ -70,7 +70,7 @@ def native_checkpoint(
     process_context.unbind_exec_turn()
     request.addfinalizer(process_context.unbind_exec_turn)
 
-    sampling = SamplingPolicyOwner(reader=SamplingPolicy)
+    sampling = fixed_sampling_owner()
     install.install(
         registry,
         config_images=model_installation.config_images,

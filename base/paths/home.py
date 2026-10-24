@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 
 __all__ = [
@@ -110,10 +110,8 @@ def is_default_home(home: Path) -> bool:
 # a worktree: a worktree's wiring would dangle once the checkout is removed. The
 # home must be the default one too, because a dev worktree resolves its home to
 # `~/.meiva` whenever MEIVA_HOME is unset.
-def is_prod_install(
-    *, repo: Path, home: Path, is_default: Callable[[Path], bool] = is_default_home
-) -> bool:
+def is_prod_install(*, repo: Path, home: Path) -> bool:
     resolved = str(repo.resolve())
     if ".claude/worktrees" in resolved or "/.worktrees/" in resolved:
         return False
-    return is_default(home)
+    return is_default_home(home)

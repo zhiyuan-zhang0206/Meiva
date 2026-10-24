@@ -10,9 +10,9 @@ from base.agents.observation.roster import AgentCard, list_directory, select_ros
 from base.agents.observation.snapshot import AgentSnapshot, select_one
 from base.lm.catalog import ModelCatalog
 
-
-def forbidden_default() -> str:
-    raise AssertionError("Unavailable capability metadata must not resolve a default model")
+# meiva:note
+# The default never decides these reads: pins and an unavailable catalog come first.
+DEFAULT_MODEL = "deepseek-v4-flash"
 
 
 @pytest.fixture
@@ -29,12 +29,12 @@ def existing_agents(db_conn: psycopg.Connection) -> psycopg.Connection:
 def test_unavailable_capabilities_preserve_ancestors_and_keyset_history(
     existing_agents: psycopg.Connection,
 ) -> None:
-    roster = select_roster(existing_agents, catalog=None, default_model_reader=forbidden_default)
+    roster = select_roster(existing_agents, catalog=None, default_model=DEFAULT_MODEL)
     assert [card.agent_id for card in roster.agents] == [2, 3]
     assert all(card.supports_vision is None for card in roster.agents)
     assert [link.agent_id for link in roster.ancestors] == [1]
     first = list_directory(
-        existing_agents, scope="all", limit=2, catalog=None, default_model_reader=forbidden_default
+        existing_agents, scope="all", limit=2, catalog=None, default_model=DEFAULT_MODEL
     )
     second = list_directory(
         existing_agents,
@@ -42,17 +42,14 @@ def test_unavailable_capabilities_preserve_ancestors_and_keyset_history(
         limit=2,
         before_id=first.next_cursor,
         catalog=None,
-        default_model_reader=forbidden_default,
+        default_model=DEFAULT_MODEL,
     )
     assert [card.agent_id for card in first.agents] == [3, 2]
     assert [card.agent_id for card in second.agents] == [1]
     assert second.next_cursor is None
-    detail = select_one(existing_agents, 1, catalog=None, default_model_reader=forbidden_default)
+    detail = select_one(existing_agents, 1, catalog=None, default_model=DEFAULT_MODEL)
     assert detail is not None and detail.supports_vision is None and detail.status == "terminated"
-    assert (
-        select_one(existing_agents, 99, catalog=None, default_model_reader=forbidden_default)
-        is None
-    )
+    assert select_one(existing_agents, 99, catalog=None, default_model=DEFAULT_MODEL) is None
 
 
 @pytest.mark.parametrize("reader", ["roster", "directory", "detail"])
@@ -70,20 +67,18 @@ def test_catalog_failure_does_not_hide_damaged_model_pins(
     )
     with pytest.raises(ValueError, match=column):
         if reader == "roster":
-            select_roster(existing_agents, catalog=None, default_model_reader=forbidden_default)
+            select_roster(existing_agents, catalog=None, default_model=DEFAULT_MODEL)
         elif reader == "directory":
-            list_directory(existing_agents, catalog=None, default_model_reader=forbidden_default)
+            list_directory(existing_agents, catalog=None, default_model=DEFAULT_MODEL)
         else:
-            select_one(existing_agents, 2, catalog=None, default_model_reader=forbidden_default)
+            select_one(existing_agents, 2, catalog=None, default_model=DEFAULT_MODEL)
 
 
 def test_nullable_capability_is_required_and_does_not_relax_agent_enums(
     existing_agents: psycopg.Connection,
 ) -> None:
-    card = select_roster(
-        existing_agents, catalog=None, default_model_reader=forbidden_default
-    ).agents[0]
-    detail = select_one(existing_agents, 2, catalog=None, default_model_reader=forbidden_default)
+    card = select_roster(existing_agents, catalog=None, default_model=DEFAULT_MODEL).agents[0]
+    detail = select_one(existing_agents, 2, catalog=None, default_model=DEFAULT_MODEL)
     assert detail is not None
     for model, data in ((AgentCard, card.model_dump()), (AgentSnapshot, detail.model_dump())):
         with pytest.raises(ValidationError, match="status"):
@@ -100,9 +95,9 @@ def test_read_errors_are_not_replaced_by_empty_agents(existing_agents: psycopg.C
     closed.close()
     for read in (select_roster, list_directory):
         with pytest.raises(psycopg.OperationalError):
-            read(closed, catalog=None, default_model_reader=forbidden_default)
+            read(closed, catalog=None, default_model=DEFAULT_MODEL)
     with pytest.raises(psycopg.OperationalError):
-        select_one(closed, 2, catalog=None, default_model_reader=forbidden_default)
+        select_one(closed, 2, catalog=None, default_model=DEFAULT_MODEL)
 
 
 @pytest.mark.parametrize(
@@ -122,10 +117,8 @@ def test_healthy_catalog_preserves_unknown_model_capability_policy(
         assert all(
             card.supports_vision is expected
             for card in read(
-                existing_agents, catalog=model_catalog, default_model_reader=forbidden_default
+                existing_agents, catalog=model_catalog, default_model=DEFAULT_MODEL
             ).agents
         )
-    detail = select_one(
-        existing_agents, 2, catalog=model_catalog, default_model_reader=forbidden_default
-    )
+    detail = select_one(existing_agents, 2, catalog=model_catalog, default_model=DEFAULT_MODEL)
     assert detail is not None and detail.supports_vision is expected

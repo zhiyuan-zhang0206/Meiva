@@ -34,6 +34,7 @@ def configured_policy(**changes: Any) -> HostPolicy:
                 clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
             ),
             harness_registration_ttl_seconds=daemon.harness_registration_ttl_seconds,
+            harness_environ={"HOME": "/nonexistent/host-policy-home"},
             stall=StallTiming(
                 scan_interval_s=daemon.host_turn_progress_scan_interval_seconds,
                 no_progress_timeout_s=daemon.host_turn_no_progress_timeout_seconds,
