@@ -8,6 +8,7 @@ import os
 import subprocess
 import tarfile
 import tempfile
+import tomllib
 from collections import deque
 from collections.abc import Generator, Iterable, Iterator
 from contextlib import contextmanager
@@ -282,6 +283,54 @@ def base_checkout(root: Path, ref: str) -> Generator[Path, None, None]:
         if omitted:
             raise RuntimeError(f"Base archive omitted tracked inputs: {omitted}")
         yield base
+
+
+# meiva:note
+# The pyproject.toml tables whose change cannot reach a test run: they configure checkers that
+# no test run loads (each new tests/ directory registers its execution environment in
+# tool.pyright). Every other table holds the interpreter, the dependencies, the pytest
+# configuration or the test hosts, so the set is closed: a table that is not listed keeps the
+# file global for the selector.
+# meiva:link docs/conventions/engineering/test-selection.md
+LOCAL_PYPROJECT_TABLES = frozenset({"tool.pyright", "tool.basedpyright", "tool.ruff"})
+
+
+# meiva:note
+# Whether the change to the repository's pyproject.toml since ``base_ref`` touches only
+# LOCAL_PYPROJECT_TABLES, or no table at all (a comment or whitespace edit). Both committed
+# texts are parsed and compared table by table: every top-level table, and ``tool.<name>`` for
+# each tool. Without a base, or when the file is new or gone, the change cannot be bounded.
+def pyproject_change_is_local(root: Path, base_ref: str | None) -> bool:
+    head = root / "pyproject.toml"
+    if base_ref is None or not head.is_file():
+        return False
+    shown = subprocess.run(  # noqa: S603
+        ["git", "-C", str(root), "show", "--end-of-options", f"{base_ref}:pyproject.toml"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if shown.returncode != 0:
+        return False
+    old, new = _pyproject_tables(shown.stdout), _pyproject_tables(head.read_text(encoding="utf-8"))
+    absent = object()
+    changed = {
+        name for name in old.keys() | new.keys() if old.get(name, absent) != new.get(name, absent)
+    }
+    return changed <= LOCAL_PYPROJECT_TABLES
+
+
+def _pyproject_tables(text: str) -> dict[str, object]:
+    tables: dict[str, object] = {}
+    for name, value in tomllib.loads(text).items():
+        if name != "tool":
+            tables[name] = value
+        elif isinstance(value, dict):
+            tool = cast(dict[str, object], value)
+            tables.update({f"tool.{tool_name}": body for tool_name, body in tool.items()})
+        else:
+            raise TypeError("pyproject.toml [tool] must be a table")
+    return tables
 
 
 def unknown_diagnostics(items: Iterable[Unknown], *, tree: str) -> tuple[str, ...]:

@@ -13,8 +13,8 @@ tags:
 
 The CI workflow selects an owner-rule backend test subset (direct importers
 plus the owning package's tests) for real pull requests. In `enforce` mode (the default) a SELECTED pull request runs that
-subset as its backend pytest gate; every other selector decision and every
-Trunk merge-tree branch keeps the full suite. In `shadow` mode no PR gates on
+subset as its backend pytest gate whenever its impact is computable; every other
+selector decision (impact unknown) and every Trunk merge-tree branch keeps the full suite. In `shadow` mode no PR gates on
 the subset: the full fan-out gates and the subset plus its comparison report
 run informational beside it. The workflow-level `TEST_SELECTION_MODE` value in
 [ci.yml](workflows/ci.yml) is the single revert switch.
@@ -28,8 +28,10 @@ run informational beside it. The workflow-level `TEST_SELECTION_MODE` value in
    empty, which degrades to the full fan-out, and the step's outcome (the
    `selector` output) fails the backend aggregator rather than the classify check.
    It lives in classify so the shards wait on one job, not two.
-2. `backend-selected` runs only a SELECTED list and is informational in shadow.
-   In enforce it is the gate: the native pytest result and shared JUnit
+2. `backend-selected` runs only a SELECTED list, as a matrix of 1 to 8 shards sized from the
+   subset's estimated time (classify publishes `shards`, `groups` and the list as the
+   `selected-tests` artifact; each shard splits the list with the full fan-out's file
+   planner). It is informational in shadow. In enforce it is the gate: the native pytest result and shared JUnit
    validator reject failed, missing, malformed or unexecuted reports, just
    like the shards. No external quarantine service determines the verdict.
    `backend-shard` is skipped exactly when enforce + SELECTED; it runs the
@@ -46,5 +48,5 @@ run informational beside it. The workflow-level `TEST_SELECTION_MODE` value in
 ## Related policy
 
 [docs/conventions/engineering/test-selection.md](../docs/conventions/engineering/test-selection.md) owns the
-selection rules, path classes, static-map limits, duration guard, artifacts, maintenance, and
+selection rules, path classes, static-map limits, duration estimates, artifacts, maintenance, and
 the mode switch.

@@ -2,13 +2,28 @@
 
 ## Purpose
 
+PR CI runs the selected subset whenever impact is computable; the Trunk merge
+queue runs the full suite and is the backstop.
+
 Backend CI uses two layers. A Trunk merge-tree branch (trunk-merge/ or
 trunk-temp/) always runs the full backend suite. A real pull request runs
-either the full suite or, when the selector returns SELECTED and the workflow
-is in enforce mode (the default), an owner-rule-selected subset in its place.
-The merge queue therefore continues to verify the combined tree with its full
-regression net, and a gap in the PR-side subset surfaces in the queue instead
-of reaching main; test selection does not change broken-main risk.
+the full suite only when its impact cannot be computed (a global path, an
+unmapped path, a deleted path without base facts) and otherwise, when the
+workflow is in enforce mode (the default), an owner-rule-selected subset in its
+place. The merge queue therefore continues to verify the combined tree with its
+full regression net, and a gap in the PR-side subset surfaces in the queue
+instead of reaching main; test selection does not change broken-main risk.
+
+No threshold on the subset's size or estimated time sends a pull request back to
+the full suite. "The impact is too large" has no definition that survives
+contact with the repository (a fixture or plugin that most tests import makes
+most of the suite the true impact, and no share of the suite separates that from
+a harmless subset), and the queue already runs the full suite on the exact tree
+that lands. Dropping the threshold is a deliberate trade against the concern of
+task #4183 (PR #3020's subset passed while the full population was red on
+`tests/contracts/test_lint_event_kinds.py`): that concern is answered by the
+pinned tree-scan tests (below) and by the queue, not by sending large subsets
+back to the full fan-out.
 
 The selector is [scripts/ci/test_selector.py](../../../scripts/ci/test_selector.py). It is
 stdlib-only and consumes the shared runtime dependency facts in
@@ -29,9 +44,10 @@ subject policies do not prune this runtime impact graph. The selector never impo
 application code or executes test code.
 
 Global fixture dependencies can therefore reach most tests. This is conservative
-runtime coupling: the duration guard reports `subset-too-close` and keeps FULL rather than
-removing those edges to produce a smaller subset. Two kinds of gap keep a test in every
-candidate subset (its location and reason stay in the JSON `diagnostics` field and stderr):
+runtime coupling: the selector keeps those edges rather than removing them to produce a
+smaller subset, and the subset that results, possibly most of the suite, still runs as
+SELECTED. Two kinds of gap keep a test in every candidate subset (its location and reason
+stay in the JSON `diagnostics` field and stderr):
 
 - An unresolved load (`import_module` of a computed name, a file loader, `python -c`
   source that cannot be read) may run any code, so it always counts.
@@ -49,9 +65,7 @@ A gap is not one when the file declares it. The shared fact collection reads
 `[external]` entry (honored for sources only; a listed test may load a repository file by
 path) says the loaded content is not part of the repository. An existence probe
 (`importlib.util.find_spec`) loads nothing and is never a gap. Explicit edges do not
-certify that an unrelated opaque input is resolved.
-When those tests alone push a subset past the duration guard, FULL reports
-`incomplete-impact` instead of `subset-too-close`. Syntax errors, malformed
+certify that an unrelated opaque input is resolved. Syntax errors, malformed
 declarations and unexpected analysis errors fail the selector job and the required
 backend check.
 
@@ -82,15 +96,15 @@ matching row decides.
 | 1 | A documentation path (see below) | DOCUMENTATION | runtime readers from either tree |
 | 2 | Root `conftest.py` | GLOBAL | full suite |
 | 3 | Any other `conftest.py` (also when deleted) | CONFTEST | every collectable test below its directory plus runtime consumers |
-| 4 | Absent from the head tree | DELETED | base-tree impact; FULL with a diagnostic when base facts are unavailable |
+| 4 | Absent from the head tree | DELETED | base-tree impact; FULL (impact unknown) with a diagnostic when base facts are unavailable |
 | 5 | A collectable test file | TEST | itself and its transitive test consumers |
 | 6a | A root meizel manifest (`meizel.toml`, `meizel.policy.toml`) | MANIFEST | runtime readers, meizel's own tests, every test naming the file and the tests of each source module that names it (below) |
-| 6b | A global path (below) | GLOBAL | full suite |
+| 6b | A global path (below) | GLOBAL | full suite (impact unknown: it applies to every test) |
 | 7a | `.github/`, `.agents/`, `.meiva/`, `.trunk/` | TREE_SCAN_ONLY | tree-scan tests plus every collectable test whose source names that top-level directory (below) |
-| 7b | `demos/`, `tests/e2e/`, `.pre-commit-config.yaml`, `.gitignore`, `.gitattributes`, `.gitleaks.toml`, `LICENSE`, `NOTICE` | TREE_SCAN_ONLY | tree-scan tests plus recognized runtime consumers |
+| 7b | `demos/`, `tests/e2e/`, `.pre-commit-config.yaml`, `.gitignore`, `.gitattributes`, `.gitleaks.toml`, `LICENSE`, `NOTICE`, and Markdown under a global prefix (below) | TREE_SCAN_ONLY | tree-scan tests plus recognized runtime consumers |
 | 8 | A non-Python file under `ui/` | FRONTEND | recognized backend resource consumers, when backend selection runs; the frontend job also owns it |
 | 9 | Any other file under agent/, meiva/, meiva_builtins/, base/, cli/, gateway/, ops/, schedules/, scripts/, services/, tests/ or ui/ | PACKAGE | transitive runtime consumers plus the owning package's tests |
-| 10 | Anything else | UNMAPPED | full suite |
+| 10 | Anything else | UNMAPPED | full suite (impact unknown: no rule owns the path) |
 
 The root meizel manifests are declarations: `[roles]` names the top-level packages the
 selector classifies by, and `[uses]`, `[debt.*]` and the policy feed the meizel checks, which
@@ -104,7 +118,22 @@ Global paths apply to every test: `pyproject.toml`, `uv.lock`, `.python-version`
 `.env.example`, the root `conftest.py`, the modules its `pytest_plugins` lists
 (plus the `__init__.py` of every package on their import path), and everything
 under tests/fixtures/, db/, migrations/, deploy/ and commands/. This list and
-the plugin set are the single "global path" concept in the selector.
+the plugin set are the single "global path" concept in the selector. Two cases that
+looked global are not, because their impact is computable rather than unknown:
+
+- Markdown under one of those prefixes (for example `deploy/lgtm/README.md`) is prose,
+  not an input a run loads. It is TREE_SCAN_ONLY: the tree-scan tests plus the tests that
+  read that file by a recognized path run, the way a documentation change selects its
+  readers. Every other file under the prefixes, including `db/schema.sql`, stays global.
+- `pyproject.toml` is global only when the tables that changed can reach a test run. The
+  selector parses the committed base and the head text and compares them table by table (the
+  top-level tables, and `tool.<name>` for each tool). When every changed table is `tool.pyright`,
+  `tool.basedpyright` or `tool.ruff` (a checker configuration no test run loads, which is where
+  each new `tests/` directory registers its execution environment) or no table changed at all,
+  the file is TREE_SCAN_ONLY too: the tests that read `pyproject.toml` by path run. Any other
+  table (`project`, `dependency-groups`, `build-system`, `tool.uv`, `tool.pytest`, the test
+  hosts, coverage, an unlisted tool) keeps it global, and so does a missing base: `--base-ref`
+  absent, or `pyproject.toml` new in the change. The listed set is closed.
 
 Tests read `.github/`, `.agents/`, `.meiva/` and `.trunk/` by path. Recognized
 resource facts reach their transitive consumers. A change there selects, besides the tree-scan tests, every
@@ -126,7 +155,7 @@ and head with the same fact collector and resolver, then intersects the resultin
 with the current collectable universe. This preserves impact when an import, fixture
 binding or resource edge is removed, and when a changed source is deleted. Base facts
 are read from a temporary Git archive, never from an unrelated working checkout.
-Without base facts, a deleted path cannot certify a subset and reports `incomplete-impact`.
+Without base facts, a deleted path has an unknown impact and reports FULL (`incomplete-impact`).
 
 ## Decision rules
 
@@ -134,32 +163,38 @@ The first matching rule decides the outcome. FULL keeps the full backend suite;
 SKIP keeps the existing documentation-only behavior (no backend suite); only
 SELECTED replaces the backend pytest fan-out, and only in enforce mode.
 
+FULL has two kinds of cause and no third. Rule 1 is the queue and non-PR events,
+which run everything by design. Rules 3 to 5 are impact unknown: the selector
+cannot say which tests a change affects, so it does not guess. A large computed
+impact is not a cause: no rule compares the subset with the full suite.
+
 | Order | Changed-path or event condition | Result |
 | --- | --- | --- |
 | 1 | Not a pull_request, or head ref begins trunk-merge/ or trunk-temp/ | FULL (queue-or-non-pr) |
 | 2 | Every path is documentation and has no known runtime reader in either tree | SKIP |
-| 3 | A path is GLOBAL | FULL (`global-path:<first path>`; the payload lists every global path) |
-| 4 | A path is UNMAPPED | FULL (unmapped; the payload lists the paths) |
-| 5 | A deleted path without base facts | FULL (incomplete-impact; diagnostic locations and reasons) |
-| 6 | Otherwise, union the contribution of every path, the tree-scan tests and every test reaching an opaque input in either tree | candidate subset |
-| 7 | The candidate is empty | FULL (no-tests) |
-| 8 | Candidate estimated time exceeds 80% of the full backend estimate | FULL (`incomplete-impact` when the changed paths' own tests fit and opaque-input tests do not, else `subset-too-close`) |
-| 8a | No timings were restored for this run (rule 8 would compare two zero sums) | FULL (no-durations) |
-| 9 | None of the above | SELECTED (owner-tests) |
+| 3 | A path is GLOBAL | FULL (impact unknown; `global-path:<first path>`, the payload lists every global path) |
+| 4 | A path is UNMAPPED | FULL (impact unknown; unmapped, the payload lists the paths) |
+| 5 | A deleted path without base facts | FULL (impact unknown; incomplete-impact with diagnostic locations and reasons) |
+| 6 | Otherwise, union the contribution of every path, the tree-scan tests and every test reaching an opaque input in either tree | SELECTED (owner-tests) |
+
+A change that no test consumes still selects the tree-scan tests, so rule 6
+never yields an empty candidate in the repository (a candidate that held no
+test at all would be a checkout without a single tree-scan test, which
+tests/scripts/test_test_selector_contract.py rules out for the repository).
 
 Rule 4 is a runtime safety net. scripts/tests/test_test_selector_owner_rules.py
 classifies every tracked path and fails when any is UNMAPPED, so the trunk never
 reaches rule 4; a new top-level directory or root file needs a class in the
 selector before it can merge.
 
-Tree-scan tests join the candidate subset before the duration and empty-candidate rules run: every
-`test_lint_*.py` under `tests/` (any depth, non-e2e) and the repo-level
+Tree-scan tests join every candidate subset, including one whose changed paths
+reach no test: every `test_lint_*.py` under `tests/` (any depth, non-e2e) and the repo-level
 CI/governance checks pinned in `scripts/ci/test_selector.py`
-(`_TREE_SCAN_TESTS`). The owner rules cannot reach a repo-wide scan
+(`TREE_SCAN_TESTS`). The owner rules cannot reach a repo-wide scan
 test from a changed source file, and a green subset must not miss a
 tree-wide gate (task #4183: PR #3020's subset passed while the full
 population was red on tests/contracts/test_lint_event_kinds.py). Name a new scan test
-`test_lint_*.py` to join automatically, or extend `_TREE_SCAN_TESTS`;
+`test_lint_*.py` to join automatically, or extend `TREE_SCAN_TESTS`;
 tests/scripts/test_test_selector_contract.py guards completeness and staleness.
 
 The documentation predicate reuses base.deploy.git.repo_change.is_doc_path, the same
@@ -208,8 +243,8 @@ external modules have no repository input to select. Unresolved dynamic inputs r
 explicit unknown evidence. Fixtures registered through `path_scopes.toml` create real
 edges, but an opaque call elsewhere in a plugin remains unknown unless its finite input
 domain is proved; its consumers then join every subset. When an opaque input sits in a
-module that most tests reach, this still requires FULL on the current repository; it is not evidence
-that the runtime dependency closure is small or complete.
+module that most tests reach, the subset is most of the suite on the current repository; it is not
+evidence that the runtime dependency closure is small or complete.
 
 The graph is rebuilt for every run and no coverage-derived map is committed. Package
 ownership and tree-scan rules remain conservative additions. The complete Trunk and
@@ -218,19 +253,40 @@ A selector `tests` list contains candidate files, not an executed test count: th
 selected native lane omits the independently executed static lane and flaky tests,
 while the serial lane owns flaky execution. JUnit records remain the execution evidence.
 
-## Duration guard
+## Subset shards
+
+A SELECTED subset runs on as many `backend selected subset` shards as its share of the suite
+needs at the size of one full shard: `ceil(est_seconds / full_est_seconds * 8)`, clamped to
+1..8 and to the number of selected files, with the share taken from file counts when no timings
+exist (`subset_shard_count`, with the width 8 owned by `FULL_FANOUT_SHARDS`; a contract test
+ties it to the full fan-out's matrix and `--count`). A subset that is the whole suite is eight
+shards and as fast as the fan-out; a few files are one short job.
+
+`classify change` publishes `shards` and `groups` (the JSON list `[1, ..., shards]` that is the
+matrix) as job outputs, and the selected file list as the `selected-tests` artifact, because the
+whole suite as one environment string already reaches Linux's 128 KB limit. Each shard
+downloads the list and splits it with the full fan-out's own planner
+(`scripts.ci.pull_requests.plan_file_shards --files-from`): a duration-balanced whole-file plan
+over the selected files only, which each shard re-collects and checks before it executes its
+group. Every shard has the full shards' 20-minute limit. The verdict is the matrix job's
+result, which is also what the shadow report reads.
+
+## Duration estimates
 
 The timing input is the repository-root `.test_durations` file. It is not tracked: the daily
 isolated shard measurement ([refresh-test-durations.yml](../../../.github/workflows/refresh-test-durations.yml))
-saves it as an Actions cache, `classify change` restores it, and a run without one keeps the full
-suite (rule 2a) because the guard below would compare two zero sums.
+saves it as an Actions cache and `classify change` restores it. The estimates only report:
+`est_seconds` and `full_est_seconds` appear in the JSON payload and the `test-selection:` log
+line, and no decision reads them. A run without the cache estimates zero for both and selects
+exactly the same subset.
 It maps pytest node IDs to seconds. Refreshes retain every measured node,
 including fast tests and durations that round to zero; only unmeasured nodes
 use pytest-split's average fallback. The selector sums entries whose node ID
 starts with each selected test file plus ::; a file with no timing entry costs
 the average present backend timing entry. A recorded zero remains zero. The
-same model estimates the complete collectable backend universe, and only
-subsets at or below 80% run.
+same model estimates the complete collectable backend universe.
+
+The estimates size the shards of a subset (above) and nothing else: no decision reads them.
 
 `scripts.ci.test_selector.load_durations` and `estimate_seconds` own this model
 for the selector and its reporting consumers. The read-only
@@ -265,9 +321,9 @@ routing expression keys off it.
 
 **enforce** (the default since 2026-09-11):
 
-- A SELECTED real PR runs `backend-selected` instead of the shard fan-out: the
-  selected subset is the backend pytest gate, and the aggregator (the
-  branch-protection check `backend (pytest + pyright)`) requires it.
+- A SELECTED real PR runs `backend-selected` (a matrix of 1 to 8 shards) instead of the
+  shard fan-out: the selected subset is the backend pytest gate, and the aggregator (the
+  branch-protection check `backend (pytest + pyright)`) requires every shard.
 - `backend-selected` uses the native pytest result and the shared JUnit
   validation gate, like the shards. Test failures remain red; no external
   quarantine service or secret determines the verdict.
@@ -326,7 +382,22 @@ fixed as a blind-map gap) are not a precondition for this switch. They stay
 recorded here as history, and the false-green rate remains the review signal
 while enforce is live.
 
-The synthetic checkout in `scripts/tests/test_test_selector_owner_rules.py`
-weights durations so both the package subset and top-level-tests fallback stay
-below the 80% guard. This makes the tests exercise owner selection instead of
-an earlier full-suite fallback.
+The synthetic checkouts in `scripts/tests/test_test_selector*.py` need no timing file
+for owner selection: durations only feed the estimates, and
+`scripts/tests/test_test_selector.py` pins that a subset above 80% of the full estimate, or over
+half of a suite larger than the subset job, is still SELECTED.
+
+2026-10-24 user ruling: the duration guard is deleted (rule 8, FULL when the candidate
+exceeded 80% of the full estimate or, on a large suite, half of it, and rule 8a, FULL
+when no timings were restored), together with the empty-candidate FULL (rule 7). How
+large an impact is too large has no definition, and the merge queue runs the full suite
+before anything reaches main. In the ten pull requests of the day before, nine ran the
+full fan-out: six on a global path, which this ruling keeps (their impact is unknown, not
+large), and three whose candidate was the whole suite, which now run as SELECTED.
+
+The same day, the three consequences of running a whole-suite subset were settled with it. The
+subset is sharded by its estimated time instead of running as one job under one timeout. Its
+list travels as an artifact instead of an environment string. And two global-path rules that
+mistook known-confined changes for unknown ones were narrowed (Markdown under a global prefix,
+and `pyproject.toml` tables that only configure a checker); the rest of the global paths are
+unchanged.

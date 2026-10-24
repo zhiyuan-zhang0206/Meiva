@@ -13,12 +13,23 @@ from pathlib import Path
 from scripts.ci.collection_tracebacks import periodic_tracebacks
 
 
+def _listed_files(path: str) -> list[str]:
+    return [line for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--count", type=int, required=True, help="number of shards to plan")
     parser.add_argument("--plan", required=True, help="where pytest writes the plan (JSON)")
     parser.add_argument("--stacks", required=True, help="where periodic tracebacks are written")
+    parser.add_argument(
+        "--files-from",
+        help="plan only the test files listed in this file, one per line (the selected subset)",
+    )
     args = parser.parse_args(argv)
+    files = _listed_files(args.files_from) if args.files_from is not None else []
+    if args.files_from is not None and not files:
+        parser.error(f"{args.files_from} lists no test file")
     with (
         Path(args.stacks).open("w") as stacks,
         periodic_tracebacks(stacks, dump_traceback=faulthandler.dump_traceback),
@@ -45,6 +56,7 @@ def main(argv: list[str]) -> int:
                     "scripts.ci.file_shard_shadow",
                     f"--file-shard-count={args.count}",
                     f"--file-shard-plan={args.plan}",
+                    *files,
                 ]
             )
         )

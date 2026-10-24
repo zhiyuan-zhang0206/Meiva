@@ -51,7 +51,6 @@ def _repo(tmp_path: Path) -> Path:
         "base/agents/runner.py": "",
         "base/empty/tests/helper.py": "",
         "ops/worker.py": "",
-        "scripts/tests/test_bulk.py": "def test_bulk(): pass\n",
         "scripts/tests/test_reads_github.py": 'WORKFLOW = ".github/workflows/ci.yml"\n',
         "scripts/tests/test_reads_trunk.py": "ROOT = '.trunk'\n",
         "scripts/tests/test_reads_agents.py": 'SKILLS = root / ".agents" / "skills"\n',
@@ -65,20 +64,6 @@ def _repo(tmp_path: Path) -> Path:
     }
     for relative_path, content in files.items():
         _write(tmp_path, relative_path, content)
-    timings = {
-        "tests/unit/test_a.py::test_a": 10.0,
-        "tests/unit/test_b.py::test_b": 10.0,
-        "tests/sub/test_c.py::test_c": 10.0,
-        "tests/sub/test_d.py::test_d": 10.0,
-        f"{_LINT}::test_scan": 1.0,
-        "base/lm/tests/test_lm.py::test_lm": 5.0,
-        "scripts/tests/test_bulk.py::test_bulk": 60.0,
-        "scripts/tests/test_reads_github.py::test_x": 1.0,
-        "scripts/tests/test_reads_trunk.py::test_x": 1.0,
-        "scripts/tests/test_reads_agents.py::test_x": 1.0,
-        "scripts/tests/test_imports_agents_module.py::test_x": 1.0,
-    }
-    _write(tmp_path, ".test_durations", json.dumps(timings))
     return tmp_path
 
 
@@ -204,7 +189,7 @@ def test_a_frontend_file_adds_no_backend_test(tmp_path: Path) -> None:
 def test_repository_level_inputs_run_only_the_tree_scan_tests(tmp_path: Path, path: str) -> None:
     result = _select(_repo(tmp_path), path)
 
-    assert (result.decision, result.tests) == ("SELECTED", (_LINT,))
+    assert (result.decision, result.reason, result.tests) == ("SELECTED", "owner-tests", (_LINT,))
 
 
 @pytest.mark.parametrize(
@@ -248,13 +233,8 @@ def test_the_real_repository_readers_of_hidden_directories_remain_covered() -> N
         root = changed.split("/", maxsplit=1)[0]
         assert set(readers) <= test_selector.referencing_tests(root, checkout), changed
     result = _select(_REPO_ROOT, ".github/workflows/ci.yml")
-    if result.decision == "SELECTED":
-        assert set(expectations[".github/workflows/ci.yml"]) <= set(result.tests)
-    else:
-        assert result.decision == "FULL"
-        assert result.reason in {"incomplete-impact", "subset-too-close", "no-durations"}
-        if result.reason == "incomplete-impact":
-            assert result.diagnostics
+    assert result.decision == "SELECTED", result.as_json()
+    assert set(expectations[".github/workflows/ci.yml"]) <= set(result.tests)
 
 
 def _manifest_repo(tmp_path: Path) -> Path:
@@ -280,10 +260,6 @@ def _manifest_repo(tmp_path: Path) -> Path:
     }
     for relative_path, content in files.items():
         _write(repo_root, relative_path, content)
-    timings = json.loads((repo_root / ".test_durations").read_text())
-    timings["meizel/tests/test_roles.py::test_roles"] = 1.0
-    timings["scripts/lint/tests/test_reader.py::test_reader"] = 1.0
-    _write(repo_root, ".test_durations", json.dumps(timings))
     return repo_root
 
 
@@ -323,14 +299,27 @@ def test_a_manifest_change_does_not_launder_a_data_file_change(tmp_path: Path) -
     assert "tests/unit/test_b.py" in with_data.tests
 
 
-def test_a_run_without_timings_keeps_the_full_suite(tmp_path: Path) -> None:
+def test_timings_only_report_the_estimates_and_never_change_the_subset(tmp_path: Path) -> None:
     repo_root = _repo(tmp_path)
-    assert _select(repo_root, "base/lm/engine.py").decision == "SELECTED"
-    (repo_root / ".test_durations").unlink()
+    untimed = _select(repo_root, "base/lm/engine.py")
+    _write(
+        repo_root,
+        ".test_durations",
+        json.dumps(
+            {"base/lm/tests/test_lm.py::test_lm": 5.0, "tests/unit/test_b.py::test_b": 95.0}
+        ),
+    )
 
-    result = _select(repo_root, "base/lm/engine.py")
+    timed = _select(repo_root, "base/lm/engine.py")
 
-    assert (result.decision, result.reason) == ("FULL", "no-durations")
+    assert (untimed.decision, untimed.reason) == ("SELECTED", "owner-tests")
+    assert (untimed.est_seconds, untimed.full_est_seconds) == (0.0, 0.0)
+    assert (timed.decision, timed.reason, timed.tests) == (
+        "SELECTED",
+        "owner-tests",
+        untimed.tests,
+    )
+    assert 0.0 < timed.est_seconds < timed.full_est_seconds
 
 
 def test_an_unowned_path_is_the_full_suite_safety_net(tmp_path: Path) -> None:

@@ -201,55 +201,79 @@ def test_docs_only_skips_but_schedule_docs_stay_conservative(tmp_path: Path) -> 
     )
 
 
-def test_duration_guard_falls_back_to_full_when_subset_is_nearly_full(tmp_path: Path) -> None:
-    """Raising the selected duration past 80% must decline the subset run."""
-    repo_root = _selector_repo(tmp_path)
-    _write(
-        repo_root,
-        ".test_durations",
-        json.dumps(
+@pytest.mark.parametrize(
+    ("timings", "estimate", "full_estimate"),
+    [
+        pytest.param(
             {
                 "tests/unit/test_changed.py::test_changed": 0.5,
                 "tests/unit/test_imports.py::test_imports": 9.0,
                 "tests/unit/test_other.py::test_other": 0.5,
                 "cli/tests/test_owner.py::test_owner": 0.5,
-            }
+            },
+            9.5,
+            10.5,
+            id="above-80-percent-of-the-full-estimate",
         ),
-    )
-
-    result = test_selector.select_tests(["cli/commands.py"], repo_root=repo_root)
-
-    assert result.decision == "FULL"
-    assert result.reason == "subset-too-close"
-    assert result.est_seconds == 9.5
-    assert result.full_est_seconds == 10.5
-
-
-# meiva:note
-# A subset that would spend more than half of a real suite is not a subset: on 2026-10-21
-# a 12,125-test selection (48% of 25,291) reached 89% of the twenty-minute subset job and
-# was killed twice. Past half of a suite bigger than that job's own budget, the
-# eight-shard fan-out is what actually runs the tests.
-# meiva:link scripts/ci/docs/duration-refresh.md
-def test_a_subset_over_half_of_a_real_suite_runs_the_full_fan_out(tmp_path: Path) -> None:
-    repo_root = _selector_repo(tmp_path)
-    _write(
-        repo_root,
-        ".test_durations",
-        json.dumps(
+        pytest.param(
             {
                 "tests/unit/test_changed.py::test_changed": 5000.0,
                 "tests/unit/test_imports.py::test_imports": 1000.0,
                 "tests/unit/test_other.py::test_other": 1000.0,
                 "cli/tests/test_owner.py::test_owner": 7000.0,
-            }
+            },
+            8000.0,
+            14000.0,
+            id="over-half-of-a-suite-larger-than-the-subset-job",
         ),
-    )
+    ],
+)
+def test_a_large_subset_is_still_selected_because_the_queue_is_the_backstop(
+    tmp_path: Path, timings: dict[str, float], estimate: float, full_estimate: float
+) -> None:
+    repo_root = _selector_repo(tmp_path)
+    _write(repo_root, ".test_durations", json.dumps(timings))
 
     result = test_selector.select_tests(["cli/commands.py"], repo_root=repo_root)
 
-    assert result.decision == "FULL"
-    assert 0.5 * result.full_est_seconds < result.est_seconds <= 0.8 * result.full_est_seconds
+    assert (result.decision, result.reason) == ("SELECTED", "owner-tests")
+    assert result.tests == ("cli/tests/test_owner.py", "tests/unit/test_imports.py")
+    assert (result.est_seconds, result.full_est_seconds) == (estimate, full_estimate)
+
+
+@pytest.mark.parametrize(
+    ("tests", "estimate", "full_estimate", "collectable", "shards"),
+    [
+        pytest.param(40, 10.0, 1000.0, 100, 1, id="small-subset-is-one-shard"),
+        pytest.param(40, 125.0, 1000.0, 100, 1, id="exactly-one-full-shard-is-one-shard"),
+        pytest.param(40, 126.0, 1000.0, 100, 2, id="just-over-one-full-shard-is-two"),
+        pytest.param(40, 500.0, 1000.0, 100, 4, id="half-the-suite-is-half-the-fanout"),
+        pytest.param(100, 1000.0, 1000.0, 100, 8, id="the-whole-suite-is-the-whole-fanout"),
+        pytest.param(40, 1500.0, 1000.0, 100, 8, id="never-wider-than-the-fanout"),
+        pytest.param(50, 0.0, 0.0, 100, 4, id="no-timings-count-files"),
+        pytest.param(3, 900.0, 1000.0, 100, 3, id="never-more-shards-than-files"),
+        pytest.param(0, 0.0, 0.0, 100, 1, id="nothing-selected-is-one-shard"),
+    ],
+)
+def test_a_subset_runs_on_its_share_of_the_full_fanout(
+    tests: int, estimate: float, full_estimate: float, collectable: int, shards: int
+) -> None:
+    assert test_selector.FULL_FANOUT_SHARDS == 8
+    assert test_selector.subset_shard_count(tests, estimate, full_estimate, collectable) == shards
+
+
+def test_only_a_selected_subset_has_shards(tmp_path: Path) -> None:
+    repo_root = _selector_repo(tmp_path)
+
+    selected = test_selector.select_tests(["cli/commands.py"], repo_root=repo_root)
+    full = test_selector.select_tests(["pyproject.toml"], repo_root=repo_root)
+    skipped = test_selector.select_tests(["docs/conventions/guide.md"], repo_root=repo_root)
+
+    assert selected.decision == "SELECTED"
+    assert 1 <= selected.shards <= selected.count
+    assert selected.as_json()["shards"] == selected.shards
+    assert (full.decision, full.shards) == ("FULL", 0)
+    assert (skipped.decision, skipped.shards) == ("SKIP", 0)
 
 
 def test_uses_average_duration_for_a_new_test_without_a_timing_entry(tmp_path: Path) -> None:

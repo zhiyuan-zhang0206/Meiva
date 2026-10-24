@@ -47,27 +47,26 @@ evicts caches.
   (evicted mid-run) fails the shard instead of degrading silently.
 - With no cache (a fresh repository, an unreadable listing) the run goes on and
   prints a `test durations` warning annotation: shards split by test count, and the
-  test selector, whose budget guards compare two sums of timings and have nothing to
-  compare, returns FULL (`no-durations`).
-
-## When the selector declines a subset
-
-Two guards turn a would-be subset into the eight-shard fan-out. The first is fixed
-in time: more than **nine tenths** of the whole suite is not a subset in any
-checkout. The second depends on the suite being real: once the full estimate is
-larger than what the subset job can run — the job's 20 minutes on the four workers
-it uses — more than **half** of it is over budget too. The second guard is why a
-12,125-test selection (48% of 25,291) no longer reaches a job that reaches 89% of
-itself in 19 minutes (`#5500`); a fixture of a few seconds is below that line, so
-its share says nothing about time. `classify change` prints one `test-selection:`
-line with the decision, the reason, the count and a hash of the list, because the
-values otherwise live only in step outputs.
+  test selector, whose time estimates only report, estimates zero and selects the same
+  subset.
 - Development machines have no file unless `refresh_test_durations.py` (the
   single-runner `refresh` command) built one; pytest-split then warns and splits
   evenly.
 
 The workflow needs only `actions: read` and the default token, no secret, no
 repository setting and no approval step.
+
+## How large a subset can be
+
+The selector never declines a subset for its size or estimated time
+([rules](../../../docs/conventions/engineering/test-selection.md)): FULL means the impact is
+unknown or the run is a queue branch. `classify change` prints one `test-selection:` line
+with the decision, the reason, the count, the estimated seconds of the subset and of the
+whole suite and a hash of the list, because the values otherwise live only in step outputs.
+A subset can be the whole suite, so it is sharded by its estimated time: `ceil(est / full * 8)`
+shards, at most the 8 of the full fan-out, each with the full shards' 20-minute limit (a
+12,125-test selection, 48% of 25,291, once reached 89% of a single twenty-minute job in 19
+minutes, `#5500`). The shards need the same timing cache as the full fan-out for the split.
 
 ## Tool input boundary
 
