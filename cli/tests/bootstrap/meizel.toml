@@ -17,13 +17,6 @@ exports = [
 "_logging_entry_child.py" = ["services/agent_runner/agent_ops"]
 
 [debt.env-patch]
-"test_dotenv_boot_launcher_context_cli.py#monkeypatch.delitem os.environ" = 1
-"test_dotenv_boot_launcher_context_cli.py#monkeypatch.delitem os.environ.MEIVA_PROCESS_PROFILE" = 1
-"test_dotenv_boot_launcher_context_cli.py#monkeypatch.setitem os.environ" = 1
-"test_dotenv_boot_launcher_context_cli.py#monkeypatch.setitem os.environ.MEIVA_APP_PORT" = 1
-"test_dotenv_boot_launcher_context_cli.py#monkeypatch.setitem os.environ.MEIVA_DB_URL" = 1
-"test_dotenv_boot_launcher_context_cli.py#monkeypatch.setitem os.environ.MEIVA_PROCESS_PROFILE" = 1
-"test_dotenv_boot_launcher_context_cli.py#monkeypatch.setitem os.environ.MEIVA_REDIS_URL" = 1
 "test_python_install.py#monkeypatch.delenv os.environ" = 1
 "test_python_install.py#monkeypatch.setenv os.environ" = 1
 "test_python_install.py#monkeypatch.setenv os.environ.PIP_CONFIG_FILE" = 1
