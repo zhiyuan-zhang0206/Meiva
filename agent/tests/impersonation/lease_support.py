@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,15 +13,23 @@ import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.base import (
+    BaseCheckpointSaver,
+    ChannelVersions,
+    Checkpoint,
+    CheckpointMetadata,
+)
 from langgraph.graph import END, START, StateGraph
 from psycopg_pool import AsyncConnectionPool
 
+from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import BaseAgentState
 from agent.takeover.process import spawn_relay
 from agent.takeover.relay import RelayBinding, RelayWait, TakeoverHost
 from base.agents import impersonation as leases
 from base.agents.context import MeivaContext
+from base.agents.history.checkpoint_postgres_walks import HistoryAsyncPostgresSaver
+from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.api_contracts.caller_identity import CallerIdentity
@@ -38,9 +47,11 @@ from base.packages.plugin_providers import build_model_catalog
 __all__ = [
     "QUICK_WAIT",
     "Cluster",
+    "FlushFaultSaver",
     "cluster",
     "exited_child",
     "fixed_clock",
+    "flush_fault_saver",
     "idle_graph",
     "native_context",
     "relay_program",
@@ -179,7 +190,46 @@ def native_context(
     )
 
 
-async def idle_graph(agent_id: int) -> tuple[Any, RunnableConfig]:
+# meiva:note
+# The production history saver with one injected fault: while armed, every database write
+# fails. The throttled saver reaches that write when it flushes a buffered state update, so a
+# failure here is a real failed flush that leaves the buffered tail retryable.
+class FlushFaultSaver(HistoryAsyncPostgresSaver):
+    def __init__(self, pool: AsyncConnectionPool[Any]) -> None:
+        super().__init__(pool)
+        self._write_fault: OSError | None = None
+
+    async def aput(
+        self,
+        config: RunnableConfig,
+        checkpoint: Checkpoint,
+        metadata: CheckpointMetadata,
+        new_versions: ChannelVersions,
+    ) -> RunnableConfig:
+        if self._write_fault is not None:
+            raise self._write_fault
+        return await super().aput(config, checkpoint, metadata, new_versions)
+
+    @contextmanager
+    def failing_writes(self, error: OSError) -> Generator[None]:
+        self._write_fault = error
+        try:
+            yield
+        finally:
+            self._write_fault = None
+
+
+async def flush_fault_saver(pool: AsyncConnectionPool[Any]) -> FlushFaultSaver:
+    saver = FlushFaultSaver(pool)
+    await saver.setup()
+    wrap_saver_writes_with_nstep_interval(saver, 100)
+    wrap_saver_reads_with_delta_reconstruction(saver)
+    return saver
+
+
+async def idle_graph(
+    agent_id: int, checkpointer: BaseCheckpointSaver[Any]
+) -> tuple[Any, RunnableConfig]:
     builder: Any = StateGraph(BaseAgentState)
 
     def idle(_state: BaseAgentState) -> dict[str, Any]:
@@ -188,7 +238,7 @@ async def idle_graph(agent_id: int) -> tuple[Any, RunnableConfig]:
     builder.add_node("idle", idle)
     builder.add_edge(START, "idle")
     builder.add_edge("idle", END)
-    graph: Any = builder.compile(checkpointer=MemorySaver())
+    graph: Any = builder.compile(checkpointer=checkpointer)
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     await graph.ainvoke(
         {"messages": [HumanMessage(id="initial-request", content="Finish the task")]}, config

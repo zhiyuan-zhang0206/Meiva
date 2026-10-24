@@ -7,8 +7,9 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.execution.protocol import ResultPayload
-from agent.graph.exec._child_boundary import ParentFacts, read_parent_facts
+from agent.graph.exec._child_boundary import ParentFacts
 from agent.graph.exec.node import ExecDone, ExecOutputChunkPublisher, ExecResult
+from agent.graph.exec.process import read_parent_facts
 from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config.tests.configuration import defaults

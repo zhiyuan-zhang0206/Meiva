@@ -6,9 +6,12 @@ from pathlib import Path
 from typing import Any, cast
 
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.graph.state import CompiledStateGraph
 from psycopg.types.json import Jsonb
 
 from agent.messages import system_note_message
+from agent.state import BaseAgentState
 from agent.takeover.notes import (
     NoteDraft,
     NoteStamp,
@@ -20,6 +23,7 @@ from agent.takeover.notes import (
     introduction_draft,
     start_drafts,
 )
+from base.agents.context import MeivaContext
 from base.agents.impersonation import OPEN, lock_lease, require_native
 from base.agents.impersonation.history import export_handoff, metadata
 from base.agents.impersonation.wake import publish_inbound_wake
@@ -30,6 +34,8 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
+AgentGraph = CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState]
+
 
 async def flush_checkpoint(checkpointer: object, agent_id: int) -> None:
     """Flush the optional buffered saver without probing dynamic attributes."""
@@ -37,6 +43,13 @@ async def flush_checkpoint(checkpointer: object, agent_id: int) -> None:
     if "_meiva_nstep_flush" in attributes:
         flush = cast(Callable[[str], Awaitable[None]], attributes["_meiva_nstep_flush"])
         await flush(str(agent_id))
+
+
+# meiva:note
+# LangGraph types the compiled graph's checkpointer with unknown generics, so the flush receives
+# it through the structural `object` that `flush_checkpoint` accepts.
+async def flush_graph_checkpoint(graph: AgentGraph, agent_id: int) -> None:
+    await flush_checkpoint(graph.checkpointer, agent_id)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
 
 
 def note_stamp(clock: Clock, *, timestamps: bool) -> NoteStamp:
@@ -81,10 +94,10 @@ def start_update(
 
 
 async def ensure_start_marker(
-    graph: Any, session: dict[str, Any], *, notes: TimestampPolicy
+    graph: AgentGraph, session: dict[str, Any], *, notes: TimestampPolicy
 ) -> None:
     """Repair a crash between accepting the request and saving its timeline anchor."""
-    config = {"configurable": {"thread_id": str(session["agent_id"])}}
+    config: RunnableConfig = {"configurable": {"thread_id": str(session["agent_id"])}}
     snapshot = await graph.aget_state(config)
     introduced = snapshot.values.get("impersonation_introduced", False)
     update = start_update(
@@ -95,7 +108,7 @@ async def ensure_start_marker(
     )
     if update["messages"] or not introduced:
         await graph.aupdate_state(config, update)
-    await flush_checkpoint(graph.checkpointer, session["agent_id"])
+    await flush_graph_checkpoint(graph, session["agent_id"])
 
 
 def resume_note_pending(state: Any) -> bool:
@@ -156,7 +169,7 @@ def record_handoff_receipt(
 
 
 async def deliver_handoff(
-    graph: Any,
+    graph: AgentGraph,
     db: Database,
     bus: EventBus,
     session: dict[str, Any],
@@ -186,7 +199,7 @@ async def deliver_handoff(
     summary, path = await asyncio.to_thread(
         save_document, db, session, incarnation, workspace=workspace
     )
-    config = {"configurable": {"thread_id": str(incarnation.agent_id)}}
+    config: RunnableConfig = {"configurable": {"thread_id": str(incarnation.agent_id)}}
     snapshot = await graph.aget_state(config)
     ref = SessionRef.of(session)
     receipt = handoff_receipt(ref)
@@ -202,7 +215,7 @@ async def deliver_handoff(
                 "turn_active": True,
             },
         )
-    await flush_checkpoint(graph.checkpointer, incarnation.agent_id)
+    await flush_graph_checkpoint(graph, incarnation.agent_id)
     await asyncio.to_thread(record_handoff_receipt, db, session, incarnation)
     # The receipt opens the claim gate; this wake drives the note's first turn when
     # nothing else is queued (and re-drives it if this turn ends before that

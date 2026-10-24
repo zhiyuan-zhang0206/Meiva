@@ -17,7 +17,7 @@ from typing import Any, cast
 
 import pytest
 
-from agent.graph.prompt.live import LiveSdk, discover_all_namespaces
+from agent.graph.prompt.live import LiveSdk, SectionInputs, discover_all_namespaces
 from agent.graph.prompt.sdk_scope import CAPABILITY_SURFACES
 from agent.graph.prompt.skill_selection import SkillView
 from agent.graph.prompt.system_prompt import effective_sdk_expand, sdk_expand_section
@@ -82,7 +82,7 @@ def test_wildcard_excludes_functions_and_private_names(model_catalog: ModelCatal
     assert "understand" not in result
     assert "impersonation" not in result
     assert "## meiva.impersonation" not in sdk_expand_section(
-        _slices(["*"]), catalog=model_catalog, live=_live()
+        SectionInputs(_slices(["*"]), model_catalog, _live())
     )
     assert not any(name.startswith("_") for name in result)
 
@@ -96,7 +96,7 @@ def test_wildcard_skips_capability_surfaces(model_catalog: ModelCatalog) -> None
 
     assert {"skills", "mcps"} == set(CAPABILITY_SURFACES)
     assert not (set(CAPABILITY_SURFACES) & set(result))
-    text = sdk_expand_section(_slices(["*"]), catalog=model_catalog, live=_live())
+    text = sdk_expand_section(SectionInputs(_slices(["*"]), model_catalog, _live()))
     assert "## meiva.skills" not in text
     assert "## meiva.mcps" not in text
 
@@ -113,7 +113,7 @@ def test_capability_surface_expands_when_named_explicitly(model_catalog: ModelCa
     install_registry.register(InstalledPackage(name="alpha", type="skill"))
     assert "skills" in _expand(["*", "skills"])
 
-    text = sdk_expand_section(_slices(["*", "skills"]), catalog=model_catalog, live=_live())
+    text = sdk_expand_section(SectionInputs(_slices(["*", "skills"]), model_catalog, _live()))
 
     assert "## meiva.skills" in text
     assert "SECRET_MARKER" not in text
@@ -147,7 +147,7 @@ def test_member_of_a_capability_surface_is_refused(
     assert "mcps.chrome" not in result
     assert "refusing 'skills.gmail'" in caplog.text
     assert "refusing 'mcps.chrome'" in caplog.text
-    text = sdk_expand_section(_slices(configured), catalog=model_catalog, live=_live())
+    text = sdk_expand_section(SectionInputs(_slices(configured), model_catalog, _live()))
     assert "## meiva.skills.gmail" not in text
     assert "## meiva.mcps.chrome" not in text
 
@@ -199,7 +199,7 @@ def test_missing_unregistered_expand_path_warns(
     """An unregistered missing path reaches the existing resolution warning."""
     with caplog.at_level("WARNING", logger="agent.graph.prompt.live"):
         text = sdk_expand_section(
-            _slices(["missing_sdk_namespace"]), catalog=model_catalog, live=_live()
+            SectionInputs(_slices(["missing_sdk_namespace"]), model_catalog, _live())
         )
 
     assert text == ""
@@ -211,9 +211,11 @@ def test_disabled_expand_path_is_skipped_without_a_warning(
 ) -> None:
     with caplog.at_level("WARNING", logger="agent.graph.prompt.live"):
         text = sdk_expand_section(
-            _slices(["missing_sdk_namespace"]),
-            catalog=model_catalog,
-            live=_live(("missing_sdk_namespace",)),
+            SectionInputs(
+                _slices(["missing_sdk_namespace"]),
+                model_catalog,
+                _live(("missing_sdk_namespace",)),
+            )
         )
 
     assert text == ""
@@ -232,7 +234,7 @@ def test_plugin_expansions_lead_the_wildcard() -> None:
 def test_section_renders_all_wildcard_namespaces(model_catalog: ModelCatalog) -> None:
     """The rendered section carries one `## meiva.<name>` contract per discovered
     namespace and no heading for the skipped top-level functions."""
-    text = sdk_expand_section(_slices(["*"]), catalog=model_catalog, live=_live())
+    text = sdk_expand_section(SectionInputs(_slices(["*"]), model_catalog, _live()))
 
     assert text.startswith("# Expanded SDK reference")
     for ns in FRAMEWORK_NAMESPACES:
@@ -272,7 +274,7 @@ def test_section_hides_attach_for_text_only_model(model_catalog: ModelCatalog) -
     """A text-only model's expanded SDK reference carries no attach contract —
     the member is unavailable to it (user ruling 2026-08-28)."""
     text = sdk_expand_section(
-        _slices(["*"], lm__llm_model="deepseek-v4-pro"), catalog=model_catalog, live=_live()
+        SectionInputs(_slices(["*"], lm__llm_model="deepseek-v4-pro"), model_catalog, _live())
     )
 
     assert "## meiva.self" in text
@@ -283,7 +285,7 @@ def test_section_keeps_attach_for_media_capable_model(model_catalog: ModelCatalo
     """A media-capable model's expanded SDK reference keeps the attach
     contract unchanged (user ruling 2026-08-28)."""
     text = sdk_expand_section(
-        _slices(["*"], lm__llm_model="claude-sonnet-5"), catalog=model_catalog, live=_live()
+        SectionInputs(_slices(["*"], lm__llm_model="claude-sonnet-5"), model_catalog, _live())
     )
 
     assert "## meiva.self" in text

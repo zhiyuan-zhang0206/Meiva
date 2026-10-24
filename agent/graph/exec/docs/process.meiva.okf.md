@@ -7,7 +7,7 @@ tags: []
 
 # Graph child process boundary
 
-The compiled graph binds one stateless `SubprocessExecProcess` through a required
+The compiled graph binds one immutable `SubprocessExecProcess` through a required
 `ExecProcess.run` operation. Each invocation supplies its own context, state,
 overlay, cancellation event and output publisher. The node captures overlay before
 subscribing to durable interrupts and retains shield timeout, cancellation
@@ -19,16 +19,18 @@ reducers.
 The real operation is synchronous until it returns the backend awaitable: inner
 execution limits are read before the outer shield timeout. State serialization
 and those reads occur without suspension; serialization now precedes the inner
-reads. No live configuration is frozen at graph construction.
+reads. No live configuration is frozen at graph construction; the only value read then
+is the process's `ParentFacts`.
 
-The production adapter delegates to the existing subprocess backend. It reads
-what the spawn needs to know about this process once per call
-(`read_parent_facts`: environment, cwd, interpreter, checkout, editable roots) and
-passes it as a `ParentFacts` value; the backend's launch plan, editable
-installation admission, process domain, native signals, output pipe, grace/reap
-and artifact cleanup contracts remain there. A test that must change what the
-child inherits overrides `parent_facts` on the adapter or hands `ParentFacts` to
-the backend; none patches the environment. Graph tests can supply scripted
+The production adapter delegates to the existing subprocess backend. It is a frozen
+value holding the `ParentFacts` of this process (environment, cwd, interpreter,
+checkout, editable roots), which `process.read_parent_facts` reads once when the
+graph is built (`_build.py`). The backend's launch plan, editable installation
+admission, process domain, native signals, output pipe, grace/reap and artifact
+cleanup contracts remain there. A test that must change what the child inherits
+constructs the adapter with its own `ParentFacts` (a changed copy of
+`read_parent_facts()`) or hands one to the backend; none subclasses the adapter or
+patches the environment. Graph tests can supply scripted
 sum/envelope outcomes without replacing interruption, payload validation, elapsed
 measurement or reducer commits. A plugin's base messages channel still requires
 its real registry declaration; a scripted result cannot bypass that validation.

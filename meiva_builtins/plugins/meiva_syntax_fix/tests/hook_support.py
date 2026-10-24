@@ -9,6 +9,7 @@ from typing import Any
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages.ai import UsageMetadata
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.runtime import Runtime
 from pydantic import Field
@@ -37,6 +38,7 @@ REPAIRED = "x = 'fixed'\nprint(x)"
 class ScriptedRepairModel(BaseChatModel):
     replies: list[str] = Field(default_factory=list)
     fails: bool = False
+    usage: UsageMetadata | None = None
 
     @property
     def _llm_type(self) -> str:
@@ -53,7 +55,8 @@ class ScriptedRepairModel(BaseChatModel):
         if self.fails:
             raise TimeoutError("the repair model did not answer")
         reply = self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
-        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=reply))])
+        message = AIMessage(content=reply, usage_metadata=self.usage)
+        return ChatResult(generations=[ChatGeneration(message=message)])
 
 
 def repairs_unterminated_string(model: str, *, agent_id: int | None = None) -> BaseChatModel:

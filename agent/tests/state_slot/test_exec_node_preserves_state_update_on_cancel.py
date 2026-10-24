@@ -13,7 +13,7 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.exec.node import exec_node_impl
-from agent.graph.exec.process import SubprocessExecProcess
+from agent.graph.exec.process import SubprocessExecProcess, read_parent_facts
 from agent.graph.interrupt.tests.queued_commands import queue_command
 from agent.state import BaseAgentState
 from agent.tests.test_state_slot import ai_message_with_code, make_runtime_and_config
@@ -74,7 +74,10 @@ async def test_exec_node_preserves_state_update_on_cancel(
 
     node_task = asyncio.create_task(
         exec_node_impl(
-            cast(BaseAgentState, state), runtime, config, process=SubprocessExecProcess()
+            cast(BaseAgentState, state),
+            runtime,
+            config,
+            process=SubprocessExecProcess(read_parent_facts()),
         )
     )
     deadline = time.monotonic() + 20.0

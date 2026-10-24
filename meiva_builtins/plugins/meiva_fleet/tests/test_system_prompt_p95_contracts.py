@@ -4,7 +4,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from agent.graph.prompt.live import read_live_sdk
+from agent.graph.prompt.live import SectionInputs, read_live_sdk
 from agent.graph.prompt.system_prompt import sdk_expand_section
 from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
 from base.config import FIELD_INFOS
@@ -61,7 +61,7 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
         default_reader=defaults(agent__sdk_expand_in_system_prompt=factory())
     )
 
-    text = sdk_expand_section(slices, catalog=model_catalog, live=read_live_sdk(slices.prompt))
+    text = sdk_expand_section(SectionInputs(slices, model_catalog, read_live_sdk(slices.prompt)))
 
     for module in ["shell", "files", "agents", "tasks"]:
         assert f"## meiva.{module}\n" in text

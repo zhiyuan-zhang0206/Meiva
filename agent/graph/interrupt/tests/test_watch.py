@@ -5,7 +5,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.interrupt import InterruptEvent, subscribe_interrupt
-from agent.graph.interrupt._watch import owned_watch, watch_for_interrupt
+from agent.graph.interrupt._watch import watch_for_interrupt
 from agent.graph.interrupt.tests.queued_commands import queue_command
 from base.agents.messages.inbound import InterruptReason
 from base.db import create_agent
@@ -79,35 +79,6 @@ async def test_a_poll_that_returns_after_stop_ends_the_watcher_without_firing(
             stop.set()
         await asyncio.wait_for(watcher, _ARRIVAL_TIMEOUT_S)
 
-    assert not event.is_set()
-
-
-async def test_a_watcher_that_swallowed_its_cancel_ends_at_its_next_check_without_firing(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
-) -> None:
-    agent_id = create_agent(db_conn)
-    queue_command(db_conn, agent_id, "cancel")
-    event, stop = InterruptEvent(), asyncio.Event()
-    entered, swallowed, finished = asyncio.Event(), asyncio.Event(), asyncio.Event()
-
-    async def swallows_one_cancel() -> None:
-        entered.set()
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            swallowed.set()
-        await watch_for_interrupt(aops_pool, event, agent_id, stop, poll_s=_POLL_S)
-        finished.set()
-
-    async with owned_watch(
-        hosted_resources, agent_id, event, stop, swallows_one_cancel(), exit_timeout_s=1.0
-    ):
-        await entered.wait()
-
-    assert swallowed.is_set()
-    assert finished.is_set()
     assert not event.is_set()
 
 

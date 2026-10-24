@@ -7,7 +7,7 @@ from typing import cast
 import pytest
 
 from agent.graph.prompt.capabilities import McpServer, capabilities_section, recall_candidates
-from agent.graph.prompt.live import LiveSdk
+from agent.graph.prompt.live import LiveSdk, SectionInputs
 from agent.graph.prompt.sdk_scope import disabled_by_sdk_config
 from agent.graph.prompt.skill_selection import SkillView, indexed_skill_identifiers
 from agent.graph.prompt.system_prompt import build_system_prompt, delegation_check_section
@@ -28,14 +28,16 @@ CHROME = McpServer("chrome", "Drive a browser")
 def _delegation_check(root: Path, *, inject: list[str], servers: tuple[McpServer, ...] = ()) -> str:
     view = skill_view(root, inject=inject)
     return delegation_check_section(
-        AgentSlices.resolve(
-            default_reader=defaults(
-                agent__prompt_delegation_check_enabled=True,
-                agent__skills_to_inject_into_system_prompt=inject,
-            )
-        ),
-        catalog=build_model_catalog(),
-        live=LiveSdk(view, servers, ()),
+        SectionInputs(
+            AgentSlices.resolve(
+                default_reader=defaults(
+                    agent__prompt_delegation_check_enabled=True,
+                    agent__skills_to_inject_into_system_prompt=inject,
+                )
+            ),
+            build_model_catalog(),
+            LiveSdk(view, servers, ()),
+        )
     )
 
 
