@@ -298,40 +298,77 @@ class TestReasoningEffortDispatch:
         assert m.thinking_level == "minimal"
         assert m.include_thoughts is False
 
+    @pytest.mark.parametrize(
+        "model",
+        ("kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"),
+    )
+    @pytest.mark.parametrize("effort", ("low", "high", "max"))
     def test_kimi_effort_injected_via_extra_body(
-        self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        model: str,
+        effort: str,
+        *,
+        model_catalog: ModelCatalog,
     ) -> None:
         from langchain_moonshot import ChatMoonshot
 
         m = build_chat_model(
-            "kimi-k3",
+            model,
             catalog=model_catalog,
             keys=ProviderKeys({"MOONSHOT_API_KEY": "sk-kimi"}),
             llm_override="",
-            overrides=model_overrides(reasoning_effort="low"),
+            overrides=model_overrides(reasoning_effort=effort),
         )
         assert isinstance(m, ChatMoonshot)
-        assert m.extra_body == {"reasoning_effort": "low"}
+        assert m.extra_body == {"reasoning_effort": effort}
 
+    @pytest.mark.parametrize(
+        "model",
+        ("kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"),
+    )
+    def test_kimi_defaults_to_max_effort_via_extra_body(
+        self, monkeypatch: pytest.MonkeyPatch, model: str, *, model_catalog: ModelCatalog
+    ) -> None:
+        from langchain_moonshot import ChatMoonshot
+
+        m = build_chat_model(
+            model,
+            catalog=model_catalog,
+            keys=ProviderKeys({"MOONSHOT_API_KEY": "sk-kimi"}),
+            llm_override="",
+            overrides=model_overrides(),
+        )
+        assert isinstance(m, ChatMoonshot)
+        assert m.extra_body == {"reasoning_effort": "max"}
+
+    @pytest.mark.parametrize(
+        "model",
+        ("kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"),
+    )
     def test_kimi_rejects_medium(
-        self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+        self, monkeypatch: pytest.MonkeyPatch, model: str, *, model_catalog: ModelCatalog
     ) -> None:
         with pytest.raises(ValueError, match="unsupported reasoning effort"):
             build_chat_model(
-                "kimi-k3",
+                model,
                 catalog=model_catalog,
                 keys=ProviderKeys({"MOONSHOT_API_KEY": "test-key"}),
                 llm_override="",
                 overrides=model_overrides(reasoning_effort="medium"),
             )
 
+    @pytest.mark.parametrize(
+        "model",
+        ("kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"),
+    )
     def test_kimi_thinking_disabled_sends_no_thinking_param(
-        self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+        self, monkeypatch: pytest.MonkeyPatch, model: str, *, model_catalog: ModelCatalog
     ) -> None:
         from langchain_moonshot import ChatMoonshot
 
         m = build_chat_model(
-            "kimi-k3",
+            model,
             thinking={"type": "disabled"},
             catalog=model_catalog,
             keys=ProviderKeys({"MOONSHOT_API_KEY": "sk-kimi"}),

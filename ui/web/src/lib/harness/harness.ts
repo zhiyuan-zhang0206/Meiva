@@ -27,6 +27,8 @@ export function harnessLabel(harness: Harness): string {
       return "Codex";
     case "antigravity":
       return "Antigravity";
+    case "kimi_code":
+      return "Kimi Code";
   }
 }
 

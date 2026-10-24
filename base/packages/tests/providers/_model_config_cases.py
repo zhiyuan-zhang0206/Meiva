@@ -126,6 +126,16 @@ def validate_all_supported_models_pass_name_check(
 def validate_superseded_model_stays_spawn_valid(
     model_catalog: ModelCatalog,
 ) -> None:
+    assert (
+        validate_model_launch(
+            model="kimi-k3",
+            config={"llm_model": "kimi-k3"},
+            catalog=model_catalog,
+            llm_override="",
+            keys=process_provider_keys(model_catalog),
+        )
+        == "kimi-k3"
+    )
     model_catalog = replace(
         model_catalog,
         models={
@@ -211,13 +221,14 @@ def validate_missing_mimo_key_raises(model_catalog: ModelCatalog) -> None:
 
 
 def validate_missing_kimi_key_raises(model_catalog: ModelCatalog) -> None:
-    with pytest.raises(ValueError, match="MOONSHOT_API_KEY"):
-        validate_model_launch(
-            model="kimi-k3",
-            catalog=model_catalog,
-            llm_override="",
-            keys=process_provider_keys(model_catalog),
-        )
+    for model in ("kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"):
+        with pytest.raises(ValueError, match="MOONSHOT_API_KEY"):
+            validate_model_launch(
+                model=model,
+                catalog=model_catalog,
+                llm_override="",
+                keys=process_provider_keys(model_catalog),
+            )
 
 
 def validate_missing_glm_key_raises(model_catalog: ModelCatalog) -> None:

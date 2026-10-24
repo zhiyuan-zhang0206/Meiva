@@ -11,9 +11,9 @@ tags:
 # Harness
 
 A harness is the shell that runs the agent loop — Meiva's own runtime, or an
-external CLI such as Claude Code, Codex or Antigravity. The model and its
-provider are separate choices. `Harness` values: `meiva` (default),
-`claude_code`, `codex`, `antigravity`.
+external CLI such as Claude Code, Codex, Antigravity or Kimi Code. The model and
+its provider are separate choices. `Harness` values: `meiva` (default),
+`claude_code`, `codex`, `antigravity`, `kimi_code`.
 
 ## Choosing one at spawn
 

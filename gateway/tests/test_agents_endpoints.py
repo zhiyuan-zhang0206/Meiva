@@ -111,6 +111,9 @@ def test_get_models_surfaces_superseded_by(
         resp = client.get("/api/models")
     body = resp.json()
     assert body["models"]["glm-5.2"]["superseded_by"] == "kimi-k3"
+    assert body["models"]["kimi-k3"]["superseded_by"] == "kimi-k3.1-pro"
+    assert body["models"]["kimi-k3.1-pro"]["superseded_by"] is None
+    assert body["models"]["kimi-k3.1-pro-highspeed"]["superseded_by"] is None
     assert body["models"]["deepseek-flash"]["superseded_by"] is None
 
 
@@ -171,12 +174,28 @@ def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value() -> 
     assert resp.status_code == 200
     models = resp.json()["models"]
 
-    assert models["deepseek-flash"]["reasoning_effort_default"] == "max"
-    assert models["claude-sonnet-5"]["reasoning_effort_default"] == "high"
-    assert models["claude-haiku-4-5-20251001"]["reasoning_effort_default"] == "none"
-    assert models["gpt-5.6-sol"]["reasoning_effort_default"] == "medium"
-    assert models["kimi-k3"]["reasoning_effort_default"] == "max"
-    assert models["glm-5.2"]["reasoning_effort_default"] == "max"
+    assert {
+        m: models[m]["reasoning_effort_default"]
+        for m in (
+            "deepseek-flash",
+            "claude-sonnet-5",
+            "claude-haiku-4-5-20251001",
+            "gpt-5.6-sol",
+            "kimi-k3",
+            "kimi-k3.1-pro",
+            "kimi-k3.1-pro-highspeed",
+            "glm-5.2",
+        )
+    } == {
+        "deepseek-flash": "max",
+        "claude-sonnet-5": "high",
+        "claude-haiku-4-5-20251001": "none",
+        "gpt-5.6-sol": "medium",
+        "kimi-k3": "max",
+        "kimi-k3.1-pro": "max",
+        "kimi-k3.1-pro-highspeed": "max",
+        "glm-5.2": "max",
+    }
 
     for model, info in models.items():
         expected = build_model_catalog().models[model].tuning.reasoning_effort
