@@ -13,6 +13,7 @@ from base.cluster.machines import register_self
 from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.tests.serving_root import serving_root as serving_root
+from base.paths.home import resolve_meiva_home
 from gateway.app import openapi_schema
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.cluster_endpoints.cluster_support import (
@@ -37,7 +38,7 @@ def test_a_pure_gateway_reports_startup_once_a_stop_has_begun(
     machine: MachineIdentity = set_machine_identity(role="gateway", name="test-mc")
     with gateway_test_client(machine=machine) as client:
         serving = client.get("/api/cluster/status").json()
-        start_serving.clear_serving()
+        start_serving.clear_serving(resolve_meiva_home())
         r = client.get("/api/cluster/status")
     assert serving["paused"] is False
     assert serving["paused_reason"] is None

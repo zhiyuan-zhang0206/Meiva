@@ -24,7 +24,7 @@ from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.paths import run_dir
 from base.sessions.pty import client, closure
-from base.sessions.pty.paths import ledger_path
+from base.sessions.pty.paths import ledger_path, service_socket_path
 from cli.commands.data_plane.maintenance.survivors import SurvivorInventory
 from cli.commands.data_plane.maintenance_stop_report import (
     StopIncompleteError,

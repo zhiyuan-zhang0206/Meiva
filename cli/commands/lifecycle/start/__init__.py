@@ -436,7 +436,9 @@ def _wait_ready(
 
 def _finalize(start: _Start, serving_generation: str) -> int:
     with start_trace.phase("finalize"):
-        if not start_serving.mark_serving(serving_generation, runtime=start.runtime.loaded):
+        if not start_serving.mark_serving(
+            start.command.home, serving_generation, runtime=start.runtime.loaded
+        ):
             print("  \u2717 this start lost its serving generation", file=sys.stderr)
             return 1
         mark_phase(start.command.home, "ready")

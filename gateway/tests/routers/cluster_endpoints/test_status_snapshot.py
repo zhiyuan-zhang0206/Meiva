@@ -20,6 +20,7 @@ from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.tests.serving_root import serving_root as serving_root
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths.home import resolve_meiva_home
 from base.paths.tests.homes import point_home
 from gateway.tests.routers.cluster_endpoints.cluster_support import (
     prod_source_checkout,
@@ -56,7 +57,7 @@ def test_snapshot_reflects_the_serving_gate_and_role(
     assert snap.paused is False
     # meiva:note
     # a stop clears the gate
-    start_serving.clear_serving()
+    start_serving.clear_serving(resolve_meiva_home())
     snap2 = _snapshot(database, machine_identity, image)
     assert snap2.paused is True
     assert snap2.paused_reason == "startup"

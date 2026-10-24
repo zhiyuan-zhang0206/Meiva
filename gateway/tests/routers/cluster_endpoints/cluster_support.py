@@ -23,6 +23,7 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import RequestPayload, ResponsePayload, ok_response
 from base.paths import root_run_dir
+from base.paths.home import resolve_meiva_home
 from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.roster.roster_probe import IdentityMismatchLog
 from gateway.cluster.status import RosterEnv
@@ -176,11 +177,13 @@ def seed_in_progress_task(db_conn: psycopg.Connection, owner: int, title: str) -
 # local machine reads `paused` with reason `startup`.
 @pytest.fixture
 def serving_gate(serving_root: RootBirth) -> Generator[None]:
-    assert start_serving.mark_serving(start_serving.begin_start(), runtime=serving_root.runtime)
+    home = resolve_meiva_home()
+    generation = start_serving.begin_start(home)
+    assert start_serving.mark_serving(home, generation, runtime=serving_root.runtime)
     try:
         yield
     finally:
-        start_serving.clear_serving()
+        start_serving.clear_serving(home)
 
 
 # meiva:note

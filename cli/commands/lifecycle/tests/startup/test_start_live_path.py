@@ -85,7 +85,7 @@ def test_a_gateway_host_does_not_probe_a_gateway_it_is(
 
     assert "probe gateway" not in capsys.readouterr().out
     assert gateway.requests == [STATUS_PATH], "only the status block's own view of the gateway"
-    assert start_serving.is_serving()
+    assert start_serving.is_serving(run.home)
 
 
 # meiva:note

@@ -649,8 +649,8 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
     # hand-off asks the process's own systemd cgroup.
     monkeypatch.setattr(root_driver, "complete_boot_start", fail)
     with start_intent.admitted_home(inputs.home):
-        start_serving.begin_start()
-        assert start_serving.state_path().exists()
+        start_serving.begin_start(inputs.home)
+        assert start_serving.state_path(inputs.home).exists()
         with pytest.raises(RuntimeError, match="refused native custody"):
             start_intent.finish_start(0, helper=None, host=command_runtime.host, home=inputs.home)
         assert not start_serving.state_path(inputs.home).exists(), (

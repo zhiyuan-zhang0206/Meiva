@@ -115,7 +115,9 @@ def do_stop(
         try:
             unstarted = require_unstarted_initialization(env.command.home)
         except _STOP_FAILURES as exc:
-            report_incomplete(exc, [], owns_journal=False, journal_opened=False)
+            report_incomplete(
+                exc, [], home=env.command.home, owns_journal=False, journal_opened=False
+            )
             return 1
         if unstarted:
             plan = plan_stop(choices, replace(host, unstarted=True), request.window)
@@ -172,9 +174,13 @@ def _run_normal(
     try:
         outcome = execute_plan(plan, env, run, retained_children, timed=True)
     except _STOP_FAILURES as exc:
-        report_incomplete(exc, run.phases, owns_journal=owns_journal, journal_opened=True)
+        report_incomplete(
+            exc, run.phases, home=home, owns_journal=owns_journal, journal_opened=True
+        )
         return 1
-    return finish_stop(owns_journal=owns_journal, notes=outcome.notes, clients=outcome.clients)
+    return finish_stop(
+        home, owns_journal=owns_journal, notes=outcome.notes, clients=outcome.clients
+    )
 
 
 def cmd_stop(

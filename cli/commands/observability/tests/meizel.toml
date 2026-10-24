@@ -5,4 +5,3 @@
 
 [debt.unresolved-patch]
 "test_atomic_writer_contracts.py#monkeypatch.setattr module._fsync_parent" = 1
-"test_atomic_writer_contracts.py#monkeypatch.setattr module.state_path" = 1

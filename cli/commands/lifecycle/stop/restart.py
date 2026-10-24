@@ -148,7 +148,7 @@ def _restart(run: _Invocation, retained_children: list[subprocess.Popen[bytes]])
     for leg in Leg:
         if leg.heading:
             print(leg.heading)
-        with status_journal.phase(leg.phase):
+        with status_journal.phase(home, leg.phase):
             rc = _run_leg(leg, run, retained_children)
         outcome = settle_leg(leg, rc)
         if isinstance(outcome, Finish):
@@ -178,7 +178,7 @@ def _cmd_restart_body(
     command: CommandRuntime,
     retained_children: list[subprocess.Popen[bytes]],
 ) -> int:
-    refusal = restart_refusal(hosting_exec_domain(), hosting_supervised_session())
+    refusal = restart_refusal(hosting_exec_domain(), hosting_supervised_session(command.home))
     if refusal is not None:
         print(refusal.message, file=sys.stderr)
         return RESTART_DECLINED_EXIT_CODE
@@ -313,7 +313,7 @@ def cmd_restart_agent_host(
     # wait up to `start_timeout` for its readiness.
     with operator_lifecycle_audit(database_factory=database_factory) as audit:
         try:
-            refuse_hosted_stop()
+            refuse_hosted_stop(command.home)
             client = admit_agent_host_restart(command, timeout=timeout)
             if client is None:
                 code = 1
