@@ -128,7 +128,7 @@ def _upload_arm(
     payload: dict[str, Any], pool: ConnectionPool | None, *, local_machine: str
 ) -> tuple[OpStatus, dict[str, object]]:
 
-    from httpx2 import HTTPStatusError
+    from httpx import HTTPStatusError
 
     from base.agents.upload_delivery.models import (
         ReceiveRequest,
