@@ -35,14 +35,14 @@ class EmbeddingDescriptor:
 
 
 _ProviderEntry = tuple[
-    Callable[[ModelCatalog, Callable[[], float], Callable[[], str | None]], EmbeddingProvider],
+    Callable[[ModelCatalog, float, str | None], EmbeddingProvider],
     Callable[[float], float],
     EmbeddingDescriptor,
 ]
 PROVIDERS: dict[str, _ProviderEntry] = {
     gemini.GeminiEmbeddingProvider.name: (
-        lambda catalog, timeout_reader, api_key_reader: gemini.GeminiEmbeddingProvider(
-            catalog, timeout_reader=timeout_reader, api_key_reader=api_key_reader
+        lambda catalog, timeout_s, api_key: gemini.GeminiEmbeddingProvider(
+            catalog, timeout_s=timeout_s, api_key=api_key
         ),
         gemini.worst_case_batch_seconds,
         EmbeddingDescriptor(
@@ -62,30 +62,14 @@ def _provider_entry(name: str) -> _ProviderEntry:
         raise ValueError(f"unknown embedding provider {name!r} (known: {known})") from None
 
 
-def get_provider_named(
-    name: str,
-    *,
-    catalog: ModelCatalog,
-    timeout_reader: Callable[[], float],
-    api_key_reader: Callable[[], str | None],
-) -> EmbeddingProvider:
-    """Construct a provider by name; unknown names fail fast."""
-    ctor, _, _ = _provider_entry(name)
-    return ctor(catalog, timeout_reader, api_key_reader)
-
-
+# meiva:note
+# Construct the provider `name` selects (the root read it from `MEIVA_EMBEDDING_BACKEND`);
+# unknown names fail fast.
 def get_provider(
-    name: str,
-    *,
-    catalog: ModelCatalog,
-    timeout_reader: Callable[[], float],
-    api_key_reader: Callable[[], str | None],
+    name: str, *, catalog: ModelCatalog, timeout_s: float, api_key: str | None
 ) -> EmbeddingProvider:
-    """Construct the configured provider
-    (`settings.services.embedding_backend`, env `MEIVA_EMBEDDING_BACKEND`)."""
-    return get_provider_named(
-        name, catalog=catalog, timeout_reader=timeout_reader, api_key_reader=api_key_reader
-    )
+    ctor, _, _ = _provider_entry(name)
+    return ctor(catalog, timeout_s, api_key)
 
 
 def worst_case_batch_seconds(name: str, *, timeout_seconds: float) -> float:

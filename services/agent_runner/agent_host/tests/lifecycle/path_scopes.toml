@@ -6,3 +6,6 @@
 "services.backup.artifact.tests.passphrase" = [
     "test_hosted_idle_recovery.py",
 ]
+"base.agents.inbox.tests.inbound_helpers" = [
+    "test_hosted_backlog_recovery.py",
+]

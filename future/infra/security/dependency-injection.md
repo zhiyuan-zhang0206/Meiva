@@ -295,9 +295,8 @@ Three more daemons, one slice each, each package declaring itself sliced:
 - `PageServerConfig` (`services/agent_runner/page_server`, root `daemon.py`): the poll interval and the
   live-event channel, threaded through the reconcile pass to the PageClosed publication.
 - `MemorySearchConfig` (`services/derived/memory_search`, root `daemon.py`): pidfile, data directory,
-  port and the batch bound `build_app` takes. The embedding provider still comes from the
-  memory-indexer factory, which three consumers share (gateway router, bring-up, this
-  daemon) and which waits for the shared-kernel batch.
+  port, the batch bound `build_app` takes and the embedding name the store's width comes from;
+  all read once at start.
 
 Not sliceable yet, found by re-scanning the code: `delivery_watchdog`, `ttl_reaper` and
 `schedule_manager` are being reworked; `memory_indexer` and `cli/commands/cluster` have
