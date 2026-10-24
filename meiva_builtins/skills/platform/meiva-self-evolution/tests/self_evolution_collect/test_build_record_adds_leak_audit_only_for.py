@@ -34,6 +34,10 @@ def test_build_record_adds_leak_audit_only_for_eval_collection(tmp_path: Path) -
         "transcript": (),
         "skills_touched": (),
     }
+    values["events"] = record_mod.event_facts(values["events"])
+    values["log_events"] = tuple(name for name, _ in values["log_events"])
+    values["inbounds"] = record_mod.inbound_facts(values["inbounds"])
+    values["transcript"] = record_mod.transcript_facts(values["transcript"])
     weekly = record_mod.build_record(record_mod.RunInputs(**values))
     audited = record_mod.build_record(record_mod.RunInputs(**values, leak_paths=paths))
 

@@ -13,7 +13,18 @@ from typing import NamedTuple, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from record import AgentMeta, Event, Inbound, RunInputs, TaskReceipts, build_record
+from record import build_record
+from record_inputs import (
+    AgentMeta,
+    Event,
+    EventFact,
+    Inbound,
+    RunInputs,
+    TaskReceipts,
+    event_facts,
+    inbound_facts,
+    transcript_facts,
+)
 
 _BUILTIN_HELP_CALL_RE = re.compile(r"(?<![a-zA-Z0-9_.])help\s*\(")
 _BUILTIN_HELP_ON_MEIVA_RE = re.compile(r"(?<![a-zA-Z0-9_.])help\s*\(\s*meiva\.")
@@ -35,13 +46,13 @@ def group_by_agent(rows: Sequence[Mapping[str, object]]) -> dict[int, list[Event
     return out
 
 
-def _builtin_help_counts(events: Sequence[Event]) -> tuple[int, int]:
+def _builtin_help_counts(events: Sequence[EventFact]) -> tuple[int, int]:
     calls = 0
     on_meiva = 0
-    for event, payload in events:
-        if event != "code":
+    for event in events:
+        if event.name != "code":
             continue
-        body = str(payload.get("body", ""))
+        body = event.body
         calls += len(_BUILTIN_HELP_CALL_RE.findall(body))
         on_meiva += len(_BUILTIN_HELP_ON_MEIVA_RE.findall(body))
     return calls, on_meiva
@@ -49,11 +60,9 @@ def _builtin_help_counts(events: Sequence[Event]) -> tuple[int, int]:
 
 # meiva:note
 # Count raw subprocess calls across executed code blocks with a regex. The count includes matching names in comments, docstrings and string literals, and it does not count ``asyncio.create_subprocess_*`` or ``subprocess.getoutput``.
-def subprocess_call_count(events: Sequence[Event]) -> int:
+def subprocess_call_count(events: Sequence[EventFact]) -> int:
     return sum(
-        len(_SUBPROCESS_CALL_RE.findall(str(payload.get("body", ""))))
-        for event, payload in events
-        if event == "code"
+        len(_SUBPROCESS_CALL_RE.findall(event.body)) for event in events if event.name == "code"
     )
 
 
@@ -109,11 +118,11 @@ def window_records(selected: Sequence[int], week: str, rows: WindowRows) -> list
             RunInputs(
                 agent_id=agent_id,
                 week=week,
-                events=tuple(rows.events.get(agent_id, [])),
-                log_events=tuple(rows.logs.get(agent_id, [])),
-                inbounds=tuple(rows.inbounds.get(agent_id, [])),
+                events=event_facts(rows.events.get(agent_id, [])),
+                log_events=tuple(name for name, _ in rows.logs.get(agent_id, [])),
+                inbounds=inbound_facts(rows.inbounds.get(agent_id, [])),
                 meta=rows.meta[agent_id],
-                transcript=tuple(rows.transcripts[agent_id]),
+                transcript=transcript_facts(rows.transcripts[agent_id]),
                 skills_touched=tuple(rows.skills[agent_id]),
                 task_receipts=rows.receipts.get(agent_id),
             )

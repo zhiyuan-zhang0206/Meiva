@@ -56,6 +56,10 @@ def _record(**fields: Any) -> dict[str, Any]:
         "skills_touched": (),
     }
     values.update(fields)
+    values["events"] = record_mod.event_facts(values["events"])
+    values["log_events"] = tuple(name for name, _ in values["log_events"])
+    values["inbounds"] = record_mod.inbound_facts(values["inbounds"])
+    values["transcript"] = record_mod.transcript_facts(values["transcript"])
     return cast(dict[str, Any], record_mod.build_record(record_mod.RunInputs(**values)))
 
 
@@ -225,7 +229,7 @@ subprocess.getoutput("not-counted")
         ("turn_end", {"body": 'subprocess.call(["not-code"])'}),
     ]
 
-    assert window_records.subprocess_call_count(events) == 8
+    assert window_records.subprocess_call_count(record_mod.event_facts(events)) == 8
 
 
 def _read(
@@ -589,7 +593,7 @@ def test_plugins_activated_counts_per_contribution() -> None:
         ("turn_end", {"ok": True}),
     ]
 
-    fired, skipped = record_mod._plugins_activated(events)
+    fired, skipped = record_mod._plugins_activated(record_mod.event_facts(events))
     assert fired == {
         "meiva_code/sdkWraps/files.read": 1,
         "meiva_syntax_fix/hooks/before_exec": 2,
@@ -608,7 +612,7 @@ def test_plugins_activated_counts_and_reports_malformed_rows() -> None:
         ("plugin_activation", {"identifier": "before_exec"}),
     ]
 
-    fired, skipped = record_mod._plugins_activated(events)
+    fired, skipped = record_mod._plugins_activated(record_mod.event_facts(events))
     assert fired == {}
     assert skipped == 3
 

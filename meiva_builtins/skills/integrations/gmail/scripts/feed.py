@@ -66,8 +66,9 @@ from typing import Any, TextIO
 # within-skill shape as the endorsed guard.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from gmail_auth import KEYCHAIN_TIMEOUT_S, AuthSources
+from gmail_auth import KEYCHAIN_TIMEOUT_S, AuthSources, GmailError, GmailInputError
 from gmail_queries import since_to_ts
+from gmail_wire import validate_limit
 from imap import discover, enum, fetch, read, search, sync, to_s1
 from smtp import draft, draft_delete, forward, reply, send
 
@@ -90,7 +91,7 @@ def body_arg(body: str | None, piped_body: str) -> str:
     if body is None:
         body = piped_body
     if not body.strip():
-        raise ValueError("no body: pass a non-empty --body or pipe text on stdin")
+        raise GmailInputError("no body: pass a non-empty --body or pipe text on stdin")
     return body
 
 
@@ -232,6 +233,8 @@ def _run(args: argparse.Namespace, proc: Process) -> Any:
 # The CLI: parse `argv`, run the lens against the process facts in `proc`, print the JSON.
 def main(argv: Sequence[str], proc: Process, stdin: TextIO) -> None:
     args = _build_parser().parse_args(argv)
+    if args.cmd in {"search", "read", "enum", "sync"}:
+        validate_limit(args.limit)
     if args.cmd in {"send", "reply", "draft"}:
         args.body = body_arg(args.body, stdin.read() if args.body is None else "")
     print(json.dumps(_run(args, proc), ensure_ascii=False, indent=2))
@@ -239,17 +242,21 @@ def main(argv: Sequence[str], proc: Process, stdin: TextIO) -> None:
 
 if __name__ == "__main__":
     _home = Path.home()
-    main(
-        sys.argv[1:],
-        Process(
-            auth=AuthSources(
-                account_env=os.environ.get("GMAIL_ACCOUNT", "").strip(),
-                password_file=_home / ".meiva" / "secrets" / "gmail-app-password",
-                security_cmd="security",
-                keychain_timeout_s=KEYCHAIN_TIMEOUT_S,
+    try:
+        main(
+            sys.argv[1:],
+            Process(
+                auth=AuthSources(
+                    account_env=os.environ.get("GMAIL_ACCOUNT", "").strip(),
+                    password_file=_home / ".meiva" / "secrets" / "gmail-app-password",
+                    security_cmd="security",
+                    keychain_timeout_s=KEYCHAIN_TIMEOUT_S,
+                ),
+                mirror_root=_home / "Downloads" / "gmail",
+                now_ts=int(time.time()),
             ),
-            mirror_root=_home / "Downloads" / "gmail",
-            now_ts=int(time.time()),
-        ),
-        sys.stdin,
-    )
+            sys.stdin,
+        )
+    except GmailError as error:
+        print(f"{type(error).__name__}: {error}", file=sys.stderr)
+        raise SystemExit(1) from None

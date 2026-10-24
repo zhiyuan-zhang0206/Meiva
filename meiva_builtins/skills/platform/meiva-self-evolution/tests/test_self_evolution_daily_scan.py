@@ -409,9 +409,9 @@ def _seed_run(
     ]
 
 
-def _env(daily_scan: Any, server: Any, home: Path, database: Database) -> Any:
-    collection = daily_scan.collect.CollectEnv(
-        database=database, gateway=world.grant(server.url), now=NOW, home=home
+def _env(daily_scan: Any, server: Any, home: Path) -> Any:
+    collection = daily_scan.collect.CollectFacts(
+        gateway=world.grant(server.url), now=NOW, home=home
     )
     return daily_scan.ScanEnv(collection=collection, coverage_floor=FLOOR)
 
@@ -426,9 +426,9 @@ def test_scan_passes_include_test_flag_through(
     db_conn.commit()
 
     with world.serve_events(rows) as server:
-        env = _env(daily_scan, server, tmp_path, database).collection
-        result1 = daily_scan.scan(1, week="w1", env=env)
-        result2 = daily_scan.scan(2, week="w2", env=env, include_test=True)
+        env = _env(daily_scan, server, tmp_path).collection
+        result1 = daily_scan.scan(1, week="w1", env=env, database=database)
+        result2 = daily_scan.scan(2, week="w2", env=env, database=database, include_test=True)
 
     assert [r["agent_id"] for r in result1.records] == [1]
     assert result1.counts == {"seen": 2, "excluded_test": 1, "skipped_meta": 0}
@@ -449,7 +449,7 @@ def test_scan_names_the_dataset_after_the_week_it_is_given(
 ) -> None:
     with world.serve_events([]) as server:
         result = daily_scan.scan(
-            1, "2026-08-13", env=_env(daily_scan, server, tmp_path, database).collection
+            1, "2026-08-13", env=_env(daily_scan, server, tmp_path).collection, database=database
         )
 
     assert result.path == tmp_path / "self_evolution" / "daily" / "2026-08-13.jsonl"
@@ -472,7 +472,7 @@ def test_main_persists_report_and_prints_pointer(
     db_conn.commit()
 
     with world.serve_events(rows) as server:
-        code = daily_scan.main([], _env(daily_scan, server, tmp_path, database))
+        code = daily_scan.main([], _env(daily_scan, server, tmp_path), database=database)
 
     assert code == 2
     daily = tmp_path / "self_evolution" / "daily"
@@ -502,7 +502,9 @@ def test_main_exits_zero_on_a_clean_window(
     db_conn.commit()
 
     with world.serve_events(rows) as server:
-        code = daily_scan.main(["--days", "2"], _env(daily_scan, server, tmp_path, database))
+        code = daily_scan.main(
+            ["--days", "2"], _env(daily_scan, server, tmp_path), database=database
+        )
 
     assert code == 0
     assert "window: 2 day(s)" in capsys.readouterr().out
@@ -512,7 +514,7 @@ def test_main_alerts_when_the_source_produced_nothing(
     daily_scan: Any, tmp_path: Path, database: Database, capsys: pytest.CaptureFixture[str]
 ) -> None:
     with world.serve_events([]) as server:
-        code = daily_scan.main([], _env(daily_scan, server, tmp_path, database))
+        code = daily_scan.main([], _env(daily_scan, server, tmp_path), database=database)
 
     assert code == 2
     assert "ALERT — 0 runs collected" in capsys.readouterr().out
@@ -522,7 +524,9 @@ def test_main_rejects_a_window_below_one_day(
     daily_scan: Any, tmp_path: Path, database: Database, capsys: pytest.CaptureFixture[str]
 ) -> None:
     with world.serve_events([]) as server:
-        code = daily_scan.main(["--days", "0"], _env(daily_scan, server, tmp_path, database))
+        code = daily_scan.main(
+            ["--days", "0"], _env(daily_scan, server, tmp_path), database=database
+        )
 
     assert code == 1
     assert "error: --days must be >= 1" in capsys.readouterr().err
@@ -545,7 +549,7 @@ def test_main_degrades_to_rich_output_when_report_unwritable(
     (daily / "2026-08-13.report.txt").mkdir(parents=True)
 
     with world.serve_events(rows) as server:
-        code = daily_scan.main([], _env(daily_scan, server, tmp_path, database))
+        code = daily_scan.main([], _env(daily_scan, server, tmp_path), database=database)
 
     captured = capsys.readouterr()
     assert code == 2
@@ -556,8 +560,9 @@ def test_main_degrades_to_rich_output_when_report_unwritable(
 
 
 # meiva:note
-# The composition root of the standalone scan reads, once, everything the scan then passes down as values: the home, the clock reading, the gateway access, a database handle that connects, and the configured coverage floor.
-def test_the_process_root_reads_home_clock_database_and_floor_once(
+# The standalone scan receives home, clock, gateway and coverage facts separately from the
+# database resource. Both roots use the test environment; the database really connects.
+def test_the_process_root_provides_facts_and_database_separately(
     daily_scan: Any, db_url: str, unit_home: Path
 ) -> None:
     before = datetime.now(UTC)
@@ -567,5 +572,5 @@ def test_the_process_root_reads_home_clock_database_and_floor_once(
     assert env.coverage_floor == FLOOR
     assert env.collection.home == unit_home
     assert before <= env.collection.now <= datetime.now(UTC)
-    with env.collection.database.connect() as conn:
+    with daily_scan.collect.process_database().connect() as conn:
         assert conn.execute("SELECT 1").fetchone() == (1,)

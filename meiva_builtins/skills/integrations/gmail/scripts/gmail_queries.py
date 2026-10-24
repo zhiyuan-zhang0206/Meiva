@@ -9,6 +9,8 @@ import datetime as _dt
 import re
 from collections.abc import Iterable, Mapping
 
+from gmail_auth import GmailInputError
+
 # meiva:note
 # Coarse discovery net (recall-broad, precision-loose): Gmail's own bulk tabs. `discover`
 # widens to these then keeps only List-Id-bearing messages, because Gmail exposes no
@@ -39,7 +41,9 @@ def since_to_ts(since: str | None, now_ts: int) -> int | None:
     try:
         parsed = _dt.datetime.fromisoformat(since)
     except ValueError:
-        raise ValueError(f"--since must be like 30d, 12h or 2026-05-07, got {since!r}") from None
+        raise GmailInputError(
+            f"--since must be like 30d, 12h or 2026-05-07, got {since!r}"
+        ) from None
     parsed = parsed.replace(tzinfo=_dt.UTC) if parsed.tzinfo is None else parsed.astimezone(_dt.UTC)
     return int(parsed.timestamp())
 
@@ -58,7 +62,7 @@ def read_query(query: str | None, message_id: str | None) -> str:
         return query
     if query is None and message_id is not None:
         return message_query(message_id)
-    raise ValueError("read needs exactly one of query / message_id")
+    raise GmailInputError("read needs exactly one of query / message_id")
 
 
 # meiva:note

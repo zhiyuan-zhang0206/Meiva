@@ -26,9 +26,18 @@ process without its machine token fails before any request. A checkpoint that
 cannot be read leaves that agent's transcript empty and prints a warning naming
 the agent.
 
-`RunInputs` carries the loaded skill names as a tuple and task-receipt counts as
-the four integers of `TaskReceipts`. Record rendering creates its own output
-lists and objects; it retains no mutable receipt row or loaded-skills list.
+`record_inputs` captures each kind of fact before assembling immutable `RunInputs`:
+`event_facts`, `inbound_facts` and `transcript_facts` each own one conversion. Telemetry retains event names, scalar usage/code/duration facts and
+plugin activation labels; unknown event names still contribute to evidence counts.
+Audit inputs retain names only, after loaded-skill validation used their raw payloads.
+Inbound and transcript rows become tuples of text and boolean facts. Skills and
+receipt counts are tuples too. Later changes to source dictionaries or rendered
+JSON cannot change that retained input or the result of building it again. Numeric
+conversion keeps the existing missing-field defaults and rejects malformed counts.
+
+`CollectFacts` contains only the gateway credential/URI value, timestamp and home.
+The `Database` resource is a required argument of both collection and daily-scan
+shells, supplied separately by their process root.
 
 Parent: [[meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.meiva.okf.md]].
 

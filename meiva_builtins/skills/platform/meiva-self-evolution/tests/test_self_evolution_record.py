@@ -85,6 +85,10 @@ def _run(**fields: Any) -> Any:
         "skills_touched": (),
     }
     values.update(fields)
+    values["events"] = record_module.event_facts(values["events"])
+    values["log_events"] = tuple(name for name, _ in values["log_events"])
+    values["inbounds"] = record_module.inbound_facts(values["inbounds"])
+    values["transcript"] = record_module.transcript_facts(values["transcript"])
     return record_module.RunInputs(**values)
 
 
@@ -432,3 +436,51 @@ def test_evidence_block_reports_prompt_source_and_task_receipts(record: Any) -> 
     )["evidence"]
     assert no_receipts["task_updates"] == {"note": 0, "status": 0, "results": 0}
     assert no_receipts["task_state_changes"] == 0
+
+
+def test_record_inputs_capture_source_rows_before_later_mutation(record: Any) -> None:
+    plugins = ["fleet"]
+    models = ["model"]
+    activation = {"plugin": plugins, "surface": "sdk", "identifier": "tasks"}
+    usage: dict[str, object] = {"model": models, "in_total": 3, "out_total": 4}
+    transcript = {"type": "human", "content": "original prompt"}
+    inbound = _inbound("user", "original inbound")
+    run = _run(
+        events=(("plugin_activation", activation), ("llm_usage", usage), ("unknown", {})),
+        inbounds=(inbound,),
+        transcript=(transcript,),
+    )
+    original = record.build_record(run)
+    plugins.append("changed")
+    models.append("changed")
+    usage["in_total"] = 999
+    transcript["content"] = "changed prompt"
+    inbound["content"] = "changed inbound"
+    assert record.build_record(run) == original
+    assert original["evidence"]["telemetry_events"] == 3
+    assert original["tokens_in"] == 3
+    assert original["plugins_activated"] == {"['fleet']/sdk/tasks": 1}
+
+
+def test_record_output_never_aliases_the_retained_input_facts(record: Any) -> None:
+    run = _run(transcript=({"type": "human", "content": "original prompt"},))
+    original = record.build_record(run)
+    rendered = record.build_record(run)
+    rendered["transcript"][0]["content"] = "changed prompt"
+    rendered["evidence"]["telemetry_events"] = 999
+    rendered["skills_touched"].append("changed")
+    assert record.build_record(run) == original
+    assert record.build_record(run)["task_prompt"] == "original prompt"
+
+
+@pytest.mark.parametrize("invalid", ["not a number", {"nested": 2}, None])
+def test_record_inputs_keep_invalid_token_counts_as_errors(record: Any, invalid: object) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        _run(events=(("llm_usage", {"in_total": invalid}),))
+
+
+def test_record_inputs_do_not_interpret_unconsumed_audit_payloads(record: Any) -> None:
+    run = _run(log_events=(("llm_usage", {"in_total": "not a number"}), ("compact", {})))
+    rendered = record.build_record(run)
+    assert rendered["evidence"]["audit_events"] == 2
+    assert rendered["compactions"] == 1

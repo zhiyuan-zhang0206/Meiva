@@ -20,3 +20,12 @@ The credential model is machine-level, not per-cluster: both the password file a
 ## Key Dependencies
 - [[meiva_builtins/skills/docs/skills.meiva.okf.md|Skills index]] — full skills catalog
 - [[meiva/skills/docs/skills.meiva.okf.md|Skill System]] — indexed in every agent's `# Capabilities` section like every loaded skill (`skills_to_inject_into_system_prompt` defaults to `*`)
+
+
+## CLI errors
+
+The CLI prints expected `GmailError` failures as one stderr line and exits 1 without
+stdout or a traceback. `GmailInputError` also satisfies `ValueError` for the pure
+body/query/window contracts. Argument syntax remains argparse's responsibility;
+unexpected internal exceptions keep their traceback for diagnosis. Credential
+failures occur before IMAP/SMTP is opened, including reply dry-run.

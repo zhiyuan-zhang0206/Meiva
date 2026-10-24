@@ -61,13 +61,18 @@ from events_window import (
 )
 from record import (
     HUMAN_SOURCES,
+    LeakPaths,
+    transcript_rows,
+)
+from record_inputs import (
     AgentMeta,
     Event,
     Inbound,
-    LeakPaths,
     RunInputs,
     TaskReceipts,
-    transcript_rows,
+    event_facts,
+    inbound_facts,
+    transcript_facts,
 )
 from window_records import (
     WindowRows,
@@ -448,11 +453,11 @@ def collect_one(
         RunInputs(
             agent_id=agent_id,
             week=week,
-            events=tuple(events),
-            log_events=tuple(log_events),
-            inbounds=tuple(inbounds),
+            events=event_facts(events),
+            log_events=tuple(name for name, _ in log_events),
+            inbounds=inbound_facts(inbounds),
             meta=meta,
-            transcript=tuple(_transcript(agent_id, database=database)),
+            transcript=transcript_facts(_transcript(agent_id, database=database)),
             skills_touched=tuple(loaded_skills(log_events)),
             leak_paths=leak_paths,
             task_receipts=receipts,
@@ -519,16 +524,15 @@ def _parse_iso(value: str) -> datetime:
 
 
 # meiva:note
-# The process facts a collection run reads: its database, gateway access, the clock reading of its start and its home.
+# The process facts a collection run reads: its gateway access, the clock reading of its start and its home.
 @dataclass(frozen=True)
-class CollectEnv:
-    database: Database
+class CollectFacts:
     gateway: GatewayAccess
     now: datetime
     home: Path
 
 
-def main(argv: Sequence[str], env: CollectEnv) -> None:
+def main(argv: Sequence[str], env: CollectFacts, *, database: Database) -> None:
     args = parse_args(argv)
     week = args.week or week_label(env.now)
     window = resolve_window(
@@ -538,7 +542,7 @@ def main(argv: Sequence[str], env: CollectEnv) -> None:
         _parse_iso(args.to) if args.to else None,
     )
     records, _counts = collect_with_counts(
-        window, week, database=env.database, gateway=env.gateway, include_test=args.include_test
+        window, week, database=database, gateway=env.gateway, include_test=args.include_test
     )
     path = write_dataset(records, env.home, week)
     counts = Counter(r["label"] for r in records)
@@ -552,24 +556,30 @@ def main(argv: Sequence[str], env: CollectEnv) -> None:
 
 
 # meiva:note
-# The composition root of the standalone run: this process's database, gateway access, clock and home.
-def process_env() -> CollectEnv:
+# The composition root of the standalone run: this process's gateway access, clock and home.
+def process_facts() -> CollectFacts:
     from base.cluster.machine.ambient import gateway_access_from_settings
-    from base.db.code_version_gate import ProcessDbGate
-    from base.native_process.code_version import CodeVersion
-    from base.native_process.loaded_commit import LoadedCommit
     from base.paths import meiva_home
 
-    version = CodeVersion(LoadedCommit.capture())
-    gate = ProcessDbGate(version=version.get, process="unknown")
-    return CollectEnv(
-        database=Database.from_settings(gate=gate),
-        gateway=gateway_access_from_settings(),
+    return CollectFacts(
+        gateway=gateway_access_from_settings(),  # ambient: O
         now=datetime.now(UTC),
         home=meiva_home(),
     )
 
 
+# meiva:note
+# The resource root is separate from the facts used to plan this collection.
+def process_database() -> Database:
+    from base.db.code_version_gate import ProcessDbGate
+    from base.native_process.code_version import CodeVersion
+    from base.native_process.loaded_commit import LoadedCommit
+
+    version = CodeVersion(LoadedCommit.capture())
+    gate = ProcessDbGate(version=version.get, process="unknown")
+    return Database.from_settings(gate=gate)
+
+
 if __name__ == "__main__":
     parse_args(sys.argv[1:])
-    main(sys.argv[1:], process_env())
+    main(sys.argv[1:], process_facts(), database=process_database())

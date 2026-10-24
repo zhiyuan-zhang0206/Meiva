@@ -63,10 +63,6 @@
     "skipif(sys.version_info < (3, 12))",
     "skipif(sys.version_info < (3, 12))"
   ],
-  "meiva_builtins/skills/tests/test_gmail.py": [
-    "skip('Keychain entry not available in this environment')",
-    "skip('Keychain entry not available')"
-  ],
   "meiva_builtins/skills/tests/test_page_reply.py": [
     "skip('Node.js is required to execute the shipped browser resource')"
   ],

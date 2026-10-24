@@ -403,6 +403,8 @@ def test_cli_reply_dry_run_reports_the_missing_credential_not_a_traceback_from_t
     )
     assert result.returncode != 0
     assert "GmailError: no Gmail app password" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert result.stdout == ""
 
 
 # meiva:note
@@ -434,3 +436,48 @@ def test_cli_help(tmp_path: Path) -> None:
     assert "search" in result.stdout
     assert "send" in result.stdout
     assert "reply" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "argv, reason",
+    [
+        (
+            ("send", "--to", "a@example.com", "--subject", "s", "--body", " ", "--dry-run"),
+            "no body",
+        ),
+        (("enum", "--list-id", "x.example.com", "--since", "soon"), "--since must be like"),
+        (
+            ("send", "--to", " ", "--subject", "s", "--body", "b", "--dry-run"),
+            "at least one recipient",
+        ),
+        (
+            (
+                "send",
+                "--to",
+                "a@example.com",
+                "--subject",
+                "s",
+                "--body",
+                "b",
+                "--attach",
+                "/missing-meiva-gmail-attachment",
+                "--dry-run",
+            ),
+            "--attach path",
+        ),
+        (("search", "--query", "x", "--limit", "-1"), "limit/scan must be >= 0"),
+        (
+            ("forward", "--message-id", "<x@host>", "--to", " ", "--dry-run"),
+            "forward needs at least one recipient",
+        ),
+    ],
+)
+def test_cli_input_errors_are_domain_errors_without_a_traceback(
+    tmp_path: Path, argv: tuple[str, ...], reason: str
+) -> None:
+    result = _run_cli(tmp_path, *argv)
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "GmailInputError:" in result.stderr
+    assert reason in result.stderr
+    assert "Traceback" not in result.stderr

@@ -3,5 +3,6 @@
 "events_window.py" = "strict"
 "label.py" = "strict"
 "record.py" = "strict"
+"record_inputs.py" = "strict"
 "scan_report.py" = "strict"
 "window_records.py" = "strict"
