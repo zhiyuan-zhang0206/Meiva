@@ -440,6 +440,13 @@ writes. Dynamic SQL and runtime expressions need boundary validation and relevan
 consumer tests. Domain ownership and whether a fallback is legitimate belong in
 contribution review; a string search alone cannot decide them.
 
+Branch over a finite domain exhaustively. A `match` lists every member and ends with
+`case _: assert_never(x)` (or raises); an if-chain over members ends in an `else` that
+raises. A `case _:` that returns or passes, and a `str` selector compared with literals,
+send an unknown or newly added member to the last branch and bypass the exhaustiveness
+check that pyright strict already performs. Make the selector a `Literal` or the owning
+enum, and reject an unknown value at the receiving boundary with `ValueError`.
+
 ## Model new cross-process / cross-layer wire shapes
 
 A payload crossing a process boundary (gateway↔agent-runner RPC, SSE events,
@@ -583,6 +590,75 @@ and do not repoint one at another module to keep a test green. When a change mak
 patched thing injectable, convert the tests of that component in the same change.
 `stub_everywhere` in `tests/fixtures/guards.py` reaches aliases that are already frozen;
 it serves the debt that remains and is not a pattern for a new test.
+
+### Test seams in another shape
+
+A test that controls code by rewriting something after it was built is a patch with
+another spelling, and it fails the same way: the target is found by name and the
+signature is bypassed. These are the spellings the reviews of the first refactor rounds
+met:
+
+- writing an instance dictionary or a frozen value: `vars(obj)[...] = ...`,
+  `obj.__dict__[...] = ...`, `object.__setattr__(obj, ...)`;
+- assigning an attribute on an imported name or on a fixture object, replacing a method
+  with a function, scripting a mock with `.side_effect = ...`;
+- swapping a module with `sys.modules[...] = ...` or writing `os.environ` directly;
+- `monkeypatch.setattr(..., raising=False)`, which turns a renamed target into a silent
+  no-op ([patching](../../meizel/docs/checker/patching.meiva.okf.md) records it);
+- a subclass of production code that overrides one method, and an armed flag on a fake
+  that switches a fault on;
+- `httpx.MockTransport(...)` where a listener on port 0 could serve the answer, a fixed
+  `time.sleep(...)` that waits out a window `now` could set, and `inspect.getsource(...)`
+  followed by a string match;
+- asserting how a mock was called (`assert_called_once_with`, `call_args`,
+  `call_count`): see form 2 above.
+
+A fault has two legitimate routes. A real resource makes it: revoke `INSERT` or `UPDATE`,
+a read-only transaction, a closed pool, a held lock, a trigger that raises, a renamed
+table, an invalid URL, a full or read-only directory, a killed child. For a fault no real
+resource can make (a cancellation that hangs, a half-open connect, a failed `fsync`), the
+component takes a required narrow `Protocol` from `base/` and the test passes the fake
+that lives in `base`'s `tests/` (form 4). Turning `vars()` into a subclass, or a subclass
+into an armed flag, changes the spelling and not the seam.
+
+When production code is subclassed only to override what it reads, give the class that
+value as a constructor field and build the real class with it; the overriding subclass
+disappears.
+
+### Deleting or rewriting a test
+
+A deleted test is lost coverage unless something else asserts the same behavior. The test
+of a pure function moves with the function. A rewritten test maps one to one onto the
+behaviors the old one covered, and a test double does not reproduce production logic: a
+test of the copy tests nothing. A test of an interface that really disappeared is deleted
+with its reason. The pull request description lists each deleted or rewritten test and says
+why.
+
+### Types of collaborators and values
+
+- A collaborator has its real type, or a narrow `Protocol` from `base/` when it is an
+  effect port. `Any` or `object` at a boundary switches the type checker off: tests pass
+  anything and the contract exists in the author's head. A heavy import is not a reason
+  for either; `[type-checking.files]` in `meizel.policy.toml` is the reviewed exception
+  ([no `if TYPE_CHECKING:`](#no-if-type_checking)). An `object` that a parser validates is
+  raw input, not a collaborator, and stays `object`.
+- A `Protocol` that only describes the shape of data is replaced by the real type; ports
+  are defined in `base/`.
+- A frozen dataclass holds immutable members: a tuple, a frozenset or a read-only
+  `Mapping`, not a `list`, `dict`, `set`, `object` or `Any`. A plan that must append
+  returns what to append and the shell appends it.
+- A class bundling several callables is a dependency bag (form 2 or 4 replaces it). A table
+  of pure functions, such as a step table or a validator table, is not.
+
+### Diff hints
+
+A commit that adds one of the shapes above, or an unmediated clock, environment or
+settings read, a callable with a default, a `None` fallback to a real implementation, a
+service locator, a non-exhaustive branch or a deleted test, is asked about it by the diff
+hints. The hook prints why the rule exists and the recipe for that shape in order of
+preference, and the commit is accepted when the code changes or when its message answers
+with `Hint-Ack: <hint-id> <path>[:<line>] -- <reason>`. The catalog, the trailer format and
+the measured noise are in [diff hints](../../scripts/lint/docs/diff-hints/diff-hints.meiva.okf.md).
 
 ## A function-local `import base.x` makes `base` local to the whole function
 

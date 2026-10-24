@@ -63,6 +63,7 @@ PREPUSH_LOCAL_ONLY = {
     "lint-prepush-artifact-freshness",
     "lint-tests-location-full",
     "check-merge-conflict",
+    "diff-hints-branch",
 }
 LOCAL_ONLY = {"check-git-hooks-install"}
 
