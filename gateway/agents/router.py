@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated, cast
+from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 from psycopg_pool import ConnectionPool
@@ -18,7 +18,11 @@ from base.telemetry.audit_events import prepare_event_log, record_audit
 from gateway.agents.creation import create_and_launch_agent, scoped_creation_key
 from gateway.agents.schemas import AgentRow, LabelPatchRequest
 from gateway.http.auth.request_principal import PRINCIPAL_SCOPE, SCOPE_HEADER
-from gateway.http.model_catalog import catalog_for_observation, require_model_catalog
+from gateway.http.model_catalog import (
+    catalog_for_observation,
+    request_default_model,
+    require_model_catalog,
+)
 from gateway.inspect import neighbors
 from gateway.inspect.schemas import BornChainResponse, BornChainRow
 from gateway.schemas.models import ModelsResponse
@@ -121,9 +125,7 @@ def get_agents(
             query=query,
             before_id=before_id,
             limit=limit,
-            default_model_reader=lambda: cast(
-                str, request.app.state.config_authority.service_field_value("llm_model")
-            ),
+            default_model=request_default_model(request),
         )
 
 
@@ -137,9 +139,7 @@ def get_agent_roster(request: Request) -> roster.AgentRoster:
         return roster.select_roster(
             conn,
             catalog=catalog_for_observation(request.app.state.catalog),
-            default_model_reader=lambda: cast(
-                str, request.app.state.config_authority.service_field_value("llm_model")
-            ),
+            default_model=request_default_model(request),
         )
 
 
@@ -213,9 +213,7 @@ def get_agent(agent_id: int, request: Request) -> AgentRow:
             conn,
             agent_id,
             catalog=catalog_for_observation(request.app.state.catalog),
-            default_model_reader=lambda: cast(
-                str, request.app.state.config_authority.service_field_value("llm_model")
-            ),
+            default_model=request_default_model(request),
         )
     if snap is None:
         raise AgentNotFound(f"agent {agent_id} does not exist")

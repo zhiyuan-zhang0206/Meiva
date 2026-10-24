@@ -58,6 +58,8 @@ def _app(
     timeline_inputs: TimestampPolicy = _TIMELINE_INPUTS,
     world: World | None = None,
 ) -> Any:
+    boot = ConfigBoot()
+    boot.set_field("llm_model", "deepseek-v4-flash-vision-exp")
     app = build_app(
         world.db if world else cast(Database, object()),
         world.pool if world else cast(ConnectionPool[Any], object()),

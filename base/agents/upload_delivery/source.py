@@ -5,7 +5,6 @@ from typing import Any
 
 from psycopg import Connection
 from psycopg.types.json import Jsonb
-from psycopg_pool import ConnectionPool
 
 from base.agents.inbox.chat_delivery import insert_chat_inbound_in_transaction
 from base.agents.messages.inbound_provenance import InboundProvenance
@@ -29,7 +28,7 @@ from base.agents.upload_delivery.paths import (
     agent_upload_dir,
 )
 from base.api_contracts.agent_contract import AgentNotFound
-from base.db.transaction import write_transaction
+from base.db.transaction import ConnectionSource, write_transaction
 from base.host.db_authority.unit import UnitIdentity
 
 # Copy attempts a batch gets before it is held for a person to re-upload.
@@ -72,7 +71,7 @@ def _lookup(conn: Connection[Any], key: str, fingerprint: str) -> tuple[Any, ...
 
 
 def _claim(
-    pool: ConnectionPool,
+    pool: ConnectionSource,
     key: str,
     agent_id: int,
     names: list[str],
@@ -80,12 +79,13 @@ def _claim(
     provenance: InboundProvenance,
     *,
     local_machine: str,
+    upload_home: Path,
 ) -> tuple[Any, ...]:
     fingerprint = request_hash(names, batch)
     source = current_unit(
         local_machine=local_machine,
     )
-    directory = agent_upload_dir(agent_id, create=False, home=Path.home()).resolve()
+    directory = agent_upload_dir(agent_id, create=False, home=upload_home).resolve()
     with write_transaction(pool) as conn:
         storage.lock_agent(conn, agent_id)
         found = _lookup(conn, key, fingerprint)
@@ -136,7 +136,7 @@ def _claim(
 
 
 def accept(
-    pool: ConnectionPool,
+    pool: ConnectionSource,
     key: str,
     agent_id: int,
     names: list[str],
@@ -144,6 +144,7 @@ def accept(
     provenance: InboundProvenance,
     *,
     local_machine: str,
+    upload_home: Path,
 ) -> Acceptance:
     claimed = _claim(
         pool,
@@ -153,6 +154,7 @@ def accept(
         batch,
         provenance,
         local_machine=local_machine,
+        upload_home=upload_home,
     )
     if claimed[4] is not None:
         return Acceptance.model_validate(claimed[4])
@@ -161,7 +163,7 @@ def accept(
     ):
         raise UploadDeliveryConflictError("receiving source belongs to another native unit")
     manifest = Manifest.model_validate(claimed[1])
-    directory = agent_upload_dir(agent_id, create=False, home=Path.home()).resolve()
+    directory = agent_upload_dir(agent_id, create=False, home=upload_home).resolve()
     if str(directory) != claimed[5]:
         raise UploadDeliveryConflictError("receiving source binds another native physical root")
     # No DB connection is held across filesystem publication. Fixed namespace and
@@ -188,7 +190,7 @@ def accept(
     return acceptance
 
 
-def status(pool: ConnectionPool, agent_id: int, batch_id: str) -> DeliveryStatus:
+def status(pool: ConnectionSource, agent_id: int, batch_id: str) -> DeliveryStatus:
     with pool.connection() as conn:
         row = conn.execute(
             "SELECT acceptance, state, reason, inbound_id, source_unit, target_unit, attempts, next_attempt_at FROM upload_delivery_batches "
@@ -210,7 +212,7 @@ def status(pool: ConnectionPool, agent_id: int, batch_id: str) -> DeliveryStatus
 
 
 def served_object(
-    pool: ConnectionPool,
+    pool: ConnectionSource,
     agent_id: int,
     batch_id: str,
     ordinal: int,
@@ -245,7 +247,7 @@ def served_object(
 # dies mid-copy costs that batch one claim window and nothing else.
 # meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md
 def due(
-    pool: ConnectionPool,
+    pool: ConnectionSource,
     limit: int = 8,
     *,
     local_machine: str,
@@ -280,7 +282,7 @@ def due(
     ]
 
 
-def validate_pending(pool: ConnectionPool, request: ReceiveRequest) -> bool:
+def validate_pending(pool: ConnectionSource, request: ReceiveRequest) -> bool:
     """Fence known placement changes before copy; final acceptance rechecks under lock."""
     with write_transaction(pool) as conn:
         row = conn.execute(
@@ -294,7 +296,7 @@ def validate_pending(pool: ConnectionPool, request: ReceiveRequest) -> bool:
         return True
 
 
-def record_failure(pool: ConnectionPool, batch_id: str, reason: str, *, hold: bool) -> str | None:
+def record_failure(pool: ConnectionSource, batch_id: str, reason: str, *, hold: bool) -> str | None:
     """Record one failed copy attempt; the batch's state afterwards, None when not pending.
 
     A permanent failure (`hold`) or the `MAX_COPY_ATTEMPTS`th attempt holds the batch, which
@@ -324,7 +326,7 @@ def _proof_paths(proof: CopyProof, manifest: Manifest) -> list[str]:
     return [str(native_directory / item.name) for item in manifest.objects]
 
 
-def complete(pool: ConnectionPool, request: ReceiveRequest, proof: CopyProof) -> int:
+def complete(pool: ConnectionSource, request: ReceiveRequest, proof: CopyProof) -> int:
     if (
         proof.version != 1
         or proof.target != request.target

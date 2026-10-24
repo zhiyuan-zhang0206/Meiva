@@ -168,6 +168,7 @@ class ClientSet:
             redis=self._redis_factory,
             gateway=builder,
             factories=self._factories,
+            pipeline_factory=self._pipeline_factory,
         )
 
     # ── the SDK layer's own clients ──────────────────────────────────────

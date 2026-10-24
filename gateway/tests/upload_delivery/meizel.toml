@@ -4,12 +4,10 @@
 
 [debt.first-party-patch]
 "child_native_link_crash.py#assignment base.host.private_storage.os.link" = 1
-"test_upload_delivery_faults.py#monkeypatch.setattr base.agents.upload_delivery.source.write_transaction" = 2
 "test_upload_delivery_faults.py#monkeypatch.setattr ops.upload_delivery.MAX_AGENT_UPLOAD_BYTES" = 1
 "test_upload_delivery_faults.py#monkeypatch.setattr ops.upload_delivery.agent_upload_dir" = 2
 "test_upload_delivery_faults.py#monkeypatch.setattr ops.upload_delivery.current_unit" = 2
 "test_upload_delivery_faults.py#monkeypatch.setattr ops.upload_delivery.http_get" = 3
-"test_upload_delivery_faults.py#monkeypatch.setattr ops.upload_delivery.write_transaction" = 1
 "test_upload_delivery_recovery.py#monkeypatch.setattr ops.upload_delivery.MAX_AGENT_UPLOAD_BYTES" = 1
 "test_upload_delivery_recovery.py#monkeypatch.setattr ops.upload_delivery.current_unit" = 2
 

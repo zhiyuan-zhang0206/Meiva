@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent.execution.protocol import ResultPayload
-from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
+from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV, AGENT_ID_ENV
 
 from ._result import (
     ExecChildError,
@@ -80,7 +80,7 @@ def plan_child_launch(
     ):
         env.pop("VIRTUAL_ENV", None)
     if agent_id is not None:
-        env["MEIVA_AGENT_ID"] = str(agent_id)
+        env[AGENT_ID_ENV] = str(agent_id)
     env["MEIVA_PROCESS_PROFILE"] = "agent"
     env["MEIVA_EXEC_REQUEST_FILE"] = str(request_path)
     env["MEIVA_EXEC_RESULT_FILE"] = str(result_path)

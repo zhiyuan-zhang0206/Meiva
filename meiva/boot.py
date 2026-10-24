@@ -33,6 +33,7 @@ from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.external_caller import external_caller
+from base.agents.sdk import call_policy
 from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import SYSTEM_TIMERS, Clock
@@ -40,6 +41,7 @@ from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.host.env.agent_env import AGENT_ID_ENV
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -112,7 +114,7 @@ def _gateway(url: str, *, config: ConfigBoot) -> Any:
 # guarantee of a nonzero exit or of delivery after a hard exit. `uninstall` unregisters the close of
 # the installation that retains the owner, so a removed surface leaves no callback behind.
 def process_sampling_owner() -> SamplingPolicyOwner:
-    owner = SamplingPolicyOwner()
+    owner = call_policy.process_sampling_owner()
     atexit.register(owner.close)
     return owner
 
@@ -237,7 +239,7 @@ def context_from_description(
 
 
 def launch_agent_id(env: Mapping[str, str]) -> int | None:
-    raw = env.get("MEIVA_AGENT_ID")
+    raw = env.get(AGENT_ID_ENV)
     return None if raw is None else int(raw)
 
 
@@ -274,7 +276,7 @@ def _launch_facts(context: MeivaContext | None, env: Mapping[str, str]) -> Launc
         host=process_context.is_host_process(),
         context_bound=context is not None,
         identity=_identity_facts(context),
-        env_has_agent_id="MEIVA_AGENT_ID" in env,
+        env_has_agent_id=AGENT_ID_ENV in env,
     )
 
 

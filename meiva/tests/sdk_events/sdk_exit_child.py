@@ -40,7 +40,9 @@ def main() -> None:
         raise RuntimeError("the plugin load installed no client set")
     attachment.close()
     process_context.unbind_context()
-    sampling = call_policy.SamplingPolicyOwner(reader=call_policy.SamplingPolicy)
+    sampling = call_policy.SamplingPolicyOwner(
+        initial=call_policy.SamplingPolicy(), fetch=call_policy.SamplingPolicy
+    )
     wrapped = metering.make_recorder(lambda: "done", "probe.exit", sampling, installation.clients)
     if wrapped() != "done":
         raise RuntimeError("the metered call changed its result")

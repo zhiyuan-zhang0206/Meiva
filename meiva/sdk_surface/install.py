@@ -52,7 +52,7 @@ from typing import assert_never
 
 from pydantic import BaseModel
 
-from base.agents.sdk.call_policy import SamplingPolicyOwner
+from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
@@ -128,7 +128,8 @@ def _is_bare_provider_mount(installation: Installation) -> bool:
 # nothing, so the sampling owner it carries is never read; a later `install` replaces the whole
 # value with its own root's owner.
 def _bare_provider_mount(provider: SkillProvider) -> Installation:
-    return replace(Installation.bare(sampling=SamplingPolicyOwner()), skill_providers=(provider,))
+    inert = SamplingPolicyOwner(initial=SamplingPolicy(), fetch=SamplingPolicy)
+    return replace(Installation.bare(sampling=inert), skill_providers=(provider,))
 
 
 def mount_skill_provider(provider: SkillProvider) -> Callable[[], None]:

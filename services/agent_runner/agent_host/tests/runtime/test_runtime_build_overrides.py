@@ -159,6 +159,7 @@ def test_the_built_in_loop_builds_no_bridge() -> None:
             registrations=None,
             registration_ttl_seconds=3600.0,
             machine="macmini",
+            environ={},
         )
         is None
     )
@@ -173,6 +174,7 @@ def test_an_external_runtime_without_a_registry_is_refused() -> None:
             registrations=None,
             registration_ttl_seconds=3600.0,
             machine="macmini",
+            environ={},
         )
     except ValueError as exc:
         assert "session registry" in str(exc)
@@ -188,6 +190,7 @@ def test_an_external_runtime_carries_a_scoped_bridge() -> None:
         registrations=None,
         registration_ttl_seconds=3600.0,
         machine="macmini",
+        environ={},
     )
     assert bridge is not None
     assert bridge.harness is Harness.CODEX

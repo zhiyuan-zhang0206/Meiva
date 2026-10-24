@@ -31,7 +31,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 @pytest.fixture
 def sampling() -> Iterator[call_policy.SamplingPolicyOwner]:
-    owner = call_policy.SamplingPolicyOwner(reader=call_policy.SamplingPolicy)
+    owner = call_policy.SamplingPolicyOwner(
+        initial=call_policy.SamplingPolicy(), fetch=call_policy.SamplingPolicy
+    )
     yield owner
     owner.close()
 
@@ -85,7 +87,9 @@ def test_sampled_out_call_does_not_construct_a_producer(bare_context: None) -> N
     def sampled_policy() -> call_policy.SamplingPolicy:
         return call_policy.SamplingPolicy(sampling_enabled=True, sample_every=1_000_000_000)
 
-    owner = call_policy.SamplingPolicyOwner(reader=sampled_policy)
+    owner = call_policy.SamplingPolicyOwner(
+        initial=call_policy.SamplingPolicy(), fetch=sampled_policy
+    )
     # meiva:note
     # the first read starts the refresh that installs the sampled-out policy
     owner.read()
