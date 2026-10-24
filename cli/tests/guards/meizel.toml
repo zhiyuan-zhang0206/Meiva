@@ -1,4 +1,9 @@
-exports = ["checkout_guard_child.py", "service_readiness_guard.py"]
+exports = [
+    "checkout_guard_child.py",
+    "command_runtime_child.py",
+    "launcher_context_child.py",
+    "service_readiness_guard.py",
+]
 
 [debt.restricted-python]
 "service_readiness_guard.py#string patch target 'cli.commands.lifecycle.root_readiness.wait_for_service_tree'" = 1

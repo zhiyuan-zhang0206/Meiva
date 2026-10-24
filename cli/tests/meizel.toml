@@ -2,6 +2,8 @@ exports = ["bootstrap", "guards"]
 
 [uses]
 "bootstrap/test_checkout_guard.py" = ["guards/checkout_guard_child.py"]
+"bootstrap/test_command_runtime.py" = ["guards/command_runtime_child.py"]
+"bootstrap/test_dotenv_boot_launcher_context_cli.py" = ["guards/launcher_context_child.py"]
 "test_main_dispatch.py" = ["bootstrap"]
 "test_main_log_init.py" = ["bootstrap"]
 "test_main_telemetry_exit.py" = ["bootstrap"]
