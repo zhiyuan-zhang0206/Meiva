@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from base.config import ConfigBoot
+import json
+
 from base.daemon.health import DaemonProbe
 
 _TIMEOUT_S = 3.0
@@ -40,11 +41,12 @@ def search_verdict(answer: dict[str, object] | DaemonProbe) -> DaemonProbe:
     return DaemonProbe.down("POST /search answered without a hits payload")
 
 
-def memory_search_probe() -> DaemonProbe:
-    """Alive when the service answers a real search with a hits payload."""
-    config = ConfigBoot()
-    config.read_process_environment()
-    services = config.view.services
-    return search_verdict(
-        post_search(services.memory_search_uri, embedding_name=services.embedding_backend)
-    )
+# meiva:note
+# Probe the roster's captured endpoint and provider with a real search. Protocol
+# failures report down; an unknown provider remains a configuration error and
+# propagates to the caller before any request.
+def memory_search_probe(*, uri: str, embedding_name: str) -> DaemonProbe:
+    try:
+        return search_verdict(post_search(uri, embedding_name=embedding_name))
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        return DaemonProbe.down(f"protocol probe failed: {exc}")

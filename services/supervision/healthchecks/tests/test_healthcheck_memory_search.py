@@ -55,3 +55,33 @@ def test_unknown_provider_fails_before_search_request() -> None:
             hc.post_search(service.url, embedding_name="unknown-provider")
 
         assert service.requests == []
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "alive", "detail"),
+    [
+        (200, b'{"hits": []}', True, "with a hits payload"),
+        (200, b'{"nope": 1}', False, "without a hits payload"),
+        (500, b"", False, "POST /search failed (HTTPStatusError:"),
+        (200, b"not-json", False, "POST /search failed (JSONDecodeError:"),
+        (200, b"null", False, "protocol probe failed:"),
+        (200, b"42", False, "protocol probe failed:"),
+    ],
+)
+def test_bound_probe_preserves_protocol_verdicts(
+    status: int, body: bytes, alive: bool, detail: str
+) -> None:
+    with HttpStub(status=status, body=body) as service:
+        result = hc.memory_search_probe(uri=service.url, embedding_name="gemini")
+
+    assert result.alive is alive
+    assert result.terminal is False
+    assert detail in result.detail
+
+
+def test_bound_probe_rejects_unknown_provider_before_network_io() -> None:
+    with HttpStub() as service:
+        with pytest.raises(ValueError, match="unknown embedding provider"):
+            hc.memory_search_probe(uri=service.url, embedding_name="unknown-provider")
+
+        assert service.requests == []
