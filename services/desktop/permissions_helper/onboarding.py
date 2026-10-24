@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import sys
-import time
 import uuid
-from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
+from typing import TextIO
 
 from base.host.permissions_helper.grants import gate, probe, triggers
 from base.host.permissions_helper.grants.catalog import PermissionItem
@@ -80,11 +79,19 @@ def check(
     return report
 
 
+# meiva:note
+# One progress line for the person running the pass; nothing when no stream was given.
+def _say(progress: TextIO | None, line: str) -> None:
+    if progress is not None:
+        progress.write(line + "\n")
+        progress.flush()
+
+
 def _ask_process_grants(
     report: GateReport,
     seat: GateHost,
     pending: tuple[PermissionItem, ...],
-    echo: Callable[[str], None] | None,
+    progress: TextIO | None,
 ) -> str:
     items = [item for item in pending if item.group == "desktop"]
     if not items:
@@ -94,8 +101,7 @@ def _ask_process_grants(
             "The running permissions helper cannot request grants: its build predates"
             " request_grants_v1. Update the helper, then run the gate again."
         )
-    if echo is not None:
-        echo("Asking the system for: " + ", ".join(item.id for item in items))
+    _say(progress, "Asking the system for: " + ", ".join(item.id for item in items))
     try:
         probe.request_process_grants(seat.client)
     except PermissionsProbeError as exc:
@@ -108,17 +114,14 @@ def _ask_items(
     pending: tuple[PermissionItem, ...],
     *,
     timeout_s: float,
-    sleep: Callable[[float], None],
-    echo: Callable[[str], None] | None,
-    request_item: Callable[..., str],
+    progress: TextIO | None,
 ) -> None:
     run_id = uuid.uuid4().hex[:8]
     for item in pending:
         if item.group == "desktop":
             continue
-        if echo is not None:
-            echo(f"Asking for: {item.title}")
-        verdict = request_item(
+        _say(progress, f"Asking for: {item.title}")
+        verdict = triggers.request_item(
             seat.client,
             item,
             workdir=seat.workdir,
@@ -126,10 +129,8 @@ def _ask_items(
             env=seat.env,
             home=seat.home,
             timeout_s=timeout_s,
-            sleep=sleep,
         )
-        if echo is not None:
-            echo(f"  -> {verdict}")
+        _say(progress, f"  -> {verdict}")
 
 
 # meiva:note
@@ -141,9 +142,7 @@ def onboard(
     now: datetime | None = None,
     automatic: bool = True,
     timeout_s: float = REQUEST_TIMEOUT_S,
-    sleep: Callable[[float], None] = time.sleep,
-    echo: Callable[[str], None] | None = None,
-    request_item: Callable[..., str] = triggers.request_item,
+    progress: TextIO | None = None,
 ) -> GateReport:
     seat = host or local_host()
     report = check(host=seat, now=now)
@@ -152,10 +151,8 @@ def onboard(
     pending = report.prompt_now() if automatic else report.requestable()
     if not pending:
         return report
-    unsupported = _ask_process_grants(report, seat, pending, echo)
-    _ask_items(
-        seat, pending, timeout_s=timeout_s, sleep=sleep, echo=echo, request_item=request_item
-    )
+    unsupported = _ask_process_grants(report, seat, pending, progress)
+    _ask_items(seat, pending, timeout_s=timeout_s, progress=progress)
     report = check(host=seat, now=now)
     if unsupported and not report.complete:
         report = replace(
@@ -201,9 +198,9 @@ class GateService:
         *,
         automatic: bool = True,
         timeout_s: float = REQUEST_TIMEOUT_S,
-        echo: Callable[[str], None] | None = None,
+        progress: TextIO | None = None,
     ) -> GateReport:
-        return onboard(automatic=automatic, timeout_s=timeout_s, echo=echo)
+        return onboard(automatic=automatic, timeout_s=timeout_s, progress=progress)
 
     def defer(self) -> None:
         defer()

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import time
+
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -22,9 +23,7 @@ from services.wake.heartbeat.tests.heartbeat_support import pool as pool
 
 
 def _selected(pool: ConnectionPool) -> dict[int, float]:
-    return dict(
-        select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, clock=Clock.from_settings())
-    )
+    return dict(select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, now=time.time()))
 
 
 class TestSelectIdleAgents:
@@ -478,7 +477,7 @@ class TestWakeupStormFlattening:
         self._backdate(db_conn, aid, threshold + offset - 5)
         got = dict(
             select_idle_agents_needing_heartbeat(
-                pool, threshold, jitter_span_s=span, clock=Clock.from_settings()
+                pool, threshold, jitter_span_s=span, now=time.time()
             )
         )
         assert aid not in got, "idle just short of the jittered due-time must be excluded"
@@ -486,7 +485,7 @@ class TestWakeupStormFlattening:
         self._backdate(db_conn, aid, threshold + offset + 5)
         got = dict(
             select_idle_agents_needing_heartbeat(
-                pool, threshold, jitter_span_s=span, clock=Clock.from_settings()
+                pool, threshold, jitter_span_s=span, now=time.time()
             )
         )
         assert aid in got, "idle just past the jittered due-time must be selected"
@@ -511,9 +510,7 @@ class TestWakeupStormFlattening:
             local_machine=machine_identity,
         )
         got = dict(
-            select_idle_agents_needing_heartbeat(
-                pool, 300.0, jitter_span_s=0.0, clock=Clock.from_settings()
-            )
+            select_idle_agents_needing_heartbeat(pool, 300.0, jitter_span_s=0.0, now=time.time())
         )
         assert aid in got
 
@@ -554,15 +551,10 @@ class TestWakeupStormFlattening:
         )
 
         order = [
-            r[0]
-            for r in select_idle_agents_needing_heartbeat(
-                pool, THRESHOLD_S, clock=Clock.from_settings()
-            )
+            r[0] for r in select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, now=time.time())
         ]
         assert order.index(a_old) < order.index(a_mid) < order.index(a_new)
 
-        capped = select_idle_agents_needing_heartbeat(
-            pool, THRESHOLD_S, limit=2, clock=Clock.from_settings()
-        )
+        capped = select_idle_agents_needing_heartbeat(pool, THRESHOLD_S, limit=2, now=time.time())
         assert len(capped) == 2
         assert a_new not in [r[0] for r in capped]

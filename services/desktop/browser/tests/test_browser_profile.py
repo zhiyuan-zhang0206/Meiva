@@ -1,13 +1,14 @@
-"""services.desktop.browser.profile — the first-start choice between a fresh dedicated
-Chrome profile and one seeded from the operator's daily Chrome.
+# meiva:note
+# services.desktop.browser.profile: the first-start choice between a fresh dedicated Chrome
+# profile and one seeded from the operator's daily Chrome.
+#
+# The interactive orchestration (`ensure_browser_profile`) talks over a `Console` whose streams
+# are `io.StringIO` here, and is wired through its module-bound seams (`profile_dir`,
+# `default_chrome_user_data_dir`, `running_chrome_pid`, `copy_default_profile`). The pure
+# machinery (exclusions, size accounting, running-Chrome detection, the copy itself) is tested
+# against a real on-disk mini profile.
 
-The interactive orchestration (`ensure_browser_profile`) is exercised by
-monkeypatching its module-bound seams (`profile_dir`, `default_chrome_user_data_dir`,
-`running_chrome_pid`, `copy_default_profile`) and `builtins.input`. The pure
-machinery — exclusions, size accounting, running-Chrome detection, and the copy
-itself — is tested against a real on-disk mini profile.
-"""
-
+import io
 import os
 from pathlib import Path
 
@@ -18,8 +19,13 @@ from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 
 
-def _boom_input(*_a: object, **_k: object) -> str:
-    raise AssertionError("input() must not be called on this path")
+# meiva:note
+# A console whose input holds exactly these answers, one per line; asking for one more is an
+# `EOFError`, so a path that must not prompt fails when it does.
+def _console(*answers: str) -> bp.Console:
+    return bp.Console(
+        stdin=io.StringIO("".join(f"{answer}\n" for answer in answers)), stdout=io.StringIO()
+    )
 
 
 def _make_profile(root: Path) -> Path:
@@ -181,14 +187,14 @@ def test_skips_when_profile_path_already_exists(
     existing = tmp_path / "prof"
     existing.mkdir()  # An empty profile from a prior launch is also immutable.
     monkeypatch.setattr(bp, "profile_dir", lambda: existing)
-    monkeypatch.setattr("builtins.input", _boom_input)
-    bp.ensure_browser_profile(interactive=True, host=fake_host())  # returns without prompting
+    bp.ensure_browser_profile(
+        interactive=True, host=fake_host(), console=_console()
+    )  # returns without prompting
 
 
 def test_skips_when_not_interactive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bp, "profile_dir", lambda: tmp_path / "absent")
-    monkeypatch.setattr("builtins.input", _boom_input)
-    bp.ensure_browser_profile(interactive=False, host=fake_host())
+    bp.ensure_browser_profile(interactive=False, host=fake_host(), console=_console())
 
 
 def test_skips_when_no_daily_chrome(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -198,8 +204,7 @@ def test_skips_when_no_daily_chrome(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         return None
 
     monkeypatch.setattr(bp, "default_chrome_user_data_dir", fake_default_chrome_user_data_dir)
-    monkeypatch.setattr("builtins.input", _boom_input)
-    bp.ensure_browser_profile(interactive=True, host=fake_host())
+    bp.ensure_browser_profile(interactive=True, host=fake_host(), console=_console())
 
 
 def _wire_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[Path, Path]]:
@@ -222,24 +227,21 @@ def _wire_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[Pa
 
 def test_choice_new_does_not_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _wire_copy(tmp_path, monkeypatch)
-    monkeypatch.setattr("builtins.input", lambda *_a: "new")  # pyright: ignore[reportUnknownArgumentType]
-    bp.ensure_browser_profile(interactive=True, host=fake_host())
+    bp.ensure_browser_profile(interactive=True, host=fake_host(), console=_console("new"))
     assert calls == []
 
 
 def test_choice_copy_confirmed_copies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _wire_copy(tmp_path, monkeypatch)
-    answers = iter(["copy", "yes"])
-    monkeypatch.setattr("builtins.input", lambda *_a: next(answers))  # pyright: ignore[reportUnknownArgumentType]
-    bp.ensure_browser_profile(interactive=True, host=fake_host())
+    answers = ["copy", "yes"]
+    bp.ensure_browser_profile(interactive=True, host=fake_host(), console=_console(*answers))
     assert len(calls) == 1
 
 
 def test_choice_copy_declined_at_confirm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _wire_copy(tmp_path, monkeypatch)
-    answers = iter(["copy", "no"])
-    monkeypatch.setattr("builtins.input", lambda *_a: next(answers))  # pyright: ignore[reportUnknownArgumentType]
-    bp.ensure_browser_profile(interactive=True, host=fake_host())
+    answers = ["copy", "no"]
+    bp.ensure_browser_profile(interactive=True, host=fake_host(), console=_console(*answers))
     assert calls == []
 
 
@@ -250,9 +252,8 @@ def test_copy_aborts_when_chrome_running(tmp_path: Path, monkeypatch: pytest.Mon
         "running_chrome_pid",
         lambda _s: 4242,  # pyright: ignore[reportUnknownArgumentType]
     )  # never quits
-    answers = iter(["copy", "new"])  # choose copy, then bail out of the retry loop
-    monkeypatch.setattr("builtins.input", lambda *_a: next(answers))  # pyright: ignore[reportUnknownArgumentType]
-    bp.ensure_browser_profile(interactive=True, host=fake_host())
+    answers = ["copy", "new"]  # choose copy, then bail out of the retry loop
+    bp.ensure_browser_profile(interactive=True, host=fake_host(), console=_console(*answers))
     assert calls == []
 
 
@@ -260,7 +261,6 @@ def test_copy_proceeds_after_chrome_quits(tmp_path: Path, monkeypatch: pytest.Mo
     calls = _wire_copy(tmp_path, monkeypatch)
     pids = iter([4242, None])  # running on first probe, quit by the second
     monkeypatch.setattr(bp, "running_chrome_pid", lambda _s: next(pids))  # pyright: ignore[reportUnknownArgumentType]
-    answers = iter(["copy", "", "yes"])  # copy; Enter to retry; confirm
-    monkeypatch.setattr("builtins.input", lambda *_a: next(answers))  # pyright: ignore[reportUnknownArgumentType]
-    bp.ensure_browser_profile(interactive=True, host=fake_host())
+    answers = ["copy", "", "yes"]  # copy; Enter to retry; confirm
+    bp.ensure_browser_profile(interactive=True, host=fake_host(), console=_console(*answers))
     assert len(calls) == 1

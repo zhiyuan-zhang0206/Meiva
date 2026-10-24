@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import pytest
 
-from base.clock import SYSTEM_TIMERS, Clock
+from base.clock import SYSTEM_TIMERS, Clock, Timers
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
@@ -45,10 +45,14 @@ def _patch_run(
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
     patch_database(monkeypatch, pool=_Pool)
 
-    async def dispatch_loop(round: DispatchRound, progress: LoopProgress, *, clock: Clock) -> None:
+    async def dispatch_loop(
+        round: DispatchRound, progress: LoopProgress, *, timers: Timers
+    ) -> None:
         await loops["dispatch"](round, progress)
 
-    async def liveness_loop(round: LivenessRound, progress: LoopProgress, *, clock: Clock) -> None:
+    async def liveness_loop(
+        round: LivenessRound, progress: LoopProgress, *, timers: Timers
+    ) -> None:
         await loops["liveness"](round, progress)
 
     monkeypatch.setattr(daemon, "dispatch_loop", dispatch_loop)

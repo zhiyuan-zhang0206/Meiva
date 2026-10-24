@@ -50,8 +50,8 @@ def _drive(loop: str, script: _Script) -> Awaitable[None]:
     clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
     progress = LoopProgress(loop, 60.0, timers=clock)
     if loop == "poll":
-        return loops.dispatch_loop(_Dispatch(script), progress, clock=clock)
-    return loops.liveness_loop(_Liveness(script), progress, clock=clock)
+        return loops.dispatch_loop(_Dispatch(script), progress, timers=clock)
+    return loops.liveness_loop(_Liveness(script), progress, timers=clock)
 
 
 @pytest.mark.parametrize("loop", ["poll", "liveness"])

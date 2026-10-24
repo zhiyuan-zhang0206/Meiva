@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from base.clock.tests.manual_timers import ManualTimers
 from base.host.permissions_helper import client
 from base.host.permissions_helper.client import PermissionsHelperClient
 from base.sessions.tests.refuse_helper import refuse_helper
@@ -104,7 +103,7 @@ def test_long_mac_ipc_path_refuses_before_building_or_native_jobs(
     monkeypatch.setattr(lifecycle, "helper_socket", lambda: long_socket)
     recorded = fake_tools(monkeypatch)
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="shorter cluster home"):
-        lifecycle.converge(helper=refuse_helper, timers=ManualTimers())
+        lifecycle.converge(helper=refuse_helper)
     assert recorded == []
 
 
@@ -120,4 +119,4 @@ def test_helper_ping_refuses_missing_stop_capability(capability: str) -> None:
     reply = {"pong": True, "root_stop_intent_v1": True, "helper_shutdown_v1": True}
     reply.pop(capability)
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="upgrade its signed artifact"):
-        lifecycle.helper_answers_ping(serve(ScriptedHelper(ping=reply)), ManualTimers())
+        lifecycle.helper_answers_ping(serve(ScriptedHelper(ping=reply)), settle_seconds=0.0)

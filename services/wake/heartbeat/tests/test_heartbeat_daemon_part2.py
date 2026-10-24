@@ -22,7 +22,6 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.tests.units import spawn_agent
-from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
@@ -122,9 +121,7 @@ def _make_idle(
 
 def _selected(pool: ConnectionPool) -> dict[int, float]:
     """agent_id -> idle_minutes for every agent the daemon would check in on."""
-    return dict(
-        select_idle_agents_needing_heartbeat(pool, _THRESHOLD_S, clock=Clock.from_settings())
-    )
+    return dict(select_idle_agents_needing_heartbeat(pool, _THRESHOLD_S, now=time.time()))
 
 
 def _mirror_nudged(agent_id: int) -> tuple[str, str, int] | None:
