@@ -18,6 +18,7 @@ export type GatewayReply =
 export interface TestGateway {
   readonly origin: string;
   readonly requests: GatewayRequest[];
+  readonly closedRequests: GatewayRequest[];
   close(): Promise<void>;
 }
 
@@ -86,6 +87,7 @@ function send(response: ServerResponse, reply: GatewayReply, cors: Record<string
 // get matching CORS headers and preflight answers.
 export async function startGateway(answer: (request: GatewayRequest) => GatewayReply): Promise<TestGateway> {
   const requests: GatewayRequest[] = [];
+  const closedRequests: GatewayRequest[] = [];
   const sockets = new Set<Socket>();
   const server = createServer((request, response) => {
     const cors = corsHeaders(request);
@@ -102,6 +104,7 @@ export async function startGateway(answer: (request: GatewayRequest) => GatewayR
         body,
       };
       requests.push(recorded);
+      response.once("close", () => closedRequests.push(recorded));
       send(response, answer(recorded), cors);
     });
   });
@@ -114,6 +117,7 @@ export async function startGateway(answer: (request: GatewayRequest) => GatewayR
   return {
     origin: `http://127.0.0.1:${port}`,
     requests,
+    closedRequests,
     close: () =>
       new Promise<void>((resolve) => {
         for (const socket of sockets) socket.destroy();
