@@ -1,0 +1,8 @@
+{
+  "allowed": 3,
+  "exemptions": {
+    "meiva_builtins/plugins/meiva_syntax_fix/tests/child_ruff_without_path.py::_assert_ruff_unreachable": "meiva_builtins/plugins/meiva_syntax_fix/tests/test_syntax_fix.py empties PATH",
+    "tests/ci/test_host_platform_marker.py::test_the_named_host_runs_and_every_other_host_skips_with_the_reason": "the assertion is about the skip `tests/fixtures/host_platform.py` produces here.",
+    "tests/fixtures/host_platform.py::_current_system": "this module IS the translation `tests/ci/test_host_platform_marker.py` checks."
+  }
+}

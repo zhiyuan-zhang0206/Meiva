@@ -1,9 +1,8 @@
 {
   "Host.system()": 7,
-  "is_linux()": 6,
-  "is_macos()": 2,
+  "is_linux()": 1,
   "os.name": 1,
   "pytest.importorskip(...)": 1,
-  "shutil.which(...)": 36,
-  "sys.platform": 41
+  "shutil.which(...)": 35,
+  "sys.platform": 31
 }
