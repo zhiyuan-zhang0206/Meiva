@@ -23,6 +23,9 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--plan", required=True, help="where pytest writes the plan (JSON)")
     parser.add_argument("--stacks", required=True, help="where periodic tracebacks are written")
     parser.add_argument(
+        "--shared", action="store_true", help="bind the plan to source/runtime identity"
+    )
+    parser.add_argument(
         "--files-from",
         help="plan only the test files listed in this file, one per line (the selected subset)",
     )
@@ -56,6 +59,7 @@ def main(argv: list[str]) -> int:
                     "scripts.ci.file_shard_shadow",
                     f"--file-shard-count={args.count}",
                     f"--file-shard-plan={args.plan}",
+                    *(["--file-shard-shared"] if args.shared else []),
                     *files,
                 ]
             )

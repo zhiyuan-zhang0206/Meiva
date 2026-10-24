@@ -1,20 +1,19 @@
-"""Opt-in collection and runtime proof for whole-file shards.
-
-Create a plan from one complete eligible collection, then collect each group's
-files and compare node IDs and fixture closure with that same snapshot. Both
-stages require --collect-only unless --file-shard-execute explicitly opts into
-runtime proof. Required CI routing remains unchanged.
-"""
+# meiva:link scripts/ci/docs/file-shard-shadow/required-ci.meiva.okf.md
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
+import platform
+import subprocess
+import sys
 import time
 from collections import defaultdict
 from collections.abc import Generator
-from importlib.metadata import version
+from importlib.metadata import distributions, version
 from pathlib import Path
+from types import ModuleType
 from typing import Annotated, Literal, Self, cast
 
 import pytest
@@ -27,6 +26,67 @@ DEFAULT_FILE_SHARDS = 16
 MAX_FILE_SHARDS = 64
 _DURATIONS = TypeAdapter(dict[str, Seconds])
 _STARTED = time.perf_counter()
+
+
+class CollectionIdentity(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    git_tree: str
+    python: str
+    lock_sha256: str
+    distributions_sha256: str
+    plugins: list[str]
+    population: list[str]
+    environment: dict[str, str | None]
+
+
+# meiva:note
+# Git receives only fixed identity queries and the checkout root, without a shell.
+def _git(root: Path, *args: str) -> str:
+    return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()  # noqa: S603
+
+
+# meiva:note
+# Porcelain's two columns cover both the index and working tree, including a staged
+# edit reverted on disk. Untracked diagnostics do not change the source identity.
+# meiva:link scripts/ci/docs/file-shard-shadow/required-ci.meiva.okf.md
+def _read_collection_identity(config: pytest.Config) -> CollectionIdentity:
+    root = config.rootpath
+    try:
+        if _git(root, "status", "--porcelain", "--untracked-files=no"):
+            raise pytest.UsageError("Shared collection requires a clean tracked index and worktree")
+        tree = _git(root, "rev-parse", "HEAD^{tree}")
+        lock = (root / "uv.lock").read_bytes()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise pytest.UsageError(f"Cannot identify shared collection source: {error}") from error
+    installed = sorted((dist.metadata["Name"].lower(), dist.version) for dist in distributions())
+    return CollectionIdentity(
+        git_tree=tree,
+        python=f"{sys.implementation.name}:{sys.version}:{sys.platform}:{platform.machine()}",
+        lock_sha256=hashlib.sha256(lock).hexdigest(),
+        distributions_sha256=hashlib.sha256(json.dumps(installed).encode()).hexdigest(),
+        plugins=sorted(
+            plugin.__name__
+            for plugin in config.pluginmanager.get_plugins()
+            if isinstance(plugin, ModuleType)
+        ),
+        population=[
+            Path(arg).relative_to(root).as_posix() if Path(arg).is_absolute() else arg
+            for arg in config.args
+        ],
+        environment={
+            name: os.environ.get(name)
+            for name in (
+                "PYTHONHASHSEED",
+                "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
+                "LC_ALL",
+                "LANG",
+                "TZ",
+                "ImageOS",
+                "ImageVersion",
+            )
+        },
+    )
 
 
 class Node(BaseModel):
@@ -68,7 +128,8 @@ class BaselineGroup(BaseModel):
 class Plan(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
+    identity: CollectionIdentity | None = None
     pytest_version: str
     pytest_split_version: str
     durations_sha256: str
@@ -101,6 +162,7 @@ _PLAN = pytest.StashKey[Plan]()
 _RUNTIME = pytest.StashKey[dict[str, "RuntimeNode"]]()
 _COLLECTION_SECONDS = pytest.StashKey[float]()
 _DURATION_DIGEST = pytest.StashKey[str]()
+_IDENTITY = pytest.StashKey[CollectionIdentity]()
 
 
 class RuntimeNode(BaseModel):
@@ -133,6 +195,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption("--file-shard-count", type=int, default=DEFAULT_FILE_SHARDS)
     group.addoption("--file-shard-check", help="Read a plan and collect one group's files.")
     group.addoption("--file-shard-group", type=int)
+    group.addoption(
+        "--file-shard-shared",
+        action="store_true",
+        help="Require identical source/runtime identity.",
+    )
     group.addoption("--file-shard-report", help="Write the collection comparison JSON.")
     group.addoption(
         "--file-shard-execute",
@@ -204,9 +271,36 @@ def _configuration_digest(config: pytest.Config) -> str:
         "markers": config.option.markexpr,
         "keywords": config.option.keyword,
         "omit_static": config.getoption("omit_static_tests", default=False),
+        "ignore": config.option.ignore,
+        "ignore_glob": config.option.ignore_glob,
+        "deselect": config.option.deselect,
     }
     raw = config.inipath.read_bytes() + json.dumps(context, sort_keys=True).encode()
     return hashlib.sha256(raw).hexdigest()
+
+
+def _validate_plan_inputs(config: pytest.Config, plan: Plan) -> None:
+    if (plan.pytest_version, plan.pytest_split_version) != (
+        pytest.__version__,
+        version("pytest-split"),
+    ):
+        raise pytest.UsageError(
+            "Shadow plan and check require the same pytest/pytest-split versions"
+        )
+    if plan.durations_sha256 != _durations(config)[1]:
+        raise pytest.UsageError("Shadow plan and check require the same duration input")
+    if plan.pytest_config_sha256 != _configuration_digest(config):
+        raise pytest.UsageError(
+            "Shadow plan and check require the same pytest configuration and filters"
+        )
+    if bool(config.getoption("file_shard_shared")) != (plan.identity is not None):
+        raise pytest.UsageError("Shared plans and consumers must both require shared identity")
+    if plan.identity is not None:
+        actual = _read_collection_identity(config)
+        if plan.identity != actual:
+            raise pytest.UsageError("Shared plan requires identical source, runtime and population")
+        if config.getoption("file_shard_count") != len(plan.groups):
+            raise pytest.UsageError("Shared plan requires the same group count")
 
 
 def _load_group(config: pytest.Config) -> None:
@@ -230,19 +324,7 @@ def _load_group(config: pytest.Config) -> None:
     index = config.getoption("file_shard_group")
     if not isinstance(index, int) or not 1 <= index <= len(plan.groups):
         raise pytest.UsageError("--file-shard-group must name a group in the plan")
-    if (plan.pytest_version, plan.pytest_split_version) != (
-        pytest.__version__,
-        version("pytest-split"),
-    ):
-        raise pytest.UsageError(
-            "Shadow plan and check require the same pytest/pytest-split versions"
-        )
-    if plan.durations_sha256 != _durations(config)[1]:
-        raise pytest.UsageError("Shadow plan and check require the same duration input")
-    if plan.pytest_config_sha256 != _configuration_digest(config):
-        raise pytest.UsageError(
-            "Shadow plan and check require the same pytest configuration and filters"
-        )
+    _validate_plan_inputs(config, plan)
     files = plan.groups[index - 1].files
     for file in files:
         path = (config.rootpath / file).resolve()
@@ -259,7 +341,11 @@ def pytest_configure(config: pytest.Config) -> None:
     check = config.getoption("file_shard_check")
     execute = config.getoption("file_shard_execute")
     if not output and not check:
-        if config.getoption("file_shard_group") or config.getoption("file_shard_report"):
+        if (
+            config.getoption("file_shard_group")
+            or config.getoption("file_shard_report")
+            or config.getoption("file_shard_shared")
+        ):
             raise pytest.UsageError("Shadow group/report options require --file-shard-check")
         return
     if output and check:
@@ -277,6 +363,8 @@ def pytest_configure(config: pytest.Config) -> None:
         _load_group(config)
     else:
         Path(cast(str, output)).unlink(missing_ok=True)
+        if config.getoption("file_shard_shared"):
+            config.stash[_IDENTITY] = _read_collection_identity(config)
 
 
 def _record(item: pytest.Item, root: Path) -> Node:
@@ -309,6 +397,7 @@ def _plan(session: pytest.Session) -> Plan:
     baseline = algorithm(count, items, durations)
     candidate = algorithm(count, [nodes[0] for nodes in by_file.values()], weights)
     return Plan(
+        identity=session.config.stash.get(_IDENTITY, None),
         pytest_version=pytest.__version__,
         pytest_split_version=version("pytest-split"),
         durations_sha256=digest,

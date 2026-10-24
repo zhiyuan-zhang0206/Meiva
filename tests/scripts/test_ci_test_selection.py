@@ -62,7 +62,13 @@ def _backend_verdict(
     assert "${{" not in script
     return subprocess.run(  # noqa: S603 - checked-in verifier over closed test-owned results
         ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", script],
-        env=os.environ | {"TEST_SELECTION_MODE": mode, "DECISION": decision},
+        env=os.environ
+        | {
+            "TEST_SELECTION_MODE": mode,
+            "DECISION": decision,
+            "SHARED_FILE_PLAN": "false",
+            "PLAN_ARTIFACT_ID": "",
+        },
         capture_output=True,
         text=True,
         check=False,
@@ -98,7 +104,9 @@ def _assert_backend_verdicts(script: str, dependencies: list[str]) -> None:
         for outcome in ("failure", "cancelled", "skipped"):
             actual = _backend_verdict(script, "true", results | {job: outcome})
             # FULL has no enforced subset; every required dependency must succeed.
-            assert actual.returncode == (0 if job == "backend-selected" else 1), actual.stdout
+            assert actual.returncode == (0 if job in {"backend-selected", "backend-plan"} else 1), (
+                actual.stdout
+            )
     # The selector step is continue-on-error inside classify; its outcome is an output.
     # A failed or cancelled selector keeps the full net but fails the required check;
     # a skipped one (no PR, or no backend side) is not a failure.
@@ -145,7 +153,7 @@ def test_shards_are_skipped_only_on_the_enforced_subset_path(tmp_path: Path) -> 
     """Everything except enforce+SELECTED runs the full fan-out: shadow, FULL,
     SKIP, and a selector failure (empty decision) all keep the gate."""
     shard = _workflow_jobs()["backend-shard"]
-    assert shard["needs"] == ["classify"]
+    assert shard["needs"] == ["classify", "backend-plan"]
     condition = shard["if"]
     # A status function admits skipped needs on main, but respects run cancellation.
     assert "!cancelled()" in condition
@@ -204,6 +212,7 @@ def _assert_shard_failure_verdicts(root: Path, script: str) -> None:
             "GROUP": str(group),
             "COVERAGE_FILE": "coverage-data",
             "GITHUB_OUTPUT": str(directory / "outputs"),
+            "SHARED_FILE_PLAN": "false",
         }
         result = subprocess.run(  # noqa: S603 -- repository shell with test-owned commands
             [
@@ -390,6 +399,7 @@ def test_aggregator_requires_whichever_pytest_path_ran() -> None:
     aggregator = _workflow_jobs()["backend"]
     assert aggregator["needs"] == [
         "classify",
+        "backend-plan",
         "backend-static",
         "backend-static-tests",
         "backend-structure",

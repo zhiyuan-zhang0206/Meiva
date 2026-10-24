@@ -381,6 +381,247 @@ def test_configuration_drift_is_rejected_before_collecting_a_group(tmp_path: Pat
     assert not output.exists()
 
 
+# meiva:note
+# Fixed Git commands act only on the synthetic project this test owns, without a shell.
+def git(root: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, timeout=10)  # noqa: S603
+
+
+def shared_plan(root: Path) -> tuple[Path, dict[str, Any]]:
+    project(root)
+    (root / "uv.lock").write_text("fixture lock input\n")
+    git(root, "init", "-q")
+    git(root, "add", ".")
+    git(
+        root,
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "commit",
+        "--no-gpg-sign",
+        "-qm",
+        "fixture",
+    )
+    output = root / "plan.json"
+    result = run(
+        root,
+        "--collect-only",
+        "-m",
+        "not flaky",
+        "--file-shard-count=2",
+        "--file-shard-shared",
+        "--file-shard-plan",
+        str(output),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return output, json.loads(output.read_text())
+
+
+def shared_check(root: Path, manifest: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return run(
+        root,
+        "--collect-only",
+        "-m",
+        "not flaky",
+        "--file-shard-count=2",
+        "--file-shard-shared",
+        "--file-shard-check",
+        str(manifest),
+        "--file-shard-group=1",
+        "--file-shard-report",
+        str(root / "check.json"),
+        *args,
+    )
+
+
+def execute_shared_group(
+    root: Path, manifest: Path, index: int
+) -> subprocess.CompletedProcess[str]:
+    return run(
+        root,
+        "-m",
+        "not flaky",
+        "-n",
+        "2",
+        "--file-shard-execute",
+        "--file-shard-count=2",
+        "--file-shard-shared",
+        "--file-shard-check",
+        str(manifest),
+        "--file-shard-group",
+        str(index),
+        "--file-shard-report",
+        str(root / f"collection-{index}.json"),
+        "--file-shard-runtime-report",
+        str(root / f"runtime-{index}.json"),
+    )
+
+
+def test_shared_plan_runs_real_workers_in_another_identical_checkout(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    manifest, data = shared_plan(source)
+    clone = tmp_path / "clone"
+    git(tmp_path, "clone", "-q", str(source), str(clone))
+    (clone / "untracked-diagnostic.log").write_text("not source drift")
+    for index, group in enumerate(data["groups"], 1):
+        result = execute_shared_group(clone, manifest, index)
+        assert result.returncode == 0, result.stdout + result.stderr
+        workers = list(clone.glob(f"collection-{index}-gw*.json"))
+        assert len(workers) == 2
+        for worker in workers:
+            observed = json.loads(worker.read_text())
+            assert observed["matched"] is True
+            assert observed["node_count"] == len(group["nodes"])
+
+
+@pytest.mark.parametrize("drift", ["unstaged", "staged", "reverted-index"])
+def test_shared_plan_rejects_both_index_and_worktree_drift(tmp_path: Path, drift: str) -> None:
+    manifest, _ = shared_plan(tmp_path)
+    (tmp_path / "check.json").write_text('{"matched": true}')
+    source = tmp_path / "tests/a/test_first.py"
+    original = source.read_text()
+    source.write_text(original + "\n# tracked drift\n")
+    if drift != "unstaged":
+        git(tmp_path, "add", str(source))
+    if drift == "reverted-index":
+        source.write_text(original)
+    result = shared_check(tmp_path, manifest)
+    assert result.returncode == 4
+    assert "clean tracked index and worktree" in result.stderr
+    assert not (tmp_path / "check.json").exists()
+
+
+def test_shared_plan_rejects_new_source_outside_its_planned_files(tmp_path: Path) -> None:
+    manifest, _ = shared_plan(tmp_path)
+    (tmp_path / "tests/a/test_new.py").write_text("def test_unplanned(): pass\n")
+    git(tmp_path, "add", "tests/a/test_new.py")
+    git(
+        tmp_path,
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "commit",
+        "--no-gpg-sign",
+        "-qm",
+        "new test outside the plan",
+    )
+    result = shared_check(tmp_path, manifest)
+    assert result.returncode == 4
+    assert "identical source, runtime and population" in result.stderr
+    assert not (tmp_path / "check.json").exists()
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["python", "lock_sha256", "distributions_sha256", "plugins", "population", "environment"],
+)
+def test_shared_identity_drift_is_rejected_before_collection(tmp_path: Path, field: str) -> None:
+    manifest, data = shared_plan(tmp_path)
+    original = data["identity"][field]
+    data["identity"][field] = (
+        ["different"]
+        if isinstance(original, list)
+        else {"PYTHONHASHSEED": "different"}
+        if isinstance(original, dict)
+        else "different"
+    )
+    manifest.write_text(json.dumps(data))
+    result = shared_check(tmp_path, manifest)
+    assert result.returncode == 4
+    assert "identical source, runtime and population" in result.stderr
+    assert not (tmp_path / "check.json").exists()
+
+
+def test_shared_consumer_cannot_accept_a_plan_without_identity(tmp_path: Path) -> None:
+    manifest, data = shared_plan(tmp_path)
+    del data["identity"]
+    manifest.write_text(json.dumps(data))
+    result = shared_check(tmp_path, manifest)
+    assert result.returncode == 4
+    assert "must both require shared identity" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "args", [("-p", "no:cacheprovider"), ("--file-shard-count=3",), ("--ignore=tests/b",)]
+)
+def test_real_plugin_selection_or_group_changes_cannot_reuse_shared_plan(
+    tmp_path: Path, args: tuple[str, ...]
+) -> None:
+    manifest, _ = shared_plan(tmp_path)
+    result = shared_check(tmp_path, manifest, *args)
+    assert result.returncode == 4
+    assert not (tmp_path / "check.json").exists()
+
+
+def test_failed_shared_planning_removes_a_previous_successful_plan(tmp_path: Path) -> None:
+    manifest, _ = shared_plan(tmp_path)
+    (tmp_path / "uv.lock").write_text("changed lock\n")
+    result = run(
+        tmp_path, "--collect-only", "--file-shard-shared", "--file-shard-plan", str(manifest)
+    )
+    assert result.returncode == 4
+    assert not manifest.exists()
+
+
+# meiva:note
+# The child interpreter receives an explicit hash seed; the parent environment stays unchanged.
+def test_actual_collection_environment_drift_is_rejected(tmp_path: Path) -> None:
+    manifest, _ = shared_plan(tmp_path)
+    seed = "17" if os.environ.get("PYTHONHASHSEED") != "17" else "23"
+    result = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-c",
+            str(tmp_path / "pyproject.toml"),
+            "--rootdir",
+            str(tmp_path),
+            "-p",
+            PLUGIN,
+            "--collect-only",
+            "-m",
+            "not flaky",
+            "--file-shard-shared",
+            "--file-shard-count=2",
+            "--file-shard-check",
+            str(manifest),
+            "--file-shard-group=1",
+            "--file-shard-report",
+            str(tmp_path / "check.json"),
+        ],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(ROOT), "PYTHONHASHSEED": seed},
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 4
+    assert "identical source, runtime and population" in result.stderr
+
+
+@pytest.mark.parametrize("field", ["nodeid", "fixtures"])
+def test_shared_workers_still_reject_actual_node_or_fixture_mismatch(
+    tmp_path: Path, field: str
+) -> None:
+    manifest, data = shared_plan(tmp_path)
+    node = data["groups"][0]["nodes"][0]
+    if field == "nodeid":
+        node[field] = node["file"] + "::test_missing"
+    else:
+        node[field].append("unplanned_fixture")
+    manifest.write_text(json.dumps(data))
+    result = execute_shared_group(tmp_path, manifest, 1)
+    assert result.returncode != 0
+    reports = list(tmp_path.glob("collection-1-gw*.json"))
+    assert reports
+    assert all(json.loads(report.read_text())["matched"] is False for report in reports)
+
+
 @pytest.fixture(scope="module")
 def runtime_proof(tmp_path_factory: pytest.TempPathFactory) -> tuple[Plan, Path]:
     root = tmp_path_factory.mktemp("runtime-proof")
