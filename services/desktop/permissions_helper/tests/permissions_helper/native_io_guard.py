@@ -18,7 +18,7 @@ def permissions_helper_native_io(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Protect direct owner-private native calls beside helper and CLI consumers."""
-    if request.node.get_closest_marker("native_permissions_helper") is not None:
+    if "native_permissions_helper" in request.keywords:
         return
 
     def forbidden(*_args: object, **_kwargs: object) -> object:

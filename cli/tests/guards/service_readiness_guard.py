@@ -27,10 +27,14 @@ def guard_service_readiness(
 
     Opt out with `@pytest.mark.real_service_readiness_gate` when the wait or the exit
     code it produces is the subject (cli/commands/lifecycle/tests/startup/test_start_live_path.py)."""
-    if request.node.get_closest_marker("real_service_readiness_gate"):
+    if "real_service_readiness_gate" in request.keywords:
         return
     ready = ReadinessWait((), 0.0, sessions_gone=False)
+
+    def ready_without_polling(*_args: object, **_kwargs: object) -> ReadinessWait:
+        return ready
+
     monkeypatch.setattr(
         "cli.commands.lifecycle.root_readiness.wait_for_service_tree",
-        lambda *_a, **_kw: ready,
+        ready_without_polling,
     )
