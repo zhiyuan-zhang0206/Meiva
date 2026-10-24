@@ -294,6 +294,30 @@ jobs:
       - name: Check canonical npm lock sources (stdlib only)
         run: python3 scripts/lint/locks/package_lock.py
 
+  diff-hints:
+    # The backstop for the diff hints (scripts/lint/docs/diff-hints/diff-hints.meiva.okf.md).
+    # The commit-msg and pre-push hooks ask; `--no-verify` and a clone without the hooks skip
+    # them. This job runs the pre-push check on the pull request's own commits and writes every
+    # `Hint-Ack` into the job summary (a directory-wide one marked broad) for the reviewer.
+    # Stdlib only, full history for the merge base. Real pull requests only: a merge-queue
+    # branch carries other pull requests' commits, which were judged on their own.
+    name: diff hints
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false && !startsWith(github.head_ref, 'trunk-') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Check that every hint on the branch is fixed or answered
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 scripts/lint/diagnostics/diff_hints/hints.py branch \
+            --base "$BASE_SHA" --head "$HEAD_SHA" --summary "$GITHUB_STEP_SUMMARY"
+
   core-content-manifests:
     # The content-channel gate (tasks #2915/#3267): core manifests' declared
     # ranges + requires_commit must hold against the repo's derived host

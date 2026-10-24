@@ -90,7 +90,7 @@ class _World:
         interpreter = self.main / ".venv/bin/python"
         interpreter.parent.mkdir(parents=True)
         interpreter.symlink_to(sys.executable)
-        for hook_type in ("pre-commit", "pre-push"):
+        for hook_type in ("pre-commit", "pre-push", "commit-msg"):
             hook = self.main / ".git/hooks" / hook_type
             hook.write_text(
                 "#!/usr/bin/env bash\n"

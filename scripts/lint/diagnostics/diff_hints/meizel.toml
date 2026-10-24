@@ -1,0 +1,36 @@
+exports = ["hints.py"]
+
+[purity]
+"." = "none"
+"acks.py" = "strict"
+"ambient.py" = "strict"
+"branches.py" = "strict"
+"catalog.py" = "strict"
+"diff.py" = "strict"
+"engine.py" = "strict"
+"model.py" = "strict"
+"names.py" = "strict"
+"removed.py" = "strict"
+"render.py" = "strict"
+"scope.py" = "strict"
+"seams.py" = "strict"
+"shapes.py" = "strict"
+"signatures.py" = "strict"
+"walk.py" = "strict"
+
+[uses]
+"acks.py" = ["model.py"]
+"ambient.py" = ["model.py", "names.py", "scope.py"]
+"branches.py" = ["model.py", "names.py", "walk.py"]
+"catalog.py" = ["model.py"]
+"diff.py" = ["model.py"]
+"engine.py" = ["ambient.py", "branches.py", "model.py", "removed.py", "scope.py", "seams.py", "shapes.py", "signatures.py"]
+"hints.py" = ["acks.py", "diff.py", "engine.py", "model.py", "render.py", "scope.py"]
+"removed.py" = ["model.py", "scope.py"]
+"render.py" = ["acks.py", "catalog.py", "model.py"]
+"scope.py" = ["model.py", "names.py"]
+"seams.py" = ["model.py", "names.py", "walk.py"]
+"shapes.py" = ["model.py", "names.py"]
+"signatures.py" = ["model.py", "names.py", "walk.py"]
+"tests" = ["acks.py", "catalog.py", "diff.py", "engine.py", "hints.py", "model.py", "removed.py", "render.py", "scope.py"]
+"walk.py" = ["model.py"]
