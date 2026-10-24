@@ -7,5 +7,5 @@ exports = ["feed.py"]
 "gmail_queries.py" = "strict"
 "gmail_wire.py" = "strict"
 
-[debt.ambient-read]
-"imap.py#environ os.environ" = 1
+[roots]
+"feed.py" = { kinds = ["environ"], why = "The script entry assembles Process and AuthSources from the process environment before invoking the command" }
