@@ -1,49 +1,54 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, tzinfo
+from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
-from services.backup.scheduler import recovery_drill
+from services.backup.scheduler.recovery_drill import (
+    load_local_dump_restore_success,
+    record_local_dump_restore_success,
+)
+
+_DONE = datetime(2026, 8, 30, 3, 0, 5, tzinfo=UTC)
 
 
-def _at(day: int, hour: int, minute: int = 0) -> datetime:
-    return datetime(2026, 8, day, hour, minute, tzinfo=UTC)
+def test_no_marker_means_no_recorded_success(tmp_path: Path) -> None:
+    assert load_local_dump_restore_success(tmp_path / "marker.json") is None
 
 
-def test_local_dump_restore_runs_once_after_the_weekly_window(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def utc_zone(**_inputs: object) -> tzinfo:
-        return UTC
+def test_a_recorded_success_reads_back_as_the_same_instant_in_utc(tmp_path: Path) -> None:
+    marker = tmp_path / "db" / "marker.json"
 
-    monkeypatch.setattr(recovery_drill, "cluster_tz", utc_zone)
-    before_window = _at(30, 2, 59)
-    window = _at(30, 3)
+    record_local_dump_restore_success(_DONE, marker)
 
-    prior_success = datetime(2026, 8, 23, 3, tzinfo=UTC)
-    assert not recovery_drill.local_dump_restore_due(
-        before_window,
-        last_success=prior_success,
-        clock_factory=lambda: Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
-        hour_reader=lambda: 3,
-    )
-    assert recovery_drill.local_dump_restore_due(
-        window,
-        last_success=prior_success,
-        clock_factory=lambda: Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
-        hour_reader=lambda: 3,
-    )
-    assert not recovery_drill.local_dump_restore_due(
-        window,
-        last_success=window,
-        clock_factory=lambda: Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
-        hour_reader=lambda: 3,
-    )
-    assert recovery_drill.local_dump_restore_due(
-        datetime(2026, 9, 6, 3, tzinfo=UTC),
-        last_success=window,
-        clock_factory=lambda: Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
-        hour_reader=lambda: 3,
-    )
+    assert load_local_dump_restore_success(marker) == _DONE
+    assert marker.stat().st_mode & 0o777 == 0o600
+
+
+def test_a_later_success_replaces_the_earlier_one(tmp_path: Path) -> None:
+    marker = tmp_path / "marker.json"
+    record_local_dump_restore_success(datetime(2026, 8, 23, 3, tzinfo=UTC), marker)
+
+    record_local_dump_restore_success(_DONE, marker)
+
+    assert load_local_dump_restore_success(marker) == _DONE
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["not json", "[]", '{"completed_at": 3}', '{"completed_at": "2026-08-30T03:00:00"}', "{}"],
+)
+def test_a_marker_of_another_shape_is_invalid(tmp_path: Path, content: str) -> None:
+    marker = tmp_path / "marker.json"
+    marker.write_text(content)
+
+    with pytest.raises(RuntimeError, match="success marker is invalid"):
+        load_local_dump_restore_success(marker)
+
+
+def test_a_naive_success_time_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="TZ-aware"):
+        record_local_dump_restore_success(
+            datetime.fromisoformat("2026-08-30T03:00:00"), tmp_path / "marker.json"
+        )

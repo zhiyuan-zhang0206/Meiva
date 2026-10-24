@@ -1,9 +1,10 @@
-exports = ["daemon.py", "worker.py"]
+exports = ["daemon.py", "settings.py", "worker.py"]
 
 [uses]
-"daemon.py" = ["operation", "recovery_drill.py", "worker.py"]
-"tests" = ["daemon.py", "operation", "recovery_drill.py", "worker.py"]
-"worker.py" = ["operation"]
+"daemon.py" = ["operation", "recovery_drill.py", "settings.py", "worker.py"]
+"tests" = ["commit_plan.py", "daemon.py", "operation", "recovery_drill.py", "settings.py", "worker.py"]
+"worker.py" = ["commit_plan.py", "operation", "settings.py"]
 
 [purity]
 "__init__.py" = "strict"
+"commit_plan.py" = "strict"

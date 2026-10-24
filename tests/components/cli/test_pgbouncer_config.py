@@ -148,11 +148,9 @@ def test_backup_defaults_to_a_direct_dump_source(
     authority.verified_conninfo.return_value = "host=/owner/socket dbname=meiva"
     local_owner = MagicMock(return_value=authority)
     monkeypatch.setattr(backup, "local_owner_authority", local_owner)
-    reader = MagicMock(return_value=remote)
 
-    result = backup.dump_source(database, is_remote_reader=reader)
+    result = backup.dump_source(database, is_remote=remote, plane_url=settings.data_plane.db_url)
 
-    reader.assert_called_once_with()
     if remote:
         assert result == "postgresql://provider:5432/meiva"
         database.direct_url.assert_called_once_with()

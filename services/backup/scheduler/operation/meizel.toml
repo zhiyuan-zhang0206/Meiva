@@ -1,6 +1,7 @@
-exports = ["staging.py", "worker_process.py"]
+exports = ["cleanup_plan.py", "staging.py", "worker_process.py"]
 
 [uses]
+"staging.py" = ["cleanup_plan.py"]
 "worker_process.py" = ["staging.py", "worker_bootstrap.py"]
 
 [loads]
@@ -8,4 +9,5 @@ exports = ["staging.py", "worker_process.py"]
 
 [purity]
 "__init__.py" = "strict"
+"cleanup_plan.py" = "strict"
 "worker_bootstrap.py" = "strict"

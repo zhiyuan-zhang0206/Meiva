@@ -1,10 +1,10 @@
-"""services/backup/dump.py — due-ness, prune, foreign-file safety, failure cleanup,
-and a real pg_dump round-trip against the session's provisioned Postgres.
-
-Every clock here is pinned: the module decides *when* in cluster time
-(`MEIVA_TIMEZONE`) and *names* dumps in UTC, so a test that let either fall back
-to the host's timezone would pass or fail by which machine ran it.
-"""
+# meiva:note
+# services/backup/dump.py — the shell around the plans, on real files and real tools.
+#
+# Every dump here is a real `pg_dump` of a real database piped through a real `openssl`,
+# under a home of the test's own: retention on real files, publication, failure
+# cleanup and the lock. The decisions themselves (names, argv, retention order, due-ness)
+# are asserted by value in `test_dump_plan.py` and `test_schedule.py`.
 
 from __future__ import annotations
 
@@ -12,76 +12,80 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
 from zoneinfo import ZoneInfo
 
-import psycopg
 import pytest
-from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict
 
-from base.clock import Clock
-from base.config import settings
-from base.db import Database
 from services.backup import dump as backup
-from services.backup.artifact import names, offsite
-from services.backup.artifact.passphrase import logical_backup_passphrase
+from services.backup.artifact import names, passphrase
+from services.backup.artifact.offsite_plan import OssTarget
+from services.backup.artifact.tests.oss_fake import BUCKET, fake_oss
+from services.backup.layout import BackupTree
+from services.backup.tests.support import held_table_lock, minted_tree, scratch_database
 
-_CLUSTER_TZ = "America/Los_Angeles"
+_NOW = datetime(2026, 8, 8, 10, 0, tzinfo=UTC)
+_KEEP = 7
 
 
 @pytest.fixture
-def bdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    # Resolve discovery before run fakes replace the shared subprocess module.
-    pg_binaries: dict[str, Path] = {
-        name: backup.pg_tool(name) for name in ("pg_dump", "pg_restore")
-    }
-    monkeypatch.setattr(backup, "pg_tool", pg_binaries.__getitem__)
-    monkeypatch.setattr(backup, "backup_dir", lambda: tmp_path)
-    monkeypatch.setattr(settings.general, "timezone", _CLUSTER_TZ)
-    return tmp_path
+def tree(tmp_path: Path) -> BackupTree:
+    return minted_tree(tmp_path)
 
 
-def cluster_instant(year: int, month: int, day: int, hour: int, minute: int) -> datetime:
-    """A cluster wall-clock instant — the clock is_due() reads."""
-    return datetime(year, month, day, hour, minute, tzinfo=ZoneInfo(_CLUSTER_TZ))
+def _dbname(db_url: str) -> str:
+    return str(conninfo_to_dict(db_url)["dbname"])
+
+
+def _run(
+    tree: BackupTree,
+    db_url: str,
+    now: datetime = _NOW,
+    *,
+    offsite_target: OssTarget | None = None,
+    timeout_s: float = backup.DUMP_TIMEOUT_S,
+) -> Path:
+    return backup.run_backup(
+        now,
+        tree=tree,
+        db_url=db_url,
+        keep=_KEEP,
+        offsite_target=offsite_target,
+        timeout_s=timeout_s,
+    )
+
+
+# meiva:note
+# The session database's dial, aimed at a port nothing listens on.
+def _refused_url(db_url: str) -> str:
+    parts = conninfo_to_dict(db_url)
+    return f"postgresql://{parts['user']}@127.0.0.1:1/{parts['dbname']}"
 
 
 def _touch(directory: Path, name: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
     p = directory / name
     p.write_bytes(b"x")
     return p
 
 
-def disable_offsite(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Skip the off-site leg in tests that only exercise the local pipeline."""
-
-    def _skip(_artifact: Path, **_kwargs: object) -> None:
-        return None
-
-    monkeypatch.setattr(offsite, "publish", _skip)
-
-
-def spawn_backup_lock_holder(
-    meiva_home: Path, ready: Path, hold_s: float
-) -> subprocess.Popen[bytes]:
-    """A separate interpreter that takes `backup_lock`, signals, and holds it."""
-    env = dict(os.environ)
-    env["MEIVA_HOME"] = str(meiva_home)
+# meiva:note
+# A separate interpreter that takes the home's `backup_lock`, signals, and holds it.
+def spawn_backup_lock_holder(home: Path, ready: Path, hold_s: float) -> subprocess.Popen[bytes]:
     return subprocess.Popen(  # noqa: S603
         [
             sys.executable,
             str(Path(__file__).with_name("child_backup_lock_holder.py")),
             str(ready),
             str(hold_s),
+            str(home),
         ],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        env=env,
+        env=dict(os.environ),
     )
 
 
@@ -93,458 +97,101 @@ def await_backup_lock_holder(ready: Path, proc: subprocess.Popen[bytes]) -> None
         time.sleep(0.02)
 
 
-def test_not_due_before_backup_hour(bdir: Path) -> None:
-    assert not backup.is_due(
-        cluster_instant(2026, 6, 10, settings.services.backup_hour - 1, 59),
-        clock_factory=Clock.from_settings,
-        hour_reader=lambda: settings.services.backup_hour,
-    )
-
-
-def test_due_at_hour_with_no_dumps(bdir: Path) -> None:
-    assert backup.is_due(
-        cluster_instant(2026, 6, 10, settings.services.backup_hour, 0),
-        clock_factory=Clock.from_settings,
-        hour_reader=lambda: settings.services.backup_hour,
-    )
-
-
-def test_not_due_again_after_todays_dump(bdir: Path) -> None:
-    _touch(bdir, "meiva-20260610T100001Z.dump")
-    assert not backup.is_due(
-        cluster_instant(2026, 6, 10, 9, 0),
-        clock_factory=Clock.from_settings,
-        hour_reader=lambda: settings.services.backup_hour,
-    )
-
-
-def test_due_again_the_next_day(bdir: Path) -> None:
-    _touch(bdir, "meiva-20260609T100001Z.dump")
-    assert backup.is_due(
-        cluster_instant(2026, 6, 10, settings.services.backup_hour, 0),
-        clock_factory=Clock.from_settings,
-        hour_reader=lambda: settings.services.backup_hour,
-    )
-
-
-def test_catchup_after_downtime(bdir: Path) -> None:
-    """Host down at 03:00 -> the first tick later that day is still due."""
-    _touch(bdir, "meiva-20260609T100001Z.dump")
-    assert backup.is_due(
-        cluster_instant(2026, 6, 10, 14, 30),
-        clock_factory=Clock.from_settings,
-        hour_reader=lambda: settings.services.backup_hour,
-    )
-
-
-def test_due_hour_follows_config(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The due hour resolves from ``services.backup_hour`` at call time."""
-    monkeypatch.setattr(settings.services, "backup_hour", 2)
-    assert not backup.is_due(
-        cluster_instant(2026, 6, 10, 1, 59),
-        clock_factory=Clock.from_settings,
-        hour_reader=lambda: settings.services.backup_hour,
-    )
-    assert backup.is_due(
-        cluster_instant(2026, 6, 10, 2, 0),
-        clock_factory=Clock.from_settings,
-        hour_reader=lambda: settings.services.backup_hour,
-    )
-
-
-# ─── the clock the schedule is read on ───
-
-
-def test_naive_now_is_rejected(bdir: Path) -> None:
-    """A naive datetime is refused rather than read as host-local — reading the
-    host clock is exactly the failure the cluster-time pin removes."""
-    _ = bdir
-    with pytest.raises(ValueError, match="TZ-aware"):
-        backup.is_due(
-            datetime(2026, 6, 10, 3, 0),  # noqa: DTZ001 — boundary rejects naive input
-            clock_factory=Clock.from_settings,
-            hour_reader=lambda: settings.services.backup_hour,
-        )
-
-
-def test_day_boundary_is_cluster_time_not_host_time(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """One instant, several host clocks, one verdict.
-
-    The regression: due-ness used to be computed on the host's wall clock, so
-    carrying a laptop from Asia/Shanghai to US/Pacific put the newest dump's
-    local date *ahead* of the new local date. `is_due` returned False and the
-    daily backup was skipped silently — no error, no log, just no dump.
-    """
-    monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
-    _touch(bdir, "meiva-20260609T190000Z.dump")  # 03:00 Jun-10 Shanghai
-
-    today = datetime(2026, 6, 9, 20, 0, tzinfo=UTC)  # 04:00 Jun-10 Shanghai
-    for host_tz in ("Asia/Shanghai", "America/Los_Angeles", "Pacific/Kiritimati"):
-        assert not backup.is_due(
-            today.astimezone(ZoneInfo(host_tz)),
-            clock_factory=Clock.from_settings,
-            hour_reader=lambda: settings.services.backup_hour,
-        ), host_tz
-
-    tomorrow = datetime(2026, 6, 10, 20, 0, tzinfo=UTC)  # 04:00 Jun-11 Shanghai
-    for host_tz in ("Asia/Shanghai", "America/Los_Angeles", "Pacific/Kiritimati"):
-        assert backup.is_due(
-            tomorrow.astimezone(ZoneInfo(host_tz)),
-            clock_factory=Clock.from_settings,
-            hour_reader=lambda: settings.services.backup_hour,
-        ), host_tz
-
-
-def test_backup_hour_is_cluster_time(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The backup hour defaults to 03:00 on the cluster's clock, whatever the host's says."""
-    monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
-    assert not backup.is_due(
-        datetime(2026, 6, 9, 18, 59, tzinfo=UTC),
-        clock_factory=Clock.from_settings,
-        hour_reader=lambda: settings.services.backup_hour,
-    )  # 02:59 Shanghai
-    assert backup.is_due(
-        datetime(2026, 6, 9, 19, 0, tzinfo=UTC),
-        clock_factory=Clock.from_settings,
-        hour_reader=lambda: settings.services.backup_hour,
-    )  # 03:00 Shanghai
-
-
-# ─── the clock dumps are named on ───
-
-
-def test_dump_name_is_utc_stamped(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
-) -> None:
-    """The filename stamp is UTC with an explicit `Z`, not cluster wall clock:
-    the name has to identify one instant for prune's ordering to be a total
-    order."""
-    monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
-
-    class _Ok:
-        returncode = 0
-        stderr = ""
-
-    def _fake_run(cmd: list[str], **_kw: object) -> _Ok:
-        if cmd[0].endswith("pg_dump"):
-            Path(cmd[cmd.index("--file") + 1]).write_bytes(b"x")
-        else:
-            Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted dump")
-        return _Ok()
-
-    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
-    path = backup.run_backup(
-        datetime(2026, 6, 10, 3, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
-        db_url="dbname=meiva",
-        db=database,
-        is_remote_reader=lambda: settings.data_plane.is_remote,
-        keep_reader=lambda: settings.services.backup_keep,
-        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
-        bucket_reader=lambda: settings.services.backup_offsite_bucket,
-        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
-    )
-    assert path.name == "meiva-20260609T190000Z.dump.enc"
-
-
-def test_run_backup_can_defer_offsite_publish(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
-) -> None:
-    """`publish=False` retains the local artifact without a network publish."""
-    published: list[Path] = []
-
-    class _Ok:
-        returncode = 0
-        stderr = ""
-
-    def _fake_run(cmd: list[str], **_kw: object) -> _Ok:
-        if cmd[0].endswith("pg_dump"):
-            Path(cmd[cmd.index("--file") + 1]).write_bytes(b"dump")
-        else:
-            Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted")
-        return _Ok()
-
-    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
-    monkeypatch.setattr(offsite, "publish", published.append)
-
-    artifact = backup.run_backup(
-        cluster_instant(2026, 6, 10, 3, 0),
-        db_url="dbname=meiva",
-        publish=False,
-        db=database,
-        is_remote_reader=lambda: settings.data_plane.is_remote,
-        keep_reader=lambda: settings.services.backup_keep,
-        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
-        bucket_reader=lambda: settings.services.backup_offsite_bucket,
-        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
-    )
-
-    assert artifact.exists()
-    assert published == []
-
-
-def test_publish_offsite_module_entry_publishes_the_named_artifact(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The detached uploader entry delegates one existing artifact to idempotent publishing."""
-    artifact = tmp_path / "meiva-20260916T030000Z.dump.enc"
-    artifact.write_bytes(b"encrypted")
-    published: list[tuple[Path, str]] = []
-
-    def _record(
-        path: Path,
-        *,
-        root: str,
-        endpoint_reader: Callable[[], str],
-        bucket_reader: Callable[[], str],
-        credentials_file_reader: Callable[[], Path | None],
-    ) -> None:
-        assert callable(endpoint_reader)
-        assert callable(bucket_reader)
-        assert callable(credentials_file_reader)
-        published.append((path, root))
-
-    monkeypatch.setattr(offsite, "publish", _record)
-
-    assert backup.run_offsite_publisher(["--publish-offsite", str(artifact)]) == 0
-    assert (
-        backup.run_offsite_publisher(
-            ["--publish-offsite", str(artifact), "--offsite-root", "scratch/x"]
-        )
-        == 0
-    )
-
-    assert published == [(artifact, names.REMOTE_ROOT), (artifact, "scratch/x")]
-
-
-@pytest.mark.parametrize("root", ["", "/abs", "trailing/"])
-def test_publish_offsite_entry_rejects_a_malformed_root(
-    root: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    artifact = tmp_path / "meiva-20260916T030000Z.dump.enc"
-    artifact.write_bytes(b"encrypted")
-
-    with pytest.raises(SystemExit) as raised:
-        backup.run_offsite_publisher(["--publish-offsite", str(artifact), "--offsite-root", root])
-
-    assert raised.value.code == 2
-    assert "--offsite-root" in capsys.readouterr().err
-
-
-def test_db_size_breakdown_real_db(db_conn: Any, database: Database) -> None:
-    """The composition query itself is pinned against a real throwaway DB: a
-    fresh DB with no checkpoint tables reads 0 instead of failing (the
-    to_regclass path). The frozen `events` archive is gone since the task
-    #1281/#1823 cleanup, so it is no longer part of the composition."""
-    _ = db_conn  # dependency: the session cluster is up
-    base_url, _name = settings.data_plane.db_url.rsplit("/", 1)
-    admin_url = f"{base_url}/postgres"
-    name = f"meiva_test_backup_{os.getpid()}_{int(time.time() * 1_000_000)}"
-    url = f"{base_url}/{name}"
-    with psycopg.connect(admin_url, autocommit=True) as admin, admin.cursor() as cur:
-        cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
-    try:
-        line = backup.db_size_breakdown(database, url)
-    finally:
-        with psycopg.connect(admin_url, autocommit=True) as admin, admin.cursor() as cur:
-            cur.execute(
-                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                "WHERE datname = %s AND pid <> pg_backend_pid()",
-                (name,),
-            )
-            cur.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name)))
-    assert line.startswith("db=") and "checkpoint=" in line and "rest=" in line
-    assert line != "unavailable"
-    # A fresh DB has no checkpoint tables.
-    assert "checkpoint=0MiB" in line
-
-
-def test_db_size_breakdown_format(monkeypatch: pytest.MonkeyPatch, database: Database) -> None:
-    """The backup log line reports the DB composition that dominates dump
-    time: total, the checkpoint tables, and the rest. Best-effort: a failed
-    sample degrades to "unavailable", never fails the backup."""
-
-    class _FakeConn:
-        def __enter__(self) -> _FakeConn:
-            return self
-
-        def __exit__(self, *exc: object) -> None:
-            return None
-
-        def execute(self, _sql: str) -> _FakeConn:
-            return self
-
-        def fetchone(self) -> tuple[int, ...]:
-            # db, blobs, checkpoints, writes
-            return (4_240_000_000, 1_240_000_000, 130_000_000, 30_000_000)
-
-    def _fake_connect(_self: Database, **_: object) -> _FakeConn:
-        return _FakeConn()
-
-    monkeypatch.setattr(Database, "connect", _fake_connect)
-    line = backup.db_size_breakdown(database)
-    assert line == "db=4044MiB checkpoint=1335MiB rest=2708MiB"
-
-    def _boom(_self: Database, **_: object) -> object:
-        raise psycopg.OperationalError("db down")
-
-    monkeypatch.setattr(Database, "connect", _boom)
-    assert backup.db_size_breakdown(database) == "unavailable"
-
-
-def test_run_backup_repairs_storage_permissions(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
-) -> None:
-    """The backup directory and completed dump are owner-only despite umask drift."""
-    bdir.chmod(0o755)
-
-    class _Ok:
-        returncode = 0
-        stderr = ""
-
-    def _fake_run(cmd: list[str], **kw: object) -> _Ok:
-        if cmd[0].endswith("pg_dump"):
-            partial = Path(cmd[cmd.index("--file") + 1])
-            partial.write_bytes(b"dump")
-            partial.chmod(0o644)
-        elif cmd[0].endswith("openssl"):
-            Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted")
-        return _Ok()
-
-    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
-    target = backup.run_backup(
-        cluster_instant(2026, 6, 10, 3, 0),
-        db_url="dbname=meiva",
-        db=database,
-        is_remote_reader=lambda: settings.data_plane.is_remote,
-        keep_reader=lambda: settings.services.backup_keep,
-        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
-        bucket_reader=lambda: settings.services.backup_offsite_bucket,
-        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
-    )
-
-    assert bdir.stat().st_mode & 0o777 == 0o700
-    assert target.stat().st_mode & 0o777 == 0o600
-
-
-def test_prune_order_survives_the_dst_fold(bdir: Path) -> None:
-    """DST-fold dumps order by their UTC instants, preserving both repeated wall times."""
-    pdt = _touch(bdir, "meiva-20261101T083000Z.dump")  # 01:30 PDT
-    pst = _touch(bdir, "meiva-20261101T093000Z.dump")  # 01:30 PST, one hour later
-    assert [p for _ts, p in backup.managed_dumps(bdir)] == [pdt, pst]
-
-    for i in range(2, settings.services.backup_keep + 1):
-        _touch(bdir, f"meiva-202611{i:02d}T090000Z.dump")
-    assert backup.prune(bdir, keep_reader=lambda: settings.services.backup_keep) == [
-        pdt
-    ]  # the earlier half of the fold, deterministically
-    assert pst.exists()
-
-
-def test_foreign_files_ignored(bdir: Path) -> None:
-    """Hand-made dumps / stray files are neither counted for due-ness nor pruned.
-
-    That includes names no writer produces any more: the wall-clock stamp of the
-    pre-cutover naming and the `pre-update` / `pitr-activation` kind segments."""
+# meiva:note
+# ─── retention and discovery on real files ───
+
+
+# meiva:note
+# DST-fold dumps order by their UTC instants, preserving both repeated wall times.
+def test_prune_order_survives_the_dst_fold(tree: BackupTree) -> None:
+    # meiva:note
+    # 01:30 PDT
+    pdt = _touch(tree.managed, "meiva-20261101T083000Z.dump")
+    # meiva:note
+    # 01:30 PST, one hour later
+    pst = _touch(tree.managed, "meiva-20261101T093000Z.dump")
+    assert [p for _ts, p in backup.managed_dumps(tree.managed)] == [pdt, pst]
+
+    for i in range(2, _KEEP + 1):
+        _touch(tree.managed, f"meiva-202611{i:02d}T090000Z.dump")
+
+    # meiva:note
+    # the earlier half of the fold
+    assert backup.prune(tree.managed, keep=_KEEP) == [pdt]
+    assert pst.exists() and not pdt.exists()
+
+
+# meiva:note
+# Hand-made dumps / stray files stay.
+#
+# That includes names no writer produces any more: the wall-clock stamp of the
+# pre-cutover naming and the `pre-update` / `pitr-activation` kind segments.
+def test_foreign_files_are_neither_counted_nor_pruned(tree: BackupTree) -> None:
     foreign = [
-        _touch(bdir, "manual.dump"),
-        _touch(bdir, "meiva-before-migration.dump"),
-        _touch(bdir, "notes.txt"),
-        _touch(bdir, "meiva-20260610-030001.dump"),
-        _touch(bdir, "meiva-20260610T100001Z.pre-update.dump.enc"),
+        _touch(tree.managed, "manual.dump"),
+        _touch(tree.managed, "meiva-before-migration.dump"),
+        _touch(tree.managed, "notes.txt"),
+        _touch(tree.managed, "meiva-20260610-030001.dump"),
+        _touch(tree.managed, "meiva-20260610T100001Z.pre-update.dump.enc"),
         _touch(
-            bdir,
+            tree.managed,
             "meiva-20260610T100001Z.pitr-activation-11111111-1111-1111-1111-111111111111.dump.enc",
         ),
     ]
-    assert backup.is_due(
-        cluster_instant(2026, 6, 10, 9, 0),
-        clock_factory=Clock.from_settings,
-        hour_reader=lambda: settings.services.backup_hour,
-    )
-    assert backup.prune(bdir, keep_reader=lambda: settings.services.backup_keep) == []
+
+    assert backup.managed_dumps(tree.managed) == []
+    assert backup.prune(tree.managed, keep=_KEEP) == []
     assert all(p.exists() for p in foreign)
 
 
-def test_prune_keeps_newest(bdir: Path) -> None:
-    names = [f"meiva-202606{i:02d}T100000Z.dump" for i in range(1, 11)]  # 10 days, oldest first
-    for name in names:
-        _touch(bdir, name)
-    removed = backup.prune(bdir, keep_reader=lambda: settings.services.backup_keep)
-    keep = settings.services.backup_keep
-    assert [p.name for p in removed] == names[: len(names) - keep]
-    assert sorted(p.name for p in bdir.glob("*.dump")) == names[len(names) - keep :]
+def test_prune_keeps_the_newest_and_deletes_the_rest(tree: BackupTree) -> None:
+    # meiva:note
+    # 10 days, oldest first
+    pool = [f"meiva-202606{i:02d}T100000Z.dump" for i in range(1, 11)]
+    for name in pool:
+        _touch(tree.managed, name)
+
+    removed = backup.prune(tree.managed, keep=_KEEP)
+
+    assert [p.name for p in removed] == pool[: len(pool) - _KEEP]
+    assert sorted(p.name for p in tree.managed.glob("*.dump")) == pool[len(pool) - _KEEP :]
 
 
-def test_prune_keep_follows_config(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The daily retention window resolves from ``services.backup_keep``."""
-    monkeypatch.setattr(settings.services, "backup_keep", 3)
+def test_prune_keep_is_an_argument(tree: BackupTree) -> None:
     for day in range(1, 6):
-        _touch(bdir, f"meiva-2026060{day}T100000Z.dump")
-    removed = backup.prune(bdir, keep_reader=lambda: settings.services.backup_keep)
-    assert len(removed) == 2
-    assert len(backup.managed_dumps(bdir)) == 3
+        _touch(tree.managed, f"meiva-2026060{day}T100000Z.dump")
+
+    assert len(backup.prune(tree.managed, keep=3)) == 2
+    assert len(backup.managed_dumps(tree.managed)) == 3
 
 
-def test_run_backup_failure_leaves_no_plaintext(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
-) -> None:
-    """A failed dump removes its reaped writer's plaintext partial, and the next
-    run sweeps a dead run's partial that no process holds open."""
-    (bdir / "other-20260801T101500Z.dump.partial").write_bytes(b"stale")
-
-    def fail(cmd: list[str], **_kw: object) -> Any:
-        Path(cmd[cmd.index("--file") + 1]).write_bytes(b"PLAINTEXT")
-        return cast(Any, type("Failed", (), {"returncode": 1, "stderr": "refused"}))
-
-    monkeypatch.setattr(backup.subprocess, "run", fail)
-    with pytest.raises(RuntimeError, match="pg_dump exited 1"):
-        backup.run_backup(
-            cluster_instant(2026, 8, 2, 3, 0),
-            db_url="dbname=whatever",
-            db=database,
-            is_remote_reader=lambda: settings.data_plane.is_remote,
-            keep_reader=lambda: settings.services.backup_keep,
-            endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
-            bucket_reader=lambda: settings.services.backup_offsite_bucket,
-            credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
-        )
-    assert not list(bdir.glob("*.partial")) and not list(bdir.glob(".backup-key-*"))
-    assert not list(bdir.glob("*.dump.enc"))
+# meiva:note
+# ─── the real pipeline ───
 
 
+# meiva:note
+# Real pg_dump of the session's Postgres (an explicit dial: not a born home): the dump
+# lands under the managed name, the .partial is gone, old dumps prune, and the artifact
+# reverses to a restorable custom archive.
 @pytest.mark.skipif(not backup.has_pg_tool("pg_dump"), reason="needs a native pg_dump binary")
-def test_run_backup_real_dump_and_prune(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
-) -> None:
-    """Real pg_dump of the session's Postgres (an explicit dial: not a born home): dump
-    lands under the managed name, the .partial is gone, and old dumps prune."""
-    for i in range(1, settings.services.backup_keep + 1):
-        _touch(bdir, f"test-2026060{i}T100000Z.dump")
+def test_run_backup_real_dump_and_prune(tree: BackupTree, db_url: str) -> None:
+    for i in range(1, _KEEP + 1):
+        _touch(tree.managed, f"test-2026060{i}T100000Z.dump")
 
-    disable_offsite(monkeypatch)
-    path = backup.run_backup(
-        cluster_instant(2026, 6, 10, 3, 0),
-        db_url=settings.data_plane.db_url,
-        db=database,
-        is_remote_reader=lambda: settings.data_plane.is_remote,
-        keep_reader=lambda: settings.services.backup_keep,
-        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
-        bucket_reader=lambda: settings.services.backup_offsite_bucket,
-        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
-    )
+    path = _run(tree, db_url)
 
-    assert path.parent == bdir
+    assert path.parent == tree.managed
     assert names.DUMP_NAME_RE.match(path.name)
     assert path.stat().st_size > 0
-    assert not list(bdir.glob("*.partial"))
-    # backup_keep pre-seeded + 1 new -> the oldest pre-seed pruned, KEEP remain.
-    assert len(backup.managed_dumps(bdir)) == settings.services.backup_keep
-    assert not (bdir / "test-20260601T100000Z.dump").exists()
+    assert not list(tree.managed.glob("*.partial")) and not list(tree.managed.glob(".backup-key-*"))
+    # meiva:note
+    # `keep` pre-seeded + 1 new -> the oldest pre-seed pruned, `keep` remain.
+    assert len(backup.managed_dumps(tree.managed)) == _KEEP
+    assert not (tree.managed / "test-20260601T100000Z.dump").exists()
+    # meiva:note
     # The fresh dump is restorable input: decrypt, then list its TOC directly.
-    restored = bdir / "listed.dump"
-    cast(Any, backup).decrypt_artifact(path, restored)
+    restored = tree.root / "listed.dump"
+    backup.decrypt_artifact(path, restored, tree=tree)
     assert restored.read_bytes().startswith(b"PGDMP"), "decrypted artifact is not a custom dump"
     listing = subprocess.run(  # noqa: S603
         [str(backup.pg_tool("pg_restore")), "--list", str(restored)],
@@ -553,168 +200,131 @@ def test_run_backup_real_dump_and_prune(
         check=False,
     )
     assert listing.returncode == 0, listing.stderr
+    assert "checkpoints" in listing.stdout, "the recoverable dump must keep the checkpoint tables"
 
 
-def _assert_pg_dump_keeps_checkpoints_and_hides_password(
-    cmds: list[list[str]], envs: list[dict[str, str]], password: str
-) -> list[str]:
-    """The pg_dump child excludes no table and gets the password only via its env."""
-    pg_dump_cmd = next(cmd for cmd in cmds if cmd[0].endswith("pg_dump"))
-    assert "--exclude-table" not in pg_dump_cmd
-    dbname = pg_dump_cmd[pg_dump_cmd.index("--dbname") + 1]
-    assert password not in " ".join(pg_dump_cmd)
-    expected = {"dbname": "whatever", "host": "db.example", "port": "5432", "user": "backup"}
-    assert conninfo_to_dict(dbname) == expected
-    assert envs[cmds.index(pg_dump_cmd)]["PGPASSWORD"] == password
-    return pg_dump_cmd
-
-
-def _assert_dump_compresses_in_dump_then_encrypts(
-    cmds: list[list[str]], pg_dump_cmd: list[str]
+def test_the_artifact_name_is_utc_stamped_whatever_zone_the_instant_carries(
+    tree: BackupTree, db_url: str
 ) -> None:
-    """The archive compresses in-dump (zstd); there is no second gzip pass."""
-    assert all(cmd[0] != "gzip" for cmd in cmds)
-    assert "--compress=zstd:3" in pg_dump_cmd
-    assert "--format=custom" in pg_dump_cmd
-    openssl_cmd = next(cmd for cmd in cmds if cmd[0].endswith("openssl"))
-    assert {"enc", "-aes-256-cbc", "-pbkdf2", "-salt", "-kfile"}.issubset(openssl_cmd)
+    shanghai = datetime(2026, 6, 10, 3, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    path = _run(tree, db_url, shanghai)
+
+    assert path.name == f"{_dbname(db_url)}-20260609T190000Z.dump.enc"
 
 
-def test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
+def test_a_same_second_dump_never_replaces_a_prior_one(tree: BackupTree, db_url: str) -> None:
+    first = _run(tree, db_url)
+    first_bytes = first.read_bytes()
+
+    second = _run(tree, db_url)
+
+    assert first.name == f"{_dbname(db_url)}-20260808T100000Z.dump.enc"
+    assert second.name == f"{_dbname(db_url)}-20260808T100001Z.dump.enc"
+    assert first.read_bytes() == first_bytes
+
+
+# meiva:note
+# The backup directory and completed dump are owner-only despite umask drift.
+def test_run_backup_repairs_storage_permissions(tree: BackupTree, db_url: str) -> None:
+    tree.managed.mkdir(parents=True)
+    tree.managed.chmod(0o755)
+
+    target = _run(tree, db_url)
+
+    assert tree.managed.stat().st_mode & 0o777 == 0o700
+    assert target.stat().st_mode & 0o777 == 0o600
+
+
+def test_a_naive_instant_is_refused_before_anything_is_written(
+    tree: BackupTree, db_url: str
 ) -> None:
-    """The recoverable dump includes checkpoints while its child argv omits the
-    database password. A password exposed in `ps` is a credential leak; an
-    excluded checkpoint table loses the sole copy of conversation history."""
-    captured: dict[str, list[list[str]] | list[dict[str, str]] | int] = {
-        "cmds": [],
-        "envs": [],
-    }
+    with pytest.raises(ValueError, match="TZ-aware"):
+        _run(tree, db_url, datetime.fromisoformat("2026-06-10T03:00:00"))
 
-    class _Ok:
-        returncode = 0
-        stderr = ""
-
-    def _fake_run(cmd: list[str], **kwargs: object) -> _Ok:
-        cast(list[list[str]], captured["cmds"]).append(cmd)
-        cast(list[dict[str, str]], captured["envs"]).append(
-            cast(dict[str, str], kwargs.get("env", {}))
-        )
-        captured["timeout"] = cast(int, kwargs.get("timeout"))
-        if cmd[0].endswith("pg_dump"):
-            # The real pg_dump writes the plaintext partial.
-            Path(cmd[cmd.index("--file") + 1]).write_bytes(b"plaintext dump")
-        else:
-            # The encryption command would write its encrypted partial.
-            Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted dump")
-        return _Ok()
-
-    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
-    password = "backup-password"  # noqa: S105 — test credential
-    path = backup.run_backup(
-        cluster_instant(2026, 8, 8, 3, 0),
-        db_url=f"postgresql://backup:{password}@db.example:5432/whatever",
-        db=database,
-        is_remote_reader=lambda: settings.data_plane.is_remote,
-        keep_reader=lambda: settings.services.backup_keep,
-        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
-        bucket_reader=lambda: settings.services.backup_offsite_bucket,
-        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
-    )
-
-    # The final artifact must be encrypted and private rather than the plaintext
-    # custom dump whose contents are readable by every account with filesystem access.
-    assert path.name == "whatever-20260808T100000Z.dump.enc"
-    assert path.stat().st_mode & 0o777 == 0o600
-    assert bdir.stat().st_mode & 0o777 == 0o700
-
-    cmds = cast(list[list[str]], captured["cmds"])
-    envs = cast(list[dict[str, str]], captured["envs"])
-    pg_dump_cmd = _assert_pg_dump_keeps_checkpoints_and_hides_password(cmds, envs, password)
-    _assert_dump_compresses_in_dump_then_encrypts(cmds, pg_dump_cmd)
-    assert captured["timeout"] == backup.DUMP_TIMEOUT_S
+    assert not list(tree.managed.glob("*"))
 
 
-def test_run_backup_keeps_database_password_out_of_argv(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
+# meiva:note
+# The dial refuses, so `pg_dump` exits 1 for real; its reaped writer's partial is removed,
+# and a dead run's partial that no process holds open is swept.
+def test_a_failed_dump_leaves_no_plaintext_and_the_next_run_sweeps_a_dead_ones(
+    tree: BackupTree, db_url: str
 ) -> None:
-    """pg_dump's connection target is visible in argv, so its password must be
-    supplied only through the child-only PGPASSWORD environment variable."""
-    captured: dict[str, object] = {}
-    real_run = subprocess.run
+    stale = _touch(tree.managed, "other-20260801T101500Z.dump.partial")
 
-    class _Ok:
-        returncode = 0
-        stderr = ""
+    with pytest.raises(RuntimeError, match="pg_dump exited 1"):
+        _run(tree, _refused_url(db_url))
 
-    def _fake_run(cmd: list[str], **kwargs: object) -> _Ok | subprocess.CompletedProcess[bytes]:
-        if not cmd[0].endswith("pg_dump"):
-            return real_run(cmd, **kwargs)  # type: ignore[arg-type, return-value]
-        captured["cmd"] = cmd
-        captured["env"] = kwargs["env"]
-        Path(cmd[cmd.index("--file") + 1]).write_bytes(b"x")
-        return _Ok()
-
-    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
-    password = "password-not-in-argv"  # noqa: S105 — assertion sentinel, not a credential
-    backup.run_backup(
-        cluster_instant(2026, 8, 8, 3, 0),
-        db_url=f"postgresql://meiva:{password}@127.0.0.1:5433/meiva",
-        db=database,
-        is_remote_reader=lambda: settings.data_plane.is_remote,
-        keep_reader=lambda: settings.services.backup_keep,
-        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
-        bucket_reader=lambda: settings.services.backup_offsite_bucket,
-        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
-    )
-
-    cmd = cast(list[str], captured["cmd"])
-    env = cast(dict[str, str], captured["env"])
-    assert password not in " ".join(cmd)
-    assert env["PGPASSWORD"] == password
+    assert not stale.exists()
+    assert not list(tree.managed.glob("*.partial")) and not list(tree.managed.glob(".backup-key-*"))
+    assert not list(tree.managed.glob("*.dump.enc"))
 
 
-def test_encrypted_artifact_decrypts_to_original_dump(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
+# meiva:note
+# A bounded caller's deadline applies to the pipeline: the blocked child is killed, reaped
+# and leaves no plaintext behind.
+def test_the_requested_timeout_bounds_a_pg_dump_that_cannot_get_its_lock(
+    tree: BackupTree, db_url: str
 ) -> None:
-    """The published artifact reverses exactly to pg_dump's custom-format bytes.
+    with scratch_database(db_url) as url, held_table_lock(url):
+        started = time.monotonic()
+        with pytest.raises(subprocess.TimeoutExpired):
+            _run(tree, url, timeout_s=1.5)
 
-    This fails if the key-file derivation, cipher invocation, or artifact name
-    changes incompatibly with the restore procedure.
-    """
-    original_dump = b"custom-format-pg-dump\x00contents"
-    real_run = subprocess.run
+    assert time.monotonic() - started < 30
+    assert not list(tree.managed.glob("*.partial")) and not list(tree.managed.glob(".backup-key-*"))
+    assert not list(tree.managed.glob("*.dump.enc"))
 
-    class _Ok:
-        returncode = 0
-        stderr = ""
 
-    def _fake_pg_dump(cmd: list[str], **kwargs: object) -> _Ok | subprocess.CompletedProcess[bytes]:
-        if cmd[0].endswith("pg_dump"):
-            Path(cmd[cmd.index("--file") + 1]).write_bytes(original_dump)
-            return _Ok()
-        return real_run(cmd, **kwargs)  # type: ignore[arg-type, return-value]
+def test_the_off_site_leg_publishes_the_finished_artifact_when_asked(
+    tree: BackupTree, db_url: str
+) -> None:
+    credentials = tree.root / "oss.json"
+    credentials.parent.mkdir(parents=True, exist_ok=True)
+    credentials.write_text('{"access_key_id": "id", "access_key_secret": "secret"}')
 
-    monkeypatch.setattr(backup.subprocess, "run", _fake_pg_dump)
-    disable_offsite(monkeypatch)
-    artifact = backup.run_backup(
-        cluster_instant(2026, 8, 8, 3, 0),
-        db_url="dbname=whatever",
-        db=database,
-        is_remote_reader=lambda: settings.data_plane.is_remote,
-        keep_reader=lambda: settings.services.backup_keep,
-        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
-        bucket_reader=lambda: settings.services.backup_offsite_bucket,
-        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
-    )
+    with fake_oss() as server:
+        target = OssTarget(server.endpoint, BUCKET, credentials)
+        local_only = _run(tree, db_url)
+        assert server.files == {}, "no off-site target means no network publish"
+        published = _run(tree, db_url, offsite_target=target)
 
-    assert artifact.name.endswith(".dump.enc")
-    key_file = bdir / "decrypt.key"
-    # The pinned passphrase, as an operator restoring by hand reads it.
-    key_file.write_text(logical_backup_passphrase(), encoding="utf-8")
+    assert local_only.exists() and published.exists()
+    [key] = server.files
+    assert key == f"{names.REMOTE_ROOT}/{published.name}"
+    assert server.files[key]["data"] == published.read_bytes()
+
+
+# meiva:note
+# ─── decryption ───
+
+
+def test_a_failed_decrypt_reports_the_exit_and_removes_the_private_key(tree: BackupTree) -> None:
+    artifact = tree.root / "artifact.dump.enc"
+    artifact.write_bytes(b"not an encrypted dump at all")
+    output = tree.root / "backup.dump"
+
+    with pytest.raises(RuntimeError, match=r"^backup decrypt exited [1-9]\d*$"):
+        backup.decrypt_artifact(artifact, output, tree=tree)
+
+    assert not list(tree.root.glob(".backup-key-*"))
+    assert output.stat().st_mode & 0o777 == 0o600
+
+
+# meiva:note
+# The published artifact reverses with the pinned passphrase as `db-restore.md` reads it:
+# this fails if the key-file derivation, cipher invocation or name changes incompatibly.
+def test_the_passphrase_an_operator_reads_decrypts_the_artifact(
+    tree: BackupTree, db_url: str
+) -> None:
+    artifact = _run(tree, db_url)
+    key_file = tree.root / "decrypt.key"
+    key_file.write_text(passphrase.resolve(tree.home), encoding="utf-8")
     key_file.chmod(0o600)
-    custom_dump = bdir / "restored.dump"
-    decrypted = real_run(
+    custom_dump = tree.root / "restored.dump"
+
+    decrypted = subprocess.run(  # noqa: S603
         [
             "openssl",
             "enc",
@@ -732,62 +342,41 @@ def test_encrypted_artifact_decrypts_to_original_dump(
         capture_output=True,
         check=False,
     )
+
     assert decrypted.returncode == 0, decrypted.stderr.decode()
-    assert custom_dump.read_bytes() == original_dump
+    assert custom_dump.read_bytes().startswith(b"PGDMP")
 
 
-def test_decrypt_failure_reports_exit_and_removes_private_key(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+# meiva:note
+# ─── the composition line ───
+
+
+# meiva:note
+# The composition query itself is pinned against a real throwaway DB: a fresh DB with no
+# checkpoint tables reads 0 instead of failing (the to_regclass path).
+def test_db_size_breakdown_real_db(db_url: str) -> None:
+    with scratch_database(db_url) as url:
+        line = backup.db_size_breakdown(url)
+
+    assert line.startswith("db=") and "checkpoint=" in line and "rest=" in line
+    assert "checkpoint=0MiB" in line
+
+
+# meiva:note
+# Best-effort: a failed sample never fails the backup.
+def test_a_database_that_cannot_be_dialed_degrades_to_unavailable(db_url: str) -> None:
+    assert backup.db_size_breakdown(_refused_url(db_url)) == "unavailable"
+
+
+@pytest.mark.parametrize("root", ["", "/abs", "trailing/"])
+def test_publish_offsite_entry_rejects_a_malformed_root(
+    root: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    key = tmp_path / ".backup-key-test"
-    key.write_text("private key")
-    key.chmod(0o600)
+    artifact = tmp_path / "meiva-20260916T030000Z.dump.enc"
+    artifact.write_bytes(b"encrypted")
 
-    def key_file(_directory: Path) -> Path:
-        return key
+    with pytest.raises(SystemExit) as raised:
+        backup.run_offsite_publisher(["--publish-offsite", str(artifact), "--offsite-root", root])
 
-    def failed_decrypt(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        return subprocess.CompletedProcess([], 7)
-
-    monkeypatch.setattr(backup, "passphrase_key_file", key_file)
-    monkeypatch.setattr(backup.subprocess, "run", failed_decrypt)
-    output = tmp_path / "backup.dump"
-    with pytest.raises(RuntimeError, match=r"^backup decrypt exited 7$"):
-        backup.decrypt_artifact(tmp_path / "artifact.dump.enc", output)
-    assert not key.exists()
-    assert output.stat().st_mode & 0o777 == 0o600
-
-
-def test_run_backup_forwards_requested_timeout(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
-) -> None:
-    """A bounded caller's deadline applies to every backup pipeline process."""
-    timeouts: list[float] = []
-
-    class _Ok:
-        returncode = 0
-        stderr = ""
-
-    def _fake_run(cmd: list[str], **kwargs: object) -> _Ok:
-        timeouts.append(cast(float, kwargs["timeout"]))
-        if cmd[0].endswith("pg_dump"):
-            Path(cmd[cmd.index("--file") + 1]).write_bytes(b"plaintext dump")
-        else:
-            Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted dump")
-        return _Ok()
-
-    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
-
-    backup.run_backup(
-        cluster_instant(2026, 8, 8, 3, 0),
-        db_url="dbname=whatever",
-        timeout_s=123.0,
-        db=database,
-        is_remote_reader=lambda: settings.data_plane.is_remote,
-        keep_reader=lambda: settings.services.backup_keep,
-        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
-        bucket_reader=lambda: settings.services.backup_offsite_bucket,
-        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
-    )
-
-    assert timeouts == [123.0, 123.0]  # pg_dump + encryption
+    assert raised.value.code == 2
+    assert "--offsite-root" in capsys.readouterr().err

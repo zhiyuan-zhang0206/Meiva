@@ -27,20 +27,27 @@ part ETags (the size and metadata must match too).
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Any, cast
 
 import oss2
 from oss2.models import PartInfo
 
 from services.backup.artifact.names import REMOTE_ROOT
+from services.backup.artifact.offsite_plan import (
+    OssTarget,
+    metadata_headers,
+    normalize_etag,
+    object_problem,
+    part_md5_header,
+    unset_keys,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -49,7 +56,6 @@ PART_SIZE = 32 * 1024 * 1024
 keeps a 20 GB object at 640 parts."""
 
 _FORBID_HEADER = {"x-oss-forbid-overwrite": "true"}
-_META_PREFIX = "x-oss-meta-"
 _METADATA = {"meiva-artifact-kind": "logical-backup"}
 _CONNECT_TIMEOUT_S = 300
 
@@ -69,80 +75,21 @@ class OffsiteAck:
     created: bool
 
 
-class _Etagged(Protocol):
-    etag: str | None
-
-
-class _InitResult(Protocol):
-    upload_id: str | None
-
-
-class _HeadResult(Protocol):
-    etag: str | None
-    content_length: int | None
-    headers: Mapping[str, str]
-
-
-class OssBucket(Protocol):
-    """The slice of `oss2.Bucket` a publish uses; tests inject a fake through it."""
-
-    def head_object(self, key: str) -> _HeadResult: ...
-
-    def init_multipart_upload(
-        self, key: str, headers: Mapping[str, str] | None = None
-    ) -> _InitResult: ...
-
-    def upload_part(
-        self,
-        key: str,
-        upload_id: str,
-        part_number: int,
-        data: bytes,
-        headers: Mapping[str, str] | None = None,
-    ) -> _Etagged: ...
-
-    def complete_multipart_upload(
-        self,
-        key: str,
-        upload_id: str,
-        parts: Sequence[PartInfo],
-        headers: Mapping[str, str] | None = None,
-    ) -> _Etagged: ...
-
-    def abort_multipart_upload(self, key: str, upload_id: str) -> None: ...
-
-
-@dataclass(frozen=True)
-class OssTarget:
-    """The configured destination: non-secret endpoint and bucket, secret file path."""
-
-    endpoint: str
-    bucket: str
-    credentials_file: Path
-
-
+# meiva:note
+# The configured OSS destination, or None (one INFO line names the unset keys).
 def configured_target(
-    *,
-    endpoint_reader: Callable[[], str],
-    bucket_reader: Callable[[], str],
-    credentials_file_reader: Callable[[], Path | None],
+    endpoint: str, bucket: str, credentials_file: Path | None
 ) -> OssTarget | None:
-    """The configured OSS destination, or None (one INFO line says why)."""
-    keys = {
-        "MEIVA_BACKUP_OFFSITE_ENDPOINT": endpoint_reader(),
-        "MEIVA_BACKUP_OFFSITE_BUCKET": bucket_reader(),
-        "MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE": credentials_file_reader(),
-    }
-    unset = [key for key, value in keys.items() if not value]
-    credentials_file = credentials_file_reader()
+    unset = unset_keys(endpoint, bucket, credentials_file)
     if unset or credentials_file is None:
         _log.info("[backup] off-site publish skipped: %s unset", ", ".join(unset))
         return None
-    return OssTarget(endpoint_reader(), bucket_reader(), credentials_file)
+    return OssTarget(endpoint, bucket, credentials_file)
 
 
-def open_bucket(target: OssTarget) -> OssBucket:
-    """Open the OSS bucket with the RAM AccessKey pair in the credentials file."""
+# meiva:note
+# Open the OSS bucket with the RAM AccessKey pair in the credentials file.
+def open_bucket(target: OssTarget) -> oss2.Bucket:
     try:
         payload: object = json.loads(target.credentials_file.read_text())
     except (OSError, ValueError) as exc:
@@ -155,44 +102,28 @@ def open_bucket(target: OssTarget) -> OssBucket:
         raise ValueError(
             "OSS credentials must carry a non-empty access_key_id and access_key_secret"
         )
-    bucket = oss2.Bucket(
+    return oss2.Bucket(
         oss2.Auth(key_id, secret),
         target.endpoint.rstrip("/"),
         target.bucket,
         connect_timeout=_CONNECT_TIMEOUT_S,
     )
-    return cast(OssBucket, bucket)
 
 
-def publish(
-    artifact: Path,
-    *,
-    endpoint_reader: Callable[[], str],
-    bucket_reader: Callable[[], str],
-    credentials_file_reader: Callable[[], Path | None],
-    root: str = REMOTE_ROOT,
-    bucket: OssBucket | None = None,
-) -> str | None:
-    """Best-effort publish of `artifact` as ``<root>/<name>``; the object name or None.
-
-    An unconfigured destination skips with one INFO line. An unusable
-    credentials file or a failed upload logs the exception and retains the
-    local artifact; neither raises, so the dump that produced `artifact`
-    stays good. `bucket` replaces the configured destination (tests).
-    """
-    if bucket is None:
-        target = configured_target(
-            endpoint_reader=endpoint_reader,
-            bucket_reader=bucket_reader,
-            credentials_file_reader=credentials_file_reader,
-        )
-        if target is None:
-            return None
-        try:
-            bucket = open_bucket(target)
-        except Exception:
-            _log.exception("[backup] off-site store unavailable; local artifact retained")
-            return None
+# meiva:note
+# Best-effort publish of `artifact` as ``<root>/<name>``; the object name or None.
+#
+# An unconfigured destination (`target` is None) publishes nothing. An unusable
+# credentials file or a failed upload logs the exception and retains the local
+# artifact; neither raises, so the dump that produced `artifact` stays good.
+def publish(artifact: Path, target: OssTarget | None, *, root: str = REMOTE_ROOT) -> str | None:
+    if target is None:
+        return None
+    try:
+        bucket = open_bucket(target)
+    except Exception:
+        _log.exception("[backup] off-site store unavailable; local artifact retained")
+        return None
     object_name = f"{root}/{artifact.name}"
     try:
         ack = put_if_absent(bucket, artifact, object_name, _METADATA)
@@ -211,24 +142,34 @@ def publish(
     return object_name
 
 
+# meiva:note
+# Upload `path` as `object_name` iff absent, or adopt an identical object. The MD5 digests
+# here are OSS's wire format for parts and objects, not secrets, so the S324 suppressions
+# are the format's.
 def put_if_absent(
-    bucket: OssBucket, path: Path, object_name: str, metadata: Mapping[str, str]
+    bucket: oss2.Bucket,
+    path: Path,
+    object_name: str,
+    metadata: Mapping[str, str],
+    *,
+    part_size: int = PART_SIZE,
 ) -> OffsiteAck:
-    """Upload `path` as `object_name` iff absent, or adopt an identical object."""
     size = path.stat().st_size
     if size <= 0:
         raise OffsiteError("off-site upload requires a non-empty artifact")
     upload_id: str | None = None
     part_etags: list[str] = []
-    whole = hashlib.md5()  # noqa: S324 — OSS content digest
+    whole = hashlib.md5()  # noqa: S324
     try:
         # Deliberately NO forbid-overwrite on init: see the module docstring.
-        init = bucket.init_multipart_upload(object_name, headers=_metadata_headers(metadata))
-        upload_id = init.upload_id
+        init = cast(
+            Any, bucket.init_multipart_upload(object_name, headers=metadata_headers(metadata))
+        )
+        upload_id = cast(str | None, init.upload_id)
         if not upload_id:
             raise OffsiteError("OSS multipart upload omitted its upload id")
         with path.open("rb") as source:
-            while chunk := source.read(PART_SIZE):
+            while chunk := source.read(part_size):
                 whole.update(chunk)
                 part_etags.append(_upload_part(bucket, object_name, upload_id, chunk, part_etags))
         if not part_etags:
@@ -251,28 +192,27 @@ def put_if_absent(
                 bucket.abort_multipart_upload(object_name, upload_id)
 
 
+# meiva:note
+# One part, sent with the `Content-MD5` header the server verifies; its returned ETag must be
+# the part's MD5. The digest is OSS's wire format, so the S324 suppression is the format's.
 def _upload_part(
-    bucket: OssBucket, object_name: str, upload_id: str, data: bytes, uploaded: Sequence[str]
+    bucket: oss2.Bucket, object_name: str, upload_id: str, data: bytes, uploaded: Sequence[str]
 ) -> str:
     digest = hashlib.md5(data).hexdigest()  # noqa: S324
     try:
         result = bucket.upload_part(
-            object_name,
-            upload_id,
-            len(uploaded) + 1,
-            data,
-            headers={"Content-MD5": base64.b64encode(bytes.fromhex(digest)).decode("ascii")},
+            object_name, upload_id, len(uploaded) + 1, data, headers=part_md5_header(digest)
         )
     except oss2.exceptions.OssError as exc:
         raise OffsiteError(f"OSS part upload failed: {exc}") from exc
-    etag = _normalize_etag(result.etag)
+    etag = normalize_etag(result.etag)
     if not etag or etag.lower() != digest:
         raise OffsiteError("OSS part ETag does not match its content MD5")
     return etag
 
 
 def _verified(
-    bucket: OssBucket,
+    bucket: oss2.Bucket,
     object_name: str,
     size: int,
     whole_md5: str,
@@ -288,37 +228,20 @@ def _verified(
     of this publisher left it).
     """
     try:
-        head = bucket.head_object(object_name)
+        head = cast(Any, bucket.head_object(object_name))
     except oss2.exceptions.OssError as exc:
         raise OffsiteError(f"OSS verification failed: {exc}") from exc
-    etag = _normalize_etag(head.etag)
-    if not etag or head.content_length is None:
-        raise OffsiteError("OSS object omitted its verification properties")
-    chain = hashlib.md5("".join(part_etags).encode()).hexdigest()  # noqa: S324
-    if (
-        int(head.content_length) != size
-        or etag.lower() != f"{chain}-{len(part_etags)}"
-        or _user_metadata(head.headers) != dict(metadata)
-    ):
-        raise OffsiteError("immutable OSS object differs from the local artifact")
-    return OffsiteAck(object_name, size, etag, whole_md5, created)
-
-
-def _normalize_etag(etag: str | None) -> str:
-    """Strip the HTTP quoting OSS puts around ETags; keep the server's case."""
-    return etag.strip().strip('"') if etag else ""
-
-
-def _user_metadata(headers: Mapping[str, str]) -> dict[str, str]:
-    return {
-        key[len(_META_PREFIX) :]: value
-        for key, value in headers.items()
-        if key.startswith(_META_PREFIX)
-    }
-
-
-def _metadata_headers(metadata: Mapping[str, str]) -> dict[str, str]:
-    return {f"{_META_PREFIX}{key}": value for key, value in metadata.items()}
+    problem = object_problem(
+        etag=head.etag,
+        content_length=head.content_length,
+        headers=head.headers,
+        size=size,
+        part_etags=part_etags,
+        metadata=metadata,
+    )
+    if problem is not None:
+        raise OffsiteError(problem)
+    return OffsiteAck(object_name, size, normalize_etag(head.etag), whole_md5, created)
 
 
 def _is_file_exists(exc: oss2.exceptions.OssError) -> bool:

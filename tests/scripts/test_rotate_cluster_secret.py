@@ -26,10 +26,10 @@ from dotenv import dotenv_values
 
 from base import paths
 from base.config import settings
-from base.db import Database
 from scripts.data_plane_ops import rotate_cluster_secret as rotate
 from services.backup import dump as backup
 from services.backup.artifact import passphrase
+from services.backup.layout import BackupTree
 
 _OLD = "old-bearer-" + "o" * 32
 _RESTORES = itertools.count()
@@ -109,13 +109,11 @@ def test_a_born_homes_rotation_keeps_its_minted_passphrase(born: Path) -> None:
 
 
 @pytest.fixture
-def backups(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
-) -> Callable[[], Path]:
+def backups(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, db_url: str) -> Callable[[], Path]:
     """Take one logical backup of this process's home through `run_backup`
     (real openssl encryption)."""
+    _ = db_url
     directory = tmp_path / "backups-db"
-    monkeypatch.setattr(backup, "backup_dir", lambda: directory)
     fake_dump = tmp_path / "pg_dump"
     fake_dump.write_text(
         f"#!{sys.executable}\n"
@@ -138,15 +136,11 @@ def backups(
         staging = directory / f"stage-{now.minute}"
         return backup.run_backup(
             now,
+            tree=BackupTree(paths.meiva_home()),
             db_url="dbname=meiva",
-            publish=False,
+            keep=settings.services.backup_keep,
+            offsite_target=None,
             staging=staging,
-            db=database,
-            is_remote_reader=lambda: settings.data_plane.is_remote,
-            keep_reader=lambda: settings.services.backup_keep,
-            endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
-            bucket_reader=lambda: settings.services.backup_offsite_bucket,
-            credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
         )
 
     return take
@@ -156,7 +150,7 @@ def _restored(artifact: Path) -> bytes:
     """The restore path's decryption (`decrypt_artifact`, shared by the snapshot
     verification and the restore drill); a fresh output file per call."""
     out = artifact.parent / f"restored-{next(_RESTORES)}.dump"
-    backup.decrypt_artifact(artifact, out)
+    backup.decrypt_artifact(artifact, out, tree=BackupTree(paths.meiva_home()))
     return out.read_bytes()
 
 
@@ -190,7 +184,7 @@ def test_a_home_without_a_pin_has_no_backup_key(home: Path, backups: Callable[[]
         backups()
     with pytest.raises(passphrase.PassphrasePinError, match="mints one at birth"):
         passphrase.logical_backup_passphrase()
-    directory = backup.backup_dir()
+    directory = BackupTree(paths.meiva_home()).managed
     assert not list(directory.rglob("*.dump.enc")) and not list(directory.rglob(".backup-key-*"))
 
 

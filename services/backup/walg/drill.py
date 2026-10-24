@@ -36,7 +36,7 @@ import time
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -50,7 +50,12 @@ from services.backup.walg.backups import Backup
 from services.backup.walg.config import WalgConfigError
 from services.backup.walg.pg_target import PgTarget
 from services.backup.walg.probe import DRILL_PERIOD, TICK_PERIOD
-from services.backup.walg.restore import RecoveryTarget, RestoreError, restored_instance
+from services.backup.walg.restore import (
+    SOCKET_ROOT,
+    RecoveryTarget,
+    RestoreError,
+    restored_instance,
+)
 from services.backup.walg.runner import WalgCommandError
 from services.backup.walg.state import DrillRecord
 
@@ -187,6 +192,7 @@ def _restore_and_verify(
     throwaway: ThrowawayConfig,
     path_reader: Callable[[], Path | None],
     database_for_url: Callable[[str], Database],
+    socket_root: Path,
 ) -> str:
     """Restore `backup` to the newest archived segment and verify it; returns the summary."""
     base = select_throwaway_base(required_bytes(backup, facts), override=throwaway.override)
@@ -204,6 +210,7 @@ def _restore_and_verify(
             user=_admin_user(target),
             keep_data=False,
             path_reader=path_reader,
+            socket_root=socket_root,
         ) as instance:
             summary = _verify(
                 instance.url(target.database), reached, database_for_url=database_for_url
@@ -213,16 +220,49 @@ def _restore_and_verify(
     return summary
 
 
+# meiva:note
+# The record's detail for a failure: an expected one says what went wrong in its own
+# words; anything else is a bug and is recorded with its type as well.
+def failure_text(exc: BaseException) -> str:
+    if isinstance(exc, _EXPECTED_FAILURES):
+        return str(exc)
+    return f"{type(exc).__name__}: {exc}"
+
+
+# meiva:note
+# The state-file record of one drill: `outcome` is (ok, detail); a failure keeps the last
+# success of `previous`.
+def drill_record(
+    backup: Backup,
+    previous: DrillRecord | None,
+    *,
+    reached: int | None,
+    outcome: tuple[bool, str],
+    seconds: float,
+    finished: datetime,
+) -> DrillRecord:
+    ok, detail = outcome
+    return DrillRecord(
+        finished_at=finished,
+        ok=ok,
+        backup=backup.name,
+        target_lsn=None if reached is None else format_lsn(reached),
+        seconds=round(seconds, 1),
+        detail=detail[:DETAIL_CHARS],
+        last_ok_at=finished if ok else (None if previous is None else previous.last_ok_at),
+    )
+
+
 def run_drill(
     target: PgTarget,
     backup: Backup,
     previous: DrillRecord | None,
     report: Report,
-    now: Callable[[], datetime],
     *,
     throwaway: ThrowawayConfig,
     path_reader: Callable[[], Path | None],
     database_for_url: Callable[[str], Database],
+    socket_root: Path = SOCKET_ROOT,
 ) -> DrillRecord:
     """Run one drill against `backup`; every failure becomes a record with `ok=False`."""
     started = time.monotonic()
@@ -230,29 +270,30 @@ def run_drill(
     try:
         facts = read_source_facts(target, backup)
         reached = target_lsn(backup, facts)
-        detail = _restore_and_verify(
-            target,
-            backup,
-            facts,
-            reached,
-            report,
-            throwaway=throwaway,
-            path_reader=path_reader,
-            database_for_url=database_for_url,
+        outcome = (
+            True,
+            _restore_and_verify(
+                target,
+                backup,
+                facts,
+                reached,
+                report,
+                throwaway=throwaway,
+                path_reader=path_reader,
+                database_for_url=database_for_url,
+                socket_root=socket_root,
+            ),
         )
-        ok = True
     except _EXPECTED_FAILURES as exc:
-        ok, detail = False, str(exc)
+        outcome = (False, failure_text(exc))
     except Exception as exc:  # any other failure is still the drill's, never a crash of the tick
         logger.error(f"[walg] recovery drill failed: {traceback.format_exc()}")
-        ok, detail = False, f"{type(exc).__name__}: {exc}"
-    finished = now()
-    return DrillRecord(
-        finished_at=finished,
-        ok=ok,
-        backup=backup.name,
-        target_lsn=None if reached is None else format_lsn(reached),
-        seconds=round(time.monotonic() - started, 1),
-        detail=detail[:DETAIL_CHARS],
-        last_ok_at=finished if ok else (None if previous is None else previous.last_ok_at),
+        outcome = (False, failure_text(exc))
+    return drill_record(
+        backup,
+        previous,
+        reached=reached,
+        outcome=outcome,
+        seconds=time.monotonic() - started,
+        finished=datetime.now(UTC),
     )

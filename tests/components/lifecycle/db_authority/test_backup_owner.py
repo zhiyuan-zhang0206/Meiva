@@ -44,7 +44,8 @@ from cli.commands.tests.test_single_box import Born
 from cli.commands.tests.test_single_box import born as born
 from cli.commands.tests.test_single_box import configured as configured
 from cli.database.tests.command_inputs import command_runtime as command_runtime
-from services.backup.artifact import offsite
+from services.backup.layout import BackupTree
+from services.backup.scheduler.settings import DumpSettings
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 pytestmark = pytest.mark.skipif(
@@ -60,10 +61,6 @@ def config_boot_environment() -> Generator[None]:
         yield
 
 
-def _no_publish(*_args: object, **_kwargs: object) -> None:
-    """The off-site leg is not under test here."""
-
-
 @pytest.fixture
 def maintenance(born: Born, monkeypatch: pytest.MonkeyPatch) -> Born:
     """The born home, seen by a process that holds no write-generation login."""
@@ -74,7 +71,6 @@ def maintenance(born: Born, monkeypatch: pytest.MonkeyPatch) -> Born:
     monkeypatch.delitem(os.environ, delivery.GENERATION_ENV, raising=False)
     monkeypatch.delenv("MEIVA_DB_ADMIN_PASSWORD", raising=False)
     assert "MEIVA_DB_ADMIN_PASSWORD" not in (born.home / ".env").read_text()
-    monkeypatch.setattr(offsite, "publish", _no_publish)
     return born
 
 
@@ -143,17 +139,21 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
     def database_for_url(url: str) -> Database:
         return Database(replace(db_config_from_settings(), db_url=url), gate=gate)
 
+    tree = BackupTree(maintenance.home)
+    settings = DumpSettings.read(config)
     result = worker.execute(
         {"kind": "dump", "now": datetime.now(UTC).isoformat()},
         work,
-        config=config,
+        settings=settings,
+        tree=tree,
         database=database,
         database_for_url=database_for_url,
     )
     artifact = worker.commit_scheduled_backup(
         work / "artifact" / str(result["artifact"]),
         str(result["sha256"]),
-        keep_reader=lambda: config.view.services.backup_keep,
+        tree=tree,
+        keep=settings.keep,
     )
 
     assert artifact.parent == maintenance.home / "backups" / "db"
@@ -165,6 +165,7 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
     scratch.mkdir(mode=0o700)
     report, _elapsed = restore_drill.run_drill(
         artifact,
+        tree=tree,
         database_for_url=database_for_url,
         foreground=True,
         scratch_root=scratch,

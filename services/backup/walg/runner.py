@@ -15,12 +15,17 @@ import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from base.cluster.dataplane.walg_binary import walg_path
 from base.native_process.child_env import daemon_process_env
 from services.backup.walg.config import WalgConfigError, configured_path
+
+# meiva:note
+# No variable beyond the daemon subset: an immutable empty mapping, so "none" is a value.
+_NO_EXTRA: Mapping[str, str] = MappingProxyType({})
 
 
 class WalgCommandError(RuntimeError):
@@ -40,13 +45,12 @@ def _pg_env(admin_url: str) -> dict[str, str]:
 
 
 def walg_env(
-    *, pg_admin_url: str | None = None, extra: Mapping[str, str] | None = None
+    *, pg_admin_url: str | None = None, extra: Mapping[str, str] = _NO_EXTRA
 ) -> dict[str, str]:
     env = daemon_process_env()
     if pg_admin_url is not None:
         env.update(_pg_env(pg_admin_url))
-    if extra is not None:
-        env.update(extra)
+    env.update(extra)
     return env
 
 
@@ -63,7 +67,7 @@ def run_walg_logged(
     *,
     timeout_s: float,
     pg_admin_url: str | None = None,
-    extra_env: Mapping[str, str] | None = None,
+    extra_env: Mapping[str, str] = _NO_EXTRA,
     path_reader: Callable[[], Path | None],
 ) -> WalgOutput:
     """Run `wal-g --config <file> *args` and return both streams.
@@ -103,7 +107,7 @@ def run_walg(
     *,
     timeout_s: float,
     pg_admin_url: str | None = None,
-    extra_env: Mapping[str, str] | None = None,
+    extra_env: Mapping[str, str] = _NO_EXTRA,
     as_json: bool = False,
     path_reader: Callable[[], Path | None],
 ) -> Any:

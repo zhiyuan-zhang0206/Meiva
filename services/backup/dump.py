@@ -1,38 +1,38 @@
-"""Daily local Postgres backup, driven by the gateway scheduler daemon.
-
-One `pg_dump --format=custom` per day into `$MEIVA_HOME/backups/db/`,
-keeping the newest ``backup_keep`` dumps (``services.backup_keep``, default 7).
-`services.backup.scheduler.daemon` calls `is_due()` independently of watchdog
-rounds: at the first wake after ``backup_hour`` cluster time with no dump for
-the current cluster day, so a host that was down at 03:00 catches up. Its
-operation worker runs `run_backup(staging=...)` inside private controls; the
-controller links that artifact into the backup directory after the worker's
-group closed (`services.backup.scheduler.worker`).
-
-Backup cadence follows the configured cluster timezone; artifact names carry
-UTC timestamps. Retention orders those timestamps independently of host DST.
-
-Local dumps guard against bad migrations / accidental deletes / DB
-corruption. `run_backup` is `dump -> encrypt -> optional off-site publish ->
-prune`. The best-effort off-site leg publishes the encrypted artifact to OSS
-iff absent (`services.backup.artifact.offsite`); an unconfigured,
-unavailable or failing store keeps the local artifact, and nothing here deletes
-a remote object (see `future/infra/data/pg-backup.md`). The dump uses PostgreSQL's
-compressed custom format.
-
-The LangGraph checkpoint tables (`checkpoint_blobs`, `checkpoints`, and
-`checkpoint_writes`) are the only copy of conversation history: messages, tool
-outputs, and compaction segments all live there. Every daily dump includes them.
-The custom dump is encrypted before publication, so local and optional off-site
-artifacts contain the complete recoverable database without storing plaintext
-conversation data at rest.
-
-Only files matching `services.backup.artifact.names` are managed (counted
-for due-ness, pruned); a hand-made dump parked in the same directory is never
-touched.
-
-Restore procedure: `.agents/skills/meiva-guide/operations/references/db-restore.md`.
-"""
+# meiva:note
+# Daily local Postgres backup, driven by the gateway scheduler daemon.
+#
+# One `pg_dump --format=custom` per day into `$MEIVA_HOME/backups/db/`,
+# keeping the newest ``backup_keep`` dumps (``services.backup_keep``, default 7).
+# `services.backup.scheduler.daemon` asks `services.backup.schedule.backup_due`
+# independently of watchdog rounds: at the first wake after ``backup_hour`` cluster
+# time with no dump for the current cluster day, so a host that was down at 03:00
+# catches up. Its operation worker runs `run_backup(staging=...)` inside private
+# controls; the controller links that artifact into the backup directory after the
+# worker's group closed (`services.backup.scheduler.worker`).
+#
+# Backup cadence follows the configured cluster timezone; artifact names carry
+# UTC timestamps. Retention orders those timestamps independently of host DST.
+#
+# Local dumps guard against bad migrations / accidental deletes / DB
+# corruption. `run_backup` is `dump -> encrypt -> optional off-site publish ->
+# prune`. The best-effort off-site leg publishes the encrypted artifact to OSS
+# iff absent (`services.backup.artifact.offsite`); an unconfigured,
+# unavailable or failing store keeps the local artifact, and nothing here deletes
+# a remote object (see `future/infra/data/pg-backup.md`). The dump uses PostgreSQL's
+# compressed custom format.
+#
+# The LangGraph checkpoint tables (`checkpoint_blobs`, `checkpoints`, and
+# `checkpoint_writes`) are the only copy of conversation history: messages, tool
+# outputs, and compaction segments all live there. Every daily dump includes them.
+# The custom dump is encrypted before publication, so local and optional off-site
+# artifacts contain the complete recoverable database without storing plaintext
+# conversation data at rest.
+#
+# Only files matching `services.backup.artifact.names` are managed (counted
+# for due-ness, pruned); a hand-made dump parked in the same directory is never
+# touched.
+#
+# Restore procedure: `.agents/skills/meiva-guide/operations/references/db-restore.md`.
 
 from __future__ import annotations
 
@@ -41,28 +41,39 @@ import logging
 import subprocess
 import threading
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager, suppress
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import cast
-from zoneinfo import ZoneInfo
 
 import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
-from base.clock import Clock
 from base.cluster.dataplane.pg_admin import local_owner_authority
 from base.cluster.dataplane.pg_tools import has_pg_tool as has_pg_tool
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.db import Database, connect_url
 from base.host.private_storage import ensure_private_file
+from base.native_process.child_env import inherited_process_env
 from base.native_process.os_platform import LockTimeoutError, file_lock
-from base.paths import meiva_home
 from base.paths.private_dir import ensure_private_dir
 from services.backup.artifact import passphrase as backup_passphrase
 from services.backup.artifact.intermediates import sweep_closed_partials
-from services.backup.artifact.names import DUMP_NAME_RE, REMOTE_ROOT, TS_FORMAT, stamp_utc
+from services.backup.artifact.names import DUMP_NAME_RE, REMOTE_ROOT, stamp_utc
+from services.backup.artifact.offsite_plan import OssTarget
+from services.backup.dump_lines import beat_line, size_breakdown, started_line
+from services.backup.dump_plan import (
+    DumpFiles,
+    decrypt_argv,
+    encrypt_argv,
+    pg_dump_argv,
+    pg_dump_env,
+    prune_victims,
+    target_files,
+)
+from services.backup.layout import BackupTree
 
 _log = logging.getLogger(__name__)
 
@@ -77,32 +88,12 @@ PROGRESS_INTERVAL_S = 60.0
 # Bound the composition-sample connection (a dead DB must stall the backup log
 # line only this long before degrading to "unavailable", never hang it).
 _BREAKDOWN_CONNECT_TIMEOUT_S = 10
-_TARGET_NAME_ATTEMPTS = 60
 _backup_lock_guard = threading.RLock()
 _backup_lock_state = threading.local()
 
 
-def cluster_tz(*, clock_factory: Callable[[], Clock]) -> ZoneInfo:
-    """The cluster wall clock every scheduling decision here is made in."""
-    return clock_factory().explicit_zone()
-
-
-def _require_aware(now: datetime) -> datetime:
-    """A naive datetime is rejected rather than read as host-local: silently
-    adopting the host's timezone is the exact failure this module was carrying."""
-    if now.tzinfo is None:
-        raise ValueError(f"backup needs a TZ-aware datetime, got naive {now!r}")
-    return now
-
-
-def backup_dir() -> Path:
-    # `<home>/backups/db`: the home itself already scopes the cluster (path-only
-    # identity), so the dump dir needs no per-cluster token.
-    return meiva_home() / "backups" / "db"
-
-
 @contextmanager
-def backup_lock(*, timeout_s: float | None = None) -> Generator[None]:
+def backup_lock(tree: BackupTree, *, timeout_s: float | None = None) -> Generator[None]:
     """Serialize backup creation and verification across local processes.
 
     The lock is re-entrant within one thread, so a caller holding it can call
@@ -118,8 +109,7 @@ def backup_lock(*, timeout_s: float | None = None) -> Generator[None]:
                 _backup_lock_state.depth -= 1
             return
 
-        lock_path = backup_dir().parent / ".db-backup.lock"
-        with file_lock(lock_path, timeout_s=timeout_s):
+        with file_lock(tree.lock, timeout_s=timeout_s):
             _backup_lock_state.depth = 1
             try:
                 yield
@@ -139,54 +129,44 @@ def managed_dumps(directory: Path) -> list[tuple[datetime, Path]]:
     return sorted(dumps)
 
 
-def is_due(
-    now: datetime, *, clock_factory: Callable[[], Clock], hour_reader: Callable[[], int]
-) -> bool:
-    """True once the cluster clock has passed ``backup_hour`` with no dump for the
-    current cluster day. `now` must be TZ-aware."""
-    local_now = _require_aware(now).astimezone(cluster_tz(clock_factory=clock_factory))
-    if local_now.hour < hour_reader():
-        return False
-    dumps = managed_dumps(backup_dir())
-    tz = cluster_tz(clock_factory=clock_factory)
-    return not dumps or dumps[-1][0].astimezone(tz).date() < local_now.date()
-
-
-def prune(directory: Path, *, keep_reader: Callable[[], int]) -> list[Path]:
-    """Delete managed dumps beyond retention: all but the newest ``backup_keep``."""
+# meiva:note
+# The UTC instant of the newest managed dump in `directory`, or None when there is none.
+def newest_dump_instant(directory: Path) -> datetime | None:
     dumps = managed_dumps(directory)
-    keep = set(dumps[-keep_reader() :])
-    removed: list[Path] = []
-    for item in dumps:
-        if item not in keep:
-            item[1].unlink()
-            removed.append(item[1])
+    return dumps[-1][0] if dumps else None
+
+
+# meiva:note
+# Delete managed dumps beyond retention: all but the newest `keep`.
+def prune(directory: Path, *, keep: int) -> list[Path]:
+    removed = prune_victims(managed_dumps(directory), keep)
+    for path in removed:
+        path.unlink()
     return removed
 
 
-def dump_source(db: Database, *, is_remote_reader: Callable[[], bool]) -> str:
-    """The dial `pg_dump` reads this cluster's whole database through.
-
-    A locally owned plane dumps as the administrator acting as the schema owner
-    over the home's owner-only socket (`base.cluster.dataplane.pg_admin`): password-free,
-    custody-checked against this home's postmaster, and independent of the
-    write generation, so a dump never needs, and never dies with, a delivered
-    login. A remote-managed plane's provider URL
-    (`Database.direct_url`) is its only authority; `_passwordless_conninfo` keeps its
-    password off argv. Both bypass PgBouncer: pg_dump holds one snapshot across
-    many statements, which a transaction pooler cannot keep.
-    """
-    if is_remote_reader():
+# meiva:note
+# The dial `pg_dump` reads this cluster's whole database through.
+#
+# A locally owned plane dumps as the administrator acting as the schema owner
+# over the home's owner-only socket (`base.cluster.dataplane.pg_admin`): password-free,
+# custody-checked against this home's postmaster, and independent of the
+# write generation, so a dump never needs, and never dies with, a delivered
+# login. A remote-managed plane's provider URL
+# (`Database.direct_url`) is its only authority; `passwordless_conninfo` keeps its
+# password off argv. Both bypass PgBouncer: pg_dump holds one snapshot across
+# many statements, which a transaction pooler cannot keep.
+def dump_source(db: Database, *, is_remote: bool, plane_url: str) -> str:
+    if is_remote:
         return db.direct_url()
-    from base.config import settings
-
-    db_url = settings.data_plane.db_url  # ambient: S
-    return local_owner_authority(db_url, remote_plane=False).verified_conninfo()
+    return local_owner_authority(plane_url, remote_plane=False).verified_conninfo()
 
 
-def _passwordless_conninfo(db_url: str) -> tuple[str, str]:
-    """Return pg_dump conninfo and password separately so the latter never enters argv."""
+# meiva:note
+# Return pg_dump conninfo and password separately so the latter never enters argv.
+def passwordless_conninfo(db_url: str) -> tuple[str, str]:
     parsed = conninfo_to_dict(db_url)
+    # meiva:note
     # Preserve SSL and other connection settings.  Password is the sole field
     # deliberately split into the child-only environment below.
     fields = {key: str(value) for key, value in parsed.items() if key != "password"}
@@ -195,12 +175,7 @@ def _passwordless_conninfo(db_url: str) -> tuple[str, str]:
     return conninfo, password if isinstance(password, str) else ""
 
 
-def passphrase_key_file(directory: Path) -> Path:
-    """A private temporary key file holding the pinned logical-backup passphrase."""
-    return backup_passphrase.write_key_file(directory)
-
-
-def decrypt_artifact(artifact: Path, custom_dump: Path) -> None:
+def decrypt_artifact(artifact: Path, custom_dump: Path, *, tree: BackupTree) -> None:
     """Decrypt one managed artifact into its raw `pg_dump --format=custom` archive.
 
     The caller owns `custom_dump` and removes it once consumed. The pinned
@@ -208,25 +183,13 @@ def decrypt_artifact(artifact: Path, custom_dump: Path) -> None:
     """
     custom_dump.touch(mode=0o600, exist_ok=False)
     custom_dump.chmod(0o600)
-    key_file = passphrase_key_file(custom_dump.parent)
+    key_file = backup_passphrase.write_key_file(custom_dump.parent, tree.home)
     try:
         proc = subprocess.run(  # noqa: S603
-            [
-                "openssl",
-                "enc",
-                "-d",
-                "-aes-256-cbc",
-                "-pbkdf2",
-                "-salt",
-                "-kfile",
-                str(key_file),
-                "-in",
-                str(artifact),
-                "-out",
-                str(custom_dump),
-            ],
+            decrypt_argv(key_file, artifact, custom_dump),
             capture_output=True,
             check=False,
+            env=inherited_process_env(),
             timeout=DUMP_TIMEOUT_S,
         )
         if proc.returncode != 0:
@@ -236,63 +199,54 @@ def decrypt_artifact(artifact: Path, custom_dump: Path) -> None:
             key_file.unlink(missing_ok=True)
 
 
-def _available_target(directory: Path, dbname: str, now: datetime) -> Path:
-    """Return an unused managed dump path without replacing a prior dump."""
-    for offset_s in range(_TARGET_NAME_ATTEMPTS):
-        stamp = (now + timedelta(seconds=offset_s)).astimezone(UTC).strftime(TS_FORMAT)
-        target = directory / f"{dbname}-{stamp}.dump.enc"
-        if not target.exists():
-            return target
-    raise RuntimeError("could not choose a distinct backup filename within 60 seconds")
-
-
 # A one-line progress report, called at most every `PROGRESS_INTERVAL_S` while a
 # long, otherwise-silent pipeline stage runs (see `run_with_progress`).
 _ProgressSink = Callable[[str], None]
 
 
-def _written_suffix(size_path: Path | None) -> str:
-    """`, N MiB written` for a child's output file — "" when it cannot be read."""
+# meiva:note
+# Bytes a child's output file holds — None when it cannot be read.
+def _written_bytes(size_path: Path | None) -> int | None:
     if size_path is None:
-        return ""
+        return None
     try:
-        written = size_path.stat().st_size
+        return size_path.stat().st_size
     except OSError:
-        return ""
-    return f", {written / 2**20:.1f} MiB written"
+        return None
 
 
+# meiva:note
+# `subprocess.run(argv, capture_output=True, check=False)` that narrates its wait.
+#
+# With `progress=None` this is exactly `subprocess.run`. With a sink, one line
+# names the child's bound and one every `interval_s` carries the
+# elapsed time and the bytes `size_path` holds, so a caller's operator sees a
+# long silent dump or encryption alive until its own `timeout_s`.
+#
+# Like `subprocess.run`, expiry or any interruption kills and reaps the child
+# before raising, so its output never has a live writer afterwards.
 def run_with_progress(
     argv: list[str],
     *,
     timeout_s: float,
     label: str,
     progress: _ProgressSink | None,
-    env: dict[str, str] | None = None,
+    env: Mapping[str, str],
     size_path: Path | None = None,
+    interval_s: float = PROGRESS_INTERVAL_S,
 ) -> subprocess.CompletedProcess[bytes]:
-    """`subprocess.run(argv, capture_output=True, check=False)` that narrates its wait.
-
-    With `progress=None` this is exactly `subprocess.run`. With a sink, one line
-    names the child's bound and one every `PROGRESS_INTERVAL_S` carries the
-    elapsed time and the bytes `size_path` holds, so a caller's operator sees a
-    long silent dump or encryption alive until its own `timeout_s`.
-
-    Like `subprocess.run`, expiry or any interruption kills and reaps the child
-    before raising, so its output never has a live writer afterwards.
-    """
     if progress is None:
         return subprocess.run(  # noqa: S603
-            argv, capture_output=True, check=False, env=env, timeout=timeout_s
+            argv, capture_output=True, check=False, env=dict(env), timeout=timeout_s
         )
     started = time.monotonic()
-    progress(f"{label} started (bounded at {timeout_s / 60:.0f} min)")
+    progress(started_line(label, timeout_s))
     with subprocess.Popen(  # noqa: S603
-        argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env
+        argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=dict(env)
     ) as proc:
         try:
             stdout, stderr = _narrated_wait(
-                proc, argv, timeout_s, started, label, progress, size_path
+                proc, argv, timeout_s, started, (label, progress, size_path), interval_s
             )
         except BaseException:
             proc.kill()
@@ -305,84 +259,75 @@ def _narrated_wait(
     argv: list[str],
     timeout_s: float,
     started: float,
-    label: str,
-    progress: _ProgressSink,
-    size_path: Path | None,
+    narration: tuple[str, _ProgressSink, Path | None],
+    interval_s: float,
 ) -> tuple[bytes, bytes]:
+    label, progress, size_path = narration
     while True:
         remaining_s = timeout_s - (time.monotonic() - started)
         if remaining_s <= 0:
             raise subprocess.TimeoutExpired(argv, timeout_s)
         try:
-            return proc.communicate(timeout=min(PROGRESS_INTERVAL_S, remaining_s))
+            return proc.communicate(timeout=min(interval_s, remaining_s))
         except subprocess.TimeoutExpired:
-            progress(f"{label} {time.monotonic() - started:.0f}s{_written_suffix(size_path)}")
+            progress(beat_line(label, time.monotonic() - started, _written_bytes(size_path)))
 
 
+# meiva:note
+# Dump the cluster DB into the managed pool and prune; return the dump path.
+#
+# Plaintext and encrypted intermediates use `.partial` names; only the
+# encrypted custom-format artifact is published after every pipeline step
+# succeeds. A failed step removes its intermediates once its tool is reaped.
+# `staging` writes into a scheduled operation's private controls instead
+# and leaves publication and pruning to that operation's controller.
+#
+# `timeout_s` lets bounded callers use a tighter ceiling than the daily
+# backup default. `offsite_target=None` keeps the completed artifact local, so
+# off-site network latency cannot extend the run.
+#
+# `progress` narrates the stages that may run for minutes without writing
+# anything (`pg_dump` and the encryption pass) — see `run_with_progress`.
 def run_backup(
-    now: datetime | None = None,
+    now: datetime,
     *,
-    db: Database,
-    is_remote_reader: Callable[[], bool],
-    db_url: str | None = None,
-    timeout_s: float = DUMP_TIMEOUT_S,
-    publish: bool = True,
-    progress: _ProgressSink | None = None,
+    tree: BackupTree,
+    db_url: str,
+    keep: int,
+    offsite_target: OssTarget | None,
     staging: Path | None = None,
-    keep_reader: Callable[[], int],
-    endpoint_reader: Callable[[], str],
-    bucket_reader: Callable[[], str],
-    credentials_file_reader: Callable[[], Path | None],
+    timeout_s: float = DUMP_TIMEOUT_S,
+    progress: _ProgressSink | None = None,
+    progress_interval_s: float = PROGRESS_INTERVAL_S,
 ) -> Path:
-    """Dump the cluster DB into backup_dir() and prune; return the dump path.
-
-    Plaintext and encrypted intermediates use `.partial` names; only the
-    encrypted custom-format artifact is published after every pipeline step
-    succeeds. A failed step removes its intermediates once its tool is reaped.
-    `staging` writes into a scheduled operation's private controls instead
-    and leaves publication and pruning to that operation's controller.
-
-    `timeout_s` lets bounded callers use a tighter ceiling than the daily
-    backup default. `publish=False` keeps the completed artifact local, so
-    off-site network latency cannot extend the run.
-
-    `progress` narrates the stages that may run for minutes without writing
-    anything (`pg_dump` and the encryption pass) — see `run_with_progress`.
-    """
-    with backup_lock():
-        directory = backup_dir() if staging is None else staging
+    with backup_lock(tree):
+        directory = tree.managed if staging is None else staging
         # Every run, the scheduled worker's staged one included, first clears
         # the backup directory of intermediates whose writers closed: a killed
         # in-process snapshot's plaintext never waits for another snapshot.
-        for swept in dict.fromkeys((backup_dir(), directory)):
+        for swept in dict.fromkeys((tree.managed, directory)):
             sweep_closed_partials(ensure_private_dir(swept))
         target = run_locked_backup(
             now,
-            db=db,
-            is_remote_reader=is_remote_reader,
-            directory=directory,
+            tree=tree,
             db_url=db_url,
-            timeout_s=timeout_s,
-            progress=progress,
+            directory=directory,
+            bound=_Bound(timeout_s, progress, progress_interval_s),
         )
-        if publish:
+        if offsite_target is not None:
             # Imported where used: the scheduler daemon imports this module for
-            # `is_due` and must not carry the OSS SDK; its backup worker, which
+            # meiva:note
+            # its schedule and must not carry the OSS SDK; its backup worker, which
             # reaches this line, loads it.
             from services.backup.artifact import offsite
 
-            offsite.publish(
-                target,
-                endpoint_reader=endpoint_reader,
-                bucket_reader=bucket_reader,
-                credentials_file_reader=credentials_file_reader,
-            )
+            offsite.publish(target, offsite_target)
         if staging is None:
-            _log_written(target, prune(target.parent, keep_reader=keep_reader))
+            _log_written(target, prune(target.parent, keep=keep))
         return target
 
 
-def prune_after_publish(target: Path, *, keep_reader: Callable[[], int]) -> None:
+def prune_after_publish(target: Path, *, tree: BackupTree, keep: int) -> None:
     """Prune around a newly linked scheduled dump without waiting on the lock.
 
     Linking never replaces a managed name, so it needs no lock; pruning does.
@@ -390,29 +335,26 @@ def prune_after_publish(target: Path, *, keep_reader: Callable[[], int]) -> None
     scheduler.
     """
     try:
-        with backup_lock(timeout_s=0):
-            removed = prune(target.parent, keep_reader=keep_reader)
+        with backup_lock(tree, timeout_s=0):
+            removed = prune(target.parent, keep=keep)
     except LockTimeoutError:
         _log.info("[backup] prune deferred while another backup owns the lock")
         removed = []
     _log_written(target, removed)
 
 
-def db_size_breakdown(db: Database, db_url: str | None = None) -> str:
-    """One-line DB composition for the backup log: total, the LangGraph
-    checkpoint tables, and everything else.
-
-    The checkpoint tables dominate DB size and dump time, so each artifact
-    carries its own growth baseline. Best-effort: a failure (e.g. a fresh
-    cluster missing the tables) degrades to "unavailable" and never fails the
-    backup. `db_url` is the same database the dump reads; None falls back to
-    the settings-derived direct connection.
-    """
+# meiva:note
+# One-line DB composition for the backup log: total, the LangGraph
+# checkpoint tables, and everything else.
+#
+# The checkpoint tables dominate DB size and dump time, so each artifact
+# carries its own growth baseline. Best-effort: a failure (e.g. a fresh
+# cluster missing the tables) degrades to "unavailable" and never fails the
+# backup. `db_url` is the same database the dump reads.
+def db_size_breakdown(db_url: str) -> str:
     try:
-        with (
-            connect_url(db_url, autocommit=True, connect_timeout=_BREAKDOWN_CONNECT_TIMEOUT_S)
-            if db_url is not None
-            else db.connect(direct=True, autocommit=True)
+        with connect_url(
+            db_url, autocommit=True, connect_timeout=_BREAKDOWN_CONNECT_TIMEOUT_S
         ) as conn:
             row = conn.execute(
                 """
@@ -427,13 +369,7 @@ def db_size_breakdown(db: Database, db_url: str | None = None) -> str:
         return "unavailable"
     assert row is not None  # noqa: S101 — aggregate over fixed tables always returns one row
     total, blobs, checkpoints, writes = (int(v) for v in row)
-    checkpoint = blobs + checkpoints + writes
-    rest = max(total - checkpoint, 0)
-    return f"db={_mb(total)}MiB checkpoint={_mb(checkpoint)}MiB rest={_mb(rest)}MiB"
-
-
-def _mb(b: int) -> int:
-    return round(b / 2**20)
+    return size_breakdown(total, blobs, checkpoints, writes)
 
 
 def _log_written(target: Path, removed: list[Path]) -> None:
@@ -445,110 +381,83 @@ def _log_written(target: Path, removed: list[Path]) -> None:
     )
 
 
+# meiva:note
+# How each pipeline stage is bounded and narrated.
+@dataclass(frozen=True)
+class _Bound:
+    timeout_s: float
+    progress: _ProgressSink | None
+    interval_s: float
+
+
+# meiva:note
+# Write one managed dump while `backup_lock` is held.
+#
+# Pipeline: `pg_dump --format=custom --compress=zstd:3` (the custom archive
+# compresses in-dump; there is no separate gzip stage), then AES-CBC
+# encryption. `bound.timeout_s` bounds every subprocess; the caller owns the lock.
+#
+# `bound.progress` narrates the two stages that may run for minutes without writing
+# anything: `pg_dump` and the encryption pass (see `run_with_progress`).
 def run_locked_backup(
-    now: datetime | None = None,
+    now: datetime,
     *,
-    db: Database,
-    is_remote_reader: Callable[[], bool],
-    db_url: str | None = None,
-    timeout_s: float = DUMP_TIMEOUT_S,
+    tree: BackupTree,
+    db_url: str,
     directory: Path,
-    progress: _ProgressSink | None = None,
+    bound: _Bound,
 ) -> Path:
-    """Write one managed dump while `backup_lock` is held.
-
-    Pipeline: `pg_dump --format=custom --compress=zstd:3` (the custom archive
-    compresses in-dump; there is no separate gzip stage), then AES-CBC
-    encryption. `timeout_s` bounds every subprocess; the caller owns the lock.
-
-    `progress` narrates the two stages that may run for minutes without writing
-    anything: `pg_dump` and the encryption pass (see `run_with_progress`).
-    """
-    now = _require_aware(now) if now is not None else datetime.now(UTC)
-    db_url = db_url if db_url is not None else dump_source(db, is_remote_reader=is_remote_reader)
+    if now.tzinfo is None:
+        raise ValueError(f"backup needs a TZ-aware datetime, got naive {now!r}")
     directory = ensure_private_dir(directory)
-    db_conninfo, password = _passwordless_conninfo(db_url)
+    db_conninfo, password = passwordless_conninfo(db_url)
     dbname = cast(str, conninfo_to_dict(db_url)["dbname"])
-    _log.info("[backup] db composition: %s", db_size_breakdown(db, db_url))
-    target = _available_target(directory, dbname, now)
-    stem = target.name.removesuffix(".dump.enc")
-    dump_partial = directory / f"{stem}.dump.partial"
-    encrypted_partial = target.with_name(target.name + ".partial")
-    dump_partial.touch(mode=0o600, exist_ok=False)
+    _log.info("[backup] db composition: %s", db_size_breakdown(db_url))
+    files = target_files(directory, dbname, now, {entry.name for entry in directory.iterdir()})
+    files.dump_partial.touch(mode=0o600, exist_ok=False)
     try:
-        _dump_and_encrypt(
-            db_conninfo, password, dump_partial, encrypted_partial, timeout_s, progress
-        )
-        encrypted_partial.rename(target)
+        _dump_and_encrypt(files, db_conninfo, password, tree, bound)
+        files.encrypted_partial.rename(files.target)
     finally:
         # Every tool below is a reaped direct child once control returns here,
         # so its plaintext output has no live writer and never outlives the run.
-        for partial in (dump_partial, encrypted_partial):
+        for partial in (files.dump_partial, files.encrypted_partial):
             partial.unlink(missing_ok=True)
-    ensure_private_file(target)
-    return target
+    ensure_private_file(files.target)
+    return files.target
 
 
 def _dump_and_encrypt(
-    db_conninfo: str,
-    password: str,
-    dump_partial: Path,
-    encrypted_partial: Path,
-    timeout_s: float,
-    progress: _ProgressSink | None,
+    files: DumpFiles, db_conninfo: str, password: str, tree: BackupTree, bound: _Bound
 ) -> None:
-    dump_partial.chmod(0o600)
-    # Pass only the credential this process owns to pg_dump. In particular, do
-    # not inherit a shell's PGPASSWORD: a dump must not accidentally
-    # authenticate with another cluster's value (#550 alignment).
-    dump_env = {"PGPASSWORD": password} if password else {}
-    dump_cmd = [
-        str(pg_tool("pg_dump")),
-        "--format=custom",
-        # The archive's own zstd compression (PG 17+); a second, external pass over
-        # the already-compressed archive gained <1% for 13-47 s on the production DB.
-        "--compress=zstd:3",
-        "--file",
-        str(dump_partial),
-        "--dbname",
-        db_conninfo,
-    ]
+    files.dump_partial.chmod(0o600)
     # The scheduler owns this subprocess in its own process, so its bound
     # cannot delay watchdog supervision. Expiry kills the child and
     # TimeoutExpired lets the scheduler schedule its retry.
     proc = run_with_progress(
-        dump_cmd,
-        timeout_s=timeout_s,
+        pg_dump_argv(str(pg_tool("pg_dump")), files.dump_partial, db_conninfo),
+        timeout_s=bound.timeout_s,
         label="pg_dump",
-        progress=progress,
-        env=dump_env,
-        size_path=dump_partial,
+        progress=bound.progress,
+        env=pg_dump_env(password),
+        size_path=files.dump_partial,
+        interval_s=bound.interval_s,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"pg_dump exited {proc.returncode}")
 
-    encrypted_partial.touch(mode=0o600, exist_ok=False)
-    encrypted_partial.chmod(0o600)
-    key_file = passphrase_key_file(dump_partial.parent)
+    files.encrypted_partial.touch(mode=0o600, exist_ok=False)
+    files.encrypted_partial.chmod(0o600)
+    key_file = backup_passphrase.write_key_file(files.dump_partial.parent, tree.home)
     try:
         proc = run_with_progress(
-            [
-                "openssl",
-                "enc",
-                "-aes-256-cbc",
-                "-pbkdf2",
-                "-salt",
-                "-kfile",
-                str(key_file),
-                "-in",
-                str(dump_partial),
-                "-out",
-                str(encrypted_partial),
-            ],
-            timeout_s=timeout_s,
+            encrypt_argv(key_file, files.dump_partial, files.encrypted_partial),
+            timeout_s=bound.timeout_s,
             label="backup encryption",
-            progress=progress,
-            size_path=encrypted_partial,
+            progress=bound.progress,
+            env=inherited_process_env(),
+            size_path=files.encrypted_partial,
+            interval_s=bound.interval_s,
         )
         if proc.returncode != 0:
             raise RuntimeError(f"backup encryption exited {proc.returncode}")
@@ -587,13 +496,13 @@ def run_offsite_publisher(argv: list[str] | None = None) -> int:
 
     config = ConfigBoot()
     config.boot()
-    offsite.publish(
-        artifact,
-        root=args.offsite_root,
-        endpoint_reader=lambda: config.view.services.backup_offsite_endpoint,
-        bucket_reader=lambda: config.view.services.backup_offsite_bucket,
-        credentials_file_reader=lambda: config.view.services.backup_offsite_credentials_file,
+    services = config.view.services
+    target = offsite.configured_target(
+        services.backup_offsite_endpoint,
+        services.backup_offsite_bucket,
+        services.backup_offsite_credentials_file,
     )
+    offsite.publish(artifact, target, root=args.offsite_root)
     return 0
 
 

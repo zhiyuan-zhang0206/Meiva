@@ -1,64 +1,34 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import errno
 import hashlib
 import json
 import os
 import socket
 import subprocess
 import sys
-from collections.abc import Generator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 import pytest
 
-from base.clock import Clock, ClockConfig
-from base.clock.configuration import clock_config_from_boot
-from base.clock.tests.manual_timers import ManualTimers
-from base.config import ConfigBoot, settings
 from base.daemon import health, health_schema
 from base.daemon.tests.health_support import unknown_image
-from base.native_process.os_platform import LockTimeoutError
+from base.native_process.os_platform import file_lock
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
+from services.backup.layout import BackupTree
 from services.backup.scheduler import daemon
+from services.backup.scheduler.recovery_drill import (
+    load_local_dump_restore_success,
+    record_local_dump_restore_success,
+)
+from services.backup.scheduler.settings import SchedulerSettings
+from services.backup.scheduler.tests.operation_support import STUB_WORKER
+from services.backup.scheduler.worker import WorkerLaunch, run_job
 
-
-@pytest.fixture(autouse=True)
-def config_boot_environment() -> Generator[None]:
-    with patch.dict(os.environ):
-        yield
-
-
-def _at(hour: int = 3, minute: int = 0) -> datetime:
-    return datetime(2026, 8, 25, hour, minute, tzinfo=UTC)
-
-
-def _always_due(_now: datetime, **_inputs: object) -> bool:
-    return True
-
-
-def _clock(timers: ManualTimers) -> Clock:
-    return Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
-
-
-class _StopAfterSleeping(ManualTimers):
-    def __init__(self, budget: float, *, wall_start: datetime) -> None:
-        super().__init__(wall_start=wall_start)
-        self._budget = budget
-
-    async def asleep(self, seconds: float) -> None:
-        await super().asleep(seconds)
-        if sum(self.sleeps) >= self._budget:
-            raise asyncio.CancelledError
-
-
-def _components(state: daemon.BackupState, timers: ManualTimers) -> list[dict[str, object]]:
-    return daemon.backup_components(state, clock=_clock(timers))
+_SUNDAY_WINDOW = datetime(2026, 8, 30, 3, tzinfo=UTC)
 
 
 def _find_free_port() -> int:
@@ -67,18 +37,27 @@ def _find_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def _settings(*, hour: int = 0) -> SchedulerSettings:
+    return SchedulerSettings(
+        timezone=ZoneInfo("UTC"), backup_hour=hour, keep=7, throwaway_base=None
+    )
+
+
+def _launch(mode: str, log: Path) -> WorkerLaunch:
+    return WorkerLaunch(STUB_WORKER, {"STUB_MODE": mode, "STUB_LOG": str(log)})
+
+
+def _ran(log: Path) -> list[str]:
+    return log.read_text().splitlines() if log.exists() else []
+
+
 def test_module_entrypoint_runs_the_scheduler(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text(
         "MEIVA_DB_URL=postgresql://meiva:test@127.0.0.1:1/meiva\n"
         "MEIVA_REDIS_URL=redis://meiva:test@127.0.0.1:1/0\n"
     )
     env = dict(os.environ)
-    env.update(
-        {
-            "MEIVA_HOME": str(tmp_path),
-            "MEIVA_CONFIG_FETCH": "skip",
-        }
-    )
+    env.update({"MEIVA_HOME": str(tmp_path), "MEIVA_CONFIG_FETCH": "skip"})
     result = subprocess.run(
         [sys.executable, "-m", "services.backup.scheduler.daemon"],
         cwd=Path(__file__).parents[4],
@@ -106,20 +85,15 @@ async def _http_get(port: int) -> tuple[int, bytes]:
 
 
 def test_backup_components_hold_a_boot_grace_then_require_a_fresh_success() -> None:
-    timers = ManualTimers(start=100.0, wall_start=_at())
     state = daemon.BackupState(started_at=100.0)
-    timers.advance(daemon.BACKUP_STALE_AFTER_S)
+    wall = 1_000_000.0
+    grace_end = 100.0 + daemon.BACKUP_STALE_AFTER_S
 
-    assert _components(state, timers) == [
-        {
-            "name": "backup",
-            "status": "ok",
-            "progress": "idle",
-        }
+    assert daemon.backup_components(state, wall_time=wall, monotonic=grace_end) == [
+        {"name": "backup", "status": "ok", "progress": "idle"}
     ]
 
-    timers.advance(1.0)
-    assert _components(state, timers) == [
+    assert daemon.backup_components(state, wall_time=wall, monotonic=grace_end + 1.0) == [
         {
             "name": "backup",
             "status": "degraded",
@@ -128,30 +102,30 @@ def test_backup_components_hold_a_boot_grace_then_require_a_fresh_success() -> N
         }
     ]
 
-    succeeded_at = timers.now()
+    succeeded_at = datetime.fromtimestamp(wall, tz=UTC)
     state.record_success(succeeded_at)
-    timers.advance(10.0)
-    assert _components(state, timers) == [
+    assert daemon.backup_components(state, wall_time=wall + 10.0, monotonic=0.0) == [
         {
             "name": "backup",
             "status": "ok",
-            "last_success": succeeded_at.timestamp(),
+            "last_success": wall,
             "age_s": 10.0,
             "progress": "idle",
         }
     ]
-    timers.advance(daemon.BACKUP_STALE_AFTER_S - 9.0)
-    assert _components(state, timers)[0]["status"] == "degraded"
+    stale = daemon.backup_components(
+        state, wall_time=wall + daemon.BACKUP_STALE_AFTER_S + 1.0, monotonic=0.0
+    )
+    assert stale[0]["status"] == "degraded"
 
 
 def test_backup_components_keep_running_dump_healthy_after_previous_failure() -> None:
-    timers = ManualTimers(wall_start=_at())
+    wall = 1_000_000.0
     state = daemon.BackupState(started_at=0.0, running=True)
-    state.record_attempt(_at())
+    state.record_attempt(datetime.fromtimestamp(wall, tz=UTC))
     state.record_error("disk full")
-    timers.advance(1.0)
 
-    assert _components(state, timers) == [
+    assert daemon.backup_components(state, wall_time=wall + 1.0, monotonic=0.0) == [
         {
             "name": "backup",
             "status": "ok",
@@ -164,13 +138,13 @@ def test_backup_components_keep_running_dump_healthy_after_previous_failure() ->
 @pytest.mark.asyncio
 async def test_healthz_returns_503_for_an_overdue_backup() -> None:
     state = daemon.BackupState(started_at=0.0)
-    timers = ManualTimers()
-    timers.advance(daemon.BACKUP_STALE_AFTER_S + 1.0)
     port = _find_free_port()
     server = await health.start_health_server(
         "pg_backup",
         port=port,
-        components=lambda: _components(state, timers),
+        components=lambda: daemon.backup_components(
+            state, wall_time=0.0, monotonic=daemon.BACKUP_STALE_AFTER_S + 1.0
+        ),
         image=unknown_image(),
     )
     try:
@@ -183,112 +157,11 @@ async def test_healthz_returns_503_for_an_overdue_backup() -> None:
         await health.stop_health_server(server)
 
 
-def test_next_backup_hour_uses_the_cluster_timezone() -> None:
-    backup_hour = settings.services.backup_hour
-
-    seconds = daemon.seconds_until_next_backup_hour(
-        _at(hour=(backup_hour - 1) % 24, minute=30),
-        config=ConfigBoot(),
-        clock=Clock(ClockConfig("UTC", "UTC", False), timers=ManualTimers()),
-    )
-
-    assert seconds == 30 * 60
-
-
-def test_due_backup_runs_once_then_waits_for_tomorrow(monkeypatch: pytest.MonkeyPatch) -> None:
-    timers = _StopAfterSleeping(budget=1.0, wall_start=_at())
-    state = daemon.BackupState(started_at=timers.monotonic())
-    ran: list[datetime] = []
-
-    monkeypatch.setattr(daemon, "is_due", _always_due)
-
-    async def record_run(kind: str, *, now: datetime, config: ConfigBoot) -> None:
-        assert kind == "dump"
-        ran.append(now)
-
-    monkeypatch.setattr(daemon, "run_job", record_run)
-
-    with pytest.raises(asyncio.CancelledError):
-        asyncio.run(daemon.backup_loop(state, config=ConfigBoot(), clock=_clock(timers)))
-
-    assert len(ran) == 1
-    assert state.running is False
-    assert state.last_success == ran[0].timestamp()
-    assert timers.sleeps == [24 * 3600.0]
-
-
-def test_due_backup_sleeps_from_completion_time(monkeypatch: pytest.MonkeyPatch) -> None:
-    started = _at(hour=settings.services.backup_hour)
-    job_took = timedelta(minutes=53, seconds=52)
-    until_tomorrow = 24 * 3600 - 53 * 60 - 52
-    timers = _StopAfterSleeping(budget=until_tomorrow, wall_start=started)
-
-    async def run_dump(kind: str, *, now: datetime, config: ConfigBoot) -> None:
-        assert kind == "dump"
-        assert now == started
-        timers.advance(job_took.total_seconds())
-
-    async def skip_restore(_now: datetime, *, config: ConfigBoot, clock: Clock) -> None:
-        pass
-
-    monkeypatch.setattr(daemon, "is_due", _always_due)
-    monkeypatch.setattr(daemon, "run_job", run_dump)
-    monkeypatch.setattr(daemon, "run_due_local_dump_restore", skip_restore)
-
-    with pytest.raises(asyncio.CancelledError):
-        asyncio.run(
-            daemon.backup_loop(
-                daemon.BackupState(started_at=timers.monotonic()),
-                config=ConfigBoot(),
-                clock=_clock(timers),
-            )
-        )
-
-    assert sum(timers.sleeps) == until_tomorrow
-
-
-def test_failed_backup_is_reported_and_not_retried_before_the_next_backup_hour(
-    monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
-) -> None:
-    config = ConfigBoot()
-    probe = ManualTimers(wall_start=_at())
-    until_next_hour = daemon.seconds_until_next_backup_hour(
-        probe.now(), config=config, clock=_clock(probe)
-    )
-    timers = _StopAfterSleeping(budget=until_next_hour, wall_start=_at())
-    state = daemon.BackupState(started_at=timers.monotonic())
-    ran: list[str] = []
-
-    monkeypatch.setattr(daemon, "is_due", _always_due)
-
-    async def fail(kind: str, *, now: datetime, config: ConfigBoot) -> None:
-        ran.append(kind)
-        raise RuntimeError("temporary failure")
-
-    monkeypatch.setattr(daemon, "run_job", fail)
-
-    with pytest.raises(asyncio.CancelledError):
-        asyncio.run(daemon.backup_loop(state, config=config, clock=_clock(timers)))
-
-    assert ran == ["dump"]
-    assert sum(timers.sleeps) == until_next_hour
-    assert state.running is False
-    assert state.last_error == "temporary failure"
-    [event] = emitted_events
-    assert (event.category, event.event_name, event.level) == (
-        "telemetry",
-        "backup_dump_failed",
-        "error",
-    )
-    assert event.attributes == {"detail": "temporary failure"}
-
-
 def test_failed_dump_does_not_make_healthz_ask_the_supervisor_for_a_restart() -> None:
-    timers = ManualTimers()
-    state = daemon.BackupState(started_at=timers.monotonic())
+    state = daemon.BackupState(started_at=0.0)
     state.record_error("disk full")
 
-    components = _components(state, timers)
+    components = daemon.backup_components(state, wall_time=10.0, monotonic=10.0)
 
     assert components[0]["status"] == "ok"
     assert components[0]["last_error"] == "disk full"
@@ -297,100 +170,172 @@ def test_failed_dump_does_not_make_healthz_ask_the_supervisor_for_a_restart() ->
     assert status == 200
 
 
-@pytest.mark.asyncio
-async def test_due_local_restore_drill_runs_after_a_successful_dump(
-    monkeypatch: pytest.MonkeyPatch,
+def test_the_settings_are_read_once_from_their_owner() -> None:
+    from base.config import ConfigBoot
+
+    config = ConfigBoot()
+    config.view.general.timezone = "Asia/Shanghai"
+    config.view.services.backup_hour = 7
+    config.view.services.backup_keep = 5
+    config.view.data_plane.pg_throwaway_base = ""
+
+    settings = SchedulerSettings.read(config)
+    config.view.services.backup_hour = 9
+
+    assert settings == SchedulerSettings(
+        timezone=ZoneInfo("Asia/Shanghai"), backup_hour=7, keep=5, throwaway_base=None
+    )
+
+
+def test_a_relative_throwaway_base_is_captured_as_an_absolute_path() -> None:
+    from base.config import ConfigBoot
+
+    config = ConfigBoot()
+    config.view.data_plane.pg_throwaway_base = "scratch-base"
+
+    base = SchedulerSettings.read(config).throwaway_base
+
+    assert base is not None and base.is_absolute() and base.name == "scratch-base"
+
+
+async def test_a_due_backup_runs_once_then_the_round_waits_for_tomorrow(tmp_path: Path) -> None:
+    tree, log = BackupTree(tmp_path / "home"), tmp_path / "workers.log"
+    state = daemon.BackupState(started_at=0.0)
+    config = _settings()
+    launch = _launch("succeed", log)
+
+    first = await daemon.backup_round(state, settings=config, tree=tree, launch=launch)
+
+    [published] = tree.managed.glob("*.dump.enc")
+    assert _ran(log) == ["dump", "restore"], "a successful dump is followed by the due drill"
+    assert state.running is False and state.last_error is None
+    assert state.last_success is not None
+    assert 0 < first <= 24 * 3600
+    assert published.read_bytes().startswith(b"encrypted ")
+    assert not list(tree.controls("dump").glob(".operation-*"))
+    assert load_local_dump_restore_success(tree.restore_marker) is not None
+
+    second = await daemon.backup_round(state, settings=config, tree=tree, launch=launch)
+
+    assert _ran(log) == ["dump", "restore"], "today's dump exists, so no second worker is launched"
+    assert 0 < second <= 24 * 3600
+
+
+async def test_a_failed_backup_is_reported_and_not_retried_before_the_next_backup_hour(
+    tmp_path: Path, emitted_events: EmittedEvents
 ) -> None:
-    now = datetime(2026, 8, 30, 3, tzinfo=UTC)
-    calls: list[str] = []
+    tree, log = BackupTree(tmp_path / "home"), tmp_path / "workers.log"
+    state = daemon.BackupState(started_at=0.0)
 
-    monkeypatch.setattr(daemon, "load_local_dump_restore_success", lambda: None)
-
-    def due(current: datetime, *, last_success: datetime | None, **_inputs: object) -> bool:
-        return current == now and last_success is None
-
-    def record_success(current: datetime) -> None:
-        calls.append(current.isoformat())
-
-    monkeypatch.setattr(
-        daemon,
-        "local_dump_restore_due",
-        due,
+    sleep_s = await daemon.backup_round(
+        state, settings=_settings(), tree=tree, launch=_launch("fail", log)
     )
 
-    async def restore(kind: str, *, config: ConfigBoot) -> None:
-        calls.append(kind)
-
-    monkeypatch.setattr(daemon, "run_job", restore)
-    monkeypatch.setattr(daemon, "record_local_dump_restore_success", record_success)
-
-    await daemon.run_due_local_dump_restore(
-        now,
-        config=ConfigBoot(),
-        clock=Clock(ClockConfig("UTC", "UTC", False), timers=ManualTimers()),
+    assert _ran(log) == ["fail"]
+    assert 0 < sleep_s <= 24 * 3600
+    assert state.running is False
+    assert state.last_error is not None and "operation exited 3" in state.last_error
+    assert state.last_success is None
+    [event] = emitted_events
+    assert (event.category, event.event_name, event.level) == (
+        "telemetry",
+        "backup_dump_failed",
+        "error",
     )
+    assert event.attributes["detail"] == state.last_error
 
-    assert calls == ["restore", now.isoformat()]
 
-
-@pytest.mark.asyncio
-async def test_due_local_restore_drill_reports_failure_without_publishing_success(
-    monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
+async def test_a_backup_with_todays_dump_launches_nothing_and_sleeps_until_the_next_hour(
+    tmp_path: Path,
 ) -> None:
-    now = datetime(2026, 8, 30, 3, tzinfo=UTC)
+    log, tree = tmp_path / "workers.log", BackupTree(tmp_path / "home")
+    tree.managed.mkdir(parents=True)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    (tree.managed / f"stubdb-{stamp}.dump.enc").write_bytes(b"x")
 
-    monkeypatch.setattr(daemon, "load_local_dump_restore_success", lambda: None)
-
-    def due(_now: datetime, *, last_success: datetime | None, **_inputs: object) -> bool:
-        return True
-
-    async def fail_restore(_kind: str, *, config: ConfigBoot) -> None:
-        raise RuntimeError("scratch restore failed")
-
-    def unexpected_success(_now: datetime) -> None:
-        pytest.fail("failed restore must not publish success")
-
-    monkeypatch.setattr(daemon, "local_dump_restore_due", due)
-    monkeypatch.setattr(daemon, "run_job", fail_restore)
-    monkeypatch.setattr(daemon, "record_local_dump_restore_success", unexpected_success)
-
-    await daemon.run_due_local_dump_restore(
-        now,
-        config=ConfigBoot(),
-        clock=Clock(ClockConfig("UTC", "UTC", False), timers=ManualTimers()),
+    sleep_s = await daemon.backup_round(
+        daemon.BackupState(started_at=0.0),
+        settings=_settings(),
+        tree=tree,
+        launch=_launch("succeed", log),
     )
 
+    assert _ran(log) == []
+    assert 0 < sleep_s <= 24 * 3600
+
+
+async def test_the_due_local_restore_drill_runs_and_records_its_success(tmp_path: Path) -> None:
+    tree, log = BackupTree(tmp_path / "home"), tmp_path / "workers.log"
+
+    await daemon.local_restore_round(
+        _SUNDAY_WINDOW, settings=_settings(hour=3), tree=tree, launch=_launch("restore", log)
+    )
+
+    assert _ran(log) == ["restore"]
+    assert load_local_dump_restore_success(tree.restore_marker) == _SUNDAY_WINDOW
+    assert not list(tree.controls("restore-drill").glob(".operation-*"))
+
+
+async def test_a_local_restore_drill_already_recorded_this_week_does_not_run(
+    tmp_path: Path,
+) -> None:
+    tree, log = BackupTree(tmp_path / "home"), tmp_path / "workers.log"
+    record_local_dump_restore_success(_SUNDAY_WINDOW, tree.restore_marker)
+
+    await daemon.local_restore_round(
+        _SUNDAY_WINDOW, settings=_settings(hour=3), tree=tree, launch=_launch("restore", log)
+    )
+
+    assert _ran(log) == []
+
+
+async def test_a_local_restore_drill_before_its_window_does_not_run(tmp_path: Path) -> None:
+    tree, log = BackupTree(tmp_path / "home"), tmp_path / "workers.log"
+    record_local_dump_restore_success(datetime(2026, 8, 23, 3, tzinfo=UTC), tree.restore_marker)
+
+    await daemon.local_restore_round(
+        datetime(2026, 8, 30, 2, 59, tzinfo=UTC),
+        settings=_settings(hour=3),
+        tree=tree,
+        launch=_launch("restore", log),
+    )
+
+    assert _ran(log) == []
+
+
+async def test_a_local_restore_drill_failure_is_reported_without_publishing_success(
+    tmp_path: Path, emitted_events: EmittedEvents
+) -> None:
+    tree, log = BackupTree(tmp_path / "home"), tmp_path / "workers.log"
+
+    await daemon.local_restore_round(
+        _SUNDAY_WINDOW, settings=_settings(hour=3), tree=tree, launch=_launch("fail", log)
+    )
+
+    assert _ran(log) == ["fail"]
+    assert load_local_dump_restore_success(tree.restore_marker) is None
     [event] = emitted_events
     assert (event.category, event.event_name, event.level) == (
         "telemetry",
         "recovery_drill_failed",
         "error",
     )
-    assert event.attributes == {"drill": "logical_dump", "detail": "scratch restore failed"}
+    assert event.attributes["drill"] == "logical_dump"
+    assert "operation exited 3" in str(event.attributes["detail"])
 
 
-@pytest.mark.asyncio
-async def test_invalid_local_restore_marker_reports_failure_without_running_restore(
-    monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
+async def test_an_invalid_local_restore_marker_reports_failure_without_running_restore(
+    tmp_path: Path, emitted_events: EmittedEvents
 ) -> None:
-    now = datetime(2026, 8, 30, 3, tzinfo=UTC)
+    tree, log = BackupTree(tmp_path / "home"), tmp_path / "workers.log"
+    tree.restore_marker.parent.mkdir(parents=True)
+    tree.restore_marker.write_text("not a marker")
 
-    def invalid_marker() -> None:
-        raise RuntimeError("logical restore drill success marker is invalid")
-
-    monkeypatch.setattr(daemon, "load_local_dump_restore_success", invalid_marker)
-    monkeypatch.setattr(
-        daemon,
-        "run_job",
-        lambda: pytest.fail("invalid marker must not run the restore"),
+    await daemon.local_restore_round(
+        _SUNDAY_WINDOW, settings=_settings(hour=3), tree=tree, launch=_launch("restore", log)
     )
 
-    await daemon.run_due_local_dump_restore(
-        now,
-        config=ConfigBoot(),
-        clock=Clock(ClockConfig("UTC", "UTC", False), timers=ManualTimers()),
-    )
-
+    assert _ran(log) == []
     [event] = emitted_events
     assert (event.category, event.event_name, event.level) == (
         "telemetry",
@@ -403,103 +348,153 @@ async def test_invalid_local_restore_marker_reports_failure_without_running_rest
     }
 
 
-def _staged_dump(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, str]:
-    from services.backup import dump as backup
+async def test_a_busy_restore_kind_defers_the_drill_without_a_failure_event(
+    tmp_path: Path, emitted_events: EmittedEvents, caplog: pytest.LogCaptureFixture
+) -> None:
+    tree, log = BackupTree(tmp_path / "home"), tmp_path / "workers.log"
+    controls = tree.controls("restore-drill")
+    controls.mkdir(parents=True)
+    caplog.set_level("INFO", logger="services.backup.scheduler.daemon")
 
+    with file_lock(controls / ".lock"):
+        await daemon.local_restore_round(
+            _SUNDAY_WINDOW, settings=_settings(hour=3), tree=tree, launch=_launch("restore", log)
+        )
+
+    assert _ran(log) == []
+    assert list(emitted_events) == []
+    assert "local restore drill deferred" in caplog.text
+    assert load_local_dump_restore_success(tree.restore_marker) is None
+
+
+def _staged_dump(tmp_path: Path) -> tuple[Path, BackupTree, str]:
     staged = tmp_path / "controls" / "meiva-20260926T000000Z.dump.enc"
     staged.parent.mkdir()
     staged.write_bytes(b"encrypted")
-    published = tmp_path / "db"
-    monkeypatch.setattr(backup, "backup_dir", lambda: published)
-
-    def keep_all(_directory: Path, **_inputs: object) -> list[Path]:
-        return []
-
-    monkeypatch.setattr(backup, "prune", keep_all)
-    return staged, published, hashlib.sha256(b"encrypted").hexdigest()
+    return staged, BackupTree(tmp_path / "home"), hashlib.sha256(b"encrypted").hexdigest()
 
 
-def test_cross_filesystem_commit_publishes_a_verified_private_copy(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_the_scheduled_commit_publishes_a_private_artifact_and_never_replaces_one(
+    tmp_path: Path,
 ) -> None:
     from services.backup.scheduler import worker
 
-    staged, published, digest = _staged_dump(tmp_path, monkeypatch)
-    link = os.link
+    staged, tree, digest = _staged_dump(tmp_path)
 
-    def cross_device(source: Path, target: Path) -> None:
-        if Path(source) == staged:
-            raise OSError(errno.EXDEV, "Invalid cross-device link")
-        link(source, target)
+    target = worker.commit_scheduled_backup(staged, digest, tree=tree, keep=7)
 
-    monkeypatch.setattr(worker.os, "link", cross_device)
-    target = worker.commit_scheduled_backup(staged, digest, keep_reader=lambda: 7)
+    assert target.parent == tree.managed
     assert target.read_bytes() == b"encrypted" and target.stat().st_mode & 0o777 == 0o600
-    assert not staged.exists() and [path.name for path in published.iterdir()] == [target.name]
+    assert not staged.exists()
     staged.write_bytes(b"encrypted")
     with pytest.raises(FileExistsError):
-        worker.commit_scheduled_backup(staged, digest, keep_reader=lambda: 7)
-    assert staged.exists() and [path.name for path in published.iterdir()] == [target.name]
+        worker.commit_scheduled_backup(staged, digest, tree=tree, keep=7)
+    assert staged.exists() and [path.name for path in tree.managed.iterdir()] == [target.name]
 
 
-def test_commit_defers_pruning_while_another_backup_holds_the_lock(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("name", "content", "message"),
+    [
+        ("notes.txt", b"encrypted", "not a managed regular artifact"),
+        ("meiva-20260926T000000Z.dump.enc", b"tampered", "changed after preparation"),
+    ],
+)
+def test_the_scheduled_commit_refuses_what_the_worker_did_not_prepare(
+    tmp_path: Path, name: str, content: bytes, message: str
 ) -> None:
-    from services.backup import dump as backup
     from services.backup.scheduler import worker
 
-    staged, published, digest = _staged_dump(tmp_path, monkeypatch)
-    pruned: list[Path] = []
+    staged, tree, digest = _staged_dump(tmp_path)
+    other = staged.with_name(name)
+    other.write_bytes(content)
 
-    def prune(directory: Path, **_inputs: object) -> list[Path]:
-        pruned.append(directory)
-        return []
+    with pytest.raises(RuntimeError, match=message):
+        worker.commit_scheduled_backup(other, digest, tree=tree, keep=7)
 
-    monkeypatch.setattr(backup, "prune", prune)
-
-    @contextlib.contextmanager
-    def busy(*, timeout_s: float | None = None) -> Generator[None]:
-        assert timeout_s == 0
-        raise LockTimeoutError("held by a base capture")
-        yield
-
-    monkeypatch.setattr(backup, "backup_lock", busy)
-    target = worker.commit_scheduled_backup(staged, digest, keep_reader=lambda: 7)
-    assert target.parent == published and target.read_bytes() == b"encrypted"
-    assert pruned == []
+    assert other.exists()
 
 
-def test_cross_filesystem_copy_survives_a_concurrent_sweep_until_linked(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_cross_filesystem_copy_is_a_verified_private_publication(tmp_path: Path) -> None:
+    from services.backup.scheduler import worker
+
+    staged, tree, digest = _staged_dump(tmp_path)
+    tree.managed.mkdir(parents=True)
+    target = tree.managed / staged.name
+
+    worker.publish_copy(staged, target, digest)
+
+    assert target.read_bytes() == b"encrypted" and target.stat().st_mode & 0o777 == 0o600
+    assert [path.name for path in tree.managed.iterdir()] == [target.name]
+    with pytest.raises(FileExistsError):
+        worker.publish_copy(staged, target, digest)
+    assert [path.name for path in tree.managed.iterdir()] == [target.name]
+    with pytest.raises(RuntimeError, match="copy differs"):
+        worker.publish_copy(staged, tree.managed / "other.dump.enc", "0" * 64)
+    assert [path.name for path in tree.managed.iterdir()] == [target.name]
+
+
+def test_a_cross_filesystem_copy_survives_a_concurrent_sweep_until_linked(tmp_path: Path) -> None:
     from services.backup.artifact.intermediates import sweep_closed_partials
     from services.backup.scheduler import worker
 
-    staged, published, digest = _staged_dump(tmp_path, monkeypatch)
-    link = os.link
+    staged, tree, digest = _staged_dump(tmp_path)
+    tree.managed.mkdir(parents=True)
+    target = tree.managed / staged.name
 
-    def cross_device_with_sweep(source: Path, target: Path) -> None:
-        if Path(source) == staged:
-            raise OSError(errno.EXDEV, "Invalid cross-device link")
-        sweep_closed_partials(published)
-        link(source, target)
+    with worker.private_copy(staged, tree.managed, target.name, digest) as copy:
+        sweep_closed_partials(tree.managed)
+        assert copy.read_bytes() == b"encrypted"
+        os.link(copy, target)
 
-    monkeypatch.setattr(worker.os, "link", cross_device_with_sweep)
-    target = worker.commit_scheduled_backup(staged, digest, keep_reader=lambda: 7)
     assert target.read_bytes() == b"encrypted"
-    assert [path.name for path in published.iterdir()] == [target.name]
+    assert [path.name for path in tree.managed.iterdir()] == [target.name]
 
 
-def test_next_backup_hour_reads_its_owner_instead_of_ambient_settings(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = ConfigBoot()
-    config.view.general.timezone = "UTC"
-    config.view.services.backup_hour = 7
-    monkeypatch.setattr(settings.services, "backup_hour", 3)
-    clock = Clock(clock_config_from_boot(config), timers=ManualTimers())
-    when = _at(hour=6, minute=30)
+def test_the_commit_defers_pruning_while_another_backup_holds_the_lock(tmp_path: Path) -> None:
+    from services.backup.scheduler import worker
+    from services.backup.tests.test_backup import (
+        await_backup_lock_holder,
+        spawn_backup_lock_holder,
+    )
 
-    assert daemon.seconds_until_next_backup_hour(when, config=config, clock=clock) == 1800
-    config.view.services.backup_hour = 8
-    assert daemon.seconds_until_next_backup_hour(when, config=config, clock=clock) == 5400
+    staged, tree, digest = _staged_dump(tmp_path)
+    tree.managed.mkdir(parents=True)
+    oldest = tree.managed / "stubdb-20260101T000000Z.dump.enc"
+    oldest.write_bytes(b"older")
+    ready = tmp_path / "ready"
+    holder = spawn_backup_lock_holder(tree.home, ready, hold_s=30.0)
+    try:
+        await_backup_lock_holder(ready, holder)
+
+        target = worker.commit_scheduled_backup(staged, digest, tree=tree, keep=1)
+    finally:
+        holder.kill()
+        holder.wait(timeout=10)
+
+    assert target.read_bytes() == b"encrypted"
+    assert oldest.exists(), "pruning waits for the next backup instead of stalling the scheduler"
+
+
+async def test_run_job_commits_the_workers_dump_into_the_pool(tmp_path: Path) -> None:
+    tree, log = BackupTree(tmp_path / "home"), tmp_path / "workers.log"
+
+    await run_job(
+        "dump",
+        settings=_settings(),
+        tree=tree,
+        launch=_launch("dump", log),
+        now=datetime(2026, 9, 26, 3, tzinfo=UTC),
+    )
+
+    [published] = tree.managed.iterdir()
+    assert published.name == "stubdb-20260926T030000Z.dump.enc"
+    assert published.stat().st_mode & 0o777 == 0o600
+
+
+async def test_run_job_refuses_a_restore_result_of_another_shape(tmp_path: Path) -> None:
+    tree, log = BackupTree(tmp_path / "home"), tmp_path / "workers.log"
+
+    with pytest.raises(RuntimeError, match="invalid result"):
+        await run_job("restore", settings=_settings(), tree=tree, launch=_launch("ok", log))
+
+    assert not list(tree.controls("restore-drill").glob(".operation-*"))

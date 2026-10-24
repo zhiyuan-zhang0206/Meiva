@@ -7,9 +7,11 @@ test fetches it back through the same fake and recovers it with a scratch postma
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, LiteralString, cast
@@ -18,7 +20,6 @@ import psycopg
 import pytest
 
 from base.cluster.dataplane.pg_tools import pg_tool
-from base.config import settings
 from services.backup.walg import restore
 from services.backup.walg.restore import RecoveryTarget, RestoreError, restored_instance
 from services.backup.walg.tests.support import (
@@ -33,18 +34,11 @@ from services.backup.walg.tests.support import (
 
 
 @pytest.fixture
-def socket_dirs(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
-    """The scratch socket directories this test's restores created (all must be removed)."""
-    created: list[Path] = []
-    real_mkdtemp = tempfile.mkdtemp
-
-    def recording_mkdtemp(prefix: str, dir: str) -> str:
-        path = real_mkdtemp(prefix=prefix, dir=dir)
-        created.append(Path(path))
-        return path
-
-    monkeypatch.setattr(restore.tempfile, "mkdtemp", recording_mkdtemp)
-    return created
+def socket_root() -> Generator[Path]:
+    """A short directory of this test's own for its restores' scratch sockets (all must be removed)."""
+    root = Path(tempfile.mkdtemp(prefix="walgsock-", dir="/tmp"))
+    yield root
+    shutil.rmtree(root, ignore_errors=True)
 
 
 def _scalar(conn: psycopg.Connection[Any], sql: str) -> Any:
@@ -100,22 +94,21 @@ def _assert_scratch_posture(instance: restore.RestoredInstance, *, max_connectio
         assert _scalar(conn, "SELECT NOT pg_is_in_recovery()") is True
 
 
-def _assert_data_directory_left_behind(destination: Path, socket_dirs: list[Path]) -> None:
+def _assert_data_directory_left_behind(destination: Path, socket_root: Path) -> None:
     """The product is a promoted data directory, its postmaster shut down cleanly."""
     assert (destination / "PG_VERSION").is_file()
     assert not (destination / "postmaster.pid").exists()
     assert not (destination / "recovery.signal").exists()
-    assert socket_dirs
-    assert not any(path.exists() for path in socket_dirs)
+    assert list(socket_root.iterdir()) == []
 
 
 def test_recovers_to_the_target_lsn_and_never_touches_the_source(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socket_dirs: list[Path], postgres_access: None
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socket_root: Path, postgres_access: None
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
     # max_connections above the default: the recovering instance only starts if it
     # copies the capacity the backup's control file records.
-    with archiving_postgres("-c", "max_connections=150") as pg:
+    with archiving_postgres("-c", "max_connections=150", sandbox=sandbox) as pg:
         scenario = _scenario(sandbox, pg)
         stored_before = sandbox.stored()
         destination = tmp_path / "restored"
@@ -127,7 +120,8 @@ def test_recovers_to_the_target_lsn_and_never_touches_the_source(
             report=reports.append,
             user="meiva",
             keep_data=True,
-            path_reader=lambda: settings.walg.walg_config_file,
+            path_reader=sandbox.path_reader,
+            socket_root=socket_root,
         ) as instance:
             assert _restored_rows(instance) == ["A", "B1", "B1b"]
             _assert_scratch_posture(instance, max_connections="150")
@@ -136,14 +130,14 @@ def test_recovers_to_the_target_lsn_and_never_touches_the_source(
         assert sandbox.stored() == stored_before
         assert _scalar(pg.connect(), "SELECT count(*) FROM t") == 4
     assert any("promoted on timeline 2" in line for line in reports)
-    _assert_data_directory_left_behind(destination, socket_dirs)
+    _assert_data_directory_left_behind(destination, socket_root)
 
 
 def test_recovers_to_a_target_time(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, postgres_access: None
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
-    with archiving_postgres() as pg:
+    with archiving_postgres(sandbox=sandbox) as pg:
         scenario = _scenario(sandbox, pg)
         with restored_instance(
             tmp_path / "restored",
@@ -152,7 +146,7 @@ def test_recovers_to_a_target_time(
             report=lambda _line: None,
             user="meiva",
             keep_data=False,
-            path_reader=lambda: settings.walg.walg_config_file,
+            path_reader=sandbox.path_reader,
         ) as instance:
             assert _restored_rows(instance) == ["A", "B1", "B1b"]
 
@@ -161,7 +155,7 @@ def test_without_a_target_recovery_replays_all_archived_wal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, postgres_access: None
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
-    with archiving_postgres() as pg:
+    with archiving_postgres(sandbox=sandbox) as pg:
         scenario = _scenario(sandbox, pg)
         with restored_instance(
             tmp_path / "restored",
@@ -170,7 +164,7 @@ def test_without_a_target_recovery_replays_all_archived_wal(
             report=lambda _line: None,
             user="meiva",
             keep_data=False,
-            path_reader=lambda: settings.walg.walg_config_file,
+            path_reader=sandbox.path_reader,
         ) as instance:
             assert _restored_rows(instance) == ["A", "B1", "B1b", "B2"]
 
@@ -180,7 +174,7 @@ def test_a_backup_that_carries_archive_settings_still_cannot_archive(
 ) -> None:
     """A source that once wrote archive settings into postgresql.auto.conf brings them back."""
     sandbox = make_sandbox(tmp_path, monkeypatch)
-    with archiving_postgres() as pg:
+    with archiving_postgres(sandbox=sandbox) as pg:
         scenario = _scenario(sandbox, pg)
         auto_conf = sandbox.store_dir / "basebackups" / scenario.backup / "postgresql.auto.conf"
         with auto_conf.open("a") as handle:
@@ -196,7 +190,7 @@ def test_a_backup_that_carries_archive_settings_still_cannot_archive(
                 report=lambda _line: None,
                 user="meiva",
                 keep_data=False,
-                path_reader=lambda: settings.walg.walg_config_file,
+                path_reader=sandbox.path_reader,
             ) as instance,
             psycopg.connect(
                 host=str(instance.socket_dir), port=instance.port, user="meiva", dbname="postgres"
@@ -207,11 +201,11 @@ def test_a_backup_that_carries_archive_settings_still_cannot_archive(
 
 
 def test_a_missing_segment_between_backup_and_target_fails_recovery(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socket_dirs: list[Path], postgres_access: None
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socket_root: Path, postgres_access: None
 ) -> None:
     """The target is only reachable through an unbroken chain: Postgres' own FATAL says so."""
     sandbox = make_sandbox(tmp_path, monkeypatch)
-    with archiving_postgres() as pg:
+    with archiving_postgres(sandbox=sandbox) as pg:
         scenario = _scenario(sandbox, pg)
         # drop the segment holding B1: it lies after the backup and before the target
         (sandbox.store_dir / "store" / scenario.b1_segment).unlink()
@@ -225,12 +219,11 @@ def test_a_missing_segment_between_backup_and_target_fails_recovery(
                 report=lambda _line: None,
                 user="meiva",
                 keep_data=False,
-                path_reader=lambda: settings.walg.walg_config_file,
+                path_reader=sandbox.path_reader,
             ),
         ):
             pytest.fail("recovery must not reach a target behind a gap")
-    assert socket_dirs
-    assert not any(path.exists() for path in socket_dirs)
+    assert list(socket_root.iterdir()) == []
 
 
 def test_refuses_a_directory_that_is_not_empty(
@@ -248,7 +241,7 @@ def test_refuses_a_directory_that_is_not_empty(
             target=RecoveryTarget(),
             report=lambda _line: None,
             keep_data=True,
-            path_reader=lambda: settings.walg.walg_config_file,
+            path_reader=sandbox.path_reader,
         ),
     ):
         pytest.fail("must not fetch into an occupied directory")
@@ -266,7 +259,7 @@ def test_refuses_the_live_data_directory(tmp_path: Path, monkeypatch: pytest.Mon
                 target=RecoveryTarget(),
                 report=lambda _line: None,
                 keep_data=True,
-                path_reader=lambda: settings.walg.walg_config_file,
+                path_reader=sandbox.path_reader,
             ),
         ):
             pytest.fail("must refuse")
@@ -285,7 +278,7 @@ def test_a_failed_fetch_is_a_restore_error(tmp_path: Path, monkeypatch: pytest.M
             target=RecoveryTarget(),
             report=lambda _line: None,
             keep_data=True,
-            path_reader=lambda: settings.walg.walg_config_file,
+            path_reader=sandbox.path_reader,
         ),
     ):
         pytest.fail("must not start Postgres after a failed fetch")
@@ -310,16 +303,13 @@ def test_the_postmaster_command_line_holds_every_safety_setting_and_no_secret(
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
 
-    def fake_control_settings(_directory: Path) -> dict[str, str]:
-        return {"max_connections": "500", "max_worker_processes": "8"}
-
-    monkeypatch.setattr(restore, "control_settings", fake_control_settings)
     argv = restore.recovery_argv(
         tmp_path / "data",
         socket_dir=tmp_path / "sock",
         port=54329,
         target=RecoveryTarget(lsn="0/3000060"),
-        path_reader=lambda: settings.walg.walg_config_file,
+        path_reader=sandbox.path_reader,
+        capacity={"max_connections": "500", "max_worker_processes": "8"},
     )
     pg_settings = [argv[i + 1] for i, arg in enumerate(argv) if arg == "-c"]
     command = next(s for s in pg_settings if s.startswith("restore_command="))
@@ -372,14 +362,13 @@ def test_control_settings_refuses_a_directory_without_a_control_file(tmp_path: P
 
 
 def test_a_role_the_restored_cluster_does_not_have_fails_at_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socket_dirs: list[Path], postgres_access: None
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socket_root: Path, postgres_access: None
 ) -> None:
     """The cluster's superuser is the source's initdb user. A role Postgres refuses never
     becomes valid, so the wait for promotion must end with Postgres' answer, not run out
     its two-hour bound."""
     sandbox = make_sandbox(tmp_path, monkeypatch)
-    monkeypatch.setattr(restore, "RESTORE_TIMEOUT_S", 60)
-    with archiving_postgres() as pg:
+    with archiving_postgres(sandbox=sandbox) as pg:
         scenario = _scenario(sandbox, pg)
         started = time.monotonic()
         with (
@@ -391,10 +380,10 @@ def test_a_role_the_restored_cluster_does_not_have_fails_at_once(
                 report=lambda _line: None,
                 user="not_the_superuser",
                 keep_data=False,
-                path_reader=lambda: settings.walg.walg_config_file,
+                path_reader=sandbox.path_reader,
+                socket_root=socket_root,
             ),
         ):
             pytest.fail("a restore as a missing role must not yield an instance")
     assert time.monotonic() - started < 30
-    assert socket_dirs
-    assert not any(path.exists() for path in socket_dirs)
+    assert list(socket_root.iterdir()) == []
