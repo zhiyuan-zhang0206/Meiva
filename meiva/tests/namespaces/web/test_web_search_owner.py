@@ -15,7 +15,7 @@ from pydantic import SecretStr
 import meiva
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
-from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
 from base.packages.plugin_config_images import DiskPluginConfigImages
@@ -87,7 +87,7 @@ def non_model_installation(
         build_all_domains=boot.ensure_eager,
         env_path=tmp_path / "config.env",
     )
-    sampling = SamplingPolicyOwner(reader=SamplingPolicy)
+    sampling = fixed_sampling_owner()
     previous = getattr(meiva, "context", None)
     process_context.bind_context(
         replace(

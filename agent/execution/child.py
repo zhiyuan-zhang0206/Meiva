@@ -19,6 +19,7 @@ from typing import Any, Literal, Protocol, cast
 
 from agent.execution.delivery_plan import delivers_telemetry, rewrites_result_after_delivery_failure
 from agent.execution.protocol import RequestPayload
+from base.host.env.agent_env import AGENT_ID_ENV
 from base.log import logger
 
 WATCHDOG_MARGIN_S = 5.0
@@ -301,7 +302,9 @@ def run_code(code: str, payload: Any) -> None:
     execution_context = process_context.current_context()
     installation = installed()
     sampling = (
-        contextlib.nullcontext() if installation is None else installation.sampling.execution()
+        contextlib.nullcontext()
+        if installation is None or installation.sampling is None
+        else installation.sampling.execution()
     )
     process_context.bind_context(replace(execution_context, sdk_calls=tally))
     try:
@@ -409,7 +412,7 @@ def run_child(
     child = import_runtime(boot_started_at)
     from agent.execution.protocol import ResultPayload, read_request, write_result
 
-    raw_agent_id = os.environ.get("MEIVA_AGENT_ID")
+    raw_agent_id = os.environ.get(AGENT_ID_ENV)
     init_logger(
         None if raw_agent_id is None else int(raw_agent_id),
         producer=context.clients.event_pipeline,

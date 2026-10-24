@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, cast
+from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from psycopg_pool import ConnectionPool
@@ -30,7 +30,12 @@ from gateway.agents.task_assignment.schemas import (
     TaskAssignmentIn,
     TaskAssignmentResult,
 )
-from gateway.http.model_catalog import CatalogLoadFailure, require_catalog, require_model_catalog
+from gateway.http.model_catalog import (
+    CatalogLoadFailure,
+    request_default_model,
+    require_catalog,
+    require_model_catalog,
+)
 from ops.rpc_schemas import SpawnAgentRequest
 
 router = APIRouter()
@@ -221,7 +226,5 @@ async def post_task_assignment(
         raw,
         result,
         catalog=request.app.state.catalog,
-        default_model=cast(
-            str, request.app.state.config_authority.service_field_value("llm_model")
-        ),
+        default_model=request_default_model(request),
     )

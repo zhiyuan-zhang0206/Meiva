@@ -32,12 +32,7 @@ def load_meiva_code_plugin(
 ):
     """Install meiva_code's declared SDK surface (cwd namespace, wraps, skill source) for each
     test and uninstall it after. Use a valid local sampling policy for SDK calls."""
-    from base.agents.sdk import call_policy
 
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     install.install(
         code_registry(),
         catalog=model_catalog,

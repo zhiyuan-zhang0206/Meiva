@@ -2,7 +2,7 @@
 # The host root supplies its configuration authority and producer without eagerly constructing a complete Settings view for a profile-restricted process.
 # meiva:link services/agent_runner/agent_host/lifecycle/docs/configuration.meiva.okf.md
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +15,7 @@ from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.host.env.registry import child_env
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths.home import resolve_meiva_home
@@ -40,9 +41,12 @@ def boot_process() -> tuple[ConfigBoot, Path]:
     return config, home
 
 
-def host_policy(config: ConfigBoot, *, keys: ProviderKeys) -> HostPolicy:
+def host_policy(
+    config: ConfigBoot, *, keys: ProviderKeys, environ: Mapping[str, str]
+) -> HostPolicy:
     return HostPolicy(
         provider_keys=keys,
+        harness_environ=child_env("runner", environ),
         max_concurrent_turns=config.view.daemon.host_max_concurrent_turns,
         cache=lambda: HostCachePolicy(
             idle_ttl_seconds=config.view.daemon.host_agent_idle_ttl_seconds,

@@ -477,6 +477,7 @@ class AgentHost:
             registrations=self._registrations,
             registration_ttl_seconds=self._policy.harness_registration_ttl_seconds(),
             machine=self._machine,
+            harness_environ=self._policy.harness_environ,
             contributions=tuple(hc for _, hc in self._extensions.harness_contributions(harness)),
         )
 

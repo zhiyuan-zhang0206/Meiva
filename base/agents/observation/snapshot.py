@@ -6,7 +6,6 @@ Directory cards and the live tree have their own bounded read contract in
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -185,7 +184,7 @@ def agent_supports_vision(
     birth_config: Any,
     *,
     catalog: ModelCatalog | None,
-    default_model_reader: Callable[[], str],
+    default_model: str,
 ) -> bool | None:
     from collections.abc import Mapping
 
@@ -201,25 +200,21 @@ def agent_supports_vision(
     pins = resolve_agent_config_pins(config_overlay, birth_config)
     if catalog is None:
         return None
-    model = _model_of_pins(pins, catalog=catalog, default_model_reader=default_model_reader)
+    model = _model_of_pins(pins, catalog=catalog, default_model=default_model)
     return model_supports_vision(model, catalog=catalog)
 
 
-def _model_of_pins(
-    pins: dict[str, Any], *, catalog: ModelCatalog, default_model_reader: Callable[[], str]
-) -> str:
+def _model_of_pins(pins: dict[str, Any], *, catalog: ModelCatalog, default_model: str) -> str:
     from base.lm.registry import resolve_available_model
 
-    return resolve_available_model(
-        pins.get("llm_model") or default_model_reader(), models=catalog.models
-    )
+    return resolve_available_model(pins.get("llm_model") or default_model, models=catalog.models)
 
 
 def _row_to_snapshot(
-    row: tuple[Any, ...], *, catalog: ModelCatalog | None, default_model_reader: Callable[[], str]
+    row: tuple[Any, ...], *, catalog: ModelCatalog | None, default_model: str
 ) -> AgentSnapshot:
     supports_vision = agent_supports_vision(
-        row[15], row[21], catalog=catalog, default_model_reader=default_model_reader
+        row[15], row[21], catalog=catalog, default_model=default_model
     )
     return AgentSnapshot.model_validate(
         {
@@ -259,7 +254,7 @@ def select_one(
     agent_id: int,
     *,
     catalog: ModelCatalog | None,
-    default_model_reader: Callable[[], str],
+    default_model: str,
 ) -> AgentSnapshot | None:
     """Look up a single agent's snapshot; returns None when the row does not exist."""
     with conn.cursor() as cur:
@@ -268,11 +263,7 @@ def select_one(
             (agent_id,),
         )
         row = cur.fetchone()
-    return (
-        _row_to_snapshot(row, catalog=catalog, default_model_reader=default_model_reader)
-        if row
-        else None
-    )
+    return _row_to_snapshot(row, catalog=catalog, default_model=default_model) if row else None
 
 
 def agent_model_target(
@@ -281,7 +272,7 @@ def agent_model_target(
     *,
     fallback: str,
     catalog: ModelCatalog,
-    default_model_reader: Callable[[], str],
+    default_model: str,
 ) -> tuple[str, ModelOverrides]:
     """The model `agent_id`'s own calls run, withdrawal-resolved, and its tuning pins.
 
@@ -314,5 +305,5 @@ def agent_model_target(
         return fallback, ModelOverrides.from_pins(None)
     pins = resolve_agent_config_pins(row[0] if row else None, row[1] if row else None)
     return _model_of_pins(
-        pins, catalog=catalog, default_model_reader=default_model_reader
+        pins, catalog=catalog, default_model=default_model
     ), ModelOverrides.from_pins(pins)
