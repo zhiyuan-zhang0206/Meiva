@@ -10,18 +10,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 import secrets
-import shlex
 import signal
 import sys
 import time
 import urllib.request
-from collections.abc import Callable, Coroutine, Iterable
+from collections.abc import Callable, Collection
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, assert_never
 
 import psutil
 import psycopg
@@ -55,8 +53,21 @@ from base.telemetry.process_logging import init_gateway_process
 from services.agent_runner.page_server import resources
 from services.agent_runner.page_server.config import PageServerConfig
 
-from . import dead_pages
-from .degradation import PageRow, close_failed_page
+from . import dead_pages, occupant_plan
+from .degradation import close_failed_page
+from .occupant_plan import Occupant
+from .page_plan import (
+    Admission,
+    PageKey,
+    PageRow,
+    ServerHandle,
+    admission,
+    health_due,
+    server_command,
+    sessions_to_close,
+    shell_pids,
+    stale_handles,
+)
 
 _log = logging.getLogger("services.agent_runner.page_server.daemon")
 
@@ -73,25 +84,6 @@ def page_server_config(*, daemon_settings: Any | None = None) -> PageServerConfi
         page_server_poll_interval_seconds=source.page_server_poll_interval_seconds,
         heartbeat_interval_seconds=source.heartbeat_interval_seconds,
     )
-
-
-# A new pty session needs a short window to finish its interactive-shell startup
-# and receive its initial command before a health probe can make a decision.
-_SPAWN_VERIFY_TIMEOUT_S = 5.0
-PAGE_SERVER_MODULE = "services.agent_runner.page_server.server"
-
-
-@dataclass
-class ServerHandle:
-    """One page-server command supervised through its persistent shell."""
-
-    agent_id: int
-    name: str
-    port: int
-    serve_dir: str
-    token: str = field(repr=False)
-    session_name: str
-    last_launch_monotonic: float
 
 
 def open_rows(pool: ConnectionPool, host: str) -> list[PageRow]:
@@ -119,23 +111,6 @@ def _closed_page_sessions(pool: ConnectionPool, host: str) -> list[str]:
             (host,),
         )
         return [str(row[0]) for row in cur.fetchall()]
-
-
-def _server_command(row: PageRow) -> str:
-    """The shell-safe command that starts a row's page server."""
-    return shlex.join(
-        [
-            sys.executable,
-            "-m",
-            PAGE_SERVER_MODULE,
-            "--port",
-            str(row.port),
-            "--host",
-            row.host,
-            "--dir",
-            row.serve_dir,
-        ]
-    )
 
 
 def _allocate_session_index(pool: ConnectionPool, agent_id: int) -> int:
@@ -213,7 +188,7 @@ def _create_page_session(
     env = {**os.environ, "PAGE_SERVER_TOKEN": token}
     if not backend.new_session(
         page_session,
-        _server_command(row),
+        server_command(sys.executable, row.port, row.host, row.serve_dir),
         Path(row.serve_dir),
         env=env,
     ):
@@ -254,12 +229,12 @@ def server_is_healthy(host: str, port: int, token: str) -> bool:
         return False
 
 
-def page_server_occupants(
-    *, process_iter_fn: Callable[[], Iterable[Any]] = psutil.process_iter
-) -> dict[int, tuple[int, str | None]]:
-    """Map each local page-server port to its process and cluster home."""
-    found: dict[int, tuple[int, str | None]] = {}
-    for proc in process_iter_fn():
+# meiva:note
+# The local page-server processes by port: pid, home and the pids of their ancestors. One
+# unreadable process must not end the scan, so every read of it is guarded the same way.
+def page_server_occupants() -> list[Occupant]:
+    found: dict[int, Occupant] = {}
+    for proc in psutil.process_iter():
         try:
             raw_cmdline = proc.cmdline()
             cmdline = [str(part) for part in raw_cmdline] if raw_cmdline else []
@@ -271,59 +246,32 @@ def page_server_occupants(
             # aborted the whole poll round — that round's stale cleanup and
             # relaunch were skipped (task #4964).
             continue
-        rendered = " ".join(cmdline)
-        if PAGE_SERVER_MODULE not in rendered:
-            continue
-        match = re.search(r"--port (\d+)", rendered)
-        if match is None:
+        port = occupant_plan.port_of(cmdline)
+        if port is None:
             continue
         try:
             raw_env = proc.environ()
             env: dict[str, str] = dict(raw_env) if raw_env else {}
         except (psutil.Error, OSError):
             env = {}
-        found[int(match.group(1))] = (pid, env.get("MEIVA_HOME"))
-    return found
+        found[port] = Occupant(port, pid, env.get("MEIVA_HOME"), _ancestor_pids(proc))
+    return list(found.values())
 
 
+# meiva:note
+# One listing of the live pty sessions' records: the page server asks the pty service of its own
+# home, and a reconcile pass lists once instead of asking per row (the 2026-08-28 incident).
 def live_session_records() -> dict[str, SessionRecord]:
-    """One listing of the live pty sessions' records.
-
-    A reconcile pass that asked ``has_session`` once per managed row would
-    serialize a round trip per row inside the 2 s poll (the 2026-08-28 incident,
-    when each ask cost a Python startup and serve()'s 15 s wait timed out about
-    half the time); one listing answers every row.
-    """
     return pty_client.live_sessions(socket_path=service_socket_path(run_dir(meiva_home())))
 
 
-def page_session_shell_pids(
-    wanted: dict[tuple[int, str], PageRow], live: dict[str, SessionRecord]
-) -> dict[int, tuple[int, str]]:
-    """Map live page-shell PIDs to their page-row keys.
-
-    ``live`` is the pass's pty record scan."""
-    session_keys = {
-        row.session_name: key for key, row in wanted.items() if row.session_name is not None
-    }
-    return {record.pid: session_keys[name] for name, record in live.items() if name in session_keys}
-
-
-def page_session_owner(
-    pid: int,
-    shell_pids: dict[int, tuple[int, str]],
-    *,
-    process_factory: Callable[[int], Any] = psutil.Process,
-) -> tuple[int, str] | None:
-    """Return the page row whose live shell is an ancestor of ``pid``."""
+# meiva:note
+# The pids of a process's ancestors, nearest first; none when the process is gone or unreadable.
+def _ancestor_pids(proc: psutil.Process) -> tuple[int, ...]:
     try:
-        parents = process_factory(pid).parents()
+        return tuple(parent.pid for parent in proc.parents())
     except psutil.Error:
-        return None
-    for parent in parents:
-        if owner := shell_pids.get(parent.pid):
-            return owner
-    return None
+        return ()
 
 
 def kill_pid(pid: int) -> None:
@@ -346,62 +294,35 @@ def _kill_page_session(backend: SessionBackend, handle: ServerHandle) -> None:
     backend.kill_session(handle.session_name)
 
 
-def _reclaim_occupants(
-    rows: list[PageRow],
-    occupants: dict[int, tuple[int, str | None]],
-    shell_pids: dict[int, tuple[int, str]],
-    *,
-    deps: ReconcileDeps | None = None,
-) -> None:
+def _reclaim_occupants(wanted_ports: Collection[int], page_shells: dict[int, PageKey]) -> None:
     """Kill detached/orphan servers while preserving live page shells."""
-    active_deps = ReconcileDeps() if deps is None else deps
-    wanted_ports = {row.port for row in rows}
-    own_home = str(meiva_home())
-    for port, (pid, home) in occupants.items():
-        if active_deps.session_owner_fn(pid, shell_pids) is not None:
-            continue
-        if home != own_home:
-            _log.info(
-                "[page-server] skipping port %s pid=%s (foreign cluster home %s)",
-                port,
-                pid,
-                home,
-            )
-            continue
-        if port in wanted_ports:
-            _log.info("[page-server] reclaiming detached port %s pid=%s", port, pid)
-        else:
-            _log.info("[page-server] closing orphaned port %s pid=%s", port, pid)
-        active_deps.kill_pid_fn(pid)
-
-
-def _close_persisted_sessions(
-    backend: SessionBackend, session_names: list[str], live_names: set[str]
-) -> None:
-    """Finish closed-page teardown after a daemon restart lost its cache."""
-    for page_session in session_names:
-        if page_session in live_names:
-            _log.info("[page-server] closing persisted page session %s", page_session)
-            backend.kill_session(page_session)
-
-
-def _drop_stale_handles(
-    backend: SessionBackend,
-    wanted: dict[tuple[int, str], PageRow],
-    managed: dict[tuple[int, str], ServerHandle],
-    live_names: set[str],
-) -> None:
-    for key, handle in list(managed.items()):
-        row = wanted.get(key)
-        if (
-            row is None
-            or row.port != handle.port
-            or row.serve_dir != handle.serve_dir
-            or row.session_name != handle.session_name
-        ):
-            _kill_page_session(backend, handle)
-            live_names.discard(handle.session_name)
-            del managed[key]
+    verdicts = occupant_plan.reclaim_plan(
+        page_server_occupants(), page_shells, wanted_ports, str(meiva_home())
+    )
+    for verdict in verdicts:
+        occupant = verdict.occupant
+        match verdict.action:
+            case occupant_plan.OccupantAction.KEEP:
+                continue
+            case occupant_plan.OccupantAction.SKIP_FOREIGN:
+                _log.info(
+                    "[page-server] skipping port %s pid=%s (foreign cluster home %s)",
+                    occupant.port,
+                    occupant.pid,
+                    occupant.home,
+                )
+                continue
+            case occupant_plan.OccupantAction.RECLAIM_WANTED:
+                _log.info(
+                    "[page-server] reclaiming detached port %s pid=%s", occupant.port, occupant.pid
+                )
+            case occupant_plan.OccupantAction.CLOSE_ORPHAN:
+                _log.info(
+                    "[page-server] closing orphaned port %s pid=%s", occupant.port, occupant.pid
+                )
+            case _:
+                assert_never(verdict.action)
+        kill_pid(occupant.pid)
 
 
 def row_matches_snapshot(pool: ConnectionPool, row: PageRow) -> bool:
@@ -426,56 +347,34 @@ def row_matches_snapshot(pool: ConnectionPool, row: PageRow) -> bool:
     return fresh is not None and (fresh[0], fresh[1]) == (row.port, row.serve_dir)
 
 
-@dataclass(frozen=True)
-class ReconcileDeps:
-    backend_factory: Callable[[], Any] = get_shell_backend
-    open_rows_fn: Callable[[ConnectionPool, str], list[PageRow]] = open_rows
-    live_sessions_fn: Callable[[], dict[str, Any]] = live_session_records
-    occupants_fn: Callable[[], dict[int, tuple[int, str | None]]] = page_server_occupants
-    shell_pids_fn: Callable[
-        [dict[tuple[int, str], PageRow], dict[str, Any]], dict[int, tuple[int, str]]
-    ] = page_session_shell_pids
-    session_owner_fn: Callable[[int, dict[int, tuple[int, str]]], tuple[int, str] | None] = (
-        page_session_owner
-    )
-    kill_pid_fn: Callable[[int], None] = kill_pid
-    row_matches_fn: Callable[[ConnectionPool, PageRow], bool] = row_matches_snapshot
-    server_healthy_fn: Callable[[str, int, str], bool] = server_is_healthy
-
-
-_DEFAULT_RECONCILE_DEPS = ReconcileDeps()
-
-
 def _ensure_handle(
     pool: ConnectionPool,
     backend: SessionBackend,
     row: PageRow,
-    managed: dict[tuple[int, str], ServerHandle],
+    managed: dict[PageKey, ServerHandle],
     now: float,
     live_names: set[str],
     bus: EventBus,
-    *,
-    deps: ReconcileDeps = _DEFAULT_RECONCILE_DEPS,
 ) -> ServerHandle | None:
     key = (row.agent_id, row.name)
     if handle := managed.get(key):
         return handle
-    if not deps.row_matches_fn(pool, row):
+    if not row_matches_snapshot(pool, row):
         return None
-    if not Path(row.serve_dir).is_dir():
+    verdict = admission(row, live_names, directory_exists=Path(row.serve_dir).is_dir())
+    if verdict is Admission.DIRECTORY_MISSING:
         _log.warning("[page-server] directory unavailable for %s; explicit serve required", key)
         close_failed_page(pool, row, bus)
         return None
+    if verdict is Admission.SESSION_LOST:
+        _log.warning("[page-server] session lost for %s; automatic restore disabled", key)
+        close_failed_page(pool, row, bus)
+        return None
+    token = _ensure_token(pool, row)
     if row.session_name is not None:
-        if row.session_name not in live_names:
-            _log.warning("[page-server] session lost for %s; automatic restore disabled", key)
-            close_failed_page(pool, row, bus)
-            return None
         page_session = row.session_name
-        token = _ensure_token(pool, row)
     else:
-        token = _ensure_token(pool, row)
-        row.server_token = token
+        row = replace(row, server_token=token)
         try:
             page_session = _create_page_session(pool, backend, row, token)
         except RuntimeError:
@@ -500,36 +399,51 @@ def _ensure_handle(
     return handle
 
 
-def reconcile_once(
+# meiva:note
+# One pass over a snapshot of the host's open rows: start fresh registrations once, adopt live
+# sessions, close failed links, and kill detached servers. `rows` is the snapshot, so a caller
+# that holds an older one reproduces a row that closed after it was read.
+def reconcile_rows(
     pool: ConnectionPool,
-    managed: dict[tuple[int, str], ServerHandle],
+    managed: dict[PageKey, ServerHandle],
+    rows: list[PageRow],
     host: str,
     bus: EventBus,
-    *,
-    deps: ReconcileDeps = _DEFAULT_RECONCILE_DEPS,
+    backend: SessionBackend,
 ) -> None:
-    """Start fresh registrations once, adopt live sessions, and close failed links."""
-    backend = deps.backend_factory()
-    rows = deps.open_rows_fn(pool, host)
     wanted = {(row.agent_id, row.name): row for row in rows}
-    live = deps.live_sessions_fn()
-    live_names = set(live)
-    _drop_stale_handles(backend, wanted, managed, live_names)
-    _close_persisted_sessions(backend, _closed_page_sessions(pool, host), live_names)
+    live_names = set(live_session_records())
+    for key in stale_handles(wanted, managed):
+        handle = managed.pop(key)
+        _kill_page_session(backend, handle)
+        live_names.discard(handle.session_name)
+    for page_session in sessions_to_close(_closed_page_sessions(pool, host), live_names):
+        _log.info("[page-server] closing persisted page session %s", page_session)
+        backend.kill_session(page_session)
     now = time.monotonic()
     for key, row in wanted.items():
-        handle = _ensure_handle(pool, backend, row, managed, now, live_names, bus, deps=deps)
-        if handle is None or now - handle.last_launch_monotonic < _SPAWN_VERIFY_TIMEOUT_S:
+        handle = _ensure_handle(pool, backend, row, managed, now, live_names, bus)
+        if handle is None or not health_due(handle, now):
             continue
-        if deps.server_healthy_fn(row.host, row.port, handle.token):
+        if server_is_healthy(row.host, row.port, handle.token):
             continue
         _log.warning("[page-server] server unavailable for %s; automatic relaunch disabled", key)
         close_failed_page(pool, row, bus)
         _kill_page_session(backend, handle)
         del managed[key]
-    live = deps.live_sessions_fn()
-    occupants = deps.occupants_fn()
-    _reclaim_occupants(rows, occupants, deps.shell_pids_fn(wanted, live), deps=deps)
+    live_pids = {name: record.pid for name, record in live_session_records().items()}
+    _reclaim_occupants({row.port for row in rows}, shell_pids(wanted, live_pids))
+
+
+def reconcile_once(
+    pool: ConnectionPool,
+    managed: dict[PageKey, ServerHandle],
+    host: str,
+    bus: EventBus,
+    backend: SessionBackend,
+) -> None:
+    """Start fresh registrations once, adopt live sessions, and close failed links."""
+    reconcile_rows(pool, managed, open_rows(pool, host), host, bus, backend)
 
 
 async def reconcile_loop(
@@ -542,7 +456,8 @@ async def reconcile_loop(
 ) -> None:
     """Run page-shell reconciliation at the configured poll interval."""
     host = local_machine.host()
-    managed: dict[tuple[int, str], ServerHandle] = {}
+    managed: dict[PageKey, ServerHandle] = {}
+    backend = get_shell_backend()
     _log.info(
         "[page-server] daemon started, pid=%s, machine=%s, host=%s",
         os.getpid(),
@@ -553,7 +468,7 @@ async def reconcile_loop(
         liveness.beat()
         try:
             await asyncio.sleep(config.page_server_poll_interval_seconds)
-            await asyncio.to_thread(reconcile_once, pool, managed, host, bus)
+            await asyncio.to_thread(reconcile_once, pool, managed, host, bus, backend)
         except asyncio.CancelledError:
             raise
         except psycopg.ProgrammingError:
@@ -574,10 +489,6 @@ async def run(
     database: Callable[[], Database],
     image: LoadedCommit,
     local_machine: MachineIdentity,
-    loop_runners: tuple[
-        Callable[..., Coroutine[Any, Any, None]],
-        Callable[..., Coroutine[Any, Any, None]],
-    ] = (reconcile_loop, dead_pages.dead_pages_loop),
 ) -> None:
     """Start the daemon and keep its health endpoint alive while it reconciles."""
     if resources.is_running(process_config, runtime=runtime):
@@ -599,17 +510,18 @@ async def run(
     db = database()
     pool = db.pool()
     config, bus = page_server_config(), EventBus.from_settings()
-    reconcile_fn, dead_pages_fn = loop_runners
     try:
         # One TaskGroup owns the resident loops, each with its own progress tracker so
         # a stalled loop cannot be masked by a busy sibling: a loop that raises cancels
         # its sibling and ends the process, and the supervisor restarts it.
         async with asyncio.TaskGroup() as loops:
             loops.create_task(
-                reconcile_fn(pool, reconcile_progress, config, bus, local_machine=local_machine)
+                reconcile_loop(pool, reconcile_progress, config, bus, local_machine=local_machine)
             )
             loops.create_task(
-                dead_pages_fn(pool, db, local_machine.host(), dead_pages_progress, config, bus)
+                dead_pages.dead_pages_loop(
+                    pool, local_machine.host(), dead_pages_progress, config, bus
+                )
             )
     finally:
         await stop_health_server(health)
@@ -617,56 +529,34 @@ async def run(
         resources.remove_pidfile(process_config, runtime=runtime)
 
 
-@dataclass(frozen=True)
-class MainDeps:
-    capture_commit: Callable[[], LoadedCommit] = LoadedCommit.capture
-    boot_config: Callable[[], ConfigBoot] = ConfigBoot
-    check_schema: Callable[[str], None] | None = None
-    version_factory: Callable[[LoadedCommit], CodeVersion] = CodeVersion
-    database_cls: Callable[..., Any] = Database
-    build_pipeline_fn: Callable[..., Any] = build_pipeline
-    init_logging_fn: Callable[..., None] = init_gateway_process
-    install_shutdown_fn: Callable[[str], None] = install_graceful_shutdown
-    runner_factory: Callable[[], Any] = asyncio.Runner
-    run_fn: Callable[..., Coroutine[Any, Any, None]] | None = None
-
-
-_DEFAULT_MAIN_DEPS = MainDeps()
-
-
-def main(
-    *,
-    exit_process: Callable[[int], None] = _hard_exit,
-    deps: MainDeps = _DEFAULT_MAIN_DEPS,
-) -> None:
+def main() -> None:
     """Initialize the daemon after verifying the database schema version."""
     from base.deploy.schema.migrations import assert_schema_current
 
-    image = deps.capture_commit()
-    machine_config = deps.boot_config()
+    image = LoadedCommit.capture()
+    machine_config = ConfigBoot()
     machine_config.boot()
     machine = machine_from_boot(machine_config)
     process_home = meiva_home().resolve()
-    schema_check = assert_schema_current if deps.check_schema is None else deps.check_schema
-    schema_check(machine_config.view.data_plane.db_url)
-    version = deps.version_factory(image)
+    assert_schema_current(machine_config.view.data_plane.db_url)
+    version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="page_server", exempt=False)
 
     def database() -> Database:
-        return deps.database_cls(
+        return Database(
             db_config_from_boot(machine_config),
             gate=gate,
             direct_url=ClusterDirectUrl(machine.host),
         )
 
-    pipeline = deps.build_pipeline_fn(database=database, machine=machine, home=process_home)
-    deps.init_logging_fn(
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
+    init_gateway_process(
         name="page_server",
         producer=lambda: pipeline,
         machine_reader=machine.name,
         image=image,
     )
-    deps.install_shutdown_fn("page_server")
+    install_graceful_shutdown("page_server")
     code = 0
     # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
     # awaits `shutdown_default_executor`, joining the default executor's
@@ -674,11 +564,10 @@ def main(
     # must never wait on those (see `_hard_exit`). The runner is therefore
     # never closed: after the explicit drain below, teardown is skipped by the
     # hard exit.
-    runner = deps.runner_factory()
-    active_run = run if deps.run_fn is None else deps.run_fn
+    runner = asyncio.Runner()
     try:
         runner.run(
-            active_run(
+            run(
                 process_config=machine_config,
                 runtime=process_home / "run",
                 database=database,
@@ -700,7 +589,7 @@ def main(
     except Exception:
         _log.exception("[page-server] daemon crashed — uncaught exception escaped run()")
         code = 1
-    exit_process(code)
+    _hard_exit(code)
 
 
 if __name__ == "__main__":

@@ -1,2 +1,0 @@
-[uses]
-"test_daemon_stop_wedge.py" = ["child_stop_blocked_watch.py"]

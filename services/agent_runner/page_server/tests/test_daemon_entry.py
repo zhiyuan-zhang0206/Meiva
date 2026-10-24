@@ -1,158 +1,80 @@
+# meiva:note
+# The page-server executable, started as a supervisor starts it, against the test cluster.
+
 from __future__ import annotations
 
-import asyncio
-import dataclasses
-from collections.abc import Callable
+import sys
 from pathlib import Path
-from typing import Any
 
-import pytest
+import psycopg
 
-from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot, field_domain
 from base.config.tests.configuration import snapshot_process_config
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.db.config import DbConfig
-from base.native_process import code_version
-from base.native_process.loaded_commit import LoadedCommit
-from services.agent_runner.page_server import daemon, resources
+from services.agent_runner.page_server import resources
+from services.agent_runner.tests.real_daemon import run_to_exit, running_daemon
+
+_DAEMON = [sys.executable, "-m", "services.agent_runner.page_server.daemon"]
 
 
-def _assert_gate_matches_image(
-    gates: list[ProcessDbGate],
-    reads: list[tuple[Path, str]],
-    image: LoadedCommit,
-    readers: list[Callable[[], str]],
-    machine: MachineIdentity,
+def test_the_daemon_serves_runs_both_loops_and_stops_cleanly_on_sigterm(
+    unit_home: Path,
+    db_conn: psycopg.Connection,
+    process_config: ConfigBoot,
+    db_url: str,
+    redis_url: str,
 ) -> None:
-    assert len(gates) == 2 and gates[0] is gates[1]
-    assert readers == [machine.host, machine.host]
-    if image.sha is None:
-        with pytest.raises(code_version.CodeVersionError, match="loaded commit"):
-            gates[0].application_name()
-        assert reads == []
-    else:
-        assert gates[0].application_name() == gates[1].application_name() == "meiva:page_server:v42"
-        assert reads == [(image.source_root, image.sha)]
+    port = resources.endpoint(process_config, runtime=unit_home / "run").health_port
+    pidfile = unit_home / "run" / "page_server.pid"
 
+    with running_daemon(
+        _DAEMON,
+        home=unit_home,
+        health_port=port,
+        machine_name="page-server-entry",
+        db_url=db_url,
+        redis_url=redis_url,
+    ) as daemon:
+        report = daemon.healthz()
+        applications = db_conn.execute(
+            "SELECT DISTINCT application_name FROM pg_stat_activity "
+            "WHERE application_name LIKE 'meiva:page_server:%'"
+        ).fetchall()
+        assert pidfile.exists()
 
-def _run_main(
-    *,
-    deps: daemon.MainDeps,
-    exit_process: Callable[[int], None] | None = None,
-) -> None:
-    runner = asyncio.Runner()
-    merged_deps = dataclasses.replace(deps, runner_factory=lambda: runner)
-    try:
-        if exit_process is None:
-            daemon.main(deps=merged_deps)
-        else:
-            daemon.main(exit_process=exit_process, deps=merged_deps)
-    finally:
-        runner.close()
+        code = daemon.stop()
 
-
-class _FakeCodeVersion(code_version.CodeVersion):
-    def __init__(
-        self,
-        loaded: LoadedCommit,
-        reads: list[tuple[Path, str]],
-    ) -> None:
-        super().__init__(loaded)
-        self._reads = reads
-
-    def get(self) -> int:
-        if self._version is None:
-            if self.loaded.sha is None:
-                raise code_version.CodeVersionError(
-                    f"cannot resolve the loaded commit of {self.loaded.source_root}: "
-                    "the process must capture its code version at startup"
-                )
-            self._reads.append((self.loaded.source_root, self.loaded.sha))
-            self._version = 42
-        return self._version
-
-
-@pytest.mark.parametrize("sha", ["captured-page-server", None])
-def test_entry_shares_the_captured_gate_with_logging_health_and_work(sha: str | None) -> None:
-    image = LoadedCommit(Path("/entry-page-server"), sha)
-    stages: list[str] = []
-    gates: list[ProcessDbGate] = []
-    reads: list[tuple[Path, str]] = []
-    factories: list[tuple[Callable[[], Database], MachineIdentity]] = []
-    readers: list[Callable[[], str]] = []
-    pipeline = object()
-
-    class Store:
-        def __init__(
-            self, config: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
-        ) -> None:
-            gates.append(gate)
-            readers.append(direct_url.local_host)
-
-    def capture() -> LoadedCommit:
-        stages.append("capture")
-        return image
-
-    def boot_config() -> ConfigBoot:
-        cfg = snapshot_process_config()
-        cfg.view.general.machine_name = "page-server-entry"
-        return cfg
-
-    def build(*, database: Callable[[], Database], machine: MachineIdentity, home: Path) -> object:
-        stages.append("producer")
-        assert gates == []
-        factories.append((database, machine))
-        return pipeline
-
-    def initialize(**inputs: Any) -> None:
-        stages.append("logging")
-        assert inputs["name"] == "page_server"
-        assert inputs["image"] is image
-        assert inputs["producer"]() is pipeline
-        assert inputs["machine_reader"]() == "page-server-entry"
-        factories[0][0]()
-
-    async def work(
-        *,
-        process_config: ConfigBoot,
-        runtime: Path,
-        database: Callable[[], Database],
-        image: LoadedCommit,
-        local_machine: MachineIdentity,
-    ) -> None:
-        stages.append("run")
-        assert image is captured and database is factories[0][0]
-        assert local_machine is factories[0][1]
-        database()
-
-    def check_schema(_url: str) -> None:
-        stages.append("schema")
-
-    def no_signals(name: str) -> None:
-        assert name == "page_server"
-        stages.append("shutdown")
-
-    def exit_process(code: int) -> None:
-        stages.append(f"exit:{code}")
-
-    captured = image
-    deps = daemon.MainDeps(
-        capture_commit=capture,
-        boot_config=boot_config,
-        check_schema=check_schema,
-        version_factory=lambda loaded: _FakeCodeVersion(loaded, reads),
-        database_cls=Store,
-        build_pipeline_fn=build,
-        init_logging_fn=initialize,
-        install_shutdown_fn=no_signals,
-        run_fn=work,
+    assert (report["name"], sorted(report["loops"])) == (
+        "page_server",
+        ["dead_show_pages", "reconcile"],
     )
-    _run_main(deps=deps, exit_process=exit_process)
-    assert stages == ["capture", "schema", "producer", "logging", "shutdown", "run", "exit:0"]
-    _assert_gate_matches_image(gates, reads, image, readers, factories[0][1])
+    assert len(applications) == 1, "the database factory and the gate are one owner"
+    assert code == 0
+    assert not pidfile.exists()
+    assert "[page-server] interrupted, shutting down" in daemon.log()
+
+
+def test_a_second_daemon_leaves_with_code_one_while_the_first_runs(
+    unit_home: Path, process_config: ConfigBoot, db_url: str, redis_url: str
+) -> None:
+    port = resources.endpoint(process_config, runtime=unit_home / "run").health_port
+    with running_daemon(
+        _DAEMON,
+        home=unit_home,
+        health_port=port,
+        machine_name="page-server-a",
+        db_url=db_url,
+        redis_url=redis_url,
+    ):
+        code, log = run_to_exit(
+            _DAEMON,
+            home=unit_home,
+            machine_name="page-server-b",
+            db_url=db_url,
+            redis_url=redis_url,
+        )
+
+    assert code == 1
+    assert "daemon already running" in log
 
 
 def test_resources_follow_the_entry_owner_at_each_original_lookup(tmp_path: Path) -> None:

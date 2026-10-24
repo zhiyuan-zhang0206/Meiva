@@ -1,10 +1,14 @@
 exports = ["daemon.py", "resources.py"]
 
 [uses]
-"daemon.py" = ["config.py", "dead_pages.py", "degradation.py", "resources.py", "server.py"]
+"daemon.py" = ["config.py", "dead_pages.py", "degradation.py", "occupant_plan.py", "page_plan.py", "resources.py"]
 "dead_pages.py" = ["config.py"]
-"tests" = ["config.py", "daemon.py", "dead_pages.py", "resources.py", "server.py"]
+"degradation.py" = ["page_plan.py"]
+"occupant_plan.py" = ["page_plan.py"]
+"tests" = ["config.py", "daemon.py", "dead_pages.py", "occupant_plan.py", "page_plan.py", "resources.py", "server.py"]
 
 [purity]
 "__init__.py" = "strict"
 "config.py" = "strict"
+"occupant_plan.py" = "strict"
+"page_plan.py" = "strict"

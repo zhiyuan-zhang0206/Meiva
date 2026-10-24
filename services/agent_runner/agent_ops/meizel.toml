@@ -1,9 +1,12 @@
 exports = ["boot.py", "daemon.py", "dispatch_sync.py", "in_flight.py", "tests"]
 
 [uses]
-"daemon.py" = ["boot.py", "dispatch_sync.py", "health.py", "in_flight.py", "to_user_resource.py", "to_user_watch.py"]
-"tests" = ["boot.py", "daemon.py", "health.py", "in_flight.py", "to_user_resource.py", "to_user_watch.py"]
+"daemon.py" = ["boot.py", "dispatch_sync.py", "health.py", "idempotency_plan.py", "in_flight.py", "ops_plan.py", "to_user_resource.py", "to_user_watch.py"]
+"dispatch_sync.py" = ["ops_plan.py"]
+"tests" = ["boot.py", "daemon.py", "health.py", "idempotency_plan.py", "in_flight.py", "ops_plan.py", "to_user_resource.py", "to_user_watch.py"]
 "to_user_resource.py" = ["in_flight.py"]
 
 [purity]
 "__init__.py" = "strict"
+"idempotency_plan.py" = "strict"
+"ops_plan.py" = "strict"
