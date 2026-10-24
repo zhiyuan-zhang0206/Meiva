@@ -5,6 +5,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+from scripts.provision import prepush_branch_diff
+
 ROOT = Path(__file__).resolve().parents[2]
 BRANCH_LINT = ROOT / "scripts/hooks/prepush-branch-lint.sh"
 MODULE = ROOT / "scripts/provision/prepush_branch_diff.py"
@@ -159,3 +163,35 @@ def test_branch_lint_names_a_hook_that_failed_and_rewrote(tmp_path: Path) -> Non
 
     assert result.returncode == 1
     assert "both: failed and rewrote 1 file(s): trimmed.txt" in result.stderr
+
+
+# meiva:note
+# The staging step is the one place a checkout can fail AFTER `git worktree add` registered it.
+# Before the guard, an OSError there escaped `main`'s `except SkipError` with both artifacts left
+# behind: a directory under the temp root (invisible to every sweep that looks in
+# `~/Meiva/.worktrees`) and a `.git/worktrees/<name>` entry pointing at it. The criterion is the
+# pair - no bytes, no entry - so this asserts both, with the failure handed in as the injected
+# `stage` collaborator rather than arranged on disk.
+def test_a_checkout_that_cannot_stage_the_toolchain_leaves_neither_bytes_nor_an_entry(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_repo_with_origin_main(repo)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+
+    def _refuse(root: Path, directory: Path) -> None:
+        raise OSError("no symlinks in this checkout")
+
+    with pytest.raises(prepush_branch_diff.SkipError) as refused:
+        prepush_branch_diff.checkout_scratch(repo, stage=_refuse, scratch=scratch)
+
+    assert "cannot stage the toolchain" in str(refused.value)
+    assert list(scratch.iterdir()) == []
+    listed = subprocess.run(
+        ["git", "-C", str(repo), "worktree", "list", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "meiva-branch-diff-" not in listed
