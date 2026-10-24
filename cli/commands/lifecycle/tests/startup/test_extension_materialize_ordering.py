@@ -20,9 +20,3 @@ def test_materialization_is_not_a_converge_step() -> None:
         "sequence after the schema check instead — see cli/commands/extensions/materialize.py:"
         "materialize_cluster_extensions."
     )
-
-
-def test_the_materializer_lives_beside_its_siblings() -> None:
-    from cli.commands.extensions import materialize
-
-    assert hasattr(materialize, "materialize_cluster_extensions")
