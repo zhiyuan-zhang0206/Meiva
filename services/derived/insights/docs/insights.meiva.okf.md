@@ -12,9 +12,9 @@ tags:
 A gateway-side daemon (`ServiceSpec.capabilities=GATEWAY`; no port and no fixed-table slot) that serves the read models derived from agents' checkpoints and audit record. Preparing retained history and deriving a live segment use CPU, so it lives in a process of its own: it never competes with the gateway's event loop, thread pool or GIL, and stopping it never touches the gateway.
 
 ## Shape
-- `daemon.py` — pidfile, the socket and the uvicorn server. Composition root: owns one `ConfigBoot` and passes its live clock/timestamp readers to the app. Its entry captures one `LoadedCommit`, shared by logging and `CodeVersion`. One `ProcessDbGate` admits both logging and service database handles, built from this configuration owner's current dial slice. Unknown capture stays unknown; pidfile, pool, socket and bounded shutdown ordering are unchanged.
-- `app.py` — `build_app(db, pool, config, *, home, catalog, timeline_inputs, default_model_reader)`: the FastAPI app and the state its routers read (`db`, `db_pool`, `config`, `catalog`, `timeline_inputs`, `default_model_reader`, `run_timeline_reader`). Its `/healthz` reports the same explicit `home` that `run` uses for the socket and pidfile. Mount new routers here.
-- `config.py` — the settings slice (`InsightsConfig`).
+- `daemon.py` — pidfile, the socket and the uvicorn server. Composition root: reads its `ConfigBoot` once into one frozen `InsightsConfig` (`config_from_boot`) and passes that value to the app; nothing below it reads a settings view. Its entry captures one `LoadedCommit`, shared by logging and `CodeVersion`. One `ProcessDbGate` admits both logging and service database handles, built from this configuration owner's current dial slice. Unknown capture stays unknown; pidfile, pool and socket are released at exit, which ends with `hard_exit`.
+- `app.py` — `build_app(db, pool, config, *, home, catalog)`: the FastAPI app and the state its routers read (`db`, `db_pool`, `insights_config`, `catalog`, `run_timeline_reader`). Its `/healthz` reports the same explicit `home` that `run` uses for the socket and pidfile. Mount new routers here.
+- `config.py` — the frozen configuration value (`InsightsConfig`: message text limit, default model, `TimestampPolicy`) a request handler reads from `app.state.insights_config`.
 - `run_timeline/` — the per-agent reads behind the agent view, see [[run_timeline.meiva.okf.md|run timeline reads]].
 
 ## Transport and trust
@@ -33,12 +33,12 @@ SIGTERM is ignored after interruption so it cannot abort that bounded drain.
 - `services/derived/insights/daemon.py` — `.venv/bin/python -m services.derived.insights.daemon`
 - Supervised through the roster's socket identity probe (`services/supervision/roster/__init__.py`).
 
-Run context model fallback uses the same process configuration owner through an
-explicit live default-model reader; it never reads another process settings facade.
+Run context model fallback is `InsightsConfig.default_model`, read once at start with the rest
+of the configuration; it never reads another process settings facade.
 
 ## Daemon composition
 
-The daemon reads its render policy and ClockConfig from its own live boot, then builds immutable handles per read. Its small pool is for short model/config row lookups; history and audit operations retain their own Database reads. The pidfile-admitted daemon replaces a predecessor's leftover socket. A restrictive umask covers the interval before chmod, and the binding owner creates the socket directory because path helpers are pure.
+The daemon reads its render policy and ClockConfig from its own boot once, at start, and the cache clock is the `SYSTEM_TIMERS` it hands the timeline reader. Its small pool is for short model/config row lookups; history and audit operations retain their own Database reads. The pidfile-admitted daemon replaces a predecessor's leftover socket. A restrictive umask covers the interval before chmod, and the binding owner creates the socket directory because path helpers are pure.
 
 The process checks schema before serving. Its signal path uses an explicit Runner and hard exit rather than waiting for the default executor to finish cold history work; uvicorn reraises the signal after graceful stop. Repeated SIGTERM is ignored during the bounded exit.
 

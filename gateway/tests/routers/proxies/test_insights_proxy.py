@@ -150,14 +150,16 @@ def test_the_gateway_declares_exactly_what_the_service_serves(
     service = build_app(
         cast(Database, object()),
         cast(ConnectionPool[Any], object()),
-        InsightsConfig(run_timeline_message_text_max=1),
+        InsightsConfig(
+            run_timeline_message_text_max=1,
+            default_model="claude-opus-5",
+            timeline_inputs=TimestampPolicy(
+                clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
+                timestamps_enabled=False,
+            ),
+        ),
         home=tmp_path,
         catalog=model_catalog,
-        default_model_reader=lambda: "deepseek-v4-flash-vision-exp",
-        timeline_inputs=TimestampPolicy(
-            clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
-            timestamps_enabled=False,
-        ),
     ).openapi()
     gateway = _gateway(httpx.MockTransport(lambda _r: httpx.Response(200))).openapi()
 

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import threading
-import time
 from bisect import bisect_right
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -16,6 +15,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.history.checkpoint import FullHistory
 from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.clock import Timers
 from base.db import Database
 from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.projection.derive import project_segment, segment_view
@@ -69,10 +69,10 @@ class TimelineReader:
         inputs: TimestampPolicy,
         jobs: IndexJobs,
         read_segment: Callable[[Database, int, str], FullHistory],
-        timer: Callable[[], float] = time.monotonic,
+        timers: Timers,
     ) -> None:
         self.db, self.pool, self.inputs, self.jobs = db, pool, inputs, jobs
-        self.read_segment, self.timer = read_segment, timer
+        self.read_segment, self.timers = read_segment, timers
         self.read_source: Callable[[Connection[Any], int], Source] = capture_source
         self._lock = threading.Lock()
 
@@ -83,12 +83,16 @@ class TimelineReader:
     def get(self, agent_id: int, snapshot: str | None = None) -> Snapshot:
         with self._lock:
             hit = self._entries.get(agent_id)
-            valid = hit is not None and self.timer() - hit.created <= MAX_AGE_SECONDS
+            valid = hit is not None and self.timers.monotonic() - hit.created <= MAX_AGE_SECONDS
             if snapshot is not None:
                 if valid and hit is not None and hit.id == snapshot:
                     return hit
                 raise HTTPException(409, "timeline snapshot expired; refresh the timeline")
-            if valid and hit is not None and self.timer() - self._checked[agent_id] <= TTL_SECONDS:
+            if (
+                valid
+                and hit is not None
+                and self.timers.monotonic() - self._checked[agent_id] <= TTL_SECONDS
+            ):
                 return hit
         with self._building[agent_id % MAX_ENTRIES]:
             return self._capture(agent_id)
@@ -98,8 +102,8 @@ class TimelineReader:
             hit = self._entries.get(agent_id)
             if (
                 hit is not None
-                and self.timer() - hit.created <= MAX_AGE_SECONDS
-                and self.timer() - self._checked[agent_id] <= TTL_SECONDS
+                and self.timers.monotonic() - hit.created <= MAX_AGE_SECONDS
+                and self.timers.monotonic() - self._checked[agent_id] <= TTL_SECONDS
             ):
                 return hit
         with self.pool.connection() as conn:
@@ -115,11 +119,11 @@ class TimelineReader:
                 hit is not None
                 and hit.head == source.head
                 and hit.sealed == source.boundaries
-                and self.timer() - hit.created <= MAX_AGE_SECONDS
+                and self.timers.monotonic() - hit.created <= MAX_AGE_SECONDS
             ):
                 with self._lock:
                     if self._entries.get(agent_id) is hit:
-                        self._checked[agent_id] = self.timer()
+                        self._checked[agent_id] = self.timers.monotonic()
                 return hit
             extent = conn.execute(
                 "SELECT min(start_ts), max(end_ts) FROM run_timeline_segments"
@@ -130,7 +134,7 @@ class TimelineReader:
         with self._lock:
             self._entries.pop(agent_id, None)
             self._entries[agent_id] = result
-            self._checked[agent_id] = self.timer()
+            self._checked[agent_id] = self.timers.monotonic()
             while len(self._entries) > MAX_ENTRIES:
                 evicted = next(iter(self._entries))
                 self._entries.pop(evicted)
@@ -157,7 +161,13 @@ class TimelineReader:
         if lifetime is not None and lifetime[0] == lifetime[1]:
             lifetime = (lifetime[0], lifetime[1] + timedelta(seconds=1))
         return Snapshot(
-            agent_id, uuid4().hex, self.timer(), source.head, source.previous, tail, lifetime
+            agent_id,
+            uuid4().hex,
+            self.timers.monotonic(),
+            source.head,
+            source.previous,
+            tail,
+            lifetime,
         )
 
     def window(

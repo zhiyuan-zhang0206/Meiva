@@ -1,19 +1,20 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Iterator
 from cProfile import Profile
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
+import psycopg
 import pytest
 from fastapi import HTTPException, Request
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from psycopg.types.json import Jsonb
+from psycopg_pool import ConnectionPool
 
 from base.agents.history.checkpoint import FullHistory, single_segment_history
-from base.agents.history.context_breakdown import RequestBreakdown
-from base.agents.history.context_response import ContextBreakdownResponse, ContextCategory
 from base.agents.history.hierarchy.units import (
     DisplayBlock,
     display_blocks,
@@ -25,11 +26,15 @@ from base.agents.history.message_tokens import MessageTokens
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
 from base.config import settings
-from base.db import Database
+from base.db import Database, create_agent
+from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
+from base.lm.context_budget import resolve_context_budget
+from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline import context
 from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.projection.derive import segment_view
+from services.derived.insights.run_timeline.schemas import RunTimelineContext
 from services.derived.insights.run_timeline.tokens import BlockContext, BlockContexts
 
 _TIMELINE_INPUTS = TimestampPolicy(
@@ -251,51 +256,49 @@ class Views:
         return found.idx, found.ts, segment, view
 
 
-def call(view: HistoryView, at: int, catalog: ModelCatalog):
+# meiva:note
+# A pool over the test's Postgres: the context route resolves the agent's model and overrides from
+# its stored row, so the real breakdown function runs against real rows.
+@pytest.fixture
+def pool(database: Database) -> Iterator[ConnectionPool[Any]]:
+    result = database.pool(min_size=1, max_size=2)
+    try:
+        yield result
+    finally:
+        result.close()
 
-    def breakdown(
-        _pool: object,
-        _agent: int,
-        found: RequestBreakdown,
-        *,
-        catalog: ModelCatalog,
-        default_model_reader: Callable[[], str],
-    ) -> ContextBreakdownResponse:
-        assert catalog is app_state.catalog
-        assert default_model_reader is app_state.default_model_reader
 
-        return ContextBreakdownResponse(
-            total_input_tokens=found.total.tokens,
-            estimated=found.total.estimated,
-            exact_fraction=found.total.exact_fraction,
-            sections=[],
-            categories=[
-                ContextCategory(
-                    kind=c.kind,
-                    tokens=c.total.tokens,
-                    estimated=c.total.estimated,
-                    exact_fraction=c.total.exact_fraction,
-                )
-                for c in found.categories
-            ],
-        )
-
+# meiva:note
+# The context route over `view`, with the real breakdown function: `default_model` is the cluster
+# default the app was configured with, `pool` holds the agent's stored row.
+def call(
+    view: HistoryView,
+    at: int,
+    catalog: ModelCatalog,
+    pool: ConnectionPool[Any],
+    *,
+    default_model: str = "claude-opus-5",
+    agent_id: int = 7,
+) -> RunTimelineContext:
     app_state = SimpleNamespace(
         db=cast(Database, object()),
-        db_pool=object(),
+        db_pool=pool,
         run_timeline_reader=Views(view),
         catalog=catalog,
-        default_model_reader=lambda: "deepseek-v4-flash-vision-exp",
-        context_breakdown_response=breakdown,
+        insights_config=InsightsConfig(
+            run_timeline_message_text_max=20,
+            default_model=default_model,
+            timeline_inputs=_TIMELINE_INPUTS,
+        ),
     )
     request = cast(Request, SimpleNamespace(app=SimpleNamespace(state=app_state)))
-    return context.get_run_timeline_context(request, 7, at)
+    return context.get_run_timeline_context(request, agent_id, at)
 
 
 def test_the_context_is_the_breakdown_of_that_request_summed_from_its_messages(
-    model_catalog: ModelCatalog,
+    model_catalog: ModelCatalog, pool: ConnectionPool[Any]
 ) -> None:
-    result = call(two_sessions(), 3, model_catalog)
+    result = call(two_sessions(), 3, model_catalog, pool)
     assert (result.request, result.session, result.sessions) == (4, 1, 2)
     assert result.ts == T0 + timedelta(minutes=10)
     assert result.total_input_tokens == 40
@@ -303,14 +306,54 @@ def test_the_context_is_the_breakdown_of_that_request_summed_from_its_messages(
     kinds = {c.kind: c.tokens for c in result.categories}
     assert set(kinds) == {"system_prompt", "user_input"}
     assert sum(kinds.values()) == 40
-    first = call(two_sessions(), 0, model_catalog)
+    first = call(two_sessions(), 0, model_catalog, pool)
     assert (first.session, first.total_input_tokens) == (0, 100)
 
 
-def test_an_agent_with_no_request_has_no_context(model_catalog: ModelCatalog) -> None:
+def test_an_agent_with_no_request_has_no_context(
+    model_catalog: ModelCatalog, pool: ConnectionPool[Any]
+) -> None:
     messages: list[BaseMessage] = [human("hello", 0)]
     read = read_times(messages, timeline_inputs=_TIMELINE_INPUTS)
     view = HistoryView.of(FullHistory(messages, (None,), (0,)), [], MessageUsage(messages), read)
     with pytest.raises(HTTPException) as caught:
-        call(view, 0, model_catalog)
+        call(view, 0, model_catalog, pool)
     assert caught.value.status_code == 404
+
+
+def _window(catalog: ModelCatalog, model: str) -> int:
+    return resolve_context_budget(
+        model, ModelOverrides.from_pins({}), catalog=catalog
+    ).max_context_tokens
+
+
+def test_the_window_follows_the_configured_default_model(
+    model_catalog: ModelCatalog, pool: ConnectionPool[Any]
+) -> None:
+    large, small = "claude-opus-5", "claude-haiku-4-5-20251001"
+    assert _window(model_catalog, large) != _window(model_catalog, small)
+
+    assert call(two_sessions(), 3, model_catalog, pool, default_model=large).max_input_tokens == (
+        _window(model_catalog, large)
+    )
+    assert call(two_sessions(), 3, model_catalog, pool, default_model=small).max_input_tokens == (
+        _window(model_catalog, small)
+    )
+
+
+def test_an_agent_that_names_its_own_model_keeps_it_over_the_default(
+    db_conn: psycopg.Connection, model_catalog: ModelCatalog, pool: ConnectionPool[Any]
+) -> None:
+    agent_id = create_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agents_meta (id, status, config_overlay) VALUES (%s, 'idling', %s)"
+        " ON CONFLICT (id) DO UPDATE SET config_overlay = EXCLUDED.config_overlay",
+        (agent_id, Jsonb({"llm_model": "claude-haiku-4-5-20251001"})),
+    )
+    db_conn.commit()
+
+    result = call(
+        two_sessions(), 3, model_catalog, pool, default_model="claude-opus-5", agent_id=agent_id
+    )
+
+    assert result.max_input_tokens == _window(model_catalog, "claude-haiku-4-5-20251001")

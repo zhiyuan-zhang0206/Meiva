@@ -1,6 +1,7 @@
-# meiva:link services/derived/insights/docs/insights.meiva.okf.md
 # meiva:note
-# The daemon retains its supplied configuration owner: later model, timestamp and timezone edits are visible through that app's readers, while the owned pool and socket close at exit.
+# The insights daemon: the process root that reads the configuration once into an `InsightsConfig`,
+# builds the app from it and serves it on an owner-only unix socket. A changed `.env` reaches the
+# daemon at its next start; the owned pool, socket and pidfile are released at exit.
 # meiva:link services/derived/insights/docs/insights.meiva.okf.md
 from __future__ import annotations
 
@@ -25,7 +26,8 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
-from base.host.exit_codes import hard_exit as _hard_exit
+from base.host.exit_codes import hard_exit
+from base.lm.catalog import ModelCatalog
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugin_providers import build_model_catalog
@@ -44,9 +46,17 @@ _MODULE = "services.derived.insights.daemon"
 _POOL_MAX_SIZE = 4
 
 
-def insights_config(*, config: ConfigBoot) -> InsightsConfig:
+# meiva:note
+# The one place the insights service reads the process configuration: the clock and the timestamp
+# switch become one `TimestampPolicy`, the rest are plain values.
+def config_from_boot(config: ConfigBoot) -> InsightsConfig:
     return InsightsConfig(
-        run_timeline_message_text_max=config.view.display.run_timeline_message_text_max
+        run_timeline_message_text_max=config.view.display.run_timeline_message_text_max,
+        default_model=config.view.lm.llm_model,
+        timeline_inputs=TimestampPolicy(
+            clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+            timestamps_enabled=config.view.general.message_timestamps,
+        ),
     )
 
 
@@ -65,7 +75,13 @@ def bind_socket(path: Path) -> socket.socket:
     return sock
 
 
-async def run(*, home: Path, config: ConfigBoot, database: Callable[[], Database]) -> None:
+async def run(
+    *,
+    home: Path,
+    config: InsightsConfig,
+    catalog: ModelCatalog,
+    database: Callable[[], Database],
+) -> None:
     pidfile = insights_pidfile(home)
     if pidfile_holds_daemon(pidfile, _MODULE) or not acquire_pidfile(pidfile, _MODULE):
         _log.info("[insights] daemon already running (pidfile=%s), exiting", pidfile)
@@ -76,18 +92,7 @@ async def run(*, home: Path, config: ConfigBoot, database: Callable[[], Database
     try:
         server = uvicorn.Server(
             uvicorn.Config(
-                build_app(
-                    db,
-                    pool,
-                    insights_config(config=config),
-                    home=home,
-                    catalog=build_model_catalog(),
-                    default_model_reader=lambda: config.view.lm.llm_model,
-                    timeline_inputs=TimestampPolicy(
-                        clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
-                        timestamps_enabled=config.view.general.message_timestamps,
-                    ),
-                ),
+                build_app(db, pool, config, home=home, catalog=catalog),
                 log_level="warning",
                 access_log=False,
                 log_config=None,
@@ -103,7 +108,7 @@ async def run(*, home: Path, config: ConfigBoot, database: Callable[[], Database
         _log.info("[insights] daemon stopped")
 
 
-def main(*, exit_process: Callable[[int], None] = _hard_exit) -> None:
+def main() -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
     image = LoadedCommit.capture()
@@ -135,7 +140,14 @@ def main(*, exit_process: Callable[[int], None] = _hard_exit) -> None:
 
     runner = asyncio.Runner()
     try:
-        runner.run(run(home=meiva_home(), config=config, database=database))
+        runner.run(
+            run(
+                home=meiva_home(),
+                config=config_from_boot(config),
+                catalog=build_model_catalog(),
+                database=database,
+            )
+        )
     except KeyboardInterrupt:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         _log.info("[insights] interrupted, shutting down")
@@ -146,7 +158,7 @@ def main(*, exit_process: Callable[[int], None] = _hard_exit) -> None:
     except Exception:
         _log.exception("[insights] fatal error, shutting down")
         code = 1
-    exit_process(code)
+    hard_exit(code)
 
 
 if __name__ == "__main__":
