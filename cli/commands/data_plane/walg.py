@@ -28,16 +28,6 @@ def _boot() -> ConfigBoot:
     return config
 
 
-# meiva:note
-# The services' WAL-G API takes the configuration path as a reader (`path_reader`); the door has
-# already read it, so the reader answers that one value.
-def path_reader_for(walg_config_file: Path | None) -> Callable[[], Path | None]:
-    def read() -> Path | None:
-        return walg_config_file
-
-    return read
-
-
 def _throwaway(config: ConfigBoot) -> ThrowawayConfig:
     return ThrowawayConfig(configured_base(config.view.data_plane.pg_throwaway_base))
 
@@ -45,7 +35,7 @@ def _throwaway(config: ConfigBoot) -> ThrowawayConfig:
 # meiva:note
 # Run the pre-flight steps; the exit code is non-zero when any step failed.
 def cmd_walg_check() -> int:
-    steps = check.run_check(path_reader=path_reader_for(_boot().view.walg.walg_config_file))
+    steps = check.run_check(path=_boot().view.walg.walg_config_file)
     for step in steps:
         print(f"  {'✓' if step.ok else '✗'} {step.name}: {step.detail}")
     return 0 if all(step.ok for step in steps) else 1
@@ -66,7 +56,7 @@ def cmd_walg_run(*, database_for_url: Callable[[str], Database]) -> int:
     config = _boot()
     return tick.run_tick(
         _stamped,
-        path_reader=path_reader_for(config.view.walg.walg_config_file),
+        path=config.view.walg.walg_config_file,
         database_for_url=database_for_url,
         throwaway=_throwaway(config),
     )
@@ -81,7 +71,7 @@ def cmd_walg_drill(*, database_for_url: Callable[[str], Database]) -> int:
     config = _boot()
     return tick.run_drill_now(
         _stamped,
-        path_reader=path_reader_for(config.view.walg.walg_config_file),
+        path=config.view.walg.walg_config_file,
         database_for_url=database_for_url,
         throwaway=_throwaway(config),
     )
@@ -96,8 +86,8 @@ def cmd_walg_drill(*, database_for_url: Callable[[str], Database]) -> int:
 def cmd_walg_restore(
     *, directory: str, backup: str, time: str | None, lsn: str | None, user: str | None = None
 ) -> int:
-    path_reader = path_reader_for(_boot().view.walg.walg_config_file)
-    if not walg_config.enabled(path_reader=path_reader):
+    path = _boot().view.walg.walg_config_file
+    if path is None:
         print("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to restore from")
         return 1
     binary_problem = walg_binary.installed_problem()
@@ -105,7 +95,7 @@ def cmd_walg_restore(
         print(f"restore failed: {binary_problem} (meiva converge installs it)", file=sys.stderr)
         return 1
     try:
-        walg_config.load_walg_config(path_reader=path_reader)
+        walg_config.load_walg_config(path=path)
         target = RecoveryTarget(time=time, lsn=lsn)
     except (walg_config.WalgConfigError, ValueError) as exc:
         print(f"restore failed: {exc}", file=sys.stderr)
@@ -118,7 +108,7 @@ def cmd_walg_restore(
             report=_stamped,
             user=user,
             keep_data=True,
-            path_reader=path_reader,
+            path=path,
         ):
             pass
     except RestoreError as exc:
@@ -146,8 +136,8 @@ def _config_lines(path: Path) -> list[str]:
     return lines
 
 
-def _postgres_lines(*, path_reader: Callable[[], Path | None]) -> list[str]:
-    expected = expected_archive(path_reader=path_reader)
+def _postgres_lines(*, path: Path) -> list[str]:
+    expected = expected_archive(path=path)
     try:
         with probe.admin_connection() as conn:
             state = probe.read_archiver_state(conn)
@@ -213,16 +203,15 @@ def _tick_lines() -> list[str]:
 # meiva:note
 # Print configuration, binary, key fingerprint, archiver, daily-tick and drill facts; exits 0.
 def cmd_walg_status() -> int:
-    path_reader = path_reader_for(_boot().view.walg.walg_config_file)
-    path = walg_config.configured_path(path_reader=path_reader)
+    path = _boot().view.walg.walg_config_file
     if path is None:
         print("WAL-G archiving is off (MEIVA_WALG_CONFIG_FILE is not set)")
         return 0
     binary_problem = walg_binary.installed_problem()
     print(f"binary: {binary_problem or f'pinned wal-g {walg_binary.WALG_VERSION}'}")
-    for line in (*_config_lines(path), *_postgres_lines(path_reader=path_reader), *_tick_lines()):
+    for line in (*_config_lines(path), *_postgres_lines(path=path), *_tick_lines()):
         print(line)
-    failure = probe.failure(path_reader=path_reader)
+    failure = probe.failure(path=path)
     print(f"health: {failure or 'ok'}")
     return 0
 
@@ -234,7 +223,7 @@ def cmd_walg_status() -> int:
 # start: `archive_mode` and the archive command take effect at the next new launch. A warning,
 # not a failure: the health probe is the alert.
 def warn_archive_inactive(walg_config_file: Path | None) -> None:
-    expected = expected_archive(path_reader=path_reader_for(walg_config_file))
+    expected = expected_archive(path=walg_config_file)
     if expected is None:
         return
     try:

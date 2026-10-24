@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -400,7 +400,7 @@ def test_status_shows_the_last_drill_and_the_last_success(
     assert "last successful drill: never" in out
 
 
-def test_check_reads_the_configuration_once_at_its_door_without_a_full_boot(
+def test_check_hands_the_configuration_read_at_its_door_to_the_services_without_a_full_boot(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     owner = ConfigBoot()
@@ -412,10 +412,11 @@ def test_check_reads_the_configuration_once_at_its_door_without_a_full_boot(
         owners.append(owner)
         return owner
 
-    def check_reader(*, path_reader: Callable[[], Path | None]) -> list[Step]:
-        assert path_reader() == first
+    received: list[Path | None] = []
+
+    def check_path(*, path: Path | None) -> list[Step]:
+        received.append(path)
         owner.view.walg.walg_config_file = second
-        assert path_reader() == first, "the door's reading is the value the services see"
         return []
 
     def no_boot(_owner: ConfigBoot) -> None:
@@ -423,7 +424,8 @@ def test_check_reads_the_configuration_once_at_its_door_without_a_full_boot(
 
     monkeypatch.setattr(walg_cmd, "ConfigBoot", build_owner)
     monkeypatch.setattr(ConfigBoot, "boot", no_boot)
-    monkeypatch.setattr(walg_cmd.check, "run_check", check_reader)
+    monkeypatch.setattr(walg_cmd.check, "run_check", check_path)
     monkeypatch.setattr(settings.walg, "walg_config_file", tmp_path / "ambient.json")
     assert walg_cmd.cmd_walg_check() == 0
     assert owners == [owner]
+    assert received == [first]

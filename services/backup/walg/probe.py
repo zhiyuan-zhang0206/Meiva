@@ -33,7 +33,7 @@ The probe never raises: anything it cannot read is its own fixed failure.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -272,8 +272,7 @@ def failure_on(
 
 # meiva:note
 # The first thing wrong with WAL archiving, or None (also None while it is off).
-def failure(*, path_reader: Callable[[], Path | None]) -> str | None:
-    path = walg_config.configured_path(path_reader=path_reader)
+def failure(*, path: Path | None) -> str | None:
     if path is None:
         return None
     return failure_on(path, admin_connection(), now=datetime.now(UTC))

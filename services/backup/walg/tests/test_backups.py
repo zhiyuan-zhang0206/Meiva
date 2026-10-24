@@ -88,7 +88,7 @@ def test_listing_asks_wal_g_for_the_detailed_json(
     sandbox: Sandbox = make_sandbox(tmp_path, monkeypatch)
     sandbox.put("backups.json", fixture_text("backup-list.json"))
 
-    listed = backups.list_backups(path_reader=sandbox.path_reader)
+    listed = backups.list_backups(path=sandbox.path)
 
     assert sandbox.calls() == ["backup-list --detail --json"]
     assert len(listed) == 4

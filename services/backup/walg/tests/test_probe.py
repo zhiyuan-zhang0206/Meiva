@@ -51,7 +51,7 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
 
 
 def _healthy_state(sandbox: Sandbox) -> probe.ArchiverState:
-    expected = expected_archive(path_reader=sandbox.path_reader)
+    expected = expected_archive(path=sandbox.path)
     assert expected is not None
     return probe.ArchiverState(
         archive_mode=expected.mode,
@@ -70,7 +70,7 @@ def test_failure_texts_carry_no_number_that_could_change_between_runs() -> None:
 
 
 def test_a_matching_quiet_archiver_is_healthy(sandbox: Sandbox) -> None:
-    expected = expected_archive(path_reader=sandbox.path_reader)
+    expected = expected_archive(path=sandbox.path)
     assert expected is not None
 
     assert probe.judge(_healthy_state(sandbox), expected) is None
@@ -87,14 +87,14 @@ def test_a_matching_quiet_archiver_is_healthy(sandbox: Sandbox) -> None:
 def test_postgres_running_other_archive_settings_is_reported(
     sandbox: Sandbox, drift: dict[str, Any]
 ) -> None:
-    expected = expected_archive(path_reader=sandbox.path_reader)
+    expected = expected_archive(path=sandbox.path)
     assert expected is not None
 
     assert probe.judge(replace(_healthy_state(sandbox), **drift), expected) == probe.SETTINGS_DIFFER
 
 
 def test_a_failing_archiver_is_reported(sandbox: Sandbox) -> None:
-    expected = expected_archive(path_reader=sandbox.path_reader)
+    expected = expected_archive(path=sandbox.path)
     assert expected is not None
 
     state = replace(_healthy_state(sandbox), failing_now=True)
@@ -103,7 +103,7 @@ def test_a_failing_archiver_is_reported(sandbox: Sandbox) -> None:
 
 
 def test_pending_wal_is_late_only_beyond_the_rpo_objective(sandbox: Sandbox) -> None:
-    expected = expected_archive(path_reader=sandbox.path_reader)
+    expected = expected_archive(path=sandbox.path)
     assert expected is not None
     healthy = _healthy_state(sandbox)
 
@@ -116,7 +116,7 @@ def test_pending_wal_is_late_only_beyond_the_rpo_objective(sandbox: Sandbox) -> 
 
 
 def test_settings_drift_outranks_the_archiver_conditions(sandbox: Sandbox) -> None:
-    expected = expected_archive(path_reader=sandbox.path_reader)
+    expected = expected_archive(path=sandbox.path)
     assert expected is not None
     state = replace(
         _healthy_state(sandbox), archive_mode="off", failing_now=True, oldest_pending_age_s=10_000.0
@@ -130,31 +130,31 @@ def test_off_is_silent_and_never_dials_postgres(
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
 
-    assert probe.failure_on(sandbox.path_reader(), NeverDialed(), now=NOW) is None
-    assert probe.configuration_failure(sandbox.path_reader()) is None
+    assert probe.failure_on(sandbox.path, NeverDialed(), now=NOW) is None
+    assert probe.configuration_failure(sandbox.path) is None
 
 
 def test_a_valid_configuration_is_fine(sandbox: Sandbox) -> None:
-    assert probe.configuration_failure(sandbox.path_reader()) is None
+    assert probe.configuration_failure(sandbox.path) is None
 
 
 def test_an_unusable_configuration_is_reported_without_its_contents(sandbox: Sandbox) -> None:
     sandbox.config_file.write_text("{" + "".join(SECRETS))
 
-    assert probe.configuration_failure(sandbox.path_reader()) == probe.CONFIG_UNUSABLE
+    assert probe.configuration_failure(sandbox.path) == probe.CONFIG_UNUSABLE
 
 
 def test_a_swapped_key_is_reported_once_a_key_is_pinned(sandbox: Sandbox) -> None:
     sandbox.key_file.write_text("cd" * 32 + "\n")
-    assert probe.configuration_failure(sandbox.path_reader()) is None, (
+    assert probe.configuration_failure(sandbox.path) is None, (
         "nothing is pinned yet: reading never pins"
     )
 
-    walg_config.load_walg_config(path_reader=sandbox.path_reader)
-    assert probe.configuration_failure(sandbox.path_reader()) is None
+    walg_config.load_walg_config(path=sandbox.path)
+    assert probe.configuration_failure(sandbox.path) is None
 
     sandbox.key_file.write_text("ef" * 32 + "\n")
-    assert probe.configuration_failure(sandbox.path_reader()) == probe.KEY_CHANGED
+    assert probe.configuration_failure(sandbox.path) == probe.KEY_CHANGED
 
 
 def test_the_probe_never_raises_when_postgres_cannot_be_read(
@@ -162,7 +162,7 @@ def test_the_probe_never_raises_when_postgres_cannot_be_read(
 ) -> None:
     unreachable = probe.admin_connection_to(refused_target())
 
-    assert probe.failure_on(sandbox.path_reader(), unreachable, now=NOW) == probe.UNREADABLE
+    assert probe.failure_on(sandbox.path, unreachable, now=NOW) == probe.UNREADABLE
 
 
 def test_a_healthy_archiver_reads_healthy_and_an_idle_one_is_not_late(
@@ -179,7 +179,7 @@ def test_a_healthy_archiver_reads_healthy_and_an_idle_one_is_not_late(
         time.sleep(2.5)
 
         state = probe.read_archiver_state(conn)
-        expected = expected_archive(path_reader=sandbox.path_reader)
+        expected = expected_archive(path=sandbox.path)
         assert expected is not None
         assert (state.archive_mode, state.archive_command) == ("on", expected.command)
         assert (state.archive_timeout_s, state.failing_now, state.failed_count) == (
@@ -268,7 +268,7 @@ def _failure(
     sandbox: Sandbox, pg: PgInstance, *, rpo_objective_s: float = RPO_OBJECTIVE_S
 ) -> str | None:
     return probe.failure_on(
-        sandbox.path_reader(),
+        sandbox.path,
         probe.admin_connection_to(pg.target),
         now=datetime.now(UTC),
         rpo_objective_s=rpo_objective_s,
@@ -377,7 +377,7 @@ def test_before_any_tick_the_time_since_enabling_is_what_counts() -> None:
 
 
 def test_the_enabling_time_is_the_key_pins_mtime(sandbox: Sandbox) -> None:
-    walg_config.load_walg_config(path_reader=sandbox.path_reader)
+    walg_config.load_walg_config(path=sandbox.path)
     assert probe.enabled_since() is not None
     pinned_at = datetime(2026, 10, 1, 0, 0, tzinfo=UTC).timestamp()
     os.utime(walg_config.key_id_path(), (pinned_at, pinned_at))
@@ -505,4 +505,4 @@ def test_off_does_not_read_the_tick_state(tmp_path: Path, monkeypatch: pytest.Mo
     walg_state.walg_dir().mkdir(parents=True, exist_ok=True)
     walg_state.state_path().write_text("{broken")
 
-    assert probe.failure_on(sandbox.path_reader(), NeverDialed(), now=NOW) is None
+    assert probe.failure_on(sandbox.path, NeverDialed(), now=NOW) is None

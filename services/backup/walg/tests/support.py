@@ -18,7 +18,7 @@ import socket
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from contextlib import AbstractContextManager, contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,7 +55,8 @@ class Sandbox:
 
     # meiva:note
     # The configured WAL-G path as this sandbox holds it: its file, or None while off.
-    def path_reader(self) -> Path | None:
+    @property
+    def path(self) -> Path | None:
         return self.config_file if self.enabled else None
 
     def config(self) -> dict[str, Any]:
@@ -135,7 +136,7 @@ def make_sandbox(
     monkeypatch.setattr(walg_binary, "installed_problem", lambda: None)
     sandbox = Sandbox(home, store_dir, config_file, key_file, enabled)
     sandbox.write_config(valid_config(key_file))
-    monkeypatch.setattr(settings.walg, "walg_config_file", sandbox.path_reader())
+    monkeypatch.setattr(settings.walg, "walg_config_file", sandbox.path)
     return sandbox
 
 
@@ -181,9 +182,7 @@ def _free_port() -> int:
 # The socket directory is short (`/tmp`), the data is disposable (fsync off), and
 # shutdown is immediate: a test never waits for a hung archive command.
 @contextmanager
-def postgres_instance(
-    *extra_args: str, path_reader: Callable[[], Path | None] | None = None
-) -> Generator[PgInstance]:
+def postgres_instance(*extra_args: str, path: Path | None = None) -> Generator[PgInstance]:
     root = Path(tempfile.mkdtemp(prefix="meiva-walgpg-", dir="/tmp"))
     data = root / "data"
     socket_dir = pg_admin.pg_socket_dir(home=root)
@@ -208,7 +207,7 @@ def postgres_instance(
             check=True,
             capture_output=True,
         )
-        archive_args = [] if path_reader is None else archive_pg_args(path_reader=path_reader)
+        archive_args = archive_pg_args(path=path)
         argv = [
             str(pg_tool("postgres")),
             "-D",
@@ -267,10 +266,8 @@ def postgres_instance(
 def archiving_postgres(
     *extra_args: str, sandbox: Sandbox | None = None
 ) -> AbstractContextManager[PgInstance]:
-    reader = (
-        sandbox.path_reader if sandbox is not None else (lambda: settings.walg.walg_config_file)
-    )
-    return postgres_instance(*extra_args, path_reader=reader)
+    path = sandbox.path if sandbox is not None else settings.walg.walg_config_file
+    return postgres_instance(*extra_args, path=path)
 
 
 def wait_for(predicate: Any, *, seconds: float = 60, what: str) -> None:
