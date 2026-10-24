@@ -48,9 +48,9 @@ The single additional job can add queue delay; lower runner usage does not alone
 prove a shorter workflow critical path. Compare actual plan/setup/test timings
 before claiming a wall-clock gain.
 
-Plans remain disposable evidence for one run, not a discovery cache. Plan
-diagnostics and per-worker reports accompany
-the existing native reports; uploads retain the non-gating transport policy.
+Plans remain disposable evidence for one run, not a discovery cache. Planning
+diagnostics and per-worker reports accompany the existing native reports; their
+publication failures do not override successful native tests.
 The shared plan is a required consumed input: upload retries once on transport
 failure, and only a successful upload supplies the artifact ID. An absent ID
 fails the producer/consumers and backend aggregator; transport retry never replans.

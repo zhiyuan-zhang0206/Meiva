@@ -69,12 +69,14 @@
 # to cache-warm.yml (hosted caches written by a PR ref are invisible to other PRs;
 # only the default branch's are shared).
 #
-# Artifact publishing is transport, not a gate: every `upload-artifact` step in
-# this workflow continues on error, so a 403/500 while finalizing an upload
-# cannot red a job whose tests passed when the required checks fan in those jobs.
-# Per-shard coverage is the one consumed artifact: it retries once, then records
-# a gap explicitly. This follows the 2026-09-22 incident where a green suite's
-# shard 15/16 upload ejected a queued PR from the Trunk merge queue.
+# Every `upload-artifact` transport step continues on error. Diagnostic/report
+# upload failures do not override successful native tests. Required inputs have
+# a separate completeness gate: selected test lists and shared full plans retry
+# upload once, then their consumers fail closed when the input is unavailable.
+# Coverage also retries once; missing data is recorded explicitly and the combine
+# gate scores the data that arrived. This separates transport from input validity
+# after the 2026-09-22 incident where a green suite's shard 15/16 upload ejected
+# a queued PR from the Trunk merge queue.
 
 name: CI
 
