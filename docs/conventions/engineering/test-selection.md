@@ -258,7 +258,14 @@ outside its nearest ownership bucket.
 
 The shared fact collector keeps line numbers, edge kinds and unresolved expressions.
 Rooted resource paths are evidence of possible use, not proof of a read or runtime
-coverage; directory paths conservatively affect changed descendants.
+coverage; directory paths conservatively affect changed descendants. The shared
+collector can narrow a complete local immediate-entry discovery to one literal
+child filename. Its member domain matches additions, deletions and renames in
+both base and head; unrelated nested files do not match. Escaping, rebound,
+replaced, aliased or unsupported discovery keeps the coarse edge. Opaque root
+alternatives retain unknown evidence, and helper/default discovery such as the
+dashboard metrics reader remains conservative. No test-directory exclusion or
+runtime discovery rewrite participates in this narrowing.
 It supports bounded static evidence, not arbitrary execution or reflection. Known
 external modules have no repository input to select. Unresolved dynamic inputs remain
 explicit unknown evidence. Fixtures registered through `path_scopes.toml` create real

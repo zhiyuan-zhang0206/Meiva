@@ -5,8 +5,6 @@ from __future__ import annotations
 import ast
 import importlib.util
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path
 
 from . import (
@@ -17,65 +15,15 @@ from . import (
     file_loader,
     mock_targets,
     normalize,
+    resource_members,
 )
+from .model import Evidence, Fact, FactKind, FileExecution, ResourceRead, Unknown
 
-__all__ = ["Evidence", "Fact", "FactKind", "FileExecution", "ResourceRead", "Unknown", "collect"]
+__all__ = ["Evidence", "Fact", "FactKind", "Unknown", "collect"]
 
 
 # The reason of a read whose path is tied to neither the checkout nor an outside root.
 UNANCHORED_READ = "Resource read has no proven repository or external path anchor"
-
-
-class FactKind(StrEnum):
-    IMPORT = "import"
-    DYNAMIC_IMPORT = "dynamic-import"
-    EMBEDDED_IMPORT = "embedded-import"
-    PYTHON_MODULE = "python-module"
-    RESOURCE = "resource"
-
-
-@dataclass(frozen=True)
-class Fact:
-    line: int
-    kind: FactKind
-    target: str
-    names: tuple[str, ...] = ()
-    via: str = ""  # recognized callee, for consumers' separate ownership policies
-
-
-@dataclass(frozen=True)
-class Unknown:
-    path: str
-    line: int
-    expression: str
-    reason: str
-    kind: FactKind = FactKind.DYNAMIC_IMPORT
-
-
-@dataclass(frozen=True)
-class ResourceRead:
-    """A recognized read operation on a checkout path, without ownership policy."""
-
-    line: int
-    target: str
-    operation: str
-
-
-@dataclass(frozen=True)
-class FileExecution:
-    """A possible input to a proven exec call, with its runtime module identity."""
-
-    line: int
-    target: str
-    name: str
-
-
-@dataclass(frozen=True)
-class Evidence:
-    records: tuple[Fact, ...]
-    unknown: tuple[Unknown, ...]
-    resource_reads: tuple[ResourceRead, ...] = ()
-    file_executions: tuple[FileExecution, ...] = ()
 
 
 _DYNAMIC_CALLS = frozenset(
@@ -104,6 +52,7 @@ class _Collector(ast.NodeVisitor):
         loaded_name: str | None = None,
     ) -> None:
         self.path, self.index, self.tops = path, index, tops
+        self.module_tree = tree
         name = "__main__" if embedded else bindings.module_name(path)
         if loaded_name is not None:
             name = loaded_name
@@ -123,6 +72,7 @@ class _Collector(ast.NodeVisitor):
         self.file_specs: dict[ast.Call, tuple[bindings.Scope, Unknown]] = {}
         self.loaded_trees: dict[str, ast.Module] = {}
         self.seen_calls: set[ast.Call] = set()
+        self.member_builders: dict[int, resource_members.Membership] = {}
 
     def visit(self, node: ast.AST) -> None:
         """Resolve visitor dispatch once per node type in this source analysis."""
@@ -184,9 +134,44 @@ class _Collector(ast.NodeVisitor):
             self.visit(expression)
         self.scope = self.context.scope(node, self.path, parent.nested_parent())
         self.scope_trees[self.scope] = node
+        self._directory_members(node)
         for statement in inner:
             self.visit(statement)
         self.scope = parent
+
+    def _directory_members(self, node: bindings.ScopeNode) -> None:
+        proven = resource_members.prove(
+            node, self.scope, self._resource_path, module_tree=self.module_tree
+        )
+        for opaque in proven.unanchored:
+            self.gap(opaque, UNANCHORED_READ, FactKind.RESOURCE)
+        if not proven.members:
+            return
+        current: bindings.Scope | None = self.scope
+        while current is not None:
+            if any(current.origin(call.func) in _PATCH_IMPORTS for call in current.calls):
+                return
+            current = current.parent
+        for proof in proven.members:
+            if not self._physical_members(proof):
+                continue
+            self.member_builders[id(proof.anchor)] = proof
+
+    def _physical_members(self, proof: resource_members.Membership) -> bool:
+        directory = self.index.repo_root.resolve() / proof.target
+        try:
+            aliased = directory.resolve() != directory.absolute()
+            if directory.is_dir():
+                aliased |= any(
+                    entry.is_symlink() or (entry / proof.member).is_symlink()
+                    for entry in directory.iterdir()
+                )
+        except OSError as error:
+            self.gap(proof.anchor, f"Resource membership cannot be inspected: {error}")
+            return False
+        if aliased:
+            self.gap(proof.anchor, "Resource membership contains a filesystem alias")
+        return not aliased
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self._nested(node)
@@ -579,7 +564,15 @@ class _Collector(ast.NodeVisitor):
         if path.is_absolute() or ".." in path.parts:
             self.gap(node, "Repository resource escapes its root", FactKind.RESOURCE)
             return
-        self.records.append(Fact(node.lineno, FactKind.RESOURCE, path.as_posix()))
+        membership = self.member_builders.get(id(node))
+        self.records.append(
+            Fact(
+                node.lineno,
+                FactKind.RESOURCE,
+                path.as_posix(),
+                member=None if membership is None else membership.member,
+            )
+        )
 
     def _read_target(self, node: ast.Call) -> ast.expr | None:
         if self._open_function(node.func):

@@ -23,6 +23,7 @@ from base.deploy.git.repo_change import (  # noqa: E402 - direct script entry ne
 )
 from meizel.roles import all_packages, pytest_test_hosts  # noqa: E402 - standalone script
 from scripts.ci.test_impact import (  # noqa: E402 - standalone script
+    Impact,
     base_checkout,
     blocking_gaps,
     build_impact,
@@ -254,7 +255,7 @@ def tree_scan_tests(repo_root: Path) -> set[str]:
 
 
 def build_import_reverse_map(repo_root: Path) -> dict[str, set[str]]:
-    """Map runtime inputs to collectable tests through unpruned shared facts."""
+    # meiva:link docs/conventions/engineering/test-selection.md
     return build_impact(repo_root.resolve(), load_checkout(repo_root).collectable).tests_by_input
 
 
@@ -365,18 +366,14 @@ def referencing_tests(root: str, checkout: Checkout) -> set[str]:
     }
 
 
-def _path_tests(
-    path: str, path_class: PathClass, checkout: Checkout, reverse_map: dict[str, set[str]]
-) -> set[str]:
+def _path_tests(path: str, path_class: PathClass, checkout: Checkout, impact: Impact) -> set[str]:
     """What one changed path contributes to the candidate subset."""
-    return _class_tests(path, path_class, checkout, reverse_map) | _doc_readers(path, checkout)
+    return _class_tests(path, path_class, checkout, impact) | _doc_readers(path, checkout)
 
 
-def _class_tests(
-    path: str, path_class: PathClass, checkout: Checkout, reverse_map: dict[str, set[str]]
-) -> set[str]:
+def _class_tests(path: str, path_class: PathClass, checkout: Checkout, impact: Impact) -> set[str]:
     """The contribution of a path's class rule."""
-    runtime = _runtime_tests(path, reverse_map)
+    runtime = impact.runtime_tests(path)
     if path_class is PathClass.TEST:
         return {path} | runtime
     if path_class is PathClass.CONFTEST:
@@ -384,16 +381,14 @@ def _class_tests(
     if path_class is PathClass.PACKAGE:
         return runtime | package_tests(path, checkout)
     if path_class is PathClass.MANIFEST:
-        return runtime | _manifest_tests(path, checkout, reverse_map)
+        return runtime | _manifest_tests(path, checkout, impact)
     root = path.split("/", maxsplit=1)[0]
     if path_class is PathClass.TREE_SCAN_ONLY and root in _REFERENCED_ROOTS:
         return referencing_tests(root, checkout) | runtime
     return runtime
 
 
-def _manifest_tests(
-    manifest: str, checkout: Checkout, reverse_map: dict[str, set[str]]
-) -> set[str]:
+def _manifest_tests(manifest: str, checkout: Checkout, impact: Impact) -> set[str]:
     """The tests that can observe a root meizel manifest: meizel's own tests, every test whose
     source names the file, and the runtime and package tests of every source module that does.
 
@@ -407,7 +402,7 @@ def _manifest_tests(
         if relative in checkout.collectable:
             selected.add(relative)
         elif not _is_test_dir_path(relative, checkout.hosts):
-            selected |= _runtime_tests(relative, reverse_map) | package_tests(relative, checkout)
+            selected |= impact.runtime_tests(relative) | package_tests(relative, checkout)
     return selected
 
 
@@ -428,14 +423,6 @@ def _doc_readers(path: str, checkout: Checkout) -> set[str]:
     }
 
 
-def _runtime_tests(path: str, reverse_map: dict[str, set[str]]) -> set[str]:
-    return {
-        test
-        for parent in (Path(path), *Path(path).parents)
-        for test in reverse_map.get(parent.as_posix(), ())
-    }
-
-
 def documentation_runtime_tests(
     changed_files: list[str], *, repo_root: Path, base_ref: str | None = None
 ) -> frozenset[str]:
@@ -451,24 +438,20 @@ def documentation_runtime_tests(
     if not paths:
         return frozenset()
     impact = build_impact(repo_root, checkout.collectable)
-    selected = {test for path in paths for test in _runtime_tests(path, impact.tests_by_input)}
+    selected = {test for path in paths for test in impact.runtime_tests(path)}
     if base_ref is not None:
         with base_checkout(repo_root, base_ref) as base_root:
             base = load_checkout(base_root)
             old = build_impact(base_root, base.collectable & checkout.collectable)
-            selected.update(
-                test for path in paths for test in _runtime_tests(path, old.tests_by_input)
-            )
+            selected.update(test for path in paths for test in old.runtime_tests(path))
     return frozenset(selected)
 
 
-def _owner_tests(
-    changed: dict[str, PathClass], checkout: Checkout, reverse_map: dict[str, set[str]]
-) -> set[str]:
+def _owner_tests(changed: dict[str, PathClass], checkout: Checkout, impact: Impact) -> set[str]:
     """The union of what each changed path contributes (rules by class)."""
     selected: set[str] = set()
     for path, path_class in changed.items():
-        selected.update(_path_tests(path, path_class, checkout, reverse_map))
+        selected.update(_path_tests(path, path_class, checkout, impact))
     return selected
 
 
@@ -566,7 +549,7 @@ def _runtime_candidates(
         unknown_diagnostics(blocking_gaps(impact, data_changed=data_changed), tree="head")
     )
     tainted = unbounded_tests(impact, data_changed=data_changed)
-    selected = _owner_tests(classes, checkout, reverse_map)
+    selected = _owner_tests(classes, checkout, impact)
     if base_ref is not None:
         with base_checkout(checkout.repo_root, base_ref) as base_root:
             base = load_checkout(base_root)
@@ -581,7 +564,7 @@ def _runtime_candidates(
             old_forced = _forced_full(old_classes, full_estimate)
             if old_forced is not None:
                 return old_forced
-            selected.update(_owner_tests(old_classes, base, old_impact.tests_by_input))
+            selected.update(_owner_tests(old_classes, base, old_impact))
             for path, tests_for_path in old_impact.tests_by_input.items():
                 reverse_map.setdefault(path, set()).update(tests_for_path & checkout.collectable)
     elif any(kind is PathClass.DELETED for kind in classes.values()):
