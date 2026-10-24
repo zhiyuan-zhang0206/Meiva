@@ -41,7 +41,6 @@ from base.config import ConfigBoot
 from base.config.domains.packages import PackagesSettings
 from base.host.git.gitenv import git_env
 from base.host.proc import run_bounded
-from base.host.system.cron import os_jobs_enabled
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.packages.extensions import install_registry
 from base.packages.skills.names import match_key
@@ -715,7 +714,7 @@ def run_refresh(
     if not config.prepared:
         raise ValueError("package refresh requires a prepared configuration owner")
     moment = now or datetime.now(UTC)
-    if from_job and not os_jobs_enabled(enabled_reader=lambda: config.view.general.os_jobs_enabled):
+    if from_job and not config.view.general.os_jobs_enabled:
         return _skip("OS jobs disabled (MEIVA_OS_JOBS_ENABLED=false)")
     if from_job and not config.view.packages.refresh_enabled:
         return _skip("refresh disabled (MEIVA_PACKAGES_REFRESH_ENABLED=false)")

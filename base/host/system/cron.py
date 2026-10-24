@@ -1,22 +1,22 @@
-"""OS-level cron registration for the cluster health probe.
-
-Platform-aware registration of a periodic job that runs the cluster health probe.
-The probe reports observations and graded alerts; it takes no repair action.
-
-- macOS: launchd User LaunchAgent plist in ~/Library/LaunchAgents/
-- Linux: user crontab entry
-
-This module is in the base layer so both the gateway lifespan (primary
-registration path) and the CLI converge step (belt-and-suspenders fallback) can
-call the same functions without violating the import layering (base < meiva <
-agent < gateway < cli).
-
-It also carries the shared launchd / crontab mechanics used by the OS jobs:
-the label prefix, the binary + `$MEIVA_HOME` a job spec is anchored to
-(`meiva_binary_path` / `job_home` / `launchd_env_block` / `cron_env_prefix`),
-the crontab read-modify-write primitives, and the `os_jobs_enabled()` gate
-every registrar consults.
-"""
+# meiva:note
+# OS-level cron registration for the cluster health probe.
+#
+# Platform-aware registration of a periodic job that runs the cluster health probe.
+# The probe reports observations and graded alerts; it takes no repair action.
+#
+# - macOS: launchd User LaunchAgent plist in ~/Library/LaunchAgents/
+# - Linux: user crontab entry
+#
+# This module is in the base layer so both the gateway lifespan (primary
+# registration path) and the CLI converge step (belt-and-suspenders fallback) can
+# call the same functions without violating the import layering (base < meiva <
+# agent < gateway < cli).
+#
+# It also carries the shared launchd / crontab mechanics used by the OS jobs:
+# the label prefix, the binary + `$MEIVA_HOME` a job spec is anchored to
+# (`meiva_binary_path` / `job_home` / `launchd_env_block` / `cron_env_prefix`),
+# the crontab read-modify-write primitives, and the OS-jobs switch note
+# every registrar consults.
 
 from __future__ import annotations
 
@@ -50,44 +50,41 @@ LAUNCHD_LABEL_PREFIX = "com.meiva"
 _CRON_MARKER = "# meiva-health-probe"
 
 
-def os_jobs_enabled(*, enabled_reader: Callable[[], bool]) -> bool:
-    """Whether this process may hand a job to the platform scheduler.
-
-    Every other host resource a test isolates — `$MEIVA_HOME`, the database, redis,
-    the service ports, the session records — is addressed by a value the process
-    reads, so redirecting the value redirects the resource. The platform
-    scheduler is not: launchd reads ONE `~/Library/LaunchAgents` per OS user,
-    `crontab` edits ONE table per user. A test-scoped home therefore isolates everything about a registered job
-    except the namespace it lands in.
-
-    So the suite turns registration off wholesale (`MEIVA_OS_JOBS_ENABLED=false`,
-    set in `tests/fixtures/env_bootstrap.py` and inherited by every subprocess it spawns)
-    instead of registering into the operator's namespace and unregistering
-    afterwards: a job that is never armed cannot fire mid-run, and cannot survive
-    a session that is SIGKILLed before its teardown.
-
-    Deregistration is deliberately NOT gated — a cleanup path has to work
-    wherever registration is forbidden.
-    """
-    # The composition root supplies the live switch; this gate owns read timing.
-    return enabled_reader()
+# meiva:note
+# Why registration is gated on `general.os_jobs_enabled`.
+#
+# Every other host resource a test isolates — `$MEIVA_HOME`, the database, redis, the service
+# ports, the session records — is addressed by a value the process reads, so redirecting the
+# value redirects the resource. The platform scheduler is not: launchd reads ONE
+# `~/Library/LaunchAgents` per OS user, `crontab` edits ONE table per user. A test-scoped home
+# therefore isolates everything about a registered job except the namespace it lands in.
+#
+# So the suite turns registration off wholesale (`MEIVA_OS_JOBS_ENABLED=false`, set in
+# `tests/fixtures/env_bootstrap.py` and inherited by every subprocess it spawns) instead of
+# registering into the operator's namespace and unregistering afterwards: a job that is never
+# armed cannot fire mid-run, and cannot survive a session that is SIGKILLed before its teardown.
+# Each `register_*` takes the switch as an `enabled` value from its composition root.
+#
+# Deregistration is deliberately NOT gated — a cleanup path has to work wherever registration is
+# forbidden.
 
 
+# meiva:note
+# Log that `kind` was not registered because OS jobs are disabled.
 def skip_os_job(kind: str) -> None:
-    """Log that `kind` was not registered because `os_jobs_enabled()` is off."""
     logger.info("OS jobs disabled (MEIVA_OS_JOBS_ENABLED=false) — not registering {}", kind)
 
 
+# meiva:note
+# Whether this process's home may register or remove the `kind` OS job.
+#
+# Labels and crontab markers carry no home, so the scheduler's one namespace per
+# OS user is shared by every process on the host, and only the default home
+# (`~/.meiva`) may write or remove an entry in it. A scratch home (a test, a tool,
+# a disposable cluster) that reached a registrar would otherwise replace or
+# `bootout` the host's real job. Both directions are gated, removal included,
+# unlike the `enabled` switch, which gates registration only.
 def owns_os_jobs(kind: str) -> bool:
-    """Whether this process's home may register or remove the `kind` OS job.
-
-    Labels and crontab markers carry no home, so the scheduler's one namespace per
-    OS user is shared by every process on the host, and only the default home
-    (`~/.meiva`) may write or remove an entry in it. A scratch home (a test, a tool,
-    a disposable cluster) that reached a registrar would otherwise replace or
-    `bootout` the host's real job. Both directions are gated, removal included,
-    unlike `os_jobs_enabled`, which gates registration only.
-    """
     from base.paths.home import is_default_home, resolve_meiva_home
 
     home = resolve_meiva_home()
@@ -576,30 +573,30 @@ def unregister_platform_job(
         raise RuntimeError("unsupported host platform for OS jobs")
 
 
+# meiva:note
+# Register the OS cron job for the cluster health probe.
+#
+# Platform-aware: dispatches to the macOS or Linux registrar.
+# Idempotent — re-running updates the interval and reloads the job.
+# A no-op when ``enabled`` is off (the test suite) or when this
+# process's home is not the default home (``owns_os_jobs``).
+#
+# Refused (with an error log) when this process runs from a non-prod
+# checkout against the prod home — the 2026-08-07 accident (Task #1025): a
+# debug/test process launched from a worktree's venv (``from gateway.app
+# import app`` + TestClient, no conftest) invoked this registrar, which
+# rewrote the prod health-probe plist to point at the worktree's disposable
+# ``meiva``. The probe then ran worktree code against prod data, misjudged
+# schema health, and auto-rolled-back (quiesce restarted every agent). The
+# job's content is anchored to THIS process's checkout, so the registration
+# must be too: same rule as ``meiva start`` (``prod_service_checkout_error``).
+#
+# Raises:
+#     RuntimeError: on registration failure.
 def register_os_cron(
-    interval_s: int = DEFAULT_INTERVAL_SECONDS, *, enabled_reader: Callable[[], bool], host: Host
+    interval_s: int = DEFAULT_INTERVAL_SECONDS, *, enabled: bool, host: Host
 ) -> None:
-    """Register the OS cron job for the cluster health probe.
-
-    Platform-aware: dispatches to the macOS or Linux registrar.
-    Idempotent — re-running updates the interval and reloads the job.
-    A no-op when ``os_jobs_enabled()`` is off (the test suite) or when this
-    process's home is not the default home (``owns_os_jobs``).
-
-    Refused (with an error log) when this process runs from a non-prod
-    checkout against the prod home — the 2026-08-07 accident (Task #1025): a
-    debug/test process launched from a worktree's venv (``from gateway.app
-    import app`` + TestClient, no conftest) invoked this registrar, which
-    rewrote the prod health-probe plist to point at the worktree's disposable
-    ``meiva``. The probe then ran worktree code against prod data, misjudged
-    schema health, and auto-rolled-back (quiesce restarted every agent). The
-    job's content is anchored to THIS process's checkout, so the registration
-    must be too: same rule as ``meiva start`` (``prod_service_checkout_error``).
-
-    Raises:
-        RuntimeError: on registration failure.
-    """
-    if not os_jobs_enabled(enabled_reader=enabled_reader):
+    if not enabled:
         skip_os_job("health-probe")
         return
     if not owns_os_jobs("health-probe"):

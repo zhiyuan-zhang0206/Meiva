@@ -31,9 +31,7 @@ def test_converge_registers_the_refresh_job(
 
     calls: list[str] = []
 
-    def register(
-        *, enabled_reader: object, refresh_enabled_reader: object, tick_reader: object, host: Host
-    ) -> None:
+    def register(*, enabled: bool, refresh_enabled: bool, tick_seconds: int, host: Host) -> None:
         calls.append("register")
 
     monkeypatch.setattr(job, "register_packages_job", register)

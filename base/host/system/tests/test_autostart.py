@@ -83,7 +83,7 @@ def test_an_empty_selection_is_refused_and_leaves_the_boot_job_in_place(
     commands = FakeCommands()
     host = fake_host(commands, platform=DARWIN_ARM64)
     with pytest.raises(ValueError, match="starts no service"):
-        autostart.register_autostart(services=frozenset(), enabled_reader=lambda: True, host=host)
+        autostart.register_autostart(services=frozenset(), enabled=True, host=host)
     assert plist.read_text() == "registered"
     assert commands.argvs == []
 

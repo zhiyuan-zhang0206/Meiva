@@ -228,7 +228,7 @@ def test_register_skips_when_os_jobs_are_disabled(monkeypatch: pytest.MonkeyPatc
         raise AssertionError("the platform must not be touched with OS jobs off")
 
     monkeypatch.setattr(cron, "register_platform_job", no_platform)
-    job.register_pr_flow_job(enabled_reader=lambda: False, production=True, host=fake_host())
+    job.register_pr_flow_job(enabled=False, production=True, host=fake_host())
     assert skipped == ["pr flow"]
 
 
@@ -240,7 +240,7 @@ def test_register_skips_without_credentials(
         raise AssertionError("the platform must not be touched without credentials")
 
     monkeypatch.setattr(cron, "register_platform_job", no_platform)
-    job.register_pr_flow_job(enabled_reader=lambda: True, production=True, host=fake_host())
+    job.register_pr_flow_job(enabled=True, production=True, host=fake_host())
 
 
 def test_register_delegates_when_credentials_pass(
@@ -252,7 +252,7 @@ def test_register_delegates_when_credentials_pass(
     monkeypatch.setattr(cron, "register_platform_job", _recorder(calls, "register"))
     monkeypatch.setattr(cron, "unregister_platform_job", _recorder(calls, "unregister"))
 
-    job.register_pr_flow_job(enabled_reader=lambda: True, production=True, host=host)
+    job.register_pr_flow_job(enabled=True, production=True, host=host)
     assert calls == ["register"]
 
     job.unregister_pr_flow_job(host=host)

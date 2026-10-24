@@ -31,54 +31,34 @@ def _refuse(message: str) -> Callable[..., None]:
     return refuse
 
 
-def _unexpected_read() -> int:
-    pytest.fail("an early return read scheduling policy")
-
-
 @pytest.mark.parametrize("enabled", [False, True])
-def test_packages_gates_do_not_read_tick(monkeypatch: pytest.MonkeyPatch, enabled: bool) -> None:
-    reads: list[str] = []
-
-    def enabled_reader() -> bool:
-        reads.append("enabled")
-        return enabled
+def test_packages_gates_stop_at_the_switch_then_the_home(
+    monkeypatch: pytest.MonkeyPatch, enabled: bool
+) -> None:
+    asked: list[str] = []
 
     def owns(_kind: str) -> bool:
-        reads.append("home")
+        asked.append("home")
         return False
 
     monkeypatch.setattr(cron, "owns_os_jobs", owns)
     packages_job.register_packages_job(
-        enabled_reader=enabled_reader,
-        refresh_enabled_reader=lambda: bool(_unexpected_read()),
-        tick_reader=_unexpected_read,
-        host=fake_host(),
+        enabled=enabled, refresh_enabled=True, tick_seconds=900, host=fake_host()
     )
-    assert reads == (["enabled", "home"] if enabled else ["enabled"])
+    assert asked == (["home"] if enabled else [])
 
 
 def test_packages_refresh_gate_follows_home_and_precedes_platform(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    reads: list[str] = []
-
     def owns(_kind: str) -> bool:
-        reads.append("home")
         return True
-
-    def refresh_reader() -> bool:
-        reads.append("refresh")
-        return False
 
     monkeypatch.setattr(cron, "owns_os_jobs", owns)
     monkeypatch.setattr(cron, "register_platform_job", _refuse("platform registrar reached"))
     packages_job.register_packages_job(
-        enabled_reader=lambda: True,
-        refresh_enabled_reader=refresh_reader,
-        tick_reader=_unexpected_read,
-        host=fake_host(),
+        enabled=True, refresh_enabled=False, tick_seconds=900, host=fake_host()
     )
-    assert reads == ["home", "refresh"]
 
 
 def _isolate_jobs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -110,7 +90,7 @@ def _assert_definitions(kind: str, platform: str, first: str, second: str) -> No
 
 @pytest.mark.parametrize("platform", ["mac", "linux"])
 @pytest.mark.parametrize("kind", ["packages", "walg"])
-def test_real_platform_job_keeps_reader_live_at_each_definition(
+def test_real_platform_job_definition_follows_the_value_given(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     platform: str,
@@ -126,31 +106,18 @@ def test_real_platform_job_keeps_reader_live_at_each_definition(
         platform=LINUX_X86 if platform == "linux" else DARWIN_ARM64,
         programs={"crontab": "/usr/bin/crontab"},
     )
-    state = {
+    values = {
         "first": 1200 if kind == "packages" else 21,
         "second": 1800 if kind == "packages" else 23,
     }
-    reads: list[str] = []
-
-    def reader(owner: str) -> Callable[[], int]:
-        def read() -> int:
-            reads.append(owner)
-            return state[owner]
-
-        return read
 
     def register(owner: str) -> str:
         if kind == "packages":
             packages_job.register_packages_job(
-                enabled_reader=lambda: True,
-                refresh_enabled_reader=lambda: True,
-                tick_reader=reader(owner),
-                host=host,
+                enabled=True, refresh_enabled=True, tick_seconds=values[owner], host=host
             )
         else:
-            walg_job.register_walg_job(
-                enabled_reader=lambda: True, backup_hour_reader=reader(owner), host=host
-            )
+            walg_job.register_walg_job(enabled=True, backup_hour=values[owner], host=host)
         if platform == "linux":
             return crontab.writes[-1]
         label = "packages-refresh" if kind == "packages" else "walg"
@@ -158,15 +125,9 @@ def test_real_platform_job_keeps_reader_live_at_each_definition(
 
     first = register("first")
     second = register("second")
-    state["first"] = state["second"]
-    updated = register("first")
+    again = register("first")
     assert first != second
-    assert updated == second
-    expected_reads = 2 if platform == "mac" else 1
-    assert (
-        reads
-        == ["first"] * expected_reads + ["second"] * expected_reads + ["first"] * expected_reads
-    )
+    assert again == first
     operations = [argv[1] for argv in (crontab.argvs if platform == "linux" else launchctl.argvs)]
     assert operations == (["bootout", "bootstrap"] * 3 if platform == "mac" else ["-l", "-"] * 3)
     _assert_definitions(kind, platform, first, second)
@@ -181,24 +142,17 @@ def test_real_platform_job_keeps_reader_live_at_each_definition(
         pr_flow_job.register_pr_flow_job,
     ],
 )
-def test_every_registrar_reads_gate_once_before_home(
+def test_every_registrar_stops_at_the_switch_before_the_home(
     monkeypatch: pytest.MonkeyPatch,
     register: Callable[..., None],
 ) -> None:
-    reads: list[str] = []
-
-    def disabled() -> bool:
-        reads.append("enabled")
-        return False
-
     def owns(_kind: str) -> bool:
         pytest.fail("home reached")
 
     monkeypatch.setattr(cron, "owns_os_jobs", owns)
     if register is pr_flow_job.register_pr_flow_job:
-        register(enabled_reader=disabled, production=True, host=fake_host())
+        register(enabled=False, production=True, host=fake_host())
     elif register is autostart.register_autostart:
-        register(services=frozenset({"gateway"}), enabled_reader=disabled, host=fake_host())
+        register(services=frozenset({"gateway"}), enabled=False, host=fake_host())
     else:
-        register(enabled_reader=disabled, host=fake_host())
-    assert reads == ["enabled"]
+        register(enabled=False, host=fake_host())

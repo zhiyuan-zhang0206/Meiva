@@ -9,7 +9,6 @@ from psycopg.conninfo import conninfo_to_dict
 
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.config import ConfigBoot, settings
-from base.host.system.cron import os_jobs_enabled
 from tests.fixtures.env_bootstrap import UNPROVISIONED_DB_URL, UNPROVISIONED_REDIS_URL
 from tests.fixtures.static_environment import static_mode
 
@@ -21,7 +20,7 @@ def test_process_environment_keeps_its_home_and_data_plane_boundary(
     throwaway_config: ThrowawayConfig,
 ) -> None:
     assert Path(os.environ["MEIVA_HOME"]) != Path.home() / ".meiva"
-    assert not os_jobs_enabled(enabled_reader=lambda: settings.general.os_jobs_enabled)
+    assert not settings.general.os_jobs_enabled
     if not static_mode(pytestconfig):
         request.getfixturevalue("postgres_access")
         request.getfixturevalue("db_url")
