@@ -14,7 +14,3 @@ exports = ["agents", "alerts.py", "cluster", "cluster_status", "env_audit", "hos
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.ambient-read]
-"host_config.py#settings base.config.settings" = 1
-"pages.py#settings base.config.settings" = 1

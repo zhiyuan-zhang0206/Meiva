@@ -7,3 +7,6 @@ exports = ["daemon.py", "service.py", "shutdown_budget.py"]
 [purity]
 "__init__.py" = "strict"
 "shutdown_budget.py" = "strict"
+
+[roots]
+"daemon.py" = { kinds = ["settings"], why = "The exec-host process entry boots configuration before composing its service resources" }

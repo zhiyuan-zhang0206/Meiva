@@ -17,9 +17,5 @@ exports = ["bringup.py", "cluster_instance.py", "completion.py", "config.py", "h
 "__init__.py" = "strict"
 "stop_budget.py" = "strict"
 
-[roots]
-"walg.py" = { kinds = ["settings"], why = "CLI command composition root boots configuration before assembling command inputs" }
-
 [debt.ambient-read]
-"completion.py#environ os.environ" = 3
-"config.py#settings base.config.settings" = 1
+"completion.py#environ os.environ" = 2

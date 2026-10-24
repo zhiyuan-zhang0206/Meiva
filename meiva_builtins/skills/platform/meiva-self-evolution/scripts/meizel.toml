@@ -11,6 +11,4 @@
 "collect.py" = ["db"]
 
 [debt.ambient-read]
-"collect.py#settings base.config.settings" = 1
-"daily_scan.py#db base.db.Database.from_settings" = 1
 "daily_scan.py#settings base.config.settings" = 1
