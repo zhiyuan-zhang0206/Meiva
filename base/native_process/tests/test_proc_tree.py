@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import time
 from typing import Any
 
 import psutil
@@ -57,6 +59,60 @@ def test_readable_ticks_decide_by_equality(observed: int, expected: bool) -> Non
 def test_a_record_without_ticks_has_nothing_to_compare() -> None:
     with pytest.raises(ValueError, match="no recorded start ticks"):
         OwnedProcess(4242, 0.5, None).ticks_match(777, pid_exists=True)
+
+
+# meiva:note
+# A child that is still running, and the identity captured from it while it was.
+def _running_child() -> tuple[subprocess.Popen[bytes], OwnedProcess]:
+    child = subprocess.Popen(["sleep", "60"])
+    return child, OwnedProcess.capture(psutil.Process(child.pid))
+
+
+def test_a_running_child_is_live_and_a_reaped_one_is_not() -> None:
+    child, identity = _running_child()
+    try:
+        assert identity.live()
+    finally:
+        child.kill()
+        child.wait()
+
+    assert not identity.live()
+
+
+def test_an_exited_child_not_yet_reaped_is_not_live() -> None:
+    child, identity = _running_child()
+    try:
+        child.kill()
+        deadline = time.monotonic() + 5.0
+        while psutil.Process(child.pid).status() != psutil.STATUS_ZOMBIE:
+            assert time.monotonic() < deadline, "the killed child never became a zombie"
+            time.sleep(0.01)
+
+        assert not identity.live()
+    finally:
+        child.wait()
+
+
+def test_reading_this_process_names_the_identity_it_was_captured_with() -> None:
+    process = psutil.Process()
+    identity = OwnedProcess.capture(process)
+
+    reading = identity.read_live()
+
+    assert reading is not None and reading.pid_exists
+    assert reading.status != psutil.STATUS_ZOMBIE
+    if identity.starttime is not None:
+        assert reading.ticks == identity.starttime
+    else:
+        assert reading.identity == identity
+
+
+def test_reading_a_pid_nobody_holds_finds_nothing() -> None:
+    child, identity = _running_child()
+    child.kill()
+    child.wait()
+
+    assert identity.read_live() is None
 
 
 @pytest.mark.requires_host("darwin")

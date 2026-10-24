@@ -6,7 +6,7 @@ exports = ["agent_env.py", "agent_slices.py", "boot_policy.py", "bootstrap.py", 
 "dotenv_boot.py" = ["bootstrap.py", "dotenv_file.py", "registry.py"]
 "health_ports.py" = ["port_table.py", "registry.py"]
 "registry.py" = ["agent_env.py", "config_lite_table.py", "process_profile.py"]
-"tests" = ["boot_policy.py", "bootstrap.py", "dotenv_boot.py", "dotenv_file.py", "harness_binaries.py", "registry.py"]
+"tests" = ["agent_env.py", "boot_policy.py", "bootstrap.py", "dotenv_boot.py", "dotenv_file.py", "harness_binaries.py", "registry.py"]
 
 [purity]
 "__init__.py" = "strict"

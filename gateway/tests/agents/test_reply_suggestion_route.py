@@ -3,24 +3,37 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import psycopg
 import pytest
 
 from base.db import Database
+from base.host.env.tests.env_files import unit_env_path
 from base.lm.catalog import ModelCatalog
-from gateway.agents.reply_suggestion.tests.support import Harness, useful_reply
+from gateway.agents.reply_suggestion.tests.support import DraftChat, GateServer, Harness
 from gateway.tests.auth.gateway_config import gateway_test_client
+
+_KEYS = "TYPESAFE_API_KEY=ts-test-key\nDEEPSEEK_API_KEY=sk-test-key\n"
 
 
 @pytest.fixture
-def harness(
+def make_harness(
     db_conn: psycopg.Connection, database: Database, model_catalog: ModelCatalog
-) -> Harness:
-    return Harness(db_conn, database, model_catalog)
+) -> Callable[[GateServer], Harness]:
+    # meiva:note
+    # The route reads the provider keys from the process environment and the home's `.env`.
+    unit_env_path().write_text(_KEYS)
+    return lambda gate: Harness(db_conn, database, model_catalog, gate=gate, chat=DraftChat())
+
+
+@pytest.fixture
+def harness(make_harness: Callable[[GateServer], Harness]) -> Harness:
+    return make_harness(GateServer(0.9))
 
 
 # meiva:note
-# Ask the gateway for a suggestion; its service answers with the harness's model doubles.
+# Ask the gateway for a suggestion; its service answers through the harness's gate wire and draft chat.
 def post(harness: Harness, agent_id: int | str | None = None, **fields: object):
     with gateway_test_client(fields=fields, catalog=harness.catalog) as client:  # pyright: ignore[reportArgumentType]
         client.app.state.reply_suggestions = harness.service
@@ -36,11 +49,13 @@ def test_the_route_returns_the_services_suggestion(harness: Harness) -> None:
         "suggestions": ["Yes, go ahead.", "Wait, explain the plan first."],
         "reason": None,
     }
-    assert len(harness.decide.calls) == 1
+    assert len(harness.gate.requests) == 1
 
 
-def test_the_route_reports_why_there_is_no_suggestion_as_a_200(harness: Harness) -> None:
-    harness.decide.result = useful_reply(0.1)
+def test_the_route_reports_why_there_is_no_suggestion_as_a_200(
+    make_harness: Callable[[GateServer], Harness],
+) -> None:
+    harness = make_harness(GateServer(0.1))
 
     response = post(harness)
 
@@ -53,7 +68,7 @@ def test_the_switch_in_the_gateways_own_config_turns_the_route_off(harness: Harn
 
     assert response.status_code == 200
     assert response.json() == {"suggestions": [], "reason": "disabled"}
-    assert harness.decide.calls == []
+    assert harness.gate.requests == []
 
 
 def test_bad_model_configuration_is_an_explicit_capability_failure(harness: Harness) -> None:
@@ -63,7 +78,7 @@ def test_bad_model_configuration_is_an_explicit_capability_failure(harness: Harn
     assert response.json()["code"] == "reply_suggestion_unavailable"
     assert response.json()["retryable"] is False
     assert "deepseek-flash" not in response.text
-    assert harness.decide.calls == []
+    assert harness.gate.requests == []
 
 
 def test_a_non_integer_agent_id_is_rejected(harness: Harness) -> None:

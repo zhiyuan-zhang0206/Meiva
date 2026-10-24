@@ -1,7 +1,6 @@
 exports = ["providers"]
 
 [debt.first-party-patch]
-"test_llm_factory.py#monkeypatch.setattr base.host.env.dotenv_file.read_env_aliases" = 1
 "test_lm_attach.py#monkeypatch.setattr base.lm.attach.packing.ATTACH_MAX_FILES_PER_TURN" = 1
 "test_lm_call.py#monkeypatch.setattr base.lm.call.jittered" = 7
 "test_lm_call.py#monkeypatch.setattr base.telemetry.tracing.is_initialized" = 1

@@ -60,6 +60,8 @@ and then raises; it produces the one fault a database cannot be asked for (durab
 acknowledgement), so a function that takes its pool as an argument is tested without a patch.
 
 The async twin is `AsyncConnectionSource` (anything that lends one connection for an `async with`
-block; `AsyncConnectionPool` is one). `base/db/tests/parked_pool.py` holds `ParkedAsyncPool`, whose
-n-th borrow waits at the pool until released and, on request, absorbs the first cancellation of that
-wait: the interrupt watcher's tests drive it instead of subclassing a pool.
+block; `AsyncConnectionPool` is one). A borrow that has to wait is built with the real pool: occupy
+its connections and start the borrower. The one fault a real pool cannot be asked for is a lost
+cancellation, which `base/db/tests/swallowed_cancel.py` holds as `CancelSwallowingPool`: its first
+borrow waits until released and absorbs the first cancellation of that wait, and the interrupt
+watcher's tests drive it instead of subclassing a pool.

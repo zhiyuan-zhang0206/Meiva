@@ -10,7 +10,6 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from base.agents.messages.inbound_provenance import InboundProvenance
 from base.agents.upload_delivery import source
 from base.agents.upload_delivery.models import CopyProof, ReceiveRequest
 from base.cluster.machine import MachineIdentity
@@ -70,44 +69,20 @@ def test_source_ready_commit_failure_recovers(
 
 # meiva:note
 # The ready write commits, then the caller sees a failure: the pool lends the batch claim first
-# and the ready write second, and loses the acknowledgement of the second.
+# and the ready write second, and loses the acknowledgement of the second. The route answers 500,
+# and the next upload of the same batch finds the committed work again.
 def test_source_ready_lost_commit_ack_recovers(
-    uploaded_agent: tuple[GatewayTestClient, int],
-    db_conn: psycopg.Connection[Any],
-    *,
-    machine_identity: MachineIdentity,
+    uploaded_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection[Any]
 ):
     client, agent = uploaded_agent
     pool = client.app.state.db_pool
-    home = client.app.state.gateway_config.upload_home
-    names = ["photo.png"]
-    batch = [("photo.png", b"bytes", "image/png")]
-    provenance = InboundProvenance(source_verified_by=None, source_transport="http")
-    lossy = LostAckPool(pool, lose_on=2, message="source ready response lost")
-    with pytest.raises(psycopg.OperationalError, match="source ready response lost"):
-        source.accept(
-            lossy,
-            "lost-ack",
-            agent,
-            names,
-            batch,
-            provenance,
-            local_machine=machine_identity.name(),
-            upload_home=home,
-        )
+    client.app.state.db_pool = LostAckPool(pool, lose_on=2, message="source ready response lost")
+    try:
+        assert post(client, agent).status_code == 500
+    finally:
+        client.app.state.db_pool = pool
     assert db_conn.execute("SELECT state FROM upload_delivery_batches").fetchone() == ("pending",)
-    recovered = source.accept(
-        pool,
-        "lost-ack",
-        agent,
-        names,
-        batch,
-        provenance,
-        local_machine=machine_identity.name(),
-        upload_home=home,
-    )
-    assert db_conn.execute("SELECT count(*) FROM upload_delivery_batches").fetchone() == (1,)
-    assert client.get(recovered.status_url + "/objects/0").content == b"bytes"
+    _recovered_source_ready(client, db_conn, agent)
 
 
 def _request_and_proof(

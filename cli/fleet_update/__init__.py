@@ -685,6 +685,9 @@ def main(
 ) -> int:
     args = _parse(argv)
     effective_env = os.environ if env is None else env
+    # meiva:note
+    # The updater imports no application module, so the agent-shell marker is spelled out here;
+    # its owner is `base.host.env.agent_env.AGENT_ID_ENV` (a test pins the two together).
     if "MEIVA_AGENT_ID" in effective_env:
         print(
             "refused: run from a plain login shell or an OS-owned job, not an Meiva "

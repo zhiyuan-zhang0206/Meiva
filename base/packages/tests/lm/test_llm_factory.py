@@ -15,8 +15,6 @@ from langchain_anthropic import ChatAnthropic
 
 from base.config import get_field, settings
 from base.config.tests.configuration import model_overrides
-from base.host.env import dotenv_file
-from base.host.env.tests.env_files import aliases_of
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.factory import (
@@ -374,7 +372,6 @@ class TestBuildChatModel:
         fallback (Task #5079) is stubbed empty — the suite fixture seeds the test
         home's `.env`, so leaving it live would hide the fail-fast contract.
         """
-        monkeypatch.setattr(dotenv_file, "read_env_aliases", aliases_of({}))
         with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"):
             build_chat_model(
                 "deepseek-flash",

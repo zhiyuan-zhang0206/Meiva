@@ -23,8 +23,8 @@ from base.config.tests.configuration import defaults, snapshot_process_config
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import idle_publisher
+from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 from base.host.env.agent_slices import AgentSlices
-from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import workspace_dir_readonly

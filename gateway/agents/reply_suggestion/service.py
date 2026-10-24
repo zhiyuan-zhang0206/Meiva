@@ -2,19 +2,23 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Any, TypedDict, cast
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage
 
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.agent_contract import AgentStatus
 from base.db import Database
-from base.lm.call import DraftModelFactory, extract_text
+from base.host.env.agent_slices import ModelOverrides
+from base.lm.call import extract_text
 from base.lm.catalog import ModelCatalog
-from base.lm.catalog.decide.types import DecisionError, Question, YesNo
+from base.lm.catalog.decide.types import AsyncTransport, DecisionError, Question, YesNo
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.compat.stop import StopCategory, classify_stop
-from base.lm.decision.call import DecideCall
+from base.lm.decision.call import decide
+from base.lm.effort import ReasoningEffort
 from base.lm.errors import ErrorClass, classify_error, normalize_provider_transport_error
+from base.lm.factory import build_chat_model
 from base.lm.usage import log_usage_from_message
 from base.log import logger
 from gateway.agents.history.timeline import load_current_timeline_items
@@ -22,7 +26,7 @@ from gateway.agents.reply_suggestion.cache import CACHE_ENTRIES, SuggestionCache
 from gateway.agents.reply_suggestion.excerpt import ConversationExcerpt, build_excerpt
 from gateway.agents.reply_suggestion.plan import (
     ReplySuggestionPolicy,
-    draft_instruction,
+    draft_messages,
     draft_verdict,
     gate_refusal,
     model_problem,
@@ -58,15 +62,45 @@ class ReplySuggestionConfigurationError(ValueError):
 
 
 # meiva:note
+# How the drafting model is built: reasoning off (DeepSeek defaults to maximum effort,
+# which makes a one-line draft run for tens of seconds), a bounded wait, and no metering of
+# its own (the service logs the usage).
+def draft_model_options(llm_override: str) -> dict[str, Any]:
+    return {
+        "reasoning_effort": ReasoningEffort.NONE,
+        "timeout": DRAFT_TIMEOUT_S,
+        "meter": False,
+        "llm_override": llm_override,
+        "overrides": ModelOverrides.from_pins({}),
+    }
+
+
+# meiva:note
+# What a structured-output call returns with `include_raw=True`: the provider's own message, the
+# parsed value (None when parsing failed) and the parsing error, if any.
+class _StructuredReply(TypedDict):
+    raw: AIMessage
+    parsed: object
+    parsing_error: BaseException | None
+
+
+def _structured_reply(reply: object) -> _StructuredReply:
+    if not isinstance(reply, dict) or not {"raw", "parsed", "parsing_error"} <= reply.keys():
+        raise TypeError("a structured call with include_raw=True returns raw/parsed/error")
+    return cast(_StructuredReply, reply)
+
+
+# meiva:note
 # Gate, draft and remember reply suggestions.
 #
-# `decide` answers the gate's question and `draft_model` builds the drafting chat model; the
-# gateway passes the real ones, a test passes doubles. Everything else a request needs
-# (the store, the settings, the catalog) arrives with the request.
+# The gate asks its question through `decide` over `transport` (None dials the provider; a test
+# hands a transport that answers the provider's wire), and the drafting chat model is built
+# from the catalog like any other, with the cluster's `llm_override`. Everything else a request
+# needs (the store, the settings, the catalog) arrives with the request.
 class ReplySuggestionService:
-    def __init__(self, *, decide: DecideCall, draft_model: DraftModelFactory) -> None:
-        self._decide = decide
-        self._draft_model = draft_model
+    def __init__(self, *, llm_override: str, transport: AsyncTransport | None) -> None:
+        self._llm_override = llm_override
+        self._transport = transport
         self._cache = SuggestionCache(CACHE_ENTRIES)
 
     async def suggest(
@@ -140,7 +174,7 @@ class ReplySuggestionService:
         keys: ProviderKeys,
     ) -> float:
         questions: dict[str, Question] = {USEFUL_REPLY: GATE_QUESTION}
-        decisions = await self._decide(
+        decisions = await decide(
             policy.gate_model,
             excerpt.text,
             questions,
@@ -149,6 +183,7 @@ class ReplySuggestionService:
             usage_kind=GATE_USAGE_KIND,
             for_agent_id=agent_id,
             timeout=GATE_TIMEOUT_S,
+            transport=self._transport,
         )
         return decisions[USEFUL_REPLY].probability("true")
 
@@ -160,19 +195,16 @@ class ReplySuggestionService:
         catalog: ModelCatalog,
         keys: ProviderKeys,
     ) -> ReplySuggestionResponse:
-        llm = self._draft_model(policy.model, catalog, keys).with_structured_output(
-            DraftReplies.model_json_schema(),
-            method="json_schema",
-            strict=True,
-            include_raw=True,
+        chat = build_chat_model(
+            policy.model, catalog=catalog, keys=keys, **draft_model_options(self._llm_override)
+        )
+        llm = chat.with_structured_output(
+            DraftReplies.model_json_schema(), method="json_schema", strict=True, include_raw=True
         )
         started = time.monotonic()
         try:
-            response = await llm.ainvoke(
-                [
-                    SystemMessage(content=draft_instruction(policy.max_candidates)),
-                    HumanMessage(content=excerpt.text),
-                ]
+            response = _structured_reply(
+                await llm.ainvoke(draft_messages(policy.max_candidates, excerpt.text))
             )
         except Exception as exc:
             failure = normalize_provider_transport_error(exc)

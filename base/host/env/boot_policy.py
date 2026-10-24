@@ -19,21 +19,13 @@ _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 # meiva:note
 # An agent boots by fetching this. The timeout must cover a slow-but-healthy
-# meiva:note
 # fetch under load (the whole boot -- fetch + import + claim -- has to finish
-# meiva:note
 # before the parent's launch-confirm poll gives up; too small a cap fails a
-# meiva:note
 # fetch that would have succeeded -- a 3s cap regressed CI). The retry covers a
-# meiva:note
 # gateway briefly unreachable mid-restart (connection refused), which fails fast.
-# meiva:note
 # A ReadTimeout (slow response) is deliberately NOT retried: stacking another
-# meiva:note
 # full timeout would blow past the launch-confirm window and fail a spawn whose
-# meiva:note
 # first fetch would have eventually returned.
-# meiva:note
 # Tuning of one bootstrap fetch; every default is the production value.
 #
 # The config boot passes `BootstrapFetch()`; a test passes small values.

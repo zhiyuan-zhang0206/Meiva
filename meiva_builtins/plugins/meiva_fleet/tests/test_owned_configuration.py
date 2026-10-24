@@ -8,7 +8,7 @@ import pytest
 
 from base.host.env import bootstrap
 from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV, SERVICE_PLUGIN_CONFIG_ENV
-from base.host.env.tests.env_files import constant, unit_env_path
+from base.host.env.tests.env_files import unit_env_path
 from base.host.proc import run_bounded
 from base.packages.plugins.config_registration import (
     disk_image_path,
@@ -49,8 +49,8 @@ def test_remote_cluster_projection_never_overrides_local_host_gate(
     image = write_image(FleetConfig(task_maintenance_enabled=False, task_escalate_n=99))
     gateway = FleetConfig(task_escalate_n=7, reduce_context_switch=False).model_dump(mode="json")
     gateway.pop("task_maintenance_enabled")
-    monkeypatch.setattr(bootstrap, "config_source_is_local", constant(False))
-    monkeypatch.setattr(bootstrap, "should_fetch_from_gateway", constant(True))
+    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(bootstrap, "should_fetch_from_gateway", lambda *_args, **_kwargs: True)
     monkeypatch.setenv(PLUGIN_CLUSTER_CONFIG_ENV, json.dumps({"meiva_fleet": gateway}))
     actual = read_plugin_config("meiva_fleet", FleetConfig, image)
     assert actual.task_maintenance_enabled is False
@@ -91,7 +91,7 @@ def test_gateway_unit_without_a_packet_composes_from_its_local_image() -> None:
 def test_invalid_present_projection_is_rejected_even_on_gateway(
     packet: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(bootstrap, "config_source_is_local", constant(True))
+    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda *_args, **_kwargs: True)
     monkeypatch.setenv(PLUGIN_CLUSTER_CONFIG_ENV, packet)
     with pytest.raises(TypeError):
         read_plugin_config("meiva_fleet", FleetConfig, write_image(FleetConfig()))
@@ -106,7 +106,7 @@ def test_gateway_truth_is_authoritative_and_projection_has_exact_scope(
     assert packet["task_escalate_n"] == 7
     packet["task_escalate_n"] = 99
     monkeypatch.setenv(PLUGIN_CLUSTER_CONFIG_ENV, json.dumps({"meiva_fleet": packet}))
-    monkeypatch.setattr(bootstrap, "config_source_is_local", constant(True))
+    monkeypatch.setattr(bootstrap, "config_source_is_local", lambda *_args, **_kwargs: True)
     assert read_plugin_config("meiva_fleet", FleetConfig, image).task_escalate_n == 7
     packet["task_escalate_n"] = "invalid"
     monkeypatch.setenv(PLUGIN_CLUSTER_CONFIG_ENV, json.dumps({"meiva_fleet": packet}))

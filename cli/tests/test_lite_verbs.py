@@ -7,8 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from base.host.env import bootstrap
-from base.host.env.tests.env_files import constant
 from base.host.net.auth import delivered_token
 from base.native_process.root_control import instance_lock
 from base.paths import root_run_dir
@@ -93,7 +91,6 @@ def test_lite_cli_uses_its_local_runner_api_token(
         monkeypatch.delenv("MEIVA_API_TOKEN", raising=False)
     else:
         monkeypatch.setenv("MEIVA_API_TOKEN", explicit)
-    monkeypatch.setattr(bootstrap, "config_source_is_local", constant(False))
 
     def consume(home: Path) -> types.SimpleNamespace:
         assert home == tmp_path
@@ -144,7 +141,6 @@ def test_lite_cli_in_agent_profile_does_not_consume_operator_capability(
     monkeypatch.delenv("MEIVA_API_TOKEN", raising=False)
     monkeypatch.setenv("MEIVA_CONFIG_FETCH", "")
     monkeypatch.delenv("MEIVA_CONFIG_FETCH", raising=False)
-    monkeypatch.setattr(bootstrap, "config_source_is_local", constant(False))
 
     def no_operator_capability(_home: Path) -> None:
         pytest.fail("an agent descendant must retain the launcher token boundary")

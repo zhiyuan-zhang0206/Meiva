@@ -31,7 +31,6 @@ exports = ["bootstrap"]
 "test_fleet_alert_silence.py#monkeypatch.setattr base.config.settings.observability.telemetry_grafana_url" = 1
 "test_fleet_alert_silence.py#monkeypatch.setattr cli.fleet_alert_silence.colocated_grafana" = 4
 "test_lite_verbs.py#monkeypatch.setattr base.host.db_authority.unit.consume_unit" = 2
-"test_lite_verbs.py#monkeypatch.setattr base.host.env.bootstrap.config_source_is_local" = 2
 "test_lite_verbs.py#monkeypatch.setattr cli.parsers.build_parser" = 3
 "test_main_dispatch.py#monkeypatch.setattr cli.commands.agents.control.cmd_agents_restart" = 1
 "test_main_dispatch.py#monkeypatch.setattr cli.parsers.build_parser" = 7
