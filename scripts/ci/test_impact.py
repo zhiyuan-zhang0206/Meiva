@@ -12,13 +12,13 @@ import tomllib
 from collections import deque
 from collections.abc import Generator, Iterable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
 from meizel.allowances import POLICY, Policy, parse
 from meizel.contracts.sync import prepare_policy_snapshot
-from scripts.structure.imports.facts import UNANCHORED_READ, FactKind, Unknown, collect
+from scripts.structure.imports.facts import UNANCHORED_READ, Fact, FactKind, Unknown, collect
 from scripts.structure.imports.fixture_scopes import declarations
 from scripts.structure.placement import CODE_TOPS, ModuleIndex
 
@@ -43,6 +43,22 @@ class Impact:
 
     tests_by_input: dict[str, set[str]]
     unknown: tuple[Unknown, ...]
+    members: dict[Fact, set[str]] = field(default_factory=dict)
+
+    def runtime_tests(self, path: str) -> set[str]:
+        # meiva:link docs/conventions/engineering/test-selection.md
+        tests = {
+            test
+            for parent in (Path(path), *Path(path).parents)
+            for test in self.tests_by_input.get(parent.as_posix(), ())
+        }
+        tests.update(
+            test
+            for fact, consumers in self.members.items()
+            if fact.matches_member(path)
+            for test in consumers
+        )
+        return tests
 
 
 def python_files(root: Path) -> Iterator[Path]:
@@ -206,6 +222,7 @@ def build_impact(root: Path, tests: frozenset[str]) -> Impact:
     index = ModuleIndex(root)
     incomplete: dict[str, tuple[Unknown, ...]] = {}
     edges = _fixture_edges(root, tests, index, incomplete)
+    member_sources: dict[Fact, set[str]] = {}
     for file in python_files(root):
         rel = file.relative_to(root).as_posix()
         tree = ast.parse(file.read_text(encoding="utf-8"), filename=rel)
@@ -213,7 +230,10 @@ def build_impact(root: Path, tests: frozenset[str]) -> Impact:
         dependencies = edges.setdefault(rel, set())
         for fact in evidence.records:
             if fact.kind is FactKind.RESOURCE:
-                dependencies.add(fact.target)
+                if fact.member is None:
+                    dependencies.add(fact.target)
+                else:
+                    member_sources.setdefault(fact, set()).add(rel)
             elif fact.kind in _MODULE_FACTS:
                 dependencies.update(module_files(fact.target, index))
             else:
@@ -226,8 +246,14 @@ def build_impact(root: Path, tests: frozenset[str]) -> Impact:
 
     reverse = _tests_by_input(edges, tests)
     unknown = {item for dependency in reverse for item in incomplete.get(dependency, ())}
+    members = {
+        fact: set[str]().union(*(reverse.get(source, set[str]()) for source in sources))
+        for fact, sources in member_sources.items()
+    }
     return Impact(
-        reverse, tuple(sorted(unknown, key=lambda item: (item.path, item.line, item.expression)))
+        reverse,
+        tuple(sorted(unknown, key=lambda item: (item.path, item.line, item.expression))),
+        members,
     )
 
 

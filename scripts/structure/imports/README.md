@@ -108,6 +108,34 @@ output. Other method names such as an arbitrary `read()` or
 `open()` do not establish a file read; built-in/imported `open` and recognized
 Path operations retain their existing resource grammar.
 
+`model.py` owns the immutable dependency values and resource-domain invariants.
+`facts.py` keeps their existing import door alongside the collector; it does not
+hold a second copy of their vocabulary or matching behavior. `Fact.via` retains
+the recognized callee for consumers that apply separate ownership policies.
+
+`resource_members.prove()` recognizes one complete lexical discovery shape: local
+root builders in a literal tuple/list, a guarded `is_dir()` iterator, sorted
+immediate `iterdir()` entries, an optional hidden-name guard, and one literal
+child filename checked with `is_file()` and appended to a fresh returned list.
+Root, entry, member and output bindings must not escape or be rebound. Unsupported
+syntax, global/default/helper propagation, visible same-module attribute writes,
+reflective namespace access or patching (including inside nested helpers), and
+filesystem aliases retain the coarse directory dependency. The proof is pure;
+the collector owns path anchoring and physical alias checks.
+
+A proven RESOURCE fact's `member` bounds possible inputs to `target/*/member`;
+`Fact.matches_member()` also includes replacement of the root or an immediate
+entry. Matching uses the whole changed path, never its ancestors, and does not
+require the member to exist. `Discovery` keeps opaque root alternatives separately
+from positive members: they retain their own Unknown even when a known builder,
+escaping output or visible mutation prevents the membership proof.
+This metadata neither executes discovery nor adds positive read events. Consumers
+that do not understand member domains can retain the conservative `target` edge.
+The CI impact owner propagates source consumers once through the ordinary graph
+and queries these domains with `Impact.runtime_tests()` for both base and head.
+Dashboard helper/default/lambda discovery remains coarse, including its real
+transitive Python file-loader dependencies.
+
 `Evidence.resource_reads` distinguishes recognized read operations from resource
 path construction. The same collector emits `ResourceRead` with the operation's
 line, checkout-relative target and method: `read_text`, `read_bytes`, or `open`
