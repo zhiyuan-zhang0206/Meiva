@@ -13,6 +13,7 @@ import json
 import threading
 import time
 from collections.abc import Iterator
+from contextlib import suppress
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -44,6 +45,7 @@ class Received:
     path: str
     headers: httpx.Headers
     body: Any
+    query: str
 
 
 @dataclass
@@ -185,7 +187,13 @@ def gateway_stub() -> Iterator[GatewayStub]:
             length = int(self.headers.get("Content-Length", "0"))
             body = json.loads(self.rfile.read(length)) if length else None
             stub.received.append(
-                Received(self.command, path, httpx.Headers(dict(self.headers.items())), body)
+                Received(
+                    self.command,
+                    path,
+                    httpx.Headers(dict(self.headers.items())),
+                    body,
+                    urlsplit(self.path).query,
+                )
             )
             stub.arrived.set()
             queue = stub.replies.get((self.command, path))
@@ -197,11 +205,12 @@ def gateway_stub() -> Iterator[GatewayStub]:
                 reply.release.wait(HELD_REPLY_BOUND_SECONDS)
             payload = reply.body if isinstance(reply.body, str) else json.dumps(reply.body)
             data = payload.encode()
-            self.send_response(reply.status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
+            with suppress(BrokenPipeError, ConnectionResetError):
+                self.send_response(reply.status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
 
         def do_GET(self) -> None:
             self.serve()

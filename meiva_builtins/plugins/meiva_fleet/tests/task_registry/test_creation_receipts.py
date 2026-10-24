@@ -1,10 +1,15 @@
 """Standalone SDK creation preserves its original accepted result."""
 
+import json
+import os
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
+from pathlib import Path
 from threading import Barrier
 from typing import Any
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import psycopg
 import pytest
@@ -16,6 +21,9 @@ from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.bus import EventBus
+from base.host.proc import run_bounded
+from base.telemetry.delivery.serialization import event_line
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.tests.fixtures.pin_agent import pin_agent
@@ -76,7 +84,12 @@ def test_lost_response_returns_original_after_mutation_and_title_reuse(
 ) -> None:
     pin_agent(seed_agent(db_conn))
     committed = task_registry.commit_creation(
-        meiva.context, "original", "work", parent=root_task_id, operation_key="lost"
+        meiva.context,
+        "original",
+        "work",
+        parent=root_task_id,
+        operation_key="lost",
+        default_remind_interval_seconds=7200,
     )
     snapshot = db_conn.execute("SELECT result FROM task_creation_receipts").fetchone()
     assert snapshot is not None
@@ -108,19 +121,25 @@ def test_publication_emits_the_committed_events_once_and_in_order(
         parent=root_task_id,
         owner=owner,
         operation_key=str(uuid4()),
+        default_remind_interval_seconds=7200,
     )
     assert emitted_events.names() == []
-    assert not committed.replayed
-    assert committed.events
+    publication = committed.publication
+    assert publication is not None
+    assert task_registry.publication_events(publication)
 
-    task_registry.publish_creation(committed)
+    task_registry.publish_creation(publication)
 
-    assert emitted_events.names() == [event.event_name for event in committed.events]
-    assert [event.attributes for event in emitted_events] == [
-        event.attributes for event in committed.events
+    assert emitted_events.names() == [
+        event.event_name for event in task_registry.publication_events(publication)
     ]
-    assert committed.events[0].event_name == "task_create"
-    assert committed.events[0].attributes["task_id"] == committed.task.id
+    assert [event.attributes for event in emitted_events] == [
+        event.attributes for event in task_registry.publication_events(publication)
+    ]
+    assert task_registry.publication_events(publication)[0].event_name == "task_create"
+    assert (
+        task_registry.publication_events(publication)[0].attributes["task_id"] == committed.task.id
+    )
 
 
 def test_deleted_task_and_parent_replay_snapshot(
@@ -259,3 +278,92 @@ def test_actor_scope_independent_and_new_key_keeps_title_constraint(
     other = task_registry.create("second", "work", parent=root_task_id, operation_key="same")
     assert original.id != other.id
     assert db_conn.execute("SELECT count(*) FROM task_creation_receipts").fetchone() == (2,)
+
+
+# meiva:note
+# A caller may edit the mutable SDK result or an Event it materialized, but the publication
+# still names and emits exactly the facts that committed. The board signal crosses real Redis.
+def test_sdk_result_and_materialized_events_cannot_rewrite_publication(
+    db_conn: psycopg.Connection,
+    root_task_id: int,
+    event_bus: EventBus,
+    emitted_events: EmittedEvents,
+) -> None:
+    pin_agent(seed_agent(db_conn))
+    committed = task_registry.commit_creation(
+        meiva.context,
+        "immutable publication",
+        "work",
+        parent=root_task_id,
+        operation_key="immutable",
+        default_remind_interval_seconds=7200,
+    )
+    publication = committed.publication
+    assert publication is not None
+    task_id = committed.task.id
+    retained_lines = publication.event_lines
+    committed.task.id = -99
+    materialized = task_registry.publication_events(publication)
+    materialized[0].attributes["task_id"] = -99
+    materialized[0].attributes["unexpected"] = ["caller data"]
+    assert publication.event_lines == retained_lines
+    assert (
+        tuple(event_line(event) for event in task_registry.publication_events(publication))
+        == retained_lines
+    )
+
+    with event_bus.sync_redis(decode_responses=True) as redis, redis.pubsub() as incoming:
+        incoming.subscribe(event_bus.channel)
+        confirmation = incoming.get_message(timeout=2.0)
+        assert confirmation is not None and confirmation["type"] == "subscribe"
+        task_registry.publish_creation(publication)
+        message = incoming.get_message(ignore_subscribe_messages=True, timeout=2.0)
+    assert message is not None
+    assert json.loads(message["data"])["task_id"] == task_id
+    assert tuple(event_line(event) for event in emitted_events) == retained_lines
+
+
+# meiva:note
+# A receipt replays the accepted SDK snapshot before today's defaults or timestamp renderer
+# become effects. The fresh operation proves the second process actually uses its new inputs.
+def test_receipt_replays_before_new_default_and_timezone_resolution(
+    db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    actor = seed_agent(db_conn)
+
+    def commit(zone: str, interval: int, key: str) -> dict[str, Any]:
+        result = run_bounded(
+            [
+                sys.executable,
+                "-I",
+                str(Path(__file__).with_name("child_creation.py")),
+                str(root_task_id),
+                str(interval),
+                key,
+            ],
+            env=dict(os.environ)
+            | {"MEIVA_AGENT_ID": str(actor), "MEIVA_TIMEZONE": zone, "MEIVA_CONFIG_FETCH": "skip"},
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout.strip().splitlines()[-1])
+
+    original = commit("UTC", 7200, "replayed")
+    before = _facts(db_conn)
+    replay = commit("Asia/Tokyo", 777, "replayed")
+    assert replay == original | {"publish": False}
+    assert _facts(db_conn) == before
+    fresh = commit("Asia/Tokyo", 777, "fresh")
+    assert original["task"]["remind_interval_seconds"] == 7200
+    assert fresh["task"]["remind_interval_seconds"] == 777
+    assert fresh["publish"] is True
+    for result, zone in ((original, "UTC"), (fresh, "Asia/Tokyo")):
+        row = db_conn.execute(
+            "SELECT created_at FROM agent_tasks WHERE id=%s", (result["task"]["id"],)
+        ).fetchone()
+        assert row is not None
+        local = row[0].astimezone(ZoneInfo(zone))
+        assert result["task"]["created_at"].startswith(local.strftime("[%Y-%m-%d "))
+        assert result["task"]["created_at"].endswith(local.strftime("%H:%M:%S]"))

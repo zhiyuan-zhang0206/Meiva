@@ -54,11 +54,12 @@ uses the existing task row, audit and notification owners. It inserts its receip
 in that same `meiva.DB.transaction()`. A producer failure rolls back the task,
 appended note, task audit facts, notification intents and receipt together.
 
-`task_registry.commit_update` is the transaction half and returns an `UpdateCommit`: the task
-id, the actor, the events the transaction recorded, the title when the update closed the task,
-and `replayed`. It emits nothing; `publish_update` emits the recorded events in order, refreshes
-the task board and logs a close, and `update_in_context` runs the two in sequence. A replayed
-commit publishes nothing.
+`task_registry.commit_update` is the transaction half and returns an immutable
+`TaskPublication` for fresh writes, or `None` for a retained acceptance. The publication
+holds the task id, actor, canonical JSONB event facts and closed title independently of
+mutable event mappings. It emits nothing; `publish_update` materializes and emits those
+facts in order, refreshes the task board and logs a close. `update_in_context` runs the
+two halves in sequence. A replay has no publication.
 
 A retained `task_update_receipts` row proves that the void-returning database
 mutation committed. Replay returns before changing the task, producing task

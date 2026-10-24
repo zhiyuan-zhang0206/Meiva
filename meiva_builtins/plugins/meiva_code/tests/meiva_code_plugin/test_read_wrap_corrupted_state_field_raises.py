@@ -6,22 +6,34 @@ import inspect
 import json
 import subprocess
 from collections.abc import Callable
+from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
 
 import meiva
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_contract import BuildContext
 from base.lm.effort import ReasoningEffort
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import PluginContributions, SdkNamespace, SdkWrap
 from meiva.sdk_surface import install, process_context
+from meiva.tests.fixtures.gateway_wire import GatewayStub
+from meiva.tests.fixtures.gateway_wire import gateway_stub as gateway_stub
 from meiva.tests.fixtures.scripted_chat_model import Script
-from meiva_builtins.plugins.meiva_code.tests.surface_support import install_code_surface
+from meiva_builtins.plugins.meiva_code.tests.surface_support import (
+    authority_with,
+    install_code_surface,
+)
 from meiva_builtins.plugins.meiva_code.tests.test_meiva_code_plugin import (
     get_injected_context_notes,
     make_git_repo,
@@ -438,44 +450,94 @@ def test_understand_wrap_passes_invalid_combo_to_core(tmp_path: Path):
 
 
 # meiva:note
-# The effort knob reaches the core through the wrap: the default (max) and an explicit value both
-# arrive as given, and the advertised signature exposes the parameter.
-def test_understand_wrap_forwards_effort():
-    from meiva_builtins.plugins.meiva_code.plugin import wrapped_understand
+# This binding supplies a real provider client with a loopback endpoint; the installed SDK wrap,
+# core plan, provider factory and OpenAI serializer all run before the listener sees the effort.
+def _wire_model(ctx: BuildContext, *, endpoint: str, client: httpx.Client) -> BaseChatModel:
+    return ChatOpenAI(
+        model=ctx.model,
+        api_key=SecretStr(ctx.keys.require("OPENAI_API_KEY")),
+        base_url=endpoint,
+        http_client=client,
+        use_responses_api=True,
+        reasoning={"effort": ctx.resolved_effort},
+        disable_streaming=True,
+        timeout=ctx.timeout,
+    )
 
-    targets: list[dict[str, str | list[str]]] = [{"prompt": "p", "text": "t"}]
-    default = forwarded(wrapped_understand(echo_understand, targets))
-    assert (default["effort"], default["targets"]) == ("max", targets)
-    assert forwarded(wrapped_understand(echo_understand, targets, effort="low"))["effort"] == "low"
-    assert inspect.signature(wrapped_understand).parameters["effort"].default == ReasoningEffort.MAX
-    assert "effort" in inspect.signature(meiva.understand).parameters
+
+def test_understand_wrap_forwards_effort(
+    gateway_stub: GatewayStub, model_catalog: ModelCatalog, config_authority: ConfigAuthority
+):
+    gateway_stub.reply(
+        "POST",
+        "/v1/responses",
+        {
+            "id": "resp_effort",
+            "object": "response",
+            "created_at": 1,
+            "status": "completed",
+            "model": "gpt-6-sol",
+            "service_tier": "default",
+            "error": None,
+            "output": [
+                {
+                    "id": "msg_1",
+                    "type": "message",
+                    "status": "completed",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "ok", "annotations": []}],
+                }
+            ],
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        },
+    )
+    with httpx.Client(trust_env=False) as client:
+        binding = replace(
+            model_catalog.bindings["gpt-"],
+            build=partial(_wire_model, endpoint=gateway_stub.url + "/v1", client=client),
+        )
+        catalog = replace(model_catalog, bindings={**model_catalog.bindings, "gpt-": binding})
+        authority = authority_with(
+            config_authority, understand_text_model="gpt-6-sol", llm_override=""
+        )
+        install.uninstall()
+        install_code_surface(catalog, authority)
+        targets: list[dict[str, str | list[str]]] = [{"prompt": "p", "text": "t"}]
+        assert meiva.understand(targets) == ["ok"]
+        assert meiva.understand(targets, effort="low") == ["ok"]
+    assert [request.body["reasoning"]["effort"] for request in gateway_stub.received] == [
+        "max",
+        "low",
+    ]
+    assert inspect.signature(meiva.understand).parameters["effort"].default == ReasoningEffort.MAX
 
 
-def test_understand_wrap_resolves_every_target_in_a_batch(tmp_path: Path):
-    """The wrap walks the whole batch: each `paths` target is resolved against the
-    tracked cwd, while a `text` target passes through untouched."""
-    from meiva_builtins.plugins.meiva_code.plugin import wrapped_understand
-
+# meiva:note
+# Every target runs through file loading and the core, retaining its material/prompt grouping.
+def test_understand_wrap_resolves_every_target_in_a_batch(
+    tmp_path: Path, understand_script: Script
+):
+    (tmp_path / "a.txt").write_text("material A", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("material B", encoding="utf-8")
     process_context.set_state(make_state_with_cwd(str(tmp_path)))
     process_context.set_state_update({})
     try:
-        resolved = forwarded(
-            wrapped_understand(
-                echo_understand,
-                [
-                    {"prompt": "p1", "paths": ["a.txt"]},
-                    {"prompt": "p2", "text": "inline"},
-                    {"prompt": "p3", "paths": ["b.txt"]},
-                ],
-            )
-        )["targets"]
+        assert meiva.understand(
+            [
+                {"prompt": "p1", "paths": ["a.txt"]},
+                {"prompt": "p2", "text": "inline"},
+                {"prompt": "p3", "paths": ["b.txt"]},
+            ]
+        ) == ["ok", "ok", "ok"]
     finally:
         process_context.unbind_exec_turn()
-    assert resolved == [
-        {"prompt": "p1", "paths": [str((tmp_path / "a.txt").resolve())]},
-        {"prompt": "p2", "text": "inline"},
-        {"prompt": "p3", "paths": [str((tmp_path / "b.txt").resolve())]},
-    ]
+    materials = [message.content for [message] in understand_script.requests]
+    for body, prompt in (("material A", "p1"), ("inline", "p2"), ("material B", "p3")):
+        assert any(
+            content[:2] == [{"type": "text", "text": body}, {"type": "text", "text": prompt}]
+            for content in materials
+        )
+    assert len(materials) == 3
 
 
 def test_understand_wrap_resolves_every_entry_in_a_paths_list(
