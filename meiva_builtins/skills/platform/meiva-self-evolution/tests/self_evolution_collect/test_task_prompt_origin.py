@@ -55,7 +55,7 @@ def _build(
             agent_id=agent_id,
             week="2026-08-30",
             events=record_mod.event_facts(()),
-            log_events=tuple(name for name, _ in ()),
+            log_events=(),
             inbounds=record_mod.inbound_facts(tuple(inbounds)),
             meta=record_mod.AgentMeta(spawner, status, "delivered"),
             transcript=record_mod.transcript_facts(() if transcript is None else tuple(transcript)),

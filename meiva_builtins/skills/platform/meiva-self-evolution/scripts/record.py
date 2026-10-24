@@ -242,12 +242,8 @@ def task_prompt_of(record: Mapping[str, object]) -> str:
     prompt = (raw.get("task_prompt") or "").strip()
     if prompt:
         return raw["task_prompt"]
-    return _first_human_message(
-        tuple(
-            TranscriptRow(row.get("type", ""), row.get("content", ""))
-            for row in raw.get("transcript") or []
-        )
-    )
+    rows = cast(Sequence[Mapping[str, str]], raw.get("transcript") or ())
+    return _first_human_message(transcript_facts(rows))
 
 
 def _peer_feedback(spawner: str, agent_messages: Sequence[InboundFact]) -> list[dict[str, Any]]:
