@@ -9,7 +9,6 @@ from __future__ import annotations
 import contextlib
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import time
@@ -23,7 +22,6 @@ import pytest
 
 from base.cluster import ownership
 from base.cluster.dataplane import pooler as base_pooler
-from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import ledger_path
@@ -96,61 +94,24 @@ def test_invalid_timeout_refuses(
 
 
 # meiva:note
-# `OwnedProcess.live` lives in base.native_process.ownership (the stop path and the frontend
-# identity probe share it); the Linux start-tick reader is that module's global, so these two
-# tests of its three outcomes patch the reference `live()` consults.
-def test_linux_ticks_win_over_changed_epoch_birth(
-    launch: Launcher, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    proc = launch("unused", term="ignore")
-    tick: int | None = 123
+# The identity decision under `OwnedProcess.live` is `ticks_match`, a pure function of the recorded
+# ticks, the observed ticks and whether the pid still exists; its three outcomes are asserted on
+# values, with no process and no /proc.
+def test_recorded_ticks_decide_identity_whatever_the_epoch_birth_says() -> None:
+    identity = OwnedProcess(4242, 0, 123)
 
-    def read_tick(_pid: int) -> int | None:
-        return tick
-
-    import base.native_process.ownership
-
-    monkeypatch.setattr(base.native_process.ownership, "pid_starttime_ticks", read_tick)
-    identity = OwnedProcess(proc.pid, 0, 123)
-    assert identity.live()
-    tick = 124
-    assert not identity.live()
-    tick = None
+    assert identity.ticks_match(123, pid_exists=True)
+    assert not identity.ticks_match(124, pid_exists=True)
     with pytest.raises(RuntimeError, match="cannot verify"):
-        identity.live()
+        identity.ticks_match(None, pid_exists=True)
 
 
-@pytest.mark.requires_host("linux")
-def test_wait_for_exit_converges_when_a_tracked_entry_vanishes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A tracked process exiting (reaped) mid-wait converges the wait instead
-    of aborting the stop — the 2026-09-20 wave-2 failure: the identity read
-    found no /proc entry after psutil had validated the pid."""
-    import base.native_process.ownership
-
-    child = subprocess.Popen([sys.executable, str(CHILD), "sleep", "30"])
-    pid = child.pid
-    starttime = pid_starttime_ticks(pid)
-    assert starttime is not None
-    identity = OwnedProcess(pid, 0.5, starttime)
-    real_read = pid_starttime_ticks
-
-    def reaping_read(reading_pid: int) -> int | None:
-        # The reap lands exactly where the kernel race puts it: after psutil
-        # validated the pid, before the raw read completes.
-        if reading_pid == pid:
-            os.kill(pid, signal.SIGKILL)
-            child.wait()
-        return real_read(reading_pid)
-
-    monkeypatch.setattr(base.native_process.ownership, "pid_starttime_ticks", reaping_read)
-    try:
-        wait_for_exit({identity}, deadline_after(5))
-    finally:
-        if child.poll() is None:
-            child.kill()
-            child.wait()
+# meiva:note
+# A tracked process that exits (is reaped) between the pid check and the tick read converges the
+# wait instead of aborting the stop (the 2026-09-20 wave-2 failure): an entry that is gone is "not
+# this process", never an error.
+def test_a_tick_read_that_finds_the_entry_gone_means_the_process_is_gone() -> None:
+    assert not OwnedProcess(4242, 0.5, 777).ticks_match(None, pid_exists=False)
 
 
 def test_a_wait_returns_as_soon_as_the_tracked_process_has_exited() -> None:

@@ -16,4 +16,3 @@ exports = ["stop_support.py"]
 "test_stop_shell_sessions.py" = ["_child.py", "stop_support.py"]
 
 [debt.first-party-patch]
-"test_data_plane_stop.py#monkeypatch.setattr base.native_process.ownership.pid_starttime_ticks" = 2
