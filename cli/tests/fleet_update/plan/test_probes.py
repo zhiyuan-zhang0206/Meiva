@@ -229,3 +229,42 @@ def test_rebuilding_hosts_are_the_ones_whose_helper_needs_it_and_only_when_accep
     probes = {"mac": {**_PRESENT, "h_stale": "yes"}, "lin": _PRESENT}
     assert rebuilding_hosts(probes, rebuild=True) == frozenset({"mac"})
     assert rebuilding_hosts(probes, rebuild=False) == frozenset()
+
+
+@pytest.mark.parametrize("field", ["hook", "active"])
+@pytest.mark.parametrize("value", ["future", "", "-"])
+def test_unknown_host_flags_are_not_negative_answers(field: str, value: str) -> None:
+    with pytest.raises(ValueError, match=rf"lin\.{field}.*{value!r}"):
+        host_refusals("lin", {**_CLEAN, field: value})
+
+
+@pytest.mark.parametrize("hook", ["yes", "no"])
+@pytest.mark.parametrize("active", ["yes", "no"])
+def test_every_valid_host_flag_combination_keeps_its_refusals(hook: str, active: str) -> None:
+    reasons = host_refusals("lin", {**_CLEAN, "hook": hook, "active": active})
+    assert len(reasons) == (hook == "yes") + (active == "yes")
+
+
+@pytest.mark.parametrize("field", ["helper", "valid", "loaded", "stale"])
+def test_unknown_helper_words_cannot_bypass_the_gate_or_rebuild_plan(field: str) -> None:
+    facts = {**_PRESENT, f"h_{field}": "future"}
+    with pytest.raises(ValueError, match=rf"{field}.*'future'"):
+        unreadable_facts(facts)
+    with pytest.raises(ValueError, match=rf"{field}.*'future'"):
+        needs_rebuild(facts)
+    with pytest.raises(ValueError, match=rf"mac:.*{field}.*'future'"):
+        refusals({"mac": facts}, _TABLE, rebuild=True)
+    with pytest.raises(ValueError, match=rf"{field}.*'future'"):
+        rebuilding_hosts({"mac": facts}, rebuild=True)
+
+
+@pytest.mark.parametrize("valid", ["yes", "no"])
+@pytest.mark.parametrize("loaded", ["yes", "no"])
+@pytest.mark.parametrize("stale", ["yes", "no"])
+def test_every_valid_helper_flag_combination_is_judged(valid: str, loaded: str, stale: str) -> None:
+    facts = {**_PRESENT, "h_valid": valid, "h_loaded": loaded, "h_stale": stale}
+    rebuild = stale == "yes" or valid == "no"
+    assert unreadable_facts(facts) == ()
+    assert needs_rebuild(facts) is rebuild
+    assert bool(refusals({"mac": facts}, _TABLE, rebuild=False)) is (loaded == "yes" and rebuild)
+    assert refusals({"mac": facts}, _TABLE, rebuild=True) == ()

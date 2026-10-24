@@ -150,11 +150,7 @@ class Sim:
         if stdin in (programs["silence"], programs["leases"]):
             return self._shipped(alias, command, stdin, emit)
         if "agent_host.pid" in command:
-            emit.append(f"host={'up' if self.s['host_up'][alias] else 'down'}")
-            journal = self.s["journal"].get(alias)
-            if journal is not None:
-                emit.append(json.dumps(journal))
-            return 0
+            return self._evidence(alias, emit)
         if "helper-signing.py" in command and " facts" in command:
             emit.append(self._helper_facts(host))
             return 0
@@ -163,6 +159,15 @@ class Sim:
         if "verify" in command:
             return self._verify(alias, command, emit)
         return self._effect_for(alias, host, command, emit)
+
+    def _evidence(self, alias: str, emit: list[str]) -> int:
+        if rc := self._failure("evidence", alias):
+            return rc
+        emit.append(f"host={'up' if self.s['host_up'][alias] else 'down'}")
+        journal = self.s["journal"].get(alias)
+        if journal is not None:
+            emit.append(json.dumps(journal))
+        return 0
 
     def _effect_for(self, alias: str, host: State, command: str, emit: list[str]) -> int:
         kinds = {
@@ -187,20 +192,19 @@ class Sim:
             return f"h_error={error}"
         helper = host.get("helper", "present")
         lines = [f"h_rc={host.get('facts_rc', 0)}", f"h_helper={helper}"]
-        if helper != "present":
+        if helper == "absent":
             return "\n".join(lines)
         facts = {
             "recorded_hash": host.get("recorded_hash", self.s["helper_hash"]),
             "expected_hash": self.s["helper_hash"],
             "loaded": host.get("loaded", "no"),
-            "valid": "yes",
+            "valid": host.get("valid", "yes"),
             "cert_root": host.get("cert_root", self.s["helper_cert_root"]),
             "signed_at": "2026-10-22T00:00:00+00:00",
         }
         lines += [f"h_{name}={value}" for name, value in facts.items()]
-        lines.append(
-            "h_stale=no" if facts["recorded_hash"] == facts["expected_hash"] else "h_stale=yes"
-        )
+        stale = "no" if facts["recorded_hash"] == facts["expected_hash"] else "yes"
+        lines.append(f"h_stale={host.get('stale', stale)}")
         dropped = host.get("drop_fact")
         return "\n".join(
             line for line in lines if dropped is None or not line.startswith(f"h_{dropped}=")

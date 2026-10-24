@@ -19,24 +19,20 @@ import pytest
 from loguru import logger
 
 from base.config import ConfigBoot
-from base.host.proc import run_bounded
-from base.host.system.hostport import Host
-from base.host.system.tests.fake_commands import LINUX_X86, FakeCommands, Reply, fake_host
 from base.packages.extensions import install_registry as reg
 from base.paths.home import resolve_meiva_home
 from cli.commands.duration import parse_duration
 from cli.commands.extensions.packages.refresh import Pass, RefreshReport, run_refresh
+from cli.commands.extensions.packages.refresh_git_plan import (
+    core_fetch,
+    core_listing,
+    package_listing,
+)
 from cli.commands.extensions.packages.refresh_rules import (
     core_fetch_needed,
     effective_interval_seconds,
     is_due,
 )
-
-
-# meiva:note
-# A host that runs the real git: the platform is fixed because the refresh does not depend on it.
-def _real_host() -> Host:
-    return Host(run=run_bounded, which=shutil.which, platform=LINUX_X86, uid=os.getuid())
 
 
 @pytest.fixture
@@ -62,7 +58,6 @@ def _refresh(
 ) -> RefreshReport:
     return run_refresh(
         config=config,
-        host=_real_host(),
         repo=repo,
         now=datetime.now(UTC),
         check_only=check_only,
@@ -380,7 +375,6 @@ def test_git_channel_copy_edit_converges_to_incoming(
             from_job=False,
             now=datetime.now(UTC),
             repo=core_repo,
-            host=_real_host(),
         )
         result, new_hash = gate._apply_staged(pkg, staged, "0" * 40)
     finally:
@@ -640,7 +634,6 @@ def test_refresh_cmd_json_shape(
     assert (
         cmd_packages_refresh(
             config=refresh_config,
-            host=_real_host(),
             repo=core_repo,
             now=datetime.now(UTC),
             json_output=True,
@@ -742,35 +735,25 @@ def test_the_apply_quota_comes_from_the_supplied_owner(
 
 
 # meiva:note
-# Every network git call is bounded by the timeout the supplied owner holds at that moment.
-# The calls cannot be timed against a real child, so the pass runs on a host whose `run` records
-# each call's timeout.
-def test_network_operations_read_the_timeout_from_the_supplied_owner(
-    refresh_config: ConfigBoot, core_repo: Path
-) -> None:
-    refresh_config.set_field("refresh_network_timeout_seconds", 6.0)
-    commands = FakeCommands()
-    commands.on(
-        ("git", "-C", str(core_repo), "ls-remote"), Reply(stdout="a" * 40 + "\trefs/heads/main\n")
+# Timeouts and command composition are values. The other cases in this module execute the real
+# Git resources; no command spy is needed to prove the supplied 6/7 second bounds.
+@pytest.mark.parametrize("timeout", [6.0, 7.0])
+def test_network_command_plans_hold_the_supplied_timeout(tmp_path: Path, timeout: float) -> None:
+    env = {"GIT_TERMINAL_PROMPT": "0"}
+    commands = (
+        core_listing(tmp_path, "https://example.invalid/core", "main", env=env, timeout=timeout),
+        core_fetch(tmp_path, "https://example.invalid/core", "main", env=env, timeout=timeout),
+        package_listing("https://example.invalid/skill", None, env=env, timeout=timeout),
     )
-    commands.on(("git", "-C", str(core_repo), "fetch"), Reply())
-    commands.on(("git", "ls-remote"), Reply(stdout="a" * 40 + "\trefs/heads/main\n"))
-    pass_ = Pass(
-        config=refresh_config,
-        check_only=False,
-        only=None,
-        from_job=False,
-        now=datetime.now(UTC),
-        repo=core_repo,
-        host=fake_host(commands),
-    )
-
-    assert pass_._ls_remote("https://example.invalid/core", "main") == ("a" * 40, None)
-    refresh_config.set_field("refresh_network_timeout_seconds", 7.0)
-    assert pass_._fetch_core("https://example.invalid/core", "main") is None
-    assert pass_._ls_remote_git("https://example.invalid/skill", "main") == ("a" * 40, False, None)
-
-    assert [call.timeout for call in commands.calls] == [6.0, 7.0, 7.0]
+    assert [command.timeout for command in commands] == [timeout, timeout, timeout]
+    assert [command.cwd for command in commands] == [tmp_path, tmp_path, None]
+    assert [command.argv for command in commands] == [
+        ("git", "ls-remote", "https://example.invalid/core", "main"),
+        ("git", "fetch", "--no-tags", "https://example.invalid/core", "main"),
+        ("git", "ls-remote", "https://example.invalid/skill", "HEAD"),
+    ]
+    assert all(command.env == env for command in commands)
+    assert package_listing("remote", "branch", env=env, timeout=timeout).argv[-1] == "branch"
 
 
 def test_refresh_rejects_unprepared_owner(core_repo: Path) -> None:

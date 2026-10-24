@@ -36,7 +36,10 @@ the next `up`.
 The half still fails with its usual exit code, and the failure output names both
 lists: `recovered:` for the hosts serving again, `needs manual:` for every host
 that is down and was not brought back — a start that failed, or a host this run
-cannot claim.
+cannot claim. If one host's evidence cannot be read, that host is named under
+`needs manual:` and recovery continues for the other hosts. The final failure
+retains the original stop error and its retry instructions; a later SSH read
+failure does not replace them.
 
 ## Contract
 

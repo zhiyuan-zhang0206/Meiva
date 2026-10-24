@@ -105,3 +105,18 @@ def test_the_recovery_starts_with_the_operators_explicit_selection(
     ]
     assert len(starts) == 2
     assert all("--only-service gateway --only-service agent-host" in command for command in starts)
+
+
+def test_an_unreadable_host_does_not_abort_recovery_or_replace_the_stop_failure(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    cluster.stop_fails["lin"] = 1
+    cluster.fail["evidence", "gw"] = 255
+    assert run("down") == 1
+    out = capsys.readouterr().out
+    assert _started(cluster) == ["mac", "lin"]
+    assert "recovery: could not read gw's evidence:" in out
+    assert "recovered: mac, lin" in out and "needs manual: gw" in out
+    assert "FAILED: lin: exit 1:" in out and "On that host retry `meiva stop`" in out
+    assert [kind for kind, _ in cluster.effects if kind == "switch"] == []
