@@ -125,6 +125,7 @@ def test_all_services_present(monkeypatch: pytest.MonkeyPatch) -> None:
         "insights",
         "otel-collector",
         "agent-host",
+        "exec-host",
         # The native LGTM backends are root units of an observability station.
         "loki",
         "prometheus",

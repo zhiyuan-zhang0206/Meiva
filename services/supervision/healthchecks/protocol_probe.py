@@ -45,11 +45,13 @@ def _observe(service: str, home: Path) -> DaemonProbe:
         mcp_daemon_shared_socket,
         run_dir,
     )
+    from base.sessions.exec_host.paths import service_socket_path as exec_host_socket_path
     from base.sessions.pty.paths import service_socket_path
 
     sockets = {
         "browser-mcp": lambda: chrome_mcp_socket(home, settings.services.browser_cdp_port),
         "computer-mcp": lambda: computer_mcp_socket(home),
+        "exec-host": lambda: exec_host_socket_path(run_dir(home)),
         "mcp-daemon": lambda: mcp_daemon_shared_socket(home),
         "pty-sessions": lambda: service_socket_path(run_dir(home)),
     }

@@ -1030,6 +1030,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/sessions/exec_host/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/sessions/pty/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
@@ -1556,6 +1561,11 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "services/agent_runner/agent_ops/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/agent_runner/exec_host/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
