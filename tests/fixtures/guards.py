@@ -15,9 +15,10 @@ import importlib.abc
 import importlib.machinery
 import os
 import sys
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterator, Sequence
+from functools import wraps
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 
 import psycopg
 import pytest
@@ -28,7 +29,7 @@ from redis.connection import AbstractConnection as RedisConnection
 
 from base.log.tests.stdlib_logging import stdlib_logging_isolated
 
-__all__ = ["refuse_native_data_plane", "stub_everywhere"]
+__all__ = ["HelperDoorGuard", "refuse_native_data_plane", "stub_everywhere"]
 
 
 @pytest.fixture(autouse=True)
@@ -171,11 +172,29 @@ def stub_everywhere(
 # meiva:note
 # The permissions-helper door is named here and never imported: an import statement would put the
 # helper package into every test's dependency set. The refusal activates when the door is first
-# imported, whichever test or phase imports it: `_HelperDoorGuard` sits on `sys.meta_path`, wraps
+# imported, whichever test or phase imports it: `HelperDoorGuard` sits on `sys.meta_path`, wraps
 # the door's own loader, and stubs `converge` as soon as the door's body has run, before any
 # importer binds the name. `converge` rebuilds, signs and loads the host's launchd job, so a
 # forgotten mock must fail the test instead of changing the developer's machine.
 _HELPER_DOOR = "services.desktop.permissions_helper"
+
+
+# meiva:note
+# Rebind renamed module globals by identity without probing dynamic module attributes. Closure
+# locals retain the real callable, so replacing a saved global cannot make the wrapper recurse.
+def _rebind_function_aliases(
+    patch: pytest.MonkeyPatch,
+    real: Callable[..., object],
+    replacement: Callable[..., object],
+) -> None:
+    aliases: dict[str, ModuleType] = {}
+    for owner in tuple(sys.modules.values()):
+        if isinstance(owner, ModuleType):
+            for name, value in tuple(vars(owner).items()):
+                if value is real:
+                    aliases.setdefault(name, owner)
+    for name, owner in aliases.items():
+        stub_everywhere(patch, owner, name, replacement)
 
 
 def _refuse_helper_converge(*_args: object, **_kwargs: object) -> Any:
@@ -189,18 +208,47 @@ def _refuse_helper_converge(*_args: object, **_kwargs: object) -> Any:
 # meiva:note
 # Finds the door through the other finders and hands back a spec whose loader is guarded.
 #
-# `arm` gives it the running test's `monkeypatch`, so a door imported mid-test is refused for
-# that test and restored when it ends; `disarm` leaves a later import (collection, a
-# native-proof test) unrefused, and the autouse fixture refuses the loaded door per test.
-class _HelperDoorGuard(importlib.abc.MetaPathFinder):
-    def __init__(self) -> None:
-        self._patch: pytest.MonkeyPatch | None = None
+# Its wrapper remains installed for the session, including collection. Only the complete
+# runtest protocol of an explicitly marked native proof admits calls to the real door; the
+# finally block revokes that permission after setup/call/teardown failures and skips too.
+# Keeping the wrapper stable also guards aliases bound during a native proof after it ends.
+class HelperDoorGuard(importlib.abc.MetaPathFinder):
+    def __init__(self, module_name: str) -> None:
+        self._module_name = module_name
+        self._patch = pytest.MonkeyPatch()
+        self._native_allowed = False
+        self._wrappers: list[tuple[Callable[..., object], Callable[..., object]]] = []
 
-    def arm(self, patch: pytest.MonkeyPatch) -> None:
-        self._patch = patch
+    def pytest_configure(self, config: pytest.Config) -> None:
+        sys.meta_path.insert(0, self)
+        config.add_cleanup(self.close)
+        door = sys.modules.get(self._module_name)
+        if door is not None:
+            self.refuse_converge_in(door)
 
-    def disarm(self) -> None:
-        self._patch = None
+    def close(self) -> None:
+        self._native_allowed = False
+        if self in sys.meta_path:
+            sys.meta_path.remove(self)
+        self._patch.undo()
+        # meiva:note
+        # Aliases bound after import were never patched individually. Restore them too; undoing
+        # these restoration writes would reinstall a wrapper belonging to a finished session.
+        restore = pytest.MonkeyPatch()
+        for guarded, real in self._wrappers:
+            _rebind_function_aliases(restore, guarded, real)
+        self._wrappers.clear()
+
+    @pytest.hookimpl(wrapper=True, tryfirst=True)
+    def pytest_runtest_protocol(
+        self, item: pytest.Item
+    ) -> Generator[None, bool | None, bool | None]:
+        previous = self._native_allowed
+        self._native_allowed = item.get_closest_marker("native_permissions_helper") is not None
+        try:
+            return (yield)
+        finally:
+            self._native_allowed = previous
 
     def find_spec(
         self,
@@ -208,7 +256,7 @@ class _HelperDoorGuard(importlib.abc.MetaPathFinder):
         path: Sequence[str] | None,
         target: ModuleType | None = None,
     ) -> importlib.machinery.ModuleSpec | None:
-        if fullname != _HELPER_DOOR:
+        if fullname != self._module_name:
             return None
         for finder in sys.meta_path:
             if finder is self:
@@ -220,14 +268,22 @@ class _HelperDoorGuard(importlib.abc.MetaPathFinder):
         return None
 
     def refuse_converge_in(self, door: ModuleType) -> None:
-        if self._patch is not None:
-            stub_everywhere(self._patch, door, "converge", _refuse_helper_converge)
+        real = cast(Callable[..., object], door.converge)
+
+        @wraps(real)
+        def guarded_converge(*args: object, **kwargs: object) -> object:
+            if self._native_allowed:
+                return real(*args, **kwargs)
+            return _refuse_helper_converge(*args, **kwargs)
+
+        self._wrappers.append((guarded_converge, real))
+        _rebind_function_aliases(self._patch, real, guarded_converge)
 
 
 # meiva:note
-# The door's own loader, followed by the refusal for the test that caused the import.
+# The door's own loader, followed by the session's default refusal before aliases bind.
 class _GuardedDoorLoader(importlib.abc.Loader):
-    def __init__(self, loader: importlib.abc.Loader, guard: _HelperDoorGuard) -> None:
+    def __init__(self, loader: importlib.abc.Loader, guard: HelperDoorGuard) -> None:
         self._loader = loader
         self._guard = guard
 
@@ -242,40 +298,8 @@ class _GuardedDoorLoader(importlib.abc.Loader):
         return getattr(self._loader, name)
 
 
-_DOOR_GUARD = _HelperDoorGuard()
-
-
 def pytest_configure(config: pytest.Config) -> None:
-    if _DOOR_GUARD not in sys.meta_path:
-        sys.meta_path.insert(0, _DOOR_GUARD)
-        config.add_cleanup(lambda: sys.meta_path.remove(_DOOR_GUARD))
-
-
-@pytest.fixture(autouse=True)
-def _guard_permissions_helper_native_io(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[None]:
-    """Helper ancestry is mandatory at runtime, never an implicit test effect.
-
-    OS_JOBS_ENABLED does not gate the permission ancestor. Caller tests must
-    explicitly mock helper converge; helper unit tests may exercise real logic
-    with their native command seam mocked. Only an intentional native proof may
-    opt out, and remains responsible for its exact-home artifact/job cleanup.
-
-    A door the run has already loaded is refused here; a door first imported while the test
-    runs is refused by `_HelperDoorGuard` the moment its body has executed.
-    """
-    if request.node.get_closest_marker("native_permissions_helper") is not None:
-        yield
-        return
-    door = sys.modules.get(_HELPER_DOOR)
-    if door is not None:
-        stub_everywhere(monkeypatch, door, "converge", _refuse_helper_converge)
-    _DOOR_GUARD.arm(monkeypatch)
-    try:
-        yield
-    finally:
-        _DOOR_GUARD.disarm()
+    config.pluginmanager.register(HelperDoorGuard(_HELPER_DOOR), "permissions-helper-door-guard")
 
 
 @pytest.fixture
