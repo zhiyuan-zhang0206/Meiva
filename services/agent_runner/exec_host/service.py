@@ -20,12 +20,12 @@ from typing import Any, cast
 
 import psutil
 
-from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 from base.log import logger
 from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.paths import exec_run_dir
 from base.sessions.exec_host import protocol
+from base.sessions.exec_host.child_environment import ChildExecution, build_child_environment
 
 _POLL_INTERVAL_S = 0.05
 _OUTPUT_DRAIN_TIMEOUT_S = 5.0
@@ -202,24 +202,22 @@ def _parse_run_request(req: dict[str, Any], *, home: Path, default_cwd: Path) ->
     )
 
 
-def _build_child_env(base_environ: Mapping[str, str], parsed: _RunRequest) -> dict[str, str]:
+def _build_child_env(
+    base_environ: Mapping[str, str], parsed: _RunRequest, source_root: Path | None
+) -> dict[str, str]:
     env = dict(base_environ)
     helper_pid = base_environ.get("MEIVA_PERMISSIONS_HELPER_PID")
     env.update(parsed.env_overlay)
     if helper_pid is not None:
         env["MEIVA_PERMISSIONS_HELPER_PID"] = helper_pid
-    env.pop(AGENT_CONFIG_OVERLAY_ENV, None)
-    env.pop(AGENT_BIRTH_CONFIG_ENV, None)
-    if parsed.agent_id is not None:
-        env["MEIVA_AGENT_ID"] = str(parsed.agent_id)
-    env["MEIVA_PROCESS_PROFILE"] = "agent"
-    env["MEIVA_EXEC_REQUEST_FILE"] = str(parsed.request_path)
-    env["MEIVA_EXEC_RESULT_FILE"] = str(parsed.result_path)
-    if parsed.config_overlay_json is not None:
-        env[AGENT_CONFIG_OVERLAY_ENV] = parsed.config_overlay_json
-    if parsed.birth_config_json is not None:
-        env[AGENT_BIRTH_CONFIG_ENV] = parsed.birth_config_json
-    return env
+    return build_child_environment(
+        env,
+        cwd=parsed.cwd,
+        source_root=source_root,
+        execution=ChildExecution(parsed.agent_id, parsed.request_path, parsed.result_path),
+        config_overlay_json=parsed.config_overlay_json,
+        birth_config_json=parsed.birth_config_json,
+    )
 
 
 def _leader_exited(leader: psutil.Process) -> bool:
@@ -303,12 +301,14 @@ class ExecHostService:
         home: Path,
         base_environ: Mapping[str, str],
         default_cwd: Path,
+        source_root: Path | None,
         executable: str = sys.executable,
     ) -> None:
         self._home = home
         self._executable = executable
         self._base_environ = dict(base_environ)
         self._default_cwd = default_cwd
+        self._source_root = source_root
         self.stop_event = asyncio.Event()
         self._closing = False
         self._active_runs: set[asyncio.Event] = set()
@@ -319,7 +319,7 @@ class ExecHostService:
         self, parsed: _RunRequest
     ) -> tuple[subprocess.Popen[bytes], ExecProcessDomain]:
         argv = [self._executable, "-I", "-B", "-X", "utf8", "-m", "agent.execution.child"]
-        env = _build_child_env(self._base_environ, parsed)
+        env = _build_child_env(self._base_environ, parsed, self._source_root)
         return ExecProcessDomain.launch_posix(
             argv,
             process_control=SYSTEM_PROCESS_CONTROL,

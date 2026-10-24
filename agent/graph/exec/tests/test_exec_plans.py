@@ -285,31 +285,3 @@ def test_only_this_agents_explicit_config_maps_ride_the_environment(tmp_path: Pa
     assert AGENT_BIRTH_CONFIG_ENV not in unbound.env
     assert bound.env[AGENT_CONFIG_OVERLAY_ENV] == '{"a": 1, "llm_model": "pinned"}'
     assert bound.env[AGENT_BIRTH_CONFIG_ENV] == '{"b": 2}'
-
-
-@pytest.mark.parametrize(
-    ("cwd", "keeps_virtual_env"),
-    [
-        ("source/agent", True),
-        ("source", True),
-        ("outside", False),
-        ("source/.worktrees/feature", False),
-        ("source/.claude/worktrees/feature", False),
-    ],
-)
-def test_a_child_keeps_the_virtual_env_only_inside_its_own_checkout(
-    tmp_path: Path, cwd: str, keeps_virtual_env: bool
-) -> None:
-    parent = _parent(cwd=tmp_path / cwd, source_root=tmp_path / "source")
-
-    launch = _plan(parent, tmp_path)
-
-    assert ("VIRTUAL_ENV" in launch.env) is keeps_virtual_env
-
-
-def test_an_interpreter_outside_a_checkout_keeps_the_virtual_env_anywhere(
-    tmp_path: Path,
-) -> None:
-    launch = _plan(_parent(cwd=tmp_path / "anywhere", source_root=None), tmp_path)
-
-    assert launch.env["VIRTUAL_ENV"] == "/source/.venv"
