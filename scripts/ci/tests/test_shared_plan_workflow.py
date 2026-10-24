@@ -22,6 +22,27 @@ def test_full_producer_and_shards_prepare_concurrently_after_classification() ->
     assert jobs["backend-selected"]["needs"] == ["classify"]
 
 
+def test_collection_only_setup_does_not_remove_execution_dependencies() -> None:
+    root = Path(__file__).resolve().parents[3]
+    jobs = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())["jobs"]
+    native = {"./.github/actions/install-pg-redis", "./.github/actions/vendor-pg-runtime"}
+    producer = jobs["backend-plan"]["steps"]
+    assert any(step.get("uses") == "./.github/actions/uv-sync" for step in producer)
+    assert not native.intersection(step.get("uses") for step in producer)
+    assert not any(step.get("uses", "").startswith("actions/setup-node@") for step in producer)
+    assert not any(step.get("run") == "npm ci" for step in producer)
+    for name in ("backend-shard", "backend-selected"):
+        execution = jobs[name]["steps"]
+        assert native <= {step.get("uses") for step in execution}
+        node = next(step for step in execution if step.get("name") == "Install Node")
+        assert node["uses"].startswith("actions/setup-node@")
+        assert node["with"]["node-version"] == 22
+        assert any(
+            step.get("working-directory") == "ui/web" and step.get("run") == "npm ci"
+            for step in execution
+        )
+
+
 def test_consumers_require_the_producers_exact_artifact_and_duration_input() -> None:
     root = Path(__file__).resolve().parents[3]
     jobs = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())["jobs"]

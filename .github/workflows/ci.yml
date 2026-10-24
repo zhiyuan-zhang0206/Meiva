@@ -14,10 +14,12 @@
 # degrades with a warning: shards split by test count and the selector's time estimates
 # are zero (they only report; the selection is the same).
 # There is no self-hosted fleet and no runner provisioner: a hosted runner
-# starts bare, so each job installs its own toolchain inline — uv, Node 22,
+# starts bare, so execution jobs install their toolchains inline — uv, Node 22,
 # Postgres 17 + Redis server binaries on PATH (the suite self-provisions
 # throwaway native clusters via base/deploy/tests/containers.py), and Playwright chromium
 # for e2e (browser dir cached; system deps installed per run).
+# The collection-only producer installs locked Python dependencies; execution
+# shards retain the native binaries and TypeScript parser used by fixture bodies.
 #
 # CHANGE-CLASS GATING (the CI pyramid's top): the `classify` job maps the PR
 # diff through base/deploy/git/repo_change.py, and suites skip when their side is untouched:
@@ -1051,21 +1053,8 @@ jobs:
         with:
           version: 0.13.1
           enable-cache: true
-      - name: Install Postgres 17 + Redis (server binaries on PATH)
-        uses: ./.github/actions/install-pg-redis
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
-      - name: Vendored Postgres runtime (production's server build)
-        uses: ./.github/actions/vendor-pg-runtime
-      - name: Install Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: ui/web/package-lock.json
-      - name: Install frontend deps (TypeScript source parser)
-        working-directory: ui/web
-        run: npm ci
       - name: Collect the complete eligible population once
         run: |
           set -euo pipefail

@@ -18,6 +18,14 @@ start the full producer. Planning errors, configuration drift and collection or
 worker validation errors fail directly without fallback or retry; ordinary test
 failures retain the existing retry and canary policy.
 
+The producer installs the locked Python dependencies needed to import the complete
+population. It does not install Node, frontend packages or native server binaries:
+the TypeScript parser and native cluster startup run in fixture bodies, after
+collection. Execution shards retain all those dependencies and compute their own
+skip conditions. Same-tree preparation comparisons must preserve every node,
+fixture closure and module plugin; hosted images can already carry binaries, so
+omitting explicit setup does not establish collection on a machine without them.
+
 Classification resolves the exact duration-cache key once and records its actual
 execution attempt. The producer publishes the plan with the exact duration bytes
 it used. A zero-byte bundle member represents a missing input; an empty JSON map
