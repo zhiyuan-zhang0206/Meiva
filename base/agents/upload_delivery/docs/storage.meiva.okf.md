@@ -46,4 +46,7 @@ factory, so text and invalid image references do not construct a gateway client.
 The fetch resolves that factory only after its canonical image-MIME guard.
 The actual process client retains its bearer and IPv4 transport, and each image
 request retains the fifteen-second timeout and HTTP-error-to-OSError boundary.
-Tests use real httpx request/response handling through MockTransport.
+Tests drive real httpx request and response handling through `httpx.MockTransport`: the answer
+comes from the test and not from a listener on port 0, which the
+[test-seam convention](../../../../docs/conventions/python-conventions.md#test-seams-in-another-shape)
+asks a new test to prefer.
