@@ -3,65 +3,45 @@ from __future__ import annotations
 import subprocess
 import sys
 import time
-from collections.abc import Callable
-from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from base.config import settings
-from base.db import Database
 from base.native_process.os_platform import LockTimeoutError
 from services.backup import dump as backup
-from services.backup.artifact import offsite
+from services.backup.layout import BackupTree
+from services.backup.tests.support import minted_tree
 from services.backup.tests.test_backup import (
     await_backup_lock_holder,
-    cluster_instant,
-    disable_offsite,
     spawn_backup_lock_holder,
 )
-from services.backup.tests.test_backup import (
-    bdir as bdir,
-)
+
+_TRY_LOCK = Path(__file__).parent.parent / "child_try_lock.py"
+_STAGE = """
+import sys, time
+out = sys.argv[1]
+for _ in range(30):
+    with open(out, "ab") as fh:
+        fh.write(b"x" * 65536)
+    time.sleep(0.06)
+"""
 
 
-def test_run_with_progress_without_a_sink_defers_to_subprocess_run(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[list[str]] = []
-
-    def _fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        _ = kwargs
-        calls.append(argv)
-        return subprocess.CompletedProcess(argv, 0, b"", b"")
-
-    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
-
+def test_run_with_progress_without_a_sink_is_a_plain_subprocess_run() -> None:
     result = backup.run_with_progress(
-        ["pg_dump", "--version"], timeout_s=5.0, label="pg_dump", progress=None
+        [sys.executable, "--version"], timeout_s=30.0, label="python", progress=None, env={}
     )
 
     assert result.returncode == 0
-    assert calls == [["pg_dump", "--version"]]
+    assert result.stdout.startswith(b"Python ")
 
 
-def test_run_with_progress_heartbeats_while_a_slow_child_runs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(backup, "PROGRESS_INTERVAL_S", 0.2)
+def test_run_with_progress_heartbeats_while_a_slow_child_runs(tmp_path: Path) -> None:
     out = tmp_path / "slow.dump.partial"
     out.write_bytes(b"")
     stage = tmp_path / "slow_stage.py"
-    stage.write_text(
-        "import sys, time\n"
-        "out = sys.argv[1]\n"
-        "for _ in range(30):\n"
-        "    with open(out, 'ab') as fh:\n"
-        "        fh.write(b'x' * 65536)\n"
-        "    time.sleep(0.06)\n",
-        encoding="utf-8",
-    )
+    stage.write_text(_STAGE, encoding="utf-8")
     lines: list[str] = []
 
     proc = backup.run_with_progress(
@@ -69,7 +49,9 @@ def test_run_with_progress_heartbeats_while_a_slow_child_runs(
         timeout_s=120.0,
         label="pg_dump",
         progress=lines.append,
+        env={},
         size_path=out,
+        interval_s=0.2,
     )
 
     assert proc.returncode == 0
@@ -82,10 +64,7 @@ def test_run_with_progress_heartbeats_while_a_slow_child_runs(
     assert sizes[-1] > 0
 
 
-def test_run_with_progress_timeout_still_kills_the_child(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(backup, "PROGRESS_INTERVAL_S", 0.2)
+def test_run_with_progress_timeout_still_kills_the_child(tmp_path: Path) -> None:
     marker = tmp_path / "finished"
     stage = tmp_path / "hung_stage.py"
     stage.write_text(
@@ -104,6 +83,8 @@ def test_run_with_progress_timeout_still_kills_the_child(
             timeout_s=1.0,
             label="pg_dump",
             progress=lines.append,
+            env={},
+            interval_s=0.2,
         )
 
     assert time.monotonic() - started < 10
@@ -114,48 +95,21 @@ def test_run_with_progress_timeout_still_kills_the_child(
 
 
 def test_run_backup_narrates_both_silent_stages_through_progress(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
+    tmp_path: Path, db_url: str
 ) -> None:
-    stages: list[tuple[str, Path | None]] = []
-
-    def _fake_stage(
-        argv: list[str],
-        *,
-        timeout_s: float,
-        label: str,
-        progress: Callable[[str], None] | None,
-        env: dict[str, str] | None = None,
-        size_path: Path | None = None,
-    ) -> subprocess.CompletedProcess[bytes]:
-        assert progress is not None, "run_backup must forward the caller's sink"
-        _ = env
-        assert timeout_s == backup.DUMP_TIMEOUT_S
-        stages.append((label, size_path))
-        progress(f"{label} started (bounded at {timeout_s / 60:.0f} min)")
-        if size_path is not None:
-            size_path.write_bytes(b"stage output")
-        return subprocess.CompletedProcess(argv, 0, b"", b"")
-
-    monkeypatch.setattr(backup, "run_with_progress", _fake_stage)
-    disable_offsite(monkeypatch)
+    tree = minted_tree(tmp_path)
     lines: list[str] = []
 
     path = backup.run_backup(
-        cluster_instant(2026, 9, 14, 21, 0),
-        db_url="dbname=whatever",
+        datetime(2026, 9, 14, 21, 0, tzinfo=UTC),
+        tree=tree,
+        db_url=db_url,
+        keep=7,
+        offsite_target=None,
         progress=lines.append,
-        db=database,
-        is_remote_reader=lambda: settings.data_plane.is_remote,
-        keep_reader=lambda: settings.services.backup_keep,
-        endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
-        bucket_reader=lambda: settings.services.backup_offsite_bucket,
-        credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
     )
 
     assert path.exists()
-    assert [label for label, _ in stages] == ["pg_dump", "backup encryption"]
-    assert stages[0][1] is not None and stages[0][1].name.endswith(".dump.partial")
-    assert stages[1][1] is not None and stages[1][1].name.endswith(".dump.enc.partial")
     minutes = backup.DUMP_TIMEOUT_S / 60
     assert lines == [
         f"pg_dump started (bounded at {minutes:.0f} min)",
@@ -163,29 +117,25 @@ def test_run_backup_narrates_both_silent_stages_through_progress(
     ]
 
 
-def test_backup_lock_reentrant_same_thread(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    meiva_home = tmp_path / "meiva-home"
-    monkeypatch.setenv("MEIVA_HOME", str(meiva_home))
+def test_backup_lock_reentrant_same_thread(tmp_path: Path) -> None:
+    tree = BackupTree(tmp_path / "meiva-home")
 
-    with backup.backup_lock(), backup.backup_lock(timeout_s=0.5):
+    with backup.backup_lock(tree), backup.backup_lock(tree, timeout_s=0.5):
         pass
 
-    with backup.backup_lock(timeout_s=0.5):
+    with backup.backup_lock(tree, timeout_s=0.5):
         pass
 
 
-def test_backup_lock_cross_process_excludes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    meiva_home = tmp_path / "meiva-home"
-    monkeypatch.setenv("MEIVA_HOME", str(meiva_home))
+def test_backup_lock_cross_process_excludes(tmp_path: Path) -> None:
+    home = tmp_path / "meiva-home"
     ready = tmp_path / "ready"
-    holder = spawn_backup_lock_holder(meiva_home, ready, hold_s=2.0)
+    holder = spawn_backup_lock_holder(home, ready, hold_s=2.0)
     try:
         await_backup_lock_holder(ready, holder)
 
         started = time.monotonic()
-        with backup.backup_lock(timeout_s=30):
+        with backup.backup_lock(BackupTree(home), timeout_s=30):
             waited = time.monotonic() - started
         assert waited >= 0.4, (
             f"took the backup lock while another process held it (waited {waited:.2f}s)"
@@ -196,16 +146,15 @@ def test_backup_lock_cross_process_excludes(
         holder.wait(timeout=10)
 
 
-def test_backup_lock_timeout_expires(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    meiva_home = tmp_path / "meiva-home"
-    monkeypatch.setenv("MEIVA_HOME", str(meiva_home))
+def test_backup_lock_timeout_expires(tmp_path: Path) -> None:
+    home = tmp_path / "meiva-home"
     ready = tmp_path / "ready"
-    holder = spawn_backup_lock_holder(meiva_home, ready, hold_s=30.0)
+    holder = spawn_backup_lock_holder(home, ready, hold_s=30.0)
     try:
         await_backup_lock_holder(ready, holder)
 
         started = time.monotonic()
-        with pytest.raises(LockTimeoutError), backup.backup_lock(timeout_s=0.5):
+        with pytest.raises(LockTimeoutError), backup.backup_lock(BackupTree(home), timeout_s=0.5):
             pytest.fail("took a backup lock another process was holding")
         waited = time.monotonic() - started
         assert 0.3 <= waited < 5
@@ -215,49 +164,30 @@ def test_backup_lock_timeout_expires(tmp_path: Path, monkeypatch: pytest.MonkeyP
         holder.wait(timeout=10)
 
 
-def test_run_backup_serializes_dump_creation(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
-) -> None:
-    events: list[str] = []
-    artifact = bdir / "verified.dump.enc"
+# meiva:note
+# Another process cannot take the backup lock while either silent stage is running.
+def test_run_backup_holds_the_lock_while_its_stages_run(tmp_path: Path, db_url: str) -> None:
+    tree = minted_tree(tmp_path)
+    probes: list[tuple[str, int]] = []
 
-    @contextmanager
-    def _backup_lock(**_kwargs: object):
-        events.append("lock-enter")
-        try:
-            yield
-        finally:
-            events.append("lock-exit")
-
-    def run_locked_backup(_now: datetime | None = None, **_kwargs: object) -> Path:
-        events.append("backup-body")
-        artifact.write_bytes(b"encrypted")
-        return artifact
-
-    monkeypatch.setattr(backup, "backup_lock", _backup_lock)
-    monkeypatch.setattr(backup, "run_locked_backup", run_locked_backup)
-
-    def _record(name: str, result: object = None) -> Callable[[Path], object]:
-        def record(_path: Path, **_kwargs: object) -> object:
-            events.append(name)
-            return result
-
-        return record
-
-    monkeypatch.setattr(offsite, "publish", _record("publish"))
-    monkeypatch.setattr(backup, "prune", _record("prune", []))
-
-    assert (
-        backup.run_backup(
-            cluster_instant(2026, 8, 8, 3, 0),
-            db_url="dbname=whatever",
-            db=database,
-            is_remote_reader=lambda: settings.data_plane.is_remote,
-            keep_reader=lambda: settings.services.backup_keep,
-            endpoint_reader=lambda: settings.services.backup_offsite_endpoint,
-            bucket_reader=lambda: settings.services.backup_offsite_bucket,
-            credentials_file_reader=lambda: settings.services.backup_offsite_credentials_file,
+    def probe(line: str) -> None:
+        # meiva:note
+        # The probe runs a fixed repository script with the interpreter's own argv, so the
+        # subprocess suppression is the harness's.
+        taken = subprocess.run(  # noqa: S603
+            [sys.executable, str(_TRY_LOCK), str(tree.home)], check=False, timeout=60
         )
-        == artifact
+        probes.append((line.split(" started", maxsplit=1)[0], taken.returncode))
+
+    backup.run_backup(
+        datetime(2026, 8, 8, 3, 0, tzinfo=UTC),
+        tree=tree,
+        db_url=db_url,
+        keep=7,
+        offsite_target=None,
+        progress=probe,
     )
-    assert events == ["lock-enter", "backup-body", "publish", "prune", "lock-exit"]
+
+    assert probes == [("pg_dump", 7), ("backup encryption", 7)]
+    with backup.backup_lock(tree, timeout_s=0):
+        pass

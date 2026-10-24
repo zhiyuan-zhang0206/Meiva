@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from base.config import settings
 from services.backup.walg import retention
 from services.backup.walg.backups import Backup, parse_backups
 from services.backup.walg.retention import (
@@ -182,9 +181,7 @@ def test_the_chain_rule_alone_already_refuses_a_plan_that_expires_every_full_bac
 def test_a_safe_plan_is_audited_then_confirmed(sandbox: Sandbox) -> None:
     lines: list[str] = []
 
-    outcome = apply_retention(
-        _backups(), lines.append, path_reader=lambda: settings.walg.walg_config_file
-    )
+    outcome = apply_retention(_backups(), lines.append, path_reader=sandbox.path_reader)
 
     assert outcome == RetentionOutcome(marked=21, deleted=21)
     assert sandbox.calls() == [
@@ -203,9 +200,7 @@ def test_a_violated_invariant_never_reaches_confirm(sandbox: Sandbox) -> None:
     sandbox.put("delete-dry.log", bad)
 
     with pytest.raises(RetentionAbortedError, match="newest backup depends on"):
-        apply_retention(
-            _backups(), lambda _line: None, path_reader=lambda: settings.walg.walg_config_file
-        )
+        apply_retention(_backups(), lambda _line: None, path_reader=sandbox.path_reader)
 
     assert sandbox.calls() == ["delete retain FULL 3 --use-sentinel-time"]
 
@@ -220,16 +215,14 @@ def test_a_confirmed_deletion_that_differs_from_the_audit_is_reported(sandbox: S
     )
 
     with pytest.raises(RetentionAbortedError, match="not the audited dry run"):
-        apply_retention(
-            _backups(), lambda _line: None, path_reader=lambda: settings.walg.walg_config_file
-        )
+        apply_retention(_backups(), lambda _line: None, path_reader=sandbox.path_reader)
 
 
 def test_with_no_more_full_backups_than_retained_wal_g_is_not_asked(sandbox: Sandbox) -> None:
     lines: list[str] = []
 
     outcome = apply_retention(
-        _backups(extra_full=False), lines.append, path_reader=lambda: settings.walg.walg_config_file
+        _backups(extra_full=False), lines.append, path_reader=sandbox.path_reader
     )
 
     assert outcome == RetentionOutcome(marked=0, deleted=0)
@@ -240,9 +233,7 @@ def test_with_no_more_full_backups_than_retained_wal_g_is_not_asked(sandbox: San
 def test_an_empty_plan_deletes_nothing(sandbox: Sandbox) -> None:
     sandbox.put("delete-dry.log", "INFO: Start delete\nINFO: Evaluating objects for deletion...\n")
 
-    outcome = apply_retention(
-        _backups(), lambda _line: None, path_reader=lambda: settings.walg.walg_config_file
-    )
+    outcome = apply_retention(_backups(), lambda _line: None, path_reader=sandbox.path_reader)
 
     assert outcome == RetentionOutcome(marked=0, deleted=0)
     assert sandbox.calls() == ["delete retain FULL 3 --use-sentinel-time"]
@@ -252,8 +243,6 @@ def test_a_failing_wal_g_delete_is_an_error_and_nothing_is_confirmed(sandbox: Sa
     sandbox.fail("delete")
 
     with pytest.raises(WalgCommandError, match="wal-g delete failed"):
-        apply_retention(
-            _backups(), lambda _line: None, path_reader=lambda: settings.walg.walg_config_file
-        )
+        apply_retention(_backups(), lambda _line: None, path_reader=sandbox.path_reader)
 
     assert sandbox.calls() == ["delete retain FULL 3 --use-sentinel-time"]

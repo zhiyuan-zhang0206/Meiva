@@ -39,7 +39,7 @@ import socket
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,6 +59,9 @@ RESTORE_TIMEOUT_S = 2 * 3600
 (RTO <= 2 hours). A restore slower than that has failed its purpose; measured and
 extrapolated durations are under twenty minutes."""
 
+# meiva:note
+# A socket path is capped at 103 bytes, so the default root of the scratch socket directory is short.
+SOCKET_ROOT = Path("/tmp")  # noqa: S108
 _POLL_S = 0.2
 # What the server says when it refuses a connection for good, matched on its (English, see
 # `lc_messages` in `recovery_argv`) text: libpq reports no SQLSTATE for a failed connect.
@@ -177,6 +180,10 @@ def control_settings(directory: Path) -> dict[str, str]:
     return found
 
 
+# meiva:note
+# The scratch postmaster's command line; every setting is an argument (see the module doc).
+#
+# `capacity` is what `control_settings(directory)` read from the backup's control file.
 def recovery_argv(
     directory: Path,
     *,
@@ -184,12 +191,10 @@ def recovery_argv(
     port: int,
     target: RecoveryTarget,
     path_reader: Callable[[], Path | None],
+    capacity: Mapping[str, str],
 ) -> list[str]:
-    """The scratch postmaster's command line; every setting is an argument (see the module doc)."""
-    capacity = [
-        arg
-        for name, value in sorted(control_settings(directory).items())
-        for arg in ("-c", f"{name}={value}")
+    capacity_args = [
+        arg for name, value in sorted(capacity.items()) for arg in ("-c", f"{name}={value}")
     ]
     return [
         str(pg_tool("postgres")),
@@ -214,14 +219,16 @@ def recovery_argv(
         "-c",
         "recovery_target_action=promote",
         *target.pg_args(),
-        *capacity,
+        *capacity_args,
         *shlex.split(f"{pg_tz_args()} {pg_shm_args()}"),
     ]
 
 
-def _wait_promoted(process: subprocess.Popen[bytes], instance: RestoredInstance, log: Path) -> int:
+def _wait_promoted(
+    process: subprocess.Popen[bytes], instance: RestoredInstance, log: Path, timeout_s: float
+) -> int:
     """Block until recovery has ended and the instance is a primary; returns its timeline."""
-    deadline = time.monotonic() + RESTORE_TIMEOUT_S
+    deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise RestoreError(
@@ -246,7 +253,7 @@ def _wait_promoted(process: subprocess.Popen[bytes], instance: RestoredInstance,
                     f"the source; name it with --user): {_log_tail(log)}"
                 ) from None
         time.sleep(_POLL_S)
-    raise RestoreError(f"recovery did not finish within {RESTORE_TIMEOUT_S}s: {_log_tail(log)}")
+    raise RestoreError(f"recovery did not finish within {timeout_s:g}s: {_log_tail(log)}")
 
 
 def _stop(process: subprocess.Popen[bytes], *, clean: bool) -> None:
@@ -268,6 +275,8 @@ def restored_instance(
     user: str | None = None,
     keep_data: bool,
     path_reader: Callable[[], Path | None],
+    timeout_s: float = RESTORE_TIMEOUT_S,
+    socket_root: Path = SOCKET_ROOT,
 ) -> Generator[RestoredInstance]:
     """Fetch `backup` into `directory`, recover it to `target`, yield the promoted instance.
 
@@ -285,7 +294,7 @@ def restored_instance(
     try:
         run_walg(
             ["backup-fetch", str(directory), backup],
-            timeout_s=RESTORE_TIMEOUT_S,
+            timeout_s=timeout_s,
             path_reader=path_reader,
         )
     except WalgCommandError as exc:
@@ -295,7 +304,7 @@ def restored_instance(
     report(f"fetched in {time.monotonic() - started:.0f}s; recovering to {target.describe()}")
 
     # Short and private: a socket path is capped at 103 bytes, which a deep scratch path exceeds.
-    socket_dir = Path(tempfile.mkdtemp(prefix="meiva-walg-restore-", dir="/tmp"))
+    socket_dir = Path(tempfile.mkdtemp(prefix="meiva-walg-restore-", dir=socket_root))
     log = socket_dir / "postgres.log"
     instance = RestoredInstance(directory, socket_dir, _free_port(), user or getpass.getuser())
     process: subprocess.Popen[bytes] | None = None
@@ -306,9 +315,10 @@ def restored_instance(
             port=instance.port,
             target=target,
             path_reader=path_reader,
+            capacity=control_settings(directory),
         )
         process = start_foreground_postgres(argv, log=log, env=pg_start_env())
-        timeline = _wait_promoted(process, instance, log)
+        timeline = _wait_promoted(process, instance, log, timeout_s)
         report(f"promoted on timeline {timeline} after {time.monotonic() - started:.0f}s")
         yield instance
     finally:

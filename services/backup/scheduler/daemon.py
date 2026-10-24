@@ -9,16 +9,14 @@ import logging
 import os
 import signal
 import sys
-from collections.abc import Callable
+import time
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from datetime import time as clock_time
+from datetime import UTC, datetime
 from pathlib import Path
 
 from base import telemetry
-from base.clock import SYSTEM_TIMERS, Clock
-from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
+from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -29,19 +27,22 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.host.exit_codes import hard_exit as _hard_exit
+from base.native_process.child_env import inherited_process_env
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
 from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
-from services.backup.dump import cluster_tz, is_due
+from services.backup.dump import newest_dump_instant
+from services.backup.layout import BackupTree
+from services.backup.schedule import backup_due, restore_due, seconds_until_next_backup_hour
 from services.backup.scheduler.operation.staging import OperationBusyError
 from services.backup.scheduler.recovery_drill import (
     load_local_dump_restore_success,
-    local_dump_restore_due,
     record_local_dump_restore_success,
 )
-from services.backup.scheduler.worker import run_job
+from services.backup.scheduler.settings import SchedulerSettings
+from services.backup.scheduler.worker import WORKER_MODULE, WorkerLaunch, run_job
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("services.backup.scheduler.daemon")
@@ -100,8 +101,9 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     )
 
 
-def backup_components(state: BackupState, *, clock: Clock) -> list[dict[str, object]]:
-    wall_time = clock.now().timestamp()
+def backup_components(
+    state: BackupState, *, wall_time: float, monotonic: float
+) -> list[dict[str, object]]:
     if state.running:
         status = OK
         started_at = state.last_attempt if state.last_attempt is not None else wall_time
@@ -117,7 +119,7 @@ def backup_components(state: BackupState, *, clock: Clock) -> list[dict[str, obj
         progress = "idle"
         detail = None if status == OK else f"last successful backup {age_s:.0f}s ago"
     else:
-        age_s = clock.monotonic() - state.started_at
+        age_s = monotonic - state.started_at
         status = OK if age_s <= BACKUP_STALE_AFTER_S else DEGRADED
         progress = "idle"
         detail = None if status == OK else f"no successful backup within {age_s:.0f}s of start"
@@ -135,31 +137,15 @@ def backup_components(state: BackupState, *, clock: Clock) -> list[dict[str, obj
     return [record]
 
 
-def seconds_until_next_backup_hour(now: datetime, *, config: ConfigBoot, clock: Clock) -> float:
-    local_now = now.astimezone(cluster_tz(clock_factory=lambda: clock))
-    backup_hour = config.view.services.backup_hour
-    next_date = local_now.date()
-    target = datetime.combine(next_date, clock_time(hour=backup_hour), tzinfo=local_now.tzinfo)
-    if local_now >= target:
-        target = datetime.combine(
-            next_date + timedelta(days=1),
-            clock_time(hour=backup_hour),
-            tzinfo=local_now.tzinfo,
-        )
-    return (target.astimezone(UTC) - now).total_seconds()
-
-
-async def run_due_local_dump_restore(now: datetime, *, config: ConfigBoot, clock: Clock) -> None:
+async def local_restore_round(
+    now: datetime, *, settings: SchedulerSettings, tree: BackupTree, launch: WorkerLaunch
+) -> None:
     try:
-        if not local_dump_restore_due(
-            now,
-            last_success=load_local_dump_restore_success(),
-            clock_factory=lambda: clock,
-            hour_reader=lambda: config.view.services.backup_hour,
-        ):
+        last = load_local_dump_restore_success(tree.restore_marker)
+        if not restore_due(now, settings.timezone, settings.backup_hour, last):
             return
-        await run_job("restore", config=config)
-        record_local_dump_restore_success(now)
+        await run_job("restore", settings=settings, tree=tree, launch=launch)
+        record_local_dump_restore_success(now, tree.restore_marker)
     except OperationBusyError as exc:
         _log.info("[pg-backup] local restore drill deferred: %s", exc)
     except Exception as exc:
@@ -172,39 +158,53 @@ async def run_due_local_dump_restore(now: datetime, *, config: ConfigBoot, clock
         _log.exception("[pg-backup] local restore drill failed")
 
 
-async def backup_loop(state: BackupState, *, config: ConfigBoot, clock: Clock) -> None:
+# meiva:note
+# One wake of the scheduler: run the dump when it is due; return the seconds to sleep.
+async def backup_round(
+    state: BackupState, *, settings: SchedulerSettings, tree: BackupTree, launch: WorkerLaunch
+) -> float:
+    now = datetime.now(UTC)
+    tz, hour = settings.timezone, settings.backup_hour
+    if not backup_due(now, tz, hour, newest_dump_instant(tree.managed)):
+        return seconds_until_next_backup_hour(now, tz, hour)
+
+    state.record_attempt(now)
+    state.running = True
+    try:
+        await run_job("dump", settings=settings, tree=tree, launch=launch, now=now)
+        state.record_success(now)
+        await local_restore_round(now, settings=settings, tree=tree, launch=launch)
+    except Exception as exc:
+        state.record_error(str(exc))
+        telemetry.emit(
+            "telemetry",
+            "backup_dump_failed",
+            level="error",
+            attributes={"detail": str(exc)[:_FAILURE_DETAIL_CHARS]},
+        )
+        _log.exception("[pg-backup] dump failed; next attempt at the next backup hour")
+    finally:
+        state.running = False
+    return seconds_until_next_backup_hour(datetime.now(UTC), tz, hour)
+
+
+async def backup_loop(
+    state: BackupState, *, settings: SchedulerSettings, tree: BackupTree, launch: WorkerLaunch
+) -> None:
     _log.info("[pg-backup] scheduler started, pid=%s", os.getpid())
     while True:
-        now = clock.now()
-        if not is_due(
-            now,
-            clock_factory=lambda: clock,
-            hour_reader=lambda: config.view.services.backup_hour,
-        ):
-            await clock.asleep(seconds_until_next_backup_hour(now, config=config, clock=clock))
-            continue
-
-        state.record_attempt(now)
-        state.running = True
-        try:
-            await run_job("dump", now=now, config=config)
-            state.record_success(now)
-            await run_due_local_dump_restore(now, config=config, clock=clock)
-        except Exception as exc:
-            state.record_error(str(exc))
-            telemetry.emit(
-                "telemetry",
-                "backup_dump_failed",
-                level="error",
-                attributes={"detail": str(exc)[:_FAILURE_DETAIL_CHARS]},
-            )
-            _log.exception("[pg-backup] dump failed; next attempt at the next backup hour")
-        finally:
-            state.running = False
-        await clock.asleep(seconds_until_next_backup_hour(clock.now(), config=config, clock=clock))
+        await asyncio.sleep(await backup_round(state, settings=settings, tree=tree, launch=launch))
 
 
-async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path, clock: Clock) -> None:
+async def run(
+    *,
+    config: ConfigBoot,
+    image: LoadedCommit,
+    runtime: Path,
+    tree: BackupTree,
+    launch: WorkerLaunch,
+    settings: SchedulerSettings,
+) -> None:
     if _is_running(config, runtime=runtime):
         _log.info(
             "[pg-backup] daemon already running (pidfile=%s), exiting",
@@ -213,17 +213,19 @@ async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path, clock: 
         sys.exit(1)
 
     write_pidfile(config, runtime=runtime)
-    state = BackupState(started_at=clock.monotonic())
+    state = BackupState(started_at=time.monotonic())
     endpoint = _endpoint(config, runtime=runtime)
     health = await start_health_server(
         "pg_backup",
         endpoint.health_port,
-        components=lambda: backup_components(state, clock=clock),
+        components=lambda: backup_components(
+            state, wall_time=time.time(), monotonic=time.monotonic()
+        ),
         image=image,
     )
     _log.info("[pg-backup] healthz listening on :%s", endpoint.health_port)
     try:
-        await backup_loop(state, config=config, clock=clock)
+        await backup_loop(state, settings=settings, tree=tree, launch=launch)
     finally:
         await stop_health_server(health)
         _remove_pidfile(config, runtime=runtime)
@@ -231,9 +233,21 @@ async def run(*, config: ConfigBoot, image: LoadedCommit, runtime: Path, clock: 
 
 
 # meiva:note
+# The lazy log-database handle: the config as its owner holds it when the handle is built.
+def scheduler_database(
+    config: ConfigBoot, machine: MachineIdentity, gate: ProcessDbGate
+) -> Database:
+    return Database(
+        db_config_from_boot(config),
+        gate=gate,
+        direct_url=ClusterDirectUrl(machine.host),
+    )
+
+
+# meiva:note
 # SIGTERM exits within the shutdown bound even while a default-executor job is wedged.
 # meiva:link services/backup/scheduler/docs/timing-and-exit.meiva.okf.md
-def main(*, exit_process: Callable[[int], None] | None = None) -> None:
+def main() -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
     config = ConfigBoot()
@@ -244,15 +258,11 @@ def main(*, exit_process: Callable[[int], None] | None = None) -> None:
     assert_schema_current(config.view.data_plane.db_url)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="pg_backup")
-
-    def database() -> Database:
-        return Database(
-            db_config_from_boot(config),
-            gate=gate,
-            direct_url=ClusterDirectUrl(machine.host),
-        )
-
-    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
+    pipeline = build_pipeline(
+        database=lambda: scheduler_database(config, machine, gate),
+        machine=machine,
+        home=process_home,
+    )
     init_gateway_process(
         name="pg_backup",
         producer=lambda: pipeline,
@@ -269,7 +279,9 @@ def main(*, exit_process: Callable[[int], None] | None = None) -> None:
                 config=config,
                 image=image,
                 runtime=process_home / "run",
-                clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+                tree=BackupTree(process_home),
+                launch=WorkerLaunch(WORKER_MODULE, inherited_process_env()),
+                settings=SchedulerSettings.read(config),
             )
         )
     except KeyboardInterrupt:
@@ -285,7 +297,7 @@ def main(*, exit_process: Callable[[int], None] | None = None) -> None:
         code = 1
     finally:
         _remove_pidfile(config, runtime=process_home / "run")
-    (exit_process or _hard_exit)(code)
+    _hard_exit(code)
 
 
 if __name__ == "__main__":

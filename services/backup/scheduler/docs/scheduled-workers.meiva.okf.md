@@ -13,17 +13,20 @@ Secrets travel on stdin, never retained request files. Each run has a unique
 0700 `.operation-*` directory, private request/result files and file-backed
 stdout/stderr. Progress and large artifact commits stay off the event loop.
 
-Each scheduler process owns one lazy `ConfigBoot` and forwards its live readers
-to due checks, weekly drill scheduling and retention. Each operation worker
-owns its own boot at process entry and forwards remote-plane, retention and
-off-site readers to the dump API. Clock factories read that same boot at the
-original timezone decision, without caching a configuration snapshot.
+Each scheduler process reads its `SchedulerSettings` (cluster clock, backup hour, retention and the
+captured throwaway base) once at its root; every field is `restart_required: gateway`. Each operation
+worker reads its `DumpSettings` (plane, retention and off-site destination) once at process entry.
+Below those roots a function takes the values, never the config owner: the pure calendar lives in
+`services.backup.schedule`, the dump's argv, names and retention in `services.backup.dump_plan`, and
+the commit judgements in `commit_plan.py`. One `BackupTree` value names every path under
+`<home>/backups`.
 
 Schema admission, scheduler health ports and log database dials use that same
 scheduler boot. Endpoint tables are rebuilt at the original resource reads
 through `ServiceEndpoints.from_boot` with the root's runtime directory. The
-separate worker's log/work/scratch database factories read its own boot at each
-original dial decision; scratch handles replace only the requested URL. Neither
+separate worker's log/work/scratch database factories (`worker_database`) read its own boot when
+a handle is built, because delivered database credentials rotate under a running process; scratch
+handles replace only the requested URL. Neither
 entry recovers configuration from the legacy settings singleton.
 
 The kind's concurrency lock prevents overlapping controller commits. A busy

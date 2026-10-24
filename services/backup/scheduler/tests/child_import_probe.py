@@ -1,18 +1,17 @@
-"""Fresh-interpreter probes for the scheduler daemon's OSS SDK import boundary.
-
-Usage: `child_import_probe.py daemon <repo> <roots...>` records, at the first
-import of the SDK, which repo frames asked for it while the daemon is imported.
-`child_import_probe.py worker <repo> <credentials> <work> <roots...>` runs the
-worker's dump leg with an empty artifact so the real off-site publish opens the
-bucket with the SDK. Both print one JSON report line on stdout.
-"""
+# meiva:note
+# Fresh-interpreter probes for the scheduler daemon's OSS SDK import boundary.
+#
+# Usage: `child_import_probe.py daemon <repo> <roots...>` records, at the first
+# import of the SDK, which repo frames asked for it while the daemon is imported.
+# `child_import_probe.py worker <repo> <credentials> <work> <roots...>` imports the
+# backup modules, then publishes an empty artifact so the real off-site publish opens
+# the bucket with the SDK. Both print one JSON report line on stdout.
 
 import importlib.abc
 import json
 import logging
 import sys
 import traceback
-from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -45,50 +44,27 @@ def _daemon_probe(repo: str, roots: tuple[str, ...]) -> None:
 def _worker_probe(credentials_path: str, work_path: str, roots: tuple[str, ...]) -> None:
     logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 
-    import services.backup.dump as backup
-    from base.config import ConfigBoot
-    from base.db import Database
-    from base.db.code_version_gate import ProcessDbGate
-    from base.native_process.code_version import CodeVersion
-    from base.native_process.loaded_commit import LoadedCommit
-
-    version = CodeVersion(LoadedCommit.capture())
-    gate = ProcessDbGate(version=version.get, process="backup-test")
-    config = ConfigBoot()
-    settings = config.view
-    from services.backup.scheduler import worker
+    import services.backup.dump as dump_module
+    import services.backup.scheduler.worker as worker_module
 
     before = sorted(m for m in sys.modules if m.split(".")[0] in roots)
     credentials = Path(credentials_path)
     credentials.write_text(json.dumps({"access_key_id": "id", "access_key_secret": "secret"}))
-    settings.services.backup_offsite_endpoint = "https://oss.invalid"
-    settings.services.backup_offsite_bucket = "backups"
-    settings.services.backup_offsite_credentials_file = credentials
-
-    def _empty_dump(_now: object, *, directory: Path, **_: object) -> Path:
-        artifact = directory / "meiva-20261002T030000Z.dump.enc"
-        artifact.write_bytes(b"")
-        return artifact
-
-    backup.run_locked_backup = _empty_dump
     work = Path(work_path)
     work.mkdir()
+    artifact = work / "meiva-20261002T030000Z.dump.enc"
+    artifact.write_bytes(b"")
 
-    def no_restore(url: str) -> Database:
-        raise AssertionError("dump must not restore")
+    from services.backup.artifact import offsite
+    from services.backup.artifact.offsite_plan import OssTarget
 
-    result = worker.execute(
-        {"kind": "dump", "now": datetime(2026, 10, 2, 3, tzinfo=UTC).isoformat()},
-        work,
-        config=config,
-        database=lambda: Database.from_settings(gate=gate),
-        database_for_url=no_restore,
-    )
+    published = offsite.publish(artifact, OssTarget("https://oss.invalid", "backups", credentials))
     sys.stdout.write(
         json.dumps(
             {
                 "before": before,
-                "result": result,
+                "imported": [dump_module.__name__, worker_module.__name__],
+                "published": published,
                 "bucket_class": sys.modules["oss2"].Bucket.__name__,
             }
         )

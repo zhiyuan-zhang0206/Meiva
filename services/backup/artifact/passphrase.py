@@ -117,12 +117,12 @@ def logical_backup_passphrase() -> str:
     return resolve(meiva_home())
 
 
-def write_key_file(directory: Path) -> Path:
-    """Write the logical-backup passphrase to a new private temporary key file.
-
-    The key never reaches argv; the caller removes the file.
-    """
-    value = logical_backup_passphrase()
+# meiva:note
+# Write `home`'s logical-backup passphrase to a new private temporary key file.
+#
+# The key never reaches argv; the caller removes the file.
+def write_key_file(directory: Path, home: Path) -> Path:
+    value = resolve(home)
     fd, name = tempfile.mkstemp(prefix=".backup-key-", dir=directory)
     path = Path(name)
     try:

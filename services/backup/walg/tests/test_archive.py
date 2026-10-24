@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from base.config import settings
 from services.backup.walg import archive
+from services.backup.walg.archive_plan import ARCHIVE_TIMEOUT_S
 from services.backup.walg.tests.support import (
     SECRETS,
     Sandbox,
@@ -20,10 +20,10 @@ from services.backup.walg.tests.support import (
 def test_off_by_default_means_no_launch_arguments(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    make_sandbox(tmp_path, monkeypatch, enabled=False)
+    sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
 
-    assert archive.expected_archive(path_reader=lambda: settings.walg.walg_config_file) is None
-    assert archive.archive_pg_args(path_reader=lambda: settings.walg.walg_config_file) == []
+    assert archive.expected_archive(path_reader=sandbox.path_reader) is None
+    assert archive.archive_pg_args(path_reader=sandbox.path_reader) == []
 
 
 def test_the_launch_arguments_are_the_expected_settings(
@@ -31,9 +31,9 @@ def test_the_launch_arguments_are_the_expected_settings(
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
 
-    args = archive.archive_pg_args(path_reader=lambda: settings.walg.walg_config_file)
+    args = archive.archive_pg_args(path_reader=sandbox.path_reader)
 
-    expected = archive.expected_archive(path_reader=lambda: settings.walg.walg_config_file)
+    expected = archive.expected_archive(path_reader=sandbox.path_reader)
     assert expected is not None
     assert args == [
         "-c",
@@ -57,9 +57,9 @@ def test_the_launch_arguments_are_the_expected_settings(
 def test_a_percent_in_a_path_is_escaped_for_postgres(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    make_sandbox(tmp_path, monkeypatch)
+    sandbox = make_sandbox(tmp_path, monkeypatch)
 
-    command = archive.archive_pg_args(path_reader=lambda: settings.walg.walg_config_file)[-1]
+    command = archive.archive_pg_args(path_reader=sandbox.path_reader)[-1]
 
     assert "meiva home%%p" in command
     assert command.count("%p") == 3, "two escaped path occurrences and the one real placeholder"
@@ -67,9 +67,9 @@ def test_a_percent_in_a_path_is_escaped_for_postgres(
 
 
 def test_no_argument_carries_a_secret(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    make_sandbox(tmp_path, monkeypatch)
+    sandbox = make_sandbox(tmp_path, monkeypatch)
 
-    joined = "\n".join(archive.archive_pg_args(path_reader=lambda: settings.walg.walg_config_file))
+    joined = "\n".join(archive.archive_pg_args(path_reader=sandbox.path_reader))
 
     assert not any(secret in joined for secret in SECRETS)
 
@@ -82,15 +82,15 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
 def test_postgres_runs_the_archive_command_and_ships_a_closed_segment(
     sandbox: Sandbox, postgres_access: None
 ) -> None:
-    expected = archive.expected_archive(path_reader=lambda: settings.walg.walg_config_file)
+    expected = archive.expected_archive(path_reader=sandbox.path_reader)
     assert expected is not None
 
-    with archiving_postgres() as pg, pg.connect() as conn:
+    with archiving_postgres(sandbox=sandbox) as pg, pg.connect() as conn:
         assert conn.execute("SHOW archive_mode").fetchone() == ("on",)
         assert conn.execute("SHOW archive_command").fetchone() == (expected.command,)
         assert conn.execute(
             "SELECT setting::int FROM pg_settings WHERE name = 'archive_timeout'"
-        ).fetchone() == (archive.ARCHIVE_TIMEOUT_S,)
+        ).fetchone() == (ARCHIVE_TIMEOUT_S,)
 
         write_some_wal_and_switch(conn)
 
@@ -112,7 +112,7 @@ def test_postgres_runs_the_archive_command_and_ships_a_closed_segment(
             text = (pg.data / name).read_text()
             assert "wal-g" not in text, "archive settings are launch arguments, never written"
             assert not any(secret in text for secret in SECRETS)
-        assert not any(secret in (pg.root / "pg.log").read_text() for secret in SECRETS)
+        assert not any(secret in (pg.data / "pg.log").read_text() for secret in SECRETS)
         assert not any(secret in expected.command for secret in SECRETS)
 
 
@@ -121,7 +121,7 @@ def test_a_failing_archive_command_is_visible_and_never_blocks_writes(
 ) -> None:
     sandbox.set_mode("fail")
 
-    with archiving_postgres() as pg, pg.connect() as conn:
+    with archiving_postgres(sandbox=sandbox) as pg, pg.connect() as conn:
         write_some_wal_and_switch(conn)
 
         def failing() -> bool:

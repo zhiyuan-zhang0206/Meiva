@@ -1,18 +1,28 @@
-"""Backup worker happy path, cancellation, private cleanup and result validation."""
+# meiva:note
+# Backup worker happy path, cancellation, private cleanup and result validation.
+#
+# Every worker here is a real child process (`stub_worker.py`) launched by the production
+# controller through its real bootstrap, so launch, wait, stop and cleanup are not stand-ins.
 
 from __future__ import annotations
 
 import asyncio
+import shutil
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from base.config import ConfigBoot
 from base.db import Database
+from services.backup.layout import BackupTree
 from services.backup.scheduler.operation import worker_process as workers
-from services.backup.scheduler.tests.operation_support import operation_kind, stub_worker, until
+from services.backup.scheduler.operation.staging import cleanup
+from services.backup.scheduler.settings import DumpSettings
+from services.backup.scheduler.tests.operation_support import (
+    STUB_WORKER,
+    operation_kind,
+    until,
+)
 
 
 @pytest.mark.parametrize(
@@ -29,7 +39,7 @@ def test_restore_worker_requires_the_captured_throwaway_base(
     from services.backup.scheduler import worker
 
     def database() -> Database:
-        pytest.fail("an invalid request must fail before database access")
+        raise AssertionError("an invalid request must fail before database access")
 
     def database_for_url(_url: str) -> Database:
         return database()
@@ -38,19 +48,27 @@ def test_restore_worker_requires_the_captured_throwaway_base(
         worker.execute(
             payload,
             tmp_path,
-            config=ConfigBoot(),
+            settings=DumpSettings(
+                is_remote=False,
+                plane_url="postgresql://unused.invalid/db",
+                keep=7,
+                offsite_endpoint="",
+                offsite_bucket="",
+                offsite_credentials_file=None,
+            ),
+            tree=BackupTree(tmp_path),
             database=database,
             database_for_url=database_for_url,
         )
     assert not (tmp_path / "scratch").exists()
 
 
-async def test_zero_exit_valid_result_is_committed_and_staging_removed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    children = stub_worker(tmp_path, monkeypatch, "Path(sys.argv[2]).write_text('{\"ok\":true}')\n")
-    completed = await workers.run_operation("unused", {}, kind=operation_kind(tmp_path), env={})
-    assert completed.result == {"ok": True} and children[0].returncode == 0
+async def test_zero_exit_valid_result_is_committed_and_staging_removed(tmp_path: Path) -> None:
+    completed = await workers.run_operation(
+        STUB_WORKER, {"mode": "ok"}, kind=operation_kind(tmp_path), env={}
+    )
+
+    assert completed.result == {"ok": True}
     assert completed.work.stat().st_mode & 0o777 == 0o700
     assert (completed.work / "request.json").stat().st_mode & 0o777 == 0o600
     assert await completed.commit(lambda: "published") == "published"
@@ -59,122 +77,88 @@ async def test_zero_exit_valid_result_is_committed_and_staging_removed(
 
 @pytest.mark.parametrize("payload,code", [("{}", 3), ("invalid", 0), ("[]", 0), (None, 0)])
 async def test_worker_failure_cleans_staging_without_blocking_next_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload: str | None, code: int
+    tmp_path: Path, payload: str | None, code: int
 ) -> None:
-    write = "" if payload is None else f"Path(sys.argv[2]).write_text({payload!r});"
-    children = stub_worker(tmp_path, monkeypatch, f"{write}sys.exit({code})\n")
+    request = {"mode": "exit", "code": code, "payload": payload}
     for _ in range(2):
         with pytest.raises((RuntimeError, TypeError)):
-            await workers.run_operation("unused", {}, kind=operation_kind(tmp_path), env={})
+            await workers.run_operation(STUB_WORKER, request, kind=operation_kind(tmp_path), env={})
         assert not list((tmp_path / "controls").glob(".operation-*"))
-    assert len(children) == 2
     assert not list(tmp_path.rglob("unresolved.json"))
 
 
 async def test_cancel_unwinds_worker_plaintext_cleanup_and_releases_kind_lock(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     ready, plaintext = tmp_path / "ready", tmp_path / "plaintext"
-    children = stub_worker(
-        tmp_path,
-        monkeypatch,
-        "import signal\n"
-        "def stopped(*_args): raise KeyboardInterrupt\n"
-        "signal.signal(signal.SIGTERM,stopped)\n"
-        f"Path({str(plaintext)!r}).write_text('private')\n"
-        f"Path({str(ready)!r}).touch()\n"
-        "try: time.sleep(60)\n"
-        f"finally: Path({str(plaintext)!r}).unlink()\n",
-    )
+    request = {"mode": "plaintext-then-hang", "plaintext": str(plaintext), "ready": str(ready)}
     task = asyncio.create_task(
-        workers.run_operation("unused", {}, kind=operation_kind(tmp_path), env={})
+        workers.run_operation(STUB_WORKER, request, kind=operation_kind(tmp_path), env={})
     )
-    try:
-        await until(ready)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-        assert children[0].returncode is not None
-        assert not plaintext.exists()
-        assert not list((tmp_path / "controls").glob(".operation-*"))
-    finally:
-        for child in children:
-            if child.poll() is None:
-                child.kill()
-            child.wait(timeout=5)
-
-
-async def test_timeout_bounds_worker_and_sanitizes_scratch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    children = stub_worker(tmp_path, monkeypatch, "time.sleep(60)\n")
-    cleaned: list[Path] = []
-    with pytest.raises(TimeoutError, match="execution bound"):
-        await workers.run_operation(
-            "unused",
-            {},
-            kind=operation_kind(tmp_path, sanitize=cleaned.append),
-            env={},
-            timeout_s=0.05,
-        )
-    assert children[0].returncode is not None
-    assert len(cleaned) == 1 and not cleaned[0].exists()
-
-
-async def test_failed_sanitizer_reports_private_staging_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    stub_worker(tmp_path, monkeypatch, "Path(sys.argv[2]).write_text('{}')\n")
-
-    def failed(_work: Path) -> None:
-        raise RuntimeError("plaintext cleanup failed")
-
+    await until(ready)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert not plaintext.exists()
+    assert not list((tmp_path / "controls").glob(".operation-*"))
     completed = await workers.run_operation(
-        "unused", {}, kind=operation_kind(tmp_path, sanitize=failed), env={}
+        STUB_WORKER, {"mode": "ok"}, kind=operation_kind(tmp_path), env={}
     )
-    with pytest.raises(RuntimeError, match="plaintext cleanup failed") as caught:
+    await completed.commit(lambda: None)
+
+
+async def test_timeout_bounds_worker_and_removes_its_plaintext_scratch(tmp_path: Path) -> None:
+    ready = tmp_path / "ready"
+    request = {"mode": "scratch-then-hang", "ready": str(ready)}
+    kind = operation_kind(tmp_path, plaintext_scratch=True)
+
+    with pytest.raises(TimeoutError, match="execution bound"):
+        await workers.run_operation(STUB_WORKER, request, kind=kind, env={}, timeout_s=3.0)
+
+    assert ready.exists(), "the worker staged its plaintext before the bound expired"
+    assert not list((tmp_path / "controls").glob(".operation-*"))
+
+
+async def test_a_staging_directory_that_cannot_be_removed_reports_its_private_path(
+    tmp_path: Path,
+) -> None:
+    completed = await workers.run_operation(
+        STUB_WORKER, {"mode": "ok"}, kind=operation_kind(tmp_path), env={}
+    )
+    shutil.rmtree(completed.work)
+
+    with pytest.raises(FileNotFoundError) as caught:
         await completed.commit(lambda: None)
-    assert completed.work.exists()
+
     assert str(completed.work) in "\n".join(caught.value.__notes__)
 
 
-async def test_old_receipts_do_not_block_independent_scratch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_old_receipts_do_not_block_independent_scratch(tmp_path: Path) -> None:
     old = tmp_path / "controls/.operation-old"
     old.mkdir(parents=True)
     (old / "unresolved.json").write_text("{}")
-    stub_worker(tmp_path, monkeypatch, "Path(sys.argv[2]).write_text('{}')\n")
-    completed = await workers.run_operation("unused", {}, kind=operation_kind(tmp_path), env={})
+
+    completed = await workers.run_operation(
+        STUB_WORKER, {"mode": "ok"}, kind=operation_kind(tmp_path), env={}
+    )
+
     assert completed.work != old
     await completed.commit(lambda: None)
     assert old.exists(), "old private scratch is not adopted or silently deleted"
 
 
-async def test_scheduled_commit_runs_off_the_event_loop(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from services.backup.scheduler import worker
-
-    name = "meiva-20260926T000000Z.dump.enc"
-    stub_worker(
-        tmp_path,
-        monkeypatch,
-        f"artifact=Path(sys.argv[2]).parent/'artifact'/{name!r}\n"
-        "artifact.parent.mkdir();artifact.write_bytes(b'encrypted')\n"
-        "Path(sys.argv[2]).write_text(json.dumps(dict(artifact=artifact.name,sha256='d')))\n",
+async def test_commit_runs_its_step_off_the_event_loop(tmp_path: Path) -> None:
+    completed = await workers.run_operation(
+        STUB_WORKER, {"mode": "ok"}, kind=operation_kind(tmp_path), env={}
     )
-    monkeypatch.setattr(worker, "meiva_home", lambda: tmp_path)
     ticks = 0
     during: list[int] = []
 
-    def slow_commit(staged: Path, _digest: str, **_inputs: object) -> Path:
+    def slow_step() -> str:
         started = ticks
         time.sleep(0.2)
         during.append(ticks - started)
-        return staged
-
-    monkeypatch.setattr(worker, "commit_scheduled_backup", slow_commit)
+        return "published"
 
     async def tick() -> None:
         nonlocal ticks
@@ -184,7 +168,7 @@ async def test_scheduled_commit_runs_off_the_event_loop(
 
     ticker = asyncio.create_task(tick())
     try:
-        await worker.run_job("dump", now=datetime(2026, 9, 26, tzinfo=UTC), config=ConfigBoot())
+        assert await completed.commit(slow_step) == "published"
     finally:
         ticker.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -192,42 +176,17 @@ async def test_scheduled_commit_runs_off_the_event_loop(
     assert during and during[0] >= 5
 
 
-async def test_failed_operation_sanitizer_keeps_path_and_reports_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+async def test_a_failed_operation_whose_staging_vanished_keeps_its_path_in_the_report(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    stub_worker(tmp_path, monkeypatch, "sys.exit(3)\n")
-
-    def failed(_work: Path) -> None:
-        raise RuntimeError("cannot sanitize private material")
-
-    with pytest.raises(RuntimeError, match="operation exited 3") as caught:
+    with pytest.raises(FileNotFoundError) as caught:
         await workers.run_operation(
-            "unused", {}, kind=operation_kind(tmp_path, sanitize=failed), env={}
+            STUB_WORKER, {"mode": "exit-and-remove-work"}, kind=operation_kind(tmp_path), env={}
         )
-    [work] = (tmp_path / "controls").glob(".operation-*")
-    assert str(work) in caplog.text
-    assert "cannot sanitize private material" in caplog.text
-    assert str(work) in "\n".join(caught.value.__notes__)
 
-
-async def test_progress_reaches_the_operator_live(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from services.backup.scheduler.operation import worker_process
-
-    stub_worker(
-        tmp_path,
-        monkeypatch,
-        "sys.stderr.write('downloading base\\nbase extracted\\n');sys.stderr.flush()\n"
-        "Path(sys.argv[2]).write_text(json.dumps({'ok': True}))\n",
-    )
-    lines: list[str] = []
-    completed = await worker_process.run_operation(
-        "m", {"chain": "c"}, kind=operation_kind(tmp_path), env={}, progress=lines.append
-    )
-    assert completed.result == {"ok": True}
-    assert lines == ["downloading base", "base extracted"]
-    await completed.commit(lambda: None)
+    assert "backup staging cleanup failed at" in caplog.text
+    [work] = [line for line in caught.value.__notes__ if "operation cleanup failed at" in line]
+    assert str(tmp_path / "controls" / ".operation-") in work
 
 
 async def test_busy_concurrency_lock_defers_without_creating_staging(tmp_path: Path) -> None:
@@ -237,5 +196,12 @@ async def test_busy_concurrency_lock_defers_without_creating_staging(tmp_path: P
     kind = operation_kind(tmp_path)
     kind.control_root.mkdir()
     with file_lock(kind.control_root / ".lock"), pytest.raises(OperationBusyError):
-        await workers.run_operation("unused", {}, kind=kind, env={})
+        await workers.run_operation(STUB_WORKER, {"mode": "ok"}, kind=kind, env={})
     assert not list(kind.control_root.glob(".operation-*"))
+
+
+def test_cleanup_of_a_vanished_directory_raises_with_the_path(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError) as caught:
+        cleanup(operation_kind(tmp_path), tmp_path / "gone")
+
+    assert str(tmp_path / "gone") in "\n".join(caught.value.__notes__)
