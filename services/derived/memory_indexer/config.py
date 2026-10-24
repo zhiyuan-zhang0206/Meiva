@@ -1,12 +1,13 @@
-"""Narrow live configuration readers owned by the memory-indexer composition root."""
+# meiva:note
+# The memory-indexer daemon's tuning and the configuration values its root reads once.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from base.config import ConfigBoot
 from services.derived.memory_indexer.embeddings import factory
+from services.derived.memory_indexer.patrol_plan import liveness_ceiling_s
 
 
 @dataclass(frozen=True)
@@ -44,49 +45,33 @@ class MemoryIndexerConfig:
                 raise ValueError(f"excluded_basenames entries must be plain file names: {name!r}")
 
 
+# meiva:note
+# What the indexer daemon takes from the configuration owner, read once by its root: the
+# embedding provider and its call budget, the storage backend and the address of the search
+# service. All of it is restart-bound; nothing below the root reads the owner again.
 @dataclass(frozen=True)
 class MemoryIndexerInputs:
-    """Readers retain one boot owner without reading or freezing its values."""
-
-    embedding_name: Callable[[], str]
-    embed_timeout: Callable[[], float]
-    api_key: Callable[[], str | None]
-    backend_name: Callable[[], str]
-    search_uri: Callable[[], str]
+    embedding_name: str
+    embed_timeout_s: float
+    api_key: str | None = field(repr=False)
+    backend_name: str
+    search_uri: str
 
     @classmethod
     def from_boot(cls, boot: ConfigBoot) -> MemoryIndexerInputs:
-        """Bind each reader to the root's owner; construction performs no reads."""
-
-        def api_key() -> str | None:
-            value = boot.view.lm.gemini_api_key
-            return None if value is None else value.get_secret_value()
-
+        services = boot.view.services
+        key = boot.view.lm.gemini_api_key
         return cls(
-            embedding_name=lambda: boot.view.services.embedding_backend,
-            embed_timeout=lambda: boot.view.services.memory_embed_timeout_seconds,
-            api_key=api_key,
-            backend_name=lambda: boot.view.services.memory_search_backend,
-            search_uri=lambda: boot.view.services.memory_search_uri,
+            embedding_name=services.embedding_backend,
+            embed_timeout_s=services.memory_embed_timeout_seconds,
+            api_key=None if key is None else key.get_secret_value(),
+            backend_name=services.memory_search_backend,
+            search_uri=services.memory_search_uri,
         )
-
-
-# Derive the ceiling from one provider batch's full retry budget: a single
-# legitimate call can exceed 180s, and several shorter calls can compound.
-# _process_paths beats before each provider/backend call, including commits
-# and deletes, so calls cannot compound in one gap (default batch budget 606s).
-# A false kill costs a rebuild; later true-wedge detection costs staleness
-# only, since search keeps reading the existing index.
-LIVENESS_TIMEOUT_FLOOR_S = 180.0  # Historic ceiling; preserve other loop branches' slack.
-# Covers executor scheduling, local processing, and loop resumption. Commit
-# calls beat separately; NumPy's 300s upsert allowance fits the default 636s.
-LIVENESS_SAFETY_MARGIN_S = 30.0
 
 
 def liveness_timeout_seconds(name: str, *, timeout_seconds: float) -> float:
     """Cover one selected provider batch plus local scheduling and commit slack."""
-    return max(
-        LIVENESS_TIMEOUT_FLOOR_S,
+    return liveness_ceiling_s(
         factory.worst_case_batch_seconds(name, timeout_seconds=timeout_seconds)
-        + LIVENESS_SAFETY_MARGIN_S,
     )

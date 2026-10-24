@@ -14,7 +14,7 @@ the caller's deadline.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 
 import httpx
 import numpy as np
@@ -40,14 +40,10 @@ class NumPyBackend:
 
     name = "numpy"
 
-    def __init__(self, *, uri_reader: Callable[[], str], readonly: bool = False) -> None:
-        self._uri_reader = uri_reader
+    def __init__(self, *, uri: str, readonly: bool = False) -> None:
+        self._uri = uri
         self._client: httpx.Client | None = None
         self._readonly = readonly
-
-    @property
-    def _uri(self) -> str:
-        return self._uri_reader()
 
     def connect(self) -> None:
         """Open the sync client + prove the service answers (a real GET

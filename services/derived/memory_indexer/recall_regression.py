@@ -5,7 +5,7 @@
 # first half up and the second half down; a change that moves both the same way has not been
 # judged. The precision half carries scores on both sides of every step it might be asked to take,
 # so the next cut down cannot report "recall up, precision unchanged" by arithmetic alone.
-# The ranking threshold and cap are read from the agent config, never copied here.
+# The ranking threshold and cap come from the agent config the entry hands in, never copied here.
 # meiva:link services/docs/gateway_side/memory_indexer/memory-recall-regression.meiva.okf.md
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from base.config import settings
+from base.config import ConfigBoot
 
 CASES_PATH = Path(__file__).resolve().parent / "tests" / "recall_cases.jsonl"
 RECALL = "recall"
@@ -64,8 +64,8 @@ class Outcome:
         return "held" if self.rank <= (self.case.baseline_rank or 0) else "slipped"
 
 
-def injection_policy() -> tuple[float, int]:
-    memory = settings.agent
+def injection_policy(config: ConfigBoot) -> tuple[float, int]:
+    memory = config.view.agent
     return memory.memory_recall_inject_threshold, memory.memory_recall_inject_max
 
 
@@ -203,7 +203,7 @@ def _ranked_from(entry: object) -> list[tuple[str, float]]:
     return ranked
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str], *, config: ConfigBoot) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Compare a fresh passive-recall run against the recorded 2026-10-18 baseline. "
@@ -222,7 +222,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--cap", type=int, default=None, help="defaults to the agent config")
     args = parser.parse_args(argv)
-    threshold, cap = injection_policy()
+    threshold, cap = injection_policy(config)
     if args.threshold is not None:
         threshold = args.threshold
     if args.cap is not None:
@@ -248,4 +248,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    boot = ConfigBoot()
+    boot.boot()
+    sys.exit(main(sys.argv[1:], config=boot))

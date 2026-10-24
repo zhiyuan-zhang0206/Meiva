@@ -4,7 +4,6 @@ import asyncio
 import logging
 import signal
 import sys
-from collections.abc import Callable
 
 import uvicorn
 
@@ -38,6 +37,7 @@ def memory_search_config(*, config: ConfigBoot) -> MemorySearchConfig:
         memory_search_data_dir=config.view.services.memory_search_data_dir,
         memory_search_port=config.view.services.memory_search_port,
         memory_search_max_batch_rows=config.view.services.memory_search_max_batch_rows,
+        embedding_name=config.view.services.embedding_backend,
     )
 
 
@@ -47,21 +47,23 @@ def _is_running(config: MemorySearchConfig) -> bool:
     )
 
 
-async def run(config: MemorySearchConfig, *, embedding_name_reader: Callable[[], str]) -> None:
-    """Load the store, then serve until the graceful-shutdown signal fires.
-
-    The provider config (`MEIVA_EMBEDDING_BACKEND`) is read at boot: the
-    store's matrix width and wire bound must match the provider that
-    produced the vectors, and an unknown provider value fails fast instead
-    of serving a half-mismatched search surface."""
-    descriptor = get_descriptor(embedding_name_reader())
+# meiva:note
+# Load the store and return the server that will serve it.
+#
+# The provider name (`MEIVA_EMBEDDING_BACKEND`) is a field of the config
+# value, read once at the root: the store's matrix width and wire bound
+# must match the provider that produced the vectors, and an unknown
+# provider value fails fast instead of serving a half-mismatched search
+# surface. A changed value takes effect on restart.
+async def build_server(config: MemorySearchConfig) -> uvicorn.Server:
+    descriptor = get_descriptor(config.embedding_name)
     store = MemoryStore(
         config.memory_search_data_dir / "vectors.npz",
         dim=descriptor.dim,
         fingerprint=descriptor.fingerprint,
     )
     await asyncio.to_thread(store.load)
-    server = uvicorn.Server(
+    return uvicorn.Server(
         uvicorn.Config(
             build_app(store, config.memory_search_max_batch_rows, embedding_dim=descriptor.dim),
             host="127.0.0.1",
@@ -71,6 +73,12 @@ async def run(config: MemorySearchConfig, *, embedding_name_reader: Callable[[],
             log_config=None,
         )
     )
+
+
+# meiva:note
+# Serve until the graceful-shutdown signal fires.
+async def run(config: MemorySearchConfig) -> None:
+    server = await build_server(config)
     await server.serve()
 
 
@@ -117,9 +125,7 @@ def main() -> None:
         # KeyboardInterrupt branch — not a normal return from `run()`.
         runner = asyncio.Runner()
         try:
-            runner.run(
-                run(config, embedding_name_reader=lambda: boot.view.services.embedding_backend)
-            )
+            runner.run(run(config))
         except KeyboardInterrupt:
             signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a retry must not abort the bounded exit
             _log.info("[memory-search] interrupted, shutting down")

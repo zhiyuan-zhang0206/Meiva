@@ -6,7 +6,6 @@ import time
 from typing import TypedDict
 
 from base import telemetry
-from services.derived.memory_indexer.config import MemoryIndexerConfig
 
 _log = logging.getLogger("services.derived.memory_indexer.patrol_status")
 
@@ -73,13 +72,6 @@ class PatrolStatus:
 
     def health_fields(self) -> dict[str, object]:
         return {"index": self.lag()}
-
-
-def retry_delay_s(config: MemoryIndexerConfig, failures: int) -> float:
-    delay = config.retry_backoff_s
-    for _ in range(failures - 1):
-        delay = min(delay * 2, config.patrol_interval_s)
-    return delay
 
 
 def emit_patrol_event(status: PatrolStatus) -> None:

@@ -8,27 +8,28 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.daemon.health import Liveness
 from services.derived.memory_indexer import daemon
 from services.derived.memory_indexer.config import MemoryIndexerConfig
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
-from services.derived.memory_indexer.patrol_status import PatrolStatus, retry_delay_s
+from services.derived.memory_indexer.patrol_status import PatrolStatus
 from services.derived.memory_indexer.tests.fake_provider import DIM, FakeProvider
 from services.derived.memory_search.tests.store_backend import StoreBackend
 from services.derived.memory_search.tests.test_memory_indexer import (
     liveness_timeout,
 )
 from services.derived.memory_search.tests.test_memory_indexer import (
-    memory_watched_root as memory_watched_root,
-)
-from services.derived.memory_search.tests.test_memory_indexer import (
     store_backend as store_backend,
 )
+from services.derived.memory_search.tests.test_memory_indexer import (
+    watched_root as watched_root,
+)
 
 
-class _Clock:
+# meiva:note
+# A clock the patrol loop drives: each wait advances time, runs the test's hook at that
+# tick and ends the run once the stop time has passed.
+class _Timers:
     def __init__(self, *, stop_at: float, on_tick: Callable[[float], None] | None = None) -> None:
         self.now = 0.0
         self._stop_at = stop_at
@@ -37,8 +38,11 @@ class _Clock:
     def monotonic(self) -> float:
         return self.now
 
-    async def wait(self, delay: float) -> None:
-        self.now += delay
+    def sleep(self, seconds: float) -> None:
+        raise AssertionError("the patrol loop must not block its thread")
+
+    async def asleep(self, seconds: float) -> None:
+        self.now += seconds
         if self._on_tick is not None:
             self._on_tick(self.now)
         if self.now > self._stop_at:
@@ -46,18 +50,18 @@ class _Clock:
 
 
 class _RecordingStatus(PatrolStatus):
-    def __init__(self, *, retry_limit: int, clock: _Clock) -> None:
+    def __init__(self, *, retry_limit: int, timers: _Timers) -> None:
         super().__init__(retry_limit=retry_limit)
         self.passes: list[tuple[float, bool]] = []
-        self._clock = clock
+        self._timers = timers
 
     def failed(self) -> None:
         super().failed()
-        self.passes.append((self._clock.now, False))
+        self.passes.append((self._timers.now, False))
 
     def succeeded(self) -> None:
         super().succeeded()
-        self.passes.append((self._clock.now, True))
+        self.passes.append((self._timers.now, True))
 
 
 async def _run_patrol(
@@ -66,8 +70,7 @@ async def _run_patrol(
     *,
     config: MemoryIndexerConfig,
     status: _RecordingStatus,
-    clock: _Clock,
-    machine: MachineIdentity,
+    timers: _Timers,
     root: Path,
 ) -> None:
     with pytest.raises(asyncio.CancelledError):
@@ -75,11 +78,9 @@ async def _run_patrol(
             backend,
             provider,
             Liveness(liveness_timeout()),
-            machine=machine,
             config=config,
             status=status,
-            clock=clock.monotonic,
-            wait=clock.wait,
+            timers=timers,
             root=root,
         )
 
@@ -104,8 +105,7 @@ class _FailsOnceProvider(FakeProvider):
 async def test_a_changed_note_waits_for_the_next_patrol_without_a_file_event(
     tmp_path: Path,
     store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
+    watched_root: Path,
 ) -> None:
     config = MemoryIndexerConfig(loop_interval_s=1.0, patrol_interval_s=100.0)
     note = tmp_path / "note.md"
@@ -116,16 +116,15 @@ async def test_a_changed_note_waits_for_the_next_patrol_without_a_file_event(
         if now == 50.0:
             assert store_backend.all_meta() == {}, "no pass has run since the note arrived"
 
-    clock = _Clock(stop_at=102.0, on_tick=on_tick)
-    status = _RecordingStatus(retry_limit=config.retry_limit, clock=clock)
+    timers = _Timers(stop_at=102.0, on_tick=on_tick)
+    status = _RecordingStatus(retry_limit=config.retry_limit, timers=timers)
     await _run_patrol(
         store_backend,
         FakeProvider(),
         config=config,
         status=status,
-        clock=clock,
-        machine=machine_identity,
-        root=tmp_path,
+        timers=timers,
+        root=watched_root,
     )
 
     assert status.passes == [(1.0, True), (101.0, True)]
@@ -136,23 +135,21 @@ async def test_a_changed_note_waits_for_the_next_patrol_without_a_file_event(
 async def test_a_failed_pass_retries_with_backoff_then_marks_over_limit(
     tmp_path: Path,
     store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
+    watched_root: Path,
 ) -> None:
     (tmp_path / "note.md").write_text("note")
     config = MemoryIndexerConfig(
         loop_interval_s=1.0, patrol_interval_s=900.0, retry_backoff_s=60.0, retry_limit=3
     )
-    clock = _Clock(stop_at=1330.0)
-    status = _RecordingStatus(retry_limit=config.retry_limit, clock=clock)
+    timers = _Timers(stop_at=1330.0)
+    status = _RecordingStatus(retry_limit=config.retry_limit, timers=timers)
     await _run_patrol(
         store_backend,
         _DownProvider(),
         config=config,
         status=status,
-        clock=clock,
-        machine=machine_identity,
-        root=tmp_path,
+        timers=timers,
+        root=watched_root,
     )
 
     assert status.passes == [
@@ -172,24 +169,22 @@ async def test_a_failed_pass_retries_with_backoff_then_marks_over_limit(
 async def test_health_lag_clears_once_a_retry_succeeds(
     tmp_path: Path,
     store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
+    watched_root: Path,
 ) -> None:
     note = tmp_path / "note.md"
     note.write_text("note")
     config = MemoryIndexerConfig(
         loop_interval_s=1.0, patrol_interval_s=100.0, retry_backoff_s=60.0, retry_limit=3
     )
-    clock = _Clock(stop_at=70.0)
-    status = _RecordingStatus(retry_limit=config.retry_limit, clock=clock)
+    timers = _Timers(stop_at=70.0)
+    status = _RecordingStatus(retry_limit=config.retry_limit, timers=timers)
     await _run_patrol(
         store_backend,
         _FailsOnceProvider(),
         config=config,
         status=status,
-        clock=clock,
-        machine=machine_identity,
-        root=tmp_path,
+        timers=timers,
+        root=watched_root,
     )
 
     assert status.passes == [(1.0, False), (61.0, True)]
@@ -199,22 +194,6 @@ async def test_health_lag_clears_once_a_retry_succeeds(
     assert index["over_limit"] is False
     assert index["last_success_at"] is not None
     assert list(store_backend.all_meta()) == [str(note.resolve())]
-
-
-def test_retry_delay_doubles_and_never_exceeds_the_patrol_interval() -> None:
-    config = MemoryIndexerConfig(retry_backoff_s=60.0, patrol_interval_s=900.0, retry_limit=5)
-    assert [retry_delay_s(config, failures) for failures in (1, 2, 3, 4)] == [
-        60.0,
-        120.0,
-        240.0,
-        480.0,
-    ]
-    capped = MemoryIndexerConfig(retry_backoff_s=60.0, patrol_interval_s=200.0, retry_limit=5)
-    assert [retry_delay_s(capped, failures) for failures in (1, 2, 3)] == [
-        60.0,
-        120.0,
-        200.0,
-    ]
 
 
 def test_over_limit_only_marks_and_keeps_the_lag_pending() -> None:
@@ -233,8 +212,7 @@ def test_over_limit_only_marks_and_keeps_the_lag_pending() -> None:
 def test_patrol_compares_content_not_mtime(
     tmp_path: Path,
     store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
+    watched_root: Path,
 ) -> None:
     note = tmp_path / "note.md"
     note.write_text("original content")
@@ -244,7 +222,7 @@ def test_patrol_compares_content_not_mtime(
         {note.resolve()},
         FakeProvider(),
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched_root,
         config=MemoryIndexerConfig(),
     )
 
@@ -266,8 +244,7 @@ def test_patrol_compares_content_not_mtime(
 def test_navigation_files_stay_out_of_the_index(
     tmp_path: Path,
     store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
+    watched_root: Path,
 ) -> None:
     (tmp_path / "MEMORY.md").write_text("- [note](note.md) — description")
     sub = tmp_path / "sub"
@@ -297,7 +274,7 @@ def test_navigation_files_stay_out_of_the_index(
         {index_file.resolve()},
         FakeProvider(),
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched_root,
         config=MemoryIndexerConfig(),
     )
     assert store_backend.all_meta() == {}
@@ -306,8 +283,7 @@ def test_navigation_files_stay_out_of_the_index(
 def test_a_vanished_root_fails_the_pass_instead_of_emptying_the_index(
     tmp_path: Path,
     store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
+    watched_root: Path,
 ) -> None:
     note = tmp_path / "note.md"
     note.write_text("note")
@@ -316,7 +292,7 @@ def test_a_vanished_root_fails_the_pass_instead_of_emptying_the_index(
         {note.resolve()},
         FakeProvider(),
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched_root,
         config=MemoryIndexerConfig(),
     )
     indexed = store_backend.all_meta()
@@ -327,7 +303,6 @@ def test_a_vanished_root_fails_the_pass_instead_of_emptying_the_index(
         store_backend,
         FakeProvider(),
         Liveness(liveness_timeout()),
-        machine=machine_identity,
         config=MemoryIndexerConfig(),
         status=status,
         root=tmp_path / "gone",

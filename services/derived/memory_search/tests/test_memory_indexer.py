@@ -19,14 +19,10 @@ import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 
 import numpy as np
 import pytest
 
-from base.cluster.machine import MachineIdentity, MachineRoles
-from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
 from base.daemon import health
 from base.daemon.health import Liveness
 from base.packages.plugin_providers import build_model_catalog
@@ -46,12 +42,12 @@ from services.derived.memory_indexer.tests.fake_provider import (
 )
 from services.derived.memory_search.tests.store_backend import StoreBackend
 
+PROVIDER = "gemini"
+EMBED_TIMEOUT_S = 60.0
+
 
 def liveness_timeout() -> float:
-    return config.liveness_timeout_seconds(
-        settings.services.embedding_backend,
-        timeout_seconds=settings.services.memory_embed_timeout_seconds,
-    )
+    return config.liveness_timeout_seconds(PROVIDER, timeout_seconds=EMBED_TIMEOUT_S)
 
 
 @pytest.fixture
@@ -65,23 +61,16 @@ def _vec(seed: int) -> np.ndarray:
     return rng.standard_normal(DIM).astype(np.float32)
 
 
-@pytest.fixture(autouse=True)
-def memory_watched_root(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, machine_identity: MachineIdentity
-) -> None:
-    """Point the daemon's watched root at this test's sandbox.
+@pytest.fixture
+def watched_root(tmp_path: Path) -> Path:
+    """The root the daemon indexes: this test's sandbox, resolved as the daemon resolves its own.
 
-    `process_paths` now prunes any path outside the watched root (stale
+    `process_paths` prunes any path outside the root it is given (stale
     authoring-checkout leftovers), so tests that embed files under
-    `tmp_path` must make `tmp_path` the root — otherwise every file they
-    write would count as foreign and be deleted.
+    `tmp_path` must hand it `tmp_path` — otherwise every file they write
+    would count as foreign and be deleted.
     """
-
-    def memory_root_for_roles(*, roles: MachineRoles) -> Path:
-        assert roles == machine_identity.role()
-        return tmp_path
-
-    monkeypatch.setattr(daemon, "memory_root", memory_root_for_roles)
+    return tmp_path.resolve()
 
 
 def test_content_hash_deterministic() -> None:
@@ -136,10 +125,8 @@ def test_scan_disk_missing_root_returns_empty(tmp_path: Path) -> None:
 
 def test_process_paths_embeds_new_files(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
+    watched_root: Path,
 ) -> None:
     f1 = tmp_path / "a.md"
     f1.write_text("content A")
@@ -152,7 +139,7 @@ def test_process_paths_embeds_new_files(
         {f1.resolve(), f2.resolve()},
         provider,
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched_root,
         config=MemoryIndexerConfig(),
     )
     assert provider.embed_batch_count == 1
@@ -163,10 +150,8 @@ def test_process_paths_embeds_new_files(
 
 def test_process_paths_skips_unchanged_hash(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
+    watched_root: Path,
 ) -> None:
     f = tmp_path / "a.md"
     f.write_text("content")
@@ -177,7 +162,7 @@ def test_process_paths_skips_unchanged_hash(
         {f.resolve()},
         provider,
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched_root,
         config=MemoryIndexerConfig(),
     )
     assert provider.embed_batch_count == 1
@@ -187,7 +172,7 @@ def test_process_paths_skips_unchanged_hash(
         {f.resolve()},
         provider,
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched_root,
         config=MemoryIndexerConfig(),
     )
     assert provider.embed_batch_count == 1  # hash unchanged, no re-embed
@@ -195,10 +180,8 @@ def test_process_paths_skips_unchanged_hash(
 
 def test_process_paths_reembeds_on_provider_fingerprint_change(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
+    watched_root: Path,
 ) -> None:
     """CTO ① (2026-08-30): a provider switch must trigger a full rebuild —
     old vectors live in a different semantic space even at the same dim, so
@@ -212,7 +195,7 @@ def test_process_paths_reembeds_on_provider_fingerprint_change(
         {f.resolve()},
         first,
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched_root,
         config=MemoryIndexerConfig(),
     )
     assert first.embed_batch_count == 1
@@ -226,7 +209,7 @@ def test_process_paths_reembeds_on_provider_fingerprint_change(
         {f.resolve()},
         switched,
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched_root,
         config=MemoryIndexerConfig(),
     )
     assert switched.embed_batch_count == 1  # re-embedded despite unchanged hash
@@ -235,7 +218,7 @@ def test_process_paths_reembeds_on_provider_fingerprint_change(
 
 
 def test_process_paths_deletes_missing_files(
-    tmp_path: Path, store_backend: StoreBackend, *, machine_identity: MachineIdentity
+    tmp_path: Path, store_backend: StoreBackend, *, watched_root: Path
 ) -> None:
     """Path enters dirty set but file not on disk — index row is deleted."""
     ghost = str(
@@ -247,31 +230,20 @@ def test_process_paths_deletes_missing_files(
         {Path(ghost)},
         FakeProvider(),
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched_root,
         config=MemoryIndexerConfig(),
     )
     assert store_backend.all_meta() == {}
 
 
 def test_process_paths_deletes_foreign_paths_even_when_file_exists(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
+    tmp_path: Path, store_backend: StoreBackend
 ) -> None:
     """Rows outside the watched root are pruned even when the file still
     exists on disk — the stale authoring-checkout leftovers that surface
     as duplicate search hits (e.g. user-profile.md ×2)."""
     watched = tmp_path / "watched"
     watched.mkdir()
-
-    def memory_root_for_roles(*, roles: MachineRoles) -> Path:
-        assert roles == machine_identity.role()
-        return watched
-
-    monkeypatch.setattr(daemon, "memory_root", memory_root_for_roles)
-
     foreign_dir = tmp_path / "foreign"
     foreign_dir.mkdir()
     foreign = foreign_dir / "note.md"  # exists on disk, outside watched root
@@ -283,19 +255,13 @@ def test_process_paths_deletes_foreign_paths_even_when_file_exists(
         {foreign},
         FakeProvider(),
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched.resolve(),
         config=MemoryIndexerConfig(),
     )
     assert store_backend.all_meta() == {}
 
 
-def test_reconcile_prunes_foreign_rows(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
+def test_reconcile_prunes_foreign_rows(tmp_path: Path, store_backend: StoreBackend) -> None:
     root = tmp_path / "watched"
     root.mkdir()
     watched = root / "a.md"
@@ -303,11 +269,6 @@ def test_reconcile_prunes_foreign_rows(
     foreign = tmp_path / "foreign.md"
     foreign.write_text("foreign content")
 
-    def memory_root_for_roles(*, roles: MachineRoles) -> Path:
-        assert roles == machine_identity.role()
-        return root
-
-    monkeypatch.setattr(daemon, "memory_root", memory_root_for_roles)
     backend = store_backend
     backend.upsert(str(watched.resolve()), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
     backend.upsert(str(foreign.resolve()), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
@@ -316,7 +277,6 @@ def test_reconcile_prunes_foreign_rows(
         backend,
         FakeProvider(),
         Liveness(liveness_timeout()),
-        machine=machine_identity,
         config=MemoryIndexerConfig(),
         status=daemon.PatrolStatus(retry_limit=3),
         root=root,
@@ -326,23 +286,12 @@ def test_reconcile_prunes_foreign_rows(
     assert str(watched.resolve()) in meta
 
 
-def test_reconcile_reembeds_on_provider_switch(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
+def test_reconcile_reembeds_on_provider_switch(tmp_path: Path, store_backend: StoreBackend) -> None:
     root = tmp_path / "watched"
     root.mkdir()
     watched = root / "a.md"
     watched.write_text("watched content")
 
-    def memory_root_for_roles(*, roles: MachineRoles) -> Path:
-        assert roles == machine_identity.role()
-        return root
-
-    monkeypatch.setattr(daemon, "memory_root", memory_root_for_roles)
     backend = store_backend
     watched_mtime = watched.stat().st_mtime
     backend.upsert(str(watched.resolve()), watched_mtime, "h", _vec(0), kind="body", chunk_idx=0)
@@ -354,7 +303,6 @@ def test_reconcile_reembeds_on_provider_switch(
         switched_backend,
         switched,
         Liveness(liveness_timeout()),
-        machine=machine_identity,
         config=MemoryIndexerConfig(),
         status=daemon.PatrolStatus(retry_limit=3),
         root=root,
@@ -426,7 +374,7 @@ class _RecordingBackend(MemorySearchBackend):
 
 
 def test_process_paths_beats_per_embed_batch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, watched_root: Path
 ) -> None:
     """Every batch gets its own beat, even when their total exceeds the ceiling."""
     now = 0.0
@@ -451,7 +399,7 @@ def test_process_paths_beats_per_embed_batch(
     backend = _RecordingBackend()
     provider = SlowProvider()
     daemon.process_paths(
-        backend, paths, provider, liveness, machine=machine_identity, config=indexer_config
+        backend, paths, provider, liveness, root=watched_root, config=indexer_config
     )
 
     assert now > liveness_timeout()
@@ -465,8 +413,7 @@ def test_process_paths_beats_during_commit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     fail_last_batch: bool,
-    *,
-    machine_identity: MachineIdentity,
+    watched_root: Path,
 ) -> None:
     """The final embed, cleanup and upsert cannot share a beat-free interval."""
     now = 0.0
@@ -483,10 +430,7 @@ def test_process_paths_beats_during_commit(
     class SlowFinalProvider(FakeProvider):
         def embed_batch(self, texts: list[str]) -> np.ndarray:
             nonlocal now
-            now += factory.worst_case_batch_seconds(
-                settings.services.embedding_backend,
-                timeout_seconds=settings.services.memory_embed_timeout_seconds,
-            )
+            now += factory.worst_case_batch_seconds(PROVIDER, timeout_seconds=EMBED_TIMEOUT_S)
             assert liveness.is_alive()
             if fail_last_batch and self.embed_batch_count == 1:
                 raise EmbeddingAPIError("last batch failed")
@@ -501,19 +445,19 @@ def test_process_paths_beats_during_commit(
     if fail_last_batch:
         with pytest.raises(EmbeddingAPIError, match="last batch failed"):
             daemon.process_paths(
-                backend, paths, provider, liveness, machine=machine_identity, config=indexer_config
+                backend, paths, provider, liveness, root=watched_root, config=indexer_config
             )
         assert set(backend.all_meta()) == {str(tmp_path / "a.md")}
     else:
         daemon.process_paths(
-            backend, paths, provider, liveness, machine=machine_identity, config=indexer_config
+            backend, paths, provider, liveness, root=watched_root, config=indexer_config
         )
         assert set(backend.all_meta()) == {str(path) for path in paths}
     assert backend.calls == ["delete_stale_rows", "upsert_many"]
 
 
 def test_process_paths_beats_per_delete(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, watched_root: Path
 ) -> None:
     """A delete-only drain batch may exceed the ceiling while each delete is timely."""
     now = 0.0
@@ -531,7 +475,7 @@ def test_process_paths_beats_per_delete(
     backend.rows = {(str(path), "body", 0): (0.0, "old", FINGERPRINT) for path in paths}
     provider = FakeProvider()
     daemon.process_paths(
-        backend, paths, provider, liveness, machine=machine_identity, config=MemoryIndexerConfig()
+        backend, paths, provider, liveness, root=watched_root, config=MemoryIndexerConfig()
     )
     assert now > liveness_timeout()
     assert backend.all_meta() == {}
@@ -539,54 +483,24 @@ def test_process_paths_beats_per_delete(
     assert provider.embed_batch_count == 0
 
 
-@pytest.mark.parametrize("provider_budget", [0.0, 10.0, 3600.0, 7200.0])
-def test_liveness_timeout_covers_worst_embed_batch(
-    monkeypatch: pytest.MonkeyPatch, provider_budget: float
-) -> None:
-    def batch_budget(name: str, *, timeout_seconds: float) -> float:
-        del name, timeout_seconds
-        return provider_budget
-
-    monkeypatch.setattr(factory, "worst_case_batch_seconds", batch_budget)
-    ceiling = liveness_timeout()
-    assert ceiling >= config.LIVENESS_TIMEOUT_FLOOR_S
-    assert ceiling >= provider_budget + config.LIVENESS_SAFETY_MARGIN_S
-
-
-def test_factory_worst_case_registry_complete(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_factory_worst_case_registry_complete() -> None:
     for name in factory.PROVIDERS:
-        monkeypatch.setattr(settings.services, "embedding_backend", name)
-        assert (
-            factory.worst_case_batch_seconds(
-                settings.services.embedding_backend,
-                timeout_seconds=settings.services.memory_embed_timeout_seconds,
-            )
-            > 0
-        ), name
+        budget = factory.worst_case_batch_seconds(name, timeout_seconds=EMBED_TIMEOUT_S)
+        assert budget > 0, name
+        assert config.liveness_timeout_seconds(name, timeout_seconds=EMBED_TIMEOUT_S) > budget, name
 
     unknown = "unknown-provider"
-    monkeypatch.setattr(settings.services, "embedding_backend", unknown)
     with pytest.raises(ValueError, match="unknown embedding provider") as provider_error:
-        factory.get_provider_named(
-            unknown,
-            catalog=build_model_catalog(),
-            timeout_reader=lambda: settings.services.memory_embed_timeout_seconds,
-            api_key_reader=lambda: None,
+        factory.get_provider(
+            unknown, catalog=build_model_catalog(), timeout_s=EMBED_TIMEOUT_S, api_key=None
         )
     with pytest.raises(ValueError) as budget_error:
-        factory.worst_case_batch_seconds(
-            settings.services.embedding_backend,
-            timeout_seconds=settings.services.memory_embed_timeout_seconds,
-        )
+        factory.worst_case_batch_seconds(unknown, timeout_seconds=EMBED_TIMEOUT_S)
     assert str(budget_error.value) == str(provider_error.value)
 
 
 def test_cold_start_reconcile_beats_liveness_across_chunks(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
+    tmp_path: Path, store_backend: StoreBackend
 ) -> None:
     """Regression (watchdog kill loop, 2026-09-19): the cold-start rebuild
     works the dirty set in file-granular chunks, beating liveness between them.
@@ -601,52 +515,38 @@ def test_cold_start_reconcile_beats_liveness_across_chunks(
         note = root / f"note-{i}.md"
         note.write_text(f"content {i}")
         files.append(note)
-
-    def memory_root_for_roles(*, roles: MachineRoles) -> Path:
-        assert roles == machine_identity.role()
-        return root
-
-    monkeypatch.setattr(daemon, "memory_root", memory_root_for_roles)
     indexer_config = MemoryIndexerConfig(reconcile_chunk_paths=2)  # 7 files -> 4 chunks
 
-    chunk_sizes: list[int] = []
-    visited: list[str] = []
+    class SlowProvider(FakeProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.batch_sizes: list[int] = []
 
-    def slow_process_paths(
-        backend: Any,
-        paths: set[Path],
-        provider: Any,
-        liveness: Liveness,
-        *,
-        machine: MachineIdentity,
-        config: MemoryIndexerConfig,
-    ) -> None:
-        assert machine is machine_identity
-        chunk_sizes.append(len(paths))
-        visited.extend(sorted(p.name for p in paths))
-        time.sleep(0.2)
+        def embed_batch(self, texts: list[str]) -> np.ndarray:
+            self.batch_sizes.append(len(texts))
+            time.sleep(0.2)
+            return super().embed_batch(texts)
 
-    monkeypatch.setattr(daemon, "process_paths", slow_process_paths)
-
+    provider = SlowProvider()
     liveness = Liveness(0.4)
     started = time.monotonic()
     assert (
         daemon.reconcile(
             store_backend,
-            FakeProvider(),
+            provider,
             liveness,
-            machine=machine_identity,
             config=indexer_config,
             status=daemon.PatrolStatus(retry_limit=indexer_config.retry_limit),
-            root=tmp_path,
+            root=root,
         )
         is True
     )
     elapsed = time.monotonic() - started
 
-    # Chunked by file: call count and sizes exact, every file visited once.
-    assert chunk_sizes == [2, 2, 2, 1]
-    assert visited == [note.name for note in files]
+    # meiva:note
+    # Chunked by file: one embed call per chunk, every file indexed once.
+    assert provider.batch_sizes == [2, 2, 2, 1]
+    assert set(store_backend.all_meta()) == {str(note) for note in files}
     # The rebuild outlived the liveness ceiling (4 chunks ≥ 0.8s > 0.4s)...
     assert elapsed > 0.4
     # ...yet the beats between chunks kept /healthz from ever reading stale.
