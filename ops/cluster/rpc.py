@@ -334,7 +334,7 @@ class RpcClient:
 
 # meiva:note
 # `RpcClient.system().dispatch_to_machine(...)` for a caller that holds no client of its own.
-# Every call reads the process settings once, through `RpcClient.system()`.
+# The kind is checked first; a valid call reads settings once through `RpcClient.system()`.
 async def dispatch_to_machine(
     db: Database,
     target_machine: str,
@@ -345,6 +345,8 @@ async def dispatch_to_machine(
     retries: int | None = None,
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
+    if not is_op_kind(kind):
+        raise ValueError(f"unknown op kind: {kind!r}")
     return await RpcClient.system().dispatch_to_machine(
         db,
         target_machine,
@@ -357,8 +359,8 @@ async def dispatch_to_machine(
 
 
 # meiva:note
-# `RpcClient.system().dispatch_to_url(...)` for a caller that holds no client of its own. Every
-# call reads the process settings once, through `RpcClient.system()`.
+# `RpcClient.system().dispatch_to_url(...)` for a caller that holds no client of its own. The
+# kind is checked first; a valid call reads settings once through `RpcClient.system()`.
 async def dispatch_to_url(
     target_machine: str,
     kind: str,
@@ -369,6 +371,8 @@ async def dispatch_to_url(
     retries: int | None = None,
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
+    if not is_op_kind(kind):
+        raise ValueError(f"unknown op kind: {kind!r}")
     return await RpcClient.system().dispatch_to_url(
         target_machine,
         kind,

@@ -8,13 +8,16 @@
 from __future__ import annotations
 
 import json
+import signal
 import sys
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from base.agents.context import MeivaContext
+from base.native_process.ownership import OwnedProcess
 from meiva.gateway_client import use_client
 from schedules.jobs.model_tracker import ModelTracker, run_tracker
 from schedules.plans.directory_plan import ReportRecipient
@@ -34,6 +37,7 @@ from schedules.tests.gateway_directory import (
 
 _SLOT = datetime(2026, 9, 7, 6, 0, tzinfo=UTC)
 _FAKE_CHECKER = Path(__file__).parent / "children" / "fake_scan.py"
+_CHECKER_TREE = Path(__file__).parent / "children" / "tracker_tree.py"
 _LEAD = ReportRecipient("model-update-tracker", "MEIVA_MODEL_UPDATE_REPORT_AGENT", "lead", None)
 _PAGES = (DirectoryPage("lead", None, (AgentRowSpec(17, "lead", "idling"),), None),)
 _REPORT = {
@@ -100,7 +104,11 @@ def _tracker(tmp_path: Path, *args: str, timeout: float = 30.0) -> ModelTracker:
     return ModelTracker(
         command=(sys.executable, str(_FAKE_CHECKER), "--write-report", str(report_dir), *args),
         cwd=tmp_path,
-        env={"PYTHONPATH": str(tmp_path)},
+        env={
+            "PYTHONPATH": str(tmp_path),
+            "MEIVA_HOME": str(tmp_path / "home"),
+            "MEIVA_CONFIG_FETCH": "skip",
+        },
         report_dir=report_dir,
         timeout=timeout,
         recipient=_LEAD,
@@ -169,3 +177,23 @@ def test_a_report_the_checker_wrote_malformed_is_reported_as_a_failure(
 
     [message] = _sent(gateway.requests)
     assert "report must be an object" in message
+
+
+def test_a_tracker_timeout_stops_its_real_descendants(
+    sdk_environment: MeivaContext, tmp_path: Path
+) -> None:
+    receipt = tmp_path / "checker-child.json"
+    tracker = replace(
+        _tracker(tmp_path, timeout=2.0),
+        command=(sys.executable, str(_CHECKER_TREE), str(receipt)),
+    )
+    with serve_gateway(_PAGES) as gateway, gateway.client() as client, use_client(client):
+        run_tracker(_SLOT, None, tracker=tracker)
+
+    owner = OwnedProcess(**json.loads(receipt.read_text()))
+    try:
+        assert not owner.live(), "the timed-out checker left its descendant running"
+        [message] = _sent(gateway.requests)
+        assert "timed out" in message
+    finally:
+        owner.send_signal(signal.SIGKILL)

@@ -552,3 +552,16 @@ def test_the_client_ignores_the_system_proxy(tmp_path: Path) -> None:
 
     assert result == {"ok": 1}
     assert len(server.received) == 1
+
+
+@pytest.mark.parametrize("case", ["unknown-machine", "unknown-url"])
+def test_public_dispatch_rejects_unknown_kind_before_invalid_settings(
+    tmp_path: Path, case: str
+) -> None:
+    result = _system_client_child(
+        tmp_path,
+        case,
+        "http://127.0.0.1:1/ops",
+        extra_env={"MEIVA_CLUSTER_RPC_TIMEOUT_SECONDS": "not-a-timeout"},
+    )
+    assert result == {"error": "unknown op kind: 'no-such-op'"}

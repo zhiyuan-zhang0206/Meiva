@@ -25,7 +25,7 @@ from base.api_contracts.agent_contract import AgentNotFound, AgentStatus
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
-from base.db import Database
+from base.db import Database, DbConfig
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
@@ -347,6 +347,53 @@ class TestPlacement:
 
 
 class TestGates:
+    @pytest.mark.parametrize("kind", ["no-such-kind", InboundKind.TERMINATE])
+    async def test_an_invalid_trigger_is_refused_for_a_live_agent(
+        self,
+        database: Database,
+        event_bus: EventBus,
+        waitings: Waitings,
+        kind: WakeTriggerKind,
+    ) -> None:
+        waiting = waitings.make(home="runner-a", status="running")
+        with pytest.raises(ValueError, match=r"no-such-kind|cannot trigger resurrection"):
+            await lifecycle.resurrect_if_terminated(
+                database,
+                event_bus,
+                waiting.agent_id,
+                trigger_inbound_id=waiting.trigger_id,
+                trigger_inbound_kind=kind,
+                local_machine="gateway-host",
+            )
+
+    @pytest.mark.parametrize("kind", ["no-such-kind", InboundKind.TERMINATE])
+    async def test_an_invalid_trigger_is_refused_before_a_database_dial(
+        self,
+        event_bus: EventBus,
+        database_gate: ProcessDbGate,
+        kind: WakeTriggerKind,
+    ) -> None:
+        database = Database(
+            DbConfig(
+                db_url="postgresql://denied@127.0.0.1:1/denied",
+                db_sslmode="disable",
+                db_pool_min_size=1,
+                db_pool_max_size=1,
+                pgbouncer_enabled=False,
+                db_authority_refusal="this test has no database authority",
+            ),
+            gate=database_gate,
+        )
+        with pytest.raises(ValueError, match=r"no-such-kind|cannot trigger resurrection"):
+            await lifecycle.resurrect_if_terminated(
+                database,
+                event_bus,
+                1,
+                trigger_inbound_id=1,
+                trigger_inbound_kind=kind,
+                local_machine="gateway-host",
+            )
+
     async def test_a_live_agent_ends_the_call_after_its_status_read(
         self,
         db_conn: psycopg.Connection,
