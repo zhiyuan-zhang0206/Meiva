@@ -20,7 +20,7 @@ from typing import Any
 import psutil
 import pytest
 
-from base.native_process import pid_starttime_ticks
+from base.native_process.kernel_identity import pid_starttime_ticks
 from base.sessions import posixproc
 from base.sessions.record import SessionRecord
 from base.sessions.tests.poll_until import poll_until

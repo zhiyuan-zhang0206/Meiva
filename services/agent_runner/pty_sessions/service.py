@@ -36,7 +36,8 @@ from typing import Any, cast
 import psutil
 
 from base.log import logger
-from base.native_process import child_env, pid_starttime_ticks
+from base.native_process import child_env
+from base.native_process.kernel_identity import pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
 from base.native_process.process_control import ProcessControl
 from base.paths import logs_dir, run_dir

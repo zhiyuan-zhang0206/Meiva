@@ -21,7 +21,7 @@ import pytest
 
 from base.deploy.lifecycle import home_lifecycle_locks, start_serving
 from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
-from base.native_process import pid_starttime_ticks
+from base.native_process.kernel_identity import pid_starttime_ticks
 from base.sessions.pty import client
 from base.sessions.pty.tests import pty_jobs as jobs
 from base.sessions.pty.tests.pty_reaper import PtyReaper

@@ -22,7 +22,7 @@ from base.host.permissions_helper.client import (
     PermissionsHelperError,
 )
 from base.log import logger
-from base.native_process import pid_starttime_ticks
+from base.native_process.kernel_identity import pid_starttime_ticks
 from base.native_process.os_platform import Platform
 from base.native_process.ownership import stable_create_time
 from base.paths import logs_dir, meiva_home, permissions_helper_socket, run_dir

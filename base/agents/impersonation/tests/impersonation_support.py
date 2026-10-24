@@ -4,7 +4,7 @@ from uuid import uuid4
 import psycopg
 from psycopg.rows import dict_row
 
-from base.native_process import native_boot_id
+from base.native_process.kernel_identity import native_boot_id
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 

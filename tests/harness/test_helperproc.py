@@ -15,7 +15,7 @@ import pytest
 
 from base.host.permissions_helper import client
 from base.host.permissions_helper.client import PermissionsHelperClient, PermissionsHelperError
-from base.native_process import pid_starttime_ticks
+from base.native_process.kernel_identity import pid_starttime_ticks
 from base.sessions import helperproc
 from base.sessions.helper_chain_guard import parent_chain_intact
 from base.sessions.record import SessionRecord
