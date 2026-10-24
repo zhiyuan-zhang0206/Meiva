@@ -122,22 +122,15 @@ def test_shutdown_line_logs_a_registered_event(loguru_records: LogRecords) -> No
     assert (extra.get("event") or "log") in EVENTS
 
 
-# The child imports the ops daemon, so it lives with that daemon's tests.
-_CHILD = (
-    Path(__file__).parent.parent.parent.parent
-    / "services/agent_runner/agent_ops/tests/child_graceful_stop.py"
-)
+_CHILD = Path(__file__).with_name("child_graceful_stop.py")
 
 
-@pytest.mark.parametrize("mode", ["asyncio-run", "ops-runner"])
-async def test_root_graceful_stop_runs_the_product_handlers_cleanup(
-    unit_home: Path, mode: str
-) -> None:
+async def test_root_graceful_stop_runs_the_product_handlers_cleanup(unit_home: Path) -> None:
     """meiva-root owns service stop: its graceful `down` (what a normal stop
     requests) must reach the product handler, whose cleanup then runs."""
     started, marker = (unit_home / name for name in ("started", "clean"))
     env = (("MEIVA_HOME", str(unit_home)), ("MEIVA_CONFIG_FETCH", "skip"))
-    command = (sys.executable, str(_CHILD), str(started), str(marker), mode)
+    command = (sys.executable, str(_CHILD), str(started), str(marker))
     unit = UnitManifest("svc", command, RestartPolicy.NEVER, "root", env)
     owner = Supervisor(
         UnitRegistry([unit]), run_dir=unit_home / "root", config=SupervisorConfig(stop_timeout_s=10)

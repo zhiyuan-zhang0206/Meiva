@@ -4,8 +4,10 @@ of agent-owned page servers that died and tells the owner once."""
 from __future__ import annotations
 
 import asyncio
-import socket
-from collections.abc import Callable, Iterator
+import contextlib
+import json
+import urllib.request
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +28,14 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus, event_bus_config_from_settings
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
-from services.agent_runner.page_server import daemon, dead_pages
+from services.agent_runner.page_server import daemon, dead_pages, resources
+from services.agent_runner.page_server.tests.page_pty import (
+    free_port as _free_port,
+)
+from services.agent_runner.page_server.tests.page_pty import (
+    refusing_show_page_close,
+    running_page_server,
+)
 from services.agent_runner.page_server.tests.slices import page_server_config
 
 _HOST = "127.0.0.1"
@@ -56,14 +65,8 @@ class _RecordingBus(EventBus):
 
 @pytest.fixture
 def published() -> dict[str, list[Any]]:
-    """Record the PageClosed frames and the wakes the pass publishes."""
-    return {"events": [], "wakes": []}
-
-
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind((_HOST, 0))
-        return int(s.getsockname()[1])
+    """Record the PageClosed frames the pass publishes."""
+    return {"events": []}
 
 
 def _page(
@@ -104,20 +107,9 @@ def _progress() -> LoopProgress:
     return LoopProgress("dead_show_pages", 600.0, timers=SYSTEM_TIMERS)
 
 
-async def _round(
-    pool: ConnectionPool,
-    *,
-    database_gate: ProcessDbGate,
-    bus: EventBus | None = None,
-    alive_fn: Callable[[str, int], bool] = dead_pages.page_server_alive,
-) -> None:
+async def _round(pool: ConnectionPool, *, bus: EventBus | None = None) -> None:
     await dead_pages.dead_pages_round(
-        pool,
-        Database.from_settings(gate=database_gate),
-        _HOST,
-        _progress(),
-        EventBus.from_settings() if bus is None else bus,
-        alive_fn=alive_fn,
+        pool, _HOST, _progress(), EventBus.from_settings() if bus is None else bus
     )
 
 
@@ -172,12 +164,11 @@ async def test_a_dead_show_page_is_closed_and_its_owner_told_once(
     _page(db_conn, agent, "dead-one", _free_port())
     _page(db_conn, agent, "dead-two", _free_port())
 
-    await _round(pool, database_gate=database_gate, bus=_RecordingBus(published))
+    await _round(pool, bus=_RecordingBus(published))
 
     assert _closed(db_conn, agent, "dead-one") and _closed(db_conn, agent, "dead-two")
     assert _notices(db_conn, agent) == []
     assert len(published["events"]) == 2
-    assert published["wakes"] == []
 
 
 async def test_a_live_show_page_and_a_dead_serve_page_are_left_alone(
@@ -185,6 +176,7 @@ async def test_a_live_show_page_and_a_dead_serve_page_are_left_alone(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     published: dict[str, list[Any]],
+    tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -203,20 +195,10 @@ async def test_a_live_show_page_and_a_dead_serve_page_are_left_alone(
     alive_port = _free_port()
     _page(db_conn, agent, "alive", alive_port)
     _page(db_conn, agent, "serve-dead", _free_port(), serve_dir="/data/site")
-    probed: list[int] = []
 
-    def alive(_host: str, port: int) -> bool:
-        probed.append(port)
-        return port == alive_port
+    with running_page_server(tmp_path, alive_port, "show-token"):
+        await _round(pool, bus=_RecordingBus(published))
 
-    await _round(
-        pool,
-        database_gate=database_gate,
-        bus=_RecordingBus(published),
-        alive_fn=alive,
-    )
-
-    assert probed == [alive_port]
     assert not _closed(db_conn, agent, "alive") and not _closed(db_conn, agent, "serve-dead")
     assert _notices(db_conn, agent) == [] and published["events"] == []
 
@@ -225,7 +207,6 @@ async def test_the_loop_scans_at_once_then_paces(
     redis_url: str,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
-    database: Database,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -242,12 +223,7 @@ async def test_the_loop_scans_at_once_then_paces(
     _page(db_conn, agent, "dead-at-start", _free_port())
     task = asyncio.create_task(
         dead_pages.dead_pages_loop(
-            pool,
-            database,
-            _HOST,
-            _progress(),
-            page_server_config(),
-            EventBus.from_settings(),
+            pool, _HOST, _progress(), page_server_config(), EventBus.from_settings()
         )
     )
     try:
@@ -268,105 +244,102 @@ async def test_the_loop_scans_at_once_then_paces(
 # --- the service owns both loops ---------------------------------------------
 
 
-def test_each_loop_gets_its_own_progress_tracker(
-    database: Database,
-    *,
-    machine_identity: MachineIdentity,
-    process_config: ConfigBoot,
-    tmp_path: Path,
+def _healthz(port: int) -> dict[str, Any]:
+    with urllib.request.urlopen(f"http://{_HOST}:{port}/healthz", timeout=5) as response:
+        return json.loads(response.read())
+
+
+async def _serve(
+    database: Database, config: ConfigBoot, runtime: Path, machine: MachineIdentity
 ) -> None:
-    received: dict[str, LoopProgress] = {}
-
-    async def reconcile(
-        _pool: object,
-        progress: LoopProgress,
-        _config: object,
-        _bus: object,
-        *,
-        local_machine: MachineIdentity,
-    ) -> None:
-        assert local_machine is machine_identity
-        received["reconcile"] = progress
-
-    async def dead(
-        _pool: object,
-        _db: object,
-        _host: str,
-        progress: LoopProgress,
-        _config: object,
-        _bus: object,
-    ) -> None:
-        received["dead"] = progress
-
-    image = LoadedCommit(Path("/page-server-tests"), None)
-    asyncio.run(
-        asyncio.wait_for(
-            daemon.run(
-                process_config=process_config,
-                runtime=tmp_path / "run",
-                database=lambda: database,
-                image=image,
-                local_machine=machine_identity,
-                loop_runners=(reconcile, dead),
-            ),
-            timeout=5.0,
-        )
+    await daemon.run(
+        process_config=config,
+        runtime=runtime,
+        database=lambda: database,
+        image=LoadedCommit(Path("/page-server-tests"), None),
+        local_machine=machine,
     )
 
-    assert sorted(received) == ["dead", "reconcile"]
-    assert len({id(p) for p in received.values()}) == 2
+
+async def _loops_reported(port: int) -> list[str]:
+    for _ in range(500):
+        with contextlib.suppress(OSError):
+            return sorted((await asyncio.to_thread(_healthz, port))["loops"])
+        await asyncio.sleep(0.02)
+    raise AssertionError("the page-server health endpoint never answered")
 
 
-@pytest.mark.parametrize("crashing", ["reconcile", "dead"])
-def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
-    crashing: str,
+async def test_each_loop_gets_its_own_progress_tracker(
     database: Database,
     *,
     machine_identity: MachineIdentity,
     process_config: ConfigBoot,
     tmp_path: Path,
 ) -> None:
-    cancelled: list[str] = []
-    observed_pools: list[ConnectionPool] = []
-    pidfile = tmp_path / "run" / "page_server.pid"
+    runtime = tmp_path / "run"
+    port = resources.endpoint(process_config, runtime=runtime).health_port
+    service = asyncio.create_task(_serve(database, process_config, runtime, machine_identity))
+    try:
+        loops = await _loops_reported(port)
+    finally:
+        service.cancel()
+        await asyncio.gather(service, return_exceptions=True)
 
-    def loop(name: str) -> Callable[..., Any]:
-        async def run_loop(pool: ConnectionPool, *_args: object) -> None:
-            observed_pools.append(pool)
-            assert pidfile.exists()
-            if name == crashing:
-                await asyncio.sleep(0.01)
-                raise RuntimeError(f"{name} crashed")
-            try:
-                await asyncio.Event().wait()
-            except asyncio.CancelledError:
-                cancelled.append(name)
-                raise
+    assert loops == ["dead_show_pages", "reconcile"]
+    assert not (runtime / "page_server.pid").exists()
 
-        return run_loop
 
-    async def reconcile_loop(*args: Any, local_machine: MachineIdentity) -> None:
-        assert local_machine is machine_identity
-        await loop("reconcile")(*args)
+# meiva:note
+# The reconcile pass reads `session_name`, which the dead-show-page scan never does, so a
+# schema that lost the column crashes only the reconcile loop.
+async def test_a_crashing_reconcile_loop_cancels_its_sibling_and_ends_the_service(
+    database: Database,
+    db_conn: psycopg.Connection,
+    *,
+    machine_identity: MachineIdentity,
+    process_config: ConfigBoot,
+    tmp_path: Path,
+) -> None:
+    runtime = tmp_path / "run"
+    db_conn.execute("ALTER TABLE agent_pages RENAME COLUMN session_name TO session_name_hidden")
+    db_conn.commit()
+    try:
+        with pytest.raises(ExceptionGroup) as raised:
+            await asyncio.wait_for(_serve(database, process_config, runtime, machine_identity), 30)
+    finally:
+        db_conn.rollback()
+        db_conn.execute("ALTER TABLE agent_pages RENAME COLUMN session_name_hidden TO session_name")
+        db_conn.commit()
 
-    image = LoadedCommit(Path("/page-server-tests"), None)
+    assert [type(exc).__name__ for exc in raised.value.exceptions] == ["UndefinedColumn"]
+    assert not (runtime / "page_server.pid").exists()
 
-    with pytest.raises(ExceptionGroup) as raised:
-        asyncio.run(
-            asyncio.wait_for(
-                daemon.run(
-                    process_config=process_config,
-                    runtime=tmp_path / "run",
-                    database=lambda: database,
-                    image=image,
-                    local_machine=machine_identity,
-                    loop_runners=(reconcile_loop, loop("dead")),
-                ),
-                timeout=5.0,
-            )
-        )
 
-    assert [str(exc) for exc in raised.value.exceptions] == [f"{crashing} crashed"]
-    assert cancelled == [({"reconcile", "dead"} - {crashing}).pop()]
-    assert observed_pools and all(p.closed for p in observed_pools)
-    assert not pidfile.exists()
+@pytest.mark.usefixtures("page_server_identity")
+async def test_a_crashing_dead_page_loop_cancels_its_sibling_and_ends_the_service(
+    database: Database,
+    db_conn: psycopg.Connection,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+    process_config: ConfigBoot,
+    redis_url: str,
+    tmp_path: Path,
+) -> None:
+    agent = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    _page(db_conn, agent, "dead-and-unclosable", _free_port())
+    runtime = tmp_path / "run"
+
+    with refusing_show_page_close(db_conn), pytest.raises(ExceptionGroup) as raised:
+        await asyncio.wait_for(_serve(database, process_config, runtime, machine_identity), 30)
+
+    assert [type(exc).__name__ for exc in raised.value.exceptions] == ["RaiseException"]
+    assert not (runtime / "page_server.pid").exists()

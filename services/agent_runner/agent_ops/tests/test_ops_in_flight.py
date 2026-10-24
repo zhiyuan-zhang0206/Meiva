@@ -8,163 +8,45 @@ import os
 import signal
 import socket
 import struct
-import threading
 import weakref
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from dataclasses import replace
 
 import pytest
-from psycopg_pool import ConnectionPool
+from pydantic import ValidationError
 
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config.service_read import ConfigAuthority
 from base.daemon.health import stop_health_server
 from base.daemon.http_transport import start_daemon_http
-from base.db import Database
-from base.host.system.hostport import Host
-from base.host.system.tests.fake_commands import fake_host
-from base.lm.catalog import ModelCatalog
-from base.native_process.loaded_commit import LoadedCommit
-from services.agent_runner.agent_ops import boot, daemon, health
+from services.agent_runner.agent_ops import boot, health
 from services.agent_runner.agent_ops import in_flight as activity
+from services.agent_runner.agent_ops.tests.ops_support import Ops, config_write, held_env_lock
 
 
-async def test_same_kind_requests_remain_counted_until_they_finish(
-    monkeypatch: pytest.MonkeyPatch,
-    op_executor: ThreadPoolExecutor,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    ops_database: Callable[[], Database],
-    ops_image: LoadedCommit,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    dispatch_pool: ConnectionPool = ConnectionPool(open=False)
-    requests: activity.RequestTokens = set()
-    workers: activity.WorkerFutures = set()
-    finishes = [asyncio.Event(), asyncio.Event()]
-    entered = asyncio.Event()
-    count = 0
-
-    async def dispatch(
-        *_args: Any, local_machine: MachineIdentity, **_kwargs: Any
-    ) -> tuple[str, dict[str, object]]:
-        del local_machine
-        nonlocal count
-        index = count
-        count += 1
-        if count == 2:
-            entered.set()
-        await finishes[index].wait()
-        return "completed", {}
-
-    dispatch_sem = asyncio.Semaphore(3)
-    tasks = [
-        asyncio.create_task(
-            daemon.ops_route(
-                b'{"kind":"config_read","payload":{}}',
-                active_ops={},
-                dispatch_sem=dispatch_sem,
-                workers=workers,
-                requests=requests,
-                pool=dispatch_pool,
-                executor=op_executor,
-                catalog=model_catalog,
-                authority=config_authority,
-                database=ops_database,
-                image=ops_image,
-                local_machine=machine_identity,
-                host=fake_host(),
-                dispatch_op=dispatch,
-            )
-        )
-        for _ in range(2)
-    ]
-    try:
-        await asyncio.wait_for(entered.wait(), 2)
-        assert len(requests) == 2
-        finishes[0].set()
-        await tasks[0]
-        assert len(requests) == 1
-        assert count == 2
-    finally:
-        for event in finishes:
-            event.set()
-        await asyncio.gather(*tasks)
-    assert len(requests) == 0
+async def _until(condition: Callable[[], bool], *, timeout_s: float = 10.0) -> None:
+    for _ in range(int(timeout_s / 0.01)):
+        if condition():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("the condition never held")
 
 
-async def test_cancelled_same_kind_await_does_not_hide_running_executor(
-    monkeypatch: pytest.MonkeyPatch,
-    config_authority: ConfigAuthority,
-    ops_database: Callable[[], Database],
-    ops_image: LoadedCommit,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    dispatch_pool: ConnectionPool = ConnectionPool(open=False)
-    workers: activity.WorkerFutures = set()
-    active_ops: daemon.ActiveOps = {}
-    entered = [threading.Event(), threading.Event()]
-    finish = [threading.Event(), threading.Event()]
-
-    def arm(
-        _kind: str,
-        payload: dict[str, Any],
-        *,
-        pool: ConnectionPool,
-        authority: ConfigAuthority,
-        database: Callable[[], Database],
-        image: LoadedCommit,
-        local_machine: MachineIdentity,
-        host: Host,
-    ) -> tuple[str, dict[str, object]]:
-        del local_machine
-        assert pool is dispatch_pool
-        index = int(payload["index"])
-        entered[index].set()
-        if not finish[index].wait(5):
-            raise TimeoutError("test worker was not released")
-        return "completed", {}
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
+async def test_a_cancelled_await_does_not_hide_the_running_worker(ops: Ops) -> None:
+    with held_env_lock():
         tasks = [
-            asyncio.create_task(
-                daemon.run_arm(
-                    "same",
-                    {"index": index},
-                    active_ops=active_ops,
-                    workers=workers,
-                    pool=dispatch_pool,
-                    executor=executor,
-                    authority=config_authority,
-                    database=ops_database,
-                    image=ops_image,
-                    local_machine=machine_identity,
-                    host=fake_host(),
-                    dispatch_arm=arm,
-                )
-            )
+            asyncio.create_task(ops.run_arm("config_write", config_write(f"worker-{index}")))
             for index in range(2)
         ]
-        try:
-            async with asyncio.timeout(2):
-                while not all(event.is_set() for event in entered):
-                    await asyncio.sleep(0.01)
-            assert len(workers) == 2
-            tasks[0].cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await tasks[0]
-            assert len(workers) == 2
-        finally:
-            for event in finish:
-                event.set()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            async with asyncio.timeout(2):
-                while workers:
-                    await asyncio.sleep(0.01)
+        await _until(lambda: len(ops.workers) == 2)
+
+        tasks[0].cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await tasks[0]
+
+        assert len(ops.workers) == 2
+
+    await asyncio.gather(*tasks, return_exceptions=True)
+    await _until(lambda: not ops.workers)
 
 
 async def test_server_close_after_client_reset_is_not_request_completion() -> None:
@@ -206,83 +88,46 @@ async def test_server_close_after_client_reset_is_not_request_completion() -> No
     assert len(requests) == 0
 
 
-async def test_active_ops_share_health_and_cleanup_within_one_daemon(
-    monkeypatch: pytest.MonkeyPatch,
-    config_authority: ConfigAuthority,
-    ops_database: Callable[[], Database],
-    ops_image: LoadedCommit,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    dispatch_pool: ConnectionPool = ConnectionPool(open=False)
-    workers: activity.WorkerFutures = set()
-    active_ops: daemon.ActiveOps = {}
-    other_daemon: daemon.ActiveOps = {}
-    entered = [threading.Event(), threading.Event()]
-    finish = [threading.Event(), threading.Event()]
+async def test_active_ops_share_health_and_cleanup_within_one_daemon(ops: Ops) -> None:
+    other_daemon: dict[str, tuple[str, float]] = {}
 
-    def arm(
-        _kind: str,
-        payload: dict[str, Any],
-        *,
-        pool: ConnectionPool,
-        authority: ConfigAuthority,
-        database: Callable[[], Database],
-        image: LoadedCommit,
-        local_machine: MachineIdentity,
-        host: Host,
-    ) -> tuple[str, dict[str, object]]:
-        del local_machine
-        assert pool is dispatch_pool
-        index = int(payload["index"])
-        entered[index].set()
-        if not finish[index].wait(5):
-            raise TimeoutError("test worker was not released")
-        if index == 1:
-            raise RuntimeError("operation failed")
-        return "completed", {}
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    with held_env_lock():
         tasks = [
-            asyncio.create_task(
-                daemon.run_arm(
-                    kind,
-                    {"index": index},
-                    active_ops=active_ops,
-                    workers=workers,
-                    pool=dispatch_pool,
-                    executor=executor,
-                    authority=config_authority,
-                    database=ops_database,
-                    image=ops_image,
-                    local_machine=machine_identity,
-                    host=fake_host(),
-                    dispatch_arm=arm,
-                )
-            )
-            for index, kind in enumerate(("config_read", "inventory_read"))
+            asyncio.create_task(ops.run_arm("config_write", config_write("active"))),
+            asyncio.create_task(ops.run_arm("inventory_write", {"plugins": {}, "mcp_servers": {}})),
         ]
-        try:
-            async with asyncio.timeout(2):
-                while not all(event.is_set() for event in entered):
-                    await asyncio.sleep(0.01)
-            assert health.ops_components(active_ops)[1]["progress"] == "2 active"
-            assert health.saturation(active_ops, 2) == 1.0
-            assert health.ops_components(other_daemon)[1]["progress"] == "0 active"
-            finish[0].set()
-            await tasks[0]
-            assert set(active_ops) == {"inventory_read"}
-            assert health.saturation(active_ops, 2) == 0.5
-            finish[1].set()
-            with pytest.raises(RuntimeError, match="operation failed"):
-                await tasks[1]
-            assert active_ops == {}
-            assert health.ops_components(active_ops)[1]["progress"] == "0 active"
-            assert health.saturation(active_ops, 2) == 0.0
-        finally:
-            for event in finish:
-                event.set()
-            await asyncio.gather(*tasks, return_exceptions=True)
+        await _until(lambda: set(ops.active_ops) == {"config_write", "inventory_write"})
+
+        assert health.ops_components(ops.active_ops)[1]["progress"] == "2 active"
+        assert health.saturation(ops.active_ops, 2) == 1.0
+        assert health.ops_components(other_daemon)[1]["progress"] == "0 active"
+
+    await asyncio.gather(*tasks)
+    assert ops.active_ops == {}
+    assert health.ops_components(ops.active_ops)[1]["progress"] == "0 active"
+    assert health.saturation(ops.active_ops, 2) == 0.0
+
+
+async def test_a_failing_operation_leaves_no_active_entry(ops: Ops) -> None:
+    with pytest.raises(ValidationError):
+        await ops.run_arm("config_audit_read", {"last": "not a number"})
+
+    assert ops.active_ops == {}
+    assert ops.workers == set()
+
+
+async def test_operations_are_scheduled_on_the_executor_of_their_invocation(ops: Ops) -> None:
+    first = ThreadPoolExecutor(max_workers=1, thread_name_prefix="first-owner")
+    second = ThreadPoolExecutor(max_workers=1, thread_name_prefix="second-owner")
+    try:
+        assert (await replace(ops, executor=first).run_arm("config_read", {}))[0] == "completed"
+        boot.shutdown_op_pool(first)
+
+        with pytest.raises(RuntimeError, match="shutdown"):
+            await replace(ops, executor=first).run_arm("config_read", {})
+        assert (await replace(ops, executor=second).run_arm("config_read", {}))[0] == "completed"
+    finally:
+        second.shutdown(wait=True)
 
 
 async def test_worker_future_is_retained_until_completion_and_isolated_per_daemon() -> None:
@@ -300,70 +145,6 @@ async def test_worker_future_is_retained_until_completion_and_isolated_per_daemo
     retained.set_result(None)
     await asyncio.sleep(0)
     assert len(workers) == 0
-
-
-async def test_op_invocations_dispatch_on_their_own_executor(
-    monkeypatch: pytest.MonkeyPatch,
-    config_authority: ConfigAuthority,
-    ops_database: Callable[[], Database],
-    ops_image: LoadedCommit,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    dispatch_pool: ConnectionPool = ConnectionPool(open=False)
-
-    def arm(
-        _kind: str,
-        _payload: dict[str, Any],
-        *,
-        pool: ConnectionPool,
-        authority: ConfigAuthority,
-        database: Callable[[], Database],
-        image: LoadedCommit,
-        local_machine: MachineIdentity,
-        host: Host,
-    ) -> tuple[str, dict[str, object]]:
-        del local_machine
-        assert pool is dispatch_pool
-        return "completed", {"thread": threading.current_thread().name}
-
-    with (
-        ThreadPoolExecutor(max_workers=1, thread_name_prefix="first-owner") as first,
-        ThreadPoolExecutor(max_workers=1, thread_name_prefix="second-owner") as second,
-    ):
-        first_result = await daemon.run_arm(
-            "status_probe",
-            {},
-            active_ops={},
-            workers=set(),
-            pool=dispatch_pool,
-            executor=first,
-            authority=config_authority,
-            database=ops_database,
-            image=ops_image,
-            local_machine=machine_identity,
-            host=fake_host(),
-            dispatch_arm=arm,
-        )
-        boot.shutdown_op_pool(first)
-        second_result = await daemon.run_arm(
-            "status_probe",
-            {},
-            active_ops={},
-            workers=set(),
-            pool=dispatch_pool,
-            executor=second,
-            authority=config_authority,
-            database=ops_database,
-            image=ops_image,
-            local_machine=machine_identity,
-            host=fake_host(),
-            dispatch_arm=arm,
-        )
-    first_thread = first_result[1]["thread"]
-    second_thread = second_result[1]["thread"]
-    assert isinstance(first_thread, str) and first_thread.startswith("first-owner")
-    assert isinstance(second_thread, str) and second_thread.startswith("second-owner")
 
 
 async def test_drain_returns_at_once_when_nothing_is_in_flight() -> None:
@@ -466,6 +247,32 @@ async def test_sigterm_closes_the_server_to_new_connections_and_waits_for_admitt
     finally:
         finish.set()
         peer.close()
+        serving.cancel()
+        await asyncio.gather(serving, return_exceptions=True)
+        signal.signal(signal.SIGTERM, previous)
+        await stop_health_server(server)
+
+
+# meiva:note
+# A retried SIGTERM that the loop handles in the same iteration as the first is one stop, not a
+# second cancellation: the serving task would otherwise be cancelled twice, absorb one and
+# propagate the other, and the daemon would exit through a traceback instead of draining.
+async def test_two_sigterms_handled_together_are_one_stop() -> None:
+    requests: activity.RequestTokens = set()
+    workers: activity.WorkerFutures = set()
+    server = await start_daemon_http(
+        host="127.0.0.1", port=0, health_response=lambda: (200, b"{}"), extra_routes={}
+    )
+    previous = signal.getsignal(signal.SIGTERM)
+    serving = asyncio.create_task(
+        activity.serve_until_sigterm(server, requests=requests, workers=workers)
+    )
+    try:
+        await asyncio.sleep(0.05)
+        os.kill(os.getpid(), signal.SIGTERM)
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.wait_for(serving, 5)
+    finally:
         serving.cancel()
         await asyncio.gather(serving, return_exceptions=True)
         signal.signal(signal.SIGTERM, previous)

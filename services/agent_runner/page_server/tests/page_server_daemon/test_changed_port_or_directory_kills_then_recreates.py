@@ -1,222 +1,121 @@
-"""Page server daemon cases: changed port or directory kills then recreates."""
+# meiva:note
+# Page server daemon cases: changed port or directory kills then recreates, and reclaim.
 
 from __future__ import annotations
 
-import os
 import secrets
-import socket
-import subprocess
-import sys
-import time
 from pathlib import Path
 
 import psycopg
+import pytest
 from psycopg_pool import ConnectionPool
 
 import services.agent_runner.page_server.daemon as psd
-from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config.service_read import ConfigAuthority
-from base.db.code_version_gate import ProcessDbGate
-from base.lm.catalog import ModelCatalog
-from services.agent_runner.page_server.tests.page_shell import PageShellBackend
-from services.agent_runner.page_server.tests.test_page_server_daemon import (
+from services.agent_runner.page_server.page_plan import PageKey, ServerHandle
+from services.agent_runner.page_server.tests.page_pty import (
     HOST,
+    free_port,
     insert_page_row,
+    page_state,
     reconcile,
+    running_page_server,
+    session_names,
+    wait_until_healthy,
 )
-from services.agent_runner.page_server.tests.test_page_server_daemon import (
-    backend as backend,
-)
-from services.agent_runner.page_server.tests.test_page_server_daemon import (
-    page_server_identity as page_server_identity,
-)
-from services.agent_runner.page_server.tests.test_page_server_daemon import (
-    sync_pool as sync_pool,
-)
+
+pytestmark = pytest.mark.usefixtures("page_server_identity", "pty_service")
 
 
 def test_changed_port_or_directory_kills_then_recreates_the_page_session(
-    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: PageShellBackend,
+    agent_id: int,
     tmp_path: Path,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
 ) -> None:
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
     old_dir = tmp_path / "old"
     old_dir.mkdir()
     new_dir = tmp_path / "new"
     new_dir.mkdir()
-    insert_page_row(db_conn, agent_id, "changed", 12007, old_dir)
-    managed: dict[tuple[int, str], psd.ServerHandle] = {}
-
+    insert_page_row(db_conn, agent_id, "changed", free_port(), old_dir)
+    managed: dict[PageKey, ServerHandle] = {}
     reconcile(sync_pool, managed)
     old_session = managed[(agent_id, "changed")].session_name
+    new_port = free_port()
     db_conn.execute(
         "UPDATE agent_pages SET port = %s, serve_dir = %s, session_name = NULL, "
         "server_token = NULL WHERE agent_id = %s AND name = %s",
-        (12008, str(new_dir), agent_id, "changed"),
+        (new_port, str(new_dir), agent_id, "changed"),
     )
     db_conn.commit()
+
     reconcile(sync_pool, managed)
-    assert backend.killed == [old_session]
-    assert managed[(agent_id, "changed")].session_name != old_session
-    assert len(backend.new_calls) == 2
 
-
-def test_daemon_restart_adopts_a_healthy_live_page_session(
-    redis_url: str,
-    sync_pool: ConnectionPool,
-    db_conn: psycopg.Connection,
-    backend: PageShellBackend,
-    tmp_path: Path,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    page_session = f"meiva-agent-{agent_id}-shell-5-page-adopted"
-    backend.sessions.add(page_session)
-    insert_page_row(
-        db_conn,
-        agent_id,
-        "adopted",
-        12009,
-        tmp_path,
-        token=secrets.token_hex(16),
-        session=page_session,
-    )
-    managed: dict[tuple[int, str], psd.ServerHandle] = {}
-
-    reconcile(sync_pool, managed, server_healthy_fn=lambda *_args: True)
-
-    assert set(managed) == {(agent_id, "adopted")}
-    assert backend.new_calls == []
-    assert backend.killed == []
-    assert backend.sent == []
+    new_session = managed[(agent_id, "changed")].session_name
+    assert new_session != old_session
+    assert session_names() == {new_session}
+    token = page_state(db_conn, agent_id, "changed").token
+    assert token is not None
+    wait_until_healthy(new_port, token)
 
 
 def test_reclaim_preserves_in_session_server_and_kills_detached_orphan(
-    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: PageShellBackend,
+    agent_id: int,
+    serve_dir: Path,
+    unit_home: Path,
     tmp_path: Path,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
 ) -> None:
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
     key = (agent_id, "kept")
-    page_session = f"meiva-agent-{agent_id}-shell-6-page-kept"
-    backend.sessions.add(page_session)
+    kept_port = free_port()
+    insert_page_row(db_conn, agent_id, key[1], kept_port, serve_dir)
+    managed: dict[PageKey, ServerHandle] = {}
+    reconcile(sync_pool, managed)
+    kept_token = page_state(db_conn, agent_id, key[1]).token
+    assert kept_token is not None
+    wait_until_healthy(kept_port, kept_token)
+    foreign_home = tmp_path / "another-cluster"
+    foreign_home.mkdir()
+
+    with (
+        running_page_server(serve_dir, free_port(), "orphan-token") as orphan,
+        running_page_server(serve_dir, free_port(), "foreign-token", home=foreign_home) as foreign,
+    ):
+        reconcile(sync_pool, managed)
+
+        assert orphan.wait(timeout=10) is not None, "the detached orphan was not killed"
+        assert foreign.poll() is None, "a server of another cluster home was killed"
+    assert psd.server_is_healthy(HOST, kept_port, kept_token)
+    assert session_names() == {managed[key].session_name}
+
+
+# meiva:note
+# A server nobody supervises on a port a row wants is killed so the row's own shell can bind.
+def test_a_detached_server_on_a_wanted_port_is_reclaimed(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    agent_id: int,
+    serve_dir: Path,
+) -> None:
+    port = free_port()
     insert_page_row(
         db_conn,
         agent_id,
-        "kept",
-        12010,
-        tmp_path,
+        "wanted",
+        port,
+        serve_dir,
         token=secrets.token_hex(16),
-        session=page_session,
-    )
-    killed: list[int] = []
-
-    reconcile(
-        sync_pool,
-        {},
-        occupants_fn=lambda: {
-            12010: (5010, str(psd.meiva_home())),
-            12011: (5011, str(psd.meiva_home())),
-        },
-        session_owner_fn=lambda pid, _pids: key if pid == 5010 else None,
-        kill_pid_fn=killed.append,
-        server_healthy_fn=lambda *_args: True,
+        session=f"meiva-agent-{agent_id}-shell-0-page-wanted",
     )
 
-    assert killed == [5011]
+    with running_page_server(serve_dir, port, "stray-token") as stray:
+        reconcile(sync_pool, {})
 
-
-def test_page_session_owner_walks_process_ancestry() -> None:
-    class _Parent:
-        def __init__(self, pid: int) -> None:
-            self.pid = pid
-
-    class _Proc:
-        @staticmethod
-        def parents() -> list[_Parent]:
-            return [_Parent(11), _Parent(12)]
-
-    def process_factory(_pid: int) -> _Proc:
-        return _Proc()
-
-    assert psd.page_session_owner(99, {12: (7, "page")}, process_factory=process_factory) == (
-        7,
-        "page",
-    )
-    assert psd.page_session_owner(
-        99, {11: (8, "near"), 12: (7, "page")}, process_factory=process_factory
-    ) == (8, "near")
-    # Unrelated host ancestry must not acquire a managed page's ownership.
-    assert psd.page_session_owner(99, {77: (7, "page")}, process_factory=process_factory) is None
+        assert stray.wait(timeout=10) is not None, "the stray server kept the wanted port"
 
 
 def test_server_module_still_serves_a_tokenized_health_endpoint(tmp_path: Path) -> None:
-    with socket.socket() as sock:
-        sock.bind((HOST, 0))
-        port = sock.getsockname()[1]
-    env = {**os.environ, "PAGE_SERVER_TOKEN": "roundtrip"}
-    proc = subprocess.Popen(  # noqa: S603 -- server module receives fixed test arguments
-        [
-            sys.executable,
-            "-m",
-            "services.agent_runner.page_server.server",
-            "--port",
-            str(port),
-            "--host",
-            HOST,
-            "--dir",
-            str(tmp_path),
-        ],
-        cwd=Path.cwd(),
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    try:
-        deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline:
-            if psd.server_is_healthy(HOST, port, "roundtrip"):
-                break
-            time.sleep(0.05)
+    port = free_port()
+    with running_page_server(tmp_path, port, "roundtrip"):
         assert psd.server_is_healthy(HOST, port, "roundtrip")
-    finally:
-        # SIGKILL: a shell session's SIGTERM=SIG_IGN is inherited, so the
-        # graceful call would leave the page server alive.
-        proc.kill()
-        proc.wait(timeout=2.0)
+        assert not psd.server_is_healthy(HOST, port, "another-token")

@@ -1,45 +1,20 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+import os
+from pathlib import Path
 
-import services.agent_runner.page_server.daemon as psd
+from services.agent_runner.page_server import daemon
+from services.agent_runner.page_server.tests.page_pty import free_port, running_page_server
 
 
-def test_occupants_skips_a_process_whose_cmdline_read_fails() -> None:
+def test_the_scan_finds_a_running_page_server_by_port_with_its_home_and_ancestry(
+    tmp_path: Path, unit_home: Path
+) -> None:
+    port = free_port()
+    with running_page_server(tmp_path, port, "occupant-token") as server:
+        occupants = {occupant.port: occupant for occupant in daemon.page_server_occupants()}
 
-    class _ReadFails:
-        pid = 424242
-
-        @property
-        def info(self) -> dict[str, object]:
-            raise SystemError("psutil: cmdline read failed mid-iteration")
-
-        def cmdline(self) -> list[str]:
-            raise SystemError("psutil: cmdline read failed mid-iteration")
-
-    class _Occupant:
-        def __init__(self, pid: int, port: int, home: str) -> None:
-            self.pid = pid
-            self._cmdline = ["python", "-m", psd.PAGE_SERVER_MODULE, "--port", str(port)]
-            self._home = home
-
-        def cmdline(self) -> list[str]:
-            return list(self._cmdline)
-
-        def environ(self) -> dict[str, str]:
-            return {"MEIVA_HOME": self._home}
-
-    procs: list[object] = [
-        _ReadFails(),
-        _Occupant(5001, 12001, "/home/a"),
-        _Occupant(5002, 12002, "/home/b"),
-    ]
-
-    def process_iter(*args: object, **kwargs: object) -> Iterator[object]:
-        del args, kwargs
-        return iter(procs)
-
-    assert psd.page_server_occupants(process_iter_fn=process_iter) == {
-        12001: (5001, "/home/a"),
-        12002: (5002, "/home/b"),
-    }
+    found = occupants[port]
+    assert found.pid == server.pid
+    assert found.home == str(unit_home)
+    assert found.ancestors[0] == os.getpid()

@@ -1,1 +1,5 @@
-exports = ["agent_host", "agent_ops", "page_server", "pty_sessions"]
+exports = ["agent_host", "agent_ops", "page_server", "pty_sessions", "tests"]
+
+[uses]
+"agent_ops" = ["tests"]
+"page_server" = ["tests"]

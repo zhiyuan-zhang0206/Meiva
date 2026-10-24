@@ -9,9 +9,18 @@ tags:
 
 # Agent ops process composition
 
-The graceful-stop child substitutes the served body while calling the actual
-daemon `main()` entry. Its consumers cover normal cancellation and a wedged
-executor; this is a shutdown composition check, not a live ops request test.
+The entry tests start the real daemon as a child process against the test cluster: it
+serves and registers, `/ops` refuses a caller without a bearer, SIGTERM (also twice) ends
+it with code 0 inside the stop window, and a second instance, a database without the
+schema and a held health port each end with code 1, logged, with no pidfile left behind.
+A wedged arm cannot hold the process exit (`child_daemon_exit.py`).
+
+Decisions are values in, plan out. `ops_plan` reads a request body into its envelope or
+the refusing answer, builds the `{status, result}` reply and the failed result of an
+exception; `idempotency_plan` decides a request's identity, whether a stored row is waited
+on, replayed or refused, and whether a lost connection is retried. `daemon` executes them;
+its tests run the real operations (`config_write` leaves one audit record per execution,
+and blocks on the `.env` lock, so a test counts executions and holds one in flight).
 
 `services/agent_runner/agent_ops/daemon.py:main` rejects unknown argv, captures
 one `LoadedCommit`, and retains a `CodeVersion` and non-exempt `ProcessDbGate`
@@ -26,8 +35,6 @@ captured image. On exit the constructed writer stops within two seconds; a cold
 close does not construct it. A close failure cannot replace an active startup or
 service failure. The original async cancellation/drain and hard exit remain:
 `Runner.close` must not join a wedged default executor before process exit.
-The entry test records logging, named shutdown registration and serving in order;
-its signal substitute isolates process handlers rather than exercising OS delivery.
 
 `services/agent_runner/agent_ops/boot.py` is the definition owner for registration,
 bind/auth posture, pidfile/endpoint resources and invocation executor/pool operations.
@@ -51,8 +58,7 @@ live in `boot.py`, with no forwarding aliases left on the daemon.
 
 `serve_ops_daemon` passes its factory and image through each request and worker binding.
 Pool construction, schema admission, pidfile and health timing remain in the
-existing order. The runtime test requires pidfile probe/write calls before pool construction,
-then health, registration and serving with the same configured endpoint.
+existing order; every exit after the pidfile is written removes it, last.
 The health payload uses the entry image. The synchronous status arm passes it
 through `ops.cluster.operations.cluster_status_op` into
 `ops.cluster_status.status_snapshot`. `running_sha` is that image's SHA, including

@@ -3,25 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
 
 from psycopg_pool import ConnectionPool
 
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from base.events.live.projection import PageClosed
-
-
-@dataclass
-class PageRow:
-    id: int
-    agent_id: int
-    name: str
-    port: int
-    host: str
-    serve_dir: str
-    server_token: str | None = field(default=None, repr=False)
-    session_name: str | None = None
+from services.agent_runner.page_server.page_plan import PageRow
 
 
 def close_failed_page(pool: ConnectionPool, row: PageRow, bus: EventBus) -> None:
