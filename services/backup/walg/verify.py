@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -129,11 +129,11 @@ def _missing_lost(integrity: dict[str, Any]) -> tuple[MissingRange, ...]:
 # Postgres for its current segment and timeline, so it is handed the owner-only
 # admin socket rather than libpq's default.
 # meiva:link services/backup/walg/docs/walg-tick.meiva.okf.md
-def verify_chain(pg_admin_url: str, *, path_reader: Callable[[], Path | None]) -> ChainVerdict:
+def verify_chain(pg_admin_url: str, *, path: Path | None) -> ChainVerdict:
     text = run_walg(
         ["wal-verify", "integrity", "timeline", "--json"],
         timeout_s=QUERY_TIMEOUT_S,
         pg_admin_url=pg_admin_url,
-        path_reader=path_reader,
+        path=path,
     )
     return parse_verdict(text, recorded_gaps=load_recorded_gaps())

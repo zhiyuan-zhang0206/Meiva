@@ -190,7 +190,7 @@ def _restore_and_verify(
     report: Report,
     *,
     throwaway: ThrowawayConfig,
-    path_reader: Callable[[], Path | None],
+    path: Path | None,
     database_for_url: Callable[[str], Database],
     socket_root: Path,
 ) -> str:
@@ -209,7 +209,7 @@ def _restore_and_verify(
             report=report,
             user=_admin_user(target),
             keep_data=False,
-            path_reader=path_reader,
+            path=path,
             socket_root=socket_root,
         ) as instance:
             summary = _verify(
@@ -260,7 +260,7 @@ def run_drill(
     report: Report,
     *,
     throwaway: ThrowawayConfig,
-    path_reader: Callable[[], Path | None],
+    path: Path | None,
     database_for_url: Callable[[str], Database],
     socket_root: Path = SOCKET_ROOT,
 ) -> DrillRecord:
@@ -279,7 +279,7 @@ def run_drill(
                 reached,
                 report,
                 throwaway=throwaway,
-                path_reader=path_reader,
+                path=path,
                 database_for_url=database_for_url,
                 socket_root=socket_root,
             ),

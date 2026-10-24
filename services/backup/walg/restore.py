@@ -190,7 +190,7 @@ def recovery_argv(
     socket_dir: Path,
     port: int,
     target: RecoveryTarget,
-    path_reader: Callable[[], Path | None],
+    path: Path | None,
     capacity: Mapping[str, str],
 ) -> list[str]:
     capacity_args = [
@@ -215,7 +215,7 @@ def recovery_argv(
         "-c",
         "lc_messages=C",
         "-c",
-        f"restore_command={postgres_command('wal-fetch', '%f', '%p', path_reader=path_reader)}",
+        f"restore_command={postgres_command('wal-fetch', '%f', '%p', path=path)}",
         "-c",
         "recovery_target_action=promote",
         *target.pg_args(),
@@ -274,7 +274,7 @@ def restored_instance(
     report: Report,
     user: str | None = None,
     keep_data: bool,
-    path_reader: Callable[[], Path | None],
+    path: Path | None,
     timeout_s: float = RESTORE_TIMEOUT_S,
     socket_root: Path = SOCKET_ROOT,
 ) -> Generator[RestoredInstance]:
@@ -295,7 +295,7 @@ def restored_instance(
         run_walg(
             ["backup-fetch", str(directory), backup],
             timeout_s=timeout_s,
-            path_reader=path_reader,
+            path=path,
         )
     except WalgCommandError as exc:
         raise RestoreError(f"backup-fetch failed: {exc}") from None
@@ -314,7 +314,7 @@ def restored_instance(
             socket_dir=socket_dir,
             port=instance.port,
             target=target,
-            path_reader=path_reader,
+            path=path,
             capacity=control_settings(directory),
         )
         process = start_foreground_postgres(argv, log=log, env=pg_start_env())

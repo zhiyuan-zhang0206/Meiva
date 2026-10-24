@@ -52,7 +52,7 @@ def test_the_cli_owner_supplies_its_configured_path_and_stays_independent_of_oth
     facts = _owner(tmp_path, None)
 
     assert facts["declared"] is True
-    assert facts["owner_reader"] == str(tmp_path / "walg.json")
+    assert facts["owner_path"] == str(tmp_path / "walg.json")
     assert facts["other_declared"] is True
 
 

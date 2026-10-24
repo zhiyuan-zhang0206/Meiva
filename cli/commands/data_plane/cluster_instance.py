@@ -75,7 +75,7 @@ from cli.commands.data_plane.instance.redis_binaries import (
     redis_binary_source,
 )
 from cli.commands.data_plane.instance.storage_plan import require_storage_credentials
-from cli.commands.data_plane.walg import path_reader_for, warn_archive_inactive
+from cli.commands.data_plane.walg import warn_archive_inactive
 from services.backup.walg.archive import archive_pg_args
 
 # meiva:note
@@ -356,9 +356,7 @@ def _launch_postmaster(
             max_connections=_PG_MAX_CONNECTIONS,
             tz_args=tuple(shlex.split(pg_tz_args())),
             shm_args=tuple(shlex.split(pg_shm_args())),
-            archive_args=tuple(
-                archive_pg_args(path_reader=path_reader_for(config.walg_config_file))
-            ),
+            archive_args=tuple(archive_pg_args(path=config.walg_config_file)),
         )
     )
     owned_postgres.start(

@@ -187,7 +187,7 @@ def _run(
         _backup(),
         previous,
         lambda _line: None,
-        path_reader=sandbox.path_reader,
+        path=sandbox.path,
         database_for_url=_database_factory(),
         throwaway=ThrowawayConfig(tmp_path),
     )
@@ -354,7 +354,7 @@ def _run_drill(
         source.newest_backup(),
         previous,
         lines.append,
-        path_reader=sandbox.path_reader,
+        path=sandbox.path,
         database_for_url=_database_factory(),
         throwaway=ThrowawayConfig(scratch_base),
         **({} if socket_root is None else {"socket_root": socket_root}),

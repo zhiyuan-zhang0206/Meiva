@@ -63,7 +63,6 @@ from cli.commands.converge.redis_bridge import probe_redis_bridge
 from cli.commands.probe import probe_service
 from cli.database.runtime import CommandRuntime
 from services.backup.walg import probe as walg_probe
-from services.backup.walg.config import enabled as walg_enabled
 from services.supervision.meiva_root_glue.manifests import launched_services
 from services.supervision.roster.spec import services_for_capabilities_annotated
 
@@ -247,8 +246,8 @@ def disk_usage_fraction(volume: Path) -> float | None:
 # WAL-G is on. The path is the configuration's WAL-G config file, read once by the root.
 def read_walg(config_file: Path | None) -> tuple[str | None, bool]:
     return (
-        walg_probe.failure(path_reader=lambda: config_file),
-        walg_enabled(path_reader=lambda: config_file),
+        walg_probe.failure(path=config_file),
+        config_file is not None,
     )
 
 

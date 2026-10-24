@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import tempfile
 import uuid
-from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,14 +41,14 @@ class Step:
     ok: bool = field(default=True, kw_only=True)
 
 
-def _storage_round_trip(*, path_reader: Callable[[], Path | None]) -> str:
+def _storage_round_trip(*, path: Path | None) -> str:
     token = uuid.uuid4().hex
     remote = f"{_CHECK_DIR}/{token}.txt"
     stored = f"{remote}.lz4"
     payload = f"meiva walg check {token}\n".encode()
 
     def call(*args: str) -> str:
-        return str(run_walg(list(args), timeout_s=_STORAGE_CALL_TIMEOUT_S, path_reader=path_reader))
+        return str(run_walg(list(args), timeout_s=_STORAGE_CALL_TIMEOUT_S, path=path))
 
     with tempfile.TemporaryDirectory(prefix="meiva-walg-check-") as scratch:
         source, fetched = Path(scratch, "put"), Path(scratch, "get")
@@ -79,10 +78,10 @@ def _storage_round_trip(*, path_reader: Callable[[], Path | None]) -> str:
 
 def _postgres_facts(
     *,
-    path_reader: Callable[[], Path | None],
+    path: Path | None,
     admin: AbstractContextManager[psycopg.Connection[Any]],
 ) -> str:
-    expected = expected_archive(path_reader=path_reader)
+    expected = expected_archive(path=path)
     try:
         with admin as conn:
             state = probe.read_archiver_state(conn)
@@ -98,10 +97,10 @@ def _postgres_facts(
     )
 
 
-def run_check(*, path_reader: Callable[[], Path | None]) -> list[Step]:
+def run_check(*, path: Path | None) -> list[Step]:
     """Run the checks in order, stopping at the first failure; the last step is the verdict."""
     return run_check_on(
-        path_reader=path_reader,
+        path=path,
         binary_problem=walg_binary.installed_problem(),
         admin=probe.admin_connection(),
     )
@@ -112,11 +111,10 @@ def run_check(*, path_reader: Callable[[], Path | None]) -> list[Step]:
 # build (None when it is) and the dial to the home's Postgres.
 def run_check_on(
     *,
-    path_reader: Callable[[], Path | None],
+    path: Path | None,
     binary_problem: str | None,
     admin: AbstractContextManager[psycopg.Connection[Any]],
 ) -> list[Step]:
-    path = walg_config.configured_path(path_reader=path_reader)
     if path is None:
         return [Step("configured", "MEIVA_WALG_CONFIG_FILE is not set", ok=False)]
     steps = [Step("configured", str(path))]
@@ -146,8 +144,8 @@ def run_check_on(
     )
 
     try:
-        steps.append(Step("storage", _storage_round_trip(path_reader=path_reader)))
+        steps.append(Step("storage", _storage_round_trip(path=path)))
     except WalgCommandError as exc:
         return [*steps, Step("storage", str(exc), ok=False)]
 
-    return [*steps, Step("postgres", _postgres_facts(path_reader=path_reader, admin=admin))]
+    return [*steps, Step("postgres", _postgres_facts(path=path, admin=admin))]

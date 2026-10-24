@@ -30,9 +30,7 @@ def converge_walg(ctx: ConvergeCtx) -> None:
             wal-g, the download failed its checksum, or the configuration is unusable
             (`WalgConfigError` names the file and the setting, never a value).
     """
-    configured = walg_config.enabled(
-        path_reader=lambda: ctx.read_config().view.walg.walg_config_file
-    )
+    configured = ctx.read_config().view.walg.walg_config_file is not None
     remote_plane = configured and ctx.read_config().view.data_plane.is_remote
     execute_walg_plan(plan_walg_converge(configured=configured, remote_plane=remote_plane), ctx)
 
@@ -47,8 +45,6 @@ def execute_walg_plan(plan: tuple[WalgStep, ...], ctx: ConvergeCtx) -> None:
             case InstallWalgBinary():
                 ensure_walg_binary()
             case LoadWalgConfig():
-                walg_config.load_walg_config(
-                    path_reader=lambda: ctx.read_config().view.walg.walg_config_file
-                )
+                walg_config.load_walg_config(path=ctx.read_config().view.walg.walg_config_file)
             case PrepareWalgStateDir():
                 ensure_private_dir(ctx.meiva_home / "backups" / "walg")
