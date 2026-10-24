@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from base.config import ConfigBoot
+from base.deploy.release import editable_install
 from base.log import logger
 from base.log.sinks import add_sink
 from base.native_process import child_env
@@ -91,6 +92,7 @@ def _run(home: Path, run: Path, *, default_cwd: Path) -> int:
         home=home,
         base_environ=child_env.inherited_process_env(),
         default_cwd=default_cwd,
+        source_root=editable_install.current_interpreter_source_root(),
     )
     path = service_socket_path(run)
     if path.parent == fallback_dir() and not _own_fallback_dir(path.parent):
