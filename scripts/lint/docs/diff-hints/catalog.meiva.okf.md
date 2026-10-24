@@ -45,8 +45,9 @@ syntax cannot tell a closed vocabulary from a wire value; a required callable ty
 `Callable` type alias (`DecideCall = Callable[..., Awaitable[...]]`); and an if-chain over
 enum members without a final `else` (only `match` is looked at).
 
-Found in review and since closed: `raising=` set by a variable, `**{...}` or a fourth positional
-argument is a tolerated miss too; a `case _:` body fails only when it ends in a `raise` or
+The diff hint now asks about `raising=` set by a variable, `**{...}` or a fourth positional
+argument; these shapes remain tolerated misses of the deterministic meizel code.
+Other gaps closed after review: a `case _:` body fails only when it ends in a `raise` or
 `assert_never`; a selector is guarded only by a `raise` in its own body, not a nested def;
 `none-fallback` also sees `x or default_name` (an imported or module-level implementation,
 not a constant), `x if x else Foo()`, an annotated assignment and `self.x = Foo()`;

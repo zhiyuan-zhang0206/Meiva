@@ -96,7 +96,7 @@ _ENVIRONMENT = ".".join(("os", "environ"))
 _PATCH_OPTIONS = frozenset({"spec", "create", "spec_set", "autospec", "new_callable"})
 # meiva:note
 # The monkeypatch methods whose `raising=False` lets a patch of a missing name pass.
-_RAISING_METHODS = frozenset({"setattr", "delattr"})
+_RAISING_METHODS = frozenset({"setattr"})
 _LEAVES = frozenset(
     {
         ast.Constant,
