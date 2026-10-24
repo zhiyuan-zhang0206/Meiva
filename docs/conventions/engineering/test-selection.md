@@ -56,11 +56,17 @@ stay in the JSON `diagnostics` field and stderr):
 - A read whose path cannot be anchored to the checkout or to an outside root
   (`path.read_text()` on a parameter) can only matter to a data file: Python sources reach
   tests through the import graph, and the tests that read source text are the pinned
-  tree-scan family. It counts only when the change includes a file that is not Python, not
-  Markdown and not a meizel manifest. Markdown is prose, and the tests that read skill or OKF
-  documents are pinned by name instead: a changed `SKILL.md` or `*.okf.md` selects every
-  collectable test whose code holds that name as part of a string constant (docstrings and
-  comments read nothing). The queue's full run catches anything else before main.
+  tree-scan family. It counts only when the change includes a data input whose readers are
+  not already represented by its path class or declaration. Python, Markdown, meizel
+  manifests, `path_scopes.toml`, `ambient_roots.toml`, `scripts/lint/baseline/`,
+  `scripts/structure/baseline/` and `scripts/structure/skip_sites.json` do not activate it.
+  Neither do TREE_SCAN_ONLY or FRONTEND inputs: their recognized readers and owning CI
+  jobs already cover them. Markdown is prose, and the tests that read skill or OKF documents
+  are pinned by name instead: a changed `SKILL.md` or `*.okf.md` selects every collectable test
+  whose code holds that name as part of a string constant (docstrings and comments read
+  nothing). A mixed diff containing another data input still includes tests reaching
+  unanchored reads. Recognized resource edges are retained for every class; this rule only
+  controls unrelated unanchored reads. The queue's full run catches anything else before main.
 
 A gap is not one when the file declares it. The shared fact collection reads
 `meizel.policy.toml`: a `[loads]` entry becomes dependency edges to its directories, and an
