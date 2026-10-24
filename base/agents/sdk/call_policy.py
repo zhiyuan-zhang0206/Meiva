@@ -7,14 +7,14 @@ import math
 import threading
 import time
 from collections.abc import Callable, Generator, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
 
 from pydantic import BaseModel, Field
 
+from base.host.env.boot_policy import BootstrapFetch
 from base.log import logger
-
-_REFRESH_SECONDS = 5.0
 
 
 class SamplingPolicy(BaseModel):
@@ -25,31 +25,33 @@ class SamplingPolicy(BaseModel):
 
 
 # meiva:note
-# One fetch of the cluster's SDK sampling policy, as the process environment and its `.env` file
-# say the cluster hands it out: read from the file when this process's config source is local, from
-# the gateway otherwise. The caller names every input; the file is read again on each call so an
-# edit reaches a running process within one refresh.
-def read_policy(*, env: Mapping[str, str], env_path: Path) -> SamplingPolicy:
-    from base.host.env.boot_policy import BootstrapFetch
-    from base.host.env.bootstrap import (
-        config_source_is_local,
-        fetch_bootstrap_config,
-        should_fetch_from_gateway,
+# Where the SDK sampling policy is read from, and how often.
+#
+# `env` is the launch environment and `env_path` the `.env` file of the home: a process whose
+# config source is local reads the file, any other asks its gateway with the environment's URL
+# and machine token (`read_policy`). `env` is a mapping the root hands in, so a root that passes
+# the live process environment (`process_environment()`) sees a token or flag that appears later,
+# and a test passes a dict. `tuning` bounds the gateway fetch; `refresh_seconds` is the wait
+# between fetches, counted from the previous one (the first fetch is due that long after the owner
+# is built).
+@dataclass(frozen=True)
+class SamplingSource:
+    env: Mapping[str, str]
+    env_path: Path
+    tuning: BootstrapFetch = field(
+        default_factory=lambda: BootstrapFetch(timeout_s=2.0, attempts=1)
     )
-    from base.host.env.dotenv_file import read_env_aliases
-    from base.host.net.auth import delivered_token
+    refresh_seconds: float = 5.0
 
-    env_file = read_env_aliases(env_path)
-    if config_source_is_local(env, env_file=env_file) or not should_fetch_from_gateway(
-        env, env_file=env_file
-    ):
-        aliases = env_file
-    else:
-        aliases = fetch_bootstrap_config(
-            env["MEIVA_GATEWAY_URL"],
-            bearer=delivered_token(env),
-            tuning=BootstrapFetch(timeout_s=2.0, attempts=1),
-        )
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.refresh_seconds) or self.refresh_seconds < 0:
+            raise ValueError("SDK sampling refresh_seconds must be finite and nonnegative")
+
+
+# meiva:note
+# The sampling policy `aliases` (env or `.env` values by alias) say; an alias that is absent takes
+# the default, and a value outside the policy's bounds raises `ValidationError`.
+def policy_from_aliases(aliases: Mapping[str, str]) -> SamplingPolicy:
     defaults = SamplingPolicy()
     return SamplingPolicy.model_validate(
         {
@@ -59,6 +61,32 @@ def read_policy(*, env: Mapping[str, str], env_path: Path) -> SamplingPolicy:
             "sample_every": aliases.get("MEIVA_SDK_CALL_SAMPLE_EVERY", defaults.sample_every),
         }
     )
+
+
+# meiva:note
+# One fetch of the cluster's SDK sampling policy from `source`: the `.env` file when this
+# process's config source is local, the gateway otherwise. The file is read again on each call
+# so an edit reaches a running process within one refresh.
+def read_policy(source: SamplingSource) -> SamplingPolicy:
+    from base.host.env.bootstrap import (
+        config_source_is_local,
+        fetch_bootstrap_config,
+        should_fetch_from_gateway,
+    )
+    from base.host.env.dotenv_file import read_env_aliases
+    from base.host.net.auth import delivered_token
+
+    env = source.env
+    env_file = read_env_aliases(source.env_path)
+    if config_source_is_local(env, env_file=env_file) or not should_fetch_from_gateway(
+        env, env_file=env_file
+    ):
+        aliases = env_file
+    else:
+        aliases = fetch_bootstrap_config(
+            env["MEIVA_GATEWAY_URL"], bearer=delivered_token(env), tuning=source.tuning
+        )
+    return policy_from_aliases(aliases)
 
 
 class _Refresh:
@@ -99,13 +127,13 @@ class _Refresh:
 
 # meiva:note
 # The SDK installation's policy snapshot and the finite lifetime of its refresh. `initial` is the
-# snapshot served until the first fetch lands; `fetch` is the one effect, called off the SDK call
-# path. The installation's root hands both in.
+# snapshot served until the first fetch lands; `source` says where each refresh reads from, off
+# the SDK call path. The installation's root builds both.
 class SamplingPolicyOwner:
-    def __init__(self, *, initial: SamplingPolicy, fetch: Callable[[], SamplingPolicy]) -> None:
-        self.fetch = fetch
+    def __init__(self, *, initial: SamplingPolicy, source: SamplingSource) -> None:
+        self.source = source
         self.value = initial
-        self.next_refresh = 0.0
+        self.next_refresh = time.monotonic() + source.refresh_seconds
         self.lock = threading.Lock()
         self.refreshing = False
         self.error: tuple[Exception, TracebackType | None] | None = None
@@ -194,7 +222,7 @@ class SamplingPolicyOwner:
                 httpx.RemoteProtocolError,
             )
             status_error = httpx.HTTPStatusError
-            value = self.fetch()
+            value = read_policy(self.source)
             with self.lock:
                 self.value = value
                 self.error = None
@@ -216,23 +244,22 @@ class SamplingPolicyOwner:
                 )
         finally:
             with self.lock:
-                self.next_refresh = time.monotonic() + _REFRESH_SECONDS
+                self.next_refresh = time.monotonic() + self.source.refresh_seconds
                 self.refreshing = False
 
 
 # meiva:note
-# The sampling owner a process installs when its root names none: the composition root of a bare
-# SDK process. It serves the default policy until its first refresh lands (an unconfigured SDK
-# emits every call, which is the safe side), and every refresh re-reads the process environment's
-# `.env` or asks the gateway (`read_policy`). Only the environment and the file location are read
-# here, once; no configuration is booted for a sampling default.
+# The sampling owner of a process whose root has no configuration boot of its own (a bare SDK
+# process, an exec child, a CLI verb): the composition root reads the process environment and
+# the home's `.env` location here, once, as values. The environment is the live process
+# environment, so a flag or token delivered after install is seen at the next refresh. Until the
+# first refresh the owner serves the policy the environment already carries.
 def process_sampling_owner() -> SamplingPolicyOwner:
-    from functools import partial
-
     from base.host.env.dotenv_file import process_env_file
     from base.host.env.registry import process_environment
 
+    env = process_environment()
     return SamplingPolicyOwner(
-        initial=SamplingPolicy(),
-        fetch=partial(read_policy, env=process_environment(), env_path=process_env_file()),
+        initial=policy_from_aliases(env),
+        source=SamplingSource(env=env, env_path=process_env_file()),
     )

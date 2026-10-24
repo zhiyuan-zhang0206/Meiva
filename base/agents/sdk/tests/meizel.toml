@@ -4,13 +4,13 @@ exports = ["sampling_owners.py"]
 "test_sdk_telemetry.py" = "wraps builtins.__import__ so one import raises"
 
 [uses]
-"test_call_policy.py" = ["_sdk_cold_child.py"]
+"test_call_policy.py" = ["_sdk_cold_child.py", "sampling_owners.py"]
+"test_policy_owner.py" = ["sampling_owners.py"]
 "test_sdk_emission_failures.py" = ["sampling_owners.py"]
 "test_sdk_telemetry.py" = ["_sdk_cold_child.py", "sampling_owners.py"]
 
 [debt.first-party-patch]
 "_sdk_cold_child.py#assignment base.agents.sdk.telemetry.emit" = 1
-"test_call_policy.py#monkeypatch.setattr base.agents.sdk.call_policy.time.monotonic" = 1
 "test_call_policy.py#monkeypatch.setattr base.telemetry.emitter.init_telemetry" = 1
 "test_sdk_emission_failures.py#monkeypatch.setattr base.agents.sdk.telemetry.emit" = 1
 "test_sdk_emission_failures.py#monkeypatch.setattr base.telemetry.emit" = 2
@@ -23,7 +23,3 @@ exports = ["sampling_owners.py"]
 
 [debt.third-party-patch]
 "test_call_policy.py#monkeypatch.delattr httpx.HTTPStatusError" = 1
-
-[debt.unresolved-patch]
-"test_call_policy.py#monkeypatch.setattr cache.refresh" = 2
-"test_policy_owner.py#monkeypatch.setattr owner.refresh" = 1

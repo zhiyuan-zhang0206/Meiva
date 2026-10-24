@@ -30,7 +30,10 @@ never leak into the live one.
 Reload is not a lifecycle. The full load starts with `meiva.sdk_surface.install.uninstall()`,
 which takes the metering recorder off and undoes every namespace, member, wrap layer, skill
 source, flag and config of the previous install (newest first), so installation starts from
-a pristine core each time. The surface form never uninstalls: a child loads once.
+a pristine core each time. A full load retaining the same sampling owner preserves the
+root's existing exit cleanup; that root still owns cleanup if the replacement fails.
+An ordinary uninstall removes the installed owner's exit registration. The surface form
+never uninstalls: a child loads once.
 Hooks, state, prompt sections and notes are not process-global at all: they are
 `PluginContributions` values, and `build_registry()` makes a new one on demand. Nothing in the host swaps a registry
 in place, though: the graph is compiled once from the registry the daemon builds at

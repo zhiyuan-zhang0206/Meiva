@@ -9,18 +9,10 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import contextmanager
 
-from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
 from meiva.sdk_surface import meiva_module
 from meiva.sdk_surface.installation import SLOT, Installation, Loading, slot
 
-__all__ = ["held_installation", "inert_sampling"]
-
-
-# meiva:note
-# A sampling owner for the installation a test builds: the real owner, serving the default policy
-# and refreshing to the same default, so nothing reads the settings or the gateway.
-def inert_sampling() -> SamplingPolicyOwner:
-    return SamplingPolicyOwner(initial=SamplingPolicy(), fetch=SamplingPolicy)
+__all__ = ["held_installation"]
 
 
 @contextmanager

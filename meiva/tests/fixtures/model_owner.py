@@ -4,11 +4,12 @@ from collections.abc import Iterator
 
 import pytest
 
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.packages.tests.model_catalog import inert_keys
 from meiva.sdk_surface.installation import Installation
-from meiva.sdk_surface.tests.installation_holder import held_installation, inert_sampling
+from meiva.sdk_surface.tests.installation_holder import held_installation
 
 __all__ = ["model_installation", "sdk_model_owner"]
 
@@ -22,7 +23,7 @@ def model_installation(
         catalog=model_catalog,
         provider_keys=inert_keys(model_catalog),
         authority=config_authority,
-        sampling=inert_sampling(),
+        sampling=fixed_sampling_owner(),
     )
 
 

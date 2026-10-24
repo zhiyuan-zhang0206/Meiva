@@ -1,11 +1,11 @@
-exports = ["agent_env.py", "agent_slices.py", "boot_policy.py", "bootstrap.py", "config_lite_table.py", "dotenv_boot.py", "dotenv_file.py", "harness_binaries.py", "health_ports.py", "port_lease.py", "port_table.py", "registry.py", "tests"]
+exports = ["agent_env.py", "agent_slices.py", "boot_policy.py", "bootstrap.py", "config_lite_table.py", "dotenv_boot.py", "dotenv_file.py", "harness_binaries.py", "health_ports.py", "port_lease.py", "port_table.py", "process_profile.py", "registry.py", "tests"]
 
 [uses]
 "agent_slices.py" = ["config_lite_table.py"]
-"bootstrap.py" = ["boot_policy.py", "registry.py"]
+"bootstrap.py" = ["boot_policy.py", "process_profile.py", "registry.py"]
 "dotenv_boot.py" = ["bootstrap.py", "dotenv_file.py", "registry.py"]
 "health_ports.py" = ["port_table.py", "registry.py"]
-"registry.py" = ["agent_env.py", "config_lite_table.py"]
+"registry.py" = ["agent_env.py", "config_lite_table.py", "process_profile.py"]
 "tests" = ["boot_policy.py", "bootstrap.py", "dotenv_boot.py", "dotenv_file.py", "harness_binaries.py", "port_lease.py", "port_table.py", "registry.py"]
 
 [purity]
@@ -13,6 +13,7 @@ exports = ["agent_env.py", "agent_slices.py", "boot_policy.py", "bootstrap.py", 
 "agent_env.py" = "strict"
 "boot_policy.py" = "strict"
 "port_table.py" = "strict"
+"process_profile.py" = "strict"
 
 [roots]
 "bootstrap.py" = { kinds = ["environ"], why = "fetches config from the gateway and os.environ.update()s it BEFORE Settings is built; importing base.config here is the import cycle this module exists to break" }

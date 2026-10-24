@@ -335,3 +335,9 @@ def test_env_registry_imports_on_clean_env_without_config_package() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_process_environment_is_the_live_process_environment() -> None:
+    from base.host.env.registry import process_environment
+
+    assert process_environment() is os.environ

@@ -27,9 +27,9 @@ from typing import Any
 import pytest
 
 from base import paths
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.config.service_read import ConfigAuthority
 from base.packages.plugins.enable_config import write_local
-from meiva.sdk_surface.tests.installation_holder import inert_sampling
 
 # Every dotted name a plugin module can be registered under.
 _PLUGIN_MODULE_PREFIXES = ("meiva_builtins.plugins.", "plugins.")
@@ -99,7 +99,7 @@ def test_boot_loader_never_imports_a_disabled_plugin(loguru_records: list[dict[s
     from meiva.sdk_surface.extensions import load_extensions
 
     load_extensions(
-        sampling=inert_sampling()
+        sampling=fixed_sampling_owner()
     )  # must not raise: the disabled plugin is never imported
 
     assert "plugins.codex_usage.plugin" not in sys.modules
@@ -128,7 +128,7 @@ def test_boot_loader_contains_broken_plugins_and_keeps_going(
 
     from meiva.sdk_surface.extensions import load_extensions
 
-    load_extensions(sampling=inert_sampling())  # must not raise
+    load_extensions(sampling=fixed_sampling_owner())  # must not raise
 
     assert "plugins.good.plugin" in sys.modules
     for broken in ("broken_relative", "broken_syntax", "broken_raise"):
@@ -154,11 +154,11 @@ def test_a_package_relative_sibling_import_resolves_and_a_reload_keeps_the_modul
 
     from meiva.sdk_surface.extensions import load_extensions
 
-    load_extensions(sampling=inert_sampling())
+    load_extensions(sampling=fixed_sampling_owner())
     first = sys.modules["plugins.codex_usage.plugin"]
     assert first.MARK == "x"
 
-    load_extensions(sampling=inert_sampling())
+    load_extensions(sampling=fixed_sampling_owner())
 
     assert sys.modules["plugins.codex_usage.plugin"] is first
 
@@ -175,7 +175,7 @@ def test_host_boot_restart_loop_survives_a_broken_plugin(
     from meiva.sdk_surface.extensions import load_extensions
 
     for _ in range(3):
-        load_extensions(sampling=inert_sampling())  # each call stands in for one host boot
+        load_extensions(sampling=fixed_sampling_owner())  # each call stands in for one host boot
 
     assert "plugins.codex_usage.plugin" not in sys.modules
     reports = [
@@ -208,7 +208,7 @@ def test_the_loader_binds_the_class_a_config_face_declares(unit_home: Path) -> N
     write_local({"plugins": {"faced": {"enabled": True}}})
 
     try:
-        loaded = load_extensions(sampling=inert_sampling())
+        loaded = load_extensions(sampling=fixed_sampling_owner())
         assert [name for name, _ in loaded.registry.plugins] == ["faced"]
         assert settings.plugins.faced.knob == 7
         with pytest.raises(RuntimeError, match="no ModelCatalog"):
@@ -228,7 +228,7 @@ def test_the_loader_retains_the_roots_explicit_owners(config_authority: ConfigAu
     catalog = CatalogBuilder().build()
     _write_plugin(paths.plugins_dir(), "good", "LOADED = True\n")
     write_local({"plugins": {"good": {"enabled": True}}})
-    sampling = inert_sampling()
+    sampling = fixed_sampling_owner()
     try:
         loaded = load_extensions(catalog=catalog, authority=config_authority, sampling=sampling)
         installation = installed()

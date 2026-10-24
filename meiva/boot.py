@@ -451,13 +451,14 @@ def _load_inputs(
     else:
         clock = Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
     catalog = build_model_catalog()
+    sampling = process_sampling_owner()
     return LoadInputs(
         surface=surface,
         disabled=disabled,
         config=config,
         machine=machine,
         clients=clients,
-        sampling=process_sampling_owner(),
+        sampling=sampling,
         caller=caller,
         clock=clock,
         home=paths.meiva_home(),

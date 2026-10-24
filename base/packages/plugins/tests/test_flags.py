@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from base.config import settings
-from base.config.profiles import MEIVA_PROCESS_PROFILE_ENV
+from base.host.env.process_profile import MEIVA_PROCESS_PROFILE_ENV
 from base.packages.plugins.flags import (
     UndeclaredFlag,
     UnknownFlag,

@@ -19,13 +19,7 @@ from typing import Any, cast
 
 from base.config.config_registry import DOMAIN_ATTRS
 from base.config.lite_parse import parse_field
-from base.config.profiles import (
-    MEIVA_PROCESS_PROFILE_ENV,
-    PROCESS_PROFILES,
-    ProcessProfile,
-    profile_domain_error,
-    profile_unknown_error,
-)
+from base.config.profiles import PROCESS_PROFILES, profile_domain_error
 from base.host.env.boot_policy import BootstrapFetch
 from base.host.env.bootstrap import (
     CONFIG_FETCH_ENV,
@@ -48,6 +42,11 @@ from base.host.env.dotenv_boot import (
     apply_process_timezone,
     load_meiva_env,
     read_database_delivery,
+)
+from base.host.env.process_profile import (
+    MEIVA_PROCESS_PROFILE_ENV,
+    ProcessProfile,
+    profile_unknown_error,
 )
 from base.paths.home import home_from_env, resolve_meiva_home
 

@@ -6,13 +6,14 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.packages.plugin_config_images import PluginConfigOwner
 from base.packages.plugins.config_face import disk_image_path
 from base.packages.plugins.config_registration import (
     bind_plugin_config,
 )
 from meiva.sdk_surface.installation import Installation
-from meiva.sdk_surface.tests.installation_holder import held_installation, inert_sampling
+from meiva.sdk_surface.tests.installation_holder import held_installation
 
 
 class _FixtureConfig(BaseModel):
@@ -25,7 +26,7 @@ class _FixtureConfig(BaseModel):
 def isolated_registry() -> Iterator[dict[str, BaseModel]]:
     """The SDK reads its current installation's own config bindings."""
     configs: dict[str, BaseModel] = {}
-    with held_installation(Installation.bare(configs=configs, sampling=inert_sampling())):
+    with held_installation(Installation.bare(configs=configs, sampling=fixed_sampling_owner())):
         yield configs
 
 

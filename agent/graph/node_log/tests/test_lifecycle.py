@@ -1,5 +1,6 @@
 import asyncio
 from typing import Any
+from zoneinfo import ZoneInfoNotFoundError
 
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -10,6 +11,7 @@ from base.agents.messages.kwargs import MeivaMsgType
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.observation.turn_progress import TurnProgress
 from base.clock import Clock
+from base.clock.tests.fakes import clock_with_unknown_timezone
 from base.events.live.tests.live_capture import LiveEvents
 from base.log.tests.log_records import LogRecords
 
@@ -231,21 +233,18 @@ async def test_the_timeline_limit_bounds_a_full_window_snapshot(live_events: Liv
 async def test_a_render_failure_leaves_the_cursor_so_the_next_enter_renders_the_full_window(
     live_events: LiveEvents,
 ) -> None:
-    def failing_timestamps() -> bool:
-        raise RuntimeError("simulated render failure")
-
     summary = HumanMessage(
         content="summary",
         additional_kwargs={"meiva_msg_type": MeivaMsgType.COMPACT_SUMMARY.value},
     )
     messages: list[BaseMessage] = [SystemMessage(content="x"), summary, AIMessage(content="b")]
 
-    with pytest.raises(RuntimeError, match="simulated render failure"):
+    with pytest.raises(ZoneInfoNotFoundError):
         async with _enter(
             live_events,
             messages,
             timeline_inputs=TimestampPolicy(
-                clock=Clock.from_settings(), timestamps_enabled=failing_timestamps()
+                clock=clock_with_unknown_timezone(), timestamps_enabled=True
             ),
         ):
             pass

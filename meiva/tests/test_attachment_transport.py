@@ -14,6 +14,7 @@ from typing import Any, cast
 
 import pytest
 
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import snapshot_process_config
 from base.lm.attach.constants import ATTACH_MAX_FILE_BYTES, ATTACH_MAX_LABEL_CHARS
@@ -22,7 +23,7 @@ from base.packages.tests.model_catalog import AddModels
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.attachment_transport import plan_media, record_media, register
 from meiva.sdk_surface.installation import Installation
-from meiva.sdk_surface.tests.installation_holder import held_installation, inert_sampling
+from meiva.sdk_surface.tests.installation_holder import held_installation
 
 _MEDIA_MODEL = "gpt-5.6-sol"
 
@@ -186,7 +187,9 @@ def test_register_reads_the_process_and_records_into_the_turn(
     image.write_bytes(b"png")
 
     with held_installation(
-        Installation.bare(catalog=model_catalog, authority=authority, sampling=inert_sampling())
+        Installation.bare(
+            catalog=model_catalog, authority=authority, sampling=fixed_sampling_owner()
+        )
     ):
         register(image, label="render result", base=tmp_path)
 
