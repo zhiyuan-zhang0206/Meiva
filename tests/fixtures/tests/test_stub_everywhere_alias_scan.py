@@ -85,9 +85,7 @@ def test_driver_batch_preserves_shared_identity_and_repeated_targets(
 
     descriptor = vars(Bound)["connect"]
     holder = types.ModuleType("driver_batch_shared_identity")
-    holder.connect = original
-    holder.renamed_connect = original
-    holder.bound_connect = Bound.connect
+    holder.__dict__.update(connect=original, renamed_connect=original, bound_connect=Bound.connect)
     bound_alias = holder.bound_connect
     monkeypatch.setitem(sys.modules, holder.__name__, holder)
     monkeypatch.setitem(sys.modules, holder.__name__ + "_alias", holder)
@@ -184,7 +182,7 @@ def test_driver_batch_distinguishes_module_owners(
     owners = [types.ModuleType(f"driver_batch_owner_{index}") for index in range(2)]
     holder = types.ModuleType("driver_batch_module_alias")
     for module in (*owners, holder):
-        module.connect = original
+        module.__dict__["connect"] = original
     monkeypatch.setitem(sys.modules, holder.__name__, holder)
     if registered:
         for module in owners:

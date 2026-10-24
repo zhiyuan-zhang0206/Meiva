@@ -487,7 +487,9 @@ def native_data_plane_guard(
 
 @pytest.fixture
 def postgres_access(
-    native_data_plane_guard, process_config: object, monkeypatch: pytest.MonkeyPatch
+    native_data_plane_guard: tuple[list[Boundary], list[Boundary]],
+    process_config: object,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The database fixture's access window; teardown restores the refusal first."""
     stub_boundaries(
@@ -500,7 +502,9 @@ def postgres_access(
 
 @pytest.fixture
 def redis_access(
-    native_data_plane_guard, process_config: object, monkeypatch: pytest.MonkeyPatch
+    native_data_plane_guard: tuple[list[Boundary], list[Boundary]],
+    process_config: object,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The Redis fixture's access window, independent of database access."""
     stub_boundaries(
