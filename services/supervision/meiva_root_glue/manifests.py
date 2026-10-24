@@ -1,42 +1,42 @@
-"""Generate K2 unit manifests from the deployment roster (W1.2e).
-
-The generator is the deployment-side half of the root supervisor: it reads
-the ops roster (`services.supervision.roster.build_services`) — the machine-readable place
-that says which service runs on which capability set — and renders the K2
-manifest JSON the root consumes (`{"units": [...]}`; schema and validators in
-`services.supervision.meiva_root.manifest`). Nothing here spawns or stops anything: this is
-the "prepare the tree's shape" slice (W1.2e), the swap itself is W1.2e-2.
-
-Mapping semantics (W1.1 v1 row set + G6 rulings):
-
-- every roster spec becomes a unit: id = `spec.session`, exec = the spec's
-  shell command (the same string a session runs, prefixed `cd <repo>`),
-  restart = always (the W1.1 default), attach = root (static services);
-- the per-(machine x home) subset is `spec.capabilities & target
-  capabilities` — the single readable place "which machine runs this";
-- application health recovery belongs to root's health monitor; there are
-  no watchdog service rows;
-- session-host classes (interactive shells / watchers / page servers /
-  schedule runners / orchestration sessions) spawn at RUNTIME via their
-  owning service (E2a) — they are not static manifest rows; their terminal
-  attach values (G6b) live in `SESSION_HOST_ATTACH` for the spawn slice;
-- OS-edge / root-internal / retired rows never appear (W1.1 D/E/F);
-- a spec that declares `stop_ceiling_s` (its own SIGTERM cleanup can outlast
-  root's default TERM window) gets `stop_timeout_s = ceiling + STOP_MARGIN_S`,
-  so root's window is derived from the unit's bound and cannot undercut it.
-
-Development exec derivation: a spec's `cmd` is a shell command, so the unit
-argv is `/bin/sh -c 'cd <repo> && ...'`. When the command is a simple one
-(bare tokens only, no leading assignment), an `exec` prefix replaces the
-shell with the service itself, keeping the unit's pid a direct child of root
-(chain discipline, I2); a compound command keeps its own shape (the frontend
-command already ends in `exec npm ...`).
-
-Output is always validated BEFORE anything consumes it — in memory via the
-same `UnitManifest.from_mapping` validators `load_manifests` uses, and again
-by re-reading the written file with `load_manifests` itself (the fail-fast
-self-check the W1.2e brief pins).
-"""
+# meiva:note
+# Generate K2 unit manifests from the deployment roster (W1.2e).
+#
+# The generator is the deployment-side half of the root supervisor: it reads
+# the ops roster (`services.supervision.roster.composition.build_services`) — the machine-readable place
+# that says which service runs on which capability set — and renders the K2
+# manifest JSON the root consumes (`{"units": [...]}`; schema and validators in
+# `services.supervision.meiva_root.manifest`). Nothing here spawns or stops anything: this is
+# the "prepare the tree's shape" slice (W1.2e), the swap itself is W1.2e-2.
+#
+# Mapping semantics (W1.1 v1 row set + G6 rulings):
+#
+# - every roster spec becomes a unit: id = `spec.session`, exec = the spec's
+#   shell command (the same string a session runs, prefixed `cd <repo>`),
+#   restart = always (the W1.1 default), attach = root (static services);
+# - the per-(machine x home) subset is `spec.capabilities & target
+#   capabilities` — the single readable place "which machine runs this";
+# - application health recovery belongs to root's health monitor; there are
+#   no watchdog service rows;
+# - session-host classes (interactive shells / watchers / page servers /
+#   schedule runners / orchestration sessions) spawn at RUNTIME via their
+#   owning service (E2a) — they are not static manifest rows; their terminal
+#   attach values (G6b) live in `SESSION_HOST_ATTACH` for the spawn slice;
+# - OS-edge / root-internal / retired rows never appear (W1.1 D/E/F);
+# - a spec that declares `stop_ceiling_s` (its own SIGTERM cleanup can outlast
+#   root's default TERM window) gets `stop_timeout_s = ceiling + STOP_MARGIN_S`,
+#   so root's window is derived from the unit's bound and cannot undercut it.
+#
+# Development exec derivation: a spec's `cmd` is a shell command, so the unit
+# argv is `/bin/sh -c 'cd <repo> && ...'`. When the command is a simple one
+# (bare tokens only, no leading assignment), an `exec` prefix replaces the
+# shell with the service itself, keeping the unit's pid a direct child of root
+# (chain discipline, I2); a compound command keeps its own shape (the frontend
+# command already ends in `exec npm ...`).
+#
+# Output is always validated BEFORE anything consumes it — in memory via the
+# same `UnitManifest.from_mapping` validators `load_manifests` uses, and again
+# by re-reading the written file with `load_manifests` itself (the fail-fast
+# self-check the W1.2e brief pins).
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ from services.supervision.meiva_root.manifest import (
     UnitRegistry,
     load_manifests,
 )
-from services.supervision.roster import build_services
+from services.supervision.roster.composition import build_services
 from services.supervision.roster.service_spec import ServiceSpec
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]

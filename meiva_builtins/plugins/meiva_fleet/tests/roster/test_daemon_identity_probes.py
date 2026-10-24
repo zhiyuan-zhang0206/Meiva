@@ -21,7 +21,7 @@ from services.backup.scheduler import daemon as backup_scheduler
 from services.derived.labeler import daemon as labeler
 from services.derived.memory_indexer import daemon as memory_indexer
 from services.entrypoints.im_bridge import daemon as im_bridge
-from services.supervision import roster
+from services.supervision.roster import composition
 from services.supervision.roster.service_spec import ServiceSpec
 from services.upkeep.events_maintenance import daemon as events_maintenance
 from services.upkeep.ttl_reaper import daemon as ttl_reaper
@@ -54,7 +54,7 @@ def _task_maintenance_pidfile() -> Path:
 
 
 def _standard_daemons() -> list[ServiceSpec]:
-    return [s for s in roster.build_services() if s.health_name is not None]
+    return [s for s in composition.build_services() if s.health_name is not None]
 
 
 def _inner_probe(spec: ServiceSpec) -> partial[DaemonProbe]:

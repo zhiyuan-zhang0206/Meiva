@@ -29,8 +29,8 @@ from base.daemon.health import DaemonProbe, probe_daemon
 from base.native_process.stop_timing import HOST_STOP_CEILING_S, OPS_STOP_CEILING_S
 from base.packages.plugins.config_registration import disk_image_path
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
-from services.supervision import roster
 from services.supervision.meiva_root_glue import manifests as gen
+from services.supervision.roster import composition
 from services.supervision.roster.healthz import healthz_url
 from services.supervision.roster.service_spec import (
     DbAccess,
@@ -181,7 +181,7 @@ def _describe(probe: object) -> object:
 
 
 def _live() -> dict[str, ServiceSpec]:
-    return {s.session: s for s in roster.build_services()}
+    return {s.session: s for s in composition.build_services()}
 
 
 def test_the_migrated_sessions_are_exactly_the_standard_daemons() -> None:

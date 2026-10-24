@@ -151,12 +151,12 @@ def _occupied(
     machine: MachineIdentity,
     host: Host,
 ) -> tuple[PortOccupant, ...]:
-    import services.supervision.roster as _roster
     from base.deploy.lifecycle.service_selection import resolve_selection
     from cli.commands.lifecycle.root_driver import start_roster
     from cli.commands.probe import occupied_health_ports
+    from services.supervision.roster.composition import build_services
 
-    available = {s.session for s in _roster.build_services()}
+    available = {s.session for s in build_services()}
     roster = start_roster(
         roles,
         resolve_selection(

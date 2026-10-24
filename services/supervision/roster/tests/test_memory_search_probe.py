@@ -8,7 +8,7 @@ from starlette.routing import Route
 
 from base.config import get_field, set_field
 from base.host.net.tests.local_http import serve_asgi
-from services.supervision.roster import build_services
+from services.supervision.roster.composition import build_services
 from services.supervision.roster.service_spec import ServiceSpec
 
 

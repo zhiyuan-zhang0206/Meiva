@@ -42,13 +42,16 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MEIVA_HOME", str(home))
 
 
+# meiva:note
+# A home patched only on base.paths leaves previously imported readers unchanged.
+# Check the roster's actual configuration input against the isolated unit home.
 def test_the_isolated_home_is_the_one_every_consumer_resolves(tmp_path: Path) -> None:
-    """`services.supervision.roster` binds `meiva_home` by name at import, out of reach of any patch of
-    `paths.meiva_home`; `converge_host` reaches it through `_desired_service_names`. A home that
-    only a patch pointed at made that real call create a second, unrelated directory."""
-    from services.supervision import roster
+    from services.supervision.roster.composition import build_services
 
-    assert roster.meiva_home() == paths.meiva_home() == tmp_path / "meiva"
+    home = tmp_path / "meiva"
+    assert paths.meiva_home() == home
+    collector = next(service for service in build_services() if service.session == "otel-collector")
+    assert collector.config_inputs == (paths.otel_collector_config(home),)
 
 
 def test_scaffold_runs_despite_dangling_config(*, command_runtime: CommandRuntime) -> None:

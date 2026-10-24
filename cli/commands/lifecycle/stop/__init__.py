@@ -49,7 +49,7 @@ from cli.commands.lifecycle.stop.report import (
 )
 from cli.commands.lifecycle.stop.steps import StopPlan
 from cli.database.lifecycle_audit import operator_lifecycle_audit
-from services.supervision.roster import build_services
+from services.supervision.roster.composition import build_services
 
 # meiva:note
 # What a stop's failure looks like: reported with its phase accounting, never compensated.

@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 from typing import Any
 
@@ -161,12 +162,17 @@ def test_indexer_is_declared_by_the_plugin_not_the_core_roster() -> None:
     from pathlib import Path as _Path
 
     from meiva_builtins.plugins.meiva_memory.services import services
-    from services.supervision import roster
+    from services.supervision.roster import composition
 
     assert [s.session for s in services()] == ["memory-indexer"]
-    assert "memory-indexer" in [s.session for s in roster.build_services()]
-    core_source = _Path(roster.__file__).read_text(encoding="utf-8")
-    assert 'session="memory-indexer"' not in core_source
+    assert "memory-indexer" in [s.session for s in composition.build_services()]
+    core_source = _Path(composition.__file__).read_text(encoding="utf-8")
+    literals = {
+        node.value
+        for node in ast.walk(ast.parse(core_source))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    assert "memory-indexer" not in literals
 
 
 def test_per_agent_framing_makes_no_path_resolution_claim(memory_plugin: Any) -> None:

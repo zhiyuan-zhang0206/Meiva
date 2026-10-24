@@ -1,47 +1,46 @@
-#!/usr/bin/env python3
-"""Lint: roster tables must match their registrations.
-
-Two tables are checked, both by set equality in both directions:
-
-1. the service domain roster (`services/supervision/roster/docs/service-roster.md`) against
-   `services/supervision/roster/__init__.py:build_services()` —
-   the single source of truth for the long-running sessions the cluster runs.
-   The service domain carries a human-readable roster
-   table documenting the same set. Nothing kept the two in sync, so a PR could
-   delete (or add) a daemon and silently leave the table wrong — exactly what
-   happened in #728, which removed the `scheduler` daemon but left its roster
-   row + prose behind for nobody to catch.
-   - a service documented in the roster but not registered in
-     `build_services()` -> "deleted a daemon, forgot to undocument it" (the
-     #728 case);
-   - a service registered in `build_services()` but missing from the roster
-     -> "added a daemon, forgot to document it".
-
-2. the healthcheck roster (`services/supervision/healthchecks/docs/check-roster/check-roster.meiva.okf.md`)
-   against the healthcheck module directory plus the ServiceSpec
-   `healthcheck_module` fields and root diagnostic adapter imports — the
-   2026-08-21 audit (issue #192) found the table documenting a phantom module
-   (`task_maintenance.py`) and missing seven real ones. See
-   `check_healthcheck_roster()` for the exact sources of truth.
-
-Sentinel contract: the table is located by a `<!-- lint:roster-table -->` HTML
-comment placed on its own line immediately ABOVE the roster table (the one whose
-header is `| Service (suffix) | Runs | Healthcheck |`). The parser then reads the
-markdown rows that follow, extracting the first-column service name from its
-`` `service` `` code span. Anchoring on a sentinel (not a header string or a line
-number) keeps the lint robust to surrounding edits; if the sentinel is missing,
-the lint errors out rather than silently passing.
-
-Exemptions:
-  - `_ROSTER_EXEMPT` — escape valve (normally empty), matching the allowlist
-    convention of the other local lints.
-
-Zero-FP basis: both sides are structured data — a Python tuple and a markdown
-table column — never prose. The only fragility (table location) is killed by the
-sentinel. Prose `scheduler`-style mentions elsewhere in the docs are out of scope
-here (manual fix + the sweeper `docs-aging` class); this lint guards the
-structured table only.
-"""
+# meiva:note
+# Lint: roster tables must match their registrations.
+#
+# Two tables are checked, both by set equality in both directions:
+#
+# 1. the service domain roster (`services/supervision/roster/docs/service-roster.md`) against
+#    `services/supervision/roster/composition.py:build_services()` —
+#    the single source of truth for the long-running sessions the cluster runs.
+#    The service domain carries a human-readable roster
+#    table documenting the same set. Nothing kept the two in sync, so a PR could
+#    delete (or add) a daemon and silently leave the table wrong — exactly what
+#    happened in #728, which removed the `scheduler` daemon but left its roster
+#    row + prose behind for nobody to catch.
+#    - a service documented in the roster but not registered in
+#      `build_services()` -> "deleted a daemon, forgot to undocument it" (the
+#      #728 case);
+#    - a service registered in `build_services()` but missing from the roster
+#      -> "added a daemon, forgot to document it".
+#
+# 2. the healthcheck roster (`services/supervision/healthchecks/docs/check-roster/check-roster.meiva.okf.md`)
+#    against the healthcheck module directory plus the ServiceSpec
+#    `healthcheck_module` fields and root diagnostic adapter imports — the
+#    2026-08-21 audit (issue #192) found the table documenting a phantom module
+#    (`task_maintenance.py`) and missing seven real ones. See
+#    `check_healthcheck_roster()` for the exact sources of truth.
+#
+# Sentinel contract: the table is located by a `<!-- lint:roster-table -->` HTML
+# comment placed on its own line immediately ABOVE the roster table (the one whose
+# header is `| Service (suffix) | Runs | Healthcheck |`). The parser then reads the
+# markdown rows that follow, extracting the first-column service name from its
+# `` `service` `` code span. Anchoring on a sentinel (not a header string or a line
+# number) keeps the lint robust to surrounding edits; if the sentinel is missing,
+# the lint errors out rather than silently passing.
+#
+# Exemptions:
+#   - `_ROSTER_EXEMPT` — escape valve (normally empty), matching the allowlist
+#     convention of the other local lints.
+#
+# Zero-FP basis: both sides are structured data — a Python tuple and a markdown
+# table column — never prose. The only fragility (table location) is killed by the
+# sentinel. Prose `scheduler`-style mentions elsewhere in the docs are out of scope
+# here (manual fix + the sweeper `docs-aging` class); this lint guards the
+# structured table only.
 
 from __future__ import annotations
 
@@ -57,7 +56,7 @@ from base.host.env.dotenv_boot import enter_scratch_home
 if __name__ == "__main__":
     enter_scratch_home()
 
-from services.supervision.roster import build_services
+from services.supervision.roster.composition import build_services
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SERVICE_ROSTER = _REPO_ROOT / "services" / "supervision" / "roster" / "docs" / "service-roster.md"

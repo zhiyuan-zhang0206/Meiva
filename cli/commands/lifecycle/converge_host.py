@@ -639,7 +639,7 @@ def selected_service_names(
     # The services an explicit selection names on this host, resolved like `meiva start`'s
     # roster: capability-gated services never count, and nothing is read from an earlier start.
     from base.deploy.lifecycle.service_selection import resolve_selection
-    from services.supervision.roster import build_services
+    from services.supervision.roster.composition import build_services
     from services.supervision.roster.spec import services_for_capabilities_annotated
 
     specs = (

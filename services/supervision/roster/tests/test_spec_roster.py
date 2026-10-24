@@ -19,7 +19,7 @@ from base.host.system import probes
 from base.host.system.tests.fake_commands import fake_host
 from base.paths.tests.homes import unit_home as unit_home
 from services.supervision import roster
-from services.supervision.roster import service_spec, spec
+from services.supervision.roster import composition, service_spec, spec
 
 _CHILD = Path(__file__).with_name("gate_roster_child.py")
 _REPO = Path(__file__).resolve().parents[4]
@@ -64,7 +64,7 @@ _AGENT_RUNNER_SESSIONS = {
 
 
 def test_agent_host_spec_launches_under_the_agent_profile() -> None:
-    agent_host = next(s for s in roster.build_services() if s.session == "agent-host")
+    agent_host = next(s for s in composition.build_services() if s.session == "agent-host")
     assert agent_host.profile == "agent"
     assert service_spec.profile_marker(agent_host) == "agent"
 
@@ -89,13 +89,13 @@ def test_profile_override_wins_over_derivation_and_no_marker() -> None:
 
 
 def test_every_service_declares_non_empty_capabilities() -> None:
-    for s in roster.build_services():
+    for s in composition.build_services():
         assert s.capabilities, f"{s.session} declares no capabilities"
         assert s.capabilities <= {"gateway", "agent-runner", "observability-station"}
 
 
 def test_capability_partition() -> None:
-    by_session = {s.session: s for s in roster.build_services()}
+    by_session = {s.session: s for s in composition.build_services()}
     assert set(by_session) == _GATEWAY_SESSIONS | _AGENT_RUNNER_SESSIONS
     for session, s in by_session.items():
         on_gateway = "gateway" in s.capabilities
@@ -121,7 +121,7 @@ def test_annotated_roster_membership_per_capability(
 
 
 def test_gateway_roster_ordering_is_load_bearing() -> None:
-    order = [s.session for s in roster.build_services()]
+    order = [s.session for s in composition.build_services()]
     assert order.index("memory-search") < order.index("memory-indexer")
 
 
@@ -136,7 +136,7 @@ def test_agent_runner_roster_ordering(*, machine_identity: MachineIdentity) -> N
 
 
 def test_application_roster_has_one_supervision_authority() -> None:
-    services = {service.session: service for service in roster.build_services()}
+    services = {service.session: service for service in composition.build_services()}
     assert "gateway-watchdog" not in services
     assert "agent-runner-watchdog" not in services
     assert services["delivery-watchdog"].identity_probe is not None
@@ -257,7 +257,7 @@ def test_otel_collector_runs_on_pure_runner(tmp_path: Path) -> None:
 
 
 def test_every_service_declares_an_identity_probe() -> None:
-    missing = {s.session for s in roster.build_services() if s.identity_probe is None}
+    missing = {s.session for s in composition.build_services() if s.identity_probe is None}
     assert missing == set(), f"{sorted(missing)} have no identity-bound health probe"
 
 
@@ -294,7 +294,7 @@ def test_profile_marker_derives_from_capabilities(
 
 
 def test_labeler_is_the_only_service_that_opts_out_of_the_profile_marker() -> None:
-    by_session = {s.session: s for s in roster.build_services()}
+    by_session = {s.session: s for s in composition.build_services()}
     opted_out = {sess for sess, s in by_session.items() if s.no_profile_marker}
     assert opted_out == {"labeler"}, (
         f"expected only the labeler to opt out of the profile marker, got {opted_out}"
@@ -312,12 +312,12 @@ def test_labeler_is_the_only_service_that_opts_out_of_the_profile_marker() -> No
 
 
 def test_gateway_daemons_keep_the_gateway_marker() -> None:
-    by_session = {s.session: s for s in roster.build_services()}
+    by_session = {s.session: s for s in composition.build_services()}
     for sess in ("heartbeat", "events-maintenance", "im-bridge", "memory-indexer", "gateway"):
         assert service_spec.profile_marker(by_session[sess]) == "gateway", sess
 
 
 def test_runner_daemons_keep_the_runner_marker() -> None:
-    by_session = {s.session: s for s in roster.build_services()}
+    by_session = {s.session: s for s in composition.build_services()}
     for sess in ("ops", "page-server"):
         assert service_spec.profile_marker(by_session[sess]) == "runner", sess

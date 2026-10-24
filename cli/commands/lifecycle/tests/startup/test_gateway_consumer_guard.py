@@ -426,7 +426,7 @@ def test_agent_host_launches_under_the_agent_profile(unit_home: Path) -> None:
     from base.host.env.dotenv_file import env_file_path, read_env_aliases
     from cli.commands.data_plane.instance.launch_delivery import LaunchDelivery
     from cli.commands.lifecycle import root_driver
-    from services.supervision.roster import build_services
+    from services.supervision.roster.composition import build_services
 
     # meiva:note
     # A gateway-config unit on a remote-managed plane: the agent projects the provider runner login.

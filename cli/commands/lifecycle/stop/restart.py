@@ -47,7 +47,7 @@ from cli.database import OperatorDatabaseFactory
 from cli.database.lifecycle_audit import operator_lifecycle_audit, record_lifecycle_request
 from cli.database.runtime import CommandRuntime
 from cli.start_runtime import StartRuntime
-from services.supervision.roster import build_services
+from services.supervision.roster.composition import build_services
 from services.supervision.roster.service_spec import ServiceSpec
 
 

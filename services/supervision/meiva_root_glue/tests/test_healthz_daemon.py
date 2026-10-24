@@ -30,6 +30,7 @@ from base.packages.plugin_config_admin import update_all_disk_images
 from base.packages.plugins.enable_config import discover_plugins
 from services.supervision import roster
 from services.supervision.meiva_root_glue import manifests as gen
+from services.supervision.roster import composition
 from services.supervision.roster.healthz import (
     daemon_identity,
     health_name_of,
@@ -47,7 +48,7 @@ _BOTH: frozenset[MachineRole] = _GATEWAY | _RUNNER
 
 
 def _healthz_specs() -> dict[str, ServiceSpec]:
-    return {s.session: s for s in roster.build_services() if s.health_name is not None}
+    return {s.session: s for s in composition.build_services() if s.health_name is not None}
 
 
 def _module(spec: ServiceSpec) -> str:
@@ -234,7 +235,7 @@ def test_every_standard_daemon_renders_as_exec_python_dash_m_its_module(unit_hom
 def test_names_are_unique_across_the_whole_roster() -> None:
     """I5: two entries sharing a session, a health name, a URL or a pidfile would fight
     over one unit, one port or one pid record, and the second would never show up."""
-    specs = roster.build_services()
+    specs = composition.build_services()
     sessions = [s.session for s in specs]
     assert len(set(sessions)) == len(sessions), sorted(sessions)
 
@@ -253,11 +254,11 @@ def test_a_healthz_endpoint_is_declared_not_left_to_its_url() -> None:
     standard daemon (`health_name`) or an endpoint that names its home (`home_healthz`).
     `meiva start` decides which ports it can check for a foreign occupant from that
     declaration, so a new `/healthz` entry cannot be silently in or out of the check."""
-    for spec in roster.build_services():
+    for spec in composition.build_services():
         serves_healthz = spec.curl_url is not None and spec.curl_url.endswith("/healthz")
         declared = spec.health_name is not None or spec.home_healthz
         assert serves_healthz == declared, spec.session
-    assert {s.session for s in roster.build_services() if s.home_healthz} == {"gate"}
+    assert {s.session for s in composition.build_services() if s.home_healthz} == {"gate"}
 
 
 def test_a_standard_daemons_session_derives_its_health_name() -> None:

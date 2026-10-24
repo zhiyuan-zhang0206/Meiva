@@ -1,12 +1,12 @@
-"""Plugin-registered ops services — discovery of the ``services.py`` faces present on this machine.
-
-Plugins expose ``services() -> tuple[ServiceSpec, ...]`` from their services module;
-``plugin_services()`` discovers the code-present plugins and returns what they declare, and
-``services.supervision.roster.build_services()`` appends it to the core roster: the plugin declares, ops discovers.
-Each plugin service's own ``ServiceSpec.gate`` keeps cluster-level enablement out of
-``services.supervision.roster.spec.gate_reason``. The fleet task daemon follows this path; see
-``docs/decisions/extensions/plugins/2026-07-19-plugin-registered-services.md``.
-"""
+# meiva:note
+# Plugin-registered ops services — discovery of the ``services.py`` faces present on this machine.
+#
+# Plugins expose ``services() -> tuple[ServiceSpec, ...]`` from their services module;
+# ``plugin_services()`` discovers the code-present plugins and returns what they declare, and
+# ``services.supervision.roster.composition.build_services()`` appends it to the core roster: the plugin declares, ops discovers.
+# Each plugin service's own ``ServiceSpec.gate`` keeps cluster-level enablement out of
+# ``services.supervision.roster.spec.gate_reason``. The fleet task daemon follows this path; see
+# ``docs/decisions/extensions/plugins/2026-07-19-plugin-registered-services.md``.
 
 from __future__ import annotations
 
