@@ -14,9 +14,11 @@ from agent.ownership.hosted import admit_hosted_runtime
 from agent.state import AgentState, CircuitState
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
+from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -24,6 +26,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 
@@ -34,11 +37,11 @@ def _breaker_ctx(pool: AsyncConnectionPool, *, database_gate: ProcessDbGate) -> 
         ops_pool=pool,
         llm=MagicMock(),
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
+        agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
-        clock_factory=configured_policy().clock_factory,
+        clock_factory=Clock.from_settings,
     )
 
 
@@ -101,6 +104,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
             wrap_saver_writes_with_nstep_interval(saver, 100)
             graph = builder.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
             host = AgentHost(
+                home=meiva_home(),
                 policy=configured_policy(),
                 pool=aops_pool,
                 checkpointer=saver,

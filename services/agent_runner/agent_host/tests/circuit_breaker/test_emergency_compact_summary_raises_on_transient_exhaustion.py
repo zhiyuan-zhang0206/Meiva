@@ -16,9 +16,11 @@ from agent.graph.tests.test_llm_helpers import CONFIG as _LLM_CONFIG
 from agent.graph.tests.test_llm_helpers import make_runtime as _llm_make_runtime
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
+from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -35,7 +37,6 @@ from services.agent_runner.agent_host.tests.circuit_breaker.helpers import (
     reject_turn,
     spawn_child_under_idling_ancestor,
 )
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 
 async def test_llm_node_closes_circuit_on_success(
@@ -234,11 +235,11 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
+            agent=AgentSlices.resolve(default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=build_model_catalog(),
-            clock_factory=configured_policy().clock_factory,
+            clock_factory=Clock.from_settings,
         ),
         child_id,
         "done",

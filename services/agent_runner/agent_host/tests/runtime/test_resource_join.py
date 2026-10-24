@@ -23,6 +23,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog
+from base.paths import meiva_home
 from meiva.sdk_surface.installation import Installation
 from services.agent_runner.agent_host import daemon
 from services.agent_runner.agent_host.host import AgentHost
@@ -77,6 +78,7 @@ async def test_original_error_joins_before_clients_and_pools_close(
     monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog, *, database_gate: ProcessDbGate
 ) -> None:
     host = AgentHost(
+        home=meiva_home(),
         policy=configured_policy(),
         pool=cast(Any, MagicMock()),
         checkpointer=cast(Any, object()),
@@ -126,6 +128,7 @@ def exercise_unfinished_main() -> None:
         assert home == Path(os.environ["MEIVA_HOME"])
         on_clients_owned()
         host = AgentHost(
+            home=meiva_home(),
             policy=configured_policy(),
             pool=cast(Any, MagicMock()),
             checkpointer=cast(Any, object()),

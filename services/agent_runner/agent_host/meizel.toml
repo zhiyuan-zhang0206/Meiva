@@ -6,10 +6,11 @@ exports = ["daemon.py", "host.py", "invocation", "lifecycle", "runtime.py", "set
 "health_routes.py" = ["dispatcher.py", "host.py"]
 "host.py" = ["invocation", "lifecycle", "runtime.py", "scheduling", "settlement.py", "stall_guard.py"]
 "invocation" = ["db_recovery.py", "lifecycle", "runtime.py"]
-"lifecycle" = ["runtime.py"]
+"lifecycle" = ["pools.py", "runtime.py"]
 "recovery" = ["host.py", "settlement.py", "tests"]
 "scheduling" = ["runtime.py"]
 "settlement.py" = ["db_recovery.py", "runtime.py", "stall_guard.py"]
+"stall_guard.py" = ["runtime.py"]
 "tests" = ["daemon.py", "dispatcher.py", "exec_memory_guard.py", "health_routes.py", "host.py", "invocation", "lifecycle", "pooled_checkpoint.py", "pools.py", "runtime.py", "scheduling", "settlement.py", "stall_guard.py", "stdout_log.py"]
 
 [purity]

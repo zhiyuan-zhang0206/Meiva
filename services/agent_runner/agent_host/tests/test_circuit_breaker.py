@@ -22,10 +22,11 @@ from agent.state import AgentState, CircuitState
 from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
+from base.clock import Clock
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -42,7 +43,6 @@ from services.agent_runner.agent_host.tests.circuit_breaker.helpers import (
 from services.agent_runner.agent_host.tests.circuit_breaker.provider_failures import (
     LONG_SUMMARY,
 )
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
 
 # ── breaker open (runloop `_handle_fatal_llm_error`) ──
 
@@ -107,11 +107,11 @@ async def test_fatal_provider_error_emits_blocked_recovery_details(
         ops_pool=None,
         llm=MagicMock(),
         event_publisher=cast(AgentEventPublisher, publisher),
-        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
+        agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(),
         catalog=build_model_catalog(),
-        clock_factory=configured_policy().clock_factory,
+        clock_factory=Clock.from_settings,
         commands=CommandCatalog.system(skills=list),
     )
     exc = FatalProviderError(
@@ -138,7 +138,6 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -190,7 +189,6 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
         )
     db_conn.commit()
 
-    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-flash")
     blocked_history = "Content Exists Risk: do not replay this rejected history"
     exc = FatalProviderError(
         blocked_history,
@@ -205,11 +203,11 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
+            agent=AgentSlices.resolve({"llm_model": "deepseek-flash"}, default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=model_catalog,
-            clock_factory=configured_policy().clock_factory,
+            clock_factory=Clock.from_settings,
             commands=CommandCatalog.system(skills=list),
         ),
         agent_id=child_id,
@@ -284,11 +282,11 @@ async def test_context_overflow_halts_background_wakes_and_reports_to_an_ancesto
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=MagicMock(),
-            agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
+            agent=AgentSlices.resolve(default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(),
             catalog=model_catalog,
-            clock_factory=configured_policy().clock_factory,
+            clock_factory=Clock.from_settings,
             commands=CommandCatalog.system(skills=list),
         ),
         agent_id=child_id,

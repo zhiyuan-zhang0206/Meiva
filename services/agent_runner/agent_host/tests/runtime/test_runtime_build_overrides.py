@@ -5,20 +5,23 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock
+from types import SimpleNamespace
+from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
 from langchain_core.messages import AIMessage
 
+from agent.ownership.hosted import admit_hosted_runtime
 from base.api_contracts.agent_contract import Harness
-from base.host.env.agent_slices import AgentSlices, ModelOverrides
-from base.lm.catalog import ModelCatalog
-from base.lm.catalog.provider_keys import ProviderKeys
+from base.config.tests.configuration import defaults
+from base.db import Database
+from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import FileSessionRegistry, HarnessTurn
-from base.packages.composer_commands import CommandCatalog
-from services.agent_runner.agent_host import host as host_module
-from services.agent_runner.agent_host import runtime as runtime_module
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.paths import meiva_home
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import (
     AgentRuntime,
@@ -27,63 +30,53 @@ from services.agent_runner.agent_host.runtime import (
     harness_bridge_for,
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
+from services.agent_runner.agent_host.tests.runtime.host_support import (
+    BuildWith,
+    Graph,
+    HostPools,
+    Row,
+    ScriptedGraph,
+)
+from services.agent_runner.agent_host.tests.runtime.observation import served_model
+
+
+@pytest.fixture
+async def admitted(
+    wired_with: BuildWith, host_pools: HostPools, database: Database
+) -> Callable[[Graph], Awaitable[tuple[AgentHost, RuntimeIncarnation]]]:
+    """A host over the given graph and the incarnation it holds for agent 1."""
+
+    async def admit(graph: Graph) -> tuple[AgentHost, RuntimeIncarnation]:
+        host, _, _ = wired_with({1: Row(status="idling")}, graph)
+        owner = await admit_hosted_runtime(
+            host_pools.workload, 1, "this-box", host.runtime_owner, db=database
+        )
+        assert owner is not None
+        return host, owner
+
+    return admit
 
 
 @pytest.mark.parametrize("pinned", [True, False])
 async def test_the_runtime_is_built_with_the_agents_overrides(
-    monkeypatch: pytest.MonkeyPatch, pinned: bool, *, model_catalog: ModelCatalog
+    admitted: Callable[[Graph], Awaitable[tuple[AgentHost, RuntimeIncarnation]]], pinned: bool
 ) -> None:
-    built: list[tuple[str, ModelOverrides]] = []
-
-    async def _boot(
-        _agent_id: int,
-        llm_model: str,
-        overrides: ModelOverrides,
-        *,
-        catalog: ModelCatalog,
-        keys: ProviderKeys,
-        llm_override: str,
-    ) -> tuple[object, None]:
-        assert catalog is model_catalog
-        assert isinstance(llm_override, str)
-        built.append((llm_model, overrides))
-        return object(), None
-
-    monkeypatch.setattr(host_module, "consume_claimed_inbounds", AsyncMock())
-    monkeypatch.setattr(runtime_module, "boot_agent_scope", _boot)
-    host = AgentHost(
-        policy=configured_policy(),
-        pool=Mock(),
-        checkpointer=Mock(),
-        graph=Mock(),
-        bus=Mock(),
-        db=Mock(),
-        catalog=model_catalog,
-        machine=configured_machine(),
-        commands=CommandCatalog.system(skills=list),
-    )
-    pins = {"reasoning_effort": "low", "claude_thinking_budget_tokens": 777} if pinned else {}
+    host, owner = await admitted(ScriptedGraph({}))
+    pins = {"reasoning_effort": "low"} if pinned else {}
     slices = AgentSlices.resolve(
-        {"llm_model": "pinned-model", **pins}, default_reader=configured_policy().default_reader
+        {"llm_model": "claude-opus-5-5", **pins}, default_reader=defaults()
     )
 
-    await host._build_runtime(1, "fingerprint", slices, incarnation=None)
+    runtime = await host._build_runtime(1, "fingerprint", slices, incarnation=owner)
 
-    assert [model for model, _ in built] == ["pinned-model"]
-    overrides = built[0][1]
-    assert overrides is slices.overrides
-    if pinned:
-        assert overrides.reasoning_effort == "low"
-        assert overrides.claude_thinking_budget_tokens == 777
-    else:
-        assert (
-            overrides
-            == AgentSlices.resolve(default_reader=configured_policy().default_reader).overrides
-        )
+    assert served_model(runtime.llm) == "claude-opus-5-5"
+    # meiva:note
+    # The model carries the pinned tuning; unpinned, it carries the catalog default.
+    assert cast(Any, runtime.llm).effort == ("low" if pinned else "medium")
 
 
 async def test_runtime_build_does_not_repair_a_dangling_history(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+    admitted: Callable[[Graph], Awaitable[tuple[AgentHost, RuntimeIncarnation]]],
 ) -> None:
     """Cold runtime construction never reads or rewrites the agent's checkpoint history.
 
@@ -92,34 +85,19 @@ async def test_runtime_build_does_not_repair_a_dangling_history(
     """
     touched: list[str] = []
 
-    class _RecordingGraph:
-        async def aget_state(self, *_args: object, **_kwargs: object) -> object:
+    class _RecordingGraph(ScriptedGraph):
+        async def aget_state(self, _config: object, /) -> SimpleNamespace:
             touched.append("aget_state")
             raise AssertionError("startup must not read graph state")
 
-        async def aupdate_state(self, *_args: object, **_kwargs: object) -> None:
+        async def aupdate_state(self, config: object, update: dict[str, Any]) -> object:
             touched.append("aupdate_state")
             raise AssertionError("startup must not rewrite graph state")
 
-    async def _boot(*_args: object, **_kwargs: object) -> tuple[object, None]:
-        return object(), None
+    host, owner = await admitted(_RecordingGraph({}))
+    slices = AgentSlices.resolve({}, default_reader=defaults())
 
-    monkeypatch.setattr(host_module, "consume_claimed_inbounds", AsyncMock())
-    monkeypatch.setattr(runtime_module, "boot_agent_scope", _boot)
-    host = AgentHost(
-        policy=configured_policy(),
-        pool=Mock(),
-        checkpointer=Mock(),
-        graph=_RecordingGraph(),  # type: ignore[arg-type]
-        bus=Mock(),
-        db=Mock(),
-        catalog=model_catalog,
-        machine=configured_machine(),
-        commands=CommandCatalog.system(skills=list),
-    )
-    slices = AgentSlices.resolve({}, default_reader=configured_policy().default_reader)
-
-    await host._build_runtime(1, "fingerprint", slices, incarnation=None)
+    await host._build_runtime(1, "fingerprint", slices, incarnation=owner)
 
     assert touched == []
 
@@ -247,6 +225,7 @@ def test_eviction_keeps_an_in_flight_runtime() -> None:
 
 async def test_dropping_an_agent_closes_its_session() -> None:
     host = AgentHost(
+        home=meiva_home(),
         policy=configured_policy(),
         pool=Mock(),
         checkpointer=Mock(),
@@ -276,6 +255,7 @@ async def test_dropping_an_agent_closes_its_session() -> None:
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 async def test_the_next_turn_waits_for_the_retired_session_to_close() -> None:
     host = AgentHost(
+        home=meiva_home(),
         policy=configured_policy(),
         pool=Mock(),
         checkpointer=Mock(),

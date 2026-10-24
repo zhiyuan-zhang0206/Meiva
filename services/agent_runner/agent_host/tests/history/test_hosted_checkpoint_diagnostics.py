@@ -14,16 +14,13 @@ from services.agent_runner.agent_host.daemon import build_checkpointer
 
 @pytest.mark.parametrize("method", ["aput", "aput_writes", "flush"])
 async def test_shared_saver_reports_each_failed_write_owner_without_swallowing(
-    db_url: str, monkeypatch: pytest.MonkeyPatch, method: str
+    db_url: str, method: str
 ) -> None:
-    monkeypatch.setattr(settings.agent, "checkpoint_interval", 100)
     pool: AsyncConnectionPool[Any] = AsyncConnectionPool(
         settings.data_plane.db_url, min_size=0, max_size=2, open=False
     )
     await pool.open()
-    saver = await build_checkpointer(
-        pool, read_checkpoint_interval=lambda: settings.agent.checkpoint_interval
-    )
+    saver = await build_checkpointer(pool, checkpoint_interval=100)
     configs: list[RunnableConfig] = []
     records: list[dict[str, Any]] = []
 

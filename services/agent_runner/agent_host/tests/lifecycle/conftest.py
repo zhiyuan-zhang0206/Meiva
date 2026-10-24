@@ -5,3 +5,9 @@ from base.packages.tests.model_catalog import add_bindings as add_bindings
 from base.packages.tests.model_catalog import add_models as add_models
 from base.packages.tests.model_catalog import model_catalog as model_catalog
 from base.packages.tests.model_catalog import set_prices as set_prices
+from services.agent_runner.agent_host.tests.runtime.host_support import event_tap as event_tap
+from services.agent_runner.agent_host.tests.runtime.host_support import host_plugin as host_plugin
+from services.agent_runner.agent_host.tests.runtime.host_support import host_pools as host_pools
+from services.agent_runner.agent_host.tests.runtime.host_support import rig as rig
+from services.agent_runner.agent_host.tests.runtime.host_support import wired as wired
+from services.agent_runner.agent_host.tests.runtime.host_support import wired_with as wired_with

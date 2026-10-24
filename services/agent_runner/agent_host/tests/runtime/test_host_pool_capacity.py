@@ -2,6 +2,7 @@ import asyncio
 import time
 from collections.abc import Callable
 from contextlib import AsyncExitStack
+from dataclasses import replace
 
 import psycopg
 import pytest
@@ -15,13 +16,18 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_settings
 from base.deploy.tests.containers import postgres
 from base.deploy.tests.pgbouncer import (
     admin_console_url,
     pgbouncer_available,
     pgbouncer_in_front,
 )
-from services.agent_runner.agent_host.pools import build_control_pool, build_shared_pool
+from services.agent_runner.agent_host.pools import (
+    PoolBounds,
+    build_control_pool,
+    build_shared_pool,
+)
 
 pytestmark = pytest.mark.skipif(
     not pgbouncer_available(), reason="pgbouncer not installed (brew/apt install pgbouncer)"
@@ -32,6 +38,20 @@ _RUNNERS = 6
 _BORROWERS_PER_RUNNER = 12
 _REQUESTS = 1000
 _LOCK_KEY = 816234
+
+
+def _pooled_database(url: str, gate: ProcessDbGate) -> Database:
+    return Database(replace(db_config_from_settings(), db_url=url), gate=gate)
+
+
+def _bounds() -> PoolBounds:
+    daemon, agent = settings.daemon, settings.agent
+    return PoolBounds(
+        workload_max_size=daemon.host_db_pool_max_size,
+        control_max_size=daemon.host_control_pool_max_size,
+        acquire_timeout_s=agent.db_pool_acquire_timeout_seconds,
+        slow_acquire_warn_s=agent.db_pool_slow_acquire_warn_seconds,
+    )
 
 
 async def _pool_counts(admin: psycopg.AsyncConnection[DictRow], database: str) -> dict[str, int]:
@@ -134,7 +154,6 @@ async def _borrow_every_lease_then_release(
 async def test_more_than_twenty_workload_leases_share_bounded_backends(
     postgres_access: None,
     record_property: Callable[[str, object], None],
-    monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
@@ -144,10 +163,10 @@ async def test_more_than_twenty_workload_leases_share_bounded_backends(
         postgres(config=throwaway_config, machine_name=machine_identity.name) as direct,
         pgbouncer_in_front(direct, pool_size=_BACKENDS) as pooled,
     ):
-        monkeypatch.setattr(settings.data_plane, "db_url", pooled)
+        database = _pooled_database(pooled, database_gate)
         async with (
-            build_shared_pool(Database.from_settings(gate=database_gate)) as workload,
-            build_control_pool(Database.from_settings(gate=database_gate)) as control,
+            build_shared_pool(database, _bounds()) as workload,
+            build_control_pool(database, _bounds()) as control,
             await psycopg.AsyncConnection[DictRow].connect(
                 admin_console_url(pooled), autocommit=True, row_factory=dict_row
             ) as admin,
@@ -286,7 +305,6 @@ async def _settle_requests_across_pools(
 async def test_six_host_pools_settle_one_thousand_short_requests_through_pgbouncer(
     postgres_access: None,
     record_property: Callable[[str, object], None],
-    monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentity,
@@ -297,7 +315,7 @@ async def test_six_host_pools_settle_one_thousand_short_requests_through_pgbounc
         postgres(config=throwaway_config, machine_name=machine_identity.name) as direct,
         pgbouncer_in_front(direct, pool_size=_BACKENDS) as pooled,
     ):
-        monkeypatch.setattr(settings.data_plane, "db_url", pooled)
+        database = _pooled_database(pooled, database_gate)
         async with AsyncExitStack() as stack:
             observer = await stack.enter_async_context(
                 await psycopg.AsyncConnection.connect(direct, autocommit=True)
@@ -311,15 +329,11 @@ async def test_six_host_pools_settle_one_thousand_short_requests_through_pgbounc
                 )
             )
             workloads = [
-                await stack.enter_async_context(
-                    build_shared_pool(Database.from_settings(gate=database_gate))
-                )
+                await stack.enter_async_context(build_shared_pool(database, _bounds()))
                 for _ in range(_RUNNERS)
             ]
             controls = [
-                await stack.enter_async_context(
-                    build_control_pool(Database.from_settings(gate=database_gate))
-                )
+                await stack.enter_async_context(build_control_pool(database, _bounds()))
                 for _ in range(_RUNNERS)
             ]
             backend_ids = await _settle_requests_across_pools(

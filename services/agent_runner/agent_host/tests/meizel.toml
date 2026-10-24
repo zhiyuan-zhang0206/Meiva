@@ -1,15 +1,14 @@
-exports = ["host_policy.py", "lifecycle", "runtime"]
+exports = ["host_policy.py", "lifecycle", "runtime", "table_faults.py"]
 
 [uses]
-"agent_host" = ["runtime"]
-"circuit_breaker" = ["host_policy.py"]
+"agent_host" = ["host_policy.py", "runtime"]
 "dispatch" = ["host_policy.py", "runtime"]
 "history" = ["host_policy.py", "runtime"]
 "lifecycle" = ["host_policy.py", "runtime"]
 "runtime" = ["host_policy.py"]
 "test_agent_host.py" = ["host_policy.py", "runtime"]
-"test_circuit_breaker.py" = ["circuit_breaker", "host_policy.py"]
-"test_circuit_breaker_audit.py" = ["host_policy.py"]
+"test_circuit_breaker.py" = ["circuit_breaker"]
+"test_circuit_breaker_audit.py" = ["table_faults.py"]
 "test_turn_dispatcher.py" = ["turn_dispatcher"]
 
 [debt.env-patch]
@@ -20,5 +19,3 @@ exports = ["host_policy.py", "lifecycle", "runtime"]
 "test_boot_sdk_posture.py#monkeypatch.setattr base.config.Settings" = 1
 "test_boot_sdk_posture.py#monkeypatch.setattr base.config.ensure_eager" = 1
 "test_boot_sdk_posture.py#monkeypatch.setattr meiva.sdk_surface.process_context.bind_host_process" = 1
-"test_circuit_breaker.py#monkeypatch.setattr base.config.settings.lm.llm_model" = 1
-"test_circuit_breaker_audit.py#monkeypatch.setattr base.telemetry.audit_events.record_audit_standalone_async" = 1

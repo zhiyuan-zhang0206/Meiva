@@ -12,7 +12,6 @@ from agent.startup import consume_claimed_inbounds
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from services.agent_runner.agent_host.db_recovery import database_phase
 from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.stall_guard import HostRestartRequiredError
@@ -132,10 +131,10 @@ async def reconcile_inbounds_after_turn(
         )
 
 
-async def wait_shielded_task[T](task: asyncio.Task[T]) -> bool:
+async def wait_shielded_task[T](task: asyncio.Task[T], *, timeout_s: float) -> bool:
     """Observe one cleanup task within a fixed bound, including repeated cancellation."""
     cancelled = False
-    deadline = asyncio.get_running_loop().time() + CANCEL_UNWIND_TIMEOUT_S
+    deadline = asyncio.get_running_loop().time() + timeout_s
     while not task.done():
         remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:

@@ -14,7 +14,9 @@ from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from agent.ownership.tests.ownership_support import admit_owner, agent_row, insert_lifecycle_command
 from base.agents.context import MeivaContext
+from base.clock import Clock
 from base.config import settings
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -22,6 +24,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.composer_commands import CommandCatalog
+from base.paths import meiva_home
 from ops import cluster_status
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.lifecycle.shells import apply_lifecycle_command
@@ -98,6 +101,7 @@ async def test_hosted_applies_only_after_continuation_returns(
         inbound = insert_lifecycle_command(db_conn, agent_id, kind)
         entered, release = asyncio.Event(), asyncio.Event()
         host = AgentHost(
+            home=meiva_home(),
             policy=configured_policy(),
             pool=aops_pool,
             checkpointer=Mock(),
@@ -121,13 +125,11 @@ async def test_hosted_applies_only_after_continuation_returns(
                 replace(
                     MeivaContext(
                         ops_pool=aops_pool,
-                        agent=AgentSlices.resolve(
-                            default_reader=configured_policy().default_reader
-                        ),
+                        agent=AgentSlices.resolve(default_reader=defaults()),
                         db=Database.from_settings(gate=database_gate),
                         bus=EventBus.from_settings(),
                         catalog=model_catalog,
-                        clock_factory=configured_policy().clock_factory,
+                        clock_factory=Clock.from_settings,
                     ),
                     original_incarnation=old,
                     hosted_resources=resources,
@@ -178,6 +180,7 @@ async def test_hosted_terminate_crash_leaves_no_half_applied_command(
             }
         )
         host = AgentHost(
+            home=meiva_home(),
             policy=configured_policy(),
             pool=aops_pool,
             checkpointer=Mock(),
@@ -226,13 +229,11 @@ async def test_hosted_terminate_crash_leaves_no_half_applied_command(
                     replace(
                         MeivaContext(
                             ops_pool=aops_pool,
-                            agent=AgentSlices.resolve(
-                                default_reader=configured_policy().default_reader
-                            ),
+                            agent=AgentSlices.resolve(default_reader=defaults()),
                             db=Database.from_settings(gate=database_gate),
                             bus=EventBus.from_settings(),
                             catalog=model_catalog,
-                            clock_factory=configured_policy().clock_factory,
+                            clock_factory=Clock.from_settings,
                         ),
                         original_incarnation=owner,
                         hosted_resources=resources,
@@ -255,13 +256,11 @@ async def test_hosted_terminate_crash_leaves_no_half_applied_command(
                 replace(
                     MeivaContext(
                         ops_pool=aops_pool,
-                        agent=AgentSlices.resolve(
-                            default_reader=configured_policy().default_reader
-                        ),
+                        agent=AgentSlices.resolve(default_reader=defaults()),
                         db=Database.from_settings(gate=database_gate),
                         bus=EventBus.from_settings(),
                         catalog=model_catalog,
-                        clock_factory=configured_policy().clock_factory,
+                        clock_factory=Clock.from_settings,
                     ),
                     original_incarnation=owner,
                     hosted_resources=resources,
@@ -294,6 +293,7 @@ async def test_pending_wake_scan_finds_a_claimed_command_without_pending_rows(
         bus=event_bus,
     )
     host = AgentHost(
+        home=meiva_home(),
         policy=configured_policy(),
         pool=aops_pool,
         checkpointer=Mock(),
@@ -360,6 +360,7 @@ async def _run_terminating_turn(
             }
         )
         host = AgentHost(
+            home=meiva_home(),
             policy=configured_policy(),
             pool=aops_pool,
             checkpointer=Mock(),
@@ -377,11 +378,11 @@ async def _run_terminating_turn(
                 original_incarnation=incarnation,
                 hosted_resources=resources,
                 ops_pool=aops_pool,
-                agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
+                agent=AgentSlices.resolve(default_reader=defaults()),
                 db=Database.from_settings(gate=database_gate),
                 bus=EventBus.from_settings(),
                 catalog=model_catalog,
-                clock_factory=configured_policy().clock_factory,
+                clock_factory=Clock.from_settings,
             ),
         )
 

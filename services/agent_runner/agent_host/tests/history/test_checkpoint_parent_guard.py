@@ -15,7 +15,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.impersonation_handoff import flush_checkpoint
 from agent.messages.guard import guarded_delta_reducer
-from base.config import settings
 from services.agent_runner.agent_host.daemon import build_checkpointer
 from services.agent_runner.agent_host.pooled_checkpoint import (
     MissingCheckpointParentError,
@@ -142,12 +141,11 @@ async def test_child_insert_failure_rolls_back_already_written_blob(
 
 
 async def test_production_nstep_reparents_skipped_checkpoint_and_flush(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    aops_pool: AsyncConnectionPool,
 ) -> None:
-    monkeypatch.setattr(settings.agent, "checkpoint_interval", 4)
     saver = await build_checkpointer(
         aops_pool,
-        read_checkpoint_interval=lambda: settings.agent.checkpoint_interval,
+        checkpoint_interval=4,
     )
     first = await saver.aput(
         _config(), _checkpoint(), {"source": "input", "step": -1}, {"value": "1"}
@@ -173,12 +171,11 @@ async def test_production_nstep_reparents_skipped_checkpoint_and_flush(
 
 
 async def test_actual_delta_graph_with_production_nstep_replays_committed_messages(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    aops_pool: AsyncConnectionPool,
 ) -> None:
-    monkeypatch.setattr(settings.agent, "checkpoint_interval", 4)
     saver = await build_checkpointer(
         aops_pool,
-        read_checkpoint_interval=lambda: settings.agent.checkpoint_interval,
+        checkpoint_interval=4,
     )
     builder = cast(Any, StateGraph(_DeltaState))
     builder.add_node("append", _delta_append)

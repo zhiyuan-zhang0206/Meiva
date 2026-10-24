@@ -31,9 +31,8 @@ from langgraph.graph.state import CompiledStateGraph
 from agent.state import BaseAgentState
 from agent.turn.runloop import emit_error_event
 from base.agents.context import MeivaContext
-from base.config import settings
 from base.log import logger
-from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
+from services.agent_runner.agent_host.runtime import StallTiming
 
 _Graph = CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState]
 
@@ -58,30 +57,32 @@ class TurnStallTimeoutError(RuntimeError):
     """
 
 
+# meiva:note
+# Run one ``graph.ainvoke`` under the turn-level no-progress stall guard.
+#
+# On stall: the invocation task is cancelled inside the host's bounded unwind
+# window (`timing.unwind_timeout_s`). Unwound → `TurnStallTimeoutError` (the
+# turn task ends; ``run_turn`` drops the runtime, so the next wake re-runs
+# startup reconciliation and waits for new input). Refused →
+# `HostRestartRequiredError` (the daemon must exit; the supervisor restarts
+# it — rescheduling beside a task that still owns the slot would violate
+# one-turn-per-agent).
+#
+# An EXTERNAL cancellation (the dispatcher's stale-turn scan, force
+# terminate, shutdown) lands on THIS task's awaits rather than the graph's,
+# because the graph now runs one level down. It is mirrored onto the graph
+# task and its unwind is awaited here, so the external cancellation keeps
+# exactly the unwinding semantics it had before this guard existed — when
+# the graph task WAS the turn task.
 async def run_invocation_with_stall_guard(
     graph: _Graph,
     agent_id: int,
     ctx: MeivaContext,
     config: RunnableConfig,
     input_update: dict[str, object],
+    *,
+    timing: StallTiming,
 ) -> dict[str, object]:
-    """Run one ``graph.ainvoke`` under the turn-level no-progress stall guard.
-
-    On stall: the invocation task is cancelled inside the host's bounded unwind
-    window (`CANCEL_UNWIND_TIMEOUT_S`). Unwound → `TurnStallTimeoutError` (the
-    turn task ends; ``run_turn`` drops the runtime, so the next wake re-runs
-    startup reconciliation and waits for new input). Refused →
-    `HostRestartRequiredError` (the daemon must exit; the supervisor restarts
-    it — rescheduling beside a task that still owns the slot would violate
-    one-turn-per-agent).
-
-    An EXTERNAL cancellation (the dispatcher's stale-turn scan, force
-    terminate, shutdown) lands on THIS task's awaits rather than the graph's,
-    because the graph now runs one level down. It is mirrored onto the graph
-    task and its unwind is awaited here, so the external cancellation keeps
-    exactly the unwinding semantics it had before this guard existed — when
-    the graph task WAS the turn task.
-    """
     ctx.turn_progress.reset(agent_id)
     if ctx.hosted_resources is None:
         raise RuntimeError("a hosted invocation requires its original resource scope")
@@ -99,17 +100,19 @@ async def run_invocation_with_stall_guard(
         while True:
             done, _pending = await asyncio.wait(
                 {invoke_task},
-                timeout=settings.daemon.host_turn_progress_scan_interval_seconds,
+                timeout=timing.scan_interval_s,
             )
             if invoke_task in done:
                 return invoke_task.result()
             age = ctx.turn_progress.age_s(agent_id)
-            if age is not None and age >= settings.daemon.host_turn_no_progress_timeout_seconds:
-                return await _abort_stalled_invocation(agent_id, ctx, invoke_task, age)
+            if age is not None and age >= timing.no_progress_timeout_s:
+                return await _abort_stalled_invocation(
+                    agent_id, ctx, invoke_task, age, unwind_timeout_s=timing.unwind_timeout_s
+                )
     except asyncio.CancelledError:
         if not invoke_task.done():
             invoke_task.cancel()
-            done, _ = await asyncio.wait({invoke_task}, timeout=CANCEL_UNWIND_TIMEOUT_S)
+            done, _ = await asyncio.wait({invoke_task}, timeout=timing.unwind_timeout_s)
             if invoke_task not in done:
                 raise HostRestartRequiredError("graph did not unwind after cancellation") from None
             if not invoke_task.cancelled():
@@ -122,6 +125,8 @@ async def _abort_stalled_invocation(
     ctx: MeivaContext,
     invoke_task: asyncio.Task[dict[str, object]],
     age_s: float,
+    *,
+    unwind_timeout_s: float,
 ) -> dict[str, object]:
     """Cancel a stalled invocation and classify the outcome.
 
@@ -153,7 +158,7 @@ async def _abort_stalled_invocation(
     # the bounded unwind would hang (verified by reproduction; see the test's
     # refuses-to-unwind case for the intended refusal shape). `asyncio.wait`
     # reports the straggler instead, and never cancels the task itself.
-    done, _pending = await asyncio.wait({invoke_task}, timeout=CANCEL_UNWIND_TIMEOUT_S)
+    done, _pending = await asyncio.wait({invoke_task}, timeout=unwind_timeout_s)
     if invoke_task not in done:
         logger.error(
             "hosted turn for agent {agent_id} did not unwind within the "

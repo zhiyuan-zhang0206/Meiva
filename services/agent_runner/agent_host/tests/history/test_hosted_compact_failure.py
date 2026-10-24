@@ -1,10 +1,7 @@
 """Compaction aborts survive a real hosted turn and its PostgreSQL flush."""
 
 import asyncio
-import json
-from dataclasses import replace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
 
 import psycopg
 import pytest
@@ -14,33 +11,21 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import START, StateGraph
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
-from redis.asyncio.client import PubSub
 
 from agent import state as states
 from agent.graph.claim.node import claim_node
 from agent.graph.hooks.compact import COMPACT_MAX_ATTEMPTS, CompactionFailedError
 from agent.impersonation_handoff import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
-from agent.tests.claim.test_inbound_ownership import agent_row
 from base.agents.context import MeivaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.inbox.insert import insert_inbound_message
-from base.config import settings
 from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus, EventBusConfig
-from base.events.live.projection import Error
-from base.events.live.publisher import AgentEventPublisher
-from base.events.live.redis_client import open_async_redis
-from base.host.env.agent_slices import AgentSlices
-from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.native_process.turn_identity import HostedTurnResources
-from base.packages.composer_commands import CommandCatalog
-from base.packages.plugin_providers import build_model_catalog
-from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
-
-from ...host import AgentHost
-from ...runtime import TurnOutcome
+from base.events.live.bus import EventBus
+from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.tests.history import provider_down_model
+from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.runtime.host_support import EventTap, Rig, Row
 
 
 def cold_reader(pool: AsyncConnectionPool[Any]) -> AsyncPostgresSaver:
@@ -80,18 +65,6 @@ async def prepare_graph(
     return graph, saver, config, history
 
 
-async def _receive_error(subscription: PubSub) -> Error:
-    async with asyncio.timeout(5):
-        while True:
-            wire = await subscription.get_message(ignore_subscribe_messages=True, timeout=1)
-            if wire is None:
-                continue
-            data = wire["data"]
-            assert isinstance(data, (str, bytes))
-            if json.loads(data)["role"] == "error":
-                return Error.model_validate_json(data)
-
-
 def _queue_compact_request(db_conn: psycopg.Connection, agent: int) -> int:
     row = db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source) "
@@ -101,48 +74,6 @@ def _queue_compact_request(db_conn: psycopg.Connection, agent: int) -> int:
     assert row is not None
     db_conn.commit()
     return row[0]
-
-
-def _build_host_driving_invoke_until_done(
-    pool: AsyncConnectionPool[Any],
-    saver: AsyncPostgresSaver,
-    graph: Any,
-    ctx: MeivaContext,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    database_gate: ProcessDbGate,
-) -> AgentHost:
-    host = AgentHost(
-        policy=configured_policy(),
-        pool=pool,
-        checkpointer=saver,
-        graph=graph,
-        machine=configured_machine(name="claim-test"),
-        bus=EventBus.from_settings(),
-        db=Database.from_settings(gate=database_gate),
-        catalog=ctx.require_catalog(),
-        commands=CommandCatalog.system(skills=list),
-    )
-    monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
-
-    async def drive(
-        target: int,
-        _runtime: object,
-        _slices: object,
-        *,
-        incarnation: RuntimeIncarnation,
-        resources: HostedTurnResources | None,
-        checkpoints: Any = None,
-    ) -> TurnOutcome:
-        assert incarnation.agent_id == target and incarnation.owner == host._owner
-        assert resources is not None
-        bound = replace(ctx, original_incarnation=incarnation, hosted_resources=resources)
-        assert bound.require_original_incarnation(target) is incarnation
-        assert bound.hosted_resources is resources
-        return await host._invoke_until_done(target, bound, checkpoints=checkpoints)
-
-    monkeypatch.setattr(host, "_drive_turns", drive)
-    return host
 
 
 def _inbound_status(db_conn: psycopg.Connection, inbound_id: int) -> tuple[Any, ...] | None:
@@ -158,16 +89,17 @@ def _agent_status(db_conn: psycopg.Connection, agent: int) -> tuple[Any, ...] | 
 async def _assert_failure_is_visible_and_durable(
     db_conn: psycopg.Connection,
     pool: AsyncConnectionPool[Any],
-    subscription: PubSub,
+    event_tap: EventTap,
     config: RunnableConfig,
     *,
     agent: int,
     compact_id: int,
     history: list[HumanMessage | AIMessage],
 ) -> None:
-    event = await _receive_error(subscription)
-    assert event.agent_id == agent
-    assert "CompactionFailedError" in event.content and "history was preserved" in event.content
+    [event] = await event_tap.events("error")
+    assert event["agent_id"] == agent
+    assert "CompactionFailedError" in event["content"]
+    assert "history was preserved" in event["content"]
     cold = await cold_reader(pool).aget_tuple(config)
     assert cold is not None
     persisted = cold.checkpoint["channel_values"]
@@ -220,76 +152,60 @@ async def _close_host_with_original_failure(
 async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool[Any],
-    monkeypatch: pytest.MonkeyPatch,
+    rig: Rig,
+    event_tap: EventTap,
     interval: int,
     database: Database,
     event_bus: EventBus,
-    *,
-    database_gate: ProcessDbGate,
 ) -> None:
-    agent = agent_row(db_conn)
+    agent = 1
+    rig.stored.write(agent, Row(status="idling"))
     provider_error = RuntimeError("compaction provider unavailable")
-    summary = AsyncMock(side_effect=provider_error)
-    monkeypatch.setattr("agent.graph.hooks.compact.generate_summary", summary)
+    provider_down_model.FAILURES[agent] = provider_error
+    provider_down_model.CALLS.pop(agent, None)
     replies: list[str] = []
 
     graph, saver, config, history = await prepare_graph(aops_pool, agent, interval, replies)
     compact_id = _queue_compact_request(db_conn, agent)
-
-    redis = open_async_redis(settings.data_plane.redis_url)
-    channel = f"{settings.data_plane.events_channel}:compact-proof:{agent}"
-    publisher = AgentEventPublisher(redis, channel, agent_id=agent)
-    turn_bus = EventBus(EventBusConfig(settings.data_plane.redis_url, channel))
-    ctx = MeivaContext(
-        ops_pool=aops_pool,
-        event_publisher=publisher,
-        llm=MagicMock(),
-        agent=AgentSlices.resolve(default_reader=configured_policy().default_reader),
-        db=Database.from_settings(gate=database_gate),
-        bus=turn_bus,
-        catalog=build_model_catalog(),
-        clock_factory=configured_policy().clock_factory,
-        commands=CommandCatalog.system(skills=list),
-    )
-    host = _build_host_driving_invoke_until_done(
-        aops_pool, saver, graph, ctx, monkeypatch, database_gate=database_gate
+    host = rig.host(
+        {},
+        graph,
+        catalog=None,
+        policy=configured_policy(llm_override=provider_down_model.OVERRIDE),
+        checkpointer=saver,
+        workload_pool=aops_pool,
+        control_pool=aops_pool,
+        bus=None,
     )
     original_failure: CompactionFailedError | None = None
-    async with asyncio.TaskGroup() as tasks:
-        try:
-            async with redis.pubsub() as subscription:  # pyright: ignore[reportUnknownMemberType] — redis stubs
-                await subscription.subscribe(channel)
-                await publisher.start(tasks)
-                await asyncio.wait_for(host.run_turn(agent), 5)
-                await _assert_failure_is_visible_and_durable(
-                    db_conn,
-                    aops_pool,
-                    subscription,
-                    config,
-                    agent=agent,
-                    compact_id=compact_id,
-                    history=history,
-                )
-                assert not replies
-                assert summary.await_count == COMPACT_MAX_ATTEMPTS
-                original_failure = _retained_compaction_failure(host, provider_error)
+    try:
+        await asyncio.wait_for(host.run_turn(agent), 10)
+        await _assert_failure_is_visible_and_durable(
+            db_conn,
+            aops_pool,
+            event_tap,
+            config,
+            agent=agent,
+            compact_id=compact_id,
+            history=history,
+        )
+        assert not replies
+        assert provider_down_model.CALLS[agent] == COMPACT_MAX_ATTEMPTS
+        original_failure = _retained_compaction_failure(host, provider_error)
 
-                insert_inbound_message(
-                    db_conn,
-                    agent,
-                    "Continue without compacting",
-                    "user",
-                    bus=event_bus,
-                    database=database,
-                )
-                await asyncio.wait_for(host.run_turn(agent), 5)
-                assert replies == ["continued"]
-                assert summary.await_count == COMPACT_MAX_ATTEMPTS
-                await _assert_new_inbound_resumes_with_history(
-                    db_conn, aops_pool, config, compact_id=compact_id, history=history
-                )
-        finally:
-            await publisher.aclose()
-            await redis.aclose()
-            await turn_bus.async_redis().aclose()
-            await _close_host_with_original_failure(host, original_failure, provider_error)
+        insert_inbound_message(
+            db_conn,
+            agent,
+            "Continue without compacting",
+            "user",
+            bus=event_bus,
+            database=database,
+        )
+        await asyncio.wait_for(host.run_turn(agent), 10)
+        assert replies == ["continued"]
+        assert provider_down_model.CALLS[agent] == COMPACT_MAX_ATTEMPTS
+        await _assert_new_inbound_resumes_with_history(
+            db_conn, aops_pool, config, compact_id=compact_id, history=history
+        )
+    finally:
+        await _close_host_with_original_failure(host, original_failure, provider_error)
