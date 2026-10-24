@@ -30,7 +30,6 @@ import numpy as np
 import pytest
 
 from base import config
-from base.config import settings
 from base.lm import usage
 from base.packages.plugin_providers import build_model_catalog
 from services.derived.memory_indexer.embeddings import gemini
@@ -49,21 +48,17 @@ from services.derived.memory_indexer.embeddings.gemini import (
 # longer settings-driven. Tests that measure elapsed time on real sockets restore the real waits.
 
 
-def _timeout_reader() -> float:
-    return settings.services.memory_embed_timeout_seconds
-
-
-def _api_key_reader() -> str | None:
-    value = settings.lm.gemini_api_key
-    return None if value is None else value.get_secret_value()
-
+TIMEOUT_S = 60.0
+API_KEY = "test-gemini-key"
 
 pytestmark = pytest.mark.usefixtures("retry_waits")
 
 
-def build_provider() -> GeminiEmbeddingProvider:
+def build_provider(
+    *, timeout_s: float = TIMEOUT_S, api_key: str | None = API_KEY, endpoint: str = ENDPOINT
+) -> GeminiEmbeddingProvider:
     return GeminiEmbeddingProvider(
-        build_model_catalog(), timeout_reader=_timeout_reader, api_key_reader=_api_key_reader
+        build_model_catalog(), timeout_s=timeout_s, api_key=api_key, endpoint=endpoint
     )
 
 
@@ -211,22 +206,6 @@ def _assert_unpriced_embedding_span(tracer: _RecordingTracer, *, tok_in: int) ->
     assert span.attributes["meiva.billing.usage_kind"] == "embedding"
     assert span.attributes["meiva.billing.cost"] == 0.0
     assert span.attributes["meiva.billing.unpriced"] is True
-
-
-@pytest.fixture(autouse=True)
-def dummy_gemini_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Inject a key so `_api_key()` does not short-circuit the provider.
-
-    These tests mock the HTTP call (`httpx.AsyncClient`), not auth — the key
-    check runs before it, so without a key every success-path test would
-    raise `EmbeddingAPIError` instead of exercising the request. CI has no
-    GEMINI_API_KEY; running locally the prod `.env` leaked one in and hid
-    the dependency. `test_embed_no_api_key_raises` overrides this back to
-    None to keep the missing-key branch a tested behavior.
-    """
-    from pydantic import SecretStr
-
-    monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("test-gemini-key"))
 
 
 # ── provider surface (the contract) ───────────────────────────────────────
@@ -435,12 +414,7 @@ def test_factory_passes_same_catalog_to_all_embedding_paths(
     monkeypatch.setattr(usage, "log_usage_fields", record_usage)
     fake = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
     patch_client(monkeypatch, fake)
-    provider = factory.get_provider(
-        settings.services.embedding_backend,
-        catalog=catalog,
-        timeout_reader=_timeout_reader,
-        api_key_reader=_api_key_reader,
-    )
+    provider = factory.get_provider("gemini", catalog=catalog, timeout_s=TIMEOUT_S, api_key=API_KEY)
     provider.embed_batch(["hello"])
     provider.embed_query("hello")
     asyncio.run(provider.embed_query_async("hello"))
@@ -495,29 +469,30 @@ def test_embed_4xx_fails_immediately(monkeypatch: pytest.MonkeyPatch) -> None:
     assert fake.call_count == 1  # 4xx -> permanent -> single attempt
 
 
-def test_embed_timeout_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The per-request timeout comes from config (MEIVA_EMBED_TIMEOUT_SECONDS,
-    task #698 G8); the retry policy is a module constant (R2-D)."""
+# meiva:note
+# The per-request timeout is the value the service root read from config
+# (MEIVA_EMBED_TIMEOUT_SECONDS, task #698 G8); the retry policy is a module
+# constant (R2-D).
+def test_embed_timeout_is_the_value_the_provider_was_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
 
-    monkeypatch.setattr(settings.services, "memory_embed_timeout_seconds", 12.5)
     fake = AsyncClient(vectors=[[1.0] * DIM], raises_times=1)
     patch_client(monkeypatch, fake)
 
-    _provider().embed_batch(["hello"])
+    _provider(timeout_s=12.5).embed_batch(["hello"])
 
-    assert fake.call_count == 2  # 1 failure + 1 retry
+    # meiva:note
+    # 1 failure + 1 retry
+    assert fake.call_count == 2
     for call in fake.calls:
         assert call["timeout"] == 12.5
 
 
+# meiva:note
+# Missing key -> EmbeddingAPIError with actionable guidance, before any POST.
 def test_embed_no_api_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Missing key -> EmbeddingAPIError with actionable guidance, before any POST.
 
-    Overrides the autouse dummy key back to None so this branch stays a
-    tested behavior even though every other provider test injects a key.
-    """
-
-    monkeypatch.setattr(settings.lm, "gemini_api_key", None)
     # No key must mean no network attempt — this makes that observable.
     monkeypatch.setattr(
         httpx,
@@ -525,7 +500,7 @@ def test_embed_no_api_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda *_a, **_k: pytest.fail("must not construct a client without an API key"),  # pyright: ignore[reportUnknownArgumentType]
     )
     with pytest.raises(EmbeddingAPIError) as exc_info:
-        _provider().embed_query("hello")
+        _provider(api_key=None).embed_query("hello")
     message = str(exc_info.value)
     assert "GEMINI_API_KEY" in message
     assert ".env" in message  # actionable: points the operator at where to set it
@@ -613,8 +588,8 @@ def test_sync_embed_rejects_running_loop(monkeypatch: pytest.MonkeyPatch) -> Non
                 ["hello"],
                 "RETRIEVAL_DOCUMENT",
                 catalog=build_model_catalog(),
-                timeout_reader=_timeout_reader,
-                api_key_reader=_api_key_reader,
+                timeout_s=TIMEOUT_S,
+                api_key=API_KEY,
             )
         assert type(error.value) is RuntimeError
         assert error.value.__cause__ is None

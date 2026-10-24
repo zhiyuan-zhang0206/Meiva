@@ -202,7 +202,11 @@ def observe(data: Path) -> OwnedProcess | None:
         require_closed(data, receipt)
         return None
     owner = _require_process(data, receipt)
-    read_pidfile(data, receipt)
+    try:
+        read_pidfile(data, receipt)
+    except FileNotFoundError:
+        if receipt.state != "captured":
+            raise
     if not owner.live():
         raise RuntimeError("PostgreSQL exited during custody observation")
     return owner
@@ -306,7 +310,7 @@ def _retained_start(data: Path, port: int, expected: OwnedProcess) -> Receipt:
     receipt = read_receipt(data)
     if receipt is None or receipt.port != port:
         raise RuntimeError("PostgreSQL retained receipt does not match the startup port")
-    if not owner.send_signal(signal.SIGHUP):
+    if receipt.state == "ready" and not owner.send_signal(signal.SIGHUP):
         raise RuntimeError("PostgreSQL exited before retained startup")
     return receipt
 
@@ -337,7 +341,10 @@ def start(
     with file_lock(path.with_suffix(".lock"), timeout_s=timeout):
         if expected is not None:
             retained = _retained_start(data, port, expected)
-            return _complete_start(data, retained, ready, timeout)
+            owner = _complete_start(data, retained, ready, timeout)
+            if retained.state == "captured" and not owner.send_signal(signal.SIGHUP):
+                raise RuntimeError("PostgreSQL exited before retained startup")
+            return owner
         if observe(data) is not None:
             raise RuntimeError("PostgreSQL is already running; startup cannot replace its birth")
         require_listener(None, port, required=False)

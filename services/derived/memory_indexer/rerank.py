@@ -41,6 +41,11 @@ from base.lm.decision.call import decide
 from base.packages.docs.notes import parse_note
 from services.derived.memory_indexer.backends.base import ChunkHit
 from services.derived.memory_indexer.chunking import chunk_text
+from services.derived.memory_indexer.rerank_plan import (
+    pair_state_text,
+    top_indices,
+    unit_probability,
+)
 
 USAGE_KINDS: dict[MemorySearchPurpose, str] = {
     "recall": "memory_rerank",
@@ -54,9 +59,6 @@ MAX_CONCURRENT_DECISIONS = 30
 """Decision requests in flight at once for one search. At the default of 30 candidates every
 request goes out together, which kept the ranking near 2s in the calibration benchmark; the
 cap only bites when `memory_rerank_candidates` is raised."""
-
-_EXCERPT_CHARS = 1800
-"""The most characters of a chunk shown to the model (the indexer's chunk size)."""
 
 _QUESTIONS: dict[MemorySearchPurpose, YesNo] = {
     "recall": YesNo(
@@ -164,9 +166,7 @@ async def ask_relevance(
             "memory rerank failed with decision model {model}: {err}", model=model, err=repr(exc)
         )
         raise IndexerUnavailable(f"memory rerank failed ({model}): {exc}") from exc
-    # A probability is within [0, 1] up to the provider's rounding; clamp so the response
-    # contract (0..1) holds exactly.
-    return min(1.0, max(0.0, decisions["relevant"].probability(TRUE)))
+    return unit_probability(decisions["relevant"].probability(TRUE))
 
 
 # ── candidates ──
@@ -261,12 +261,14 @@ def load_candidates(
 def pair_state(query: str, candidate: Candidate, purpose: MemorySearchPurpose) -> str:
     """The state shown to the decision model for one (query, candidate chunk) pair."""
     query_header, note_header = _STATE_TEMPLATES[purpose]
-    note = (
-        f"path: {candidate.path}\n"
-        f"description: {candidate.description or '(none)'}\n"
-        f"excerpt:\n{candidate.chunk[:_EXCERPT_CHARS]}"
+    return pair_state_text(
+        query,
+        path=candidate.path,
+        description=candidate.description,
+        chunk=candidate.chunk,
+        query_header=query_header,
+        note_header=note_header,
     )
-    return f"{query_header}\n{query}\n\n{note_header}\n{note}"
 
 
 # ── entry point ──
@@ -329,7 +331,7 @@ async def rerank(
     scores = await _score_all(
         model, states, _QUESTIONS[purpose], catalog, keys, USAGE_KINDS[purpose]
     )
-    ranked = sorted(range(len(candidates)), key=lambda i: scores[i], reverse=True)[:k]
+    ranked = top_indices(scores, k)
     return [
         RankedChunk(
             path=candidates[i].path,

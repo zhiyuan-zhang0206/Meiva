@@ -22,6 +22,10 @@ session audits. Logging construction retains its lazy database dial.
 
 `run` keeps the existing computer-use configuration, optional socket argument,
 single-instance guard and handler identity. Its shutdown still stops the loop
-watchdog, closes the listener, drains the tracked clients within the configured
-bound, and unlinks the socket. Errors keep their existing propagation and the
+watchdog, closes the listener, joins the watchdog within one second, then drains
+the tracked clients within the configured bound, and unlinks the socket. Errors keep their existing propagation and the
 lock-free Unix `ping` payload remains unchanged.
+
+Stopping requests the watchdog's exit and waits for the actual thread before returning,
+including when the serving task is cancelled. Failure to join within one second triggers
+the existing process dump-and-exit boundary. Real Unix socket tests cover SIGTERM and cancellation.

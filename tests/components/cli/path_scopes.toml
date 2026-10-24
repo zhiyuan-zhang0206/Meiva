@@ -3,3 +3,6 @@
 "tests.path_scoped.cli_tests" = [
     ".",
 ]
+"base.agents.inbox.tests.inbound_helpers" = [
+    "test_pgbouncer_wire.py",
+]

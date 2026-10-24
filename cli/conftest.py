@@ -3,6 +3,12 @@
 import pytest
 
 from cli.commands.tests.health_port_guard import guard_health_port_gate as guard_health_port_gate
+from cli.tests.guards.service_readiness_guard import (
+    guard_service_readiness as guard_service_readiness,
+)
+from services.desktop.permissions_helper.tests.permissions_helper.native_io_guard import (
+    permissions_helper_native_io as permissions_helper_native_io,
+)
 
 
 @pytest.fixture(autouse=True)

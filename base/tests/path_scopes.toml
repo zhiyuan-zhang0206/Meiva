@@ -3,3 +3,6 @@
 "base.deploy.tests.db_authority_tests" = [
     "test_delivery.py",
 ]
+"base.agents.inbox.tests.inbound_helpers" = [
+    "test_caller_persistence.py",
+]

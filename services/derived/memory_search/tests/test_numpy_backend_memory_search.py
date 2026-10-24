@@ -8,32 +8,18 @@ over a real socket — the same shape the indexer daemon and gateway dial.
 from __future__ import annotations
 
 import asyncio
-import socket
-import threading
-import time
 from collections.abc import Iterator
+from pathlib import Path
 
 import httpx
 import numpy as np
 import pytest
-import uvicorn
 
-from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from services.derived.memory_indexer.backends import probe
 from services.derived.memory_indexer.backends.numpy import NumPyBackend
-from services.derived.memory_search.app import build_app
-from services.derived.memory_search.store import MemoryStore
-
-
-def _free_port() -> int:
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
-
+from services.derived.memory_search.tests.search_service import free_port, serve_memory_search
 
 _DIM = 8
 _FP = "test:gemini:dim=8"
@@ -47,35 +33,14 @@ def _vec(seed: int) -> np.ndarray:
 @pytest.fixture(scope="session")
 def memory_search_uri(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     """A real uvicorn server for the whole session, on a free port."""
-    port = _free_port()
     data_file = tmp_path_factory.mktemp("memory-search") / "vectors.npz"
-    server = uvicorn.Server(
-        uvicorn.Config(
-            build_app(MemoryStore(data_file, dim=_DIM, fingerprint=_FP), 500, embedding_dim=_DIM),
-            host="127.0.0.1",
-            port=port,
-            log_level=None,
-            access_log=False,
-            log_config=None,
-        )
-    )
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    deadline = time.time() + 10.0
-    while not server.started:
-        if time.time() > deadline:
-            raise RuntimeError("memory_search test server failed to start")
-        time.sleep(0.05)
-    yield f"http://127.0.0.1:{port}"
-    server.should_exit = True
-    thread.join(timeout=5.0)
+    with serve_memory_search(data_file, dim=_DIM, fingerprint=_FP) as uri:
+        yield uri
 
 
 @pytest.fixture
-def backend(memory_search_uri: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[NumPyBackend]:
-
-    monkeypatch.setattr(settings.services, "memory_search_uri", memory_search_uri)
-    b = NumPyBackend(uri_reader=lambda: settings.services.memory_search_uri)
+def backend(memory_search_uri: str) -> Iterator[NumPyBackend]:
+    b = NumPyBackend(uri=memory_search_uri)
     b.connect()
     try:
         yield b
@@ -115,7 +80,7 @@ def test_upsert_many_uses_one_request_with_batch_timeout() -> None:
         requests.append(request)
         return httpx.Response(200, json={"status": "ok"})
 
-    backend = NumPyBackend(uri_reader=lambda: settings.services.memory_search_uri)
+    backend = NumPyBackend(uri="http://memory-search")
     backend._client = httpx.Client(
         base_url="http://memory-search", transport=httpx.MockTransport(_respond)
     )
@@ -134,12 +99,8 @@ def test_upsert_many_uses_one_request_with_batch_timeout() -> None:
     assert requests[0].extensions["timeout"]["read"] == 300.0
 
 
-def test_readonly_upsert_many_connects_but_refuses_write(
-    memory_search_uri: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-
-    monkeypatch.setattr(settings.services, "memory_search_uri", memory_search_uri)
-    backend = NumPyBackend(readonly=True, uri_reader=lambda: settings.services.memory_search_uri)
+def test_readonly_upsert_many_connects_but_refuses_write(memory_search_uri: str) -> None:
+    backend = NumPyBackend(readonly=True, uri=memory_search_uri)
     backend.connect()
     try:
         with pytest.raises(RuntimeError, match="read-only"):
@@ -162,17 +123,34 @@ def test_search_topk_async_matches_sync(backend: NumPyBackend) -> None:
     assert sync[0].score == pytest.approx(1.0)
 
 
-def test_connect_fails_fast_when_service_down(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_each_backend_dials_the_uri_it_was_given(memory_search_uri: str, tmp_path: Path) -> None:
+    ones = np.ones(_DIM, dtype=np.float32)
+    with serve_memory_search(tmp_path / "other.npz", dim=_DIM, fingerprint=_FP) as other_uri:
+        shared, other = NumPyBackend(uri=memory_search_uri), NumPyBackend(uri=other_uri)
+        shared.connect()
+        other.connect()
+        try:
+            other.upsert("/only-other.md", 1.0, "h", ones, kind="body", chunk_idx=0)
+            assert "/only-other.md" in other.all_meta()
+            assert "/only-other.md" not in shared.all_meta()
+            other_hits = asyncio.run(other.search_topk_async(ones, 5, timeout=5.0))
+            shared_hits = asyncio.run(shared.search_topk_async(ones, 5, timeout=5.0))
+            assert [hit.path for hit in other_hits] == ["/only-other.md"]
+            assert "/only-other.md" not in [hit.path for hit in shared_hits]
+        finally:
+            shared.close()
+            other.close()
 
-    monkeypatch.setattr(settings.services, "memory_search_uri", f"http://127.0.0.1:{_free_port()}")
-    backend = NumPyBackend(uri_reader=lambda: settings.services.memory_search_uri)
+
+def test_connect_fails_fast_when_service_down() -> None:
+    backend = NumPyBackend(uri=f"http://127.0.0.1:{free_port()}")
     with pytest.raises(httpx.ConnectError):
         backend.connect()
     backend.close()  # idempotent no-op
 
 
 def test_requires_connect_before_use() -> None:
-    backend = NumPyBackend(uri_reader=lambda: settings.services.memory_search_uri)
+    backend = NumPyBackend(uri="http://memory-search")
     with pytest.raises(RuntimeError, match="not connected"):
         backend.all_meta()
 
@@ -180,16 +158,10 @@ def test_requires_connect_before_use() -> None:
 # ── preflight probes (CTO ruling 2026-08-30 direction ②) ───────────────────
 
 
-def test_probe_numpy_healthy(
-    memory_search_uri: str, monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
-
-    monkeypatch.setattr(settings.services, "memory_search_uri", memory_search_uri)
+def test_probe_numpy_healthy(memory_search_uri: str, *, database_gate: ProcessDbGate) -> None:
     assert (
         probe.probe_backend(
-            "numpy",
-            Database.from_settings(gate=database_gate),
-            uri_reader=lambda: settings.services.memory_search_uri,
+            "numpy", Database.from_settings(gate=database_gate), uri=memory_search_uri
         ).message
         is None
     )

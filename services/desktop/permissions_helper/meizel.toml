@@ -1,4 +1,4 @@
-exports = ["launchd_job.py", "lifecycle.py", "onboarding.py", "signing_identity.py"]
+exports = ["launchd_job.py", "lifecycle.py", "onboarding.py", "signing_identity.py", "tests"]
 
 [uses]
 "__init__.py" = ["lifecycle.py"]

@@ -7,7 +7,7 @@ import functools
 import os
 import re
 import sys
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import pytest
@@ -226,6 +226,30 @@ def _db_stall_guard(provisioned_db: str, postgres_access: None) -> Iterator[None
         yield
 
 
+# meiva:note
+# Quiesce the telemetry this process has already loaded: drain the emitter, close the
+# observed-metrics projection and the event-store pool. A process that never imported
+# telemetry has nothing running to quiesce, and importing it here would put the whole
+# telemetry package into every test's dependency set (the rule `_telemetry_event_store_off`
+# in `guards.py` follows too).
+def _quiesce_loaded_telemetry() -> None:
+    emitter = sys.modules.get("base.telemetry.emitter")
+    if emitter is not None:
+        emitter.sync()
+    observed_metrics = sys.modules.get("base.telemetry.metrics.observed_metrics")
+    if observed_metrics is not None:
+        observed_metrics.close_projection()
+    event_store = sys.modules.get("base.telemetry.event_store")
+    if event_store is not None:
+        event_store.close_store()
+
+
+def _disable_loaded_event_store() -> None:
+    event_store = sys.modules.get("base.telemetry.event_store")
+    if event_store is not None:
+        event_store.set_enabled(enabled=False)
+
+
 @pytest.fixture
 def _clean_db(
     provisioned_db: str,
@@ -237,9 +261,6 @@ def _clean_db(
     import psycopg
 
     from base.config import settings
-    from base.telemetry import event_store
-    from base.telemetry.emitter import sync
-    from base.telemetry.metrics.observed_metrics import close_projection
 
     monkeypatch.setattr(settings.data_plane, "db_url", provisioned_db)
     monkeypatch.setitem(os.environ, "MEIVA_DB_URL", provisioned_db)
@@ -247,11 +268,9 @@ def _clean_db(
     previous_file = env_file.read_text()
     request.addfinalizer(functools.partial(env_file.write_text, previous_file))
     _rewrite_test_env_file_line(env_file, "MEIVA_DB_URL", provisioned_db)
-    event_store.set_enabled(enabled=False)
+    _disable_loaded_event_store()
 
-    sync()
-    close_projection()
-    event_store.close_store()
+    _quiesce_loaded_telemetry()
     with psycopg.connect(settings.data_plane.db_url) as conn:
         for attempt in range(3):
             try:
@@ -267,10 +286,8 @@ def _clean_db(
     try:
         yield
     finally:
-        sync()
-        close_projection()
-        event_store.close_store()
-        event_store.set_enabled(enabled=False)
+        _quiesce_loaded_telemetry()
+        _disable_loaded_event_store()
 
 
 @pytest.fixture
@@ -396,9 +413,8 @@ def database_version(pytestconfig: pytest.Config) -> CodeVersion:
 @pytest.fixture
 def database_gate(database_version: CodeVersion):
     from base.db.code_version_gate import ProcessDbGate
-    from base.telemetry import process_name
 
-    return ProcessDbGate(process=process_name(), version=database_version.get)
+    return ProcessDbGate(process="pytest", version=database_version.get)
 
 
 @pytest.fixture
@@ -410,20 +426,6 @@ def database(db_url: str, database_gate):
         gate=database_gate,
         direct_url=ClusterDirectUrl(lambda: "127.0.0.1"),
     )
-
-
-@pytest.fixture
-def publish_wake(database, event_bus) -> Callable[[int, str], bool]:
-    from base.agents.impersonation.wake import publish_inbound_wake
-
-    return functools.partial(publish_inbound_wake, database, event_bus)
-
-
-@pytest.fixture
-def insert_inbound(database, event_bus) -> Callable[..., int]:
-    from base.agents.inbox.insert import insert_inbound_message
-
-    return functools.partial(insert_inbound_message, database=database, bus=event_bus)
 
 
 @pytest.fixture

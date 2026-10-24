@@ -7,14 +7,11 @@ import os
 import time
 from collections.abc import Iterator, Sequence
 from pathlib import Path
-from typing import Any
 from unittest.mock import patch
 
 import numpy as np
 import pytest
 
-from base.cluster.machine import MachineIdentity, MachineRoles
-from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.daemon.health import Liveness
 from services.derived.memory_indexer import chunking, daemon
 from services.derived.memory_indexer.backends.base import content_hash
@@ -27,10 +24,10 @@ from services.derived.memory_search.tests.test_memory_indexer import (
     long_note,
 )
 from services.derived.memory_search.tests.test_memory_indexer import (
-    memory_watched_root as memory_watched_root,
+    store_backend as store_backend,
 )
 from services.derived.memory_search.tests.test_memory_indexer import (
-    store_backend as store_backend,
+    watched_root as watched_root,
 )
 
 
@@ -45,49 +42,31 @@ def owned_config_environment() -> Iterator[None]:
 
 
 def test_reconcile_embed_error_truncates_and_returns_false(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    store_backend: StoreBackend,
-    caplog: pytest.LogCaptureFixture,
-    *,
-    machine_identity: MachineIdentity,
+    tmp_path: Path, store_backend: StoreBackend, caplog: pytest.LogCaptureFixture
 ) -> None:
     root = tmp_path / "watched"
     root.mkdir()
     for i in range(6):
         (root / f"note-{i}.md").write_text(f"content {i}")
-
-    def memory_root_for_roles(*, roles: MachineRoles) -> Path:
-        assert roles == machine_identity.role()
-        return root
-
-    monkeypatch.setattr(daemon, "memory_root", memory_root_for_roles)
     indexer_config = MemoryIndexerConfig(reconcile_chunk_paths=2)  # 6 files -> 3 chunks
 
-    calls: list[int] = []
+    class FailingProvider(FakeProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.batch_sizes: list[int] = []
 
-    def failing_process_paths(
-        backend: Any,
-        paths: set[Path],
-        provider: Any,
-        liveness: Liveness,
-        *,
-        machine: MachineIdentity,
-        config: MemoryIndexerConfig,
-    ) -> None:
-        calls.append(len(paths))
-        raise EmbeddingAPIError("embed boom")
+        def embed_batch(self, texts: list[str]) -> np.ndarray:
+            self.batch_sizes.append(len(texts))
+            raise EmbeddingAPIError("embed boom")
 
-    monkeypatch.setattr(daemon, "process_paths", failing_process_paths)
-
+    provider = FailingProvider()
     liveness = Liveness(600.0)
     with caplog.at_level(logging.ERROR, logger="services.derived.memory_indexer.daemon"):
         assert (
             daemon.reconcile(
                 store_backend,
-                FakeProvider(),
+                provider,
                 liveness,
-                machine=machine_identity,
                 config=indexer_config,
                 status=daemon.PatrolStatus(retry_limit=indexer_config.retry_limit),
                 root=root,
@@ -95,7 +74,10 @@ def test_reconcile_embed_error_truncates_and_returns_false(
             is False
         )
 
-    assert calls == [2]  # first chunk failed -> remaining chunks never ran (as before)
+    # meiva:note
+    # first chunk failed -> remaining chunks never ran
+    assert provider.batch_sizes == [2]
+    assert store_backend.all_meta() == {}
     expected = (
         f"patrol embed failed: {EmbeddingAPIError('embed boom')!r}"
         " — 6 path(s) still behind; the next pass retries"
@@ -176,11 +158,7 @@ def test_file_rows_no_frontmatter_no_desc() -> None:
 
 
 def test_process_paths_indexes_desc_and_body_chunks(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
+    tmp_path: Path, store_backend: StoreBackend, watched_root: Path
 ) -> None:
     """One file with a description + a long body lands as 1 desc row + N body
     chunks; all_meta still reports the file once."""
@@ -196,7 +174,7 @@ def test_process_paths_indexes_desc_and_body_chunks(
         {f.resolve()},
         FakeProvider(),
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched_root,
         config=MemoryIndexerConfig(),
     )
     assert str(f.resolve()) in store_backend.all_meta()
@@ -205,11 +183,7 @@ def test_process_paths_indexes_desc_and_body_chunks(
 
 
 def test_process_paths_removes_stale_tail_when_file_shrinks(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
+    tmp_path: Path, store_backend: StoreBackend, watched_root: Path
 ) -> None:
     """Issue #1946: after a file shrinks, the rows it no longer produces
     (old body tail) are gone — every remaining chunk matches current content."""
@@ -221,7 +195,7 @@ def test_process_paths_removes_stale_tail_when_file_shrinks(
         {f.resolve()},
         FakeProvider(),
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched_root,
         config=MemoryIndexerConfig(),
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0), ("body", 1), ("body", 2)}
@@ -232,7 +206,7 @@ def test_process_paths_removes_stale_tail_when_file_shrinks(
         {f.resolve()},
         FakeProvider(),
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched_root,
         config=MemoryIndexerConfig(),
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
@@ -240,11 +214,7 @@ def test_process_paths_removes_stale_tail_when_file_shrinks(
 
 
 def test_process_paths_removes_desc_row_when_description_deleted(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
+    tmp_path: Path, store_backend: StoreBackend, watched_root: Path
 ) -> None:
     """A removed description removes its row; the body stays current."""
     f = tmp_path / "note.md"
@@ -255,7 +225,7 @@ def test_process_paths_removes_desc_row_when_description_deleted(
         {f.resolve()},
         FakeProvider(),
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched_root,
         config=MemoryIndexerConfig(),
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
@@ -266,7 +236,7 @@ def test_process_paths_removes_desc_row_when_description_deleted(
         {f.resolve()},
         FakeProvider(),
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched_root,
         config=MemoryIndexerConfig(),
     )
     assert store_backend.rows(f) == {("body", 0)}
@@ -274,11 +244,7 @@ def test_process_paths_removes_desc_row_when_description_deleted(
 
 
 def test_process_paths_removes_all_rows_when_file_becomes_empty(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
+    tmp_path: Path, store_backend: StoreBackend, watched_root: Path
 ) -> None:
     """An emptied file leaves no rows behind (issue #1946)."""
     f = tmp_path / "note.md"
@@ -289,7 +255,7 @@ def test_process_paths_removes_all_rows_when_file_becomes_empty(
         {f.resolve()},
         FakeProvider(),
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched_root,
         config=MemoryIndexerConfig(),
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
@@ -300,7 +266,7 @@ def test_process_paths_removes_all_rows_when_file_becomes_empty(
         {f.resolve()},
         FakeProvider(),
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched_root,
         config=MemoryIndexerConfig(),
     )
     assert store_backend.rows(f) == set()
@@ -308,7 +274,7 @@ def test_process_paths_removes_all_rows_when_file_becomes_empty(
 
 
 def test_process_paths_calls_upsert_many_once_across_embed_batches(
-    tmp_path: Path, *, machine_identity: MachineIdentity
+    tmp_path: Path, watched_root: Path
 ) -> None:
     class _RecordingBackend(StoreBackend):
         def __init__(self) -> None:
@@ -333,7 +299,7 @@ def test_process_paths_calls_upsert_many_once_across_embed_batches(
         {first.resolve(), second.resolve()},
         FakeProvider(),
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched_root,
         config=indexer_config,
     )
 
@@ -343,7 +309,7 @@ def test_process_paths_calls_upsert_many_once_across_embed_batches(
 
 
 def test_partial_embedding_failure_keeps_old_rows_intact(
-    tmp_path: Path, *, machine_identity: MachineIdentity
+    tmp_path: Path, watched_root: Path
 ) -> None:
     """A file whose embedding fails part way keeps its previous rows whole —
     all-old is the recoverable consistent state; the hash stays mismatching so
@@ -375,7 +341,7 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
         {note.resolve()},
         FakeProvider(),
         Liveness(liveness_timeout()),
-        machine=machine_identity,
+        root=watched_root,
         config=indexer_config,
     )
     old_meta = backend.all_meta()
@@ -388,7 +354,7 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
             {note.resolve()},
             _FailSecondBatchProvider(),
             Liveness(liveness_timeout()),
-            machine=machine_identity,
+            root=watched_root,
             config=indexer_config,
         )
 
@@ -398,10 +364,7 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
 
 
 def test_complete_file_still_commits_when_another_fails(
-    tmp_path: Path,
-    store_backend: StoreBackend,
-    *,
-    machine_identity: MachineIdentity,
+    tmp_path: Path, store_backend: StoreBackend, watched_root: Path
 ) -> None:
     """Files whose rows are ALL embedded commit even when a sibling file
     fails mid-embedding (issue #1946)."""
@@ -425,7 +388,7 @@ def test_complete_file_still_commits_when_another_fails(
             {complete.resolve(), partial.resolve()},
             _FailOnSecondFileProvider(),
             Liveness(liveness_timeout()),
-            machine=machine_identity,
+            root=watched_root,
             config=indexer_config,
         )
 

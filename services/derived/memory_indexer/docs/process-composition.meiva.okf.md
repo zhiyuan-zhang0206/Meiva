@@ -15,7 +15,11 @@ path. Endpoint and pidfile operations borrow those inputs through
 The work and logging database factory calls `db_config_from_boot` at each
 handle creation and retains the entry's gate and lazy machine host reader.
 Schema checks, health-before-pool ordering and shutdown stay at their original
-boundaries. Business-specific configuration slices keep their existing readers.
+boundaries.
+
+`run` reads the provider and backend inputs (`MemoryIndexerInputs`) once and passes
+the values down; the watched memory root is a value `main` hands to `run`, resolved
+once. A changed setting reaches the daemon on restart.
 
 Loop tuning is a frozen `MemoryIndexerConfig` (`loop_interval_s`,
 `patrol_interval_s`, `retry_backoff_s`, `retry_limit`, `excluded_basenames`,
