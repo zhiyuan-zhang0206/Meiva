@@ -176,14 +176,40 @@ def _day_arg(value: str) -> date:
     return datetime.strptime(value, "%Y%m%d").replace(tzinfo=UTC).date()
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Operator CLI: recompute a range of closed UTC days (monotone guard applies)."""
+@dataclass(frozen=True)
+class RangeReport:
+    result: RollupResult
+    rebuilt: bool
+
+
+# meiva:note
+# Recompute the closed days `[first, last]` on `conn` (the monotone guard applies). A day at or before
+# the fold watermark is already inside the folded totals, so a range reaching it also refolds them.
+def roll_range(conn: psycopg.Connection, first: date, last: date, *, today: date) -> RangeReport:
+    result = roll_days(conn, first, last)
+    rebuilt = first <= folded_through(conn)
+    if rebuilt:
+        rebuild_totals(conn, today=today)
+    return RangeReport(result, rebuilt)
+
+
+# meiva:note
+# The inclusive `(first, last)` range of closed UTC days the operator asked for. An argument error
+# or an inverted range exits with the usage message before anything else starts.
+def parse_range(argv: list[str] | None) -> tuple[date, date]:
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     parser.add_argument("--from", dest="first", type=_day_arg, required=True, metavar="YYYYMMDD")
     parser.add_argument("--to", dest="last", type=_day_arg, required=True, metavar="YYYYMMDD")
     args = parser.parse_args(argv)
     if args.first > args.last:
         parser.error("--from is after --to")
+    return args.first, args.last
+
+
+# meiva:note
+# Operator CLI: recompute a range of closed UTC days (monotone guard applies).
+def main(argv: list[str] | None = None) -> int:
+    first, last = parse_range(argv)
     config = ConfigBoot()
     config.boot()
     machine = machine_from_boot(config)
@@ -191,14 +217,12 @@ def main(argv: list[str] | None = None) -> int:
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process=process_name())
     with events_maintenance_db(config, gate=gate, local_host=machine.host).connect() as conn:
-        result = roll_days(conn, args.first, args.last)
-        # A day at or before the watermark is already inside the folded totals.
-        if args.first <= folded_through(conn):
-            rebuild_totals(conn, today=datetime.now(UTC).date())
-            sys.stdout.write("rebuilt agent_model_tokens_total\n")
+        report = roll_range(conn, first, last, today=datetime.now(UTC).date())
+    if report.rebuilt:
+        sys.stdout.write("rebuilt agent_model_tokens_total\n")
     sys.stdout.write(
-        f"rolled {result.start_day}..{result.end_day}: "
-        f"{result.tokens_rows} token rows, {result.metrics_rows} metrics rows\n"
+        f"rolled {report.result.start_day}..{report.result.end_day}: "
+        f"{report.result.tokens_rows} token rows, {report.result.metrics_rows} metrics rows\n"
     )
     return 0
 
