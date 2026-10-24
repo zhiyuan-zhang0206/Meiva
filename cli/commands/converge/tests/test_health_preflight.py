@@ -6,6 +6,7 @@
 # `$MEIVA_HOME/logs/health_preflight.log`, never failing a start.
 
 
+import socket
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -225,7 +226,7 @@ def test_data_plane_gateway_partial_up_probes(
 ) -> None:
     record = _born_gateway_home(tmp_path / "home")
     pg_url, redis_url = _dead_urls()
-    with closing(socket.socket()) as occupant:
+    with socket.socket() as occupant:
         occupant.bind(("127.0.0.1", record.ports["postgres"]))
         occupant.listen(1)
         ctx = _preflight_ctx(
