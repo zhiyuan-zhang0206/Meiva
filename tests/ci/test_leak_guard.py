@@ -209,11 +209,23 @@ def test_the_guard_sets_up_before_every_other_function_scoped_autouse_fixture(
 ) -> None:
     """Teardown runs in reverse: the first fixture set up compares last, after monkeypatch's undo."""
     names = request.fixturenames
-    root_autouse = ("_clean_state", "_restore_plugin_registrations")
-    others = [n for n in names if n in root_autouse or n.startswith("_guard_")]
-    assert "_leak_guard" in names
-    assert len(others) > len(root_autouse), f"the root autouse fixtures are missing: {others}"
-    assert all(names.index("_leak_guard") < names.index(other) for other in others)
+    root_autouse = (
+        "_restore_agent_identity",
+        "_restore_plugin_registrations",
+        "suite_is_not_inside_an_exec_domain",
+        "_otlp_export_off",
+        "_telemetry_event_store_off",
+        "_restore_metering",
+        "_guard_process_exec",
+        "_no_stdlib_telemetry_bridge",
+        "native_data_plane_guard",
+    )
+    required = ("_leak_guard", "monkeypatch", *root_autouse)
+    missing = [name for name in required if name not in names]
+    assert not missing, f"the root isolation fixtures are missing: {missing}"
+    first = names.index("_leak_guard")
+    for name in (*root_autouse, "monkeypatch"):
+        assert first < names.index(name), f"_leak_guard must set up before {name}"
 
 
 def test_agent_identity_holds_no_process_global_slot() -> None:
