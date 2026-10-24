@@ -15,8 +15,26 @@ from scripts.lint.diagnostics.diff_hints.model import FileKind, FunctionNode, Hi
 from scripts.lint.diagnostics.diff_hints.names import OS_ENVIRON, dotted
 from scripts.lint.diagnostics.diff_hints.walk import own_nodes, scope_nodes
 
+# meiva:note
+# Test parameters that are not fixture objects a test could arm: pytest's own fixtures and the
+# real-resource fixtures of tests/fixtures/provisioning.py, whose settings are configuration.
 _OBJECT_PARAMS_SKIPPED = frozenset(
-    {"self", "cls", "monkeypatch", "tmp_path", "tmp_path_factory", "capsys", "caplog", "request"}
+    {
+        "self",
+        "cls",
+        "monkeypatch",
+        "tmp_path",
+        "tmp_path_factory",
+        "capsys",
+        "caplog",
+        "request",
+        "db_conn",
+        "database",
+        "database_gate",
+        "event_bus",
+        "pool",
+        "redis_url",
+    }
 )
 _ENVIRON_WRITERS = frozenset({"update", "pop", "setdefault", "clear", "__setitem__"})
 _SPY_PREFIXES = ("assert_called", "assert_awaited", "assert_not_called", "assert_not_awaited")
@@ -56,12 +74,12 @@ def _is_test_module(path: str) -> bool:
     return name.startswith("test_") or name.endswith("_test.py")
 
 
-def _named_call_seam(callee: str | None, unit: Unit, *, polling: bool) -> str | None:
+def _named_call_seam(callee: str | None, unit: Unit, *, unjudged_sleep: bool) -> str | None:
     if callee == "httpx.MockTransport":
         return "`httpx.MockTransport` replaces the network instead of serving a real listener"
     if callee == "inspect.getsource":
         return "`inspect.getsource` asserts on source text instead of behavior"
-    if callee == "time.sleep" and _is_test_module(unit.path) and not polling:
+    if callee == "time.sleep" and _is_test_module(unit.path) and not unjudged_sleep:
         return "`time.sleep` waits out a time window on the real clock"
     if callee is not None and callee.startswith(OS_ENVIRON + ".") and _is_test_module(unit.path):
         written = callee.rsplit(".", 1)[-1] in _ENVIRON_WRITERS
@@ -85,8 +103,8 @@ def _method_call_seam(node: ast.Call, unit: Unit) -> str | None:
     return None
 
 
-def _call_seam(node: ast.Call, unit: Unit, *, polling: bool) -> str | None:
-    named = _named_call_seam(dotted(node.func, unit.names), unit, polling=polling)
+def _call_seam(node: ast.Call, unit: Unit, *, unjudged_sleep: bool) -> str | None:
+    named = _named_call_seam(dotted(node.func, unit.names), unit, unjudged_sleep=unjudged_sleep)
     return named if named is not None else _method_call_seam(node, unit)
 
 
@@ -104,7 +122,12 @@ def _subscript_seam(target: ast.Subscript, unit: Unit) -> str | None:
     ):
         return "`vars(obj)[...] = ...` writes an instance attribute around the signature"
     if isinstance(holder, ast.Attribute) and holder.attr == "__dict__":
-        return "`obj.__dict__[...] = ...` writes an instance attribute around the signature"
+        own = isinstance(holder.value, ast.Name) and holder.value.id == "self"
+        return (
+            None
+            if own
+            else "`obj.__dict__[...] = ...` writes an instance attribute around the signature"
+        )
     return None
 
 
@@ -173,7 +196,7 @@ def _node_seams(
 ) -> list[str]:
     found: list[str] = []
     if isinstance(node, ast.Call):
-        call = _call_seam(node, unit, polling=id(node) in polled)
+        call = _call_seam(node, unit, unjudged_sleep=id(node) in polled)
         if call is not None:
             found.append(call)
     for target in _targets(node):
@@ -214,6 +237,16 @@ def _loop_calls(nodes: list[ast.AST]) -> frozenset[int]:
     )
 
 
+# meiva:note
+# The calls whose `time.sleep` is not a test waiting out a window: any call in a loop (it paces
+# a poll for a real resource) and every call outside a test function's own body (a fake
+# server's handler or a fake's work, where the sleep is the behavior being simulated).
+def _unjudged_sleeps(function: FunctionNode | None, nodes: list[ast.AST]) -> frozenset[int]:
+    if function is not None and function.name.startswith("test_"):
+        return _loop_calls(nodes)
+    return frozenset(id(node) for node in nodes if isinstance(node, ast.Call))
+
+
 def patch_shapes(unit: Unit) -> list[Site]:
     if unit.kind is not FileKind.TEST:
         return []
@@ -224,7 +257,7 @@ def patch_shapes(unit: Unit) -> list[Site]:
     found: dict[tuple[int, str], Site] = {}
     for function, nodes in scopes:
         scope_names = (_local_names(function), _test_params(function))
-        polled = _loop_calls(nodes)
+        polled = _unjudged_sleeps(function, nodes)
         for node in nodes:
             line = getattr(node, "lineno", 0)
             if line not in unit.added:

@@ -28,7 +28,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from meizel.roles import all_packages, packages  # noqa: E402
-from scripts.lint.diagnostics.diff_hints.acks import parse_acks, unanswered, unused  # noqa: E402
+from scripts.lint.diagnostics.diff_hints.acks import (  # noqa: E402
+    answers,
+    parse_acks,
+    unanswered,
+    unused,
+)
 from scripts.lint.diagnostics.diff_hints.diff import parse_diff  # noqa: E402
 from scripts.lint.diagnostics.diff_hints.engine import analyze  # noqa: E402
 from scripts.lint.diagnostics.diff_hints.model import (  # noqa: E402
@@ -38,10 +43,28 @@ from scripts.lint.diagnostics.diff_hints.model import (  # noqa: E402
     Roles,
     Site,
 )
-from scripts.lint.diagnostics.diff_hints.render import render_errors, render_open  # noqa: E402
+from scripts.lint.diagnostics.diff_hints.render import (  # noqa: E402
+    render_errors,
+    render_open,
+    render_summary,
+)
 from scripts.lint.diagnostics.diff_hints.scope import classify  # noqa: E402
 
-_DIFF = ("diff", "-U0", "--no-color", "--no-ext-diff", "--no-renames", "--diff-filter=ACMRTD")
+# meiva:note
+# The diff the hints read. Prefixes are explicit because `diff.mnemonicPrefix` and
+# `diff.noprefix` rewrite them, and a path that keeps a prefix is out of every scope, so the
+# hook would pass silently. `-M` makes a pure rename a header without hunks (nothing added,
+# nothing asked) and a rename with edits a diff of the edits only.
+_DIFF = (
+    "diff",
+    "-U0",
+    "--no-color",
+    "--no-ext-diff",
+    "-M",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+    "--diff-filter=ACMRTD",
+)
 
 
 class GitError(RuntimeError):
@@ -52,7 +75,7 @@ class GitError(RuntimeError):
 # Fixed argument vectors only: git from PATH, never a shell, never user text as a command.
 def _git(*args: str) -> bytes:
     done = subprocess.run(  # noqa: S603
-        ["git", "-c", "core.quotePath=false", *args],
+        ["git", "-c", "core.quotePath=false", "-c", "diff.renameLimit=5000", *args],
         capture_output=True,
         check=False,
     )
@@ -101,7 +124,9 @@ def _diff(
     patch = _git(*_DIFF, *spec, "--", "*.py").decode("utf-8", "replace")
     changes = parse_diff(patch)
     live = [
-        c.path for c in changes if not c.deleted and classify(c.path, roles) is not FileKind.OTHER
+        c.path
+        for c in changes
+        if c.added and not c.deleted and classify(c.path, roles) is not FileKind.OTHER
     ]
     return changes, _read_blobs(rev, live)
 
@@ -112,41 +137,65 @@ def _sites(spec: Sequence[str], rev: str) -> list[Site]:
     return analyze(changes, texts, roles)
 
 
-def _base(head: str) -> str:
+# meiva:note
+# The fork point of `head` from `base_ref`. A missing ref fails explicitly: not knowing the
+# base is not a reason to claim an empty contribution.
+def _merge_base(base_ref: str, head: str) -> str:
     try:
-        _git("rev-parse", "--verify", "-q", "origin/main")
+        _git("rev-parse", "--verify", "-q", base_ref)
     except GitError as error:
-        raise GitError("pre-push requires a local origin/main; fetch origin main first") from error
-    return _git("merge-base", "origin/main", head).decode().strip()
+        raise GitError(f"cannot find {base_ref}; fetch it before pushing") from error
+    return _git("merge-base", base_ref, head).decode().strip()
 
 
-def _verdict(
-    sites: list[Site], acks: tuple[Ack, ...], errors: tuple[str, ...], *, branch: bool
-) -> int:
+def _commits(base: str, head: str) -> list[tuple[str, str]]:
+    raw = _git("log", "--format=%H%x1f%B%x00", f"{base}..{head}").decode("utf-8", "replace")
+    entries = [entry.strip("\n") for entry in raw.split("\0") if entry.strip()]
+    return [(sha[:9], message) for sha, _, message in (e.partition("\x1f") for e in entries)]
+
+
+def _report_problems(errors: tuple[str, ...], notes: tuple[str, ...]) -> None:
+    for note in notes:
+        sys.stderr.write(f"diff hints: note: {note}\n")
+    if errors:
+        sys.stderr.write(render_errors(errors) + "\n")
+
+
+def _verdict(sites: list[Site], acks: tuple[Ack, ...], *, branch: bool) -> list[Site]:
     open_sites = unanswered(sites, acks, ignore_line=branch)
     for ack in [] if branch else unused(acks, sites):
         message = f"note: the answer `{ack.hint.value} {ack.path}` matches no open site"
         sys.stderr.write(f"diff hints: {message}\n")
-    if errors:
-        sys.stderr.write(render_errors(errors) + "\n")
     if open_sites:
         sys.stderr.write(render_open(open_sites) + "\n")
-    return 1 if (open_sites or errors) else 0
+    return open_sites
 
 
 def _commit_msg(message_file: str) -> int:
     message = Path(message_file).read_text(encoding="utf-8", errors="replace")
-    acks, errors = parse_acks(message)
-    return _verdict(_sites(["--cached"], ""), acks, errors, branch=False)
+    acks, errors, notes = parse_acks(message)
+    _report_problems(errors, notes)
+    open_sites = _verdict(_sites(["--cached"], ""), acks, branch=False)
+    return 1 if (open_sites or errors) else 0
 
 
-def _branch(head: str) -> int:
-    base = _base(head)
-    raw = _git("log", "--format=%B%x00", f"{base}..{head}").decode("utf-8", "replace")
-    parsed = [parse_acks(message) for message in raw.split("\0")]
-    acks = tuple(ack for found, _ in parsed for ack in found)
-    errors = tuple(error for _, found in parsed for error in found)
-    return _verdict(_sites([base, head], head), acks, errors, branch=True)
+def _branch(head: str, base_ref: str, summary: str | None) -> int:
+    base = _merge_base(base_ref, head)
+    answered: list[tuple[str, Ack]] = []
+    errors: list[str] = []
+    for sha, message in _commits(base, head):
+        found, problems, notes = parse_acks(message)
+        answered.extend((sha, ack) for ack in found)
+        errors.extend(f"{sha}: {problem}" for problem in problems)
+        _report_problems((), tuple(f"{sha}: {note}" for note in notes))
+    _report_problems(tuple(errors), ())
+    sites = _sites([base, head], head)
+    open_sites = _verdict(sites, tuple(ack for _, ack in answered), branch=True)
+    if summary is not None:
+        entries = [(sha, ack, answers(ack, sites)) for sha, ack in answered]
+        with Path(summary).open("a", encoding="utf-8") as handle:
+            handle.write(render_summary(entries, len(open_sites)) + "\n")
+    return 1 if (open_sites or errors) else 0
 
 
 def _report(base: str, head: str, *, as_json: bool) -> int:
@@ -169,7 +218,10 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Diff hints: questions a commit message answers.")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("commit-msg").add_argument("message_file")
-    commands.add_parser("branch").add_argument("--head", default="HEAD")
+    branch = commands.add_parser("branch")
+    branch.add_argument("--head", default="HEAD")
+    branch.add_argument("--base", default="origin/main")
+    branch.add_argument("--summary", default=None)
     report = commands.add_parser("report")
     report.add_argument("base")
     report.add_argument("head")
@@ -183,7 +235,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "commit-msg":
             return _commit_msg(args.message_file)
         if args.command == "branch":
-            return _branch(args.head)
+            return _branch(args.head, args.base, args.summary)
         return _report(args.base, args.head, as_json=args.json)
     except GitError as error:
         sys.stderr.write(f"diff hints: {error}\n")

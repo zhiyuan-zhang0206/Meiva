@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.lint.diagnostics.diff_hints.acks import parse_acks, suggestions, unanswered, unused
+from scripts.lint.diagnostics.diff_hints.acks import (
+    answers,
+    parse_acks,
+    suggestions,
+    unanswered,
+    unused,
+)
 from scripts.lint.diagnostics.diff_hints.model import Ack, HintId, Site
 
 SITE = Site(HintId.AMBIENT_READ, "cli/x.py", 42, "x")
@@ -10,7 +16,7 @@ OTHER = Site(HintId.AMBIENT_READ, "cli/x.py", 90, "y")
 
 
 def _ack(text: str) -> Ack:
-    acks, errors = parse_acks(text)
+    acks, errors, _ = parse_acks(text)
     assert not errors, errors
     return acks[0]
 
@@ -26,8 +32,8 @@ def test_a_path_trailer_has_no_line() -> None:
 
 
 def test_git_template_comments_are_skipped() -> None:
-    acks, errors = parse_acks("# Hint-Ack: ambient-read cli/x.py -- a comment line only\n")
-    assert acks == () and errors == ()
+    acks, errors, notes = parse_acks("# Hint-Ack: ambient-read cli/x.py -- a comment line only\n")
+    assert acks == () and errors == () and notes == ()
 
 
 @pytest.mark.parametrize(
@@ -42,9 +48,10 @@ def test_git_template_comments_are_skipped() -> None:
     ],
 )
 def test_a_malformed_trailer_is_an_error_not_an_answer(line: str) -> None:
-    acks, errors = parse_acks(line + "\n")
+    acks, errors, _ = parse_acks("subject\n\n" + line + "\n")
     if line.startswith("Hint-Ack:"):
         assert acks == () and len(errors) == 1
+        assert "reword" in errors[0] or "reason" in errors[0] or "unknown hint id" in errors[0]
     else:
         assert acks == () and errors == ()
 
@@ -110,3 +117,40 @@ def test_many_files_of_one_id_collapse_into_directory_templates() -> None:
     assert len(suggestions(wide)) == 8
     deep = [Site(HintId.DELETED_TEST, f"top/{i}/sub/test_x.py", 1, "t") for i in range(8)]
     assert suggestions(deep) == ["Hint-Ack: deleted-test top/ -- <reason>"]
+
+
+def test_the_key_is_case_insensitive_like_any_git_trailer_key() -> None:
+    for key in ("hint-ack", "HINT-ACK", "Hint-ack"):
+        ack = _ack(f"subject\n\n{key}: Ambient-Read cli/x.py:42 -- composition root of the daemon")
+        assert (ack.hint, ack.line) == (HintId.AMBIENT_READ, 42)
+
+
+def test_narrative_that_starts_with_the_key_outside_the_trailer_block_is_a_note() -> None:
+    message = (
+        "Rework the poll\n\n"
+        "Hint-Ack: wraps here because the text was folded and the next\n"
+        "line carries the rest of the sentence.\n\n"
+        "Co-Authored-By: Someone <someone@example.com>\n"
+    )
+    acks, errors, notes = parse_acks(message)
+    assert acks == () and errors == ()
+    assert len(notes) == 1 and "outside the trailer block" in notes[0]
+
+
+def test_a_malformed_answer_in_the_trailer_block_says_how_to_fix_it() -> None:
+    _, errors, _ = parse_acks("subject\n\nHint-Ack: ambient-read cli/x.py\n")
+    assert len(errors) == 1
+    assert "expected `Hint-Ack: <hint-id> <path>[:<line>] -- <reason>`" in errors[0]
+    assert "git commit --amend" in errors[0]
+
+
+def test_a_well_formed_answer_outside_the_trailer_block_still_counts() -> None:
+    message = "subject\n\nHint-Ack: ambient-read cli/x.py -- composition root of the daemon\n\nbody after it\n"
+    acks, errors, _ = parse_acks(message)
+    assert len(acks) == 1 and errors == ()
+
+
+def test_answers_counts_the_sites_an_ack_covers_by_id_and_path() -> None:
+    ack = _ack("Hint-Ack: ambient-read cli/ -- the whole cli package is a shell layer here")
+    other = Site(HintId.SPY_ASSERT, "cli/t.py", 1, "z")
+    assert answers(ack, [SITE, OTHER, other]) == 2

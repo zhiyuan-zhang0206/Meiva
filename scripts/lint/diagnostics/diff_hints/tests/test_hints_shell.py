@@ -96,7 +96,7 @@ def test_a_malformed_trailer_is_reported(repo: Path) -> None:
     stage_clock_read(repo)
     done = run(repo, "commit-msg", message_file(repo, "x\n\nHint-Ack: ambient-read cli/x.py:5\n"))
     assert done.returncode == 1
-    assert "malformed trailer" in done.stderr
+    assert "this line is not an answer" in done.stderr
 
 
 def test_a_commit_without_hints_passes(repo: Path) -> None:
@@ -143,3 +143,74 @@ def test_report_lists_every_site_without_asking_for_answers(repo: Path) -> None:
     assert done.stdout.startswith("cli/x.py:5: hint ambient-read")
     as_json = run(repo, "report", "main", "HEAD", "--json")
     assert '"hint": "ambient-read"' in as_json.stdout
+
+
+def test_a_mnemonic_prefix_config_does_not_blind_the_hook(repo: Path) -> None:
+    git(repo, "config", "diff.mnemonicPrefix", "true")
+    stage_clock_read(repo)
+    done = run(repo, "commit-msg", message_file(repo, "Read the clock\n"))
+    assert done.returncode == 1
+    assert "cli/x.py:5: hint ambient-read" in done.stderr
+
+
+def test_a_no_prefix_config_does_not_blind_the_hook(repo: Path) -> None:
+    git(repo, "config", "diff.noprefix", "true")
+    stage_clock_read(repo)
+    assert run(repo, "commit-msg", message_file(repo, "Read the clock\n")).returncode == 1
+
+
+def test_a_pure_rename_asks_nothing(repo: Path) -> None:
+    (repo / "cli" / "tests").mkdir()
+    spy = "def test_a(m):\n    m.assert_called_once_with(1)\n"
+    (repo / "cli" / "x.py").write_text(CLOCK_READ, encoding="utf-8")
+    (repo / "cli" / "tests" / "test_a.py").write_text(spy, encoding="utf-8")
+    commit(repo, "Add both")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "mv", "cli/x.py", "cli/y.py")
+    git(repo, "mv", "cli/tests/test_a.py", "cli/tests/test_b.py")
+    assert run(repo, "commit-msg", message_file(repo, "Move both\n")).returncode == 0
+
+
+def test_a_rename_with_edits_asks_about_the_edits_only(repo: Path) -> None:
+    (repo / "cli" / "x.py").write_text(CLOCK_READ, encoding="utf-8")
+    commit(repo, "Add the clock read")
+    git(repo, "mv", "cli/x.py", "cli/y.py")
+    (repo / "cli" / "y.py").write_text(
+        CLOCK_READ + "\n\ndef later() -> float:\n    return time.time()\n", encoding="utf-8"
+    )
+    git(repo, "add", "cli/y.py")
+    done = run(repo, "commit-msg", message_file(repo, "Move and extend\n"))
+    assert done.returncode == 1
+    assert "cli/y.py:9: hint ambient-read: `time.time`" in done.stderr
+    assert "cli/y.py:5" not in done.stderr
+
+
+def test_the_branch_check_takes_an_explicit_base_and_writes_the_summary(
+    repo: Path, tmp_path: Path
+) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    git(repo, "switch", "-q", "-c", "work")
+    (repo / "cli" / "x.py").write_text(CLOCK_READ, encoding="utf-8")
+    commit(
+        repo, "Read the clock\n\nHint-Ack: ambient-read cli/ -- the whole package is a shell layer"
+    )
+    git(repo, "update-ref", "-d", "refs/remotes/origin/main")
+    summary = tmp_path / "summary.md"
+    done = run(repo, "branch", "--base", base, "--summary", str(summary))
+    assert done.returncode == 0, done.stderr
+    text = summary.read_text(encoding="utf-8")
+    assert "1 answer(s) on this branch; 0 site(s) still open." in text
+    assert "`cli/` **broad**" in text
+    assert "the whole package is a shell layer" in text
+
+
+def test_a_narrative_line_that_starts_with_the_key_does_not_wedge_the_push(repo: Path) -> None:
+    git(repo, "switch", "-q", "-c", "work")
+    (repo / "cli" / "x.py").write_text("VALUE = 2\n", encoding="utf-8")
+    commit(
+        repo,
+        "Change a value\n\nHint-Ack: is the name of the trailer this change\ndoes not use.\n\nSigned-off-by: T <t@meiva>",
+    )
+    done = run(repo, "branch")
+    assert done.returncode == 0
+    assert "outside the trailer block" in done.stderr

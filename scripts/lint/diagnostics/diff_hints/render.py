@@ -10,7 +10,7 @@ from collections.abc import Iterable
 
 from scripts.lint.diagnostics.diff_hints.acks import suggestions
 from scripts.lint.diagnostics.diff_hints.catalog import spec_of
-from scripts.lint.diagnostics.diff_hints.model import HintId, Site
+from scripts.lint.diagnostics.diff_hints.model import Ack, HintId, Site
 
 _WIDTH = 100
 _LABEL = 9
@@ -79,6 +79,39 @@ def render_open(sites: Iterable[Site], *, limit: int | None = _SITES_SHOWN) -> s
         "commit message (a path without a line answers every site of that id in the file):"
     )
     lines.extend(f"  {template}" for template in suggestions(open_sites))
+    return "\n".join(lines)
+
+
+_BROAD_SITES = 10
+
+
+def _scope(ack: Ack) -> str:
+    return ack.path if ack.line is None else f"{ack.path}:{ack.line}"
+
+
+def _is_broad(ack: Ack, covers: int) -> bool:
+    return ack.path.endswith("/") or covers >= _BROAD_SITES
+
+
+# meiva:note
+# The answers of a branch as a table for a reviewer: which commit gave it, what it covers, how
+# many sites it answers and the reason. A directory trailer, or one that answers ten sites or
+# more, is marked broad: the reason has to carry the weight there.
+def render_summary(entries: Iterable[tuple[str, Ack, int]], open_sites: int) -> str:
+    rows = list(entries)
+    lines = [
+        "## Diff hint answers",
+        "",
+        f"{len(rows)} answer(s) on this branch; {open_sites} site(s) still open.",
+    ]
+    if rows:
+        lines += ["", "| commit | hint | scope | covers | reason |", "|---|---|---|---|---|"]
+        for sha, ack, covers in rows:
+            mark = " **broad**" if _is_broad(ack, covers) else ""
+            reason = ack.reason.replace("|", "\\|")
+            lines.append(
+                f"| `{sha}` | `{ack.hint.value}` | `{_scope(ack)}`{mark} | {covers} | {reason} |"
+            )
     return "\n".join(lines)
 
 

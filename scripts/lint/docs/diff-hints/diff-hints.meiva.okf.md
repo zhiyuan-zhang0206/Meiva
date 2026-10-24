@@ -22,7 +22,7 @@ subclass became an armed flag). Hints put a question at the moment the shape is 
 
 | Layer | Standard | Where |
 |---|---|---|
-| Hard rule | deterministic, zero false positives, recorded debt may only shrink | `meizel check` (`test-subclass-override`, `patch-raising-false`, the patch codes) |
+| Hard rule | deterministic, zero false positives, recorded debt may only shrink | `meizel check` (the patch codes, `missing-patch-target`, purity, locality) |
 | Diff hint | keyword and AST triggered on added lines, false positives allowed, **must be answered** | this page |
 | Review | equivalence of behavior, undeclared changes, honesty of the report | people |
 
@@ -42,12 +42,15 @@ Hint-Ack: <hint-id> <path>[:<line>] -- <reason>
 - The reason is a sentence about why the site is right (`composition root of the daemon`,
   `shell loop; the decision is unmet_step`), at least eight characters; the template
   placeholder `<reason>` is refused.
-- A `Hint-Ack:` line that does not parse, names an unknown id or has no reason is an error,
-  not a silent non-answer. An answer that matches no open site is reported and ignored.
-- Source files carry no inline marker and no file is exempt by name, the same as the
-  ambient-state rule. A composition root is recognised by its file name only
-  (`main.py`, `__main__.py`, `runtime.py`, `app.py`) for `ambient-read` and
-  `service-locator`; everything else is answered.
+- The key is case-insensitive, like any git trailer key. A `Hint-Ack:` line in the final
+  paragraph (the trailer block) that does not parse, names an unknown id or has no reason is
+  an error that says how to fix it, not a silent non-answer; the same text earlier in the
+  message is narrative and is only noted. An answer that matches no open site is reported and
+  ignored.
+- Source files carry no inline marker and there is no per-file list. The one built-in
+  exemption is a heuristic stated here: for `ambient-read` and `service-locator` a file named
+  `main.py`, `__main__.py`, `runtime.py` or `app.py` is taken for a composition root. Every
+  other site is answered.
 
 ## When it runs
 
@@ -55,6 +58,7 @@ Hint-Ack: <hint-id> <path>[:<line>] -- <reason>
 |---|---|---|
 | `commit-msg` | `hints.py commit-msg MSGFILE` | the staged diff (`git diff --cached -U0`) against the trailers of this message; line numbers are exact |
 | `pre-push` | `hints.py branch` | the whole branch diff (`merge-base(origin/main, HEAD)..HEAD`) against the trailers of every commit on the branch |
+| CI, pull requests | `hints.py branch --base BASE --head HEAD --summary FILE` | the same check over the pull request's own commits, and a table of every answer in the job summary |
 
 The pre-push check closes what the commit check cannot see: an amend, a rebase and a
 cherry-pick that never ran the commit-msg hook. It judges the final diff, so a hint that a
@@ -65,8 +69,18 @@ it is how the calibration numbers were produced.
 
 `default_install_hook_types` in `.pre-commit-config.yaml` makes a plain `pre-commit install`
 (from the main clone, see [Git hooks](../../../../docs/conventions/runbook.md#git-hooks-pre-commit--pre-push))
-install the `commit-msg` hook too. Without it the pre-push check is still the gate. CI does
-not run either stage; a CI step over the pull request's commits is a possible follow-up.
+install the `commit-msg` hook too, and `check_git_hooks.py` reports a clone that lacks it.
+
+The CI job `diff hints` is the backstop for `--no-verify` and for a clone without the hooks.
+It runs the pre-push check on the pull request's commits and writes every answer into the job
+summary for the reviewer: the commit, the scope, how many sites it covers and the reason. A
+directory trailer, or one that covers ten sites or more, is marked broad, so a reason that has
+to carry a whole directory is read as such. The reason's length is not judged by the tool; its
+visibility is the control.
+
+A rename is a rename: the diff is read with rename detection, so a moved file reports nothing
+and a moved file with edits reports its edits only. The diff prefixes are fixed to `a/` and
+`b/` whatever `diff.mnemonicPrefix` or `diff.noprefix` say.
 
 ## What is read
 
