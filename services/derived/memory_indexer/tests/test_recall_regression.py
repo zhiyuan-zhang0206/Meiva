@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from base.config import settings
+from base.config import ConfigBoot
 from services.derived.memory_indexer.recall_regression import (
     CASES_PATH,
     PRECISION,
@@ -69,10 +69,11 @@ def test_recall_cases_sit_below_the_old_threshold_and_precision_cases_above_the_
 
 
 def test_injection_policy_reads_the_agent_config() -> None:
-    threshold, cap = injection_policy()
+    boot = ConfigBoot()
+    threshold, cap = injection_policy(boot)
 
-    assert threshold == settings.agent.memory_recall_inject_threshold
-    assert cap == settings.agent.memory_recall_inject_max
+    assert threshold == boot.view.agent.memory_recall_inject_threshold
+    assert cap == boot.view.agent.memory_recall_inject_max
 
 
 def test_a_recall_case_that_keeps_its_rank_holds() -> None:
@@ -225,7 +226,10 @@ def test_cli_reports_the_baseline_itself(
         encoding="utf-8",
     )
 
-    assert main(["--results", str(payload), "--threshold", "0.72", "--cap", "3"]) == 0
+    assert (
+        main(["--results", str(payload), "--threshold", "0.72", "--cap", "3"], config=ConfigBoot())
+        == 0
+    )
 
     out = capsys.readouterr().out
     assert "55 cases" in out
@@ -238,4 +242,4 @@ def test_cli_refuses_results_that_skip_a_case(tmp_path: Path) -> None:
     payload.write_text("{}", encoding="utf-8")
 
     with pytest.raises(SystemExit, match="missing"):
-        main(["--results", str(payload)])
+        main(["--results", str(payload)], config=ConfigBoot())

@@ -4,6 +4,9 @@ import pytest
 
 from base.paths.tests.homes import default_home as default_home
 from base.paths.tests.homes import unit_home as unit_home
+from services.desktop.permissions_helper.tests.permissions_helper.native_io_guard import (
+    permissions_helper_native_io as permissions_helper_native_io,
+)
 
 
 @pytest.fixture(autouse=True)

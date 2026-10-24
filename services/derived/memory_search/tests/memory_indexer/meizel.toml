@@ -3,11 +3,3 @@
 
 [debt.env-patch]
 "test_reconcile_embed_error_truncates_and_returns_false.py#patch.dict os.environ" = 1
-
-[debt.first-party-patch]
-"test_entry_config_failure.py#monkeypatch.setattr services.derived.memory_indexer.daemon.start_health_server" = 1
-"test_reconcile_embed_error_truncates_and_returns_false.py#monkeypatch.setattr services.derived.memory_indexer.daemon.memory_root" = 1
-"test_reconcile_embed_error_truncates_and_returns_false.py#monkeypatch.setattr services.derived.memory_indexer.daemon.process_paths" = 1
-
-[debt.unresolved-patch]
-"test_entry_config_failure.py#monkeypatch.setattr boot.view.services.embedding_backend" = 1

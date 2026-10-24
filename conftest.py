@@ -59,9 +59,7 @@ from tests.fixtures.env_bootstrap import (  # noqa: E402 -- isolation first: no 
     session_ports,
 )
 from tests.fixtures.guards import (  # noqa: E402
-    guard_service_readiness,
     homes_get_their_own_ports,
-    permissions_helper_native_io,
     postgres_access,
     redis_access,
 )
@@ -75,8 +73,6 @@ from tests.fixtures.provisioning import (  # noqa: E402
     db_url,
     event_bus,
     gateway_data_plane,
-    insert_inbound,
-    publish_wake,
     redis_url,
     throwaway_config,
 )
@@ -92,13 +88,9 @@ __all__ = [
     "distinct_free_ports",
     "event_bus",
     "gateway_data_plane",
-    "guard_service_readiness",
     "homes_get_their_own_ports",
-    "insert_inbound",
-    "permissions_helper_native_io",
     "postgres_access",
     "process_config",
-    "publish_wake",
     "redis_access",
     "redis_url",
     "session_ports",

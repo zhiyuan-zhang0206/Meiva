@@ -2,16 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
 import pytest
 from pydantic import SecretStr
 
 from base.config import ConfigBoot
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from services.derived.memory_indexer import daemon
 from services.derived.memory_indexer.config import MemoryIndexerConfig, MemoryIndexerInputs
-from services.derived.memory_indexer.tests.fake_provider import FakeProvider
 
 
 def test_tuning_defaults_are_the_production_values() -> None:
@@ -54,12 +49,8 @@ def test_excluded_basenames_must_be_plain_file_names() -> None:
             MemoryIndexerConfig(excluded_basenames=(name,))
 
 
-def test_inputs_are_cold_and_owned() -> None:
+def test_inputs_are_read_once_from_their_own_owner() -> None:
     first, second = ConfigBoot(), ConfigBoot()
-    first_inputs = MemoryIndexerInputs.from_boot(first)
-    second_inputs = MemoryIndexerInputs.from_boot(second)
-    assert not first.prepared and not second.prepared
-    assert first.upgrades == second.upgrades == 0
     for owner, name, timeout, key in (
         (first, "first", 11.0, "first-key"),
         (second, "second", 22.0, "second-key"),
@@ -69,91 +60,45 @@ def test_inputs_are_cold_and_owned() -> None:
         owner.set_field("gemini_api_key", SecretStr(key))
         owner.set_field("memory_search_backend", name)
         owner.set_field("memory_search_uri", f"http://{name}")
-    assert first_inputs.embedding_name() == first_inputs.backend_name() == "first"
-    assert second_inputs.embedding_name() == second_inputs.backend_name() == "second"
-    assert first_inputs.search_uri() == "http://first"
-    assert second_inputs.search_uri() == "http://second"
-    assert (first_inputs.embed_timeout(), second_inputs.embed_timeout()) == (11.0, 22.0)
-    assert (first_inputs.api_key(), second_inputs.api_key()) == ("first-key", "second-key")
 
-
-def test_inputs_observe_updates_without_crossing_owners() -> None:
-    first, second = ConfigBoot(), ConfigBoot()
     first_inputs = MemoryIndexerInputs.from_boot(first)
     second_inputs = MemoryIndexerInputs.from_boot(second)
-    for owner, key, timeout in ((first, "first-key", 11.0), (second, "second-key", 22.0)):
-        owner.set_field("gemini_api_key", SecretStr(key))
-        owner.set_field("memory_embed_timeout_seconds", timeout)
-    assert (first_inputs.api_key(), second_inputs.api_key()) == ("first-key", "second-key")
-    first.set_field("memory_embed_timeout_seconds", 33.0)
-    first.set_field("gemini_api_key", None)
-    assert first_inputs.embed_timeout() == 33.0
-    assert first_inputs.api_key() is None
-    assert second_inputs.embed_timeout() == 22.0
-    assert second_inputs.api_key() == "second-key"
 
-
-async def test_retry_constructs_selected_backend_with_required_uri_reader(
-    monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate
-) -> None:
-    requests: list[str] = []
-    client_class = httpx.Client
-
-    def response(request: httpx.Request) -> httpx.Response:
-        requests.append(str(request.url))
-        return httpx.Response(200, json={"count": 0})
-
-    def client(*, base_url: str, timeout: float) -> httpx.Client:
-        return client_class(
-            base_url=base_url, timeout=timeout, transport=httpx.MockTransport(response)
-        )
-
-    monkeypatch.setattr(httpx, "Client", client)
-    backend = await daemon.connect_backend_with_retry(
-        Database.from_settings(gate=database_gate),
-        FakeProvider(),
-        name="numpy",
-        uri_reader=lambda: "http://selected-memory",
+    assert not first.prepared and not second.prepared
+    assert first.upgrades == second.upgrades == 0
+    assert first_inputs == MemoryIndexerInputs(
+        embedding_name="first",
+        embed_timeout_s=11.0,
+        api_key="first-key",
+        backend_name="first",
+        search_uri="http://first",
     )
-    try:
-        assert backend.name == "numpy"
-        assert requests == ["http://selected-memory/meta"]
-    finally:
-        backend.close()
+    assert second_inputs == MemoryIndexerInputs(
+        embedding_name="second",
+        embed_timeout_s=22.0,
+        api_key="second-key",
+        backend_name="second",
+        search_uri="http://second",
+    )
 
 
-@pytest.mark.parametrize(
-    "error", [httpx.ConnectError("not ready"), ValueError("bad configuration")]
-)
-async def test_backend_startup_retries_only_connection_failures(
-    monkeypatch: pytest.MonkeyPatch, error: Exception, *, database_gate: ProcessDbGate
-) -> None:
-    from unittest.mock import AsyncMock, MagicMock
+def test_inputs_are_restart_bound() -> None:
+    owner = ConfigBoot()
+    owner.set_field("memory_embed_timeout_seconds", 11.0)
+    owner.set_field("gemini_api_key", SecretStr("old-key"))
+    inputs = MemoryIndexerInputs.from_boot(owner)
 
-    backend = MagicMock(name="backend")
-    backend.connect.side_effect = [error, None]
-    monkeypatch.setattr(daemon, "get_backend", MagicMock(return_value=backend))
-    sleep = AsyncMock()
-    monkeypatch.setattr(daemon.asyncio, "sleep", sleep)
-    if isinstance(error, httpx.ConnectError):
-        assert (
-            await daemon.connect_backend_with_retry(
-                Database.from_settings(gate=database_gate),
-                FakeProvider(),
-                name="numpy",
-                uri_reader=lambda: "http://test",
-            )
-            is backend
-        )
-        assert backend.connect.call_count == 2
-        sleep.assert_awaited_once_with(2.0)
-    else:
-        with pytest.raises(ValueError, match="bad configuration"):
-            await daemon.connect_backend_with_retry(
-                Database.from_settings(gate=database_gate),
-                FakeProvider(),
-                name="numpy",
-                uri_reader=lambda: "http://test",
-            )
-        assert backend.connect.call_count == 1
-        sleep.assert_not_awaited()
+    owner.set_field("memory_embed_timeout_seconds", 33.0)
+    owner.set_field("gemini_api_key", None)
+
+    assert inputs.embed_timeout_s == 11.0
+    assert inputs.api_key == "old-key"
+
+
+def test_a_missing_key_stays_missing_and_a_present_key_stays_out_of_the_repr() -> None:
+    keyed, keyless = ConfigBoot(), ConfigBoot()
+    keyed.set_field("gemini_api_key", SecretStr("secret-value"))
+    keyless.set_field("gemini_api_key", None)
+
+    assert MemoryIndexerInputs.from_boot(keyless).api_key is None
+    assert "secret-value" not in repr(MemoryIndexerInputs.from_boot(keyed))

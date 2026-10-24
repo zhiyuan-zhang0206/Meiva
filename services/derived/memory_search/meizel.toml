@@ -3,7 +3,7 @@ exports = ["app.py", "daemon.py"]
 [uses]
 "app.py" = ["store.py"]
 "daemon.py" = ["app.py", "config.py", "store.py"]
-"tests" = ["app.py", "daemon.py", "store.py"]
+"tests" = ["app.py", "config.py", "daemon.py", "store.py"]
 
 [purity]
 "__init__.py" = "strict"

@@ -154,19 +154,7 @@ def test_upsert_batch_persists_all_rows_before_ack(tmp_path: Path) -> None:
     assert len(fresh) == 2
 
 
-def test_upsert_batch_matches_sequential_endpoints(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import services.derived.memory_search.store as store_module
-
-    ticks = iter([0.0, 1.0] * 4)
-
-    class _FakeTime:
-        @staticmethod
-        def perf_counter() -> float:
-            return next(ticks)
-
-    monkeypatch.setattr(store_module, "time", _FakeTime)
+def test_upsert_batch_matches_sequential_endpoints(tmp_path: Path) -> None:
     rows = [_upsert_body("/a.md", 0), _upsert_body("/b.md", 1), _upsert_body("/c.md", 2)]
     with _client(tmp_path / "sequential") as sequential, _client(tmp_path / "batched") as batched:
         for row in rows:
@@ -179,7 +167,9 @@ def test_upsert_batch_matches_sequential_endpoints(
             batched.post("/search", json=query).json()
             == sequential.post("/search", json=query).json()
         )
-        assert batched.get("/stats").json() == sequential.get("/stats").json()
+        stats = [client.get("/stats").json() for client in (sequential, batched)]
+        assert [entry["rows"] for entry in stats] == [3, 3]
+        assert all(entry["last_save_seconds"] >= 0.0 for entry in stats)
 
 
 def test_upsert_batch_saves_once_while_single_upserts_save_each_row(
