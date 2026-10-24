@@ -10,6 +10,7 @@ from typing import cast
 
 from base.agents.context.clients import DatabaseHandle
 from base.cluster import session_name
+from base.host.env.registry import process_environment
 from base.log import logger
 from base.paths import repo_root, workspace_dir
 from base.sessions.backend import PtySessionBackend, get_shell_backend
@@ -154,7 +155,9 @@ class ShellSessions:
 # meiva:note
 # The machine facts a new session starts from, read once per creation: this checkout and the environment the session forwards.
 def session_host() -> SessionHost:
-    return SessionHost(checkout=repo_root(), forwarded=forward_env_dict(activate_venv=True))
+    return SessionHost(
+        checkout=repo_root(), forwarded=forward_env_dict(process_environment(), activate_venv=True)
+    )
 
 
 # meiva:note
