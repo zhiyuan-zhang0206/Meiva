@@ -99,7 +99,7 @@ def test_generated_job_delivers_real_argv_and_environment(
     result = run_bounded(argv, env=env, cwd=tmp_path, capture_output=True, text=True, timeout=5)
     assert (result.returncode, result.stderr) == (0, "")
     records = [json.loads(line) for line in capture.read_text().splitlines()]
-    expected = {
+    expected: dict[str, list[list[str]]] = {
         "logs": [
             ["logs", "rotate"],
             ["logs", "retention", "--family-days", logs_content.FAMILY_DAYS],
