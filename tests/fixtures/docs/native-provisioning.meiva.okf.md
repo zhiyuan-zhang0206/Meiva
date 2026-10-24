@@ -38,6 +38,13 @@ Child Postgres/Redis memory is outside this gauge. These failure diagnostics go
 to stderr. Finally the temporary home is removed; native fixture owners already
 tear down their own processes and data directories.
 
+Driver refusal batches all boundaries through one static scan of the currently
+loaded modules. Same-name aliases match by object identity, including shared
+callables and repeated targets; each new refusal window scans again for late
+imports. The scan reads module dictionaries without invoking PEP 562 attributes.
+Resource admission still restores each driver descriptor in its own function
+fixture window, and teardown restores the prior refusal before the outer guard.
+
 Sync and async connection fixtures share these guards. Async pools use
 check_connection and autocommit, and inbound listeners own a dedicated
 reconnecting subscription that closes on teardown. Tests needing a particular

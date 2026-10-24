@@ -15,10 +15,14 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
+import selectors
 import subprocess
 import sys
-from collections.abc import Callable, Mapping
+import time
+from collections.abc import Callable, Generator, Mapping
+from contextlib import ExitStack, contextmanager, suppress
 from pathlib import Path
 
 import pytest
@@ -31,26 +35,91 @@ _LEASE_CHILD = Path(__file__).with_name("_lease_child.py")
 
 
 # meiva:note
-# Every child here runs this interpreter on a fixed script with one integer: no
-# shell, no interpolated text.
+# Even a partial launch or failed report leaves no child holding a lease.
+def _close_lease_child(child: subprocess.Popen[bytes]) -> None:
+    try:
+        if child.stdin is not None:
+            with suppress(BrokenPipeError):
+                child.stdin.close()
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=30)
+    finally:
+        for stream in (child.stdout, child.stderr):
+            if stream is not None:
+                stream.close()
+
+
+# meiva:note
+# Fixed interpreter/script and one integer; stdin is the real holder's release latch.
+@contextmanager
+def _lease_children(
+    count: int, processes: int, *, stdin: int
+) -> Generator[list[subprocess.Popen[bytes]]]:
+    children: list[subprocess.Popen[bytes]] = []
+    with ExitStack() as cleanup:
+        for _ in range(processes):
+            child = subprocess.Popen(  # noqa: S603
+                [sys.executable, str(_LEASE_CHILD), str(count)],
+                stdin=stdin,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=_REPO_ROOT,
+            )
+            cleanup.callback(_close_lease_child, child)
+            children.append(child)
+        yield children
+
+
+# meiva:note
+# Read complete reports without closing stdin, with one deadline for the whole group.
+def _lease_reports(children: list[subprocess.Popen[bytes]]) -> list[list[int]]:
+    reports: dict[int, list[int]] = {}
+    pending = {child.pid: b"" for child in children}
+    deadline = time.monotonic() + 120
+    with selectors.DefaultSelector() as ready:
+        for child in children:
+            assert child.stdout is not None
+            ready.register(child.stdout, selectors.EVENT_READ, child)
+        while len(reports) < len(children):
+            remaining = deadline - time.monotonic()
+            assert remaining > 0, "lease children did not report before the deadline"
+            readable = ready.select(timeout=remaining)
+            assert readable, "lease children did not report before the deadline"
+            for key, _ in readable:
+                child: subprocess.Popen[bytes] = key.data
+                chunk = os.read(key.fd, 4096)
+                assert chunk, f"lease child {child.pid} exited before reporting"
+                pending[child.pid] += chunk
+                if b"\n" in pending[child.pid]:
+                    line = pending[child.pid].split(b"\n", 1)[0]
+                    reports[child.pid] = json.loads(line)
+                    ready.unregister(key.fileobj)
+    return [reports[child.pid] for child in children]
+
+
+def _assert_live_lease_holders(
+    children: list[subprocess.Popen[bytes]], leased: list[list[int]]
+) -> None:
+    assert all(child.poll() is None for child in children), (
+        "lease holders are not simultaneously live"
+    )
+    holders = port_lease.live_holders()
+    assert all(
+        holders.get(child.pid) == ports for child, ports in zip(children, leased, strict=True)
+    )
+
+
 def _lease_in_children(count: int, processes: int) -> list[list[int]]:
-    children = [
-        subprocess.Popen(  # noqa: S603
-            [sys.executable, str(_LEASE_CHILD), str(count)],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=_REPO_ROOT,
-        )
-        for _ in range(processes)
-    ]
-    leased: list[list[int]] = []
-    for child in children:
-        out, err = child.communicate(timeout=120)
-        assert child.returncode == 0, err
-        leased.append(json.loads(out))
-    return leased
+    with _lease_children(count, processes, stdin=subprocess.PIPE) as children:
+        leased = _lease_reports(children)
+        _assert_live_lease_holders(children, leased)
+        for child in children:
+            assert child.stdin is not None
+            child.stdin.close()
+        for child in children:
+            assert child.wait(timeout=30) == 0
+        return leased
 
 
 def test_one_process_finds_its_earlier_leases_held(
@@ -70,6 +139,28 @@ def test_concurrent_processes_never_share_a_leased_port(
     assert len(leased) == 240
     assert len(set(leased)) == 240, "two concurrent holders were given the same port"
     assert not set(leased) & set(mine)
+
+
+def test_early_eof_is_not_evidence_of_concurrent_lease_holders() -> None:
+    with _lease_children(count=1, processes=4, stdin=subprocess.DEVNULL) as children:
+        leased = _lease_reports(children)
+        for child in children:
+            assert child.wait(timeout=30) == 0
+        with pytest.raises(AssertionError, match="not simultaneously live"):
+            _assert_live_lease_holders(children, leased)
+
+
+def test_a_failed_probe_closes_every_reported_holder() -> None:
+    with (
+        pytest.raises(RuntimeError, match="probe aborted after reporting"),
+        _lease_children(count=1, processes=4, stdin=subprocess.PIPE) as children,
+    ):
+        leased = _lease_reports(children)
+        _assert_live_lease_holders(children, leased)
+        raise RuntimeError("probe aborted after reporting")
+    assert all(child.poll() is not None for child in children)
+    holders = port_lease.live_holders()
+    assert all(child.pid not in holders for child in children)
 
 
 # meiva:note

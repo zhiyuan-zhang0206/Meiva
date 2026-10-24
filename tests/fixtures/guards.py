@@ -29,7 +29,7 @@ from redis.connection import AbstractConnection as RedisConnection
 
 from base.log.tests.stdlib_logging import stdlib_logging_isolated
 
-__all__ = ["HelperDoorGuard", "refuse_native_data_plane", "stub_everywhere"]
+__all__ = ["HelperDoorGuard", "refuse_native_data_plane", "stub_boundaries", "stub_everywhere"]
 
 
 @pytest.fixture(autouse=True)
@@ -153,20 +153,38 @@ def _restore_metering(sdk_metering: None) -> None:
 def stub_everywhere(
     monkeypatch: pytest.MonkeyPatch, module: object, name: str, stub: object
 ) -> None:
-    real = getattr(module, name)
-    monkeypatch.setattr(module, name, stub)
-    for mod in list(sys.modules.values()):
-        # Static lookup on purpose — never `getattr(mod, name, None)`: that
-        # invokes a module-level `__getattr__` (PEP 562) on every loaded
-        # module, and a dynamic surface can run arbitrary code while merely
-        # being probed (task #3950: `meiva.mcps.__getattr__` formats its "no such
-        # server" message by calling the metered `servers()`, so the old probe
-        # emitted a burst of `sdk_call` telemetry rows on every test setup and
-        # polluted the per-test event mirror). A dynamically-served name is
-        # not a frozen alias either — the real object was never bound into the
-        # module's dict, which is exactly the surface the rebind below sets on.
-        if getattr(mod, "__dict__", {}).get(name, None) is real:
-            monkeypatch.setattr(mod, name, stub)
+    stub_boundaries(monkeypatch, ((module, name, stub),))
+
+
+# meiva:link tests/fixtures/docs/native-provisioning.meiva.okf.md
+def stub_boundaries(
+    monkeypatch: pytest.MonkeyPatch, boundaries: Sequence[tuple[object, str, object]]
+) -> None:
+    modules = list(sys.modules.values())
+    registered = {id(mod) for mod in modules}
+    replacements: dict[str, dict[int, tuple[object, object]]] = {}
+    for module, name, stub in boundaries:
+        by_identity = replacements.setdefault(name, {})
+        real = getattr(module, name)
+        if id(module) in registered:
+            real = by_identity.get(id(real), (real, real))[1]
+        monkeypatch.setattr(module, name, stub)
+        # meiva:note
+        # Repeated targets can replace a refusal installed earlier in this batch.
+        for identity, (original, replacement) in tuple(by_identity.items()):
+            if replacement is real:
+                by_identity[identity] = (original, stub)
+        # meiva:note
+        # Shared callables keep the first refusal on frozen module aliases,
+        # just as consecutive single-boundary scans do.
+        by_identity.setdefault(id(real), (real, stub))
+    for mod in modules:
+        namespace = getattr(mod, "__dict__", {})
+        for name, by_identity in replacements.items():
+            real = namespace.get(name, None)
+            replacement = by_identity.get(id(real))
+            if replacement is not None and replacement[0] is real:
+                monkeypatch.setattr(mod, name, replacement[1])
 
 
 # meiva:note
@@ -438,10 +456,17 @@ def _refusal(resource: str, *, reason: str | None = None) -> Callable[..., Any]:
 
 def refuse_native_data_plane(patch: pytest.MonkeyPatch, *, reason: str | None = None) -> None:
     """Install the same driver boundary for an entire static process or a test."""
-    for boundaries, resource in ((_POSTGRES_BOUNDARIES, "Postgres"), (_REDIS_BOUNDARIES, "Redis")):
-        for owner, name in boundaries:
-            forbidden = _refusal(resource, reason=reason)
-            stub_everywhere(patch, owner, name, forbidden)
+    stub_boundaries(
+        patch,
+        tuple(
+            (owner, name, _refusal(resource, reason=reason))
+            for boundaries, resource in (
+                (_POSTGRES_BOUNDARIES, "Postgres"),
+                (_REDIS_BOUNDARIES, "Redis"),
+            )
+            for owner, name in boundaries
+        ),
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -462,19 +487,29 @@ def native_data_plane_guard(
 
 @pytest.fixture
 def postgres_access(
-    native_data_plane_guard, process_config: object, monkeypatch: pytest.MonkeyPatch
+    native_data_plane_guard: tuple[list[Boundary], list[Boundary]],
+    process_config: object,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The database fixture's access window; teardown restores the refusal first."""
-    for owner, name, original, bound in native_data_plane_guard[0]:
-        stub_everywhere(monkeypatch, owner, name, bound)
+    stub_boundaries(
+        monkeypatch,
+        tuple((owner, name, bound) for owner, name, _original, bound in native_data_plane_guard[0]),
+    )
+    for owner, name, original, _bound in native_data_plane_guard[0]:
         monkeypatch.setattr(owner, name, original)
 
 
 @pytest.fixture
 def redis_access(
-    native_data_plane_guard, process_config: object, monkeypatch: pytest.MonkeyPatch
+    native_data_plane_guard: tuple[list[Boundary], list[Boundary]],
+    process_config: object,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The Redis fixture's access window, independent of database access."""
-    for owner, name, original, bound in native_data_plane_guard[1]:
-        stub_everywhere(monkeypatch, owner, name, bound)
+    stub_boundaries(
+        monkeypatch,
+        tuple((owner, name, bound) for owner, name, _original, bound in native_data_plane_guard[1]),
+    )
+    for owner, name, original, _bound in native_data_plane_guard[1]:
         monkeypatch.setattr(owner, name, original)
