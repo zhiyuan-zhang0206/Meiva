@@ -44,3 +44,16 @@ def test_the_facade_reads_the_profile_from_its_process_environment() -> None:
         "local": _CODEX,
         "explicit": "agent:406",
     }
+
+
+# meiva:note
+# A profile the SDK cannot parse is a fault in who is calling. The plugin load that reads the
+# process environment refuses it and leaves no installation, so no SDK call runs under a guessed
+# identity (before the profile was an installation value, each call's admission refused it).
+def test_an_unreadable_profile_fails_the_plugin_load_and_leaves_no_installation() -> None:
+    result = run_probe("unreadable_external_profile", env={"MEIVA_CALLER_IDENTITY": "{not json"})
+
+    assert result.returncode == 0, result.stderr
+    outcome, error_type = result.stdout.strip().splitlines()[-2:]
+    assert json.loads(outcome) == {"rejected": True, "installed": False}
+    assert error_type == "ValidationError"

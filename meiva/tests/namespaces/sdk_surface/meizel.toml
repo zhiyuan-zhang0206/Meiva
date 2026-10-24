@@ -3,7 +3,6 @@
 
 [uses]
 "test_install.py" = ["child_install_disabled.py"]
-"test_metering.py" = ["child_metering_identity.py"]
 "test_process_clients.py" = ["child_gateway_credentials.py"]
 "test_sampling_atexit.py" = ["child_sampling_atexit.py", "child_sampling_atexit_uninstalled.py"]
 
