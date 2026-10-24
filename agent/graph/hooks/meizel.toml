@@ -8,3 +8,7 @@ exports = ["compact.py", "framework.py", "node.py", "tests"]
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.ambient-read]
+"capabilities.py#clock datetime.datetime.now" = 1
+"compact.py#clock datetime.datetime.now" = 4

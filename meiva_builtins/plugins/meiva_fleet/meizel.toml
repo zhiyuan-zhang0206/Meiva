@@ -14,4 +14,7 @@ exports = ["default_config.py", "inspector.py", "metrics.py", "plugin.py", "task
 "_task_requests.py" = "strict"
 
 [debt.ambient-read]
+"_task_update.py#clock datetime.datetime.now" = 1
+"plugin.py#clock datetime.datetime.now" = 1
+"plugin.py#random uuid.uuid4" = 2
 "task_registry.py#bus base.events.live.bus.EventBus.from_settings" = 2

@@ -15,6 +15,13 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 "sweep_outcome.py" = "strict"
 
 [roots]
+"schedule_verify_child.py" = { kinds = ["cwd"], why = "Schedule verification process entry captures its repository working directory and passes it to call-site analysis" }
 "config.py" = { kinds = ["environ"], why = "the settings-free repair path (meiva config --local) reads MEIVA_GATEWAY_URL / MEIVA_CLUSTER_SECRET from the raw env/.env WITHOUT constructing Settings — a broken .env is exactly the scenario it repairs, and constructing Settings would fail first" }
 
 "fleet_gateway.py" = { kinds = ["settings"], why = "CLI command composition root boots configuration before assembling command inputs" }
+
+[debt.ambient-read]
+"fleet_gateway.py#clock time.monotonic" = 2
+"fleet_gateway.py#random uuid.uuid4" = 1
+"schedules.py#random uuid.uuid4" = 1
+"schedules_verify.py#clock datetime.datetime.now" = 1

@@ -13,3 +13,6 @@ exports = ["background.py", "background_plan.py", "coding_tools", "log_ring.py",
 "log_ring.py" = "strict"
 "session_env.py" = "strict"
 "session_plan.py" = "strict"
+
+[debt.ambient-read]
+"__init__.py#home pathlib.Path.home" = 1

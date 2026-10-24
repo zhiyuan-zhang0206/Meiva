@@ -18,3 +18,12 @@ exports = ["agent_env.py", "agent_slices.py", "boot_policy.py", "bootstrap.py", 
 [roots]
 "dotenv_boot.py" = { kinds = ["environ"], why = "load_dotenv ~/.meiva/.env, must run before Settings import" }
 "registry.py" = { kinds = ["environ"], why = "child_env builds the parent->child forwarding dict from the LIVE env (the registry's allowlist keys + passthrough rows); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env, not its own snapshot — same child-env handoff as base.sessions.env_forwarding" }
+
+[debt.ambient-read]
+"dotenv_boot.py#home pathlib.Path.home" = 1
+"dotenv_file.py#clock datetime.datetime.now" = 1
+"harness_binaries.py#home pathlib.Path.home" = 1
+"port_lease.py#pid os.getpid" = 5
+"port_lease.py#pid os.getuid" = 1
+"port_lease.py#random secrets.randbelow" = 1
+"port_lease.py#random secrets.token_hex" = 1

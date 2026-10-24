@@ -52,8 +52,12 @@ def test_every_hint_is_a_row_of_the_catalog_table_in_the_documentation(hint: Hin
 
 def test_the_first_site_of_an_id_prints_the_whole_text_and_later_sites_only_the_line() -> None:
     sites = [
-        Site(HintId.AMBIENT_READ, "cli/a.py", 3, "`time.time` read in a non-root module"),
-        Site(HintId.AMBIENT_READ, "cli/b.py", 9, "`time.time` read in a non-root module"),
+        Site(
+            HintId.SERVICE_LOCATOR, "cli/a.py", 3, "`app.state` fetches inputs from the application"
+        ),
+        Site(
+            HintId.SERVICE_LOCATOR, "cli/b.py", 9, "`app.state` fetches inputs from the application"
+        ),
         Site(
             HintId.SPY_ASSERT,
             "cli/tests/test_c.py",
@@ -64,9 +68,9 @@ def test_the_first_site_of_an_id_prints_the_whole_text_and_later_sites_only_the_
     text = render_open(sites)
     assert text.count("why:") == 2
     assert text.count("instead:") == 2
-    assert "cli/b.py:9: hint ambient-read" in text
-    assert "Hint-Ack: ambient-read cli/a.py:3 -- <reason>" in text
-    assert "Hint-Ack: ambient-read cli/a.py -- <reason>" not in text
+    assert "cli/b.py:9: hint service-locator" in text
+    assert "Hint-Ack: service-locator cli/a.py:3 -- <reason>" in text
+    assert "Hint-Ack: service-locator cli/a.py -- <reason>" not in text
 
 
 def test_a_noisy_id_is_capped_and_the_cap_is_said() -> None:
@@ -83,14 +87,14 @@ def test_a_noisy_id_is_capped_and_the_cap_is_said() -> None:
 
 
 def test_the_summary_marks_a_directory_answer_and_a_wide_answer_as_broad() -> None:
-    narrow = Ack(HintId.AMBIENT_READ, "cli/x.py", 4, "composition root of the daemon")
+    narrow = Ack(HintId.SERVICE_LOCATOR, "cli/x.py", 4, "composition root of the daemon")
     directory = Ack(HintId.DELETED_TEST, "cli/tests/", None, "the suite moved into the package")
     wide = Ack(HintId.TEST_SEAM, "cli/tests/test_a.py", None, "polls | real child")
     text = render_summary(
         [("abc123def", narrow, 1), ("abc123def", directory, 7), ("1234abcd", wide, 12)], 2
     )
     assert "3 answer(s) on this branch; 2 site(s) still open." in text
-    assert "| `abc123def` | `ambient-read` | `cli/x.py:4` | 1 |" in text
+    assert "| `abc123def` | `service-locator` | `cli/x.py:4` | 1 |" in text
     assert "`cli/tests/` **broad**" in text
     assert "`cli/tests/test_a.py` **broad**" in text
     assert "polls \\| real child" in text

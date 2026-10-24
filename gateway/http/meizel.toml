@@ -6,3 +6,6 @@ exports = ["auth", "config.py", "disconnect.py", "middleware", "model_catalog.py
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.ambient-read]
+"config.py#home pathlib.Path.home" = 1

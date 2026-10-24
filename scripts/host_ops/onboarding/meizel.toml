@@ -6,3 +6,7 @@ exports = ["catalog.py", "harness_onboarding.py", "hostfs.py", "transport.py"]
 
 [roots]
 "hostfs.py" = { kinds = ["environ"], why = "carried to the target machine and executed there before any Meiva settings exist; it expands the path variables ($DSH_HOME) the way that machine's shell would, which the operator's Settings cannot know" }
+
+[debt.ambient-read]
+"harness_onboarding.py#clock datetime.datetime.now" = 2
+"harness_onboarding.py#home pathlib.Path.home" = 1

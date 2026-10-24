@@ -6,3 +6,6 @@ exports = ["cluster_registry.py", "refresh.py", "refresh_git_plan.py", "refresh_
 
 [purity]
 "refresh_git_plan.py" = "strict"
+
+[debt.ambient-read]
+"__init__.py#clock datetime.datetime.now" = 2

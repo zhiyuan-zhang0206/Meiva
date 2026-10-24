@@ -15,6 +15,9 @@ exports = ["identity.py", "runtime.py", "store.py", "types.py"]
 "store.py" = ["types.py"]
 "tests" = ["store.py", "types.py"]
 
+[debt.ambient-read]
+"store.py#random uuid.uuid4" = 2
+
 [debt.impure-call]
 "commands.py#async def execute_ingress_command" = 1
 "commands.py#async def notice_reply_verdict" = 1

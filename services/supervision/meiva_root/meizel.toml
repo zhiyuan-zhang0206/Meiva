@@ -23,3 +23,12 @@ exports = ["__main__.py", "failure_state.py", "health.py", "inputs.py", "manifes
 
 [purity]
 "helper_chain_plan.py" = "strict"
+
+[debt.ambient-read]
+"daemon.py#pid os.getpid" = 1
+"health.py#clock time.time" = 1
+"intent_store.py#clock time.time" = 1
+"left_behind.py#clock time.monotonic" = 2
+"left_behind.py#clock time.time" = 1
+"supervisor.py#clock time.time" = 5
+"supervisor.py#pid os.getpid" = 1

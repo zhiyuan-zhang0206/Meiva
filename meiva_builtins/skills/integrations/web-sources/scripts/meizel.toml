@@ -6,4 +6,5 @@ exports = ["webscrape.py"]
 "scrape_wire.py" = "strict"
 
 [debt.ambient-read]
+"webscrape.py#clock datetime.datetime.now" = 1
 "webscrape.py#environ os.environ" = 1

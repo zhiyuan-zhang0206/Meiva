@@ -7,3 +7,6 @@
 [purity]
 "__init__.py" = "strict"
 "_state.py" = "strict"
+
+[debt.ambient-read]
+"agent_runtime.py#clock datetime.datetime.now" = 1

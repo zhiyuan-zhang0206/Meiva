@@ -7,3 +7,6 @@ exports = ["page_acceptance.py", "page_target.py", "page_target_policy.py", "pag
 
 [purity]
 "page_target_policy.py" = "strict"
+
+[debt.ambient-read]
+"page_acceptance.py#clock datetime.datetime.now" = 1

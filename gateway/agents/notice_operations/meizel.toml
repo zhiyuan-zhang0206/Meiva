@@ -8,3 +8,7 @@ exports = ["current.py", "notice_answers.py", "notice_plan.py", "notices.py", "r
 [purity]
 "__init__.py" = "strict"
 "notice_plan.py" = "strict"
+
+[debt.ambient-read]
+"notices.py#clock datetime.datetime.now" = 4
+"router.py#clock datetime.datetime.now" = 1

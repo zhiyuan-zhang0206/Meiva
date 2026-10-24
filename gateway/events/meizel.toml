@@ -15,3 +15,8 @@ exports = ["agent_events.py", "computer_traces.py", "merged.py", "metrics.py", "
 "events_plan.py" = "strict"
 "schemas.py" = "strict"
 "sse_frames.py" = "strict"
+
+[debt.ambient-read]
+"agent_events.py#clock datetime.datetime.now" = 1
+"metrics.py#clock datetime.datetime.now" = 1
+"router.py#clock datetime.datetime.now" = 1

@@ -30,6 +30,7 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "settings.py" = ["bus"]
 
 [debt.ambient-read]
+"help.py#home pathlib.Path.home" = 1
 "settings.py#settings base.config.settings" = 1
 
 [debt.impure-call]

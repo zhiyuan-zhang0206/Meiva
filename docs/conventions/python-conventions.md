@@ -581,14 +581,17 @@ That is checked, not held by reviewers: a file that is not a root and reaches on
 those is an `ambient-read` of `meizel check`
 ([ambient reads](../../meizel/docs/checker/ambient.meiva.okf.md)). A root declares itself
 under `[roots]` in its directory's `meizel.toml` with the kinds it reads (`settings`, `db`,
-`endpoints`, `bus` and `environ` are checked; the clock, home and working directory, platform,
-process ids and randomness are recorded by the scanner and not yet checked), and says why when the
-reason is not plain. The existing reads are recorded debt of the directory
+`endpoints`, `bus`, `environ`, `clock`, `home`, `cwd`, `platform`, `pid`, `random`), and says why
+when the reason is not plain. The existing reads are recorded debt of the directory
 that holds them and may only shrink; a file under `purity = "strict"` has none. This reverses
-the earlier decision to leave `settings` to reviewers: a component that imports `settings`
-is no longer a defect only a reader notices. Only the point where a file takes the value is
-recorded; what it does with the object afterwards is not followed, so a root that hands its
-`settings` down whole is still a service locator and review catches that.
+the earlier decision to leave `settings` to reviewers ("a convention that reviewers hold, not
+a lint"): a component that imports `settings` is no longer a defect only a reader notices.
+The check does not look at the `purity` mode to decide whether it applies: a `none` file is
+judged like any other, because the point is the split itself. A shell executes a plan and
+reads no environment; the only files that read the world are the roots, whatever their mode.
+Only the point where a file takes the value is recorded; what it does with the object afterwards
+is not followed, so a root that hands its `settings` down whole is still a service locator and
+review catches that.
 
 A dependency is a required parameter. A default (`client: Client = Client()`), a
 module-level instance, or a function that builds its own client when none is passed puts

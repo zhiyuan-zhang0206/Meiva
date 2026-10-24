@@ -14,6 +14,12 @@
 "config.py" = "strict"
 "mapping.py" = "strict"
 
+[debt.ambient-read]
+"session.py#clock datetime.datetime.now" = 2
+"session.py#clock time.monotonic" = 3
+"session.py#clock time.perf_counter" = 2
+"session.py#random uuid.uuid4" = 1
+
 [debt.impure-call]
 "session.py#async def __aenter__" = 1
 "session.py#async def __aexit__" = 1

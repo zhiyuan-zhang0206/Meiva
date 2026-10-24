@@ -1,3 +1,13 @@
 [uses]
 "onboard-helper-grants.py" = ["scan_child.py"]
 "tests" = ["request_grants_evidence.py"]
+
+[debt.ambient-read]
+"helper-signing.py#clock datetime.datetime.now" = 3
+"onboard-helper-grants.py#clock time.monotonic" = 2
+"onboard-helper-grants.py#home pathlib.Path.home" = 3
+"onboard-helper-grants.py#pid os.getpid" = 1
+"onboard-helper-grants.py#platform os.uname" = 1
+"onboard-helper-grants.py#platform sys.platform" = 1
+"request_grants_evidence.py#clock datetime.datetime.now" = 1
+"request_grants_evidence.py#platform sys.platform" = 1

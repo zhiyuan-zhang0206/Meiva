@@ -6,3 +6,8 @@
 "_pages.py" = "strict"
 "_rows.py" = "strict"
 "_sites.py" = "strict"
+
+[debt.ambient-read]
+"_dom.py#clock time.monotonic" = 2
+"_utils.py#clock datetime.datetime.now" = 1
+"webchat.py#clock time.monotonic" = 6

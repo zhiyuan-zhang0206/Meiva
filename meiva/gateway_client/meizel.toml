@@ -6,3 +6,6 @@
 [purity]
 "agent_plans.py" = "strict"
 "plans.py" = "strict"
+
+[debt.ambient-read]
+"__init__.py#random uuid.uuid4" = 3

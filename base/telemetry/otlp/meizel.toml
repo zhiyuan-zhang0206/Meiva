@@ -16,3 +16,5 @@ exports = ["telemetry_otlp.py", "telemetry_otlp_defer.py", "telemetry_otlp_expor
 
 [debt.ambient-read]
 "telemetry_otlp.py#settings base.config.settings" = 2
+"telemetry_otlp_logs.py#clock time.time_ns" = 1
+"telemetry_otlp_metrics.py#random uuid.uuid4" = 1

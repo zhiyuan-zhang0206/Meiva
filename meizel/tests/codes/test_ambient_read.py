@@ -80,6 +80,8 @@ def test_the_standard_library_windows_onto_the_world_are_acquisitions(
     [
         "import random\n\nx = random.Random(7)\n",
         "import time\n\nx = time.sleep\n",
+        "from secrets import compare_digest\n\nx = compare_digest(b'a', b'b')\n",
+        "import secrets as secure\n\nx = secure.compare_digest(b'a', b'b')\n",
         "import os\n\nx = os.path.join('a', 'b')\n",
         "x = 'os.environ'\n",
         "# os.environ in a comment\nx = 1\n",
@@ -110,6 +112,11 @@ def test_a_seeded_generator_a_value_or_a_look_alike_is_not(
         ),
         (
             "import time\n\ndef f():\n    def inner():\n        time.sleep(1)\n    return time.monotonic()\n",
+            [],
+        ),
+        (
+            "import time\n\ndef f():\n    def inner():\n        return time.monotonic()\n"
+            "    time.sleep(1)\n    return inner\n",
             [],
         ),
         ("import time\n\ndef f():\n    return time.time()\n", [("clock", "time.time")]),
@@ -247,3 +254,59 @@ def test_a_call_acquires_only_when_the_policy_marks_the_name_as_a_call(
 ) -> None:
     source = "from cfg import get_field\n\nx = get_field('a')\nreader = get_field\n"
     assert acquired(make_repo, source) == [("settings", "cfg.get_field")]
+
+
+@pytest.mark.parametrize(
+    ("source", "key"),
+    [
+        ("import time\n\nx = time.time()\n", "mod.py#clock time.time"),
+        ("from pathlib import Path\n\nx = Path.home()\n", "mod.py#home pathlib.Path.home"),
+        ("import os\n\nx = os.getcwd()\n", "mod.py#cwd os.getcwd"),
+        ("import sys\n\nx = sys.platform\n", "mod.py#platform sys.platform"),
+        ("import os\n\nx = os.getpid()\n", "mod.py#pid os.getpid"),
+        ("import uuid\n\nx = uuid.uuid4()\n", "mod.py#random uuid.uuid4"),
+        ("import os\n\nx = os.environ\n", "mod.py#environ os.environ"),
+        ("from cfg import settings\n\nx = settings.a\n", "mod.py#settings cfg.settings"),
+    ],
+)
+def test_every_kind_is_judged_outside_a_root(make_repo: RepoFactory, source: str, key: str) -> None:
+    _, sites = read_sites(make_repo, source)
+    assert [d.debt.key for d in sites if d.debt] == [key]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import random\n\nx = random.Random()\n",
+        "import random\n\nx = random.Random(None)\n",
+        "import random\n\nx = random.Random(x=None)\n",
+        "from random import Random as Generator\n\nx = Generator()\n",
+        "from random import Random as Generator\n\nx = Generator(x=None)\n",
+        "import random\n\ndef f(seed):\n    return random.Random(seed)\n",
+        "from random import Random as Generator\n\ndef f(seed):\n    return Generator(x=seed)\n",
+        "import random\n\ndef f(inputs):\n    return random.Random(*inputs)\n",
+        "import random\n\ndef f(inputs):\n    return random.Random(**inputs)\n",
+    ],
+)
+def test_a_generator_without_a_proven_non_none_seed_acquires_randomness(
+    make_repo: RepoFactory, source: str
+) -> None:
+    assert acquired(make_repo, source) == [("random", "random.Random")]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import random\n\nx = random.Random(x=7)\n",
+        "import random\n\nx = random.Random(0)\n",
+        "import random\n\nx = random.Random('')\n",
+        "import random\n\nx = random.Random(b'')\n",
+        "from random import Random as Generator\n\nx = Generator(-7)\n",
+        "import random as rng\n\nx = rng.Random(b'fixed')\n",
+        "from random import Random\n\nx = Random\n",
+    ],
+)
+def test_a_literal_seed_or_a_generator_type_reference_does_not_acquire_randomness(
+    make_repo: RepoFactory, source: str
+) -> None:
+    assert acquired(make_repo, source) == []

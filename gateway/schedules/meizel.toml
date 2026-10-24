@@ -10,3 +10,6 @@ exports = ["receipts.py", "router.py", "session_control.py", "tests"]
 [purity]
 "__init__.py" = "strict"
 "plans.py" = "strict"
+
+[debt.ambient-read]
+"session_control.py#clock time.monotonic" = 2

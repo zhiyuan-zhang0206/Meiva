@@ -15,6 +15,9 @@ exports = ["derive.py", "jobs.py", "reader.py", "source.py"]
 [roots]
 "backfill.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 
+[debt.ambient-read]
+"reader.py#random uuid.uuid4" = 1
+
 [debt.impure-call]
 "nodes.py#import psycopg" = 3
 "reader.py#import fastapi" = 1

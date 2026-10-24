@@ -6,3 +6,9 @@ exports = ["home_lifecycle_locks.py", "launch_failures.py", "pause_markers.py", 
 [purity]
 "__init__.py" = "strict"
 "service_selection.py" = "strict"
+
+[debt.ambient-read]
+"home_lifecycle_locks.py#clock datetime.datetime.now" = 1
+"home_lifecycle_locks.py#pid os.getpid" = 1
+"start_serving.py#random uuid.uuid4" = 1
+"status_journal.py#pid os.getpid" = 3

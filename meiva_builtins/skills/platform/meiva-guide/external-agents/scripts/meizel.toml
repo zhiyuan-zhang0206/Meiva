@@ -1,2 +1,8 @@
 [purity]
 "context_probe.py" = "strict"
+
+[debt.ambient-read]
+"spawn_dsh.py#clock time.time" = 2
+"watch_work.py#clock datetime.datetime.now" = 1
+"watch_work.py#clock time.monotonic" = 2
+"watch_work.py#random uuid.uuid4" = 1

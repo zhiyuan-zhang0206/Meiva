@@ -8,3 +8,4 @@ exports = ["lifecycle_audit.py", "runtime.py", "tests"]
 
 [debt.ambient-read]
 "runtime.py#environ os.environ" = 1
+"runtime.py#home pathlib.Path.home" = 1

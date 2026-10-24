@@ -8,3 +8,10 @@ exports = ["daemon.py", "ledger.py", "shutdown_budget.py"]
 [purity]
 "__init__.py" = "strict"
 "shutdown_budget.py" = "strict"
+
+[debt.ambient-read]
+"daemon.py#pid os.getuid" = 1
+"service.py#clock time.time" = 1
+"service.py#pid os.getpid" = 1
+"service.py#random uuid.uuid4" = 1
+"session.py#clock time.monotonic" = 2

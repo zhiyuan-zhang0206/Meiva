@@ -12,19 +12,35 @@ tags:
 
 The hints were run over the pull requests whose reviews are the source of the catalog:
 \#6810, \#6813, \#6816, \#6846 and \#6848 (PR heads against their merge bases; \#6813 at the
-head the review judged). That is 2,109 changed files. These are the pull requests the catalog
-was fitted on, so the recall below is a fit, not a prediction; there is no hold-out set yet.
+head the review judged). The 2026-10-25 rerun used the fixed inputs below and counted 2,107
+changed files, correcting the earlier 2,109 total. Sites and path-level answers were rerun;
+the manual finding and misfire classifications below are retained from the original review.
+These are the pull requests the catalog was fitted on, so the recall below is a fit, not a
+prediction; there is no hold-out set yet.
 The first real one is the next set of reviewed pull requests, and this page is updated from it.
+
+| PR | Base | Head | Changed files |
+|---|---|---|---|
+| #6810 | `3afe7672cdd9` | `f1cda50cd093` | 449 |
+| #6813 (reviewed head) | `63a13e61268c` | `9f231d94bdfc` | 300 |
+| #6816 | `30e81d2f1a6e` | `0441967ce8b2` | 486 |
+| #6846 | `1a30eb683ea4` | `3fc2901a9ed4` | 451 |
+| #6848 | `1d199d9df9cd` | `3670df96c3cd` | 421 |
+
+Run `python scripts/lint/diagnostics/diff_hints/hints.py report BASE HEAD --json` for each pair. File and path-answer
+counts are summed per PR, so a path changed in two pull requests counts twice.
 
 | Measure | Value |
 |---|---|
-| Sites raised | 625 (0.30 per changed file) |
-| Answers needed at path level | 450, of which 261 are `deleted-test` (one per file; one per directory with a directory trailer) |
+| Sites raised | 547 (0.26 per changed file) |
+| Answers needed at path level | 414, of which 261 are `deleted-test` (one per file; one per directory with a directory trailer) |
 | Reviewed findings | 73 |
 | Findings that are a diff shape | 38 (52%) |
-| Of those, a hint fired on the cited site | 33 (87%) on the fitted set; of all 73 findings 45% |
+| Of those, a hint fired on the cited site | 30 (79%) on the fitted set; of all 73 findings 41% |
 
-Not caught although mechanical (5): a source-text assertion whose added lines carry no
+Eight diff-shape findings have no remaining hint: three belonged to the retired `ambient-read`
+hint, and five were already missed before its retirement. Those five are a source-text assertion
+whose added lines carry no
 `inspect.getsource`, a `Callable` type alias used as a required port, an enum if-chain without a
 final `else`, `Literal` selectors that fall into `else`, and a field compared with a literal
 (`fact.role == "shell"`, left to review on purpose). Of the 35 findings that are not a diff shape,
@@ -41,7 +57,6 @@ count: every hit is a real removal and no detector decides it.
 
 | Id | Sites | Files | Judged | Misfires | Findings hit | Note |
 |---|---|---|---|---|---|---|
-| `ambient-read` | 78 | 36 | 30 | 0 | 3 | 16 of the 30 are an interval clock in a function that also sleeps (the next wait is decided inside the loop); 14 read the environment, home, platform, settings or the wall clock |
 | `service-locator` | 102 | 34 | 20 | 0 | 1 | |
 | `lambda-dependency` | 45 | 22 | 30 | 2 | 2 | `pipeline_factory=lambda: pipeline`, a single lazily built resource, which the conventions allow |
 | `test-seam` | 33 | 20 | 33 | 0 | 3 | 18 are an armed flag or a value assigned on a fake's own fixture object, which the red line rules out and the reviews found |
@@ -56,7 +71,7 @@ count: every hit is a real removal and no detector decides it.
 | `spy-assert` | 2 | 2 | 2 | 0 | 0 | |
 | `deleted-test` | 261 | 261 | not judged | not judged | 6 | |
 
-Pooled over the 219 judged sites: 7 misfires (3.2%). `callable-default` and `spy-assert` hit no
+Pooled over the 189 judged sites: 7 misfires (3.7%). `callable-default` and `spy-assert` hit no
 finding because the reviewed callbacks and spies were leftovers outside the added lines.
 
 What the calibration changed, each from a sample of the hits:
@@ -73,22 +88,25 @@ What the calibration changed, each from a sample of the hits:
 - `test-subclass` first included every third-party base (`BaseChatModel`, `httpx.BaseTransport`:
   implementing an abstract interface); only database and cache clients remain, which is the
   `ParkedPool(AsyncConnectionPool)` case.
-- `ambient-read` first counted a `datetime.now(UTC)` handed straight to a call as `now=`,
-  `*_at` or `*_ts` (the shell reading once and passing the value, which is the form the hint
-  asks for) and generated ids (`uuid4`); both are out.
-- `ambient-read` first asked about every `time.monotonic()`; 24 of 30 sampled sites were a
-  deadline, a duration or a TTL. The conventions scope injection by what a test needs to steer
-  ([Tests do not patch](../../../../docs/conventions/python-conventions.md#tests-do-not-patch-production-takes-what-a-test-needs-to-control):
-  "production code that no test needs to steer may still `import time`"), so an interval clock
-  (`time.monotonic`, `time.perf_counter` and their `_ns` forms) asks only when the same function
-  also sleeps, where "how long to wait next" is a decision inside a loop. The wall clock
-  (`time.time`, `datetime.now`, `utcnow`, `today`) is still always asked: it almost always feeds a
-  decision.
 - A field compared with a literal was added to `wildcard-case` and removed again: 4 of its 17
   sites were on a reviewed finding, the rest compared wire kinds (`item.kind == "system_prompt"`).
 - Renames: the first run read a moved file as a new file and asked about its old contents again.
   The diff is read with rename detection now, so a pure rename asks nothing and a rename with
   edits asks about the edits.
+
+## What moved out
+
+The hint `ambient-read` (the clock, the environment, the platform, randomness, the whole `Settings`)
+was in the first catalog: 78 sites in 36 files over these five pull requests, 30 read with no
+misfire, and a hit on 3 reviewed findings. It was the one hint whose question has a
+deterministic answer, so it became the `ambient-read` code of `meizel check`
+([ambient reads](../../../../meizel/docs/checker/ambient.meiva.okf.md)), judged against the `[roots]`
+of each directory instead of a file-name heuristic. The figures above exclude it. The checker
+contracts verify the promoted rules; this rerun did not measure historical checker recall at
+those three review sites.
+Reading the first sample of it is what fixed the interval-clock policy (24 of 30 sampled sites were
+a deadline, a duration or a TTL; an interval clock counts only in a function that also sleeps),
+which the meizel code keeps.
 
 ## Cost of a commit
 

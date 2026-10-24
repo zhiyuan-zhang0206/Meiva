@@ -7,3 +7,6 @@ exports = ["intermediates.py", "names.py", "offsite.py", "offsite_plan.py", "pas
 [purity]
 "names.py" = "strict"
 "offsite_plan.py" = "strict"
+
+[debt.ambient-read]
+"passphrase.py#random secrets.token_hex" = 1

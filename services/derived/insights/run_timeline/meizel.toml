@@ -13,6 +13,9 @@ exports = ["projection", "router.py", "schemas.py", "tests"]
 "." = "strict-to-be"
 "__init__.py" = "strict"
 
+[debt.ambient-read]
+"router.py#clock datetime.datetime.now" = 1
+
 [debt.impure-call]
 "context.py#import fastapi" = 1
 "links.py#import fastapi" = 1

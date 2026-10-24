@@ -12,4 +12,18 @@ exports = ["scripted_reply.py", "understanding_replay.py"]
 "understanding_replay.py" = { kinds = ["settings"], why = "Tool entry composes its process resources from the launch configuration" }
 
 [debt.ambient-read]
+"boundary.py#home pathlib.Path.home" = 1
+"clean_host_deps.py#clock time.monotonic" = 2
+"clean_host_deps.py#random uuid.uuid4" = 1
+"container.py#random uuid.uuid4" = 1
+"host_dependency_refusal.py#random uuid.uuid4" = 1
+"observe.py#clock time.monotonic" = 2
+"observe.py#clock time.time" = 1
+"observe.py#home pathlib.Path.home" = 1
+"observe.py#platform sys.platform" = 2
+"observe.py#random uuid.uuid4" = 1
+"tart_golden.py#home pathlib.Path.home" = 1
+"tart_run.py#home pathlib.Path.home" = 1
+"tart_run.py#random uuid.uuid4" = 1
+"tart_vm.py#clock time.monotonic" = 2
 "understanding_replay.py#db base.db.Database.from_settings" = 1
