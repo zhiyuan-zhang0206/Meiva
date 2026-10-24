@@ -133,6 +133,11 @@ class IntentRecord:
     source: IntentSource
     restart_failed: RestartFailure | None
     caller: CallerFacts | None = None
+    # meiva:note
+    # When this record was written (epoch seconds); 0.0 means "now". Persisted so
+    # a stop's age survives a root restart: an operator stop that nobody revisits
+    # must be able to say how long it has been held.
+    updated_at: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,8 +209,15 @@ def write(run_dir: Path, unit: str, record: IntentRecord) -> None:
     except OSError as exc:
         _log.error("unit %s: intent record write failed: %s", unit, exc)
         return
+    # meiva:note
+    # The caller is the only attribution an operator stop leaves behind, and the
+    # next write overwrites it: log it here or it is gone (task #5611).
     _log.debug(
-        "unit %s: intent record written (%s/%s)", unit, record.intent.value, record.source.value
+        "unit %s: intent record written (%s/%s by %s)",
+        unit,
+        record.intent.value,
+        record.source.value,
+        "unknown" if record.caller is None else record.caller.summary(),
     )
 
 
@@ -234,7 +246,7 @@ def _encode(record: IntentRecord) -> str:
         "restart_failed": None
         if failure is None
         else {"stage": failure.stage.value, "since": failure.since, "detail": failure.detail},
-        "updated_at": time(),
+        "updated_at": record.updated_at or time(),
     }
     if record.caller is not None:
         body["caller"] = _encode_caller(record.caller)
@@ -255,7 +267,14 @@ def _decode(raw: object) -> IntentRecord:
         source,
         _decode_failure(values["restart_failed"]),
         _decode_caller(values.get("caller")),
+        _decode_epoch(values["updated_at"], "updated_at"),
     )
+
+
+def _decode_epoch(raw: object, field: str) -> float:
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise TypeError(f"{field} must be a number")
+    return float(raw)
 
 
 def _encode_caller(caller: CallerFacts) -> dict[str, object]:

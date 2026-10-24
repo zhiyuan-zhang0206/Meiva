@@ -24,6 +24,7 @@ from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest
 from services.supervision.meiva_root.probes import ProbeRegistry
 from services.supervision.meiva_root.stopping import SupervisorConfig
 from services.supervision.meiva_root.supervisor import Supervisor
+from services.supervision.meiva_root.unit_records import OperatorStopFacts
 
 _CHILD = Path(__file__).with_name("child_unit.py")
 
@@ -224,6 +225,9 @@ class _OwnerlessSupervisor:
 
     def unit_failure_facts(self, unit_id: str) -> UnitFailureFacts:
         return UnitFailureFacts(intent_running=True, restart_failed=None)
+
+    def operator_stop_facts(self, unit_id: str) -> OperatorStopFacts | None:
+        return None
 
 
 def _events(records: LogRecords, name: str) -> list[dict[str, object]]:
