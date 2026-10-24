@@ -5,4 +5,4 @@ exports = ["cli.py", "pull_requests", "refresh_test_durations.py", "shard_counts
 "file_shard_runtime.py" = ["file_shard_shadow.py"]
 "pull_requests" = ["collection_tracebacks.py", "test_selector.py"]
 "test_selector.py" = ["test_impact.py"]
-"tests" = ["cli.py", "collection_tracebacks.py", "coverage_gates.py", "dependency_audit.py", "e2e_scope.py", "file_shard_runtime.py", "file_shard_shadow.py", "host_marks_census.py", "pull_requests", "refresh_test_durations.py"]
+"tests" = ["cli.py", "collection_tracebacks.py", "coverage_gates.py", "dependency_audit.py", "e2e_scope.py", "file_shard_runtime.py", "file_shard_shadow.py", "host_marks_census.py", "pull_requests", "refresh_test_durations.py", "test_impact.py", "test_selector.py"]

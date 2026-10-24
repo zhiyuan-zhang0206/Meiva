@@ -112,19 +112,30 @@ def test_scan():
     _assert_selected(root, "base/leaf.py", "tests/consumer/test_scan.py")
 
 
-def test_global_plugins_and_local_conftests_are_real_runtime_dependencies(tmp_path: Path) -> None:
+def test_the_root_conftest_and_its_plugins_are_not_a_per_test_input(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     _write(root, "base/leaf.py")
     _write(root, "tests/plugin.py", "from base import leaf\n")
     _write(root, "conftest.py", 'pytest_plugins = ["tests.plugin"]\n')
+    _write(root, "tests/test_lint_scan.py", "def test_scan(): pass\n")
     _write(root, "base/other/tests/test_other.py", "def test_other(): pass\n")
+
     result = test_selector.select_tests(["base/leaf.py"], repo_root=root)
+
     # meiva:note
-    # Only the global plugin reaches this test, and it reaches every test: the impact is the
-    # whole suite, which is still a SELECTED subset (the merge queue is the full backstop).
-    assert (result.decision, result.reason) == ("SELECTED", "owner-tests")
-    assert result.tests == ("base/other/tests/test_other.py",)
-    (root / "conftest.py").unlink()
+    # Every test loads the root conftest and its plugin, so the plugin's production closure used to
+    # reach all tests. Changing the root conftest or the plugin is a global change (FULL), so the
+    # closure is not also charged to each test; the harness import contract covers what they import.
+    assert test_selector.build_import_reverse_map(root).get("base/leaf.py", set()) == set()
+    assert (result.decision, result.tests) == ("SELECTED", ("tests/test_lint_scan.py",))
+    for global_path in ("conftest.py", "tests/plugin.py"):
+        full = test_selector.select_tests([global_path], repo_root=root)
+        assert (full.decision, full.reason) == ("FULL", f"global-path:{global_path}")
+
+
+def test_a_nested_conftest_is_still_a_runtime_dependency_of_its_tests(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _write(root, "base/leaf.py")
     _write(root, "base/consumer/tests/conftest.py", "from base import leaf\n")
     _write(root, "base/consumer/tests/test_scope.py", "def test_scope(): pass\n")
     _assert_selected(root, "base/leaf.py", "base/consumer/tests/test_scope.py")
