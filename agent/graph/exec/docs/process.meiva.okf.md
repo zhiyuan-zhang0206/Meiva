@@ -25,9 +25,15 @@ is the process's `ParentFacts`.
 The production adapter delegates to the existing subprocess backend. It is a frozen
 value holding the `ParentFacts` of this process (environment, cwd, interpreter,
 checkout, editable roots), which `process.read_parent_facts` reads once when the
-graph is built (`_build.py`). The backend's launch plan, editable installation
-admission, process domain, native signals, output pipe, grace/reap and artifact
-cleanup contracts remain there. A test that must change what the child inherits
+graph is built (`_build.py`). After editable-install admission and writing the
+request envelope, `run_in_subprocess` connects to the per-home `exec-host` service
+over `<home>/run/exec-host.sock` (`_remote.py` / `base.sessions.exec_host`) when
+available, streaming output frames into `StreamingTextIO`, forwarding cancellation
+in-band, and letting `exec-host` own child spawning and process-group supervision;
+when `exec-host.sock` is not listening (such as in standalone unit tests), it falls
+back to spawning `agent.execution.child` directly. Both routes converge on the same
+result-envelope decode, `result_from_payload` mapping, and request/result file
+cleanup. A test that must change what the child inherits
 constructs the adapter with its own `ParentFacts` (a changed copy of
 `read_parent_facts()`) or hands one to the backend; none subclasses the adapter or
 patches the environment. Graph tests can supply scripted
