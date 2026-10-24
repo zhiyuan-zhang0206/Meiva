@@ -9,8 +9,8 @@
 # ## Boot order, and why it is this one
 #
 # 1. **Instance lock and pidfile**, so a second instance cannot race the first for
-#    turns. Holding the lock, the host empties `<home>/run/exec`: the exec children
-#    of the previous host have already killed their own process groups.
+#    turns. Independent exec clients can still own envelopes in `<home>/run/exec`;
+#    the host does not delete their shared directory at startup.
 # 2. **Process-scope boot** — trace export precedes models and skills materialize
 #    once. Plugins load once (issue #170); new extensions require a host restart.
 # 3. **The shared data plane** — workload/control pools, checkpointer and graph.
@@ -577,13 +577,10 @@ async def run(
 
     from agent.graph import build_graph  # pyright: ignore[reportUnknownVariableType]
     from agent.process_boot import (
-        clear_exec_run_dir,
         init_process_scope,
         land_cluster_extensions,
         process_trace_config,
     )
-
-    clear_exec_run_dir(home)
 
     workload_pool, control_pool, bus, db = boot_handles(database(), config)
     liveness = Liveness(_LIVENESS_TIMEOUT_S)

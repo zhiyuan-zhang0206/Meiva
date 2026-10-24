@@ -20,6 +20,22 @@ tags: []
   - Exceeding `timeout_s` triggers `SIGTERM` to the process group followed by the same grace window and `domain.kill_and_reap()`.
 - **Memory guard**: Runs `run_memory_guard_forever` to monitor OS memory pressure and terminate the largest `execute_code` domain when system memory reaches `critical`, writing a notice next to the child's result file.
 
+## Envelope ownership across startup
+
+The caller owns its request and result paths and removes those exact files after
+its process domain closes. The service's singleton lock excludes another
+exec-host daemon; it does not exclude independent clients or direct fallback
+children. Neither exec-host nor agent-host deletes the shared `run/exec` tree on
+startup. A live client's request, later result and unconsumed memory-guard notice
+must survive either daemon starting.
+
+Abrupt caller death can leave residue. The protocol prunes result and atomic
+temporary files older than one hour when the same agent allocates another
+request, retaining request evidence. There is no complete automatic collector
+for requests, memory-guard notices or agents with no subsequent request. Safe
+manual recovery requires establishing that all clients and runs using the home
+have stopped, rather than relying on one daemon's instance lock.
+
 ## Child environment authority
 
 `base/sessions/exec_host/child_environment.py` owns the environment contract for
