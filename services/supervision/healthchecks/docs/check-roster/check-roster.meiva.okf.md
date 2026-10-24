@@ -46,10 +46,12 @@ The roster binds `memory_search_probe` to required URI and embedding-provider
 strings when `build_services()` runs, alongside its service ports and URLs.
 Each call still sends a zero vector of the provider's dimension to `POST /search`
 with a three-second timeout; it does not construct configuration or reload the
-unit's environment. HTTP/JSON decoding failures and response errors that raise
-`TypeError` report down; an unknown provider remains a configuration error before
-network I/O. The existing verdict checks for `hits` membership without validating
-the JSON container type; tightening that response contract is separate work.
+unit's environment. HTTP/JSON decoding failures report down; an unknown provider
+remains a configuration error before network I/O. The response must be a JSON
+object with a `hits` member. A string or array containing `hits` is down, as are
+null and number responses; these report `without an object payload` rather than
+a generic protocol `TypeError`. The presence check does not constrain the value
+of the object's `hits` member.
 
 The [[services/supervision/meiva_root_glue/docs/diagnostics.meiva.okf.md|diagnostic roster]] documents
 platform/capability gates, per-check budgets, authenticated data-plane protocols, and
