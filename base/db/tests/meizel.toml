@@ -1,4 +1,4 @@
-exports = ["fakes.py"]
+exports = ["fakes.py", "lost_ack.py"]
 
 [uses]
 "test_boot_authority.py" = ["_boot_authority_child.py"]
