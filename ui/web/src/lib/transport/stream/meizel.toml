@@ -1,0 +1,23 @@
+exports = ["sse-plan.ts", "sse-share.ts", "stream-hub.ts", "tests"]
+
+[uses]
+"share-plan.test.ts" = ["share-plan.ts"]
+"share-plan.ts" = ["sse-plan.ts"]
+"sse-plan.test.ts" = ["sse-plan.ts"]
+"sse-share.test.ts" = ["sse-plan.ts", "sse-share.ts", "tests"]
+"sse-share.ts" = ["share-plan.ts", "sse-plan.ts"]
+"stream-hub.test.ts" = ["stream-hub.ts", "tests"]
+"stream-hub.ts" = ["sse-plan.ts", "sse-share.ts"]
+
+[purity]
+"." = "strict-to-be"
+"share-plan.ts" = "strict"
+"sse-plan.ts" = "strict"
+"stream-hub.ts" = "strict"
+
+[debt.impure-call]
+"sse-share.ts#<module>#clearInterval" = 1
+"sse-share.ts#<module>#clearTimeout" = 1
+"sse-share.ts#<module>#queueMicrotask" = 1
+"sse-share.ts#<module>#setInterval" = 1
+"sse-share.ts#<module>#setTimeout" = 1

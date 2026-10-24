@@ -9,7 +9,11 @@ import type { UseTimelineTestContext } from "./use-timeline-context";
 
 export function registerUseTimelineSwitchTests(ctx: UseTimelineTestContext): void {
   const {
-    api,
+    timeline,
+    snapshot,
+    timelineReads,
+    snapshotReads,
+    resolves,
     pushEvent,
     pushConnectionEvent,
     snapshotItem,
@@ -22,9 +26,10 @@ export function registerUseTimelineSwitchTests(ctx: UseTimelineTestContext): voi
 describe("useTimeline agentId switch", () => {
   it("agentId changes → items cleared immediately → fetches new snapshot", async () => {
     const showError = vi.fn();
-    vi.mocked(api.getTimeline)
-      .mockResolvedValueOnce(tlResp([snapshotItem({ payload: "thread-A" })]))
-      .mockResolvedValueOnce(tlResp([snapshotItem({ payload: "thread-B" })]));
+    timeline.queue(
+      resolves(tlResp([snapshotItem({ payload: "thread-A" })])),
+      resolves(tlResp([snapshotItem({ payload: "thread-B" })])),
+    );
 
     const { result, rerender, unmount } = renderHook(
       ({ tid }: { tid: number | null }) => useTimeline(tid, showError),
@@ -36,28 +41,29 @@ describe("useTimeline agentId switch", () => {
     rerender({ tid: 2 });
 
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("thread-B"));
-    expect(api.getTimeline).toHaveBeenLastCalledWith(2, expect.objectContaining({ signal: expect.any(AbortSignal) as AbortSignal }));
+    expect(timelineReads.at(-1)).toMatchObject({ agentId: 2, signal: expect.any(AbortSignal) as AbortSignal });
     unmount();
   });
 
   it("refetch within the same agent (a NEW response object) still calls reloadSnapshot to update items", async () => {
 
     const showError = vi.fn();
-    vi.mocked(api.getTimeline)
-      .mockResolvedValueOnce(tlResp([snapshotItem({ payload: "v1" })]))
-      .mockResolvedValueOnce(tlResp([snapshotItem({ payload: "v2" })]));
+    timeline.queue(
+      resolves(tlResp([snapshotItem({ payload: "v1" })])),
+      resolves(tlResp([snapshotItem({ payload: "v2" })])),
+    );
 
     const { result, unmount } = renderHook(() => useTimeline(42, showError), { wrapper });
 
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("v1"));
-    expect(api.getTimeline).toHaveBeenCalledTimes(1);
+    expect(timelineReads).toHaveLength(1);
 
     await act(async () => {
       await ctx.getQueryClient().invalidateQueries({ queryKey: ["timeline", 42] });
     });
 
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("v2"));
-    expect(api.getTimeline).toHaveBeenCalledTimes(2);
+    expect(timelineReads).toHaveLength(2);
 
     unmount();
   });
@@ -65,9 +71,10 @@ describe("useTimeline agentId switch", () => {
   it("on agent switch, thread guard prevents wrong-thread events from contaminating the new thread", async () => {
 
     const showError = vi.fn();
-    vi.mocked(api.getTimeline)
-      .mockResolvedValueOnce(tlResp([]))
-      .mockResolvedValueOnce(tlResp([snapshotItem({ payload: "thread-B fresh" })]));
+    timeline.queue(
+      resolves(tlResp([])),
+      resolves(tlResp([snapshotItem({ payload: "thread-B fresh" })])),
+    );
 
     const { result, rerender, unmount } = renderHook(
       ({ tid }: { tid: number | null }) => useTimeline(tid, showError),
@@ -96,55 +103,53 @@ describe("useTimeline agentId switch", () => {
       tlResp([snapshotItem({ item_id: "1.0", payload: "stale cached" })]),
     );
 
-    vi.mocked(api.getConversationSnapshot).mockReset().mockResolvedValue(
+    snapshot.always(resolves(
       composedSnapshot(tlResp([
         snapshotItem({ item_id: "1.0", payload: "fresh" }),
         snapshotItem({ item_id: "2.0", payload: "happened while away" }),
       ])),
-    );
+    ));
 
     const { result, unmount } = renderHook(() => useTimeline(7, showError), { wrapper });
 
     await waitFor(() =>
       expect(result.current.items.map((i) => i.payload)).toEqual(["stale cached"]),
     );
-    expect(api.getTimeline).not.toHaveBeenCalled();
+    expect(timelineReads).toHaveLength(0);
 
     pushConnectionEvent({ type: "open" });
     await waitFor(() =>
       expect(result.current.items.map((i) => i.payload)).toEqual(["fresh", "happened while away"]),
     );
-    expect(api.getConversationSnapshot).toHaveBeenCalledWith(7, expect.any(AbortSignal) as AbortSignal);
+    expect(snapshotReads).toContainEqual({ agentId: 7, signal: expect.any(AbortSignal) as AbortSignal });
     unmount();
   });
 
   it("compact_done for a NON-active thread does not refetch the active thread (targets ev.agent_id)", async () => {
 
     const showError = vi.fn();
-    vi.mocked(api.getTimeline).mockReset().mockResolvedValue(tlResp([]));
     renderHook(() => useTimeline(42, showError), { wrapper });
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(timelineReads).toHaveLength(1));
 
     pushEvent({ role: "compact_done", agent_id: 99 });
 
     await ctx.delay(0);
-    expect(api.getTimeline).toHaveBeenCalledTimes(1);
+    expect(timelineReads).toHaveLength(1);
   });
 
   it("compact_done defers the refetch until a nonempty timeline snapshot arrives", async () => {
 
     const showError = vi.fn();
-    vi.mocked(api.getTimeline).mockReset().mockResolvedValue(tlResp([]));
     renderHook(() => useTimeline(42, showError), { wrapper });
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(timelineReads).toHaveLength(1));
 
     pushEvent({ role: "compact_done", agent_id: 42 });
     await ctx.delay(0);
-    expect(api.getTimeline).toHaveBeenCalledTimes(1);
+    expect(timelineReads).toHaveLength(1);
 
     pushEvent({ role: "timeline_snapshot", agent_id: 42, msg_count: 0, items: [] });
     await ctx.delay(0);
-    expect(api.getTimeline).toHaveBeenCalledTimes(1);
+    expect(timelineReads).toHaveLength(1);
 
     pushEvent({
       role: "timeline_snapshot",
@@ -152,7 +157,7 @@ describe("useTimeline agentId switch", () => {
       msg_count: 2,
       items: [snapshotItem({ item_id: "1.0", payload: "[summary]" })],
     });
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(timelineReads).toHaveLength(2));
 
     pushEvent({
       role: "timeline_snapshot",
@@ -161,7 +166,7 @@ describe("useTimeline agentId switch", () => {
       items: [snapshotItem({ item_id: "1.0", payload: "[summary]" })],
     });
     await ctx.delay(0);
-    expect(api.getTimeline).toHaveBeenCalledTimes(2);
+    expect(timelineReads).toHaveLength(2);
   });
 
   it("after a compact reset, re-attaches the previous session (default retention = 1)", async () => {
@@ -195,9 +200,7 @@ describe("useTimeline agentId switch", () => {
       }
       return tlResp(postWindow(), true);
     };
-    vi.mocked(api.getTimeline).mockImplementation((_id: number, opts?: { before?: string; limit?: number }) =>
-      Promise.resolve(pageFor(opts)),
-    );
+    timeline.always((_id, opts) => Promise.resolve(pageFor(opts)));
 
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(result.current.items).toHaveLength(1));
@@ -213,7 +216,7 @@ describe("useTimeline agentId switch", () => {
     });
 
     await waitFor(() => {
-      expect(api.getTimeline).toHaveBeenCalledWith(42, { before: "2.0", limit: 50, signal: expect.any(AbortSignal) as AbortSignal });
+      expect(timelineReads).toContainEqual({ agentId: 42, before: "2.0", limit: 50, signal: expect.any(AbortSignal) as AbortSignal });
     });
     await waitFor(() => {
       expect(result.current.items.map((i) => i.item_id)).toEqual([
@@ -259,9 +262,7 @@ describe("useTimeline agentId switch", () => {
         true,
       );
     };
-    vi.mocked(api.getTimeline).mockImplementation((_id: number, opts?: { before?: string; limit?: number }) =>
-      Promise.resolve(pageFor(opts)),
-    );
+    timeline.always((_id, opts) => Promise.resolve(pageFor(opts)));
 
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(result.current.items).toHaveLength(1));
@@ -279,7 +280,7 @@ describe("useTimeline agentId switch", () => {
     });
 
     await waitFor(() => {
-      expect(api.getTimeline).toHaveBeenCalledWith(42, { before: "1.0", limit: 50, signal: expect.any(AbortSignal) as AbortSignal });
+      expect(timelineReads).toContainEqual({ agentId: 42, before: "1.0", limit: 50, signal: expect.any(AbortSignal) as AbortSignal });
     });
     await waitFor(() => {
       expect(result.current.items.map((i) => i.item_id)).toEqual([

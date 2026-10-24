@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { AlertsBadge } from "@/components/notifications/alerts-badge";
 import type { AlertsResponse } from "@/lib/contracts/types";
+import { apiWrapper, fakeApi } from "@/lib/transport/tests/api/fake-api";
 
 afterEach(cleanup);
 
@@ -24,7 +25,9 @@ function wrap(ui: React.ReactElement, seed: AlertsResponse | null) {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   if (seed) qc.setQueryData(["alerts"], seed);
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>, {
+    wrapper: apiWrapper(fakeApi({})),
+  });
 }
 
 describe("AlertsBadge", () => {

@@ -119,6 +119,14 @@ afterEach(() => {
   );
 });
 
+// meiva:note
+// The guards below replace the platform's fetch and XMLHttpRequest. A test that
+// owns a real exchange with a local server (src/lib/transport/tests/network) takes
+// the originals from this frozen record and hands them to its transport explicitly.
+Object.defineProperty(globalThis, Symbol.for("meiva.test.realNetwork"), {
+  value: Object.freeze({ fetch: globalThis.fetch, XMLHttpRequest: globalThis.XMLHttpRequest }),
+});
+
 globalThis.fetch = (input: RequestInfo | URL) => {
   const target =
     typeof input === "string" ? input : input instanceof URL ? input.href : input.url;

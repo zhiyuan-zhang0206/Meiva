@@ -31,7 +31,8 @@ import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 
-import { api } from "../transport/api";
+import type { Api } from "../transport/api";
+import { useApi } from "../transport/transport-context";
 import { useDocumentVisible } from "../layout/use-document-visible";
 
 /** Delay before the queued run fires: long enough for the same-tick request
@@ -67,7 +68,7 @@ export interface AgentReconcile {
   abort(agentId: number): void;
 }
 
-export function createAgentReconcile(client: QueryClient): AgentReconcile {
+export function createAgentReconcile(client: QueryClient, api: Pick<Api, "getConversationSnapshot">): AgentReconcile {
   const entries = new Map<number, Reconcile>();
   const watchers = new Set<() => void>();
   const publish = () => { for (const listener of watchers) listener(); };
@@ -201,10 +202,10 @@ export function createAgentReconcile(client: QueryClient): AgentReconcile {
 // is what lets one "open" burst collapse into one composed read.
 const coordinators = new WeakMap<QueryClient, AgentReconcile>();
 
-function coordinatorFor(client: QueryClient): AgentReconcile {
+function coordinatorFor(client: QueryClient, api: Pick<Api, "getConversationSnapshot">): AgentReconcile {
   let coordinator = coordinators.get(client);
   if (coordinator === undefined) {
-    coordinator = createAgentReconcile(client);
+    coordinator = createAgentReconcile(client, api);
     coordinators.set(client, coordinator);
   }
   return coordinator;
@@ -217,26 +218,27 @@ export function useAgentReconcile(agentId: number | null): {
   abortReconcile: () => void;
   isReconciling: boolean;
 } {
+  const api = useApi();
   const client = useQueryClient();
   const isVisible = useDocumentVisible();
-  const coordinator = coordinatorFor(client);
+  const coordinator = coordinatorFor(client, api);
   const refreshing = useCallback(() => coordinator.isRefreshing(agentId), [coordinator, agentId]);
   const isReconciling = useSyncExternalStore(coordinator.watch, refreshing, () => false);
 
   useEffect(() => {
     if (agentId === null || !isVisible) return;
-    return coordinatorFor(client).subscribe(agentId);
-  }, [client, agentId, isVisible]);
+    return coordinator.subscribe(agentId);
+  }, [coordinator, agentId, isVisible]);
 
   const requestReconcile = useCallback(() => {
     if (agentId === null) return;
-    coordinatorFor(client).request(agentId);
-  }, [client, agentId]);
+    coordinator.request(agentId);
+  }, [coordinator, agentId]);
 
   const abortReconcile = useCallback(() => {
     if (agentId === null) return;
-    coordinatorFor(client).abort(agentId);
-  }, [client, agentId]);
+    coordinator.abort(agentId);
+  }, [coordinator, agentId]);
 
   return { requestReconcile, abortReconcile, isReconciling };
 }

@@ -1,30 +1,32 @@
 import type { ReactNode } from "react";
-import type { Mock, MockInstance } from "vitest";
 
-export interface MockEventSourceLike {
+import type { AuthResult } from "../../stream/tests/scripted-auth";
+
+export interface StreamSourceLike {
   url: string;
-  init?: EventSourceInit;
+  init: EventSourceInit;
   readyState: number;
-  fireOpen(): void;
-  fireMessage(data: unknown): void;
-  fireErrorWithReadyState(state: number): void;
+  open(): void;
+  frame(data: unknown): void;
+  error(state: number): void;
 }
 
 export interface EventStreamTestContext {
-  checkAuthMock: Mock<() => Promise<{ authenticated: boolean }>>;
-  MockEventSource: {
+  auth: {
+    always(result: AuthResult): void;
+    once(result: AuthResult): void;
+    onceDeferred(): { release: (result: AuthResult) => void };
+    probes(): number;
+  };
+  READY: {
     readonly CONNECTING: 0;
     readonly OPEN: 1;
     readonly CLOSED: 2;
   };
-  getLastInstance: () => MockEventSourceLike | null;
-  getInstances: () => MockEventSourceLike[];
+  getLastInstance: () => StreamSourceLike | null;
+  getInstances: () => StreamSourceLike[];
   resetInstances: () => void;
-  deferredAuthResult: () => {
-    promise: Promise<{ authenticated: boolean }>;
-    resolve: (result: { authenticated: boolean }) => void;
-  };
-  expectInstance: () => MockEventSourceLike;
+  expectInstance: () => StreamSourceLike;
   waitForInstance: () => Promise<void>;
   withProvider: () => ({ children }: { children: ReactNode }) => ReactNode;
   withAgentProvider: () => ({ children }: { children: ReactNode }) => ReactNode;
@@ -32,5 +34,5 @@ export interface EventStreamTestContext {
   getStoreState: () => { reconnectNonce: number; activeId: number | null };
   setStoreState: (partial: { reconnectNonce?: number; activeId?: number | null }) => void;
   setDocumentVisibility: (state: DocumentVisibilityState) => void;
-  spyConsoleError: () => MockInstance;
+  reportedErrors: () => { message: string; cause: unknown }[];
 }

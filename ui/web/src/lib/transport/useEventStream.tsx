@@ -8,10 +8,13 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 
-import { API_BASE, api } from "./api";
+import { trackTransport } from "./api-base";
 import { useFoldOwner } from "../fold/owner";
-import { createSseLifecycle, notifySessionInvalid, sseRuntime } from "./sse-lifecycle";
-import { reportSseTransportMode, sseTransport, type SseChannel } from "./sse-share";
+import { createSseTimers, reopenIfClosed, sseRuntime } from "./sse-lifecycle";
+import { classifySystemFrame, nextParseFailures, selectedAgentEvents } from "./sse-frames";
+import { readyStateKind, type SseChannel } from "./stream/sse-plan";
+import { useStreamHub } from "./transport-context";
+import type { EventSourceHandle } from "./transport";
 import type { ConnectionEvent, SystemEvent } from "../contracts/types";
 
 export type { ConnectionEvent } from "../contracts/types";
@@ -58,146 +61,102 @@ interface EventStreamContextValue {
   ) => () => void;
 }
 
-/** Fan one shared or legacy SSE channel into the unchanged subscriber API.
- * `onOpenChange` drives the global Provider's e2e-ready marker. */
+// meiva:note
+// Fans one shared or legacy SSE channel into the unchanged subscriber API.
+// `onOpenChange` drives the global Provider's e2e-ready marker. A cluster-update
+// reconnect bump re-runs the effect; the leader replaces its source and the open
+// that follows reconciles missed events. Unauthenticated or hidden pages keep the
+// connection closed, because EventSource cannot send an Authorization header and
+// an unauthenticated GET would only feed a retry storm. A legacy source that the
+// server closes is probed once: an invalid session stops, anything else retries
+// with capped exponential backoff.
+// meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md
 function useSseConnection(
-  url: string | null,
+  path: string | null,
   channel: SseChannel,
   activeId: number | null,
   isVisible: boolean,
   subscribersRef: React.RefObject<Set<Subscriber>>,
   onOpenChange: (open: boolean) => void,
 ): void {
+  const hub = useStreamHub();
   const authStatus = sseRuntime.useAuthStatus();
-  // A cluster-update reconnect bump re-runs this effect; the leader replaces
-  // its source and the subsequent open reconciles missed events.
   const reconnectNonce = sseRuntime.useStore((s) => s.reconnectNonce);
   const bumpReconnect = sseRuntime.useStore((s) => s.bumpReconnect);
   // Legacy-only CLOSED retry, separate from the global reconnect lever.
   const [retryNonce, setRetryNonce] = useState(0);
   const failCountRef = useRef(0);
   const lastReconnectNonce = useRef(reconnectNonce);
-  const transport = sseTransport(sseRuntime.useMergedChannels());
+  const transport = hub.transportFor(sseRuntime.useMergedChannels());
 
   useEffect(() => {
-    if (authStatus !== "authenticated" || !isVisible || (!transport && url === null)) {
-      // Not authenticated: keep the connection closed. EventSource cannot set an
-      // Authorization header, so an unauthenticated SSE GET 401s at the gateway —
-      // opening it would just feed the retry storm (Task #1635). When auth flips
-      // to "authenticated" (login), this effect re-runs and opens fresh.
+    if (authStatus !== "authenticated" || !isVisible || (!transport && path === null)) {
       lastReconnectNonce.current = reconnectNonce;
       onOpenChange(false);
       return;
     }
-    reportSseTransportMode();
-    // EventSource needs withCredentials for the cross-origin session cookie.
-    // Consecutive parse failures within one connection: the backend
-    // validates every frame (pydantic rejects raw control characters), so
-    // repeated parse errors mean the transport is corrupting frames — count
-    // and force a reconnect at 3 (Task #951).
+    const mode = hub.modeEventOnce();
+    if (mode !== null) trackTransport("sse-transport", mode);
+    // meiva:note
+    // Consecutive parse failures within one connection: the backend validates
+    // every frame, so repeated parse errors mean the transport is corrupting
+    // frames and the third forces a backoff reopen.
     let parseFailures = 0;
-    let es: EventSource | null = null;
+    let es: EventSourceHandle | null = null;
     if (!transport) {
-      if (url === null) throw new Error("legacy SSE URL missing");
-      es = new EventSource(url, { withCredentials: true });
+      if (path === null) throw new Error("legacy SSE path missing");
+      es = hub.openLegacy(path);
     }
 
-    const lifecycle = createSseLifecycle({
+    const timers = createSseTimers({
       failCount: failCountRef,
       watchdogMs: WATCHDOG_MS,
       reconnectBaseMs: RECONNECT_BASE_MS,
       reconnectMaxMs: RECONNECT_MAX_MS,
-      onWatchdog: () => {
-        for (const sub of subscribersRef.current) sub.conn({ type: "reconnecting" });
-        if (transport) transport.restart(channel);
-        else bumpReconnect();
-      },
-      onRetry: () => setRetryNonce((n) => n + 1),
-      onClosed: () => {
-        for (const sub of subscribersRef.current) sub.conn({ type: "closed" });
-      },
-      onConnecting: () => {
-        for (const sub of subscribersRef.current) sub.conn({ type: "reconnecting" });
-      },
-      checkAuth: () => api.checkAuth(),
-      onInvalidSession: notifySessionInvalid,
+    });
+    const notifyAll = (event: ConnectionEvent) => {
+      for (const sub of subscribersRef.current) sub.conn(event);
+    };
+    const reopenLegacy = () => setRetryNonce((n) => n + 1);
+    const armWatchdog = () => timers.armWatchdog(() => {
+      notifyAll({ type: "reconnecting" });
+      if (transport) transport.restart(channel);
+      else bumpReconnect();
     });
 
     const handleOpen = () => {
-      if (lifecycle.isDisposed()) return;
-      lifecycle.resetBackoff();
+      if (timers.isDisposed()) return;
+      timers.resetBackoff();
       onOpenChange(true);
-      lifecycle.armWatchdog();
-      for (const sub of subscribersRef.current) sub.conn({ type: "open" });
+      armWatchdog();
+      notifyAll({ type: "open" });
     };
     const handleFrame = (raw: string) => {
-      if (lifecycle.isDisposed()) return;
-      // Any frame = the connection is alive — reset the watchdog before
-      // anything else (heartbeat counts too).
-      lifecycle.armWatchdog();
-      // e.data is spec'd as string, but browser implementations (Blob
-      // mode / unusual toString) sometimes drift; defensive cast
-      // prevents a String() throw from drowning the catch.
-
-      // Parse here; subscriber exceptions must not count as corrupt frames.
-      let events: SystemEvent[] | null;
-      try {
-        const parsed = JSON.parse(raw) as unknown;
-        // Heartbeat is an ad-hoc liveness frame (`{"role":"heartbeat"}`),
-        // not part of the SystemEvent union — check the role string before
-        // casting, and never fan it out as a business event. The watchdog
-        // reset above already consumed its only meaning (liveness).
-        if (
-          typeof parsed === "object" &&
-          parsed !== null &&
-          !Array.isArray(parsed) &&
-          (parsed as { role?: unknown }).role === "heartbeat"
-        ) {
+      if (timers.isDisposed()) return;
+      armWatchdog();
+      const frame = classifySystemFrame(raw);
+      if (frame.kind === "heartbeat") return;
+      if (frame.kind === "malformed") {
+        notifyAll({ type: "parse-failed", raw, error: frame.error });
+        const failures = nextParseFailures(parseFailures);
+        parseFailures = failures.failures;
+        if (!failures.reopen) return;
+        if (transport) {
+          if (transport.isLeader()) transport.restart(channel, true);
           return;
         }
-        if (Array.isArray(parsed)) {
-          // Batched format from /api/system/all: `data: [{...}, {...}]`.
-          // Drop non-object elements (corrupt batch members) instead of
-          // as-casting them into SystemEvents.
-          const list: SystemEvent[] = [];
-          for (const item of parsed) {
-            if (typeof item !== "object" || item === null) continue;
-            if ((item as { role?: unknown }).role === "heartbeat") continue;
-            list.push(item as SystemEvent);
-          }
-          events = list;
-        } else {
-          events = [parsed as SystemEvent];
-        }
-      } catch (err) {
-        for (const sub of subscribersRef.current) {
-          sub.conn({ type: "parse-failed", raw, error: err });
-        }
-        // Three corrupt frames force a backoff reopen (Task #951).
-        parseFailures += 1;
-        if (parseFailures >= 3) {
-          parseFailures = 0;
-          if (transport) {
-            if (transport.isLeader()) transport.restart(channel, true);
-            return;
-          }
-          if (es === null) throw new Error("legacy EventSource unavailable", { cause: err });
-          es.close();
-          // Capped backoff, same as a dead-end CLOSED — an immediate reopen
-          // against a source that keeps sending corrupt frames reconnects
-          // into the same garbage in a tight loop (Task #1051).
-          lifecycle.scheduleReopen();
-        }
+        if (es === null) throw new Error("legacy EventSource unavailable", { cause: frame.error });
+        es.close();
+        timers.scheduleReopen(reopenLegacy);
         return;
       }
 
       // The leader relays the union detail feed. Preserve each tab's old
       // selected-agent stream contract before any subscriber sees a frame.
-      if (transport && channel === "systemAll") {
-        events = activeId === null ? [] : events.filter((event) =>
-          event.agent_id === 0 || event.agent_id === activeId);
-        if (events.length === 0) return;
-      }
+      const events = transport && channel === "systemAll"
+        ? selectedAgentEvents(frame.events, activeId)
+        : frame.events;
+      if (transport && channel === "systemAll" && events.length === 0) return;
 
       // Isolate subscriber failures; batch subscribers receive one call per frame.
       for (const sub of subscribersRef.current) {
@@ -210,7 +169,7 @@ function useSseConnection(
             }
           }
         } catch (subErr) {
-          console.error("[useSseConnection] subscriber threw while folding an event", subErr);
+          hub.transport.diagnostics.error("[useSseConnection] subscriber threw while folding an event", subErr);
         }
       }
     };
@@ -219,41 +178,49 @@ function useSseConnection(
         onFrame: handleFrame,
         onGap: () => handleOpen(),
         onState: (state) => {
-          if (lifecycle.isDisposed()) return;
+          if (timers.isDisposed()) return;
           if (state === "open") {
             handleOpen();
           } else {
             if (state === "closed") {
-              lifecycle.clearWatchdog();
+              timers.clearWatchdog();
             }
-            for (const sub of subscribersRef.current) sub.conn({ type: state });
+            notifyAll({ type: state });
           }
         },
       }, activeId);
       if (lastReconnectNonce.current !== reconnectNonce) transport.restart(channel);
       lastReconnectNonce.current = reconnectNonce;
       return () => {
-        lifecycle.dispose();
+        timers.dispose();
         unsubscribe();
       };
     }
 
     if (es === null) throw new Error("legacy EventSource unavailable");
-    es.onopen = handleOpen;
-    es.onmessage = (event) => handleFrame(
+    const source = es;
+    source.onopen = handleOpen;
+    source.onmessage = (event) => handleFrame(
       typeof event.data === "string" ? event.data : "[non-string SSE payload]",
     );
-    es.onerror = () => lifecycle.handleLegacyError(es);
+    source.onerror = () => {
+      if (timers.isDisposed()) return;
+      const kind = readyStateKind(source.readyState);
+      if (kind === "closed") notifyAll({ type: "closed" });
+      else if (kind === "connecting") notifyAll({ type: "reconnecting" });
+      reopenIfClosed(source, hub.session, timers, reopenLegacy);
+    };
 
     return () => {
-      lifecycle.dispose();
-      es.close();
+      timers.dispose();
+      source.close();
     };
-    // url + authStatus + reconnectNonce + retryNonce are the levers (retryNonce is
+    // meiva:note
+    // path + authStatus + reconnectNonce + retryNonce are the levers (retryNonce is
     // the local connect-failure backoff). subscribersRef / onOpenChange /
     // bumpReconnect are stable identities included only to satisfy the lint.
-  }, [url, channel, activeId, isVisible, transport, authStatus, reconnectNonce, retryNonce,
-    bumpReconnect, subscribersRef, onOpenChange]);
+  }, [path, channel, activeId, isVisible, transport, authStatus, reconnectNonce, retryNonce,
+    bumpReconnect, subscribersRef, onOpenChange, hub]);
 }
 
 /** Mint a stable `subscribe(onSystem, onConn)` over a subscriber Set. */
@@ -317,7 +284,7 @@ export function EventStreamProvider({
   const isVisible = sseRuntime.useDocumentVisible();
 
   useSseConnection(
-    isVisible ? `${API_BASE}/api/system` : null,
+    isVisible ? "/api/system" : null,
     "system",
     null,
     isVisible,
@@ -389,10 +356,10 @@ export function AgentEventStreamProvider({ children }: { children: React.ReactNo
   const subscribersRef = useRef<Set<Subscriber>>(new Set());
   const activeId = sseRuntime.useStore((s) => s.activeId);
   const isVisible = sseRuntime.useDocumentVisible();
-  const url = isVisible && activeId !== null
-    ? `${API_BASE}/api/system/all?agents=${activeId}`
+  const path = isVisible && activeId !== null
+    ? `/api/system/all?agents=${activeId}`
     : null;
-  useSseConnection(url, "systemAll", activeId, isVisible, subscribersRef, NOOP_OPEN_CHANGE);
+  useSseConnection(path, "systemAll", activeId, isVisible, subscribersRef, NOOP_OPEN_CHANGE);
   const subscribe = useSubscribe(subscribersRef);
 
   return (

@@ -1,14 +1,14 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { SystemEvent } from "../../contracts/types";
-import type { ConnectionEvent } from "../useEventStream";
-import { useAgentEventStream } from "../useEventStream";
+import type { SystemEvent } from "../../../contracts/types";
+import type { ConnectionEvent } from "../../useEventStream";
+import { useAgentEventStream } from "../../useEventStream";
 import type { EventStreamTestContext } from "./use-event-stream-context";
 
 export function registerAgentEventStreamTests(ctx: EventStreamTestContext): void {
   const {
-    MockEventSource,
+    READY,
     expectInstance,
     waitForInstance,
     useAuth,
@@ -44,8 +44,8 @@ describe("AgentEventStreamProvider selected detail stream", () => {
     await waitForInstance();
     const old = expectInstance();
     act(() => ctx.setStoreState({ activeId: null }));
-    expect(old.readyState).toBe(MockEventSource.CLOSED);
-    act(() => old.fireMessage(JSON.stringify({ role: "chat_delta", agent_id: 1, item_id: "1.0", content: "late" })));
+    expect(old.readyState).toBe(READY.CLOSED);
+    act(() => old.frame(JSON.stringify({ role: "chat_delta", agent_id: 1, item_id: "1.0", content: "late" })));
     expect(onSystem).not.toHaveBeenCalled();
   });
 
@@ -54,10 +54,10 @@ describe("AgentEventStreamProvider selected detail stream", () => {
     const { unmount } = renderHook(() => useAgentEventStream(vi.fn(), vi.fn()), { wrapper: withAgentProvider() });
     await waitForInstance();
     for (let id = 2; id <= 100; id += 1) act(() => ctx.setStoreState({ activeId: id }));
-    expect(ctx.getInstances().filter((stream) => stream.readyState !== MockEventSource.CLOSED)).toHaveLength(1);
+    expect(ctx.getInstances().filter((stream) => stream.readyState !== READY.CLOSED)).toHaveLength(1);
     expect(expectInstance().url).toBe("/api/system/all?agents=100");
     unmount();
-    expect(ctx.getInstances().every((stream) => stream.readyState === MockEventSource.CLOSED)).toBe(true);
+    expect(ctx.getInstances().every((stream) => stream.readyState === READY.CLOSED)).toBe(true);
   });
 
   it("agent switch → closes and reopens with the new filter", async () => {
@@ -71,7 +71,7 @@ describe("AgentEventStreamProvider selected detail stream", () => {
 
     act(() => ctx.setStoreState({ activeId: 2 }));
     await waitFor(() => expect(expectInstance()).not.toBe(first));
-    expect(first.readyState).toBe(MockEventSource.CLOSED);
+    expect(first.readyState).toBe(READY.CLOSED);
     expect(expectInstance().url).toBe("/api/system/all?agents=2");
   });
 
@@ -90,7 +90,7 @@ describe("AgentEventStreamProvider selected detail stream", () => {
         ctx.setDocumentVisibility("hidden");
       });
 
-      expect(first.readyState).toBe(MockEventSource.CLOSED);
+      expect(first.readyState).toBe(READY.CLOSED);
       onConn.mockClear();
       act(() => {
         vi.advanceTimersByTime(7_000);
@@ -114,13 +114,9 @@ describe("AgentEventStreamProvider selected detail stream", () => {
   });
 
   it("calling useAgentEventStream outside its Provider → throws (fail-fast)", () => {
-    const errSpy = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined );
     expect(() => renderHook(() => useAgentEventStream(vi.fn(), vi.fn()))).toThrow(
       /useAgentEventStream/,
     );
-    errSpy.mockRestore();
   });
 
   it("batched array frame → fans out each element as individual SystemEvent to subscribers", async () => {
@@ -131,9 +127,9 @@ describe("AgentEventStreamProvider selected detail stream", () => {
     });
     await waitForInstance();
     act(() => {
-      expectInstance().fireOpen();
+      expectInstance().open();
 
-      expectInstance().fireMessage(
+      expectInstance().frame(
         JSON.stringify([
           { role: "chat_delta", agent_id: 7, item_id: "1.0", content: "hello" },
           { role: "code_delta", agent_id: 7, item_id: "1.0", content: "print" },
@@ -177,14 +173,15 @@ describe("AgentEventStreamProvider selected detail stream", () => {
       wrapper: withAgentProvider(),
     });
     await waitForInstance();
-    const errSpy = ctx.spyConsoleError();
     act(() => {
-      expectInstance().fireMessage(
+      expectInstance().frame(
         JSON.stringify({ role: "chat_delta", agent_id: 7, item_id: "1.0", content: "hi" }),
       );
     });
-    errSpy.mockRestore();
 
+    expect(ctx.reportedErrors().map((report) => report.message)).toEqual([
+      "[useSseConnection] subscriber threw while folding an event",
+    ]);
     expect(onSystem).toHaveBeenCalledTimes(1);
 
     expect(onSystemBoom).toHaveBeenCalledTimes(1);
@@ -198,7 +195,7 @@ describe("AgentEventStreamProvider selected detail stream", () => {
     });
     await waitForInstance();
     act(() => {
-      expectInstance().fireMessage(
+      expectInstance().frame(
         JSON.stringify([
           "corrupt-string-element",
           42,
@@ -221,8 +218,8 @@ describe("AgentEventStreamProvider selected detail stream", () => {
     });
     await waitForInstance();
     act(() => {
-      expectInstance().fireOpen();
-      expectInstance().fireMessage(
+      expectInstance().open();
+      expectInstance().frame(
         JSON.stringify([
           { role: "chat_delta", agent_id: 7, item_id: "1.0", content: "a" },
           { role: "heartbeat" },
@@ -255,8 +252,8 @@ describe("AgentEventStreamProvider selected detail stream", () => {
     );
     await waitForInstance();
     act(() => {
-      expectInstance().fireOpen();
-      expectInstance().fireMessage(
+      expectInstance().open();
+      expectInstance().frame(
         JSON.stringify([
           { role: "chat_delta", agent_id: 7, item_id: "1.0", content: "a" },
           { role: "code_delta", agent_id: 7, item_id: "2.0", content: "b" },
@@ -287,17 +284,18 @@ describe("AgentEventStreamProvider selected detail stream", () => {
       wrapper: withAgentProvider(),
     });
     await waitForInstance();
-    const errSpy = ctx.spyConsoleError();
     act(() => {
-      expectInstance().fireMessage(
+      expectInstance().frame(
         JSON.stringify([
           { role: "chat_delta", agent_id: 7, item_id: "1.0", content: "a" },
           { role: "chat_delta", agent_id: 7, item_id: "1.0", content: "b" },
         ]),
       );
     });
-    errSpy.mockRestore();
 
+    expect(ctx.reportedErrors().map((report) => report.message)).toEqual([
+      "[useSseConnection] subscriber threw while folding an event",
+    ]);
     expect(onSystem).toHaveBeenCalledTimes(2);
 
     expect(onBatchBoom).toHaveBeenCalledTimes(1);
@@ -312,8 +310,8 @@ describe("AgentEventStreamProvider selected detail stream", () => {
     );
     await waitForInstance();
     act(() => {
-      expectInstance().fireOpen();
-      expectInstance().fireMessage(
+      expectInstance().open();
+      expectInstance().frame(
         JSON.stringify({ role: "llm_done", agent_id: 7 }),
       );
     });

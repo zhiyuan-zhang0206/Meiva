@@ -1,18 +1,3 @@
-// useEventStream unit tests — mock global EventSource and verify
-// readyState tri-state dispatch + onmessage parse path directly. This
-// is the only load-bearing new logic from PR #18 (silent-failure-hunter
-// F7+F8 fixes); the entire useTimeline connectionState behavior
-// depends on this file's onerror branches being correct, so they must
-// be tested directly.
-//
-// 2026-05-06 refactor: useEventStream changed from (agentId, onSystem,
-// onConn) to a Context Provider pattern (agentId on EventStreamProvider).
-// Tests use renderHook's `wrapper` option to wrap each hook call in a
-// Provider.
-
-const mocks = vi.hoisted(() => ({ checkAuth: vi.fn() }));
-vi.mock("@/lib/transport/api", () => ({ API_BASE: "", api: { checkAuth: mocks.checkAuth } }));
-
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createContext, createElement, useContext, useEffect, useState } from "react";
@@ -22,16 +7,20 @@ import { create } from "zustand";
 
 import { AGENTS_QUERY_KEY, RECONNECT_QUERY_KEYS } from "../fold";
 import { useFoldOwner } from "../fold/owner";
-import { api } from "./api";
 import {
+  notifySessionInvalid,
   registerSseRuntime,
   setSessionInvalidHandler,
   type SseAuthStatus,
   type SseStoreSlice,
 } from "./sse-lifecycle";
-import { registerAgentEventStreamTests } from "./tests/use-event-stream-agent";
-import type { EventStreamTestContext } from "./tests/use-event-stream-context";
-import { registerEventStreamProviderTests } from "./tests/use-event-stream-provider";
+import { StreamHubProvider } from "./transport-context";
+import { StreamHub } from "./stream/stream-hub";
+import { FakeNetwork, FakeTab, READY, type FakeEventSource } from "./stream/tests/fake-stream";
+import { ScriptedAuth } from "./stream/tests/scripted-auth";
+import { registerAgentEventStreamTests } from "./tests/suite/use-event-stream-agent";
+import type { EventStreamTestContext } from "./tests/suite/use-event-stream-context";
+import { registerEventStreamProviderTests } from "./tests/suite/use-event-stream-provider";
 import type { ConnectionEvent } from "./useEventStream";
 import {
   AgentEventStreamProvider,
@@ -55,7 +44,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
   useEffect(() => {
     let cancelled = false;
-    api
+    auth
       .checkAuth()
       .then((res) => {
         if (!cancelled) setStatus(res.authenticated ? "authenticated" : "unauthenticated");
@@ -89,64 +78,28 @@ function useDocumentVisible(): boolean {
   return isVisible;
 }
 
-// -- mock global EventSource ----------------------------------------
+// meiva:note
+// -- the page's transport: a fake tab whose event sources the test drives ----
 
-class MockEventSource {
-  static readonly CONNECTING = 0;
-  static readonly OPEN = 1;
-  static readonly CLOSED = 2;
+let auth: ScriptedAuth;
+let network: FakeNetwork;
+let tab: FakeTab;
+let hub: StreamHub;
 
-  url: string;
-  init?: EventSourceInit;
-  readyState = MockEventSource.CONNECTING;
-  onopen: ((e: Event) => void) | null = null;
-  onmessage: ((e: MessageEvent) => void) | null = null;
-  onerror: ((e: Event) => void) | null = null;
-
-  constructor(url: string, init?: EventSourceInit) {
-    this.url = url;
-    this.init = init;
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- mock must track the latest constructed instance
-    lastInstance = this;
-    instances.push(this);
-  }
-
-  close(): void {
-    this.readyState = MockEventSource.CLOSED;
-  }
-
-  // Test-driver helper — set readyState + trigger onerror directly, not via EventSource API
-  fireOpen(): void {
-    this.readyState = MockEventSource.OPEN;
-    this.onopen?.(new Event("open"));
-  }
-  fireMessage(data: unknown): void {
-    this.onmessage?.(new MessageEvent("message", { data: data as string }));
-  }
-  fireErrorWithReadyState(state: number): void {
-    this.readyState = state;
-    this.onerror?.(new Event("error"));
-  }
+function useTransport(capability: "legacy" | "shared"): void {
+  network = new FakeNetwork();
+  tab = new FakeTab({ network, capability, wallNow: () => Date.now(), secureContext: true });
+  hub = new StreamHub(tab.transport, { checkAuth: auth.checkAuth, sessionInvalid: notifySessionInvalid }, "");
 }
 
-let lastInstance: MockEventSource | null = null;
-let instances: MockEventSource[] = [];
-
-function deferredAuthResult() {
-  let resolve!: (result: { authenticated: boolean }) => void;
-  const promise = new Promise<{ authenticated: boolean }>((done) => {
-    resolve = done;
-  });
-  return { promise, resolve };
+function lastInstance(): FakeEventSource | null {
+  return tab.sources.at(-1) ?? null;
 }
 
 beforeEach(() => {
-  lastInstance = null;
-  instances = [];
-  mocks.checkAuth.mockReset();
-  mocks.checkAuth.mockResolvedValue({ authenticated: true });
+  auth = new ScriptedAuth();
+  useTransport("legacy");
   navigator.sendBeacon = () => true;
-  vi.stubGlobal("EventSource", MockEventSource);
   Object.defineProperty(document, "visibilityState", {
     configurable: true,
     value: "visible",
@@ -161,16 +114,16 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  vi.unstubAllGlobals();
 });
 
-function expectInstance(): MockEventSource {
-  if (!lastInstance) throw new Error("EventSource was not constructed");
-  return lastInstance;
+function expectInstance(): FakeEventSource {
+  const source = lastInstance();
+  if (!source) throw new Error("EventSource was not constructed");
+  return source;
 }
 
 async function waitForInstance(): Promise<void> {
-  await waitFor(() => expect(lastInstance).not.toBeNull());
+  await waitFor(() => expect(lastInstance()).not.toBeNull());
 }
 
 // Helps renderHook wrap a hook into the Provider. agentId is passed via the wrapper factory.
@@ -181,15 +134,18 @@ function withProvider() {
     defaultOptions: { queries: { retry: false } },
   });
   return function Wrapper({ children }: { children: ReactNode }) {
-    return createElement(
-      AuthProvider,
-      null,
-      createElement(
-        QueryClientProvider,
-        { client: qc },
-        createElement(EventStreamProvider, { children }),
+    return createElement(StreamHubProvider, {
+      hub,
+      children: createElement(
+        AuthProvider,
+        null,
+        createElement(
+          QueryClientProvider,
+          { client: qc },
+          createElement(EventStreamProvider, { children }),
+        ),
       ),
-    );
+    });
   };
 }
 
@@ -202,15 +158,18 @@ function withProviderAndClient() {
   // Plain arrow function (not an object method) — destructuring it out of the
   // return value would otherwise trip @typescript-eslint/unbound-method.
   const wrapper = ({ children }: { children: ReactNode }) =>
-    createElement(
-      AuthProvider,
-      null,
-      createElement(
-        QueryClientProvider,
-        { client: qc },
-        createElement(EventStreamProvider, { children }),
+    createElement(StreamHubProvider, {
+      hub,
+      children: createElement(
+        AuthProvider,
+        null,
+        createElement(
+          QueryClientProvider,
+          { client: qc },
+          createElement(EventStreamProvider, { children }),
+        ),
       ),
-    );
+    });
   return { qc, wrapper };
 }
 
@@ -219,11 +178,10 @@ function withProviderAndClient() {
 
 describe("EventStreamProvider connection lifecycle", () => {
   it("without profile APIs, separate pages keep their own EventSources", async () => {
-    vi.stubGlobal("BroadcastChannel", undefined);
     renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
     renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
-    await waitFor(() => expect(instances).toHaveLength(2));
-    expect(instances.map((source) => source.url)).toEqual(["/api/system", "/api/system"]);
+    await waitFor(() => expect(tab.sources).toHaveLength(2));
+    expect(tab.sources.map((source) => source.url)).toEqual(["/api/system", "/api/system"]);
   });
 
   it("mount + open → subscriber receives onConnectionEvent({type:'open'})", async () => {
@@ -232,7 +190,7 @@ describe("EventStreamProvider connection lifecycle", () => {
 
     renderHook(() => useEventStream(onSystem, onConn), { wrapper: withProvider() });
     await waitForInstance();
-    act(() => expectInstance().fireOpen());
+    act(() => expectInstance().open());
 
     expect(onConn).toHaveBeenCalledWith({ type: "open" });
     expect(onSystem).not.toHaveBeenCalled();
@@ -241,7 +199,7 @@ describe("EventStreamProvider connection lifecycle", () => {
   it("provider always opens EventSource (global connection)", async () => {
     renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
     await waitForInstance();
-    expect(lastInstance).not.toBeNull();
+    expect(lastInstance()).not.toBeNull();
     expect(expectInstance().url).toContain("/api/system");
   });
 
@@ -263,7 +221,7 @@ describe("EventStreamProvider connection lifecycle", () => {
       });
       document.dispatchEvent(new Event("visibilitychange"));
     });
-    expect(first.readyState).toBe(MockEventSource.CLOSED);
+    expect(first.readyState).toBe(READY.CLOSED);
 
     act(() => {
       Object.defineProperty(document, "visibilityState", {
@@ -283,16 +241,14 @@ describe("EventStreamProvider connection lifecycle", () => {
     // never connect ("SSE connection lost").
     renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
     await waitForInstance();
-    expect(expectInstance().init?.withCredentials).toBe(true);
+    expect(expectInstance().init.withCredentials).toBe(true);
   });
 
   it("calling useEventStream outside Provider → throws (fail-fast, not silent)", () => {
     // Suppress React error-boundary console.error noise
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined /* suppress console.error in error-boundary test */);
     expect(() => renderHook(() => useEventStream(vi.fn(), vi.fn()))).toThrow(
       /EventStreamProvider/,
     );
-    errSpy.mockRestore();
   });
 });
 
@@ -304,8 +260,8 @@ describe("EventStreamProvider onmessage", () => {
     renderHook(() => useEventStream(onSystem, onConn), { wrapper: withProvider() });
     await waitForInstance();
     act(() => {
-      expectInstance().fireOpen();
-      expectInstance().fireMessage(
+      expectInstance().open();
+      expectInstance().frame(
         JSON.stringify({ role: "chat_delta", agent_id: 42, content: "hi" }),
       );
     });
@@ -324,8 +280,8 @@ describe("EventStreamProvider onmessage", () => {
     renderHook(() => useEventStream(onSystem, onConn), { wrapper: withProvider() });
     await waitForInstance();
     act(() => {
-      expectInstance().fireOpen();
-      expectInstance().fireMessage("{not valid json");
+      expectInstance().open();
+      expectInstance().frame("{not valid json");
     });
 
     expect(onSystem).not.toHaveBeenCalled();
@@ -345,8 +301,8 @@ describe("EventStreamProvider onmessage", () => {
     renderHook(() => useEventStream(vi.fn(), onConn), { wrapper: withProvider() });
     await waitForInstance();
     act(() => {
-      expectInstance().fireOpen();
-      expectInstance().fireMessage({ type: "Blob", size: 100 });
+      expectInstance().open();
+      expectInstance().frame({ type: "Blob", size: 100 });
     });
 
     expect(onConn).toHaveBeenCalledWith(
@@ -365,37 +321,20 @@ describe("EventStreamProvider half-dead watchdog", () => {
   });
 
   it("shared CONNECTING state keeps the watchdog armed until a frame arrives", async () => {
-    const locks = {
-      request: (_name: string, _options: LockOptions, callback: (lock: Lock) => Promise<void>) =>
-        callback({ name: "meiva-ui-sse", mode: "exclusive" }),
-    };
-    const nativeNavigator = navigator;
-    vi.stubGlobal("navigator", new Proxy(nativeNavigator, {
-      get(target, key): unknown {
-        if (key === "locks") return locks;
-        const value: unknown = Reflect.get(target, key, target);
-        return value;
-      },
-    }));
-    vi.stubGlobal("BroadcastChannel", class {
-      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
-      postMessage(_message: unknown): void { return; }
-      close(): void { return; }
-    });
-
+    useTransport("shared");
     renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
-    await waitFor(() => expect(instances).toHaveLength(2));
-    const system = instances.find((source) => source.url === "/api/system");
+    await waitFor(() => expect(tab.sources).toHaveLength(2));
+    const system = tab.sources.find((source) => source.url === "/api/system");
     if (!system) throw new Error("system source missing");
     vi.useFakeTimers();
     act(() => {
-      system.fireOpen();
-      system.fireErrorWithReadyState(MockEventSource.CONNECTING);
+      system.open();
+      system.error(READY.CONNECTING);
       vi.advanceTimersByTime(45_000);
     });
 
-    expect(system.readyState).toBe(MockEventSource.CLOSED);
-    expect(instances.filter((source) => source.url === "/api/system")).toHaveLength(2);
+    expect(system.readyState).toBe(READY.CLOSED);
+    expect(tab.sources.filter((source) => source.url === "/api/system")).toHaveLength(2);
   });
 
   it("45s with NO frame → notifies reconnecting + bumps reconnectNonce", async () => {
@@ -404,7 +343,7 @@ describe("EventStreamProvider half-dead watchdog", () => {
     renderHook(() => useEventStream(vi.fn(), onConn), { wrapper: withProvider() });
     await waitForInstance();
     vi.useFakeTimers();
-    act(() => expectInstance().fireOpen());
+    act(() => expectInstance().open());
     onConn.mockClear();
 
     const nonceBefore = useStore.getState().reconnectNonce;
@@ -422,7 +361,7 @@ describe("EventStreamProvider half-dead watchdog", () => {
     renderHook(() => useEventStream(vi.fn(), onConn), { wrapper: withProvider() });
     await waitForInstance();
     vi.useFakeTimers();
-    act(() => expectInstance().fireOpen());
+    act(() => expectInstance().open());
     onConn.mockClear();
     const nonceBefore = useStore.getState().reconnectNonce;
 
@@ -430,7 +369,7 @@ describe("EventStreamProvider half-dead watchdog", () => {
     // Total elapsed 60s but never 45s of continuous silence → no fire.
     act(() => {
       vi.advanceTimersByTime(30_000);
-      expectInstance().fireMessage(JSON.stringify({ role: "heartbeat" }));
+      expectInstance().frame(JSON.stringify({ role: "heartbeat" }));
       vi.advanceTimersByTime(30_000);
     });
 
@@ -452,13 +391,13 @@ describe("fold subscription lifecycle (Task #1033 regression)", () => {
     // (unsubscribe) and the foldSubscribedRef early-return skipped the
     // resubscribe — the fold was permanently gone from the subscriber set
     // and every domain's realtime layer went silently stale.
-    act(() => expectInstance().fireOpen());
+    act(() => expectInstance().open());
 
     // A later business event must still reach the fold and land in the cache.
     // (fireMessage mirrors the wire format: JSON string — a non-string payload
     // goes down the parse-failed path and never reaches subscribers.)
     act(() => {
-      expectInstance().fireMessage(
+      expectInstance().frame(
         JSON.stringify({
           role: "agent_spawned",
           agent_id: 2,
@@ -481,15 +420,17 @@ describe("fold subscription lifecycle (Task #1033 regression)", () => {
 
   it("every reconnect gap repairs scoped queries, including a second gap within 30 seconds", async () => {
     const { qc, wrapper } = withProviderAndClient();
-    for (const key of RECONNECT_QUERY_KEYS) qc.setQueryData(key, []);
-    const spy = vi.spyOn(qc, "invalidateQueries");
+    const seed = () => { for (const key of RECONNECT_QUERY_KEYS) qc.setQueryData(key, []); };
+    const invalidated = () => RECONNECT_QUERY_KEYS.map((key) => qc.getQueryState(key)?.isInvalidated);
+    seed();
+    expect(invalidated()).toEqual(RECONNECT_QUERY_KEYS.map(() => false));
     renderHook(() => useEventStream(() => undefined, () => undefined), { wrapper });
     await waitForInstance();
-    await act(async () => { expectInstance().fireOpen(); await Promise.resolve(); });
-    expect(spy).toHaveBeenCalledTimes(RECONNECT_QUERY_KEYS.length);
-    spy.mockClear();
-    await act(async () => { expectInstance().fireOpen(); await Promise.resolve(); });
-    expect(spy).toHaveBeenCalledTimes(RECONNECT_QUERY_KEYS.length);
+    await act(async () => { expectInstance().open(); await Promise.resolve(); });
+    expect(invalidated()).toEqual(RECONNECT_QUERY_KEYS.map(() => true));
+    seed();
+    await act(async () => { expectInstance().open(); await Promise.resolve(); });
+    expect(invalidated()).toEqual(RECONNECT_QUERY_KEYS.map(() => true));
   });
 });
 
@@ -498,28 +439,34 @@ function withAgentProvider() {
     defaultOptions: { queries: { retry: false } },
   });
   return function Wrapper({ children }: { children: ReactNode }) {
-    return createElement(
-      AuthProvider,
-      null,
-      createElement(
-        QueryClientProvider,
-        { client: qc },
-        createElement(AgentEventStreamProvider, { children }),
+    return createElement(StreamHubProvider, {
+      hub,
+      children: createElement(
+        AuthProvider,
+        null,
+        createElement(
+          QueryClientProvider,
+          { client: qc },
+          createElement(AgentEventStreamProvider, { children }),
+        ),
       ),
-    );
+    });
   };
 }
 
 const eventStreamTestContext: EventStreamTestContext = {
-  checkAuthMock: mocks.checkAuth,
-  MockEventSource,
-  getLastInstance: () => lastInstance,
-  getInstances: () => instances,
-  resetInstances: () => {
-    lastInstance = null;
-    instances = [];
+  auth: {
+    always: (result) => auth.always(result),
+    once: (result) => auth.once(result),
+    onceDeferred: () => auth.onceDeferred(),
+    probes: () => auth.probes,
   },
-  deferredAuthResult,
+  READY,
+  getLastInstance: lastInstance,
+  getInstances: () => tab.sources,
+  resetInstances: () => {
+    tab.sources.length = 0;
+  },
   expectInstance,
   waitForInstance,
   withProvider,
@@ -534,7 +481,7 @@ const eventStreamTestContext: EventStreamTestContext = {
     });
     document.dispatchEvent(new Event("visibilitychange"));
   },
-  spyConsoleError: () => vi.spyOn(console, "error"),
+  reportedErrors: () => tab.errors,
 };
 
 registerEventStreamProviderTests(eventStreamTestContext);

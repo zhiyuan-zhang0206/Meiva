@@ -14,7 +14,6 @@
 //                          races, etc.).
 //
 // Mock strategy:
-//   - api.getTimeline: vi.mocked controls return value / delay.
 //   - useEventStream: mocked as a helper that exposes onEvent so the
 //     test can manually trigger SSE events (the real hook builds an
 //     EventSource over the network; tests don't need that).
@@ -24,15 +23,24 @@ import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, ApiError } from "../transport/api";
+import { ApiError } from "../transport/api";
+import { apiWrapper, fakeApi } from "../transport/tests/api/fake-api";
 import { interactionTimingResetForTest } from "../format/interaction-timing";
-import type { UseTimelineTestContext } from "./tests/use-timeline-context";
-import { registerUseTimelinePaginationTests } from "./tests/use-timeline-pagination";
+import { SETTINGS_QUERY_KEY } from "../state/use-user-settings";
 import type {
-  BackendTimelineItem,
-  ConversationSnapshotResponse,
-  SystemEvent,
-  TimelineResponse,
+  Answer,
+  SnapshotRead,
+  TimelineRead,
+  TimelineReadOptions,
+  UseTimelineTestContext,
+} from "./tests/use-timeline-context";
+import { registerUseTimelinePaginationTests } from "./tests/use-timeline-pagination";
+import {
+  USER_SETTING_DEFAULTS,
+  type BackendTimelineItem,
+  type ConversationSnapshotResponse,
+  type SystemEvent,
+  type TimelineResponse,
 } from "../contracts/types";
 import { parseItemId } from "./timeline";
 import { useTimelineStore } from "./timeline-store";
@@ -49,18 +57,6 @@ vi.mock("react", async (importOriginal) => {
     startTransition: (cb: () => void) => startTransitionSpy(cb),
   };
 });
-
-vi.mock("../transport/api", async (importOriginal) => ({
-  ...await importOriginal<{ ApiError: typeof ApiError }>(),
-  api: {
-    getTimeline: vi.fn(),
-    getConversationSnapshot: vi.fn(),
-    getSettings: vi.fn(),
-    getConfig: vi.fn().mockResolvedValue({ fields: [] }),
-  },
-}));
-
-const noteTurnStart = vi.fn<(agentId: number) => void>();
 
 let currentEventHandler: ((ev: SystemEvent) => void) | null = null;
 let currentConnectionHandler: ((ev: ConnectionEvent) => void) | null = null;
@@ -164,42 +160,101 @@ function composedSnapshot(timeline: TimelineResponse): ConversationSnapshotRespo
   };
 }
 
+function resolves<T>(value: T): () => Promise<T> {
+  return () => Promise.resolve(value);
+}
+
+function rejects(error: Error): () => Promise<never> {
+  return () => Promise.reject(error);
+}
+
+// meiva:note
+// The test gateway: every timeline and snapshot read is logged, then answered by
+// the next queued answer or, once those are used, by the standing one. The user
+// settings and the display config the hook reads through its own query keys are
+// seeded into the cache instead (seedSettings below), so no read reaches a network.
+const timelineReads: TimelineRead[] = [];
+const snapshotReads: SnapshotRead[] = [];
+const turnStarts: number[] = [];
+type TimelineAnswer = Answer<[agentId: number, options: TimelineReadOptions | undefined], TimelineResponse>;
+type SnapshotAnswer = Answer<[agentId: number, signal: AbortSignal | undefined], ConversationSnapshotResponse>;
+let queuedTimelineAnswers: TimelineAnswer[] = [];
+let standingTimelineAnswer: TimelineAnswer = resolves(tlResp([]));
+let queuedSnapshotAnswers: SnapshotAnswer[] = [];
+let standingSnapshotAnswer: SnapshotAnswer = resolves(composedSnapshot(tlResp([])));
+
+const Gateway = apiWrapper(fakeApi({
+  getTimeline: (agentId, options) => {
+    timelineReads.push({
+      agentId,
+      before: options?.before,
+      limit: options?.limit,
+      signal: options?.signal,
+    });
+    return (queuedTimelineAnswers.shift() ?? standingTimelineAnswer)(agentId, options);
+  },
+  getConversationSnapshot: (agentId, signal) => {
+    snapshotReads.push({ agentId, signal });
+    return (queuedSnapshotAnswers.shift() ?? standingSnapshotAnswer)(agentId, signal);
+  },
+}));
+
+let queryClient: QueryClient;
+let visibility: DocumentVisibilityState = "visible";
+
 beforeEach(() => {
-  vi.clearAllMocks();
-  noteTurnStart.mockReset();
-  interactionTimingResetForTest(noteTurnStart);
+  startTransitionSpy.mockClear();
+  timelineReads.length = 0;
+  snapshotReads.length = 0;
+  turnStarts.length = 0;
+  queuedTimelineAnswers = [];
+  standingTimelineAnswer = resolves(tlResp([]));
+  queuedSnapshotAnswers = [];
+  standingSnapshotAnswer = resolves(composedSnapshot(tlResp([])));
+  interactionTimingResetForTest((agentId) => { turnStarts.push(agentId); });
   currentEventHandler = null;
   currentConnectionHandler = null;
   currentBatchHandler = null;
-  vi.mocked(api.getTimeline).mockReset().mockResolvedValue(tlResp([]));
-  vi.mocked(api.getConversationSnapshot).mockReset().mockResolvedValue(composedSnapshot(tlResp([])));
-  vi.mocked(api.getSettings).mockResolvedValue({ settings: [] });
+  visibility = "visible";
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
   useTimelineStore.setState({ switchThread: REAL_SWITCH_THREAD, reloadSnapshot: REAL_RELOAD_SNAPSHOT });
   useTimelineStore.getState().switchThread(0, null, false);
   useTimelineStore.setState({ compactReplaceSeq: 0, compactReplaceAgent: null });
+  queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime: Infinity },
+    },
+  });
+  queryClient.setQueryData(["config", null], { fields: [] });
+  seedSettings({});
 });
 
 afterEach(() => {
   cleanup();
   interactionTimingResetForTest();
+  Reflect.deleteProperty(document, "visibilityState");
   currentEventHandler = null;
   currentConnectionHandler = null;
   currentBatchHandler = null;
 });
 
+function seedSettings(overrides: Record<string, unknown>): void {
+  queryClient.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS, ...overrides });
+}
 
-let queryClient: QueryClient;
-
-beforeEach(() => {
-  queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-    },
+function setVisibility(next: DocumentVisibilityState): void {
+  visibility = next;
+  act(() => {
+    document.dispatchEvent(new Event("visibilitychange"));
   });
-});
+}
 
 function wrapper({ children }: { children: React.ReactNode }) {
-  return React.createElement(QueryClientProvider, { client: queryClient }, children);
+  return React.createElement(
+    QueryClientProvider,
+    { client: queryClient },
+    React.createElement(Gateway, null, children),
+  );
 }
 
 // -- tests ─────────────────────────────────────────────────────────────────
@@ -210,7 +265,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 describe("useTimeline mount + initial fetch", () => {
   it("on mount, immediately fetches GET /timeline", async () => {
     const showError = vi.fn();
-    vi.mocked(api.getTimeline).mockResolvedValue(tlResp([
+    standingTimelineAnswer = resolves(tlResp([
       snapshotItem({ kind: "agent_chat", payload: "hi" }),
     ]));
 
@@ -219,25 +274,23 @@ describe("useTimeline mount + initial fetch", () => {
     await waitFor(() => {
       expect(result.current.items).toHaveLength(1);
     });
-    expect(api.getTimeline).toHaveBeenCalledWith(42, expect.objectContaining({ signal: expect.any(AbortSignal) as AbortSignal }));
+    expect(timelineReads[0]).toMatchObject({ agentId: 42, signal: expect.any(AbortSignal) as AbortSignal });
     expect(result.current.items[0].payload).toBe("hi");
     expect(showError).not.toHaveBeenCalled();
   });
 
   it("hasMoreOlder reflects the page; loadOlder fetches before=oldest id and prepends", async () => {
     const showError = vi.fn();
-    vi.mocked(api.getTimeline).mockResolvedValueOnce(
-      tlResp(
+    queuedTimelineAnswers = [
+      resolves(tlResp(
         [
           snapshotItem({ item_id: "5.0", kind: "inbound_chat", payload: "recent" }),
           snapshotItem({ item_id: "6.0", payload: "newest" }),
         ],
         true,
-      ),
-    );
-    vi.mocked(api.getTimeline).mockResolvedValueOnce(
-      tlResp([snapshotItem({ item_id: "3.0", kind: "inbound_chat", payload: "older" })], false),
-    );
+      )),
+      resolves(tlResp([snapshotItem({ item_id: "3.0", kind: "inbound_chat", payload: "older" })], false)),
+    ];
 
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(result.current.items).toHaveLength(2));
@@ -246,7 +299,7 @@ describe("useTimeline mount + initial fetch", () => {
     act(() => result.current.loadOlder());
 
     await waitFor(() => expect(result.current.items).toHaveLength(3));
-    expect(api.getTimeline).toHaveBeenLastCalledWith(42, { before: "5.0", limit: 50, signal: expect.any(AbortSignal) as AbortSignal });
+    expect(timelineReads.at(-1)).toEqual({ agentId: 42, before: "5.0", limit: 50, signal: expect.any(AbortSignal) as AbortSignal });
     expect(result.current.items.map((i) => i.item_id)).toEqual(["3.0", "5.0", "6.0"]);
     expect(result.current.hasMoreOlder).toBe(false);
     expect(showError).not.toHaveBeenCalled();
@@ -256,8 +309,8 @@ describe("useTimeline mount + initial fetch", () => {
     // GET /timeline re-attaches the prompt and compact summary at every
     // window head. Neither is a valid cursor for the historical tail.
     const showError = vi.fn();
-    vi.mocked(api.getTimeline).mockResolvedValueOnce(
-      tlResp(
+    queuedTimelineAnswers = [
+      resolves(tlResp(
         [
           snapshotItem({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
           snapshotItem({
@@ -268,10 +321,8 @@ describe("useTimeline mount + initial fetch", () => {
           snapshotItem({ item_id: "960.1", kind: "inbound_chat", payload: "recent" }),
         ],
         true,
-      ),
-    );
-    vi.mocked(api.getTimeline).mockResolvedValueOnce(
-      tlResp(
+      )),
+      resolves(tlResp(
         [
           snapshotItem({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
           snapshotItem({
@@ -282,10 +333,8 @@ describe("useTimeline mount + initial fetch", () => {
           snapshotItem({ item_id: "915.1", kind: "agent_chat", payload: "older" }),
         ],
         true,
-      ),
-    );
-    vi.mocked(api.getTimeline).mockResolvedValueOnce(
-      tlResp(
+      )),
+      resolves(tlResp(
         [
           snapshotItem({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
           snapshotItem({
@@ -296,18 +345,19 @@ describe("useTimeline mount + initial fetch", () => {
           snapshotItem({ item_id: "800.1", kind: "agent_chat", payload: "oldest" }),
         ],
         false,
-      ),
-    );
+      )),
+    ];
 
     const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
     await waitFor(() => expect(result.current.items).toHaveLength(3));
     expect(result.current.hasMoreOlder).toBe(true);
-    vi.mocked(api.getTimeline).mockClear();
+    timelineReads.length = 0;
 
     act(() => result.current.loadOlder());
 
     await waitFor(() => expect(result.current.items).toHaveLength(4));
-    expect(api.getTimeline).toHaveBeenNthCalledWith(1, 42, {
+    expect(timelineReads[0]).toEqual({
+      agentId: 42,
       before: "960.1",
       limit: 50,
       signal: expect.any(AbortSignal) as AbortSignal,
@@ -323,7 +373,8 @@ describe("useTimeline mount + initial fetch", () => {
     act(() => result.current.loadOlder());
 
     await waitFor(() => expect(result.current.items).toHaveLength(5));
-    expect(api.getTimeline).toHaveBeenNthCalledWith(2, 42, {
+    expect(timelineReads[1]).toEqual({
+      agentId: 42,
       before: "915.1",
       limit: 100,
       signal: expect.any(AbortSignal) as AbortSignal,
@@ -342,9 +393,20 @@ describe("useTimeline mount + initial fetch", () => {
 });
 
 const testContext: UseTimelineTestContext = {
-  api,
   ApiError,
-  noteTurnStart,
+  timeline: {
+    queue: (...answers) => { queuedTimelineAnswers.push(...answers); },
+    always: (answer) => { standingTimelineAnswer = answer; },
+  },
+  snapshot: {
+    queue: (...answers) => { queuedSnapshotAnswers.push(...answers); },
+    always: (answer) => { standingSnapshotAnswer = answer; },
+  },
+  timelineReads,
+  snapshotReads,
+  turnStarts,
+  resolves,
+  rejects,
   startTransitionSpy,
   pushEvent,
   pushBatch,
@@ -355,12 +417,8 @@ const testContext: UseTimelineTestContext = {
   composedSnapshot,
   getQueryClient: () => queryClient,
   wrapper,
-  spyInvalidateQueries: () => vi.spyOn(queryClient, "invalidateQueries"),
-  spyReloadSnapshot: () => vi.spyOn(useTimelineStore.getState(), "reloadSnapshot"),
-  spyDocumentVisibility: () => vi.spyOn(document, "visibilityState", "get"),
-  dispatchVisibilityChange: () => {
-    document.dispatchEvent(new Event("visibilitychange"));
-  },
+  seedSettings,
+  setVisibility,
   delay: (ms = 0) => new Promise((r) => setTimeout(r, ms)),
 };
 

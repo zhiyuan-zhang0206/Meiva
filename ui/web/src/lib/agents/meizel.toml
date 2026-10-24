@@ -21,14 +21,11 @@ exports = ["agent-reconcile.ts", "agent-tree.ts", "sidebar.ts", "use-agent-pages
 "use-fleet-agents.ts" = "strict"
 
 [debt.first-party-patch]
-"agent-reconcile.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
 "sidebar.test.ts#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
 "sidebar.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
 "use-agent-actions.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.compact" = 1
 "use-agent-actions.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.spawnAgent" = 3
-"use-agent-pages.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
 "use-agents.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"use-all-pages.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
 "use-fleet-agents.test.tsx#vi.mock ui/web/src/lib/agents/use-agents.ts" = 1
 
 [debt.impure-call]
@@ -66,13 +63,8 @@ exports = ["agent-reconcile.ts", "agent-tree.ts", "sidebar.ts", "use-agent-pages
 "use-pending-messages.ts#usePendingMessages#useRef" = 1
 
 [debt.stdlib-patch]
-"agent-reconcile.test.ts#vi.spyOn client.invalidateQueries" = 1
 "use-agent-actions.test.tsx#vi.spyOn client.invalidateQueries" = 1
 "use-agent-actions.test.tsx#vi.stubGlobal crypto" = 1
-"use-agent-pages.test.ts#vi.spyOn queryClient.invalidateQueries" = 1
-"use-agent-pages.test.ts#vi.stubGlobal EventSource" = 1
-"use-all-pages.test.ts#vi.spyOn queryClient.invalidateQueries" = 1
-"use-all-pages.test.ts#vi.stubGlobal EventSource" = 1
 
 [debt.wide-exports]
 "meizel.toml#exports" = 1

@@ -1,6 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { SETTINGS_QUERY_KEY } from "../../state/use-user-settings";
 
 import type {
   ConversationSnapshotResponse,
@@ -12,7 +11,13 @@ import type { UseTimelineTestContext } from "./use-timeline-context";
 
 export function registerUseTimelineOwnershipTests(ctx: UseTimelineTestContext): void {
   const {
-    api,
+    timeline,
+    snapshot,
+    timelineReads,
+    snapshotReads,
+    resolves,
+    seedSettings,
+    setVisibility,
     pushEvent,
     pushConnectionEvent,
     snapshotItem,
@@ -24,21 +29,21 @@ export function registerUseTimelineOwnershipTests(ctx: UseTimelineTestContext): 
 
 describe("selected timeline ownership", () => {
   it("clearing selection releases displayed content and starts no request", async () => {
-    vi.mocked(api.getTimeline).mockResolvedValue(tlResp([snapshotItem({ payload: "selected" })]));
+    timeline.always(resolves(tlResp([snapshotItem({ payload: "selected" })])));
     const { result, rerender } = renderHook<ReturnType<typeof useTimeline>, { id: number | null }>(({ id }) => useTimeline(id, vi.fn()), {
       initialProps: { id: 1 }, wrapper,
     });
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("selected"));
-    const reads = vi.mocked(api.getTimeline).mock.calls.length;
+    const reads = timelineReads.length;
     rerender({ id: null });
     expect(result.current.items).toEqual([]);
     expect(useTimelineStore.getState().activeThreadId).toBeNull();
-    expect(api.getTimeline).toHaveBeenCalledTimes(reads);
+    expect(timelineReads).toHaveLength(reads);
   });
 
   it("rapid A to B to A aborts obsolete reads and cannot accept the first A response", async () => {
     const reads: { id: number; signal: AbortSignal; resolve: (data: TimelineResponse) => void }[] = [];
-    vi.mocked(api.getTimeline).mockImplementation((id, opts) => new Promise((resolve) => {
+    timeline.always((id, opts) => new Promise((resolve) => {
       if (!opts?.signal) throw new Error("missing AbortSignal");
       reads.push({ id, signal: opts.signal, resolve });
     }));
@@ -69,7 +74,7 @@ describe("selected timeline ownership", () => {
     let finishPage!: (data: TimelineResponse) => void;
     let pageSignal: AbortSignal | undefined;
     const showError = vi.fn();
-    vi.mocked(api.getTimeline).mockImplementation((_id, opts) => {
+    timeline.always((_id, opts) => {
       if (opts?.before) {
         pageSignal = opts.signal;
         return new Promise((resolve) => { finishPage = resolve; });
@@ -96,7 +101,7 @@ describe("selected timeline ownership", () => {
     let finishPage!: (data: TimelineResponse) => void;
     let pageSignal: AbortSignal | undefined;
     const showError = vi.fn();
-    vi.mocked(api.getTimeline).mockImplementation((_id, opts) => {
+    timeline.always((_id, opts) => {
       if (opts?.before) {
         pageSignal = opts.signal;
         return new Promise((resolve) => { finishPage = resolve; });
@@ -107,35 +112,27 @@ describe("selected timeline ownership", () => {
     await waitFor(() => expect(result.current.hasMoreOlder).toBe(true));
     act(() => result.current.loadOlder());
     expect(result.current.loadingOlder).toBe(true);
-    const visibility = ctx.spyDocumentVisibility();
-    try {
-      if (cause === "hidden") {
-        act(() => {
-          visibility.mockReturnValue("hidden");
-          ctx.dispatchVisibilityChange();
-        });
-      } else {
-        pushEvent({ role: "compact_done", agent_id: 1 });
-      }
-      expect(pageSignal?.aborted).toBe(true);
-      expect(result.current.loadingOlder).toBe(false);
-      await act(async () => {
-        finishPage(tlResp([snapshotItem({ item_id: "1.0", payload: "obsolete page" })]));
-        await Promise.resolve();
-      });
-      expect(result.current.items.map((item) => item.payload)).toEqual(["current"]);
-      expect(showError).not.toHaveBeenCalled();
-    } finally {
-      visibility.mockRestore();
+    if (cause === "hidden") {
+      setVisibility("hidden");
+    } else {
+      pushEvent({ role: "compact_done", agent_id: 1 });
     }
+    expect(pageSignal?.aborted).toBe(true);
+    expect(result.current.loadingOlder).toBe(false);
+    await act(async () => {
+      finishPage(tlResp([snapshotItem({ item_id: "1.0", payload: "obsolete page" })]));
+      await Promise.resolve();
+    });
+    expect(result.current.items.map((item) => item.payload)).toEqual(["current"]);
+    expect(showError).not.toHaveBeenCalled();
   });
 
   it("returning after an inactive compact refreshes to the authoritative tail on reattach", async () => {
     let compacted = false;
-    vi.mocked(api.getTimeline).mockImplementation((id) => Promise.resolve(
+    timeline.always((id) => Promise.resolve(
       tlResp([snapshotItem({ item_id: "1.0", payload: id === 1 && compacted ? "compacted A" : `agent ${id}` })]),
     ));
-    vi.mocked(api.getConversationSnapshot).mockReset().mockImplementation(() =>
+    snapshot.always(() =>
       Promise.resolve(composedSnapshot(tlResp([
         snapshotItem({ item_id: "1.0", payload: "compacted A" }),
       ]))));
@@ -153,8 +150,8 @@ describe("selected timeline ownership", () => {
     pushConnectionEvent({ type: "open" });
     await waitFor(() => expect(result.current.items.map((item) => item.payload)).toEqual(["compacted A"]));
 
-    expect(api.getTimeline).toHaveBeenCalledTimes(2);
-    expect(api.getConversationSnapshot).toHaveBeenCalledTimes(1);
+    expect(timelineReads).toHaveLength(2);
+    expect(snapshotReads).toHaveLength(1);
 
     expect(ctx.getQueryClient().getQueryCache().findAll({ queryKey: ["timeline"] })).toHaveLength(2);
   });
@@ -163,14 +160,13 @@ describe("selected timeline ownership", () => {
 describe("selected opening-gap reconcile", () => {
   it("reads again after a pre-open initial read settles", async () => {
     let finish!: (value: TimelineResponse) => void;
-    vi.mocked(api.getTimeline)
-      .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }))
-      .mockResolvedValue(tlResp([snapshotItem({ item_id: "1.0", payload: "unexpected per-domain read" })]));
-    vi.mocked(api.getConversationSnapshot).mockReset().mockResolvedValue(
+    timeline.queue(() => new Promise((resolve) => { finish = resolve; }));
+    timeline.always(resolves(tlResp([snapshotItem({ item_id: "1.0", payload: "unexpected per-domain read" })])));
+    snapshot.always(resolves(
       composedSnapshot(tlResp([snapshotItem({ item_id: "1.0", payload: "committed before stream opened" })])),
-    );
+    ));
     const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
-    await waitFor(() => expect(api.getTimeline).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(timelineReads).toHaveLength(1));
     pushConnectionEvent({ type: "open" });
     await act(async () => {
       finish(tlResp([snapshotItem({ item_id: "1.0", payload: "read before subscription" })]));
@@ -178,23 +174,23 @@ describe("selected opening-gap reconcile", () => {
     });
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("committed before stream opened"));
 
-    expect(api.getConversationSnapshot).toHaveBeenCalledTimes(1);
-    expect(api.getTimeline).toHaveBeenCalledTimes(1);
+    expect(snapshotReads).toHaveLength(1);
+    expect(timelineReads).toHaveLength(1);
   });
 
   it("compact_done aborts an in-flight reconcile: the pre-compact snapshot never lands", async () => {
-    vi.mocked(api.getTimeline).mockResolvedValue(
+    timeline.always(resolves(
       tlResp([snapshotItem({ item_id: "1.0", payload: "stable" })]),
-    );
+    ));
     let finishSnapshot!: (value: ConversationSnapshotResponse) => void;
-    vi.mocked(api.getConversationSnapshot).mockReset().mockImplementation(
+    snapshot.always(
       () => new Promise((resolve) => { finishSnapshot = resolve; }),
     );
     const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("stable"));
 
     pushConnectionEvent({ type: "open" });
-    await waitFor(() => expect(api.getConversationSnapshot).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(snapshotReads).toHaveLength(1));
 
     pushEvent({ role: "compact_done", agent_id: 42 });
 
@@ -216,13 +212,13 @@ describe("compact retention request ownership", () => {
     const tailWindow = () => tlResp(compacted ? postWindow() : [
       snapshotItem({ item_id: "90.0", payload: "before gap" }),
     ], true);
-    vi.mocked(api.getTimeline).mockImplementation((_id, opts) => {
+    timeline.always((_id, opts) => {
       if (opts?.before) return Promise.resolve(tlResp([
         snapshotItem({ item_id: "s1.gap.1.0", payload: "retained across reconnect" }),
       ], false));
       return Promise.resolve(tailWindow());
     });
-    vi.mocked(api.getConversationSnapshot).mockReset().mockImplementation(() =>
+    snapshot.always(() =>
       Promise.resolve(composedSnapshot(tailWindow())));
     const { result } = renderHook(() => useTimeline(1, vi.fn()), { wrapper });
     await waitFor(() => expect(result.current.items[0]?.payload).toBe("before gap"));
@@ -231,20 +227,18 @@ describe("compact retention request ownership", () => {
     await waitFor(() => expect(result.current.items.map((item) => item.payload)).toContain("retained across reconnect"));
     expect(useTimelineStore.getState().compactReplaceSeq).toBe(1);
     pushConnectionEvent({ type: "open" });
-    await waitFor(() => expect(api.getConversationSnapshot).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(snapshotReads).toHaveLength(2));
     expect(useTimelineStore.getState().compactReplaceSeq).toBe(1);
 
-    expect(api.getTimeline).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(api.getTimeline).mock.calls.filter((call) => call[1]?.before)).toHaveLength(1);
+    expect(timelineReads).toHaveLength(2);
+    expect(timelineReads.filter((read) => read.before)).toHaveLength(1);
   });
 
   it.each(["switch", "hidden", "unmount", "clear"].flatMap((cause) => [2, -1].map((retention) => ({ cause, retention }))))("$cause cancels retention $retention and rejects its late completion", async ({ cause, retention }) => {
     const pages: { signal: AbortSignal; resolve: (page: TimelineResponse) => void }[] = [];
     const showError = vi.fn();
-    vi.mocked(api.getSettings).mockResolvedValue({ settings: [
-      { key: "display.compact_history_sessions", value: retention, updated_at: "2026-09-17T00:00:00Z" },
-    ] });
-    vi.mocked(api.getTimeline).mockImplementation((_id, opts) => {
+    seedSettings({ "display.compact_history_sessions": retention });
+    timeline.always((_id, opts) => {
       if (!opts?.before) return Promise.resolve(tlResp(postWindow(), true));
       if (!opts.signal) throw new Error("History requires cancellation");
       const signal = opts.signal;
@@ -254,64 +248,52 @@ describe("compact retention request ownership", () => {
       ({ id }) => useTimeline(id, showError), { initialProps: { id: 1 }, wrapper },
     );
     await waitFor(() => expect(view.result.current.items).toHaveLength(3));
-    await waitFor(() => expect(ctx.getQueryClient().getQueryData(SETTINGS_QUERY_KEY)).toBeTruthy());
     const compact = () => {
       pushEvent({ role: "compact_done", agent_id: 1 });
       pushEvent({ role: "timeline_snapshot", agent_id: 1, msg_count: 3, items: postWindow() });
     };
     compact();
     await waitFor(() => expect(pages).toHaveLength(1));
-    const visibility = ctx.spyDocumentVisibility();
-    try {
-      if (cause === "switch") {
-        view.rerender({ id: 2 });
-        view.rerender({ id: 1 });
-        await waitFor(() => expect(view.result.current.items).toHaveLength(3));
-        compact();
+    if (cause === "switch") {
+      view.rerender({ id: 2 });
+      view.rerender({ id: 1 });
+      await waitFor(() => expect(view.result.current.items).toHaveLength(3));
+      compact();
 
-        await waitFor(() => expect(pages).toHaveLength(2));
-      } else if (cause === "hidden") {
-        act(() => {
-          visibility.mockReturnValue("hidden");
-          ctx.dispatchVisibilityChange();
-        });
-      } else if (cause === "clear") {
-        view.rerender({ id: null });
-      } else {
-        view.unmount();
-      }
-      expect(pages[0].signal.aborted).toBe(true);
+      await waitFor(() => expect(pages).toHaveLength(2));
+    } else if (cause === "hidden") {
+      setVisibility("hidden");
+    } else if (cause === "clear") {
+      view.rerender({ id: null });
+    } else {
+      view.unmount();
+    }
+    expect(pages[0].signal.aborted).toBe(true);
+    await act(async () => {
+      pages[0].resolve(tlResp([snapshotItem({ item_id: "s1.old.1.0", payload: "obsolete retained page" })], true));
+      await Promise.resolve();
+    });
+    expect(useTimelineStore.getState().items.some((item) => item.payload === "obsolete retained page")).toBe(false);
+    expect(pages).toHaveLength(cause === "switch" ? 2 : 1);
+    if (cause === "hidden") {
+      setVisibility("visible");
+
+      await waitFor(() => expect(pages).toHaveLength(2));
+    }
+    if (cause === "switch" || cause === "hidden") {
+      expect(pages[1].signal.aborted).toBe(false);
       await act(async () => {
-        pages[0].resolve(tlResp([snapshotItem({ item_id: "s1.old.1.0", payload: "obsolete retained page" })], true));
+        pages[1].resolve(tlResp([snapshotItem({ item_id: "s1.new.1.0", payload: "current retained page" })], true));
         await Promise.resolve();
       });
-      expect(useTimelineStore.getState().items.some((item) => item.payload === "obsolete retained page")).toBe(false);
-      expect(pages).toHaveLength(cause === "switch" ? 2 : 1);
-      if (cause === "hidden") {
-        act(() => {
-          visibility.mockReturnValue("visible");
-          ctx.dispatchVisibilityChange();
-        });
-
-        await waitFor(() => expect(pages).toHaveLength(2));
-      }
-      if (cause === "switch" || cause === "hidden") {
-        expect(pages[1].signal.aborted).toBe(false);
-        await act(async () => {
-          pages[1].resolve(tlResp([snapshotItem({ item_id: "s1.new.1.0", payload: "current retained page" })], true));
-          await Promise.resolve();
-        });
-        await waitFor(() => expect(pages).toHaveLength(3));
-        await act(async () => {
-          pages[2].resolve(tlResp([snapshotItem({ item_id: "s2.new.1.0", payload: "older retained page" })], false));
-          await Promise.resolve();
-        });
-        expect(view.result.current.items.map((item) => item.payload)).toContain("older retained page");
-      }
-      expect(showError).not.toHaveBeenCalled();
-    } finally {
-      visibility.mockRestore();
+      await waitFor(() => expect(pages).toHaveLength(3));
+      await act(async () => {
+        pages[2].resolve(tlResp([snapshotItem({ item_id: "s2.new.1.0", payload: "older retained page" })], false));
+        await Promise.resolve();
+      });
+      expect(view.result.current.items.map((item) => item.payload)).toContain("older retained page");
     }
+    expect(showError).not.toHaveBeenCalled();
   });
 });
 
@@ -319,11 +301,11 @@ describe("latest-message refresh lifecycle", () => {
   it("exposes the shared reconcile request as fetching until the new tail lands", async () => {
     ctx.getQueryClient().setQueryData(["timeline", 7], tlResp([snapshotItem({ item_id: "1.0", payload: "Cached reply" })]));
     let finish!: (snapshot: ReturnType<typeof composedSnapshot>) => void;
-    vi.mocked(api.getConversationSnapshot).mockReset().mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    snapshot.always(() => new Promise((resolve) => { finish = resolve; }));
     const { result } = renderHook(() => useTimeline(7, vi.fn()), { wrapper });
     expect(result.current.isFetching).toBe(false);
     pushConnectionEvent({ type: "open" });
-    await waitFor(() => expect(api.getConversationSnapshot).toHaveBeenCalledOnce());
+    await waitFor(() => expect(snapshotReads).toHaveLength(1));
     expect(result.current.isFetching).toBe(true);
     expect(result.current.items[0].payload).toBe("Cached reply");
     act(() => { finish(composedSnapshot(tlResp([snapshotItem({ item_id: "2.0", payload: "New reply" })]))); });

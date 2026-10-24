@@ -5,6 +5,8 @@ import { vi } from "vitest";
 
 import type { AgentRow } from "@/lib/contracts/types";
 import type { ConnectionState } from "@/lib/timeline/use-timeline";
+import { api } from "@/lib/transport/api";
+import { apiWrapper, fakeApi } from "@/lib/transport/tests/api/fake-api";
 
 export const hooksState = {
   isLarge: true,
@@ -115,11 +117,15 @@ export function makeAgent(overrides: Partial<AgentRow>): AgentRow {
   };
 }
 
+export const gatewayWrapper = apiWrapper(fakeApi({ getReplySuggestion: api.getReplySuggestion }));
+
 export function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>, {
+    wrapper: gatewayWrapper,
+  });
 }
 
 export function resetHomePageTestState() {

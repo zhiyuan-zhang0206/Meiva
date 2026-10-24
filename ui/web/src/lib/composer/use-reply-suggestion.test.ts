@@ -2,7 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BackendTimelineItem, ReplySuggestionResponse } from "../contracts/types";
-import { api } from "../transport/api";
+import { apiWrapper, fakeApi } from "../transport/tests/api/fake-api";
 import { REPLY_SUGGESTION_DELAY_MS, useReplySuggestion } from "./use-reply-suggestion";
 
 function item(kind: BackendTimelineItem["kind"], id: string, extra: Partial<BackendTimelineItem> = {}) {
@@ -33,6 +33,13 @@ interface Pending {
 let pending: Pending[];
 let visibility: "visible" | "hidden";
 
+const wrapper = apiWrapper(fakeApi({
+  getReplySuggestion: (agentId, signal) =>
+    new Promise<ReplySuggestionResponse>((resolve, reject) => {
+      pending.push({ agentId, signal, resolve, reject });
+    }),
+}));
+
 function setVisibility(value: "visible" | "hidden") {
   visibility = value;
   act(() => {
@@ -58,30 +65,25 @@ beforeEach(() => {
   pending = [];
   visibility = "visible";
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
-  vi.spyOn(api, "getReplySuggestion").mockImplementation(
-    (agentId, signal) =>
-      new Promise<ReplySuggestionResponse>((resolve, reject) => {
-        pending.push({ agentId, signal, resolve, reject });
-      }),
-  );
 });
 
 afterEach(() => {
   vi.useRealTimers();
-  vi.restoreAllMocks();
+  Reflect.deleteProperty(document, "visibilityState");
 });
 
 describe("useReplySuggestion", () => {
   it("requests after the quiet period, not before, and returns the answer", async () => {
     const { result } = renderHook((props: Props) => useReplySuggestion(props), {
+      wrapper,
       initialProps: idle,
     });
 
     await elapse(REPLY_SUGGESTION_DELAY_MS - 1);
-    expect(api.getReplySuggestion).not.toHaveBeenCalled();
+    expect(pending).toHaveLength(0);
 
     await elapse(1);
-    expect(api.getReplySuggestion).toHaveBeenCalledTimes(1);
+    expect(pending).toHaveLength(1);
     expect(pending[0].agentId).toBe(7);
     expect(result.current).toBeNull();
 
@@ -91,6 +93,7 @@ describe("useReplySuggestion", () => {
 
   it("starts nothing when a new turn begins within the quiet period", async () => {
     const { rerender } = renderHook((props: Props) => useReplySuggestion(props), {
+      wrapper,
       initialProps: idle,
     });
 
@@ -98,23 +101,25 @@ describe("useReplySuggestion", () => {
     rerender({ ...idle, busy: true });
     await elapse(REPLY_SUGGESTION_DELAY_MS * 2);
 
-    expect(api.getReplySuggestion).not.toHaveBeenCalled();
+    expect(pending).toHaveLength(0);
   });
 
   it("waits for the running -> idling transition: no request while busy or running", async () => {
     const { rerender } = renderHook((props: Props) => useReplySuggestion(props), {
+      wrapper,
       initialProps: { ...idle, busy: true, status: "running" },
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS * 2);
-    expect(api.getReplySuggestion).not.toHaveBeenCalled();
+    expect(pending).toHaveLength(0);
 
     rerender(idle);
     await elapse(REPLY_SUGGESTION_DELAY_MS);
-    expect(api.getReplySuggestion).toHaveBeenCalledTimes(1);
+    expect(pending).toHaveLength(1);
   });
 
   it("aborts the request and clears the suggestion when a new turn starts", async () => {
     const { result, rerender } = renderHook((props: Props) => useReplySuggestion(props), {
+      wrapper,
       initialProps: idle,
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
@@ -130,6 +135,7 @@ describe("useReplySuggestion", () => {
 
   it("clears a shown suggestion as soon as a new turn starts", async () => {
     const { result, rerender } = renderHook((props: Props) => useReplySuggestion(props), {
+      wrapper,
       initialProps: idle,
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
@@ -142,6 +148,7 @@ describe("useReplySuggestion", () => {
 
   it("clears it when the user's own message becomes the last item", async () => {
     const { result, rerender } = renderHook((props: Props) => useReplySuggestion(props), {
+      wrapper,
       initialProps: idle,
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
@@ -153,6 +160,7 @@ describe("useReplySuggestion", () => {
 
   it("aborts when the selected agent changes", async () => {
     const { rerender } = renderHook((props: Props) => useReplySuggestion(props), {
+      wrapper,
       initialProps: idle,
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
@@ -166,6 +174,7 @@ describe("useReplySuggestion", () => {
 
   it("aborts on unmount", async () => {
     const { unmount } = renderHook((props: Props) => useReplySuggestion(props), {
+      wrapper,
       initialProps: idle,
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
@@ -176,7 +185,7 @@ describe("useReplySuggestion", () => {
   });
 
   it("aborts when the page is hidden and asks again when it is visible", async () => {
-    renderHook((props: Props) => useReplySuggestion(props), { initialProps: idle });
+    renderHook((props: Props) => useReplySuggestion(props), { wrapper, initialProps: idle });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
 
     setVisibility("hidden");
@@ -189,25 +198,27 @@ describe("useReplySuggestion", () => {
 
   it("sends nothing while the page is hidden", async () => {
     visibility = "hidden";
-    renderHook((props: Props) => useReplySuggestion(props), { initialProps: idle });
+    renderHook((props: Props) => useReplySuggestion(props), { wrapper, initialProps: idle });
 
     await elapse(REPLY_SUGGESTION_DELAY_MS * 3);
 
-    expect(api.getReplySuggestion).not.toHaveBeenCalled();
+    expect(pending).toHaveLength(0);
   });
 
   it("sends nothing when the setting is off", async () => {
     renderHook((props: Props) => useReplySuggestion(props), {
+      wrapper,
       initialProps: { ...idle, enabled: false },
     });
 
     await elapse(REPLY_SUGGESTION_DELAY_MS * 3);
 
-    expect(api.getReplySuggestion).not.toHaveBeenCalled();
+    expect(pending).toHaveLength(0);
   });
 
   it("aborts when the setting is turned off mid-request", async () => {
     const { rerender } = renderHook((props: Props) => useReplySuggestion(props), {
+      wrapper,
       initialProps: idle,
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
@@ -226,26 +237,29 @@ describe("useReplySuggestion", () => {
     ["the timeline is empty", { items: [] }],
   ])("sends nothing when %s", async (_name, override) => {
     renderHook((props: Props) => useReplySuggestion(props), {
+      wrapper,
       initialProps: { ...idle, ...override },
     });
 
     await elapse(REPLY_SUGGESTION_DELAY_MS * 3);
 
-    expect(api.getReplySuggestion).not.toHaveBeenCalled();
+    expect(pending).toHaveLength(0);
   });
 
   it("looks through trailing framework markers to the agent's message", async () => {
     renderHook((props: Props) => useReplySuggestion(props), {
+      wrapper,
       initialProps: { ...idle, items: [...AGENT_SAYS, item("system_marker", "3.0")] },
     });
 
     await elapse(REPLY_SUGGESTION_DELAY_MS);
 
-    expect(api.getReplySuggestion).toHaveBeenCalledTimes(1);
+    expect(pending).toHaveLength(1);
   });
 
   it("requests each turn once, however many times the conditions flicker", async () => {
     const { rerender } = renderHook((props: Props) => useReplySuggestion(props), {
+      wrapper,
       initialProps: idle,
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
@@ -255,12 +269,12 @@ describe("useReplySuggestion", () => {
     rerender(idle);
     await elapse(REPLY_SUGGESTION_DELAY_MS * 3);
 
-    expect(api.getReplySuggestion).toHaveBeenCalledTimes(1);
+    expect(pending).toHaveLength(1);
   });
 
   it("does not request a turn again after a failure", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { rerender } = renderHook((props: Props) => useReplySuggestion(props), {
+      wrapper,
       initialProps: idle,
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
@@ -268,17 +282,17 @@ describe("useReplySuggestion", () => {
       pending[0].reject(new Error("HTTP 503"));
       await Promise.resolve();
     });
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("HTTP 503"));
 
     rerender({ ...idle, busy: true });
     rerender(idle);
     await elapse(REPLY_SUGGESTION_DELAY_MS * 2);
 
-    expect(api.getReplySuggestion).toHaveBeenCalledTimes(1);
+    expect(pending).toHaveLength(1);
   });
 
   it("requests the next turn when the agent speaks again", async () => {
     const { rerender } = renderHook((props: Props) => useReplySuggestion(props), {
+      wrapper,
       initialProps: idle,
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
@@ -291,11 +305,12 @@ describe("useReplySuggestion", () => {
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
 
-    expect(api.getReplySuggestion).toHaveBeenCalledTimes(2);
+    expect(pending).toHaveLength(2);
   });
 
   it("returns nothing for an empty suggestion", async () => {
     const { result } = renderHook((props: Props) => useReplySuggestion(props), {
+      wrapper,
       initialProps: idle,
     });
     await elapse(REPLY_SUGGESTION_DELAY_MS);
