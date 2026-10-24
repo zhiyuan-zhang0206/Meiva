@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import io
 from email.message import EmailMessage, Message
 from pathlib import Path
 
@@ -324,26 +323,26 @@ def test_drafts_folder_missing_or_unparseable_raises() -> None:
 
 
 def test_body_arg_direct() -> None:
-    assert feed.body_arg("hello", io.StringIO("ignored")) == "hello"
+    assert feed.body_arg("hello", "ignored") == "hello"
 
 
 def test_body_arg_reads_stdin_when_omitted() -> None:
-    assert feed.body_arg(None, io.StringIO("from stdin\n")) == "from stdin\n"
+    assert feed.body_arg(None, "from stdin\n") == "from stdin\n"
 
 
 def test_body_arg_rejects_empty() -> None:
     with pytest.raises(ValueError, match="no body"):
-        feed.body_arg("", io.StringIO())
+        feed.body_arg("", "")
 
 
 def test_body_arg_rejects_whitespace() -> None:
     with pytest.raises(ValueError, match="no body"):
-        feed.body_arg("   ", io.StringIO())
+        feed.body_arg("   ", "")
 
 
 def test_body_arg_rejects_a_blank_stdin() -> None:
     with pytest.raises(ValueError, match="no body"):
-        feed.body_arg(None, io.StringIO(" \n"))
+        feed.body_arg(None, " \n")
 
 
 def _message(**hdrs: str) -> EmailMessage:

@@ -262,23 +262,21 @@ def test_to_s1_points_raw_path_at_the_root_the_message_was_saved_under(tmp_path:
     assert imap.to_s1(_post(), root=tmp_path, matrix_entity="e1")["matrix_entity"] == "e1"
 
 
-def _process(tmp_path: Path, *, stdin: str = "") -> Any:
+def _process(tmp_path: Path) -> Any:
     sources = auth.AuthSources(
         account_env="me@example.com",
         password_file=tmp_path / "no-password-file",
         security_cmd=str(tmp_path / "no-security"),
         keychain_timeout_s=1.0,
     )
-    return feed.Process(
-        auth=sources, mirror_root=tmp_path / "mirror", now_ts=NOW_TS, stdin=io.StringIO(stdin)
-    )
+    return feed.Process(auth=sources, mirror_root=tmp_path / "mirror", now_ts=NOW_TS)
 
 
 def test_main_send_dry_run_prints_the_composed_message(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     argv = ["send", "--to", "test@example.com", "--subject", "Test", "--body", "Hello world"]
-    feed.main([*argv, "--dry-run"], _process(tmp_path))
+    feed.main([*argv, "--dry-run"], _process(tmp_path), io.StringIO())
     data = json.loads(capsys.readouterr().out)
     assert data["sent"] is False
     assert data["subject"] == "Test"
@@ -291,13 +289,17 @@ def test_main_send_reads_the_body_from_stdin_when_omitted(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     argv = ["send", "--to", "a@b.com", "--subject", "S", "--dry-run"]
-    feed.main(argv, _process(tmp_path, stdin="piped body\n"))
+    feed.main(argv, _process(tmp_path), io.StringIO("piped body\n"))
     assert json.loads(capsys.readouterr().out)["body"] == "piped body"
 
 
 def test_main_send_refuses_an_empty_piped_body(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="no body"):
-        feed.main(["send", "--to", "a@b.com", "--subject", "S", "--dry-run"], _process(tmp_path))
+        feed.main(
+            ["send", "--to", "a@b.com", "--subject", "S", "--dry-run"],
+            _process(tmp_path),
+            io.StringIO(),
+        )
 
 
 def test_main_send_carries_attachments_and_refuses_a_missing_file(
@@ -306,17 +308,19 @@ def test_main_send_carries_attachments_and_refuses_a_missing_file(
     attachment = tmp_path / "report.pdf"
     attachment.write_bytes(b"%PDF-1.4")
     argv = ["send", "--to", "a@b.com", "--subject", "S", "--body", "see attached", "--dry-run"]
-    feed.main([*argv, "--attach", str(attachment)], _process(tmp_path))
+    feed.main([*argv, "--attach", str(attachment)], _process(tmp_path), io.StringIO())
     assert json.loads(capsys.readouterr().out)["attachments"] == ["report.pdf"]
     with pytest.raises(ValueError, match="not a readable file"):
-        feed.main([*argv, "--attach", str(tmp_path / "missing.pdf")], _process(tmp_path))
+        feed.main(
+            [*argv, "--attach", str(tmp_path / "missing.pdf")], _process(tmp_path), io.StringIO()
+        )
 
 
 def test_main_draft_dry_run_writes_nothing(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     argv = ["draft", "--to", "a@b.com", "--subject", "S", "--body", "b", "--dry-run"]
-    feed.main(argv, _process(tmp_path))
+    feed.main(argv, _process(tmp_path), io.StringIO())
     data = json.loads(capsys.readouterr().out)
     assert data["drafted"] is False and data["subject"] == "S"
 
@@ -336,12 +340,16 @@ def test_main_reply_without_a_password_fails_cleanly_before_any_connection(
 ) -> None:
     argv = ["reply", "--message-id", "<test@host>", "--body", "Thanks", "--dry-run"]
     with pytest.raises(auth.GmailError, match="no Gmail app password"):
-        feed.main(argv, _process(tmp_path))
+        feed.main(argv, _process(tmp_path), io.StringIO())
 
 
 def test_main_rejects_an_unreadable_since_window(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="--since must be like"):
-        feed.main(["enum", "--list-id", "x.example.com", "--since", "soon"], _process(tmp_path))
+        feed.main(
+            ["enum", "--list-id", "x.example.com", "--since", "soon"],
+            _process(tmp_path),
+            io.StringIO(),
+        )
 
 
 def _run_cli(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:

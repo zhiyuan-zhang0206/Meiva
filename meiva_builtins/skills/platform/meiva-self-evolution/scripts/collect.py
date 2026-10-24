@@ -59,7 +59,16 @@ from events_window import (
     slice_step,
     week_label,
 )
-from record import HUMAN_SOURCES, AgentMeta, Event, Inbound, LeakPaths, RunInputs, transcript_rows
+from record import (
+    HUMAN_SOURCES,
+    AgentMeta,
+    Event,
+    Inbound,
+    LeakPaths,
+    RunInputs,
+    TaskReceipts,
+    transcript_rows,
+)
 from window_records import (
     WindowRows,
     annotated_record,
@@ -270,7 +279,7 @@ def _inbounds_by_agent(
     }
 
 
-def _task_receipts_by_agent(cur: psycopg.Cursor, ids: list[int]) -> dict[int, dict[str, int]]:
+def _task_receipts_by_agent(cur: psycopg.Cursor, ids: list[int]) -> dict[int, TaskReceipts]:
     cur.execute(
         "WITH status_receipts AS ("
         "SELECT actor_agent_id, task_id, request->>'status' AS declared, "
@@ -297,10 +306,7 @@ def _task_receipts_by_agent(cur: psycopg.Cursor, ids: list[int]) -> dict[int, di
         "GROUP BY r.actor_agent_id",
         [ids, ids],
     )
-    return {
-        row[0]: {"note": row[1], "status": row[2], "results": row[3], "state_changes": row[4]}
-        for row in cur.fetchall()
-    }
+    return {row[0]: TaskReceipts(row[1], row[2], row[3], row[4]) for row in cur.fetchall()}
 
 
 def _meta_by_agent(cur: psycopg.Cursor, ids: list[int]) -> dict[int, AgentMeta]:
@@ -447,7 +453,7 @@ def collect_one(
             inbounds=tuple(inbounds),
             meta=meta,
             transcript=tuple(_transcript(agent_id, database=database)),
-            skills_touched=loaded_skills(log_events),
+            skills_touched=tuple(loaded_skills(log_events)),
             leak_paths=leak_paths,
             task_receipts=receipts,
         )

@@ -53,7 +53,7 @@ def test_help_and_subprocess_counters_ride_on_the_record() -> None:
         inbounds=(),
         meta=record_mod.AgentMeta("user", "terminated", "done"),
         transcript=(),
-        skills_touched=[],
+        skills_touched=(),
     )
 
     rec = wr.annotated_record(run)
@@ -72,7 +72,7 @@ def test_window_records_builds_one_record_per_selected_agent_in_order() -> None:
             1: [{"source": "user", "content": "task", "is_broadcast": False, "claimed": True}]
         },
         meta={1: meta, 2: meta, 3: meta},
-        receipts={2: {"note": 1, "status": 0, "results": 0, "state_changes": 0}},
+        receipts={2: record_mod.TaskReceipts(1, 0, 0, 0)},
         transcripts={1: [], 2: [{"type": "human", "content": "from transcript"}]},
         skills={1: ["meiva-goal"], 2: []},
     )

@@ -53,7 +53,7 @@ def _record(**fields: Any) -> dict[str, Any]:
         "inbounds": (),
         "meta": record_mod.AgentMeta("user", "completed", "done"),
         "transcript": (),
-        "skills_touched": [],
+        "skills_touched": (),
     }
     values.update(fields)
     return cast(dict[str, Any], record_mod.build_record(record_mod.RunInputs(**values)))
@@ -688,6 +688,6 @@ def test_task_receipts_by_agent_counts_notes_states_and_changes(
     with db_conn.cursor() as cur:
         counts = collect_mod._task_receipts_by_agent(cur, [7001, 7002, 7999])
 
-    assert counts[7001] == {"note": 2, "status": 5, "results": 1, "state_changes": 3}
-    assert counts[7002] == {"note": 1, "status": 0, "results": 0, "state_changes": 0}
+    assert counts[7001] == record_mod.TaskReceipts(2, 5, 1, 3)
+    assert counts[7002] == record_mod.TaskReceipts(1, 0, 0, 0)
     assert 7999 not in counts

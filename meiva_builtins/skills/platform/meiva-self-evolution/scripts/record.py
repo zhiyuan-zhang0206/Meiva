@@ -374,11 +374,7 @@ def _grade(ev: dict[str, Any]) -> tuple[str, str | None]:
 def _evidence_block(
     run: RunInputs, stats: _EventStats, prompts: dict[str, Any], final_output: str
 ) -> dict[str, Any]:
-    receipts = (
-        run.task_receipts
-        if run.task_receipts is not None
-        else {"note": 0, "status": 0, "results": 0, "state_changes": 0}
-    )
+    receipts = run.task_receipts if run.task_receipts is not None else TaskReceipts(0, 0, 0, 0)
     return {
         "telemetry_events": len(run.events),
         "audit_events": len(run.log_events),
@@ -392,11 +388,11 @@ def _evidence_block(
         "inbound_total": len(run.inbounds),
         "inbound_claimed": sum(1 for message in run.inbounds if message["claimed"]),
         "task_updates": {
-            "note": receipts["note"],
-            "status": receipts["status"],
-            "results": receipts["results"],
+            "note": receipts.note,
+            "status": receipts.status,
+            "results": receipts.results,
         },
-        "task_state_changes": receipts["state_changes"],
+        "task_state_changes": receipts.state_changes,
         "exec_ok": stats.exec_ok,
         "exec_failed": stats.exec_failed,
     }
@@ -411,6 +407,15 @@ class AgentMeta(NamedTuple):
 
 
 # meiva:note
+# The receipt counts read for one agent, with no mutable query row retained by a record input.
+class TaskReceipts(NamedTuple):
+    note: int
+    status: int
+    results: int
+    state_changes: int
+
+
+# meiva:note
 # Everything one record is built from, as values: the agent's telemetry and audit events, its inbounds, its lifecycle row,
 # its transcript rows, the skills it loaded and the optional leak surfaces and task-receipt counts. `build_record` reads nothing else.
 @dataclass(frozen=True)
@@ -422,9 +427,9 @@ class RunInputs:
     inbounds: tuple[Inbound, ...]
     meta: AgentMeta
     transcript: tuple[dict[str, str], ...]
-    skills_touched: list[str]
+    skills_touched: tuple[str, ...]
     leak_paths: LeakPaths | None = None
-    task_receipts: dict[str, int] | None = None
+    task_receipts: TaskReceipts | None = None
 
 
 def build_record(run: RunInputs) -> dict[str, object]:
@@ -449,7 +454,7 @@ def build_record(run: RunInputs) -> dict[str, object]:
         "tokens_in": stats.tokens_in,
         "tokens_out": stats.tokens_out,
         "tools_called": count_tool_calls(stats.code_bodies),
-        "skills_touched": run.skills_touched,
+        "skills_touched": list(run.skills_touched),
         "plugins_activated": plugins_activated,
         "plugins_activated_skipped": plugins_activated_skipped,
         "exec_ok": stats.exec_ok,

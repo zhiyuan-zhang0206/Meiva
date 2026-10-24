@@ -59,7 +59,7 @@ def _build(
             inbounds=tuple(inbounds),
             meta=record_mod.AgentMeta(spawner, status, "delivered"),
             transcript=() if transcript is None else tuple(transcript),
-            skills_touched=[],
+            skills_touched=(),
         )
     )
 
