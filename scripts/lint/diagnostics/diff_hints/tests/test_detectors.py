@@ -278,8 +278,9 @@ def test_a_composition_root_is_found_by_its_file_name() -> None:
 
 def test_a_sleep_in_a_helper_script_is_the_real_resource_not_a_seam() -> None:
     sleeper = "import time\n\ndef sleeper():\n    time.sleep(1)\n"
+    waiting = "import time\n\ndef test_a():\n    time.sleep(1)\n"
     assert hints(sleeper, "cli/tests/sleep_child.py") == []
-    assert hints(sleeper, "cli/tests/test_x.py") == [HintId.TEST_SEAM]
+    assert hints(waiting, "cli/tests/test_x.py") == [HintId.TEST_SEAM]
 
 
 def test_a_protocol_fires_above_base_and_not_in_base() -> None:
@@ -360,3 +361,30 @@ def test_a_sleep_that_paces_a_poll_is_the_real_resource_form() -> None:
     waiting = "import time\n\ndef test_a():\n    time.sleep(0.2)\n"
     assert hints(polling, "cli/tests/test_x.py") == []
     assert hints(waiting, "cli/tests/test_x.py") == [HintId.TEST_SEAM]
+
+
+def test_a_clock_handed_to_a_call_as_its_now_is_the_form_the_hint_asks_for() -> None:
+    handed = "from datetime import UTC, datetime\n\ndef f():\n    return g(now=datetime.now(UTC), finished_at=datetime.now(UTC))\n"
+    kept = "from datetime import UTC, datetime\n\ndef f():\n    return g(label=datetime.now(UTC))\n"
+    assert hints(handed) == []
+    assert hints(kept) == [HintId.AMBIENT_READ]
+
+
+def test_a_generated_id_is_not_an_ambient_read() -> None:
+    assert hints("import uuid\n\ndef f():\n    return uuid.uuid4().hex\n") == []
+
+
+def test_a_sleep_inside_a_fake_s_handler_is_the_behavior_it_simulates() -> None:
+    handler = "import time\n\ndef test_a():\n    def handle(request):\n        time.sleep(0.2)\n    assert handle\n"
+    method = "import time\n\nclass Slow:\n    def handle(self):\n        time.sleep(0.2)\n"
+    assert hints(handler, "cli/tests/test_x.py") == []
+    assert hints(method, "cli/tests/test_x.py") == []
+
+
+def test_configuring_a_real_resource_fixture_or_a_double_s_own_dict_is_not_a_seam() -> None:
+    resource = "def test_a(db_conn):\n    db_conn.autocommit = True\n"
+    own = "class Fake:\n    def __init__(self):\n        self.__dict__['x'] = 1\n"
+    armed = "def test_a(backend):\n    backend.fail_reap = True\n"
+    assert hints(resource, "cli/tests/test_x.py") == []
+    assert hints(own, "cli/tests/test_x.py") == []
+    assert hints(armed, "cli/tests/test_x.py") == [HintId.TEST_SEAM]

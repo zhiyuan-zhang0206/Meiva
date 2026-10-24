@@ -17,7 +17,7 @@ Each hint prints the site, then once per id: `why` (the principle in a sentence)
 
 | Id | Fires on (added lines) | Instead, first choice |
 |---|---|---|
-| `ambient-read` | production file, not a root: `time.*` clocks, `datetime.now/utcnow/today`, `os.environ`, `os.getenv`, `os.getcwd`, `Path.home/cwd`, `platform.*`, `sys.platform`, `socket.gethostname`, `random.*`, `uuid4`, a read of `settings` | take the value; lift a loop's decision into a pure function of `now` and keep the sleep in the shell |
+| `ambient-read` | production file, not a root: `time.*` clocks, `datetime.now/utcnow/today`, `os.environ`, `os.getenv`, `os.getcwd`, `Path.home/cwd`, `platform.*`, `sys.platform`, `socket.gethostname`, `random.*`, a read of `settings`; not a clock handed to a call as `now=`/`*_at`/`*_ts` | take the value; lift a loop's decision into a pure function of `now` and keep the sleep in the shell |
 | `callable-default` | a parameter annotated `Callable`, `Coroutine` or `Awaitable`, or named `*_fn`, `*_hook`, `*_cb`, `*_reader`, `*_factory`, `*_fetch`, with a default | required parameter; a value if it only fetches one; a plan if it is an effect |
 | `callable-bag` | a dataclass, `NamedTuple`, `TypedDict`, `Protocol` or `BaseModel` with two or more `Callable` fields | values in, a plan out; one narrow port in `base/` for a real effect |
 | `none-fallback` | production file: a `None` default and `x or Call()`, `if x is None: x = Call()` or `Call() if x is None else x` | required parameter; split a borrowed and an owned mode into two types |
@@ -27,7 +27,7 @@ Each hint prints the site, then once per id: `why` (the principle in a sentence)
 | `deleted-test` | a removed `def test_*` whose name the same diff does not add back | list each in the PR description with its reason; a pure function's test moves with it |
 | `service-locator` | production file, not a root: `request.app.state.*`, `app.state.*`, `runtime_view(...)`, `settings_view(...)` | a frozen `XxxConfig` built by the root with exactly the fields read |
 | `mutable-in-frozen` | production file: a frozen dataclass field typed `list`, `dict`, `set`, `object`, `Any` (or the `typing` and `collections` spellings) | a tuple, frozenset or `Mapping`; return what to append and let the shell append |
-| `test-seam` | test file: `vars(x)[..] =`, `x.__dict__[..] =`, `object.__setattr__`, `raising=False`, `sys.modules[..] =`, a write to `os.environ`, `.side_effect =`, an attribute assigned on an imported name or on a fixture object of a test function, a method replaced by a lambda or function, `httpx.MockTransport`, `inspect.getsource`, a `time.sleep` outside a loop | a real resource makes the fault, or a narrow port in `base/` with its fake; the spelling is not the repair |
+| `test-seam` | test file: `vars(x)[..] =`, `x.__dict__[..] =`, `object.__setattr__`, `raising=False`, `sys.modules[..] =`, a write to `os.environ`, `.side_effect =`, an attribute assigned on an imported name or on a fixture object of a test function, a method replaced by a lambda or function, `httpx.MockTransport`, `inspect.getsource`, a `time.sleep` in the body of a `test_*` function, outside a loop | a real resource makes the fault, or a narrow port in `base/` with its fake; the spelling is not the repair |
 | `test-subclass` | test file: a class with a method whose base is a production class (resolved through imports to a first-party non-test module) or a `psycopg`, `psycopg_pool` or `redis` class; exception bases are skipped | give the class the value it reads as a constructor field; a real resource for the fault |
 | `lambda-dependency` | a call passing `lambda` for a `*_reader`, `*_fn` or `*_hook` keyword, or for a `*_factory` keyword when the lambda only returns a name, attribute or constant | pass the value; change the lower API and name its owner |
 | `spy-assert` | test file: `assert_called*`, `assert_awaited*`, `assert_not_called`, `assert_has_calls`, `assert_any_call`, `call_args`, `call_count`, `mock_calls` and the await spellings | assert the plan or the real effect's result |
@@ -44,6 +44,14 @@ but not caught: a field compared with a string literal (`fact.role == "shell"`),
 syntax cannot tell a closed vocabulary from a wire value; a required callable typed as a
 `Callable` type alias (`DecideCall = Callable[..., Awaitable[...]]`); and an if-chain over
 enum members without a final `else` (only `match` is looked at).
+
+Found in review and left for a later change, because each widens a detector: `raising=` set by a
+variable, `**{...}` or a position; a `raise` anywhere in a `case _:` body (including in a nested
+branch or def) counts as failing; `none-fallback` does not see `x or default_name`, `x if x else
+Foo()`, an annotated assignment or `self.x = Foo()`; `mutable-in-frozen` and `callable-default`
+need the field or parameter line to be added (a class turned `frozen=True` over an existing
+`list` field is missed, as is `from typing import Callable as Cb`); and `deleted-test` does not
+report a test whose name another file of the same diff adds, whatever it tests.
 
 ## Adding or changing a hint
 

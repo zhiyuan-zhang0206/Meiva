@@ -32,8 +32,6 @@ _AMBIENT_NAMES = frozenset(
         "pathlib.Path.cwd",
         "socket.gethostname",
         "socket.getfqdn",
-        "uuid.uuid1",
-        "uuid.uuid4",
         "sys.platform",
     }
 )
@@ -41,6 +39,8 @@ _AMBIENT_MODULES = ("platform.", "random.")
 _DETERMINISTIC = frozenset({"random.Random"})
 _SETTINGS = "base.config.settings"
 _LOCATOR_CALLS = frozenset({"runtime_view", "settings_view"})
+_HANDOVER_NAMES = frozenset({"now", "at", "ts", "timestamp"})
+_HANDOVER_SUFFIXES = ("_at", "_ts", "_now", "_time")
 
 
 def _is_ambient(name: str) -> bool:
@@ -63,11 +63,28 @@ def _read_name(node: ast.AST, unit: Unit) -> str | None:
     return None
 
 
+# meiva:note
+# The clock reads that are handed straight to a call as its `now` (or `*_at`, `*_ts`): the
+# caller reads once and passes the value, which is the form the hint asks for.
+def _handed_over(unit: Unit) -> frozenset[int]:
+    handed: set[int] = set()
+    for call in unit.calls:
+        for keyword in call.keywords:
+            name = keyword.arg or ""
+            named = name in _HANDOVER_NAMES or name.endswith(_HANDOVER_SUFFIXES)
+            if named and isinstance(keyword.value, ast.Call):
+                handed.add(id(keyword.value.func))
+    return frozenset(handed)
+
+
 def ambient_read(unit: Unit) -> list[Site]:
     if unit.kind is not FileKind.PRODUCTION or is_root_file(unit.path):
         return []
     sites: list[Site] = []
+    handed = _handed_over(unit)
     for node in unit.touched:
+        if id(node) in handed:
+            continue
         read = _read_name(node, unit)
         if read is not None:
             line = getattr(node, "lineno", 0)

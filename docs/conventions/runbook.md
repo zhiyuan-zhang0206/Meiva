@@ -913,11 +913,11 @@ installation (`check_git_hooks.py --strict`: a problem stops the bootstrap) with
 the same health on every source `meiva start`
 (`ensure_local_git_hooks` runs `check_git_hooks.py --scan-machine` over the
 conventional local checkouts); drift warns, it never blocks. Before deleting a
-worktree, inspect both shared hooks' `INSTALL_PYTHON` values and reinstall from
-the main clone if either points into the worktree.
+worktree, inspect the shared hooks' `INSTALL_PYTHON` values (pre-commit, pre-push and
+commit-msg) and reinstall from the main clone if any points into the worktree.
 
-The fast `check-git-hooks-install` commit hook checks both shared pre-commit and
-pre-push hooks and reports every problem: a hook is missing, unmanaged,
+The fast `check-git-hooks-install` commit hook checks the shared pre-commit, pre-push and
+commit-msg hooks and reports every problem: a hook is missing, unmanaged,
 non-executable, dispatches the wrong stage, is redirected by `core.hooksPath`, or
 points at a missing/non-executable interpreter or a disposable `worktrees/` or
 `.worktrees/` path. Executable Python paths in stable user-level uv tool

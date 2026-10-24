@@ -37,10 +37,10 @@ def _spec_ambient_read() -> HintSpec:
             "1) take the value as a parameter (`now`, `home`, a field of a frozen `XxxConfig`) "
             "and let the root read it once; 2) if the read sits inside a loop or a retry, lift "
             "the decision into a pure function of `now` and the previous state and keep the "
-            "sleep in the shell; 3) a real resource is not relevant, the thing read is data; "
-            "4) only a loop whose behavior is the interleaving takes `Timers` or `Clock` from "
-            "base/clock. If this file is a composition root or the system implementation of a "
-            "port, answer `composition root`."
+            "sleep in the shell; 3) a real resource does not apply, because what is read is data "
+            "and not an effect; 4) only a loop whose behavior is the interleaving takes `Timers` "
+            "or `Clock` from base/clock. If this file is a composition root or the system "
+            "implementation of a port, answer `composition root`."
         ),
         see=_FORMS,
     )
@@ -108,7 +108,8 @@ def _spec_wildcard_case() -> HintSpec:
         ),
         instead=(
             "1) list every member explicitly and end with `case _: assert_never(x)`; 2) turn the "
-            "`str` selector into a `Literal` or into the enum that owns the domain; 3) convert "
+            "`str` selector into the enum that owns the domain (a `Literal` where a schema or protocol "
+            "requires one); 3) convert "
             "and reject unknown values at the boundary with `ValueError`; 4) an if-chain ends "
             "in an `else` that raises."
         ),
@@ -130,7 +131,7 @@ def _spec_protocol_outside_base() -> HintSpec:
             "split first, a decision lifted into a pure function needs no port; 4) if base "
             "cannot own it, say why."
         ),
-        see=_LANDS,
+        see=_VALUES,
     )
 
 
@@ -162,8 +163,8 @@ def _spec_deleted_test() -> HintSpec:
             "1) a pure function's test moves with the function and is never deleted; 2) a "
             "rewritten test must map one to one onto the behaviors the old one covered, and no "
             "test double may reproduce production logic; 3) a test of an interface that really "
-            "disappeared is deleted with its reason; 4) list each deleted test and its reason "
-            "in the PR description."
+            "disappeared is deleted with its reason; 4) answer with the trailer below and list "
+            "each deleted test and its reason in the PR description."
         ),
         see=_DELETED,
     )

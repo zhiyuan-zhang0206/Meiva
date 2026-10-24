@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 from scripts.lint.diagnostics.diff_hints.catalog import spec_of
-from scripts.lint.diagnostics.diff_hints.model import HintId, Site
-from scripts.lint.diagnostics.diff_hints.render import render_open
+from scripts.lint.diagnostics.diff_hints.model import Ack, HintId, Site
+from scripts.lint.diagnostics.diff_hints.render import render_open, render_summary
 
 ROOT = Path(__file__).resolve().parents[5]
 DOC = ROOT / "scripts/lint/docs/diff-hints/catalog.meiva.okf.md"
@@ -80,3 +80,22 @@ def test_a_noisy_id_is_capped_and_the_cap_is_said() -> None:
     templates = [line for line in text.splitlines() if line.strip().startswith("Hint-Ack:")]
     assert len(templates) <= 7
     assert any("Hint-Ack: deleted-test cli/tests/ -- <reason>" in line for line in templates)
+
+
+def test_the_summary_marks_a_directory_answer_and_a_wide_answer_as_broad() -> None:
+    narrow = Ack(HintId.AMBIENT_READ, "cli/x.py", 4, "composition root of the daemon")
+    directory = Ack(HintId.DELETED_TEST, "cli/tests/", None, "the suite moved into the package")
+    wide = Ack(HintId.TEST_SEAM, "cli/tests/test_a.py", None, "polls | real child")
+    text = render_summary(
+        [("abc123def", narrow, 1), ("abc123def", directory, 7), ("1234abcd", wide, 12)], 2
+    )
+    assert "3 answer(s) on this branch; 2 site(s) still open." in text
+    assert "| `abc123def` | `ambient-read` | `cli/x.py:4` | 1 |" in text
+    assert "`cli/tests/` **broad**" in text
+    assert "`cli/tests/test_a.py` **broad**" in text
+    assert "polls \\| real child" in text
+    assert "`cli/x.py:4` **broad**" not in text
+
+
+def test_a_summary_with_no_answers_still_says_what_is_open() -> None:
+    assert render_summary([], 0).endswith("0 answer(s) on this branch; 0 site(s) still open.")
