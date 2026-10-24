@@ -5,3 +5,6 @@
 "test_host_turn_progress_publish.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.TURN_PROGRESS_PUBLISH_TIMEOUT_S" = 2
 "test_host_turn_progress_publish.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.asyncio.sleep" = 2
 "test_host_turn_progress_publish.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.publish_turn_progress_heartbeat" = 5
+
+[debt.patch-raising-false]
+"test_host_turn_progress_publish.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.TURN_PROGRESS_PUBLISH_TIMEOUT_S" = 2

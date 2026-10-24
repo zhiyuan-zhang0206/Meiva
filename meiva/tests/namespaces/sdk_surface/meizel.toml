@@ -16,3 +16,7 @@
 "test_log_agent_attribution.py#patch.object base.log.process.logger.info" = 2
 "test_log_agent_attribution.py#patch.object base.native_process.loaded_commit.capture_commit" = 1
 "test_log_agent_attribution.py#patch.object base.telemetry.process_logging.add_event_sink" = 2
+
+[debt.test-subclass-override]
+"test_install.py#subclass base.packages.plugin_config_images.DiskPluginConfigImages.owner" = 1
+"test_install.py#subclass base.packages.plugin_config_images.PluginConfigOwner.read" = 1

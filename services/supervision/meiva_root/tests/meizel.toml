@@ -28,6 +28,10 @@
 [debt.stdlib-patch]
 "test_meiva_root_supervisor.py#monkeypatch.setattr os.killpg" = 2
 
+[debt.test-subclass-override]
+"test_meiva_root_intent.py#subclass services.supervision.meiva_root.supervisor.Supervisor._signal_owned" = 1
+"test_root_work_ownership.py#subclass services.supervision.meiva_root.supervisor.Supervisor._signal_owned" = 1
+
 [debt.unresolved-patch]
 "test_meiva_root_intent.py#monkeypatch.setattr owner._signal_owned" = 1
 "test_meiva_root_intent.py#monkeypatch.setattr owner._stop_unit" = 1

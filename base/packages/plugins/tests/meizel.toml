@@ -9,3 +9,8 @@ exports = []
 
 [debt.first-party-patch]
 "test_load_report.py#monkeypatch.setattr base.telemetry.emit" = 1
+
+[debt.test-subclass-override]
+"config_boot_child.py#subclass base.packages.plugin_config_images.PluginConfigOwner.create_default" = 1
+"test_config_boot_race.py#subclass base.packages.plugin_config_images.PluginConfigOwner.create_default" = 3
+"test_config_boot_race.py#subclass base.packages.plugin_config_images.PluginConfigOwner.read" = 2

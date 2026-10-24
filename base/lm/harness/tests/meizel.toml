@@ -1,3 +1,6 @@
 [uses]
 "test_handoff.py" = []
 "test_registry.py" = []
+
+[debt.test-subclass-override]
+"test_bridge.py#subclass base.lm.harness.registry.FileSessionRegistry.save" = 1

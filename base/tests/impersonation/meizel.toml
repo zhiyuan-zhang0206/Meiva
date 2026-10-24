@@ -7,3 +7,6 @@ exports = ["support.py"]
 "test_impersonation_relay.py" = ["support.py"]
 "test_impersonation_reminders.py" = ["support.py"]
 "test_impersonation_roster_wakes.py" = ["publications.py"]
+
+[debt.test-subclass-override]
+"test_impersonation.py#subclass base.events.live.bus.EventBus.publish_best_effort_sync" = 1

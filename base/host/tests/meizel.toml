@@ -18,6 +18,9 @@ exports = ["daemon_shutdown.py", "daemon_shutdown_child.py", "short_tmp.py"]
 "test_proc.py#monkeypatch.setattr base.native_process.ownership.pidfd.send_signal" = 1
 "test_proc.py#monkeypatch.setattr base.native_process.ownership.sys" = 1
 
+[debt.patch-raising-false]
+"test_private_storage.py#monkeypatch.setattr base.host.private_storage.logger" = 1
+
 [debt.restricted-python]
 "test_proc.py#python -c" = 9
 "test_proc.py#python subprocess that runs something other than a literal repository file" = 1

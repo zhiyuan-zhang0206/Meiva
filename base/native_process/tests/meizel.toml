@@ -23,6 +23,10 @@ exports = ["fake_process_control.py", "host_pipe.py"]
 "test_proc_tree_identity.py#monkeypatch.setattr base.native_process.pidfd.pidfd_libc" = 1
 "test_proc_tree_identity.py#monkeypatch.setattr base.native_process.pidfd.sys" = 1
 
+[debt.patch-raising-false]
+"test_proc_tree_identity.py#monkeypatch.delattr os.pidfd_open" = 2
+"test_proc_tree_identity.py#monkeypatch.delattr signal.pidfd_send_signal" = 2
+
 [debt.restricted-python]
 "test_proc_tree_identity.py#python -c" = 3
 

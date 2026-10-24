@@ -28,8 +28,15 @@ exports = ["identity_inputs.py"]
 "test_telemetry_otlp_endpoint_preflight.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp_metrics.metric_views" = 1
 "test_telemetry_otlp_endpoint_preflight.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp_metrics.metrics_resource" = 1
 
+[debt.patch-raising-false]
+"test_telemetry_otlp.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.production_identity" = 1
+"test_telemetry_otlp_child_defer.py#monkeypatch.setattr base.telemetry.otlp.telemetry_otlp.production_identity" = 1
+
 [debt.stdlib-patch]
 "test_telemetry_otlp_child_defer.py#monkeypatch.setattr sys.is_finalizing" = 2
+
+[debt.test-subclass-override]
+"test_otlp_worker_lifecycle.py#subclass base.telemetry.otlp.telemetry_otlp.OtlpBackend._enabled" = 1
 
 [debt.third-party-patch]
 "test_telemetry_otlp_endpoint_preflight.py#monkeypatch.setattr opentelemetry.exporter.otlp.proto.http._log_exporter.OTLPLogExporter" = 1

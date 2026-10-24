@@ -1,0 +1,4 @@
+[debt.test-subclass-override]
+"test_probe.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.ping" = 2
+"test_probe.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.request_grants" = 1
+"test_probe.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.spawn_process" = 1

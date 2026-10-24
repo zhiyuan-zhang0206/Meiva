@@ -2,3 +2,7 @@ exports = ["test_runner_role.py"]
 
 [uses]
 "test_runner_grant_matrix.py" = ["test_runner_role.py"]
+
+[debt.test-subclass-override]
+"test_runner_role.py#subclass base.cluster.checkpoint_schema.PostgresCheckpointSchema.migrations" = 1
+"test_runner_role.py#subclass base.cluster.checkpoint_schema.PostgresCheckpointSchema.setup" = 6
