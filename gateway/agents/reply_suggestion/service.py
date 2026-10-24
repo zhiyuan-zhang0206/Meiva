@@ -2,19 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable, Mapping
-from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.agent_contract import AgentStatus
 from base.db import Database
-from base.lm.call import extract_text
+from base.lm.call import DraftModelFactory, extract_text
 from base.lm.catalog import ModelCatalog
-from base.lm.catalog.decide.types import Decision, DecisionError, Question, YesNo
+from base.lm.catalog.decide.types import DecisionError, Question, YesNo
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.compat.stop import StopCategory, classify_stop
+from base.lm.decision.call import DecideCall
 from base.lm.errors import ErrorClass, classify_error, normalize_provider_transport_error
 from base.lm.usage import log_usage_from_message
 from base.log import logger
@@ -52,9 +51,6 @@ GATE_QUESTION = YesNo(
         "The agent only reports progress, waits on another agent or a running job, or has finished."
     ),
 )
-
-DecideCall = Callable[..., Awaitable[Mapping[str, Decision]]]
-DraftModelFactory = Callable[[str, ModelCatalog, ProviderKeys], Any]
 
 
 class ReplySuggestionConfigurationError(ValueError):

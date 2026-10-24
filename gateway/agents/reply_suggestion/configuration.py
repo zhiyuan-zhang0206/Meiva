@@ -2,20 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from langchain_core.language_models.chat_models import BaseChatModel
-
 from base.config import ConfigBoot
 from base.host.env.agent_slices import ModelOverrides
+from base.lm.call import ChatDraftModel, DraftModel
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.decision.call import decide
 from base.lm.effort import ReasoningEffort
 from base.lm.factory import build_chat_model
 from gateway.agents.reply_suggestion.plan import ReplySuggestionPolicy
-from gateway.agents.reply_suggestion.service import (
-    DRAFT_TIMEOUT_S,
-    ReplySuggestionService,
-)
+from gateway.agents.reply_suggestion.service import DRAFT_TIMEOUT_S, ReplySuggestionService
 
 __all__ = ["draft_model_options", "reply_suggestion_policy", "reply_suggestion_service"]
 
@@ -49,9 +45,9 @@ def draft_model_options(llm_override: str) -> dict[str, Any]:
 
 
 def reply_suggestion_service(llm_override: str) -> ReplySuggestionService:
-    def draft_model(model: str, catalog: ModelCatalog, keys: ProviderKeys) -> BaseChatModel:
-        return build_chat_model(
-            model, catalog=catalog, keys=keys, **draft_model_options(llm_override)
+    def draft_model(model: str, catalog: ModelCatalog, keys: ProviderKeys) -> DraftModel:
+        return ChatDraftModel(
+            build_chat_model(model, catalog=catalog, keys=keys, **draft_model_options(llm_override))
         )
 
     return ReplySuggestionService(decide=decide, draft_model=draft_model)
