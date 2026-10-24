@@ -18,20 +18,15 @@ type FieldValue = str | int | float | bool | Path | list[str]
 
 # meiva:note
 # The parse kinds cover the table's field types (bool strings, int from a trimmed integer
-# meiva:note
 # literal or an integral decimal, float, Path, the CSV split of the eval allowlist). The
-# meiva:note
 # parity test (base/tests/config/bootstrap/test_config_lite_parity.py) locks every kind
-# meiva:note
 # against the eager sub-model construction, error for error.
 
 _BOOL_TRUE = frozenset({"1", "true", "yes", "on", "t", "y"})
 _BOOL_FALSE = frozenset({"0", "false", "no", "off", "f", "n"})
 # meiva:note
 # Python's `int()` accepts the optional sign and underscores; pydantic's int
-# meiva:note
 # additionally accepts a plain decimal that is integral ("5.0", not "5.", not
-# meiva:note
 # ".5", not "5e1") — and rejects non-ASCII digits (Python would accept them).
 _INT_LITERAL = re.compile(r"[+-]?[0-9][0-9_]*\Z")
 _INT_DECIMAL = re.compile(r"[+-]?[0-9]+\.[0-9]+\Z")

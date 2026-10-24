@@ -101,6 +101,7 @@ from .health_routes import cancel_turn_route, stats_route
 from .host import AgentHost
 from .lifecycle.configuration import (
     boot_process,
+    handoff_source,
     host_machine,
     host_policy,
     initialize_logging,
@@ -137,9 +138,8 @@ def _claim_pidfile() -> None:
         sys.exit(1)
 
 
-# A fixed timer proves liveness even when no agent has work. The same beat
 # meiva:note
-# reaps crash corpses, so its step IS the lattice's beat interval.
+# Idle hosts still publish liveness; the same beat reaps corpses, so its step is the lattice beat.
 _LIVENESS_TIMEOUT_S = 60.0
 LIVENESS_BEAT_STEP_S = AGENT_HOST_BEAT_INTERVAL_S
 BEAT_DB_TIMEOUT_S = 10.0
@@ -608,7 +608,6 @@ async def run(
             [cls for _plugin, cls in installation.registry.state_classes()],
             checkpoint_interval=config.view.agent.checkpoint_interval,
         )
-        # One graph shares the dynamic state schema for all hosted turns.
         host = AgentHost(
             pool=workload_pool,
             control_pool=control_pool,
@@ -619,6 +618,7 @@ async def run(
             db=db,
             catalog=installation.require_catalog(),
             policy=host_policy(config, keys=installation.require_provider_keys()),
+            handoff_stamping=handoff_source(config),
             clients=clients,
             extensions=installation.registry,
             commands=CommandCatalog.system(skills=meiva_skills.names),

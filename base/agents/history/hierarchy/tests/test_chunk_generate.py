@@ -26,8 +26,8 @@ from base.clock import Clock
 from base.config import settings
 from base.lm.catalog import ModelCatalog
 
-_TIMELINE_INPUTS = TimestampPolicy(
-    clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
+_TIMELINE_INPUTS = TimestampPolicy.from_clock(
+    Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
 
 

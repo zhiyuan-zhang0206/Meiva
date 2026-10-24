@@ -29,7 +29,7 @@ __all__ = [
 
 def timeline_rendering(config: GatewayConfig) -> TimestampPolicy:
     clock = Clock(config.clock, timers=SYSTEM_TIMERS)
-    return TimestampPolicy(clock=clock, timestamps_enabled=config.message_timestamps)
+    return TimestampPolicy.from_clock(clock, timestamps_enabled=config.message_timestamps)
 
 
 def timeline_read(config: GatewayConfig) -> TimelineRead:

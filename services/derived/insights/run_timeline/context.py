@@ -62,7 +62,6 @@ def get_run_timeline_context(
     history = view.history
     body_start = history.segment_starts[0]
     config: InsightsConfig = request.app.state.insights_config
-    default_model = config.default_model
     breakdown = context_breakdown_response(
         request.app.state.db_pool,
         agent_id,
@@ -73,7 +72,7 @@ def get_run_timeline_context(
             local - body_start,
         ),
         catalog=request.app.state.catalog,
-        default_model_reader=lambda: default_model,
+        default_model=config.default_model,
     )
     return RunTimelineContext(
         **breakdown.model_dump(),

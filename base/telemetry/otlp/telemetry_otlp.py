@@ -60,7 +60,7 @@ from pathlib import Path
 from typing import Any
 
 from base.cluster.derive import production_identity
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.telemetry.delivery.loss import report_loss
 from base.telemetry.delivery.mirror import append_jsonl
 from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus, Event
@@ -213,7 +213,7 @@ NO_EMITTER = "_no_emitter"
 # meiva:note
 # Decide export eligibility from the caller's machine, unit home and environment.
 def observability_export_allowed(
-    machine: MachineIdentity, *, home: Path, endpoint_explicit: bool
+    machine: MachineIdentityReader, *, home: Path, endpoint_explicit: bool
 ) -> bool:
     if endpoint_explicit:
         return True

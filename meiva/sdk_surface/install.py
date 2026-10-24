@@ -47,12 +47,13 @@ from __future__ import annotations
 import atexit
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from types import MappingProxyType
 from typing import assert_never
 
 from pydantic import BaseModel
 
-from base.agents.sdk.call_policy import SamplingPolicyOwner
+from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner, SamplingSource
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
@@ -128,7 +129,11 @@ def _is_bare_provider_mount(installation: Installation) -> bool:
 # nothing, so the sampling owner it carries is never read; a later `install` replaces the whole
 # value with its own root's owner.
 def _bare_provider_mount(provider: SkillProvider) -> Installation:
-    return replace(Installation.bare(sampling=SamplingPolicyOwner()), skill_providers=(provider,))
+    inert = SamplingPolicyOwner(
+        initial=SamplingPolicy(),
+        source=SamplingSource(env={}, env_path=Path("/nonexistent-sampling-home/.env")),
+    )
+    return replace(Installation.bare(sampling=inert), skill_providers=(provider,))
 
 
 def mount_skill_provider(provider: SkillProvider) -> Callable[[], None]:
@@ -381,8 +386,11 @@ def apply_config_overlay(overlay: dict[str, object]) -> None:
     setattr(meiva_module(), SLOT, replace(current, configs=MappingProxyType(configs)))
 
 
-def uninstall() -> Installation | None:
-    """Remove the SDK surface and return its owners for an explicit subsequent reinstall."""
+# meiva:note
+# Remove the surface and return its owners. A replacement names the exact sampling owner it
+# retains so that root keeps its existing exit cleanup even if loading the replacement fails.
+# An ordinary uninstall removes the installed owner's registration.
+def uninstall(*, retaining_sampling: SamplingPolicyOwner | None = None) -> Installation | None:
     from . import metering
 
     installation = installed()
@@ -393,7 +401,8 @@ def uninstall() -> Installation | None:
         # in flight; a failed attempt stays un-retried), a fresh install overwrites it.
         return None
     # meiva:link meiva/docs/sdk-surface/install-lifetime.meiva.okf.md
-    atexit.unregister(installation.sampling.close)
+    if installation.sampling is not retaining_sampling:
+        atexit.unregister(installation.sampling.close)
     setattr(meiva_module(), SLOT, None)
     _run(list(installation.undo), Build.of(installation))
     return installation

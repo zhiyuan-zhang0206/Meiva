@@ -1,18 +1,44 @@
 """Explicit database transaction postures."""
 
 from collections.abc import AsyncGenerator, Generator
-from contextlib import asynccontextmanager, contextmanager
-from typing import Any, TypeVar
+from contextlib import (
+    AbstractAsyncContextManager,
+    AbstractContextManager,
+    asynccontextmanager,
+    contextmanager,
+)
+from typing import Any, Protocol, TypeVar
 
 import psycopg
-from psycopg_pool import AsyncConnectionPool, ConnectionPool
+from psycopg_pool import AsyncConnectionPool
 
 _CT = TypeVar("_CT", bound=psycopg.AsyncConnection[Any])
 
 
+# meiva:note
+# What an async reader needs of a pool: one connection lent for the length of an `async with`
+# block. `psycopg_pool.AsyncConnectionPool` is one; a test pool that swallows a cancellation of the
+# borrow (`base/db/tests/swallowed_cancel.py`) is the other, a fault no real pool produces on demand.
+class AsyncConnectionSource(Protocol):
+    def connection(
+        self, timeout: float | None = None
+    ) -> AbstractAsyncContextManager[psycopg.AsyncConnection[Any]]: ...
+
+
+# meiva:note
+# What a transaction needs of a pool: one connection lent for the length of a `with` block, committed
+# when the block ends normally. `psycopg_pool.ConnectionPool` is one; a test pool that loses the
+# acknowledgement of a commit it really made is the other (`base/db/tests/lost_ack.py`), which no
+# real pool can be made to do on demand.
+class ConnectionSource(Protocol):
+    def connection(
+        self, timeout: float | None = None
+    ) -> AbstractContextManager[psycopg.Connection[Any]]: ...
+
+
 @contextmanager
 def write_transaction(
-    pool: ConnectionPool, *, timeout: float | None = None
+    pool: ConnectionSource, *, timeout: float | None = None
 ) -> Generator[psycopg.Connection, None, None]:
     """Open one transaction explicitly allowed to write, on a connection of `pool`.
 

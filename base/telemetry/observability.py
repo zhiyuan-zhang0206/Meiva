@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 
 ObservabilityEndpointVariable = Literal[
     "MEIVA_TELEMETRY_OTLP_ENDPOINT",
@@ -59,7 +59,7 @@ def endpoint_override_is_explicit(
     return variable in environ
 
 
-def gateway_observability_home(machine: MachineIdentity, *, home: Path) -> Path | None:
+def gateway_observability_home(machine: MachineIdentityReader, *, home: Path) -> Path | None:
     """Return this unit's home when it serves the gateway capability.
 
     Missing role identity is treated as non-gateway so
@@ -75,7 +75,9 @@ def gateway_observability_home(machine: MachineIdentity, *, home: Path) -> Path 
     return home if "gateway" in roles else None
 
 
-def home_is_observability_station(home: Path, *, machine: MachineIdentity, unit_home: Path) -> bool:
+def home_is_observability_station(
+    home: Path, *, machine: MachineIdentityReader, unit_home: Path
+) -> bool:
     """Whether this home is the observability station — the provider identity
     of the host's native LGTM backends.
 
@@ -105,7 +107,7 @@ def home_is_observability_station(home: Path, *, machine: MachineIdentity, unit_
 
 
 def collector_allowed_for_home(
-    home: Path | None, *, machine: MachineIdentity, unit_home: Path, endpoint_explicit: bool
+    home: Path | None, *, machine: MachineIdentityReader, unit_home: Path, endpoint_explicit: bool
 ) -> bool:
     """Whether the gateway home at ``home`` may run the local otel-collector.
 

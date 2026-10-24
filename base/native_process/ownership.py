@@ -68,6 +68,18 @@ def _start_ticks(pid: int) -> int | None:
     return ticks
 
 
+# meiva:note
+# What one look at a pid saw (`OwnedProcess.read_live`): the Linux start ticks as read, whether the
+# pid is still in the process table, the psutil status, and the identity captured now when the
+# record carries no ticks.
+@dataclass(frozen=True)
+class LiveReading:
+    ticks: int | None
+    pid_exists: bool
+    status: str
+    identity: OwnedProcess | None
+
+
 @dataclass(frozen=True)
 class OwnedProcess:
     pid: int
@@ -127,27 +139,47 @@ class OwnedProcess:
         return observed == self.starttime
 
     # meiva:note
-    # Whether the pid still is this recorded process.
-    def live(self) -> bool:
+    # Look at this record's pid once: the start ticks as read (Linux), whether the pid is still in
+    # the process table, its status, and, where the record carries no ticks, the identity the
+    # process has now. None when there is no such process. `judge_live` decides from the reading.
+    def read_live(self) -> LiveReading | None:
         try:
             process = psutil.Process(self.pid)
-            # Branch on the recorded field first: a platform-first test lets
-            # the Linux type check narrow it and flag the later comparison.
             if self.starttime is None:
                 if sys.platform == "linux":
                     raise RuntimeError(f"missing Linux start ticks for PID {self.pid}")
-                if not self.birth_matches(process):
-                    return False
-            else:
-                observed = _start_ticks(self.pid)
-                # meiva:note
-                # Existence is asked only when the read found nothing.
-                exists = observed is not None or psutil.pid_exists(self.pid)
-                if not self.ticks_match(observed, pid_exists=exists):
-                    return False
-            return process.status() not in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD)
+                return LiveReading(
+                    ticks=None,
+                    pid_exists=True,
+                    status=process.status(),
+                    identity=OwnedProcess.capture(process),
+                )
+            observed = _start_ticks(self.pid)
+            # meiva:note
+            # Existence is asked only when the read found nothing.
+            exists = observed is not None or psutil.pid_exists(self.pid)
+            return LiveReading(
+                ticks=observed, pid_exists=exists, status=process.status(), identity=None
+            )
         except psutil.NoSuchProcess:
+            return None
+
+    # meiva:note
+    # Whether a reading still names this recorded process and it is neither a zombie nor dead.
+    def judge_live(self, reading: LiveReading | None) -> bool:
+        if reading is None:
             return False
+        if self.starttime is None:
+            if reading.identity is None or not self.same_birth(reading.identity):
+                return False
+        elif not self.ticks_match(reading.ticks, pid_exists=reading.pid_exists):
+            return False
+        return reading.status not in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD)
+
+    # meiva:note
+    # Whether the pid still is this recorded process.
+    def live(self) -> bool:
+        return self.judge_live(self.read_live())
 
     def send_signal(self, signum: int) -> bool:
         """Signal this birth, retaining the Linux process object through delivery.

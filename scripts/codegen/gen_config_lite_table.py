@@ -204,6 +204,18 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
         "port",
         "support row: telemetry_otlp_endpoint's derived default input",
     ),
+    LiteField(
+        "os_jobs_enabled",
+        "literal",
+        None,
+        "cli/commands/converge/os_jobs master gate before resolving any job policy",
+    ),
+    LiteField(
+        "refresh_enabled",
+        "literal",
+        None,
+        "cli/commands/converge/os_jobs channel gate before reading the refresh tick",
+    ),
     LiteField("sdk_call_sampling_enabled", "literal", None, "sdk_call_policy"),
     LiteField("sdk_call_sample_every", "literal", None, "sdk_call_policy"),
     LiteField(

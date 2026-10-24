@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import Any
 
 import meiva
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.db import Database
+from base.host.env.agent_env import AGENT_ID_ENV
 from base.host.env.agent_slices import ModelOverrides, agent_setting
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
@@ -39,7 +40,7 @@ def apply_per_agent_eval_isolation(*, default_reader: Callable[[str, str], Any])
         disabled.append("understand")
     sdk_disable.apply_sdk_disable(disabled)
 
-    agent_id = int(os.environ["MEIVA_AGENT_ID"])
+    agent_id = int(os.environ[AGENT_ID_ENV])
     isolated_pool = workspace_dir(agent_id) / "memory-pool"
     isolated_pool.mkdir(parents=True, exist_ok=True)
     memory = getattr(meiva, "memory", None)
@@ -82,7 +83,7 @@ def process_trace_config(config: ConfigBoot) -> TraceConfig:
     )
 
 
-def init_process_scope(*, machine: MachineIdentity, home: Path, trace: TraceConfig) -> None:
+def init_process_scope(*, machine: MachineIdentityReader, home: Path, trace: TraceConfig) -> None:
     from base.telemetry.tracing import initialize_tracing
 
     initialize_tracing(machine=machine, home=home, config=trace)

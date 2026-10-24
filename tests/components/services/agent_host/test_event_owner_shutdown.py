@@ -23,7 +23,7 @@ from base.telemetry.delivery.receipts import Event
 from base.telemetry.otlp.trace_config import TraceConfig
 from services.agent_runner.agent_host import daemon
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_policy, handoff_timestamps
 
 
 def event() -> Event:
@@ -61,6 +61,7 @@ async def test_host_release_runs_and_first_original_failure_remains_primary(
     pipe = EventPipeline(writer=writer, batch_size=1)
     clients = ClientSet(pipeline_factory=lambda: pipe)
     host = AgentHost(
+        handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
         pool=cast(Any, MagicMock()),

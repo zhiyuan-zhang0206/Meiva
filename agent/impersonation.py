@@ -76,7 +76,7 @@ from base.agents.impersonation.relay import (
     stamp_relay_failure,
 )
 from base.agents.impersonation.status import ImpersonationStatus
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision, relay_exited
 from base.agents.observation.relay_supervision import heartbeat_fresh as _heartbeat_fresh
 from base.agents.observation.relay_supervision import terminate_relay as terminate_relay
@@ -230,11 +230,11 @@ async def _activate_accepted(
     incarnation: RuntimeIncarnation,
     relays: RelaySupervision,
     *,
-    notes: TimestampPolicy,
+    timestamps: TimestampSource,
     host: TakeoverHost,
 ) -> dict[str, Any] | None:
     """Activate an accepted lease; None when the relay gate failed and native control resumes."""
-    await _handoff.ensure_start_marker(graph, session, notes=notes)
+    await _handoff.ensure_start_marker(graph, session, notes=timestamps.policy())
     # The bound relay must be live before the takeover stands. On failure
     # the lease is rolled back to 'rejected' with a loud reason and the
     # native agent resumes — no silent half-takeover.
@@ -293,7 +293,7 @@ async def settle_checkpoint(
     *,
     activate_accepted: bool = True,
     incarnation: RuntimeIncarnation | None,
-    notes: TimestampPolicy,
+    timestamps: TimestampSource,
     host: TakeoverHost,
 ) -> bool:
     """After invocation+flush, activate; apply terminal deltas exactly once."""
@@ -304,7 +304,7 @@ async def settle_checkpoint(
     session, incarnation = _held(session, incarnation)
     if step is SettleStep.ACTIVATE:
         activated = await _activate_accepted(
-            graph, db, bus, session, incarnation, relays, notes=notes, host=host
+            graph, db, bus, session, incarnation, relays, timestamps=timestamps, host=host
         )
         if activated is None:
             return False
@@ -322,7 +322,7 @@ async def settle_checkpoint(
             bus,
             session,
             incarnation,
-            notes=notes,
+            timestamps=timestamps,
             workspace=host.workspace(agent_id),
             reason=aborted_detail(session.get("rejection_reason")),
         )

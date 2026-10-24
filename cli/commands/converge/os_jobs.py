@@ -43,20 +43,27 @@ def ensure_logs_maintenance(ctx: ConvergeCtx) -> None:
     register_logs_job(enabled=ctx.read_config().view.general.os_jobs_enabled, host=ctx.host)
 
 
+# meiva:note
+# Register the host's content-refresh tick only from the owning home. Resolve the channel switch
+# after global/home admission, and the interval only for an enabled channel. The registrar keeps
+# its own ownership check at the physical-write boundary; its command rechecks both switches.
 def ensure_packages_refresh_job(ctx: ConvergeCtx) -> None:
-    """Register the recurring content-refresh pass (design §5.6; task #3267).
+    from base.host.system import cron
+    from base.host.system.packages_job import RefreshSchedule, register_packages_job
 
-    Every serving unit runs it: skills are per-machine state, so each home owns
-    its own pass. Delegates to `base.host.system.packages_job`, which no-ops when
-    `MEIVA_OS_JOBS_ENABLED` is off and skips registration when the refresh channel
-    itself is disabled (`MEIVA_PACKAGES_REFRESH_ENABLED`); the registered command
-    re-checks both at run time. Idempotent."""
-    from base.host.system.packages_job import register_packages_job
-
+    view = ctx.read_config().view
+    jobs_enabled = view.general.os_jobs_enabled
+    if jobs_enabled and not cron.owns_os_jobs("packages refresh"):
+        return
+    refresh_enabled = view.packages.refresh_enabled if jobs_enabled else False
     register_packages_job(
-        enabled=ctx.read_config().view.general.os_jobs_enabled,
-        refresh_enabled=ctx.read_config().view.packages.refresh_enabled,
-        tick_seconds=ctx.read_config().view.packages.refresh_tick_seconds,
+        enabled=jobs_enabled,
+        schedule=RefreshSchedule(
+            refresh_enabled=refresh_enabled,
+            tick_seconds=view.packages.refresh_tick_seconds if refresh_enabled else None,
+        )
+        if jobs_enabled
+        else None,
         host=ctx.host,
     )
     # A registration failure propagates so converge fails fast.
@@ -88,12 +95,17 @@ def ensure_walg_job(ctx: ConvergeCtx) -> None:
     a command which now does nothing. Both directions only act in the default
     home (`owns_os_jobs`), and registration is a no-op where
     `MEIVA_OS_JOBS_ENABLED` is off. Delegates to `base.host.system.walg_job`."""
+    from base.host.system import cron
     from base.host.system.walg_job import register_walg_job, unregister_walg_job
 
+    if not cron.owns_os_jobs("WAL-G tick"):
+        return
     if ctx.read_config().view.walg.walg_config_file is not None:
+        view = ctx.read_config().view
+        jobs_enabled = view.general.os_jobs_enabled
         register_walg_job(
-            enabled=ctx.read_config().view.general.os_jobs_enabled,
-            backup_hour=ctx.read_config().view.services.backup_hour,
+            enabled=jobs_enabled,
+            backup_hour=view.services.backup_hour if jobs_enabled else None,
             host=ctx.host,
         )
     else:

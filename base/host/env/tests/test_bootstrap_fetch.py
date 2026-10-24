@@ -288,6 +288,22 @@ def test_launcher_context_is_the_live_profile_or_the_recorded_one() -> None:
     assert bootstrap.launcher_context({"MEIVA_PROCESS_PROFILE": ""}) is None
 
 
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"MEIVA_PROCESS_PROFILE": "agnet"},
+        {bootstrap.LAUNCHER_PROFILE_ENV_KEY: "Runner"},
+    ],
+)
+def test_a_launcher_profile_outside_the_vocabulary_is_refused_before_a_credential_branch(
+    env: dict[str, str],
+) -> None:
+    with pytest.raises(ValueError, match="not a known process profile"):
+        bootstrap.launcher_context(env)
+    with pytest.raises(ValueError, match="not a known process profile"):
+        bootstrap.launch_facts(env, env_file={})
+
+
 # ── P0 #2100: the parent config snapshot ─────────────────────────────────────
 
 

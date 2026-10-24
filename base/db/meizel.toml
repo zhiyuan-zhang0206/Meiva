@@ -4,7 +4,7 @@ exports = ["code_version_gate.py", "config.py", "connections.py", "test_db_guard
 "__init__.py" = ["config.py", "connections.py", "handle.py"]
 "connections.py" = ["code_version_gate.py", "config.py"]
 "handle.py" = ["code_version_gate.py", "config.py", "connections.py"]
-"tests" = ["__init__.py", "code_version_gate.py", "config.py", "connections.py", "test_db_guard.py"]
+"tests" = ["__init__.py", "code_version_gate.py", "config.py", "connections.py", "test_db_guard.py", "transaction.py"]
 
 [state]
 "__init__.py" = ["db"]

@@ -17,7 +17,7 @@ from http.client import HTTPException
 from pathlib import Path
 from typing import Any, assert_never
 
-from base.cluster.machine import MachineRoles
+from base.cluster.machine import MachineIdentity, MachineRoleMissing, MachineRoles
 from base.daemon.health import DaemonProbe
 from base.paths import meiva_home
 from services.supervision.healthchecks.plans.lgtm_plan import (
@@ -63,11 +63,22 @@ def lgtm_host_marker() -> Path:
 
 
 # meiva:note
+# The capability set `is_lgtm_host` decides on: the unit's roles, or None while none is configured
+# (an unconfigured unit, a bootstrap process). An invalid capability set raises
+# `MachineRoleInvalid`, so the answer never degrades to the marker alone.
+def lgtm_roles(machine: MachineIdentity) -> MachineRoles | None:
+    try:
+        return machine.role()
+    except MachineRoleMissing:
+        return None
+
+
+# meiva:note
 # Whether the unit at `home` is the observability station: the `lgtm-host` marker
 # OR the declarative `observability-station` capability in its `roles`.
 #
-# `roles` is the unit's capability set, or None while it has no resolvable role
-# (an unconfigured unit, a bootstrap process): then the marker alone decides.
+# `roles` is the unit's capability set, or None while it has no configured role (`lgtm_roles`):
+# then the marker alone decides.
 def is_lgtm_host(home: Path, *, roles: MachineRoles | None) -> bool:
     return (home / "lgtm-host").exists() or (roles is not None and "observability-station" in roles)
 

@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
+from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV, AGENT_ID_ENV
 
 
 @dataclass(frozen=True)
@@ -45,7 +45,7 @@ def build_child_environment(
     if source_root is not None and not _cwd_is_inside_checkout(cwd, source_root):
         env.pop("VIRTUAL_ENV", None)
     if execution.agent_id is not None:
-        env["MEIVA_AGENT_ID"] = str(execution.agent_id)
+        env[AGENT_ID_ENV] = str(execution.agent_id)
     env["MEIVA_PROCESS_PROFILE"] = "agent"
     env["MEIVA_EXEC_REQUEST_FILE"] = str(execution.request_path)
     env["MEIVA_EXEC_RESULT_FILE"] = str(execution.result_path)

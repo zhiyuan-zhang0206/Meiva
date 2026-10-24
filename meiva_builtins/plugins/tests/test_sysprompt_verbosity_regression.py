@@ -5,7 +5,7 @@ from contextlib import redirect_stdout
 import pytest
 
 import meiva
-from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths.home import resolve_meiva_home
@@ -29,7 +29,7 @@ def load_meiva_code_plugin(model_installation: Installation) -> Iterator[None]:
         catalog=model_installation.require_catalog(),
         authority=model_installation.authority,
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
-        sampling=SamplingPolicyOwner(reader=SamplingPolicy),
+        sampling=fixed_sampling_owner(),
     )
 
     yield
@@ -46,7 +46,7 @@ def _load_meiva_fleet_plugin(model_installation: Installation) -> Iterator[None]
         catalog=model_installation.require_catalog(),
         authority=model_installation.authority,
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
-        sampling=SamplingPolicyOwner(reader=SamplingPolicy),
+        sampling=fixed_sampling_owner(),
     )
 
     yield

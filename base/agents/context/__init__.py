@@ -1,37 +1,37 @@
-"""Run-scoped dependency context — what one graph run is handed.
-
-The agent host builds an `MeivaContext` for each turn task and passes it via
-`graph.ainvoke(input, context=ctx)`. Graph nodes have the signature
-`(state, runtime: Runtime[MeivaContext], config: RunnableConfig)` and read their
-dependencies as `runtime.context.X`:
-
-- **handles** the host built and owns: `llm`, `event_publisher`, `ops_pool`, the cluster
-  `db` (`Database`) and `bus` (`EventBus`) — a node that touches a handle expects it non-None;
-  the eval driver and tests populate only the ones their path needs;
-- **`agent`**: the agent's resolved per-turn configuration (`AgentSlices`, see
-  `base.host.env.agent_slices`), built by the host when the turn starts;
-- **`extensions`**: the plugins' contributions, held by the host that loaded them;
-- **`commands`**: the composer commands the host serves, which the claim node expands a chat
-  inbound's `/name` through;
-- **`identity`**: who the run acts as (`AgentIdentity`);
-- **`clients`**: the lazily-built connections the process holds (SQL, Redis, gateway HTTP, and the
-  SDK layer's own), closed with `close()`.
-- **`machine`**: the composition root's lazy `MachineIdentity`, shared with its database,
-  logger and event pipeline. It can be supplied without an agent or live clients;
-  `require_machine()` rejects a context that did not receive one.
-- **host-held state** the graph reads or writes across turns: `turn_progress`, `relays`.
-  The host builds each once and hands the same object to every turn it runs;
-  a context built without them (the eval driver, a test) carries private ones.
-
-The exec child holds the same type. The host puts `describe()` of the turn's context in the exec
-request envelope and the child builds its instance with `from_description()`, so agent code reads
-the identity the host's turn carries (`meiva.context`). Only what is serializable and not secret
-crosses (identity, the gateway endpoint); a connection the child needs it builds itself, on first
-use, from its own settings and environment, and releases when the process ends.
-
-`frozen=True`: context is read-only during a run. If you need mutable state, split it into a
-separate dataclass.
-"""
+# meiva:note
+# Run-scoped dependency context — what one graph run is handed.
+#
+# The agent host builds an `MeivaContext` for each turn task and passes it via
+# `graph.ainvoke(input, context=ctx)`. Graph nodes have the signature
+# `(state, runtime: Runtime[MeivaContext], config: RunnableConfig)` and read their
+# dependencies as `runtime.context.X`:
+#
+# - **handles** the host built and owns: `llm`, `event_publisher`, `ops_pool`, the cluster
+#   `db` (`Database`) and `bus` (`EventBus`) — a node that touches a handle expects it non-None;
+#   the eval driver and tests populate only the ones their path needs;
+# - **`agent`**: the agent's resolved per-turn configuration (`AgentSlices`, see
+#   `base.host.env.agent_slices`), built by the host when the turn starts;
+# - **`extensions`**: the plugins' contributions, held by the host that loaded them;
+# - **`commands`**: the composer commands the host serves, which the claim node expands a chat
+#   inbound's `/name` through;
+# - **`identity`**: who the run acts as (`AgentIdentity`);
+# - **`clients`**: the lazily-built connections the process holds (SQL, Redis, gateway HTTP, and the
+#   SDK layer's own), closed with `close()`.
+# - **`machine`**: the composition root's read-only machine identity, shared with its database,
+#   logger and event pipeline. It can be supplied without an agent or live clients;
+#   `require_machine()` rejects a context that did not receive one.
+# - **host-held state** the graph reads or writes across turns: `turn_progress`, `relays`.
+#   The host builds each once and hands the same object to every turn it runs;
+#   a context built without them (the eval driver, a test) carries private ones.
+#
+# The exec child holds the same type. The host puts `describe()` of the turn's context in the exec
+# request envelope and the child builds its instance with `from_description()`, so agent code reads
+# the identity the host's turn carries (`meiva.context`). Only what is serializable and not secret
+# crosses (identity, the gateway endpoint); a connection the child needs it builds itself, on first
+# use, from its own settings and environment, and releases when the process ends.
+#
+# `frozen=True`: context is read-only during a run. If you need mutable state, split it into a
+# separate dataclass.
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.harness.engine import TurnEngine
@@ -131,10 +131,10 @@ class MeivaContext:
     clock_factory: Callable[[], Clock] | None = None
     """Build the current clock from this process owner's configuration at each use."""
 
-    machine: MachineIdentity | None = None
+    machine: MachineIdentityReader | None = None
     """Machine identity retained by the composition root; independent of agent identity."""
 
-    def require_machine(self) -> MachineIdentity:
+    def require_machine(self) -> MachineIdentityReader:
         """Read this root's machine owner; partial contexts fail without a fallback."""
         if self.machine is None:
             raise RuntimeError("this MeivaContext carries no MachineIdentity (ctx.machine is None)")
@@ -150,10 +150,10 @@ class MeivaContext:
     # The message-timestamp policy of the unit of work that asks: this owner's clock and the
     # agent's `general.message_timestamps`, read once.
     def timestamp_policy(self) -> TimestampPolicy:
-        return TimestampPolicy(
-            clock=self.require_clock(),
-            timestamps_enabled=self.require_agent().read("general", "message_timestamps"),
-        )
+        enabled = self.require_agent().read("general", "message_timestamps")
+        if not enabled and self.clock_factory is None:
+            return TimestampPolicy.off()
+        return TimestampPolicy.from_clock(self.require_clock(), timestamps_enabled=enabled)
 
     bus: EventBus | None = None
     """The cluster Redis / live-events handle, for the same."""
@@ -258,7 +258,7 @@ class MeivaContext:
         description: dict[str, Any],
         *,
         clients: ClientSet,
-        machine: MachineIdentity,
+        machine: MachineIdentityReader,
         original_incarnation: RuntimeIncarnation | None = None,
     ) -> Self:
         """Rebuild identity with clients and original admission supplied by the child's root."""

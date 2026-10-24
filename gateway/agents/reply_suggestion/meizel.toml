@@ -2,7 +2,7 @@ exports = ["configuration.py", "router.py", "service.py", "tests"]
 
 [uses]
 "cache.py" = ["schemas.py"]
-"configuration.py" = ["plan.py", "service.py"]
+"configuration.py" = ["plan.py"]
 "plan.py" = ["schemas.py"]
 "router.py" = ["schemas.py", "service.py"]
 "service.py" = ["cache.py", "excerpt.py", "plan.py", "schemas.py"]

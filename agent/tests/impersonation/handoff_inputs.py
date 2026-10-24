@@ -34,7 +34,7 @@ from base.agents.context.identity import AgentIdentity
 from base.agents.history.checkpoint_postgres_walks import HistoryAsyncPostgresSaver
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.inbox.insert import insert_inbound_message
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
@@ -68,7 +68,7 @@ __all__ = [
     "end_external_session",
     "executor_acks_says_and_releases",
     "handoff_clients",
-    "handoff_notes",
+    "handoff_timestamps",
     "inbound_wakes",
     "local_exec_process",
     "prepare_graph",
@@ -89,9 +89,9 @@ def handoff_clients(machine_identity: MachineIdentity) -> Iterator[ClientSet]:
         clients.close()
 
 
-def handoff_notes() -> TimestampPolicy:
+def handoff_timestamps() -> TimestampSource:
     clock = Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS)
-    return TimestampPolicy(clock=clock, timestamps_enabled=False)
+    return TimestampSource(clock=clock, timestamps_enabled=False)
 
 
 def takeover_host(tmp_path: Path, machine: MachineIdentity) -> TakeoverHost:
@@ -499,7 +499,7 @@ async def resume_native(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     assert wakes.drain() == ["impersonation"]

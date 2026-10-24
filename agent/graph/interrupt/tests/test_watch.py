@@ -9,6 +9,7 @@ from agent.graph.interrupt._watch import watch_for_interrupt
 from agent.graph.interrupt.tests.queued_commands import queue_command
 from base.agents.messages.inbound import InterruptReason
 from base.db import create_agent
+from base.db.tests.swallowed_cancel import CancelSwallowingPool
 from base.native_process.turn_identity import HostedTurnResources
 
 _ARRIVAL_TIMEOUT_S = 5.0
@@ -54,32 +55,56 @@ async def test_the_watcher_keeps_polling_until_a_cancel_is_queued(
     assert event.reason is InterruptReason.USER
 
 
+async def _until_a_borrower_waits(pool: AsyncConnectionPool) -> None:
+    async def waiting() -> None:
+        while pool.get_stats().get("requests_waiting", 0) < 1:
+            await asyncio.sleep(_POLL_S)
+
+    await asyncio.wait_for(waiting(), _ARRIVAL_TIMEOUT_S)
+
+
 @pytest.mark.parametrize("cancel_is_pending", [False, True])
 async def test_a_poll_that_returns_after_stop_ends_the_watcher_without_firing(
-    db_url: str, db_conn: psycopg.Connection, cancel_is_pending: bool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, cancel_is_pending: bool
 ) -> None:
     agent_id = create_agent(db_conn)
     if cancel_is_pending:
         queue_command(db_conn, agent_id, "cancel")
     event, stop = InterruptEvent(), asyncio.Event()
-    single_connection: AsyncConnectionPool = AsyncConnectionPool(
-        db_url,
-        min_size=1,
-        max_size=1,
-        kwargs={"autocommit": True, "prepare_threshold": None},
-        open=False,
-    )
-    async with single_connection as pool:
-        async with pool.connection():
-            watcher = asyncio.create_task(
-                watch_for_interrupt(pool, event, agent_id, stop, poll_s=_POLL_S)
-            )
-            await asyncio.sleep(0.1)
-            assert not watcher.done()
-            stop.set()
-        await asyncio.wait_for(watcher, _ARRIVAL_TIMEOUT_S)
+    async with aops_pool.connection(), aops_pool.connection():
+        watcher = asyncio.create_task(
+            watch_for_interrupt(aops_pool, event, agent_id, stop, poll_s=_POLL_S)
+        )
+        await _until_a_borrower_waits(aops_pool)
+        assert not watcher.done()
+        stop.set()
+    await asyncio.wait_for(watcher, _ARRIVAL_TIMEOUT_S)
 
     assert not event.is_set()
+
+
+async def test_a_borrow_that_swallows_the_watchers_cancel_still_ends_after_stop_without_firing(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    agent_id = create_agent(db_conn)
+    queue_command(db_conn, agent_id, "cancel")
+    event, stop = InterruptEvent(), asyncio.Event()
+    pool = CancelSwallowingPool(aops_pool)
+    watcher = asyncio.create_task(watch_for_interrupt(pool, event, agent_id, stop, poll_s=_POLL_S))
+    try:
+        await asyncio.wait_for(pool.waiting.wait(), _ARRIVAL_TIMEOUT_S)
+        stop.set()
+        watcher.cancel()
+        await asyncio.wait_for(pool.swallowed.wait(), _ARRIVAL_TIMEOUT_S)
+        assert not watcher.done()
+        pool.release()
+        await asyncio.wait_for(watcher, _ARRIVAL_TIMEOUT_S)
+        assert not event.is_set()
+    finally:
+        stop.set()
+        pool.release()
+        watcher.cancel()
+        await asyncio.gather(watcher, return_exceptions=True)
 
 
 @pytest.mark.parametrize("missing_scope", [True, False])

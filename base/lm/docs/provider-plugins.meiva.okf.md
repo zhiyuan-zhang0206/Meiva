@@ -79,7 +79,7 @@ both literal rate tables without executing plugin code.
   `validate_effort`; `ctx.keys.require(key_env)` fails at build time if the
   process's `ProviderKeys` lacks the key.
 - A process holds its keys as one frozen `ProviderKeys` value
-  (`base/lm/provider_keys.py`). Each composition root builds it with
+  (`base/lm/catalog/provider_keys.py`). Each composition root builds it with
   `process_provider_keys(catalog)` (`base/lm/factory.py`): the live
   environment first, then the local cluster `.env` only for declared keys the
   environment lacks, so an available key never depends on reading the fallback

@@ -37,18 +37,21 @@ reverse through `meiva/sdk_surface/plugins.py:uninstall`; a bound plugin config 
 function `bind_plugin_config` returned, which its record keeps. An installed surface is reversed
 through the same ledger, rebuilt by `Build.of` from the installation's frozen snapshots.
 
-## The atexit owner follows the installation
+## The sampling root retains cleanup during reload
 
-`install()` requires the sampling owner and registers nothing itself. The bare-SDK
-process, which has no service lifespan to schedule that cleanup, builds its owner with
-`meiva/boot.py:process_sampling_owner`, which registers the owner's `close` with `atexit`.
-The registration belongs to the installation that retains the owner rather than to the
-process at large: `uninstall()` unregisters the same `close` before
-it drops the slot, so a removed surface leaves nothing behind that could
-re-raise a refresh failure the surface no longer owns, while an installation
-left in place still reports that failure at interpreter exit. This is finite
-cleanup, not a promise of a nonzero exit code or of delivery after a hard exit.
+`install()` requires the sampling owner and registers nothing itself. A bare-SDK
+process builds its owner through `meiva/boot.py:process_sampling_owner`, which
+registers `close` with `atexit`; a service root closes its owner through its lifespan.
 
-The process-lifetime sampling close is registered with, and removed by, the installation that owns it: uninstalling the SDK surface unregisters that owner's close, so a removed surface cannot re-raise its refresh failure at interpreter exit, while an installation left in place (the bare-SDK process) still reports one.
+A full reload resolves the owner it will retain before removing the previous surface.
+`uninstall(retaining_sampling=owner)` preserves an existing exit registration only when
+that exact owner was installed. The replacement keeps the same cleanup; an owner managed
+by a service acquires no exit registration. An ordinary `uninstall()` removes the
+installed owner's registration before reversing the surface.
+
+If a reload retaining the owner fails while importing faces or installing the new
+surface, the process root still owns that owner and its existing finite exit cleanup.
+The surface may be absent after failure; that does not abandon an unfinished refresh.
+This cleanup does not promise a nonzero exit code or delivery after a hard exit.
 
 Parent: [[sdk-surface.meiva.okf.md]].

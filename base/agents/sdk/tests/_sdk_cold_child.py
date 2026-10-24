@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib.abc
 import os
 import sys
+from pathlib import Path
 
 
 def cold_import_loads_no_httpx() -> None:
@@ -28,7 +29,6 @@ def capture_import_failure() -> None:
     ]
     failure = error_type("invalid cold capture module")
     executed: list[str] = []
-    call_policy.policy = lambda _owner: SamplingPolicy()  # type: ignore[assignment]
     telemetry.emit = lambda *_args, **_kwargs: executed.append("emit")  # type: ignore[assignment]
 
     class BrokenCapture(importlib.abc.MetaPathFinder):
@@ -44,7 +44,10 @@ def capture_import_failure() -> None:
             (),
             {},
             identity={},
-            sampling_owner=call_policy.SamplingPolicyOwner(),
+            sampling_owner=call_policy.SamplingPolicyOwner(
+                initial=SamplingPolicy(),
+                source=call_policy.SamplingSource(env={}, env_path=Path("absent.env")),
+            ),
         )
     except (ImportError, RuntimeError) as actual:
         assert actual is failure

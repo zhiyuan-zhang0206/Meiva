@@ -21,7 +21,9 @@ from base.cluster.machine.gateway_access import (
     gateway_bearer,
 )
 from base.cluster.machine.identity import (
+    MachineFacts,
     MachineIdentity,
+    MachineIdentityReader,
     MachineNameMissing,
     MachineRole,
     MachineRoleInvalid,
@@ -37,7 +39,9 @@ __all__ = [
     "GatewayAccess",
     "GatewayApiBaseMissing",
     "GatewayApiTokenMissing",
+    "MachineFacts",
     "MachineIdentity",
+    "MachineIdentityReader",
     "MachineNameMissing",
     "MachineRole",
     "MachineRoleInvalid",

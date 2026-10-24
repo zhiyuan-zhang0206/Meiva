@@ -10,11 +10,9 @@ import tempfile
 import threading
 import time
 from collections.abc import Iterator
-from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import patch
 
 import httpx
 import psycopg
@@ -24,7 +22,7 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage
 from psycopg_pool import ConnectionPool
 
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config import ConfigBoot
 from base.db import Database
@@ -40,13 +38,12 @@ from services.derived.insights.daemon import bind_socket
 from services.derived.insights.run_timeline.tests.test_projection import World
 from services.derived.insights.run_timeline.tests.test_projection import world as world
 
-_TIMELINE_INPUTS = TimestampPolicy(
+_TIMELINE_SOURCE = TimestampSource(
     clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS), timestamps_enabled=False
 )
 _CONFIG = InsightsConfig(
     run_timeline_message_text_max=20,
     default_model="claude-opus-5",
-    timeline_inputs=_TIMELINE_INPUTS,
 )
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _OTLP_ENDPOINT = "MEIVA_TELEMETRY_OTLP_ENDPOINT"
@@ -56,25 +53,27 @@ def _app(
     *,
     home: Path,
     model_catalog: ModelCatalog,
-    timeline_inputs: TimestampPolicy = _TIMELINE_INPUTS,
+    timestamps: TimestampSource,
     world: World | None = None,
 ) -> Any:
-    app = build_app(
+    return build_app(
         world.db if world else cast(Database, object()),
         world.pool if world else cast(ConnectionPool[Any], object()),
-        replace(_CONFIG, timeline_inputs=timeline_inputs),
+        _CONFIG,
         home=home,
         catalog=model_catalog,
+        timestamps=timestamps,
     )
-    if world:
-        app.state.run_timeline_reader.read_segment = world.read_segment
-    return app
 
 
 def test_the_app_serves_the_run_timeline_routes_at_their_public_paths(
     tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
-    paths = set(_app(home=tmp_path, model_catalog=model_catalog).openapi()["paths"])
+    paths = set(
+        _app(home=tmp_path, model_catalog=model_catalog, timestamps=_TIMELINE_SOURCE).openapi()[
+            "paths"
+        ]
+    )
     assert {
         "/api/agents/{agent_id}/run-timeline",
         "/api/agents/{agent_id}/run-timeline/messages",
@@ -85,7 +84,11 @@ def test_the_app_serves_the_run_timeline_routes_at_their_public_paths(
 def test_healthz_names_the_service_home_and_process(
     tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
-    body = TestClient(_app(home=tmp_path, model_catalog=model_catalog)).get("/healthz").json()
+    body = (
+        TestClient(_app(home=tmp_path, model_catalog=model_catalog, timestamps=_TIMELINE_SOURCE))
+        .get("/healthz")
+        .json()
+    )
     assert body["name"] == "insights"
     assert isinstance(body["pid"], int)
     assert body["home"] == str(tmp_path)
@@ -94,7 +97,9 @@ def test_healthz_names_the_service_home_and_process(
 def test_a_route_validates_before_it_reads_anything(
     tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
-    client = TestClient(_app(home=tmp_path, model_catalog=model_catalog))
+    client = TestClient(
+        _app(home=tmp_path, model_catalog=model_catalog, timestamps=_TIMELINE_SOURCE)
+    )
 
     assert client.get("/api/agents/1/run-timeline/messages?start=3&end=1").status_code == 422
     assert client.get("/api/agents/1/run-timeline/messages?start=-1&end=1").status_code == 422
@@ -137,7 +142,7 @@ def test_the_app_answers_over_the_bound_socket(
     sock: socket.socket = bind_socket(path)
     server = uvicorn.Server(
         uvicorn.Config(
-            _app(home=short_dir, model_catalog=model_catalog),
+            _app(home=short_dir, model_catalog=model_catalog, timestamps=_TIMELINE_SOURCE),
             log_level="warning",
             access_log=False,
             log_config=None,
@@ -157,8 +162,8 @@ def test_the_app_answers_over_the_bound_socket(
     assert not thread.is_alive()
 
 
-def _policy(*, enabled: bool) -> TimestampPolicy:
-    return TimestampPolicy(
+def _timestamps(*, enabled: bool) -> TimestampSource:
+    return TimestampSource(
         clock=Clock(
             ClockConfig("UTC", "UTC", False),
             now=lambda: datetime(2026, 10, 10, 12, tzinfo=UTC),
@@ -168,7 +173,7 @@ def _policy(*, enabled: bool) -> TimestampPolicy:
     )
 
 
-def _compact_history(world: World) -> list[str]:
+def _compact_history(world: World) -> None:
     world.put(
         [
             HumanMessage(
@@ -182,48 +187,35 @@ def _compact_history(world: World) -> list[str]:
         sealed=False,
         agent=9,
     )
-    return world.loads
 
 
 def test_apps_keep_their_rendering_policy_and_cache_separate(
     world: World, tmp_path: Path, *, model_catalog: ModelCatalog
 ) -> None:
-    loads = _compact_history(world)
-    hidden, shown = _policy(enabled=False), _policy(enabled=True)
-    first = _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=hidden, world=world)
-    second = _app(home=tmp_path, model_catalog=model_catalog, timeline_inputs=shown, world=world)
-    assert first.state.insights_config.timeline_inputs is hidden
-    assert second.state.insights_config.timeline_inputs is shown
+    _compact_history(world)
+    hidden, shown = _timestamps(enabled=False), _timestamps(enabled=True)
+    first = _app(home=tmp_path, model_catalog=model_catalog, timestamps=hidden, world=world)
+    second = _app(home=tmp_path, model_catalog=model_catalog, timestamps=shown, world=world)
+    assert first.state.timeline_timestamps is hidden
+    assert second.state.timeline_timestamps is shown
     path = "/api/agents/9/run-timeline/messages?start=0&end=0&full=true"
 
-    assert TestClient(first).get(path).json()["messages"][0]["parts"][0]["text"] == (
-        "Compact summary:\n\nsummary"
-    )
-    assert TestClient(second).get(path).json()["messages"][0]["parts"][0]["text"] == (
-        "Compact summary [2026-10-10 12:00:00]:\n\nsummary"
-    )
-    assert len(loads) == 2
-
-
-@pytest.fixture
-def owned_config_environment() -> Iterator[None]:
-    try:
-        with patch.dict(os.environ):
-            yield
-    finally:
-        time.tzset()
+    with TestClient(first) as hidden_client, TestClient(second) as shown_client:
+        assert hidden_client.get(path).json()["messages"][0]["parts"][0]["text"] == (
+            "Compact summary:\n\nsummary"
+        )
+        assert shown_client.get(path).json()["messages"][0]["parts"][0]["text"] == (
+            "Compact summary [2026-10-10 12:00:00]:\n\nsummary"
+        )
+        assert (
+            first.state.run_timeline_reader.get(9).id != second.state.run_timeline_reader.get(9).id
+        )
 
 
 # meiva:note
-# The root reads the process configuration once into the frozen value the app is built from: the
-# text limit and the default model as plain values, the clock (in the cluster's zone) and the
-# timestamp switch as one `TimestampPolicy`. A later edit of the owner does not reach it.
-@pytest.mark.usefixtures("owned_config_environment")
+# The root captures only scalar configuration; stamping remains an independent app resource.
 def test_the_root_builds_one_config_from_the_process_configuration() -> None:
     boot = ConfigBoot()
-    boot.set_field("timezone", "Asia/Tokyo")
-    boot.set_field("message_timestamp_weekday", False)
-    boot.set_field("message_timestamps", False)
     boot.set_field("run_timeline_message_text_max", 37)
     boot.set_field("llm_model", "claude-opus-5")
 
@@ -232,10 +224,6 @@ def test_the_root_builds_one_config_from_the_process_configuration() -> None:
 
     assert config.run_timeline_message_text_max == 37
     assert config.default_model == "claude-opus-5"
-    assert config.timeline_inputs.timestamps_enabled is False
-    assert config.timeline_inputs.clock.format_timestamp(
-        datetime(2026, 10, 10, 12, tzinfo=UTC)
-    ) == ("[2026-10-10 21:00:00]")
 
 
 # meiva:note

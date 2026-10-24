@@ -11,6 +11,7 @@ from base.lm.catalog import ModelCatalog
 from gateway.agents.reply_suggestion.plan import (
     ReplySuggestionPolicy,
     draft_instruction,
+    draft_messages,
     draft_verdict,
     gate_refusal,
     model_problem,
@@ -159,3 +160,11 @@ def test_an_unfinished_or_unparsed_draft_is_rejected_even_if_its_text_is_valid(
 ) -> None:
     result = verdict(*drafted(["Yes."]), finished=finished, parse_failed=parse_failed)
     assert (result.suggestions, result.rejection) == ([], "unfinished")
+
+
+def test_a_draft_call_carries_the_instruction_first_and_the_excerpt_after_it() -> None:
+    system, human = draft_messages(2, "the excerpt")
+
+    assert (system.type, human.type) == ("system", "human")
+    assert system.content == draft_instruction(2)
+    assert human.content == "the excerpt"

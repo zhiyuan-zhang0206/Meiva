@@ -27,7 +27,11 @@ from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
-from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
+from services.agent_runner.agent_host.tests.host_policy import (
+    configured_machine,
+    configured_policy,
+    handoff_timestamps,
+)
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 
 
@@ -104,6 +108,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
             wrap_saver_writes_with_nstep_interval(saver, 100)
             graph = builder.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
             host = AgentHost(
+                handoff_stamping=handoff_timestamps(),
                 home=meiva_home(),
                 policy=configured_policy(),
                 pool=aops_pool,

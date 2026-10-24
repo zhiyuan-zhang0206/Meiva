@@ -14,8 +14,8 @@ from gateway.tests.history.test_timeline import (
     test_client as test_client,
 )
 
-_TIMELINE_INPUTS = TimestampPolicy(
-    clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
+_TIMELINE_INPUTS = TimestampPolicy.from_clock(
+    Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
 
 

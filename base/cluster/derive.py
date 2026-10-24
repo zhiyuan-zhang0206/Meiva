@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit, urlunsplit
 
-from base.cluster.machine import MachineIdentity, MachineNameMissing
+from base.cluster.machine import MachineIdentityReader, MachineNameMissing
 from base.cluster.record import ClusterRecord
 from base.host.env.registry import REDIS_PASSWORD_ENV, health_port_env_aliases
 from base.host.net.url_secret import redacted_url, url_with_port, url_with_userinfo
@@ -51,7 +51,7 @@ def home_label(home: Path) -> str:
     return Path(home).expanduser().name
 
 
-def production_identity(machine: MachineIdentity, *, home: Path) -> bool:
+def production_identity(machine: MachineIdentityReader, *, home: Path) -> bool:
     """Whether this process has the registered production identity.
 
     A configured machine (it has a name) running against the production ``~/.meiva`` home

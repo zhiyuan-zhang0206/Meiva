@@ -69,9 +69,12 @@ def _h_plugins_inspect(args: argparse.Namespace) -> int:
     # catalog reaches into the agent layer, and routing it through the package
     # export would pull `agent` into every other CLI verb's import.
     from agent.extensions.catalog import build_catalog
+    from base.agents.sdk.call_policy import process_sampling_owner
     from cli.commands.extensions.plugins_inspect import cmd_plugins_inspect
 
-    return cmd_plugins_inspect(args.name, catalog=build_catalog())
+    sampling = process_sampling_owner()
+    with sampling.execution():
+        return cmd_plugins_inspect(args.name, catalog=build_catalog(sampling=sampling))
 
 
 def _h_plugins_verify(_args: argparse.Namespace) -> int:

@@ -6,7 +6,7 @@ import pytest
 
 from agent.graph.prompt.live import SectionInputs, read_live_sdk
 from agent.graph.prompt.system_prompt import sdk_expand_section
-from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.config import FIELD_INFOS
 from base.config.service_read import ConfigAuthority
 from base.config.tests.config_authority import config_authority as config_authority
@@ -22,7 +22,6 @@ from base.packages.tests.model_catalog import set_prices as set_prices
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install
 from meiva.sdk_surface.installation import installed
-from meiva.sdk_surface.tests.installation_holder import inert_sampling
 
 
 @pytest.fixture(autouse=True)
@@ -38,7 +37,7 @@ def _no_plugin_expansions() -> Iterator[None]:
             provider_keys=prior.provider_keys,
             authority=prior.authority,
             config_images=prior.config_images,
-            sampling=inert_sampling(),
+            sampling=fixed_sampling_owner(),
         )
 
 
@@ -56,7 +55,7 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
         catalog=model_catalog,
         authority=config_authority,
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
-        sampling=SamplingPolicyOwner(reader=SamplingPolicy),
+        sampling=fixed_sampling_owner(),
     )
 
     slices = AgentSlices.resolve(

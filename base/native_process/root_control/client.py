@@ -125,6 +125,9 @@ def caller_identity(environ: Mapping[str, str]) -> CallerPayload:
         uid=os.getuid(),
         cwd=_bounded(str(Path.cwd())),
         argv=redacted_argv(list(sys.argv)),
+        # meiva:note
+        # `base.host.env.agent_env.AGENT_ID_ENV` owns this name; `base.host` already reaches
+        # `base.native_process`, so the key is spelled here (a test pins the two together).
         agent_id=environ.get("MEIVA_AGENT_ID") or None,
         machine=_machine_name(),
         operation_id=environ.get("MEIVA_OPERATION_ID") or None,

@@ -16,10 +16,12 @@ import pytest
 from base.cluster import machine as _machine
 from base.cluster.machine import (
     GatewayAccess,
+    MachineFacts,
     MachineIdentity,
     MachineNameMissing,
     MachineRoleInvalid,
     MachineRoleMissing,
+    MachineRoles,
     format_capabilities,
     roles_from_flags,
 )
@@ -111,6 +113,119 @@ def test_owned_identity_rejects_invalid_supplied_facts() -> None:
             serve_agent_runner=False,
             serve_observability_station=False,
         )
+
+
+def test_declared_machine_facts_are_normalized_without_a_reader_owner() -> None:
+    facts = MachineFacts.of(
+        name=" box ", role="agent-runner,gateway", host=" 10.0.0.2 ", description=" voice "
+    )
+    assert facts.name() == "box"
+    assert facts.role() == frozenset({"agent-runner", "gateway"})
+    assert facts.host() == "10.0.0.2" and facts.description() == "voice"
+    assert not hasattr(facts, "set") and not hasattr(facts, "reset")
+    bare = MachineFacts.of(name="box", role=["gateway"])
+    assert bare.host() == "localhost" and bare.description() is None
+
+
+def test_missing_facts_only_refuse_the_field_a_consumer_needs() -> None:
+    unnamed = MachineFacts.of(name=" ", role="gateway")
+    assert unnamed.role() == frozenset({"gateway"})
+    with pytest.raises(MachineNameMissing):
+        unnamed.name()
+    unconfigured = MachineFacts.of(name="m", role=())
+    assert unconfigured.name() == "m"
+    with pytest.raises(MachineRoleMissing):
+        unconfigured.role()
+
+
+@pytest.mark.parametrize("role", ["typo", "gateway,typo", ["gateway", "typo"]])
+def test_declared_unknown_role_tokens_are_rejected_at_construction(role: str | list[str]) -> None:
+    with pytest.raises(MachineRoleInvalid, match="typo"):
+        MachineFacts.of(name="m", role=role)
+
+
+def test_declared_facts_and_replacements_stay_stable_after_the_supplied_list_changes() -> None:
+    roles = ["gateway"]
+    original = MachineFacts.of(name="a", role=roles, host="h1", description="d")
+    recorded = {original: "original"}
+    roles.append("typo")
+    derived = original.replaced(role="agent-runner", description=None)
+    assert (derived.name(), derived.host()) == ("a", "h1")
+    assert derived.role() == frozenset({"agent-runner"}) and derived.description() is None
+    assert original.role() == frozenset({"gateway"}) and original.description() == "d"
+    assert recorded[original] == "original"
+
+
+def test_captured_facts_do_not_follow_a_legacy_owners_repair_and_reset() -> None:
+    config = ConfigBoot()
+    config.read_process_environment()
+    for field, value in {
+        "machine_name": "before",
+        "machine_host": "h1",
+        "machine_description": "first",
+        "machine_serve_gateway": True,
+        "machine_serve_agent_runner": False,
+        "machine_serve_observability_station": False,
+    }.items():
+        config.set_field(field, value)
+    owner = machine_from_boot(config)
+    snapshot = MachineFacts.capture(owner, host="snapshot-host")
+    recorded = {snapshot: "captured"}
+    config.set_field("machine_name", "after")
+    config.set_field("machine_description", "second")
+    config.set_field("machine_serve_gateway", False)
+    config.set_field("machine_serve_agent_runner", True)
+    owner.reset()
+    assert owner.name() == "after" and owner.role() == frozenset({"agent-runner"})
+    assert (snapshot.name(), snapshot.host(), snapshot.description()) == (
+        "before",
+        "snapshot-host",
+        "first",
+    )
+    assert snapshot.role() == frozenset({"gateway"}) and recorded[snapshot] == "captured"
+
+
+def test_explicit_capture_preserves_missing_facts_and_overrides_before_reading_invalid_ones() -> (
+    None
+):
+    invalid = MachineIdentity(
+        name=lambda: " ",
+        role=lambda: frozenset({"typo"}),
+        host=lambda: "h",
+        description=lambda: None,
+    )
+    repaired = MachineFacts.capture(invalid, role="gateway")
+    assert repaired.role() == frozenset({"gateway"}) and repaired.host() == "h"
+    with pytest.raises(MachineNameMissing):
+        repaired.name()
+    with pytest.raises(MachineRoleInvalid, match="typo"):
+        MachineFacts.capture(invalid)
+
+    config = ConfigBoot()
+    config.read_process_environment()
+    config.set_field("machine_name", "configured-name")
+    for flag in [
+        "machine_serve_gateway",
+        "machine_serve_agent_runner",
+        "machine_serve_observability_station",
+    ]:
+        config.set_field(flag, False)
+    missing = MachineFacts.capture(machine_from_boot(config))
+    assert missing.name() == "configured-name"
+    with pytest.raises(MachineRoleMissing):
+        missing.role()
+
+
+def test_capture_does_not_convert_unrelated_reader_failures_to_missing_facts() -> None:
+    def unavailable_role() -> MachineRoles:
+        raise OSError("identity source is unavailable")
+
+    owner = MachineIdentity(
+        name=lambda: "m", role=unavailable_role, host=lambda: "h", description=lambda: None
+    )
+    with pytest.raises(OSError, match="identity source is unavailable"):
+        MachineFacts.capture(owner)
+    assert MachineFacts.capture(owner, role="gateway").role() == frozenset({"gateway"})
 
 
 @pytest.fixture

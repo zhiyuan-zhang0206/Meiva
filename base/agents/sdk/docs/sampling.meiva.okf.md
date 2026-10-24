@@ -25,17 +25,23 @@ Sampling is opt-in. The default records every event; the execution owner still t
 every executed public entry even when its event is sampled out. An invalid policy
 rejects a call before execution and therefore adds no tally.
 
-The owner's cache refreshes at most once per five seconds without performing
-network I/O on the SDK call path. Enrolled runners fetch with a two-second timeout
-and one attempt; local processes read their local configuration.
-The first read starts a retained refresh attempt. Admission and its real thread
-handle prevent another attempt while it remains alive. Each attempt records
+The owner is built from a `SamplingSource` value: the launch environment, the home's `.env`
+path, the gateway-fetch tuning and the wait between refreshes. A composition root builds it
+(`process_sampling_owner()` reads the live process environment and the home once); a test
+passes a dict, a file in `tmp_path` or a loopback gateway. Until the first refresh the owner
+serves the policy the environment already carries (`policy_from_aliases`), and it refreshes at
+most once per `refresh_seconds` (five by default), the first one due that long after the owner
+is built, without performing network I/O on the SDK call path. Enrolled runners fetch with a
+two-second timeout and one attempt; local processes read their `.env`. The environment is the
+live one, so a gateway URL, token or flag that appears after install is seen at the next
+refresh. The read that finds a refresh due starts a retained attempt. Admission and its real
+thread handle prevent another attempt while it remains alive. Each attempt records
 completion and its original error; worker-boundary failures are immediately
 reported through the no-emitter logger and raised on the owner's next read or stop.
 
 HTTP timeout, network and remote-protocol failures, and HTTP 429, may retain the
 last valid policy. Authentication/status errors other than 429, malformed JSON
-or configuration, and reader code errors are not transient recovery. The cache
+or configuration, and an unreadable `.env` are not transient recovery. The cache
 records them and raises on every subsequent read until a successful refresh
 provides a new valid snapshot. Failed reads can still trigger a refresh when due;
 a later network outage cannot clear an already-recorded configuration error.
@@ -70,11 +76,12 @@ a note. A completed body with an unfinished refresh retains its actual result;
 the diagnostic and retained attempt express the separate shutdown outcome. Slow
 sampling does not turn code execution into a timeout or retry its side effects.
 
-The host stops sampling after turn drain and before closing checkpoint pools,
-including failed boot cleanup. Other SDK processes register finite `atexit`
-cleanup when their installation creates the owner. An `atexit` failure is visible
-but does not guarantee a nonzero exit; hard exit does not guarantee a join or
-delivery of an unfinished attempt. Refresh does not start a telemetry pipeline.
+The host stops sampling after turn drain and before checkpoint pools close, including
+failed boot. Bare SDK and CLI roots register finite `atexit` cleanup. A same-owner reload
+preserves that registration through success or failure; the root retains cleanup.
+An ordinary `uninstall()` unregisters the installed owner. A service owner gains no exit
+registration. Exit cleanup reports failures but promises neither a nonzero exit nor a join
+or delivery after hard exit. Refresh starts no telemetry pipeline.
 
 The SDK recorder snapshots caller identity at entry and explicitly passes it through
 `run_metered` / `run_metered_async` to the final event. The call retains its own copy;

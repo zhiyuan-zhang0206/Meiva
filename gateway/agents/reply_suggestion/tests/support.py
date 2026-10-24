@@ -1,34 +1,77 @@
 # meiva:note
-# A reply-suggestion harness over the real store.
-#
-# The agent, its status and its conversation live in the throwaway Postgres; the service reads them
-# as it does in the gateway. Only the two model calls are doubles (`ScriptedDecide`, `ScriptedDraftModel`), handed
-# to the service as its required `decide` and `draft_model`.
+# A reply-suggestion harness over throwaway Postgres and a real loopback HTTP provider.
+# The Jev binding and LangChain Responses adapter own wire parsing; tests supply response facts.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import replace
+from types import MappingProxyType
 from typing import Any
 
 import psycopg
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
+from pydantic import SecretStr
 
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.api_contracts.agent_contract import AgentStatus
 from base.clock import Clock
 from base.config import settings
 from base.db import Database, create_agent
 from base.lm.catalog import ModelCatalog
-from base.lm.catalog.decide.types import Decision
-from base.lm.tests.scripted_calls import ScriptedDecide, ScriptedDraftModel
-from base.packages.tests.model_catalog import inert_keys
+from base.lm.catalog.decide.types import DecisionBinding, DecisionBuildContext
+from base.lm.catalog.provider_contract import BuildContext
+from base.lm.catalog.provider_keys import ProviderKeys
 from gateway.agents.reply_suggestion.plan import ReplySuggestionPolicy
 from gateway.agents.reply_suggestion.schemas import ReplySuggestionResponse
 from gateway.agents.reply_suggestion.service import ReplySuggestionService
+from gateway.agents.reply_suggestion.tests.provider_wire import LocalTransport, ProviderWire
 from gateway.http.model_catalog import CatalogLoadFailure
+
+DRAFT_PROVIDER_PREFIX = "deepseek-"
+
+
+# meiva:note
+# The service exercises the same Responses adapter used by DeepSeek's native structured-output
+# path. Its endpoint is local; parsing, stop metadata, usage and cancellation remain LangChain's.
+# Provider construction itself is covered by the provider's factory tests.
+def with_provider_wire(catalog: ModelCatalog, wire: ProviderWire) -> ModelCatalog:
+    from langchain_openai import ChatOpenAI
+
+    binding = catalog.bindings[DRAFT_PROVIDER_PREFIX]
+
+    def build(context: BuildContext) -> BaseChatModel:
+        return ChatOpenAI(
+            model=context.model,
+            api_key=SecretStr(context.keys.require(binding.key_env)),
+            base_url=wire.url,
+            use_responses_api=True,
+            reasoning_effort="none",
+            timeout=context.timeout,
+            max_retries=0,
+        )
+
+    local = replace(binding, build=build)
+    decision_provider = catalog.decision_provider_of("jev-1.13.0")
+    assert decision_provider is not None
+
+    original_build = decision_provider.build
+
+    def build_gate(context: DecisionBuildContext) -> DecisionBinding:
+        return original_build(replace(context, transport=LocalTransport(wire.url)))
+
+    return replace(
+        catalog,
+        bindings=MappingProxyType({**catalog.bindings, binding.prefix: local}),
+        decision_providers=MappingProxyType(
+            {
+                **catalog.decision_providers,
+                decision_provider.prefix: replace(decision_provider, build=build_gate),
+            }
+        ),
+    )
 
 
 # meiva:note
@@ -70,15 +113,6 @@ def conversation(question: str = "Deploy now?") -> list[BaseMessage]:
     ]
 
 
-def useful_reply(probability: float) -> Mapping[str, Decision]:
-    return {
-        "useful_reply": Decision(
-            top="true" if probability >= 0.5 else "false",
-            probabilities={"true": probability, "false": 1 - probability},
-        )
-    }
-
-
 def default_policy() -> ReplySuggestionPolicy:
     return ReplySuggestionPolicy(
         enabled=True,
@@ -91,21 +125,27 @@ def default_policy() -> ReplySuggestionPolicy:
 
 
 # meiva:note
-# One idle agent whose newest message is a question, plus a service with model doubles.
+# One idle agent whose newest message is a question, plus a service wired to the gate wire and
+# the drafting provider the test gave it.
 class Harness:
     def __init__(
-        self, db_conn: psycopg.Connection, database: Database, catalog: ModelCatalog
+        self,
+        db_conn: psycopg.Connection,
+        database: Database,
+        catalog: ModelCatalog,
+        *,
+        wire: ProviderWire,
+        keys: ProviderKeys,
     ) -> None:
         self.db_conn = db_conn
         self.database = database
-        self.catalog: ModelCatalog | CatalogLoadFailure = catalog
+        self.real_catalog = catalog
+        self.catalog: ModelCatalog | CatalogLoadFailure = with_provider_wire(catalog, wire)
+        self.keys = keys
         self.policy = default_policy()
-        self.decide = ScriptedDecide(useful_reply(0.9))
-        self.chat = ScriptedDraftModel(
-            '{"suggestions": ["Yes, go ahead.", "Wait, explain the plan first."]}'
-        )
-        self.service = ReplySuggestionService(decide=self.decide, draft_model=self.chat.factory)
-        self.rendering = TimestampPolicy(clock=Clock.from_settings(), timestamps_enabled=False)
+        self.wire = wire
+        self.service = ReplySuggestionService(llm_override="", transport=None)
+        self.timestamps = TimestampSource(clock=Clock.from_settings(), timestamps_enabled=False)
         self.agent_id = self._create_idle_agent()
         self._versions = 0
         self.store(conversation())
@@ -144,7 +184,7 @@ class Harness:
             self.agent_id if agent_id is None else agent_id,
             db=self.database,
             policy=self.policy,
-            rendering=self.rendering,
+            rendering=self.timestamps.policy(),
             catalog=self.catalog,
-            keys=None if isinstance(self.catalog, CatalogLoadFailure) else inert_keys(self.catalog),
+            keys=None if isinstance(self.catalog, CatalogLoadFailure) else self.keys,
         )

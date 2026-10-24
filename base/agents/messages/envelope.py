@@ -144,10 +144,7 @@ def _timestamp(created_at: datetime | None, inputs: TimestampPolicy) -> tuple[st
     """
     if not inputs.timestamps_enabled:
         return "", ""
-    clock = inputs.clock
-    formatted = (
-        clock.format_timestamp(created_at) if created_at is not None else clock.now_timestamp()
-    )
+    formatted = inputs.format(created_at) if created_at is not None else inputs.now_stamp()
     return formatted, f" {formatted}"
 
 

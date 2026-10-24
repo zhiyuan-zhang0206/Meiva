@@ -1,5 +1,8 @@
 exports = ["external_skills.py"]
 
+[uses]
+"test_packages_job_converge.py" = ["child_packages_job_gate.py"]
+
 [debt.first-party-patch]
 "test_pg_runtime_converge.py#monkeypatch.setattr base.cluster.dataplane.pg_runtime.ensure_pg_runtime" = 2
 "test_pg_runtime_converge.py#monkeypatch.setattr base.cluster.dataplane.pg_runtime.shutil.which" = 1

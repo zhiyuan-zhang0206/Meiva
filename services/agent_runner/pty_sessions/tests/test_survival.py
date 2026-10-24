@@ -27,6 +27,7 @@ from base.native_process.tests.fake_process_control import FakeProcessControl, S
 from base.sessions.pty import client, closure
 from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.paths import ledger_path
+from base.sessions.pty.survivor_role import SurvivorRole
 from base.sessions.pty.tests import pty_jobs as jobs
 from base.sessions.pty.tests import pty_shells as support
 from base.sessions.pty.tests.pty_service import REPO, PtyServiceProcess, service_run, service_socket
@@ -254,7 +255,7 @@ def test_a_surviving_shell_remains_recorded_for_the_next_sweep(tmp_path: Path) -
         ledger.write(path, [target])
         first = ledger.sweep(path, process_control=control)
         assert child.poll() is None
-        assert first.survivors == (closure.Survivor(target.name, identity, "shell"),)
+        assert first.survivors == (closure.Survivor(target.name, identity, SurvivorRole.SHELL),)
         assert Signalled("killpg", identity.pid, signal.SIGKILL) in control.signals
         assert ledger.leftovers(path) == [target.name]
         assert ledger.read(path) == [target], "a failed shell cleanup must retain its retry target"
@@ -285,7 +286,7 @@ def test_a_known_job_only_survivor_does_not_retain_a_shell_session_gate(tmp_path
         ledger.write(path, [target])
         outcome = ledger.sweep(path, process_control=control)
         assert child.poll() is None
-        assert outcome.survivors == (closure.Survivor(target.name, job, "job"),)
+        assert outcome.survivors == (closure.Survivor(target.name, job, SurvivorRole.JOB),)
         assert ledger.leftovers(path) == []
         assert ledger.read(path) == []
     finally:

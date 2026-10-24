@@ -12,6 +12,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Literal
 
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import ValidationError
 
 from gateway.agents.reply_suggestion.schemas import DraftReplies, SuggestionReason
@@ -20,6 +21,7 @@ __all__ = [
     "DraftVerdict",
     "ReplySuggestionPolicy",
     "draft_instruction",
+    "draft_messages",
     "draft_verdict",
     "gate_refusal",
     "model_problem",
@@ -49,6 +51,15 @@ class ReplySuggestionPolicy:
 class DraftVerdict:
     suggestions: list[str]
     rejection: Literal["unfinished", "invalid", "too_many"] | None
+
+
+# meiva:note
+# The two messages of a draft call: the instruction first, then the conversation excerpt.
+def draft_messages(max_candidates: int, excerpt_text: str) -> list[BaseMessage]:
+    return [
+        SystemMessage(content=draft_instruction(max_candidates)),
+        HumanMessage(content=excerpt_text),
+    ]
 
 
 def draft_instruction(max_candidates: int) -> str:

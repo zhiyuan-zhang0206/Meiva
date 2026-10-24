@@ -15,7 +15,7 @@ import dataclasses
 
 from agent.tests.impersonation.external.runtime import Takeover
 from base.agents.context.clients import ClientSet
-from base.agents.sdk import call_policy
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.impersonation.attachment import Attachment
@@ -42,7 +42,7 @@ def test_a_lease_that_declares_no_capability_reaches_every_sdk_entry(
         executed.append("ran")
         return "ran"
 
-    sampling = call_policy.SamplingPolicyOwner(reader=call_policy.SamplingPolicy)
+    sampling = fixed_sampling_owner()
     try:
         entries = sorted(
             fq for _parent, _attr, fq in metering.read_surface(meiva_module()).routines

@@ -134,9 +134,10 @@ def non_agent_import_unbound_context() -> None:
     assert installation.installed() is None
     process_context.unbind_context()
     process_context.bind_host_process()
-    from meiva.sdk_surface.tests.installation_holder import held_installation, inert_sampling
+    from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
+    from meiva.sdk_surface.tests.installation_holder import held_installation
 
-    with held_installation(installation.Installation.bare(sampling=inert_sampling())):
+    with held_installation(installation.Installation.bare(sampling=fixed_sampling_owner())):
         meiva.ensure_plugins_loaded()
     assert process_context.is_host_process()
     assert getattr(meiva, "context", None) is None

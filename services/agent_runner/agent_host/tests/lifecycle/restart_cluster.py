@@ -40,7 +40,7 @@ from services.agent_runner.agent_host.lifecycle.graceful_exit import (
     write_exit_restart,
 )
 from services.agent_runner.agent_host.scheduling.pending_wakes import scan_rows
-from services.agent_runner.agent_host.tests.host_policy import configured_policy
+from services.agent_runner.agent_host.tests.host_policy import configured_policy, handoff_timestamps
 from services.agent_runner.agent_host.tests.lifecycle import scripted_model
 
 __all__ = ["Cluster", "Host", "Inbound", "cluster"]
@@ -163,6 +163,7 @@ class Cluster:
     async def host(self, *, drain_s: float = 30, wakes: bool = False) -> Host:
         checkpointer = await build_checkpointer(self.pool, checkpoint_interval=1)
         host = AgentHost(
+            handoff_stamping=handoff_timestamps(),
             home=meiva_home(),
             pool=self.pool,
             checkpointer=checkpointer,

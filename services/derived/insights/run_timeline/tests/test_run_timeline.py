@@ -18,7 +18,7 @@ from base.agents.history.hierarchy.units import (
     read_times,
 )
 from base.agents.history.hierarchy.usage import MessageUsage
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import Clock
 from base.clock.tests.manual_timers import ManualTimers
 from base.config import settings
@@ -29,9 +29,10 @@ from services.derived.insights.run_timeline.projection.derive import project_seg
 from services.derived.insights.run_timeline.projection.jobs import IndexJobs
 from services.derived.insights.run_timeline.projection.reader import Snapshot, TimelineReader
 
-_TIMELINE_INPUTS = TimestampPolicy(
+_TIMELINE_SOURCE = TimestampSource(
     clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
+_TIMELINE_INPUTS = _TIMELINE_SOURCE.policy()
 
 T0 = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
 
@@ -141,7 +142,7 @@ def read(
         reader = TimelineReader(
             world.db,
             pool,
-            inputs=_TIMELINE_INPUTS,
+            timestamps=_TIMELINE_SOURCE,
             jobs=jobs,
             read_segment=no_body,
             timers=ManualTimers(),

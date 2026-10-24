@@ -25,7 +25,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import DatabaseFactory
 from base.agents.context.external_attachment import ExternalAttachment
 from base.agents.context.identity import AgentIdentity, ExternalLease
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.config.agent_pins import resolve_agent_config_pins
 from base.config.service_read import ConfigAuthority
@@ -136,7 +136,7 @@ class Attachment(ExternalAttachment):
         self._version: int = 0
         super().__init__(identity=_LeaseIdentity(self), codec=_Codec(self))
         self._boot: ExternalBoot = inputs.boot
-        self._machine: MachineIdentity = self._boot.machine
+        self._machine: MachineIdentityReader = self._boot.machine
         self._database: DatabaseFactory = self._boot.database
         boot = self._boot
         match boot:

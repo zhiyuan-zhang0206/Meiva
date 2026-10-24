@@ -75,4 +75,3 @@
 
 [debt.unresolved-patch]
 "test_pg_runtime.py#monkeypatch.setattr type(pg_runtime.get_backend()).pg_binary_path" = 2
-"test_pgbouncer.py#monkeypatch.setattr probe_machine.host" = 1

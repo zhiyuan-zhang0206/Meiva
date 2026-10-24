@@ -25,6 +25,6 @@ Each unit carries `context_tokens` / `generation_tokens` / `estimated` (`tokens.
 
 `GET /api/agents/{id}/run-timeline/context?at=` (`projection/reader.py`) returns the context breakdown of the LLM request at message index `at` (the first request at or after it, else the last; 404 when the agent has made none): the same `ContextBreakdownResponse` the composer's `context-breakdown` returns (shared `base.agents.history.context_response.context_breakdown_response`: window, thresholds), computed over what that request really sent (the segment's own head, then the segment's messages before the request's AIMessage) from each message's own token count (`base/agents/history/message_tokens.py`, `request_breakdown`; the categories sum to the request's `input_tokens`), each category carrying `estimated` / `exact_fraction`, plus `request`, `session` / `sessions` (zero-based session of the count) and `ts`. It works for any session of the stitched history, not only the latest.
 
-A `TimestampPolicy` built at the root feeds derivation and raw rendering.
+The root's `TimestampSource` mints a `TimestampPolicy` per job and read.
 
 See [[range-projection.meiva.okf.md|range projection and snapshot ownership]].

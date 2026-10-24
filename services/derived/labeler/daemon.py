@@ -30,7 +30,7 @@ from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
 from base.config.domains.lm import LmSettings
-from base.config.profiles import PROCESS_PROFILES, profile_unknown_error
+from base.config.profiles import PROCESS_PROFILES
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
@@ -39,6 +39,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.host.env.agent_slices import ModelOverrides
+from base.host.env.process_profile import profile_unknown_error
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys

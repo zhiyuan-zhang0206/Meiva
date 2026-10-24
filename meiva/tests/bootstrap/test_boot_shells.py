@@ -8,13 +8,14 @@ import pytest
 
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentity
 from base.config.tests.configuration import snapshot_process_config
 from meiva import boot
 from meiva.sdk_surface.installation import Installation, Loading, slot
 from meiva.sdk_surface.pure.load_plan import LoadStep
-from meiva.sdk_surface.tests.installation_holder import held_installation, inert_sampling
+from meiva.sdk_surface.tests.installation_holder import held_installation
 from meiva.self.harness.attachment import attachment_clock
 
 _CLOCK = Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS)
@@ -22,7 +23,7 @@ _CLOCK = Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS)
 
 @pytest.mark.parametrize("step", [LoadStep.BIND_CATALOG, LoadStep.NOTHING])
 def test_steps_that_change_nothing_leave_the_slot_as_it_was(step: LoadStep) -> None:
-    held = Installation.bare(sampling=inert_sampling())
+    held = Installation.bare(sampling=fixed_sampling_owner())
     with held_installation(held):
         boot.settle_installed(step, None)
         assert slot() is held
@@ -52,7 +53,7 @@ def test_a_missing_name_after_a_recorded_failure_raises_it() -> None:
 
 
 def test_a_missing_name_on_an_installed_process_loads_nothing() -> None:
-    with held_installation(Installation.bare(sampling=inert_sampling())):
+    with held_installation(Installation.bare(sampling=fixed_sampling_owner())):
         assert boot.maybe_load_plugins_for_missing("tasks") is False
 
 

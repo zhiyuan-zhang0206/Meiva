@@ -16,7 +16,6 @@ from typing import assert_never
 
 from psycopg import Connection
 from psycopg.types.json import Jsonb
-from psycopg_pool import ConnectionPool
 
 from base.agents.upload_delivery import storage
 from base.agents.upload_delivery.models import (
@@ -34,7 +33,7 @@ from base.agents.upload_delivery.paths import (
 )
 from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
 from base.cluster.machine.ambient import gateway_access_from_settings
-from base.db.transaction import write_transaction
+from base.db.transaction import ConnectionSource, write_transaction
 from base.host.db_authority.unit import UnitIdentity
 from base.host.net.http_dial import get as http_get
 from ops.upload_delivery.copy_plan import (
@@ -72,7 +71,7 @@ class ReceiverConfig:
 # meiva:note
 # The composition entry the ops daemon dispatches `upload-receive-v1` to: it reads this
 # process's home, gateway access and quota constants, then runs the copy.
-def receive(pool: ConnectionPool, request: ReceiveRequest, *, local_machine: str) -> CopyProof:
+def receive(pool: ConnectionSource, request: ReceiveRequest, *, local_machine: str) -> CopyProof:
     config = ReceiverConfig(
         unit=current_unit(local_machine=local_machine),
         user_home=Path.home(),
@@ -89,7 +88,9 @@ def receive(pool: ConnectionPool, request: ReceiveRequest, *, local_machine: str
 # Ready evidence is historical, so a repeat verifies the actual files before it returns any
 # proof, and fetches only the objects that are absent; a conflicting present final is never
 # overwritten. The database connection is released across every network and disk phase.
-def copy_batch(pool: ConnectionPool, request: ReceiveRequest, config: ReceiverConfig) -> CopyProof:
+def copy_batch(
+    pool: ConnectionSource, request: ReceiveRequest, config: ReceiverConfig
+) -> CopyProof:
     if request.target != config.unit:
         raise UploadDeliveryConflictError("copy targets a different native machine/home")
     manifest = request.manifest
@@ -113,7 +114,7 @@ def copy_batch(pool: ConnectionPool, request: ReceiveRequest, config: ReceiverCo
 
 
 def _reserve(
-    pool: ConnectionPool, request: ReceiveRequest, config: ReceiverConfig, directory: Path
+    pool: ConnectionSource, request: ReceiveRequest, config: ReceiverConfig, directory: Path
 ) -> None:
     manifest = request.manifest
     unit = config.unit

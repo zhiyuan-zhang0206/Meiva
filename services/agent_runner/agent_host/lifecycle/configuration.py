@@ -8,24 +8,26 @@ from pathlib import Path
 from base import paths
 from base.agents.context.clients import ClientSet
 from base.agents.history.hierarchy.group_consumer import UnderstandingReadInputs
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.boot import machine_from_boot
 from base.config import ConfigBoot
+from base.host.env.registry import child_env
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.paths.home import resolve_meiva_home
 from base.telemetry.process_logging import init_gateway_process
-from meiva.boot import process_disable_entries, process_sampling_owner
+from meiva.boot import process_disable_entries
 from meiva.sdk_surface.installation import Installation
 from services.agent_runner.agent_host.pools import PoolBounds
 from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy, StallTiming
 
 __all__ = [
     "boot_process",
+    "handoff_source",
     "host_machine",
     "host_policy",
     "initialize_logging",
@@ -48,6 +50,7 @@ def host_policy(config: ConfigBoot, *, keys: ProviderKeys) -> HostPolicy:
     return HostPolicy(
         max_concurrent_turns=daemon.host_max_concurrent_turns,
         provider_keys=keys,
+        harness_environ=child_env("runner", config.process_environment()),
         cache=HostCachePolicy(
             idle_ttl_seconds=daemon.host_agent_idle_ttl_seconds, size=daemon.host_agent_cache_size
         ),
@@ -55,16 +58,21 @@ def host_policy(config: ConfigBoot, *, keys: ProviderKeys) -> HostPolicy:
         llm_override=config.view.lm.llm_override,
         default_reader=lambda domain, field: getattr(getattr(config.view, domain), field),
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
-        handoff_notes=TimestampPolicy(
-            clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
-            timestamps_enabled=config.view.general.message_timestamps,
-        ),
         harness_registration_ttl_seconds=daemon.harness_registration_ttl_seconds,
         stall=StallTiming(
             scan_interval_s=daemon.host_turn_progress_scan_interval_seconds,
             no_progress_timeout_s=daemon.host_turn_no_progress_timeout_seconds,
             unwind_timeout_s=CANCEL_UNWIND_TIMEOUT_S,
         ),
+    )
+
+
+# meiva:note
+# The process root keeps stamping as an independent resource, outside the host's policy values.
+def handoff_source(config: ConfigBoot) -> TimestampSource:
+    return TimestampSource(
+        clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+        timestamps_enabled=config.view.general.message_timestamps,
     )
 
 
@@ -102,6 +110,7 @@ def load_installation(
     clients: ClientSet,
     load_extensions: Callable[..., object],
 ) -> Installation:
+    from base.agents.sdk.call_policy import process_sampling_owner
     from base.config import Settings
     from base.config.service_read import ConfigAuthority
     from base.lm.factory import process_provider_keys
@@ -120,8 +129,8 @@ def load_installation(
         catalog=catalog,
         provider_keys=process_provider_keys(catalog),
         authority=authority,
-        clients=clients,
         sampling=process_sampling_owner(),
+        clients=clients,
         clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         disabled_entries=process_disable_entries(),
     )

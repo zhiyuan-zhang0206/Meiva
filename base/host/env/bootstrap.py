@@ -33,7 +33,6 @@
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,15 +45,13 @@ from base.host.env.boot_policy import (
     serve_flag,
     validated_bootstrap_payload,
 )
+from base.host.env.process_profile import (
+    MEIVA_PROCESS_PROFILE_ENV,
+    ProcessProfile,
+    parse_process_profile,
+)
 
 LAUNCHER_PROFILE_ENV_KEY = "MEIVA_LAUNCHER_PROFILE"
-
-
-# meiva:note
-# This process's live environment, read-only: the one door below the config boot for a
-# composition root that hands the environment down as a value.
-def process_environment() -> Mapping[str, str]:
-    return os.environ
 
 
 _GENERATION_ENV = "MEIVA_DB_GENERATION"
@@ -82,9 +79,12 @@ class EnvBootResult:
 # `LAUNCHER_PROFILE_ENV_KEY` (cli/main.py `_normalize_process_profile`), so a
 # boot pass reached through a CLI still knows the launcher context (#4334).
 # None when the tree has no launcher context at all — a plain shell or test
-# process — and the projection exemptions stay off.
-def launcher_context(env: Mapping[str, str]) -> str | None:
-    return env.get("MEIVA_PROCESS_PROFILE") or env.get(LAUNCHER_PROFILE_ENV_KEY)
+# process — and the projection exemptions stay off. A value that is not a `ProcessProfile`
+# raises (`parse_process_profile`): the marker is set by the launcher, and a misspelling must
+# not pass for "some other profile" in the credential and projection branches that compare it.
+def launcher_context(env: Mapping[str, str]) -> ProcessProfile | None:
+    value = env.get(MEIVA_PROCESS_PROFILE_ENV) or env.get(LAUNCHER_PROFILE_ENV_KEY)
+    return parse_process_profile(value) if value else None
 
 
 # meiva:note
@@ -98,7 +98,7 @@ def launcher_context(env: Mapping[str, str]) -> str | None:
 @dataclass(frozen=True)
 class LaunchFacts:
     machine_token: str | None = field(repr=False)
-    launcher_profile: str | None
+    launcher_profile: ProcessProfile | None
     gateway_home: bool
 
 

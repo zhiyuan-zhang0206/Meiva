@@ -20,6 +20,8 @@ from agent.ownership.tests.ownership_support import admit_owner, agent_row, inse
 from base.agents.context import MeivaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.messages.kwargs import NoteTag
+from base.agents.messages.timestamp_policy import TimestampSource
+from base.clock.tests.fakes import clock_rejecting_now
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -30,7 +32,10 @@ from base.packages.composer_commands import CommandCatalog
 from base.paths import meiva_home
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.tests.host_policy import configured_machine, configured_policy
+from services.agent_runner.agent_host.tests.host_policy import (
+    configured_machine,
+    configured_policy,
+)
 
 
 async def _checkpoint(
@@ -89,6 +94,7 @@ async def test_first_hosted_invocation_only_resumes_unhalted_pending_handoff(
     policy = configured_policy()
     machine = configured_machine(name="claim-test")
     host = AgentHost(
+        handoff_stamping=TimestampSource(clock=clock_rejecting_now(), timestamps_enabled=True),
         home=meiva_home(),
         policy=policy,
         pool=aops_pool,

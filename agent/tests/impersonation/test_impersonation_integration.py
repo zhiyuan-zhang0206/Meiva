@@ -16,7 +16,7 @@ from agent.tests.impersonation.handoff_inputs import (
     deliver_peers_and_ack_first,
     end_external_session,
     executor_acks_says_and_releases,
-    handoff_notes,
+    handoff_timestamps,
     local_exec_process,
     prepare_graph,
     runner_exec_process,
@@ -93,7 +93,7 @@ async def test_takeover_inbox_release_and_resume(
         agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     assert (
@@ -138,7 +138,7 @@ async def test_takeover_inbox_release_and_resume(
         agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     scope = await scope.require_service().turn()
@@ -166,7 +166,7 @@ async def test_takeover_inbox_release_and_resume(
         agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     assert (await graph.aget_state(config)).values["handoff__total"] == 7
@@ -204,7 +204,7 @@ async def test_a_lost_database_receipt_does_not_apply_the_plugin_delta_twice(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     leases.merge_plugin_delta(
@@ -228,7 +228,7 @@ async def test_a_lost_database_receipt_does_not_apply_the_plugin_delta_twice(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     assert (await graph.aget_state(config)).values["handoff__total"] == 3
@@ -244,7 +244,7 @@ async def test_a_lost_database_receipt_does_not_apply_the_plugin_delta_twice(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     assert (await graph.aget_state(config)).values["handoff__total"] == 3
@@ -302,7 +302,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     inbound_id = insert_inbound_message(
@@ -335,7 +335,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     snapshot = await graph.aget_state(config)
@@ -352,7 +352,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     await graph.ainvoke(
@@ -402,7 +402,7 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=takeover_host(tmp_path, machine_identity),
     )
     assert not calls
@@ -461,7 +461,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     leases.release(
@@ -483,7 +483,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
             event_bus,
             lease,
             owner,
-            notes=handoff_notes(),
+            timestamps=handoff_timestamps(),
             workspace=workspace,
         )
     assert (
@@ -494,10 +494,22 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
     )
     assert not calls
     await deliver_handoff(
-        graph, database, event_bus, lease, owner, notes=handoff_notes(), workspace=workspace
+        graph,
+        database,
+        event_bus,
+        lease,
+        owner,
+        timestamps=handoff_timestamps(),
+        workspace=workspace,
     )
     await deliver_handoff(
-        graph, database, event_bus, lease, owner, notes=handoff_notes(), workspace=workspace
+        graph,
+        database,
+        event_bus,
+        lease,
+        owner,
+        timestamps=handoff_timestamps(),
+        workspace=workspace,
     )
     durable = await saver.aget_tuple(config)
     assert durable is not None
@@ -551,7 +563,7 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
         owner.agent_id,
         ctx.relays,
         incarnation=owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         host=host,
     )
     leases.release(
@@ -568,7 +580,7 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
         event_bus,
         lease,
         owner,
-        notes=handoff_notes(),
+        timestamps=handoff_timestamps(),
         workspace=host.workspace(owner.agent_id),
     )
 

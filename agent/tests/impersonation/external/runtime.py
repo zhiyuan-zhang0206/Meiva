@@ -31,7 +31,7 @@ from agent.tests.impersonation.lease_support import cluster as cluster
 from base.agents import impersonation as leases
 from base.agents.context.external_attachment.plugin_state_codec import encode_plugin_delta
 from base.agents.impersonation.tests.impersonation_support import legacy_session
-from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.config import ConfigBoot
@@ -193,7 +193,7 @@ def sample_surface(
 ) -> Iterator[None]:
     write_sample_plugin(unit_home / "plugins")
     request.addfinalizer(forget_sample_plugin)
-    sampling = SamplingPolicyOwner(reader=SamplingPolicy)
+    sampling = fixed_sampling_owner()
     install.install(
         sample_registry(),
         config_images=UnboundPluginConfigImages(),

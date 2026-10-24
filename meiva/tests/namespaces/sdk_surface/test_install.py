@@ -24,7 +24,7 @@ from pydantic import BaseModel
 
 import meiva
 from base.agents.context.clients import ClientSet
-from base.agents.sdk import call_policy
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.host.proc import run_bounded
 from base.packages.plugin_config_contracts import PluginConfigImages
 from base.packages.plugin_config_images import (
@@ -84,7 +84,7 @@ def load_failures() -> list[tuple[str, BaseException]]:
 @pytest.fixture
 def install_surface(load_failures: list[tuple[str, BaseException]]) -> Iterator[InstallSurface]:
     """The real installer, given a valid sampling owner and a reporter that collects failures."""
-    sampling = call_policy.SamplingPolicyOwner(reader=call_policy.SamplingPolicy)
+    sampling = fixed_sampling_owner()
 
     def collect(name: str, exc: BaseException) -> None:
         load_failures.append((name, exc))

@@ -197,14 +197,9 @@ def test_description_carries_the_gateway_endpoint_and_no_secret() -> None:
     assert description["gateway_url"] == "http://gateway.test:8000"
     assert "secret" not in repr(description).lower()
 
-    from base.cluster.machine import MachineIdentity
+    from base.cluster.machine import MachineFacts
 
-    machine = MachineIdentity(
-        name=lambda: "child",
-        role=lambda: frozenset({"agent-runner"}),
-        host=lambda: "localhost",
-        description=lambda: None,
-    )
+    machine = MachineFacts.of(name="child", role="agent-runner")
     child = MeivaContext.from_description(
         description, clients=ClientSet(gateway_url=description["gateway_url"]), machine=machine
     )
@@ -262,3 +257,17 @@ def test_a_built_event_pipeline_is_returned_while_another_thread_builds_a_client
 
     assert not blocked, "event_pipeline() waited for an unrelated client build"
     assert returned == [pipeline]
+
+
+def test_a_derived_set_keeps_the_event_pipeline_factory_of_its_parent() -> None:
+    built: list[object] = []
+
+    def pipeline() -> object:
+        built.append(object())
+        return built[-1]
+
+    parent = ClientSet(pipeline_factory=pipeline)
+    derived = parent.with_gateway(lambda _url: httpx.Client(base_url="http://derived.test"))
+
+    assert derived.event_pipeline() is built[0]
+    assert parent.event_pipeline() is built[1]

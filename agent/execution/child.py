@@ -25,6 +25,7 @@ from agent.execution.delivery_plan import (
 from agent.execution.protocol import RequestPayload, ResultPayload
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
+from base.host.env.agent_env import AGENT_ID_ENV
 from base.log import logger
 
 WATCHDOG_MARGIN_S = 5.0
@@ -404,7 +405,7 @@ def run_child(
 
     if not isinstance(config, ConfigBoot):
         raise TypeError("run_child needs the child's booted ConfigBoot")
-    raw_agent_id = os.environ.get("MEIVA_AGENT_ID")
+    raw_agent_id = os.environ.get(AGENT_ID_ENV)
     init_logger(
         None if raw_agent_id is None else int(raw_agent_id),
         producer=context.clients.event_pipeline,

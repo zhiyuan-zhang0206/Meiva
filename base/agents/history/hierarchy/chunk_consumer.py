@@ -184,8 +184,8 @@ def describe(
         tools=tools,
         corrections=inputs.corrections(),
         on_call=calls.append,
-        timeline_inputs=TimestampPolicy(
-            clock=inputs.clock_factory(), timestamps_enabled=inputs.timestamps_enabled()
+        timeline_inputs=TimestampPolicy.from_clock(
+            inputs.clock_factory(), timestamps_enabled=inputs.timestamps_enabled()
         ),
     )
 
@@ -268,7 +268,7 @@ async def run_job(
         job.agent_id,
         fallback=inputs.hierarchy_model(),
         catalog=models.catalog,
-        default_model_reader=inputs.default_model,
+        default_model=inputs.default_model(),
     )
     try:
         history, closing_segment = await asyncio.to_thread(
@@ -300,8 +300,8 @@ async def run_job(
         unit.kind == "note"
         for unit in divide_units(
             list(located.messages),
-            timeline_inputs=TimestampPolicy(
-                clock=inputs.clock_factory(), timestamps_enabled=inputs.timestamps_enabled()
+            timeline_inputs=TimestampPolicy.from_clock(
+                inputs.clock_factory(), timestamps_enabled=inputs.timestamps_enabled()
             ),
         )
     ):

@@ -46,18 +46,31 @@ KEPT_WITH_EXTRAS: tuple[tuple[str, str], ...] = (
 
 
 # meiva:note
-# The keep flags a parsed command chose, named as the operator typed them.
-def kept_with_extras(choices: object) -> list[str]:
-    return [flag for name, flag in KEPT_WITH_EXTRAS if getattr(choices, name, None) == flag]
+# The keep flags a command chose, named as the operator typed them.
+def kept_with_extras(
+    *, keep_shell_sessions: bool, keep_browser: bool, keep_service: bool
+) -> list[str]:
+    chosen = {
+        "shell": keep_shell_sessions,
+        "browser": keep_browser,
+        "kept": keep_service,
+    }
+    return [flag for name, flag in KEPT_WITH_EXTRAS if chosen[name]]
 
 
 # meiva:note
 # Why this stop cannot retire extras, or None when it can.
-def extras_keep_refusal(choices: object) -> str | None:
-    kept = kept_with_extras(choices)
-    if getattr(choices, "extras", None) != "--stop-extras" or not kept:
+def extras_keep_refusal(
+    *, stop_extras: bool, keep_shell_sessions: bool, keep_browser: bool, keep_service: bool
+) -> str | None:
+    conflicting = kept_with_extras(
+        keep_shell_sessions=keep_shell_sessions,
+        keep_browser=keep_browser,
+        keep_service=keep_service,
+    )
+    if not stop_extras or not conflicting:
         return None
     return (
         "--stop-extras retires the permissions helper and needs the service root stopped, so "
-        f"nothing may be kept; conflicting: {', '.join(kept)}. Drop them, or use --keep-extras"
+        f"nothing may be kept; conflicting: {', '.join(conflicting)}. Drop them, or use --keep-extras"
     )

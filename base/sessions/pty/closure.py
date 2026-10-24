@@ -18,6 +18,7 @@ import psutil
 from base.native_process.ownership import OwnedProcess
 from base.native_process.process_control import ProcessControl
 from base.sessions.pty import process_groups
+from base.sessions.pty.survivor_role import SurvivorRole
 
 
 @dataclass(frozen=True)
@@ -52,9 +53,7 @@ class Survivor:
 
     session: str
     process: OwnedProcess
-    # meiva:note
-    # `role` is "shell" (the shell itself) or "job" (any other member).
-    role: str
+    role: SurvivorRole
 
 
 # meiva:note
@@ -78,7 +77,7 @@ class Outcome:
                 {
                     "session": survivor.session,
                     "process": _identity_wire(survivor.process),
-                    "role": survivor.role,
+                    "role": survivor.role.value,
                 }
                 for survivor in self.survivors
             ],
@@ -96,7 +95,11 @@ class Outcome:
                 for item in data["closed"]
             ),
             survivors=tuple(
-                Survivor(item["session"], identity_from_wire(item["process"]), item["role"])
+                Survivor(
+                    item["session"],
+                    identity_from_wire(item["process"]),
+                    SurvivorRole(item["role"]),
+                )
                 for item in data["survivors"]
             ),
         )
@@ -162,7 +165,11 @@ def close_sessions(
     for target in entries:
         left = _present(_known(target))
         survivors.extend(
-            Survivor(target.name, identity, "shell" if identity == target.shell else "job")
+            Survivor(
+                target.name,
+                identity,
+                SurvivorRole.SHELL if identity == target.shell else SurvivorRole.JOB,
+            )
             for identity in left
         )
         if target.members and not process_groups.live(target.shell):

@@ -168,16 +168,10 @@ from base.config.config_registry import (
     schema_extra as schema_extra,
 )
 from base.config.profiles import (
-    MEIVA_PROCESS_PROFILE_ENV as MEIVA_PROCESS_PROFILE_ENV,
-)
-from base.config.profiles import (
     PROCESS_PROFILES as PROCESS_PROFILES,
 )
 from base.config.profiles import (
     PROFILE_UNSET as PROFILE_UNSET,
-)
-from base.config.profiles import (
-    ProcessProfile as ProcessProfile,
 )
 from base.host.env.bootstrap import (
     CONFIG_FETCH_ENV as CONFIG_FETCH_ENV,
@@ -201,6 +195,12 @@ from base.host.env.config_lite_table import (
 )
 from base.host.env.dotenv_boot import (
     load_meiva_env as load_meiva_env,
+)
+from base.host.env.process_profile import (
+    MEIVA_PROCESS_PROFILE_ENV as MEIVA_PROCESS_PROFILE_ENV,
+)
+from base.host.env.process_profile import (
+    ProcessProfile as ProcessProfile,
 )
 
 if TYPE_CHECKING:

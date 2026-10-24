@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
-from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db import Database
 from base.lm.catalog import ModelCatalog
@@ -153,13 +153,13 @@ def test_the_gateway_declares_exactly_what_the_service_serves(
         InsightsConfig(
             run_timeline_message_text_max=1,
             default_model="claude-opus-5",
-            timeline_inputs=TimestampPolicy(
-                clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
-                timestamps_enabled=False,
-            ),
         ),
         home=tmp_path,
         catalog=model_catalog,
+        timestamps=TimestampSource(
+            clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
+            timestamps_enabled=False,
+        ),
     ).openapi()
     gateway = _gateway(httpx.MockTransport(lambda _r: httpx.Response(200))).openapi()
 

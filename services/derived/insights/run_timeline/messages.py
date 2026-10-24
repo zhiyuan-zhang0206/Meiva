@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items
+from base.agents.messages.timestamp_policy import TimestampSource
 from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.projection.reader import TimelineReader
@@ -93,13 +94,15 @@ def get_run_timeline_messages(
         raise HTTPException(404, f"message {end} not found: history has {cut.count}")
     text_max = config.run_timeline_message_text_max
     stop = min(end, start + limit - 1)
+    timestamps: TimestampSource = request.app.state.timeline_timestamps
+    inputs = timestamps.policy()
     out: list[RunTimelineMessage] = []
     for segment, view in reader.span(cut, start, stop):
         local_start = max(start, segment.message_start) - segment.offset
         local_stop = min(stop + 1, segment.message_end) - segment.offset
         items, _ = build_timeline_items(
             view.history.messages[local_start:local_stop],
-            inputs=config.timeline_inputs,
+            inputs=inputs,
         )
         by_message: dict[int, list[TimelineItem]] = {}
         for item in items:

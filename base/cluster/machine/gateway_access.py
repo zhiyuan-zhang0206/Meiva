@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from base.host.env.process_profile import ProcessProfile
+
 __all__ = [
     "GatewayAccess",
     "GatewayApiBaseMissing",
@@ -84,17 +86,15 @@ class GatewayAccess:
     cluster_secret: str = field(repr=False)
     remote_plane: bool
     machine_token: str | None = field(repr=False)
-    launcher_profile: str | None
+    launcher_profile: ProcessProfile | None
     gateway_home: bool
 
 
 # meiva:note
 # Launcher profiles whose processes present the machine API token and never the
-# meiva:note
 # human secret: the launcher delivers one to every agent host and runner service
-# meiva:note
 # (`cli.commands.data_plane.bringup.api_delivery`), exec children inherit it.
-_TOKEN_ONLY_PROFILES = frozenset({"agent", "runner"})
+_TOKEN_ONLY_PROFILES: frozenset[ProcessProfile] = frozenset({"agent", "runner"})
 
 
 # meiva:note

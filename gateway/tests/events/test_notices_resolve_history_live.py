@@ -54,7 +54,7 @@ def test_read_keeps_question_in_snapshot(
         db_conn,
         a,
         catalog=model_catalog,
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert snap is not None
     assert [n.id for n in snap.notices_awaiting_response] == [nid]
@@ -109,7 +109,7 @@ def test_resolve_cross_agent_path_409(
         db_conn,
         a,
         catalog=model_catalog,
-        default_model_reader=lambda: settings.lm.llm_model,
+        default_model=settings.lm.llm_model,
     )
     assert snap is not None
     assert [n.id for n in snap.notices_awaiting_response] == [nid]

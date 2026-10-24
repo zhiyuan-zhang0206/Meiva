@@ -19,13 +19,7 @@ from typing import Any, cast
 
 from base.config.config_registry import DOMAIN_ATTRS
 from base.config.lite_parse import parse_field
-from base.config.profiles import (
-    MEIVA_PROCESS_PROFILE_ENV,
-    PROCESS_PROFILES,
-    ProcessProfile,
-    profile_domain_error,
-    profile_unknown_error,
-)
+from base.config.profiles import PROCESS_PROFILES, profile_domain_error
 from base.host.env.boot_policy import BootstrapFetch
 from base.host.env.bootstrap import (
     CONFIG_FETCH_ENV,
@@ -48,6 +42,11 @@ from base.host.env.dotenv_boot import (
     apply_process_timezone,
     load_meiva_env,
     read_database_delivery,
+)
+from base.host.env.process_profile import (
+    MEIVA_PROCESS_PROFILE_ENV,
+    ProcessProfile,
+    profile_unknown_error,
 )
 from base.paths.home import home_from_env, resolve_meiva_home
 
@@ -251,14 +250,17 @@ def _log_upgrade(reason: str) -> None:
     logger.debug("config boot-lite upgraded to the eager config chain (reason={!r})", reason)
 
 
+# meiva:note
+# One composition owner's lazy configuration, overlays and build gate.
+#
+# Construction performs no environment delivery or full-model build. Call boot() at the existing
+# process entry, the composition root. The root reads `view` once and builds each component's
+# frozen `XxxConfig` value from it; `view` itself, and closures over it, stay in the root module
+# and are never handed to a component. A component that must see a later change is handed the
+# `ConfigBoot` as a real resource and builds a fresh value at its unit of work. A view always
+# resolves this instance, including after upgrade.
+# meiva:link base/config/docs/config-roots.meiva.okf.md
 class ConfigBoot:
-    """One composition owner's lazy configuration, overlays and build gate.
-
-    Construction performs no environment delivery or full-model build. Call
-    boot() at the existing process entry; pass view or narrow reader closures
-    to consumers. A view always resolves this instance, including after upgrade.
-    """
-
     __slots__ = (
         "_lock",
         "env_boot",

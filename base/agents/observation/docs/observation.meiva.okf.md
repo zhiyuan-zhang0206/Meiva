@@ -63,7 +63,7 @@ and keep native-only prompt display out of external transcripts.
 
 ## Agent capability projection
 
-Model projections take an explicit `default_model_reader` from their caller.
+Model projections take an explicit `default_model` value from their caller.
 Cards and snapshots resolve overlay pins over birth pins, using the caller's
 current default only when neither map pins a model. They share
 `snapshot.agent_supports_vision`, including registered withdrawal resolution.

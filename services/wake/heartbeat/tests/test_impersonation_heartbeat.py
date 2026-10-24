@@ -219,16 +219,11 @@ def test_sdk_attachment_can_pause_heartbeat(
     import meiva
     from base.agents.context.external_attachment import plugin_state_codec
     from base.agents.context.external_attachment.state_schema import BaseAgentState
-    from base.agents.sdk import call_policy
     from meiva import impersonation
     from meiva.tests.fixtures.pin_agent import pin_agent
 
     monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
 
-    def _policy_for_test(_owner: call_policy.SamplingPolicyOwner) -> call_policy.SamplingPolicy:
-        return call_policy.SamplingPolicy()
-
-    monkeypatch.setattr(call_policy, "policy", _policy_for_test)
     lease = active_lease(
         db_conn,
         config_authority=config_authority,

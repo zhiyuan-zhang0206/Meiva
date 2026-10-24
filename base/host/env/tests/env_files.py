@@ -1,18 +1,10 @@
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from base.host.env.dotenv_file import process_env_file, read_env_aliases
 
-__all__ = [
-    "aliases_of",
-    "constant",
-    "env_path_of",
-    "unit_env_aliases",
-    "unit_env_path",
-    "use_env_files",
-]
+__all__ = ["unit_env_aliases", "unit_env_path", "use_env_files"]
 
 
 # meiva:note
@@ -39,39 +31,3 @@ def use_env_files(
         (home / "mirror.env").write_text(mirror_file.read_text())
     monkeypatch.setenv("MEIVA_HOME", str(home))
     return home
-
-
-# meiva:note
-# Typed stand-ins for the ambient readers a few tests still replace. Each answers any call
-# meiva:note
-# the production code makes, so a test states the answer and not the call's arguments.
-
-
-# meiva:note
-# A function that returns `value` whatever it is called with.
-def constant[T](value: T) -> Callable[..., T]:
-
-    def answer(*_args: object, **_kwargs: object) -> T:
-        return value
-
-    return answer
-
-
-# meiva:note
-# A `read_env_aliases` that returns a copy of `values` for any path.
-def aliases_of(values: dict[str, str]) -> Callable[[Path], dict[str, str]]:
-
-    def read(_env_path: Path) -> dict[str, str]:
-        return dict(values)
-
-    return read
-
-
-# meiva:note
-# An `env_file_path` that answers `path` for any home.
-def env_path_of(path: Path) -> Callable[[Path], Path]:
-
-    def locate(_home: Path) -> Path:
-        return path
-
-    return locate

@@ -11,7 +11,7 @@ import sys
 from types import SimpleNamespace
 
 import meiva
-from base.agents.sdk import call_policy
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions, SdkNamespace
 from base.paths.home import resolve_meiva_home
@@ -32,7 +32,7 @@ def ping() -> str:
 sdk_disable.apply_entries(["disabled_ns"])
 sentinel = sys.modules["meiva.disabled_ns"]
 assert isinstance(sentinel, DisabledSDKModule)
-sampling = call_policy.SamplingPolicyOwner(reader=call_policy.SamplingPolicy)
+sampling = fixed_sampling_owner()
 registry = ExtensionRegistry(
     (
         (

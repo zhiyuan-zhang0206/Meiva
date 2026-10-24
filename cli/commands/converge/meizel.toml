@@ -10,7 +10,7 @@ exports = ["brew_pin.py", "firewall.py", "firewall_command.py", "frontend_env.py
 "ownership_preflight.py" = ["plans", "spec.py"]
 "redis_bridge.py" = ["plans", "spec.py"]
 "steps.py" = ["plans", "spec.py"]
-"tests" = ["health_preflight.py", "plans", "redis_bridge.py", "spec.py", "steps.py"]
+"tests" = ["health_preflight.py", "os_jobs.py", "plans", "redis_bridge.py", "spec.py", "steps.py"]
 "walg.py" = ["plans", "spec.py"]
 
 [purity]

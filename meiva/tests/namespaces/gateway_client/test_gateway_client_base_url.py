@@ -17,6 +17,7 @@ from base.cluster.machine import (
 )
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
+from base.host.env.process_profile import ProcessProfile
 from meiva.boot import derived_clients
 from meiva.gateway_client import use_client
 from meiva.sdk_surface import process_context
@@ -42,8 +43,10 @@ def client_config(machine_identity: MachineIdentity) -> Iterator[ConfigBoot]:
         context.clients.close()
 
 
-def test_gateway_client_base_url_is_gateway_url(client_config: ConfigBoot) -> None:
-    meiva.context.require_machine().set(role="agent-runner")
+def test_gateway_client_base_url_is_gateway_url(
+    client_config: ConfigBoot, machine_identity: MachineIdentity
+) -> None:
+    machine_identity.set(role="agent-runner")
     client_config.set_field("gateway_url", "https://cp.example.com")
 
     import base.agents.context.gateway_client.transport as gc
@@ -65,7 +68,9 @@ def test_gateway_client_sends_cluster_secret_bearer(client_config: ConfigBoot) -
     assert client.headers.get("Authorization") == "Bearer s3cr3t-token"
 
 
-def _access(secret: str, delivered: str | None = None, profile: str | None = None) -> GatewayAccess:
+def _access(
+    secret: str, delivered: str | None = None, profile: ProcessProfile | None = None
+) -> GatewayAccess:
     return GatewayAccess(
         gateway_url="https://cp.example.com",
         cluster_secret=secret,
