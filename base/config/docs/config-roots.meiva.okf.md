@@ -34,3 +34,13 @@ work, not a stored closure, decides when the setting is read.
 
 Tests build the `XxxConfig` value directly. `ConfigBoot.set_field` is for a test that needs the
 real owner (config round trips, the admin panel), not for steering a component.
+
+## Configuration behind an earlier gate
+
+Read conditional policy only after the facts that make it necessary. OS-job convergence checks
+its master switch and home ownership before resolving a refresh schedule; a disabled refresh
+channel has no tick. The `os_jobs_enabled` and `refresh_enabled` lite-manifest rows serve these
+gates without constructing Settings and validating the unused tick. An active channel still upgrades and
+validates the configured interval. The generated rows take their aliases and defaults from the config
+owner; it does not introduce a second parser. Malformed lite flags still fail at the existing
+boot boundary, including when a later gate would skip the job.
