@@ -2,9 +2,10 @@ exports = ["launchd_job.py", "lifecycle.py", "onboarding.py", "signing_identity.
 
 [uses]
 "__init__.py" = ["lifecycle.py"]
-"lifecycle.py" = ["build_state.py", "hardened_runtime.py", "launchd_job.py", "signing_identity.py"]
+"lifecycle.py" = ["activation_plan.py", "build_state.py", "hardened_runtime.py", "launchd_job.py", "signing_identity.py"]
 "signing_identity.py" = ["hardened_runtime.py"]
-"tests" = ["__init__.py", "launchd_job.py", "lifecycle.py", "onboarding.py", "signing_identity.py"]
+"tests" = ["__init__.py", "activation_plan.py", "launchd_job.py", "lifecycle.py", "onboarding.py", "signing_identity.py"]
 
 [purity]
+"activation_plan.py" = "strict"
 "hardened_runtime.py" = "strict"

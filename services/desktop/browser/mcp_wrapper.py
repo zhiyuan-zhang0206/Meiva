@@ -41,10 +41,6 @@ from services.desktop.browser.mcp_socket_bridge import (
 _UPSTREAM_DOWN_MSG = "chrome upstream session is down; restart browser-mcp before continuing"
 
 
-def _retryable_rejection(exc: Exception) -> bool:
-    return isinstance(exc, RuntimeError) and _UPSTREAM_DOWN_MSG in str(exc)
-
-
 class Link(SocketLink):
     def __init__(
         self,
@@ -58,7 +54,7 @@ class Link(SocketLink):
             writer,
             service_label="chrome MCP daemon",
             timeout_reader=timeout_reader,
-            extra_fields=None,
+            extra_fields={},
         )
 
 
@@ -85,7 +81,7 @@ class ReconnectingSocketLink(ReconnectingLink):
             lambda reader, writer: Link(reader, writer, timeout_reader=timeout_reader),
             max_attempts=max_retries + 1,
             base_delay=base_delay,
-            retryable_rejection=_retryable_rejection,
+            rejection_message=_UPSTREAM_DOWN_MSG,
             close_on_error=is_transport_error,
         )
 

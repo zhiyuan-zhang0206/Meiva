@@ -154,7 +154,7 @@ def select_idle_agents_needing_heartbeat(
     pool: ConnectionPool,
     idle_threshold_s: float,
     *,
-    clock: Clock,
+    now: float,
     heartbeat_interval_s: float | None = None,
     jitter_span_s: float = 0.0,
     limit: int | None = None,
@@ -253,7 +253,6 @@ def select_idle_agents_needing_heartbeat(
     # filter is a fast no-op. The limit is applied AFTER the backoff filter so
     # backed-off agents never consume the per-step wake-rate slots.
     if backoff_until:
-        now = clock.now().timestamp()
         rows = [r for r in rows if now >= backoff_until.get(r[0], 0.0)]
     if limit is not None:
         rows = rows[:limit]
@@ -502,7 +501,7 @@ def backoff_deadlines(
     idle_threshold_s: float,
     deadline_state: dict[int, tuple[int, float]] | None = None,
     *,
-    clock: Clock,
+    now: float,
 ) -> dict[int, float]:
     """Keep each absolute deadline until its agent's failure streak changes.
 
@@ -514,7 +513,6 @@ def backoff_deadlines(
     deadline_state = {} if deadline_state is None else deadline_state
     for agent_id in deadline_state.keys() - failure_streak.keys():
         del deadline_state[agent_id]
-    now = clock.now().timestamp()
     for agent_id, streak in failure_streak.items():
         previous = deadline_state.get(agent_id)
         if previous is None or previous[0] != streak:
@@ -600,10 +598,11 @@ class HeartbeatDispatch:
             noop_streak=self._noop_streak,
             heartbeat_interval_s=self._config.heartbeat_interval_s,
         )
+        now = self._clock.now().timestamp()
         rows = select_idle_agents_needing_heartbeat(
             self._pool,
             self._config.idle_threshold_s,
-            clock=self._clock,
+            now=now,
             heartbeat_interval_s=self._config.heartbeat_interval_s,
             jitter_span_s=JITTER_SPAN_S,
             limit=_MAX_CHECKINS_PER_STEP,
@@ -611,7 +610,7 @@ class HeartbeatDispatch:
                 self._failure_streak,
                 self._config.idle_threshold_s,
                 self._deadline_state,
-                clock=self._clock,
+                now=now,
             ),
         )
         for agent_id, idle_minutes in rows:
@@ -695,9 +694,9 @@ async def run(
                 ),
                 clock=clock,
             )
-            loops.create_task(dispatch_loop(dispatcher, dispatch_progress, clock=clock))
+            loops.create_task(dispatch_loop(dispatcher, dispatch_progress, timers=clock))
             loops.create_task(
-                liveness_loop(AgentLivenessRound(db, pool, bus), liveness_progress, clock=clock)
+                liveness_loop(AgentLivenessRound(db, pool, bus), liveness_progress, timers=clock)
             )
             loops.create_task(
                 completion_digest.completion_digest_loop(

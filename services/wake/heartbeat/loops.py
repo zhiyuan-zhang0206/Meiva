@@ -7,7 +7,7 @@ from typing import Protocol
 
 import psycopg
 
-from base.clock import Clock
+from base.clock import Timers
 from base.daemon.loop_health import LoopProgress
 from base.daemon.round_loop import RoundFailureBudget
 from services.wake.heartbeat.liveness import PASS_INTERVAL_S
@@ -28,22 +28,22 @@ class LivenessRound(Protocol):
 
 
 # meiva:link services/wake/heartbeat/docs/dispatch-round.meiva.okf.md
-async def sleep_with_liveness(liveness: LoopProgress, total_s: float, *, clock: Clock) -> None:
+async def sleep_with_liveness(liveness: LoopProgress, total_s: float, *, timers: Timers) -> None:
     remaining = total_s
     while remaining > 0:
         liveness.beat()
         step = min(_LIVENESS_BEAT_STEP_S, remaining)
-        await clock.asleep(step)
+        await timers.asleep(step)
         remaining -= step
 
 
 # meiva:link services/wake/heartbeat/docs/dispatch-round.meiva.okf.md
-async def dispatch_loop(dispatch: DispatchRound, liveness: LoopProgress, *, clock: Clock) -> None:
+async def dispatch_loop(dispatch: DispatchRound, liveness: LoopProgress, *, timers: Timers) -> None:
     step = dispatch.interval_s
     failures = RoundFailureBudget("heartbeat poll")
     while True:
         try:
-            await sleep_with_liveness(liveness, step, clock=clock)
+            await sleep_with_liveness(liveness, step, timers=timers)
             dispatch.run_round()
             failures.succeeded()
         except asyncio.CancelledError:
@@ -61,7 +61,7 @@ async def dispatch_loop(dispatch: DispatchRound, liveness: LoopProgress, *, cloc
 
 # meiva:link services/wake/heartbeat/docs/dispatch-round.meiva.okf.md
 async def liveness_loop(
-    observation: LivenessRound, liveness: LoopProgress, *, clock: Clock
+    observation: LivenessRound, liveness: LoopProgress, *, timers: Timers
 ) -> None:
     failures = RoundFailureBudget("heartbeat liveness")
     while True:
@@ -73,4 +73,4 @@ async def liveness_loop(
         except Exception as exc:
             _log.exception("[heartbeat] liveness loop iteration failed")
             failures.failed(exc)
-        await sleep_with_liveness(liveness, PASS_INTERVAL_S, clock=clock)
+        await sleep_with_liveness(liveness, PASS_INTERVAL_S, timers=timers)

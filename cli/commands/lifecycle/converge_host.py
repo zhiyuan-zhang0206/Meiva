@@ -149,9 +149,11 @@ def ensure_browser(ctx: ConvergeCtx) -> None:
             print(browser_deps_warning(reason, host=ctx.host), file=sys.stderr)
             print("    (meiva-browser will not start on this host)", file=sys.stderr)
         case OfferProfileSeed(interactive=interactive):
-            from services.desktop.browser.profile import ensure_browser_profile
+            from services.desktop.browser.profile import Console, ensure_browser_profile
 
-            ensure_browser_profile(interactive=interactive, host=ctx.host)
+            ensure_browser_profile(
+                interactive=interactive, host=ctx.host, console=Console.of_process()
+            )
 
 
 def _helper_enabled(ctx: ConvergeCtx) -> bool:
@@ -179,7 +181,7 @@ def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:
         case BringUpHelper():
             from services.desktop.permissions_helper import converge
 
-            converge(helper=ctx.require_helper(), timers=ctx.timers)
+            converge(helper=ctx.require_helper())
 
 
 def ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:

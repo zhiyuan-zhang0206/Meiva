@@ -5,18 +5,15 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from base.host.permissions_helper.client import HelperFactory
 
 
-def converge(*, helper: HelperFactory, timers: Any) -> None:
-    """Idempotent macOS helper bring-up: build, sign, and load.
-
-    `timers` is a `base.clock.Timers`, typed where it is used (`lifecycle.converge`): this door
-    stays import-light because importing `base.clock` loads the configuration, which the test
-    plugins that stub this function must not do.
-    """
+# meiva:note
+# Idempotent macOS helper bring-up: build, sign, and load.
+#
+# The door stays import-light: the lifecycle module loads on first use, so the test plugins
+# that stub this function never import the configuration.
+def converge(*, helper: HelperFactory) -> None:
     from services.desktop.permissions_helper.lifecycle import converge as _converge
 
-    _converge(helper=helper, timers=timers)
+    _converge(helper=helper)

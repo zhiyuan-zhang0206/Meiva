@@ -19,7 +19,7 @@ def run(args: argparse.Namespace, service: GateService | None = None) -> int:
             gate.onboard(
                 automatic=False,
                 timeout_s=args.timeout,
-                echo=lambda line: print(line, file=sys.stderr),
+                progress=sys.stderr,
             ),
             as_json=args.json,
         )

@@ -18,9 +18,16 @@ from services.desktop.browser.mcp_wrapper import Link, ReconnectingSocketLink
 from services.desktop.computer import mcp_wrapper as computer_wrapper
 
 
+# meiva:note
+# The browser link is told its socket; the computer link derives its own and stamps an identity.
 def _link_kwargs(side: str) -> dict[str, Any]:
-    """The browser link is told its socket; the computer link derives its own."""
-    return {"socket_path": Path("/unused.sock")} if side == "browser" else {}
+    return {"socket_path": Path("/unused.sock")} if side == "browser" else {"agent_id": None}
+
+
+# meiva:note
+# The computer link carries the agent identity it stamps on every request.
+def _identity(side: str) -> dict[str, Any]:
+    return {} if side == "browser" else {"agent_id": None}
 
 
 _WRAPPERS = {"browser": browser_wrapper, "computer": computer_wrapper}
@@ -473,7 +480,9 @@ async def test_wrapper_failure_policy_and_wire_messages(side: str) -> None:
             **_link_kwargs(side), timeout_reader=lambda: 1.0
         )
         connect = AsyncMock(
-            return_value=wrapper.Link(FakeReader([line]), writer, timeout_reader=lambda: 1.0)
+            return_value=wrapper.Link(
+                FakeReader([line]), writer, timeout_reader=lambda: 1.0, **_identity(side)
+            )
         )
         reconnecting._connect_once = connect
         with pytest.raises(error_type) as error:
@@ -498,11 +507,13 @@ async def test_upstream_rejection_is_browser_only(retry_waits: list[float], side
             FakeReader([_line({"id": 1, "ok": False, "error": rejection})]),
             writers[0],
             timeout_reader=lambda: 1.0,
+            **_identity(side),
         ),
         wrapper.Link(
             FakeReader([_line({"id": 1, "ok": True, "result": "ok"})]),
             writers[1],
             timeout_reader=lambda: 1.0,
+            **_identity(side),
         ),
     ]
     connect = AsyncMock(side_effect=links)
@@ -541,7 +552,9 @@ async def test_stalled_drain_is_unknown_delivery_without_retry(
 
     writer = StalledWriter()
     connect = AsyncMock(
-        return_value=wrapper.Link(FakeReader([]), writer, timeout_reader=lambda: 0.01)
+        return_value=wrapper.Link(
+            FakeReader([]), writer, timeout_reader=lambda: 0.01, **_identity(side)
+        )
     )
     reconnecting = wrapper.ReconnectingSocketLink(**_link_kwargs(side), timeout_reader=lambda: 0.01)
     reconnecting._connect_once = connect
@@ -575,11 +588,14 @@ async def test_write_or_drain_failure_is_not_retried(
     failed_writer.close = lambda: closed.append(True)
     connect = AsyncMock(
         side_effect=[
-            wrapper.Link(FakeReader([]), failed_writer, timeout_reader=lambda: 1.0),
+            wrapper.Link(
+                FakeReader([]), failed_writer, timeout_reader=lambda: 1.0, **_identity(side)
+            ),
             wrapper.Link(
                 FakeReader([_line({"id": 1, "ok": True, "result": "ok"})]),
                 success_writer,
                 timeout_reader=lambda: 1.0,
+                **_identity(side),
             ),
         ]
     )
@@ -608,11 +624,12 @@ async def test_drain_reset_surfaces_unknown_delivery_without_retry(side: str) ->
     fresh = FakeWriter()
     connect = AsyncMock(
         side_effect=[
-            wrapper.Link(FakeReader([]), failed, timeout_reader=lambda: 1.0),
+            wrapper.Link(FakeReader([]), failed, timeout_reader=lambda: 1.0, **_identity(side)),
             wrapper.Link(
                 FakeReader([_line({"id": 1, "ok": True, "result": "next"})]),
                 fresh,
                 timeout_reader=lambda: 1.0,
+                **_identity(side),
             ),
         ]
     )
@@ -637,11 +654,12 @@ async def test_closed_before_write_retries_without_sending(
     fresh = FakeWriter()
     connect = AsyncMock(
         side_effect=[
-            wrapper.Link(FakeReader([]), closed, timeout_reader=lambda: 1.0),
+            wrapper.Link(FakeReader([]), closed, timeout_reader=lambda: 1.0, **_identity(side)),
             wrapper.Link(
                 FakeReader([_line({"id": 1, "ok": True, "result": "ok"})]),
                 fresh,
                 timeout_reader=lambda: 1.0,
+                **_identity(side),
             ),
         ]
     )
@@ -682,11 +700,13 @@ async def test_bridge_timeout_readers_are_dynamic_and_isolated(side: str) -> Non
         InitiallyBlockedReader([_line({"id": 2, "ok": True, "result": "updated"})]),
         FakeWriter(),
         timeout_reader=first_timeout,
+        **_identity(side),
     )
     second_link = wrapper.Link(
         FakeReader([_line({"id": 1, "ok": True, "result": "independent"})]),
         FakeWriter(),
         timeout_reader=second_timeout,
+        **_identity(side),
     )
     assert reads == []
     with pytest.raises(TimeoutError):
