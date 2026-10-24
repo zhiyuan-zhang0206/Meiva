@@ -1,4 +1,4 @@
-exports = ["bootstrap"]
+exports = ["bootstrap", "guards"]
 
 [uses]
 "test_main_dispatch.py" = ["bootstrap"]
