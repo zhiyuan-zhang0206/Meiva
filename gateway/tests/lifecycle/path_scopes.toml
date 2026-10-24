@@ -6,3 +6,6 @@
 "base.config.tests.config_authority" = [
     ".",
 ]
+"base.agents.inbox.tests.inbound_helpers" = [
+    "test_inbound_provenance.py",
+]
