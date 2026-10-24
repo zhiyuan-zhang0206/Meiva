@@ -22,7 +22,7 @@ from functools import cache as _cache
 from pathlib import Path
 from typing import Any
 
-from gmail_auth import AuthSources, GmailError
+from gmail_auth import AuthSources, GmailError, GmailInputError
 from gmail_compose import msg_summary, plan_forward, plan_reply, recipient_list, sent_summary
 from gmail_queries import message_query
 from gmail_wire import ALL_MAIL, parse_drafts_folder
@@ -45,7 +45,7 @@ def _attach_files(msg: EmailMessage, paths: list[str]) -> None:
     for p in paths:
         path = Path(p).expanduser()
         if not path.is_file():
-            raise ValueError(f"--attach path is not a readable file: {p}")
+            raise GmailInputError(f"--attach path is not a readable file: {p}")
         ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         maintype, _, subtype = ctype.partition("/")
         msg.add_attachment(
@@ -122,7 +122,7 @@ def send(
 ) -> dict[str, Any]:
     to_list = recipient_list(to)
     if not to_list:
-        raise ValueError("send needs at least one recipient")
+        raise GmailInputError("send needs at least one recipient")
     cc_list = recipient_list(cc)
     msg = _compose(
         auth, to=to_list, subject=subject, body=body, cc=cc_list or None, attachments=attach
@@ -204,12 +204,11 @@ def forward(
     attach: list[str] | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    orig = _original(auth, message_id)
-
     to_list = recipient_list(to)
     if not to_list:
-        raise ValueError("forward needs at least one recipient")
+        raise GmailInputError("forward needs at least one recipient")
     cc_list = recipient_list(cc)
+    orig = _original(auth, message_id)
 
     plan = plan_forward(orig, body)
     msg = _compose(
@@ -257,7 +256,7 @@ def draft(
 ) -> dict[str, Any]:
     to_list = recipient_list(to)
     if not to_list:
-        raise ValueError("draft needs at least one recipient")
+        raise GmailInputError("draft needs at least one recipient")
     cc_list = recipient_list(cc)
     msg = _compose(
         auth, to=to_list, subject=subject, body=body, cc=cc_list or None, attachments=attach

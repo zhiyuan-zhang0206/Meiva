@@ -12,9 +12,8 @@ import sys
 import warnings
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NamedTuple, TypedDict, cast
+from typing import Any, NamedTuple, cast
 
 from langchain_core.messages import BaseMessage
 
@@ -22,6 +21,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from audit import LeakPaths, invalidated, scan
 from label import label
+from record_inputs import AgentMeta as AgentMeta
+from record_inputs import EventFact, InboundFact, RunInputs, TaskReceipts, TranscriptRow
+from record_inputs import event_facts as event_facts
+from record_inputs import inbound_facts as inbound_facts
+from record_inputs import transcript_facts as transcript_facts
 
 from base.lm.system_note import SYSTEM_NOTE_OPEN
 
@@ -88,20 +92,6 @@ PEER_FEEDBACK_KEYWORDS = (
 
 
 HUMAN_SOURCES = frozenset({"user", "ui:web"})
-
-
-# meiva:note
-# One telemetry or audit event of an agent: its name and its attributes as the events API returned them.
-Event = tuple[str, Mapping[str, object]]
-
-
-# meiva:note
-# One inbound chat message as `collect.py` reads it: the sender, the text, whether the same text went to several agents (a broadcast), and whether the agent claimed it.
-class Inbound(TypedDict):
-    source: str
-    content: str
-    is_broadcast: bool
-    claimed: bool
 
 
 def _detect_correction(content: str) -> bool:
@@ -194,22 +184,14 @@ def transcript_rows(messages: Sequence[BaseMessage]) -> list[dict[str, str]]:
     return [{"type": message.type, "content": _msg_text(message.content)} for message in messages]
 
 
-def _plugins_activated(events: Sequence[Event]) -> tuple[dict[str, int], int]:
+def _plugins_activated(events: Sequence[EventFact]) -> tuple[dict[str, int], int]:
     fired: Counter[str] = Counter()
     skipped = 0
-    for event_type, payload in events:
-        if event_type != "plugin_activation":
-            continue
-        data = cast(dict[str, Any], payload or {})
-        plugin, surface, identifier = (
-            data.get("plugin"),
-            data.get("surface"),
-            data.get("identifier"),
-        )
-        if not (plugin and surface and identifier):
+    for event in events:
+        if event.activation_skipped:
             skipped += 1
-            continue
-        fired[f"{plugin}/{surface}/{identifier}"] += 1
+        elif event.activation is not None:
+            fired[event.activation] += 1
     return dict(sorted(fired.items())), skipped
 
 
@@ -229,10 +211,10 @@ def _task_source(source: str, spawner: str) -> str:
 
 
 # meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
-def _first_human_message(transcript: Sequence[dict[str, str]]) -> str:
+def _first_human_message(transcript: Sequence[TranscriptRow]) -> str:
     for message in transcript:
-        content = message.get("content") or ""
-        if message.get("type") != "human" or not content.strip():
+        content = message.content or ""
+        if message.type != "human" or not content.strip():
             continue
         if content.lstrip().startswith(SYSTEM_NOTE_OPEN):
             continue
@@ -242,14 +224,14 @@ def _first_human_message(transcript: Sequence[dict[str, str]]) -> str:
 
 # meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
 def _task_prompt(
-    spawner: str, messages: Sequence[Inbound], transcript: Sequence[dict[str, str]]
+    spawner: str, messages: Sequence[InboundFact], transcript: Sequence[TranscriptRow]
 ) -> tuple[str, str]:
     for wanted in ("human", "spawner", "schedule"):
         for message in messages:
-            if _task_source(message["source"], spawner) != wanted:
+            if _task_source(message.source, spawner) != wanted:
                 continue
-            if message["content"].strip():
-                return message["content"], wanted
+            if message.content.strip():
+                return message.content, wanted
     inherited = _first_human_message(transcript)
     return (inherited, "transcript") if inherited else ("", "none")
 
@@ -260,10 +242,15 @@ def task_prompt_of(record: Mapping[str, object]) -> str:
     prompt = (raw.get("task_prompt") or "").strip()
     if prompt:
         return raw["task_prompt"]
-    return _first_human_message(raw.get("transcript") or [])
+    return _first_human_message(
+        tuple(
+            TranscriptRow(row.get("type", ""), row.get("content", ""))
+            for row in raw.get("transcript") or []
+        )
+    )
 
 
-def _peer_feedback(spawner: str, agent_messages: Sequence[Inbound]) -> list[dict[str, Any]]:
+def _peer_feedback(spawner: str, agent_messages: Sequence[InboundFact]) -> list[dict[str, Any]]:
     spawner_id: int | None = None
     if spawner.startswith("agent:"):
         with contextlib.suppress(IndexError, ValueError):
@@ -271,13 +258,13 @@ def _peer_feedback(spawner: str, agent_messages: Sequence[Inbound]) -> list[dict
     peer_feedback: list[dict[str, Any]] = []
     for message in agent_messages:
         try:
-            from_agent = int(message["source"].split(":", 1)[1])
+            from_agent = int(message.source.split(":", 1)[1])
         except (IndexError, ValueError):
             from_agent = 0
         if from_agent == spawner_id:
             continue
-        if _detect_peer_feedback(message["content"]):
-            peer_feedback.append({"from_agent": from_agent, "content": message["content"]})
+        if _detect_peer_feedback(message.content):
+            peer_feedback.append({"from_agent": from_agent, "content": message.content})
     return peer_feedback
 
 
@@ -293,23 +280,23 @@ class _EventStats(NamedTuple):
     duration_s: float
 
 
-def _event_stats(events: Sequence[Event]) -> _EventStats:
+def _event_stats(events: Sequence[EventFact]) -> _EventStats:
     turns = exec_ok = exec_failed = tokens_in = tokens_out = 0
     models: list[str] = []
     code_bodies: list[str] = []
     exec_outcomes: list[str] = []
     duration = 0.0
-    for event, raw_payload in events:
-        payload = cast(dict[str, Any], raw_payload)
+    for fact in events:
+        event = fact.name
         if event == "turn_end":
             turns += 1
-            duration += float(payload.get("duration_seconds", 0))
+            duration += fact.duration_s
         elif event == "llm_usage":
-            models.append(str(payload.get("model", "")))
-            tokens_in += int(payload.get("in_total", 0))
-            tokens_out += int(payload.get("out_total", 0))
+            models.append(fact.model)
+            tokens_in += fact.tokens_in
+            tokens_out += fact.tokens_out
         elif event == "code":
-            code_bodies.append(str(payload.get("body", "")))
+            code_bodies.append(fact.body)
         if _is_exec_ok(event):
             exec_ok += 1
             exec_outcomes.append(event)
@@ -341,13 +328,11 @@ def _leak_fields(code_bodies: list[str], agent_id: int, leak_paths: LeakPaths) -
 
 
 def _prompt_fields(
-    spawner: str, inbounds: Sequence[Inbound], transcript: Sequence[dict[str, str]]
+    spawner: str, inbounds: Sequence[InboundFact], transcript: Sequence[TranscriptRow]
 ) -> dict[str, Any]:
-    per_agent = [message for message in inbounds if not message["is_broadcast"]]
-    human_messages = [
-        message["content"] for message in per_agent if message["source"] in HUMAN_SOURCES
-    ]
-    agent_messages = [message for message in per_agent if message["source"].startswith("agent:")]
+    per_agent = [message for message in inbounds if not message.is_broadcast]
+    human_messages = [message.content for message in per_agent if message.source in HUMAN_SOURCES]
+    agent_messages = [message for message in per_agent if message.source.startswith("agent:")]
     task_prompt, task_prompt_source = _task_prompt(spawner, per_agent, transcript)
     followups = human_messages[1:] if task_prompt_source == "human" else human_messages
     return {
@@ -386,7 +371,7 @@ def _evidence_block(
         "final_output_chars": len(final_output.strip()),
         "terminal_status": run.meta.status,
         "inbound_total": len(run.inbounds),
-        "inbound_claimed": sum(1 for message in run.inbounds if message["claimed"]),
+        "inbound_claimed": sum(1 for message in run.inbounds if message.claimed),
         "task_updates": {
             "note": receipts.note,
             "status": receipts.status,
@@ -398,47 +383,13 @@ def _evidence_block(
     }
 
 
-# meiva:note
-# The lifecycle row of one agent (`agents_meta`): who spawned it, its last status and the text of its final message.
-class AgentMeta(NamedTuple):
-    spawner: str
-    status: str | None
-    last_message_text: str | None
-
-
-# meiva:note
-# The receipt counts read for one agent, with no mutable query row retained by a record input.
-class TaskReceipts(NamedTuple):
-    note: int
-    status: int
-    results: int
-    state_changes: int
-
-
-# meiva:note
-# Everything one record is built from, as values: the agent's telemetry and audit events, its inbounds, its lifecycle row,
-# its transcript rows, the skills it loaded and the optional leak surfaces and task-receipt counts. `build_record` reads nothing else.
-@dataclass(frozen=True)
-class RunInputs:
-    agent_id: int
-    week: str
-    events: tuple[Event, ...]
-    log_events: tuple[Event, ...]
-    inbounds: tuple[Inbound, ...]
-    meta: AgentMeta
-    transcript: tuple[dict[str, str], ...]
-    skills_touched: tuple[str, ...]
-    leak_paths: LeakPaths | None = None
-    task_receipts: TaskReceipts | None = None
-
-
 def build_record(run: RunInputs) -> dict[str, object]:
     agent_id = run.agent_id
     spawner, status, last_message_text = run.meta
     prompts = _prompt_fields(spawner, run.inbounds, run.transcript)
 
     stats = _event_stats(run.events)
-    compactions = sum(1 for event_type, _ in run.log_events if event_type == "compact")
+    compactions = sum(1 for name in run.log_events if name == "compact")
 
     plugins_activated, plugins_activated_skipped = _plugins_activated(run.events)
 
@@ -448,7 +399,7 @@ def build_record(run: RunInputs) -> dict[str, object]:
         "spawner": spawner,
         "model": _mode(stats.models),
         **prompts,
-        "transcript": list(run.transcript),
+        "transcript": [{"type": row.type, "content": row.content} for row in run.transcript],
         "final_output": last_message_text or "",
         "turns": stats.turns,
         "tokens_in": stats.tokens_in,

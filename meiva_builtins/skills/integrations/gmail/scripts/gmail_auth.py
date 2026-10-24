@@ -43,6 +43,12 @@ class GmailError(Exception):
     pass
 
 
+# meiva:note
+# A caller's input failed a Gmail command's value contract.
+class GmailInputError(GmailError, ValueError):
+    pass
+
+
 KeychainFailure = Literal["program_missing", "timed_out", "refused"]
 
 

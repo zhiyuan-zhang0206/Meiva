@@ -42,6 +42,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from base.db import Database
+
 # `collect` is a sibling in this skill's own scripts/ dir,
 # not an importable package (PYTHONSAFEPATH=1 keeps a script's own directory
 # off sys.path) — restore it for the sibling import. Structure Rule 6
@@ -75,12 +77,17 @@ class ScanResult(NamedTuple):
 #
 # Source: the gateway's /api/events; a failed read fails the scan.
 def scan(
-    days: int, week: str, *, env: collect.CollectEnv, include_test: bool = False
+    days: int,
+    week: str,
+    *,
+    env: collect.CollectFacts,
+    database: Database,
+    include_test: bool = False,
 ) -> ScanResult:
     records, counts = collect.collect_with_counts(
         resolve_window(env.now, days, None, None),
         week,
-        database=env.database,
+        database=database,
         gateway=env.gateway,
         include_test=include_test,
     )
@@ -94,7 +101,7 @@ def scan(
 # What the daily scan reads once at its start: the collection env, and the judgeable share below which the scan alerts.
 @dataclass(frozen=True)
 class ScanEnv:
-    collection: collect.CollectEnv
+    collection: collect.CollectFacts
     coverage_floor: float
 
 
@@ -115,7 +122,7 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
 
 # meiva:note
 # Run the scan and return its exit code. The full report is published atomically (a unique temporary file, then a rename), so a reader never sees a partial report and a failed rerun leaves the previous file in place; when it cannot be written the compact view is not used, because the rich lines are then the only copy of the details.
-def main(argv: Sequence[str], env: ScanEnv) -> int:
+def main(argv: Sequence[str], env: ScanEnv, *, database: Database) -> int:
     args = _parse_args(argv)
     if args.days < 1:
         print("error: --days must be >= 1", file=sys.stderr)
@@ -124,6 +131,7 @@ def main(argv: Sequence[str], env: ScanEnv) -> int:
         args.days,
         week_label(env.collection.now),
         env=env.collection,
+        database=database,
         include_test=args.include_test,
     )
     view = scan_report.ScanView(
@@ -149,11 +157,11 @@ def process_env() -> ScanEnv:
     from base.config import settings
 
     return ScanEnv(
-        collection=collect.process_env(),
+        collection=collect.process_facts(),
         coverage_floor=settings.general.self_evolution_coverage_alert_floor,
     )
 
 
 if __name__ == "__main__":
     _parse_args(sys.argv[1:])
-    raise SystemExit(main(sys.argv[1:], process_env()))
+    raise SystemExit(main(sys.argv[1:], process_env(), database=collect.process_database()))

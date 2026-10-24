@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
-from gmail_auth import GmailError
+from gmail_auth import GmailError, GmailInputError
 
 # meiva:note
 # Gmail's "All Mail" holds archived issues too, not just the inbox -- a newsletter the user
@@ -40,13 +40,17 @@ def parse_search_response(typ: str, data: Sequence[bytes | None], query: str) ->
     return payload.split() if payload else []
 
 
+def validate_limit(n: int | None) -> None:
+    if n is not None and n < 0:
+        raise GmailInputError(f"limit/scan must be >= 0, got {n}")
+
+
 # meiva:note
 # The newest `n` ids, newest-first (IMAP returns ascending sequence order). A negative `n` is
 # a caller bug (it would slice off the *oldest* `|n|` and silently return a wrong-length
 # list), so it is rejected rather than mis-sliced.
 def recent(ids: list[bytes], n: int | None) -> list[bytes]:
-    if n is not None and n < 0:
-        raise ValueError(f"limit/scan must be >= 0, got {n}")
+    validate_limit(n)
     newest_first = ids[::-1]
     return newest_first[:n] if n is not None else newest_first
 

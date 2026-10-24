@@ -54,11 +54,11 @@ def _build(
         record_mod.RunInputs(
             agent_id=agent_id,
             week="2026-08-30",
-            events=(),
-            log_events=(),
-            inbounds=tuple(inbounds),
+            events=record_mod.event_facts(()),
+            log_events=tuple(name for name, _ in ()),
+            inbounds=record_mod.inbound_facts(tuple(inbounds)),
             meta=record_mod.AgentMeta(spawner, status, "delivered"),
-            transcript=() if transcript is None else tuple(transcript),
+            transcript=record_mod.transcript_facts(() if transcript is None else tuple(transcript)),
             skills_touched=(),
         )
     )

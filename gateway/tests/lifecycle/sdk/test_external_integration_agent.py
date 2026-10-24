@@ -161,7 +161,7 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     expected = (
         "Native core and plugin rules\n\n<system_note>\nConfigured skill rules\n</system_note>"
     )
-    assert reader.read_instructions(lease["session_id"], agent_id) == expected
+    assert reader.read_instructions(reader.Target(lease["session_id"], agent_id)) == expected
     with impersonation.attach(lease["id"]):
         assert agent_id == meiva.self.AGENT_ID
         assert agent_identity.require_actor() == f"agent:{agent_id}"
@@ -180,7 +180,7 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
         "integration__seen": {"external"}
     }
     assert native_snapshot.integration__seen == {"native"}
-    assert reader.read_instructions(lease["session_id"], agent_id) == expected
+    assert reader.read_instructions(reader.Target(lease["session_id"], agent_id)) == expected
     with impersonation.attach(lease["id"]):
         assert handle.read().seen == {"native", "external"}
     assert (
