@@ -209,6 +209,7 @@ describe("runsOnHarness", () => {
     expect(runsOnHarness(data, "deepseek-v4-pro", "meiva")).toBe(true);
     expect(runsOnHarness(data, "deepseek-v4-pro", "codex")).toBe(true);
     expect(runsOnHarness(data, "deepseek-v4-pro", "claude_code")).toBe(false);
+    expect(runsOnHarness(data, "deepseek-v4-pro", "kimi_code")).toBe(false);
     expect(runsOnHarness(data, "gpt-5.6", "codex")).toBe(false);
   });
 

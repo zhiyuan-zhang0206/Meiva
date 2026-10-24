@@ -379,7 +379,7 @@ def _metered(
 #         thinking is slow/expensive and turns content into list-of-blocks);
 #         it also skips reasoning-effort injection where both would conflict
 #         (deepseek 400) or contradict intent (claude / glm / gemini /
-#         mimo / qwen). kimi-k3 cannot disable reasoning — logged
+#         mimo / qwen). kimi-k3 / kimi-k3.1-pro* cannot disable reasoning — logged
 #         and ignored. `{"type": "enabled", "budget_tokens": N}` is manual
 #         extended thinking — see the claude helper for the per-model rules.
 #         None = provider default.
