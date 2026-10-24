@@ -11,3 +11,8 @@ exports = ["attachment.py", "registration.py", "store.py"]
 [purity]
 "admission.py" = "strict"
 "registration.py" = "strict"
+
+[roots]
+"__init__.py" = { kinds = ["environ"], why = "the same one-shot MEIVA_HARNESS_HANDLE handoff read by the public entry, before any Settings exists: `meiva.attach()` is what a bare harness child calls first, and the handle is per-launch IPC, not cluster configuration" }
+
+"attachment.py" = { kinds = ["settings"], why = "External controller attachment owns process bootstrap when no SDK context is bound" }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from meizel.graph.model import AmbientKind
 from scripts.lint.diagnostics.diff_hints.model import FileChange, HintId, RemovedLine
 from scripts.lint.diagnostics.diff_hints.removed import deleted_tests
 from scripts.lint.diagnostics.diff_hints.tests.support import ROLES, hints, sites
@@ -487,3 +488,17 @@ def test_an_interval_clock_asks_only_where_the_function_also_sleeps() -> None:
 def test_the_wall_clock_always_asks() -> None:
     wall = "import time\nfrom datetime import UTC, datetime\n\ndef f():\n    return time.time(), datetime.now(UTC)\n"
     assert hints(wall) == [HintId.AMBIENT_READ, HintId.AMBIENT_READ]
+
+
+def test_declared_roots_exempt_only_their_actual_ambient_kinds() -> None:
+    source = "import os\nimport time\n\nx = os.environ['A']\ny = time.time()\n"
+    declared = sites(source, "base/host/env/registry.py", roots=frozenset({AmbientKind.ENVIRON}))
+    assert [(site.hint, site.line) for site in declared] == [(HintId.AMBIENT_READ, 5)]
+
+
+def test_a_settings_root_can_assemble_inputs_from_the_process() -> None:
+    source = "from base.config import settings\n\nx = settings.service\n"
+    assert (
+        sites(source, "services/wake/heartbeat/daemon.py", roots=frozenset({AmbientKind.SETTINGS}))
+        == []
+    )

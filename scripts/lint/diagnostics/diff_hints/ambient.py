@@ -3,11 +3,12 @@
 # the platform, randomness and the whole `Settings` object (`ambient-read`), and the
 # service-locator shapes that fetch a component's inputs from the application
 # (`service-locator`). Both look at production files only and skip a composition root
-# by file name, because a root is where the world is read.
+# by manifest kind; the existing filename heuristic remains for legacy roots.
 from __future__ import annotations
 
 import ast
 
+from meizel.graph.model import INTERVAL_CLOCKS, AmbientKind, stdlib_kind
 from scripts.lint.diagnostics.diff_hints.model import FileKind, HintId, Site, Unit
 from scripts.lint.diagnostics.diff_hints.names import OS_ENVIRON, OS_GETENV, dotted
 from scripts.lint.diagnostics.diff_hints.scope import is_root_file
@@ -32,15 +33,6 @@ _AMBIENT_NAMES = frozenset(
         "sys.platform",
     }
 )
-# meiva:note
-# The interval clocks. A deadline, a duration or a TTL read from them in code no test needs to
-# steer is the plain use of `time` that the conventions allow; the read becomes a decision worth
-# asking about only when the same function also sleeps, because then "how long to wait next" sits
-# inside the loop. The wall clock (`time.time`, `datetime.now`) almost always feeds a decision
-# and is always asked.
-_INTERVAL_CLOCKS = frozenset(
-    {"time.monotonic", "time.monotonic_ns", "time.perf_counter", "time.perf_counter_ns"}
-)
 _AMBIENT_MODULES = ("platform.", "random.")
 _DETERMINISTIC = frozenset({"random.Random"})
 _SETTINGS = "base.config.settings"
@@ -52,7 +44,7 @@ _HANDOVER_SUFFIXES = ("_at", "_ts", "_now", "_time")
 def _is_ambient(name: str) -> bool:
     if name in _DETERMINISTIC:
         return False
-    return name in _AMBIENT_NAMES or name in _INTERVAL_CLOCKS or name.startswith(_AMBIENT_MODULES)
+    return name in _AMBIENT_NAMES or name in INTERVAL_CLOCKS or name.startswith(_AMBIENT_MODULES)
 
 
 def _read_name(node: ast.AST, unit: Unit) -> str | None:
@@ -107,7 +99,7 @@ def _is_interval_read(node: ast.AST, unit: Unit) -> bool:
     target = node
     if not isinstance(target, ast.Attribute | ast.Name):
         return False
-    return dotted(target, unit.names) in _INTERVAL_CLOCKS
+    return dotted(target, unit.names) in INTERVAL_CLOCKS
 
 
 def ambient_read(unit: Unit) -> list[Site]:
@@ -117,10 +109,17 @@ def ambient_read(unit: Unit) -> list[Site]:
     handed = _handed_over(unit)
     waiting = _in_waiting_function(unit)
     for node in unit.touched:
-        if id(node) in handed or (_is_interval_read(node, unit) and id(node) not in waiting):
+        if (
+            not isinstance(node, ast.Attribute | ast.Name)
+            or id(node) in handed
+            or (_is_interval_read(node, unit) and id(node) not in waiting)
+        ):
             continue
         read = _read_name(node, unit)
-        if read is not None:
+        target = dotted(node, unit.names)
+        acquired = None if target is None else stdlib_kind(target)
+        kind = AmbientKind.SETTINGS if acquired is None else acquired[0]
+        if read is not None and kind not in unit.roots:
             line = getattr(node, "lineno", 0)
             detail = f"`{read}` read in a non-root module"
             sites.append(Site(HintId.AMBIENT_READ, unit.path, line, detail))
@@ -142,7 +141,11 @@ def _locator_detail(node: ast.AST) -> str | None:
 
 
 def service_locator(unit: Unit) -> list[Site]:
-    if unit.kind is not FileKind.PRODUCTION or is_root_file(unit.path):
+    if (
+        unit.kind is not FileKind.PRODUCTION
+        or is_root_file(unit.path)
+        or AmbientKind.SETTINGS in unit.roots
+    ):
         return []
     sites: list[Site] = []
     for node in unit.touched:

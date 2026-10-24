@@ -2,3 +2,9 @@ exports = ["lifecycle_audit.py", "runtime.py", "tests"]
 
 [uses]
 "tests" = ["__init__.py", "lifecycle_audit.py", "runtime.py"]
+
+[roots]
+"runtime.py" = { kinds = ["settings"], why = "CLI command composition root boots configuration before assembling command inputs" }
+
+[debt.ambient-read]
+"runtime.py#environ os.environ" = 1

@@ -2,3 +2,9 @@ exports = ["agent_usage.py"]
 
 [purity]
 "usage_budget.py" = "strict"
+
+[roots]
+"agent_usage.py" = ["db"]
+
+[debt.ambient-read]
+"watch_idle.py#settings base.config.settings" = 1

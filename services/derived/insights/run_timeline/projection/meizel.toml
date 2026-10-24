@@ -12,6 +12,9 @@ exports = ["derive.py", "jobs.py", "reader.py", "source.py"]
 "source.py" = ["model.py"]
 "store.py" = ["model.py"]
 
+[roots]
+"backfill.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+
 [debt.impure-call]
 "nodes.py#import psycopg" = 3
 "reader.py#import fastapi" = 1

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from meizel.tests.synthetic import RepoFactory, diagnostics, verdict
+from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, verdict
 
 BASE = {
     "pkg/__init__.py": "",
@@ -33,6 +33,21 @@ def code_for(make_repo: RepoFactory, manifest: str, code: str, extra: dict[str, 
         ('[uses]\n"a.py" = "b.py"\n', "manifest-syntax"),
         ("this is not toml", "manifest-syntax"),
         ('[uses]\n"a.py" = ["meizel.toml"]\n', "manifest-unknown-child"),
+        ('[roots]\n"a.py" = ["nonsense"]\n', "manifest-syntax"),
+        ('[roots]\n"a.py" = []\n', "manifest-syntax"),
+        ('[roots]\n"a.py" = "environ"\n', "manifest-syntax"),
+        ('[roots]\n"ghost.py" = ["environ"]\n', "manifest-unknown-child"),
+        ('[roots]\n"sub/a.py" = ["environ"]\n', "manifest-unknown-child"),
+        ('[roots]\n"a" = ["environ"]\n', "manifest-unknown-child"),
+        ('[roots]\n"a.py" = { kinds = ["environ"] }\n', "manifest-syntax"),
+        ('[roots]\n"a.py" = { kinds = ["environ"], why = " " }\n', "manifest-syntax"),
+        ('[roots]\n"a.py" = { kinds = ["environ"], why = "x", also = 1 }\n', "manifest-syntax"),
+        ('[roots]\n"a.py" = { kinds = ["environ", "environ"], why = "x" }\n', "manifest-duplicate"),
+        ("roots = 3\n", "manifest-syntax"),
+        ('[state]\n"a.py" = ["environ"]\n', "manifest-syntax"),
+        ('[state]\n"a.py" = "settings"\n', "manifest-syntax"),
+        ('[state]\n"ghost.py" = ["settings"]\n', "manifest-unknown-child"),
+        ("state = 3\n", "manifest-syntax"),
     ],
 )
 def test_malformed_manifests_fail_with_a_located_diagnostic(
@@ -69,3 +84,19 @@ def test_a_well_formed_manifest_is_silent(make_repo: RepoFactory) -> None:
 def test_unknown_keys_do_not_hide_other_errors(make_repo: RepoFactory) -> None:
     root = make_repo({**BASE, "pkg/meizel.toml": 'mystery = 1\n[uses]\n"a.py" = ["a.py"]\n'})
     assert {c for c, _ in verdict(root)} >= {"manifest-unknown-key", "manifest-self-edge"}
+
+
+def test_state_and_roots_are_read_into_the_manifest(make_repo: RepoFactory) -> None:
+    manifest = (
+        '[state]\n"a.py" = ["settings", "db"]\n\n'
+        '[roots]\n"a.py" = ["environ"]\n"b.py" = { kinds = ["clock", "pid"], why = "stamps rows" }\n'
+    )
+    root = make_repo({**BASE, "pkg/meizel.toml": manifest})
+    read = analysis_of(root).manifests["pkg"]
+    assert {name: [kind.value for kind in kinds] for name, kinds in read.state.items()} == {
+        "a.py": ["settings", "db"]
+    }
+    assert {name: ([k.value for k in r.kinds], r.why) for name, r in read.roots.items()} == {
+        "a.py": (["environ"], ""),
+        "b.py": (["clock", "pid"], "stamps rows"),
+    }

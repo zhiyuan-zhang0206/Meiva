@@ -27,33 +27,16 @@ import re
 from pathlib import Path
 
 from meizel import allowances
-from meizel.state.ambient_state.roots import package_roots
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _POLICY = allowances.load(_REPO_ROOT)
 _RULE = "ambient-state"
 
 
-def _parse_handles(entries: tuple[str, ...]) -> tuple[str, frozenset[str]]:
-    if not entries:
-        return "", frozenset()
-    classes = {entry.partition(":")[2] for entry in entries}
-    if len(classes) != 1 or "" in classes:
-        raise ValueError(f"handle entries must share one `module:Class` class: {entries}")
-    return next(iter(classes)), frozenset(entry.partition(":")[0] for entry in entries)
-
-
 SKILL_SCRIPT_PATTERNS = tuple(re.compile(p) for p in _POLICY.names(_RULE, "skill-script-patterns"))
 CONFIG_MODULES = _POLICY.names(_RULE, "config-modules")
 CONFIG_READERS = frozenset(_POLICY.names(_RULE, "config-readers"))
 SETTINGS_NAMES = frozenset(_POLICY.names(_RULE, "config-readers")[:1])
-DB_MODULES = frozenset(_POLICY.names(_RULE, "db-modules"))
-DB_PRIMITIVES = frozenset(_POLICY.names(_RULE, "db-primitives"))
-DB_HANDLE_CLASS, DB_HANDLE_MODULES = _parse_handles(_POLICY.names(_RULE, "db-handles"))
-BUS_HANDLE_CLASS, BUS_HANDLE_MODULES = _parse_handles(_POLICY.names(_RULE, "bus-handles"))
-ENDPOINT_HANDLE_CLASS, ENDPOINT_HANDLE_MODULES = _parse_handles(
-    _POLICY.names(_RULE, "endpoint-handles")
-)
 
 # ── 1. write-only facades ──────────────────────────────────────────────────
 
@@ -90,15 +73,3 @@ PURE_REPO_CALLEES: dict[str, str] = _POLICY.reasons(_RULE, "pure-repo-callees")
 # nothing mutable is a cache of a constant, not state. A site that stops being
 # reported fails as stale.
 ALLOWED: dict[str, str] = _POLICY.reasons(_RULE, "sites")
-
-# ── 4. slice-governed packages ─────────────────────────────────────────────
-
-# Packages whose configuration arrives as constructor-injected slices: package dir ->
-# its composition-root modules, the only modules there that may read `settings`
-# (meizel/state/ambient_state/sliced.py). A package declares itself in its own
-# `ambient_roots.toml` (`settings = [...]`, see roots.py) when it is sliced; leaving needs
-# a decision record. A declared root that no longer exists fails as stale.
-SLICED_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "settings")
-DB_HANDLE_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "db")
-ENDPOINT_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "endpoints")
-BUS_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "bus")

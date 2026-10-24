@@ -8,3 +8,6 @@ exports = ["app.py", "daemon.py"]
 [purity]
 "__init__.py" = "strict"
 "config.py" = "strict"
+
+[roots]
+"daemon.py" = ["settings"]

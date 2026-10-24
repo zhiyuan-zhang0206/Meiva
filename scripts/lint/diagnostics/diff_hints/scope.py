@@ -1,13 +1,14 @@
 # meiva:note
 # Which files the hints judge. Production hints govern the application and template
 # packages, test hints the tests of those packages and the top-level test directory;
-# tooling, examples and the frontend are outside both. A composition root is found by
-# its file name, a transparent heuristic: no per-file list exists.
+# tooling, examples and the frontend are outside both. Declared ambient kinds arrive
+# with each unit; the filename heuristic remains for legacy composition roots.
 from __future__ import annotations
 
 import ast
 from bisect import bisect_left
 
+from meizel.graph.model import AmbientKind
 from scripts.lint.diagnostics.diff_hints.model import FileKind, FunctionNode, Roles, Unit
 from scripts.lint.diagnostics.diff_hints.names import import_names
 
@@ -53,7 +54,9 @@ def _holds(node: ast.AST, lines: list[int]) -> bool:
 # meiva:note
 # The parsed unit of a file, or None when the file is out of scope, the change added no
 # line, or the file does not parse (a syntax error is another gate's finding, not a hint).
-def parse_unit(path: str, text: str, added: frozenset[int], roles: Roles) -> Unit | None:
+def parse_unit(
+    path: str, text: str, added: frozenset[int], roles: Roles, roots: frozenset[AmbientKind]
+) -> Unit | None:
     kind = classify(path, roles)
     if kind is FileKind.OTHER or not added:
         return None
@@ -81,6 +84,7 @@ def parse_unit(path: str, text: str, added: frozenset[int], roles: Roles) -> Uni
         added,
         kind,
         roles,
+        roots,
         names,
         touched,
         tuple(functions),

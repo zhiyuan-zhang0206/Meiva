@@ -6,3 +6,6 @@ exports = ["daemon.py", "tests"]
 
 [purity]
 "__init__.py" = "strict"
+
+[roots]
+"daemon.py" = { kinds = ["endpoints", "bus", "settings"], why = "Service or operator process entry boots configuration before composing its resources" }

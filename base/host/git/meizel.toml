@@ -9,6 +9,9 @@ exports = ["gitenv.py", "host_version.py"]
 "__init__.py" = "strict"
 "gitenv.py" = "strict-to-be"
 
+[roots]
+"gitenv.py" = { kinds = ["environ"], why = "git_env copies the live env for a git subprocess (which needs PATH/HOME/SSH_AUTH_SOCK) and layers GIT_TERMINAL_PROMPT/GIT_SSH_COMMAND on top; git plumbing + a whole-environment child handoff, not Meiva runtime config" }
+
 [debt.impure-call]
 "gitenv.py#os.environ" = 1
 "host_version.py#Path.is_file" = 1

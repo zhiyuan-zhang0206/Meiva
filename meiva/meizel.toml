@@ -17,3 +17,6 @@ exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "
 "understand" = ["files.py", "sdk_surface", "security.py"]
 "watcher" = ["sdk_surface", "shell"]
 "web" = ["sdk_surface", "security.py"]
+
+[roots]
+"boot.py" = { kinds = ["environ", "settings"], why = "launched_context() / has_launched_identity() read os.environ[\"MEIVA_AGENT_ID\"]; the env key is the only channel for child processes (shell sessions, watchers) to discover their parent agent; SDK process bootstrap constructs and binds process-owned contexts" }

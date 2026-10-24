@@ -167,3 +167,26 @@ def test_policy_diff_treats_an_unborn_policy_as_empty(
     assert run(root, "policy", "diff", "--against", "HEAD") == 0
     assert "+ [external] app/runner.py" in capsys.readouterr().out
     assert analysis_of(root).verdict is not None
+
+
+def test_historical_policy_diff_keeps_retired_entries_and_surviving_reasons(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from meizel.contracts.sync import prepare_policy_snapshot
+
+    old = (
+        '[ambient-state]\ndb-modules = ["base#db"]\ndb-handles = ["base:Database"]\n'
+        '[ambient-state.sites]\n"a.py::cache" = "keep # and this reason"\n'
+    )
+    root = make_repo({"meizel.policy.toml": old})
+    commit(root)
+    metadata = prepare_policy_snapshot(root)
+    assert metadata.named[("ambient-state", "db-handles")] == ("base:Database",)
+    normalized = (root / "meizel.policy.toml").read_text()
+    assert '"a.py::cache" = "keep # and this reason"' in normalized
+    assert "db-modules" not in normalized and "db-handles" not in normalized
+    assert run(root, "policy", "diff", "--against", "HEAD") == 0
+    out = capsys.readouterr().out
+    assert "- [ambient-state.db-modules] base#db" in out
+    assert "- [ambient-state.db-handles] base:Database" in out
+    assert "ambient-state.sites" not in out

@@ -12,3 +12,12 @@ exports = ["computer.py", "control.py", "impersonation.py", "impersonation_adapt
 
 [purity]
 "__init__.py" = "strict"
+
+[roots]
+"impersonation.py" = { kinds = ["bus", "environ"], why = "MEIVA_IMPERSONATION_RELAY_TOKEN is the relay's scoped credential handoff (stdin for codex, env for claude); it is neither persisted cluster config nor inherited native agent identity" }
+"impersonation_relay.py" = ["bus"]
+
+[debt.ambient-read]
+"impersonation.py#settings base.config.settings" = 2
+"impersonation_parsers.py#environ os.environ" = 1
+"impersonation_relay.py#settings base.config.settings" = 1

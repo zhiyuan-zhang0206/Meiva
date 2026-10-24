@@ -14,3 +14,6 @@ exports = ["metrics.py"]
 "__init__.py" = "strict"
 "_state.py" = "strict"
 "inherited_blocks.py" = "strict"
+
+[debt.ambient-read]
+"pool_ops.py#environ os.environ" = 1

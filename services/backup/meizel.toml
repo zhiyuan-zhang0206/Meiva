@@ -13,3 +13,7 @@ exports = ["artifact", "dump.py", "layout.py", "restore_drill.py", "scheduler", 
 "dump_plan.py" = "strict"
 "layout.py" = "strict"
 "schedule.py" = "strict"
+
+[roots]
+"dump.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+"restore_drill.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }

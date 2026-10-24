@@ -39,10 +39,11 @@ table or section name is `policy-syntax`, not an exemption that silently allows 
 
 | Table | Rule | Sections |
 |---|---|---|
-| `ambient-state` | module-level state (`meizel/state/ambient_state`) | `sink-callees`, `sink-callee-suffixes`, `wiring-callees`, `pure-callees`, `pure-chain-callees`, `skill-script-patterns`, `config-modules`, `config-readers`, `db-modules`, `db-primitives`, `db-handles`, `bus-handles`, `endpoint-handles` (lists); `sink-facades`, `pure-repo-callees`, `sites`, `db-packages`, `db-handle-packages`, `bus-packages`, `endpoint-packages`, `config-packages`, `bundle-packages`, `sliced-packages`, `task-owner-packages`, `thread-owner-packages` |
+| `ambient` | the names through which the repository's own state is reached (`meizel/contracts/ambient_read.py`, [[meizel/docs/checker/ambient.meiva.okf.md|ambient reads]]) | `settings`, `db`, `endpoints`, `bus` (lists; `name()` acquires only when called) |
+| `ambient-state` | module-level state (`meizel/state/ambient_state`) | `sink-callees`, `sink-callee-suffixes`, `wiring-callees`, `pure-callees`, `pure-chain-callees`, `skill-script-patterns`, `config-modules`, `config-readers` (lists); `sink-facades`, `pure-repo-callees`, `sites` |
 | `clock-lattice` | lattice-vocabulary constants | `family-modules` (list); `independent-clocks` (`path::NAME`) |
 | `single-owner.<decision>` | one owner per decision | one table of module paths per decision, e.g. `postgres-dial`, plus `<decision>-owners` lists |
-| `no-os-environ` | raw `os.environ` | `provider-key-vars`, `live-read-vars`, `files`; `test-only-dirs`, `rule-inputs` (lists) |
+| `no-os-environ` | a test sets an environment variable that `Settings` models | `provider-key-vars`, `live-read-vars`, `files` (test files that exercise the settings-free boundary); `test-only-dirs`, `rule-inputs` (lists) |
 | `turn-scoped-config` | per-agent settings reads | `files`, `plugin-mechanism-files`; `scan-dirs`, `extra-files`, `rule-inputs` (lists) |
 | `path-imports` | runtime `sys.path` mutation | `scope`, `skills-scope` (lists) |
 | `python-commands` | bare Python subprocess invocations | `argv-wrappers` (list) |
@@ -76,5 +77,12 @@ entry added, removed or changed since the ref, in every table above, one per lin
 and CI prints that list in the log and in the check summary whenever the file
 changed. It informs; it does not block. When a rename or a move touches a listed
 path or name, the same PR updates the entry (a renamed file leaves a stale one).
+
+Historical Git comparisons use an explicit snapshot decoder for the five retired
+`ambient-state` lists: `db-modules`, `db-primitives`, `db-handles`, `bus-handles` and
+`endpoint-handles`. Each still requires a list of non-empty strings; every other unknown or
+malformed entry is rejected. `policy diff` retains those entries so their retirement is
+reported. Selector and debt comparison normalize only disposable base snapshots through this
+owner; the working-tree parser continues to reject the retired vocabulary.
 
 Parent: [[meizel/docs/checker/checker.meiva.okf.md|the checker]].

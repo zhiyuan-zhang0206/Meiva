@@ -14,3 +14,7 @@ exports = ["daemon.py", "resolution.py", "rollup.py", "token_totals.py"]
 "health_components.py" = "strict"
 "loop_roster.py" = "strict"
 "pass_policy.py" = "strict"
+
+[roots]
+"daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+"rollup.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }

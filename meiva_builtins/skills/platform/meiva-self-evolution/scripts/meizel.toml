@@ -6,3 +6,9 @@
 "record_inputs.py" = "strict"
 "scan_report.py" = "strict"
 "window_records.py" = "strict"
+
+[roots]
+"collect.py" = ["db"]
+
+[debt.ambient-read]
+"daily_scan.py#settings base.config.settings" = 1

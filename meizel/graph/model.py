@@ -1,11 +1,15 @@
-"""Value types shared by every stage of the checker."""
+# meiva:note
+# Value types and the closed ambient vocabulary shared by every stage of the checker.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 __all__ = [
+    "INTERVAL_CLOCKS",
+    "Acquisition",
+    "AmbientKind",
     "Code",
     "DebtKey",
     "Diagnostic",
@@ -17,6 +21,8 @@ __all__ = [
     "Problem",
     "PurityItem",
     "Restricted",
+    "Sources",
+    "stdlib_kind",
 ]
 
 
@@ -64,6 +70,8 @@ class Code(StrEnum):
     MISSING_PATCH_TARGET = "missing-patch-target"
     PATCH_RAISING_FALSE = "patch-raising-false"
     TEST_SUBCLASS_OVERRIDE = "test-subclass-override"
+    AMBIENT_READ = "ambient-read"
+    STALE_ROOT = "stale-root"
     IMPURE_EDGE = "impure-edge"
     IMPURE_CALL = "impure-call"
     UNFROZEN_VALUE = "unfrozen-value"
@@ -79,6 +87,88 @@ class Code(StrEnum):
     WIDE_PUBLIC_SURFACE = "wide-public-surface"
     WIDE_PARAMS = "wide-params"
     DEEP_ATTR_CHAIN = "deep-attr-chain"
+
+
+# meiva:note
+# What a process reads from the world it runs in, as a closed vocabulary.
+#
+# The first four are state a repository holds itself (declared under `[state]` and named in
+# the policy); the rest are the standard library's windows onto the process and the machine.
+class AmbientKind(StrEnum):
+    SETTINGS = "settings"
+    DB = "db"
+    ENDPOINTS = "endpoints"
+    BUS = "bus"
+    ENVIRON = "environ"
+    CLOCK = "clock"
+    HOME = "home"
+    CWD = "cwd"
+    PLATFORM = "platform"
+    PID = "pid"
+    RANDOM = "random"
+
+
+# meiva:note
+# The interval clocks. Reading one for a deadline, a duration or a TTL is the plain use of `time`
+# that the conventions allow in code no test needs to steer; the read is a decision worth a root
+# only where the same function also sleeps, because then how long to wait next is decided in
+# a loop. The wall clock is always a window onto the world.
+INTERVAL_CLOCKS = frozenset(
+    {"time.monotonic", "time.monotonic_ns", "time.perf_counter", "time.perf_counter_ns"}
+)
+
+_STDLIB: dict[str, AmbientKind] = {
+    **dict.fromkeys(INTERVAL_CLOCKS, AmbientKind.CLOCK),
+    **dict.fromkeys(
+        (f"os.{name}" for name in ("environ", "getenv", "putenv")), AmbientKind.ENVIRON
+    ),
+    **dict.fromkeys(
+        (
+            "time.time",
+            "time.time_ns",
+            "datetime.datetime.now",
+            "datetime.datetime.utcnow",
+            "datetime.datetime.today",
+            "datetime.date.today",
+        ),
+        AmbientKind.CLOCK,
+    ),
+    **dict.fromkeys(("pathlib.Path.home", "os.path.expanduser"), AmbientKind.HOME),
+    **dict.fromkeys(("os.getcwd", "os.getcwdb", "pathlib.Path.cwd"), AmbientKind.CWD),
+    **dict.fromkeys(
+        ("sys.platform", "os.name", "os.uname", "socket.gethostname", "socket.getfqdn"),
+        AmbientKind.PLATFORM,
+    ),
+    **dict.fromkeys(
+        ("os.getpid", "os.getppid", "os.getuid", "os.geteuid", "os.getgid", "os.getegid"),
+        AmbientKind.PID,
+    ),
+    **dict.fromkeys(("uuid.uuid1", "uuid.uuid4"), AmbientKind.RANDOM),
+}
+# meiva:note
+# Modules every public name of which reaches the machine or draws randomness.
+_WHOLE_MODULES = {
+    "platform": AmbientKind.PLATFORM,
+    "random": AmbientKind.RANDOM,
+    "secrets": AmbientKind.RANDOM,
+}
+# meiva:note
+# A generator built from an explicit seed is a value, not a window onto the process.
+_SEEDED = frozenset({"random.Random"})
+
+
+# meiva:note
+# The kind and the acquired name of a dotted standard-library name, or None.
+def stdlib_kind(dotted: str) -> tuple[AmbientKind, str] | None:
+    parts = dotted.split(".")
+    for end in range(1, len(parts) + 1):
+        prefix = ".".join(parts[:end])
+        if prefix in _STDLIB:
+            return _STDLIB[prefix], prefix
+    whole = _WHOLE_MODULES.get(parts[0])
+    if whole is not None and len(parts) > 1 and ".".join(parts[:2]) not in _SEEDED:
+        return whole, ".".join(parts[:2])
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +204,26 @@ class Patch:
     target: str
     code: Code
     imported: bool = False
+
+
+# meiva:note
+# The point where a file reaches the ambient world: `target` is the dotted name it reads.
+@dataclass(frozen=True, slots=True)
+class Acquisition:
+    line: int
+    kind: AmbientKind
+    target: str
+
+
+# meiva:note
+# The state a repository keeps itself: dotted name -> kind.
+#
+# `names` acquire the state when imported or read as an attribute of their module; `calls` only
+# when called, so that importing a class for an annotation acquires nothing.
+@dataclass(frozen=True, slots=True)
+class Sources:
+    names: dict[str, AmbientKind] = field(default_factory=dict[str, AmbientKind])
+    calls: dict[str, AmbientKind] = field(default_factory=dict[str, AmbientKind])
 
 
 @dataclass(frozen=True, slots=True)

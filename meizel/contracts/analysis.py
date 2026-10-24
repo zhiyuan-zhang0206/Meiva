@@ -9,6 +9,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from meizel.contracts.ambient_read import ambient_diagnostics, sources_from, stale_roots
 from meizel.contracts.debt import file_key, set_debt
 from meizel.contracts.ledger import debts_in, reconcile
 from meizel.contracts.manifest import Manifest, load_manifests, manifest_path
@@ -22,7 +23,7 @@ from meizel.contracts.rule import (
     purity_diagnostics,
     stale_exports,
 )
-from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind, Patch
+from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind, Patch, Sources
 from meizel.graph.universe import Universe, load_universe
 from meizel.language.fixtures import FixtureIndex, fixture_facts
 from meizel.language.scan import EXTERNAL_FORMS, FileScan, mount_facts, scan_file
@@ -30,7 +31,7 @@ from meizel.language.scan import EXTERNAL_FORMS, FileScan, mount_facts, scan_fil
 __all__ = ["POLICY", "Analysis", "analyze", "diagnose", "render_policy", "scan_all", "set_debt"]
 
 _PARALLEL_FROM = 200
-_WORKER: dict[str, Universe] = {}
+_WORKER: dict[str, tuple[Universe, Sources]] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,22 +83,28 @@ def _all_source_files(universe: Universe) -> tuple[str, ...]:
     return universe.source_files(scopes, exts)
 
 
-def _init_worker(universe: Universe) -> None:
-    _WORKER["universe"] = universe
+def _init_worker(universe: Universe, sources: Sources) -> None:
+    _WORKER["scan"] = (universe, sources)
 
 
 def _scan_in_worker(path: str) -> FileScan:
-    return scan_file(_WORKER["universe"], path)
+    universe, sources = _WORKER["scan"]
+    return scan_file(universe, path, sources)
 
 
 def scan_all(
-    universe: Universe, jobs: int | None = None, paths: Sequence[str] | None = None
+    universe: Universe,
+    sources: Sources,
+    jobs: int | None = None,
+    paths: Sequence[str] | None = None,
 ) -> dict[str, FileScan]:
     paths = _all_source_files(universe) if paths is None else paths
     workers = jobs if jobs is not None else min(os.cpu_count() or 1, 8)
     if workers <= 1 or len(paths) < _PARALLEL_FROM:
-        return {p: scan_file(universe, p) for p in paths}
-    with ProcessPoolExecutor(workers, initializer=_init_worker, initargs=(universe,)) as pool:
+        return {p: scan_file(universe, p, sources) for p in paths}
+    with ProcessPoolExecutor(
+        workers, initializer=_init_worker, initargs=(universe, sources)
+    ) as pool:
         scans = pool.map(_scan_in_worker, paths, chunksize=max(1, len(paths) // (workers * 8)))
         return {scan.path: scan for scan in scans}
 
@@ -345,11 +352,11 @@ def _stale_diagnostics(
 
 
 def _scan_changed(
-    universe: Universe, changed: Collection[str], jobs: int | None
+    universe: Universe, sources: Sources, changed: Collection[str], jobs: int | None
 ) -> dict[str, FileScan]:
     """The changed Python files, plus what resolving their fixture requests needs."""
     wanted = {p for p in _all_source_files(universe) if p in changed or p.endswith("conftest.py")}
-    scans = scan_all(universe, jobs, sorted(wanted))
+    scans = scan_all(universe, sources, jobs, sorted(wanted))
     while True:
         modules = (
             universe.resolve_module(n) for s in scans.values() for n, _ in s.fixtures.plugins
@@ -357,7 +364,7 @@ def _scan_changed(
         more = sorted({m.file for m in modules if m is not None and m.file and m.file not in scans})
         if not more:
             return scans
-        scans.update(scan_all(universe, jobs, more))
+        scans.update(scan_all(universe, sources, jobs, more))
 
 
 def _distinct(diagnostics: list[Diagnostic]) -> list[Diagnostic]:
@@ -387,6 +394,7 @@ def diagnose(scan: FileScan, manifests: dict[str, Manifest]) -> list[Diagnostic]
     loaders, externals = _declared_loads(manifests), _declared_externals(manifests)
     found.extend(_source_diagnostics([scan], loaders, externals))
     found.extend(_patch_diagnostics([scan]))
+    found.extend(ambient_diagnostics([scan], manifests))
     found.extend(purity_diagnostics([scan], [scan], manifests, Policy(), include_manifests=False))
     return _distinct(found)
 
@@ -406,7 +414,12 @@ def analyze(
     diagnostics.extend(policy_problems)
     diagnostics.extend(check_policy(manifests, policy))
     scope = None if changed is None else frozenset(changed)
-    scans = scan_all(universe, jobs) if scope is None else _scan_changed(universe, scope, jobs)
+    sources = sources_from(manifests, policy)
+    scans = (
+        scan_all(universe, sources, jobs)
+        if scope is None
+        else _scan_changed(universe, sources, scope, jobs)
+    )
     judged = sorted(scans if scope is None else scope & scans.keys())
     loaders = _declared_loads(manifests)
     externals = _declared_externals(manifests)
@@ -420,6 +433,7 @@ def analyze(
     diagnostics.extend(found)
     diagnostics.extend(_source_diagnostics([scans[p] for p in judged], loaders, externals))
     diagnostics.extend(_patch_diagnostics(scans[p] for p in judged))
+    diagnostics.extend(ambient_diagnostics((scans[p] for p in judged), manifests))
     purity_diags = purity_diagnostics(scans.values(), [scans[p] for p in judged], manifests, policy)
     stale = StaleDeclarations()
     if scope is None:
@@ -432,6 +446,7 @@ def analyze(
             unused_exports,
         )
         diagnostics.extend(_stale_diagnostics(manifests, stale))
+        diagnostics.extend(stale_roots(scans, manifests))
         diagnostics.extend(paid_strict_to_be(manifests, purity_diags))
     diagnostics.extend(purity_diags)
     diagnostics = _distinct(diagnostics)

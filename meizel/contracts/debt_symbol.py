@@ -12,8 +12,10 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
+from meizel.contracts.ambient_read import sources_from
 from meizel.contracts.analysis import diagnose
 from meizel.contracts.manifest import Manifest
+from meizel.contracts.policy import load_policy
 from meizel.graph.model import Code, MeizelError
 from meizel.graph.universe import Universe
 from meizel.language.scan import scan_source
@@ -116,7 +118,9 @@ def symbol_debt(
     if span is None:
         raise MeizelError(f"{path} defines no top-level function or class {name}")
     found: Counter[tuple[Code, str, str]] = Counter()
-    for item in diagnose(scan_source(universe, path, source), manifests):
+    policy, _ = load_policy(universe)
+    scan = scan_source(universe, path, source, sources_from(manifests, policy))
+    for item in diagnose(scan, manifests):
         if item.debt is not None and span[0] <= item.line <= span[1]:
             found[(item.code, item.debt.owner, item.debt.key)] += 1
     return dict(found)

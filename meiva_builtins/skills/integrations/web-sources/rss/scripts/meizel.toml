@@ -3,3 +3,6 @@ exports = ["feed.py"]
 [purity]
 "rss_plan.py" = "strict"
 "rss_post.py" = "strict"
+
+[roots]
+"feed.py" = { kinds = ["environ"], why = "The command entry builds its scrape configuration from the process environment before invoking run" }

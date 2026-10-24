@@ -15,6 +15,9 @@ exports = ["config.py", "tests"]
 "_startup.py" = "strict"
 "_wire.py" = "strict"
 
+[debt.ambient-read]
+"_daemon.py#settings base.config.settings" = 1
+
 [debt.third-party-patch]
 "_oauth.py#assignment mcp.client.auth.oauth2.OAuthContext.prepare_token_auth" = 1
 "_oauth.py#assignment mcp.client.auth.oauth2.validate_metadata_issuer" = 1
