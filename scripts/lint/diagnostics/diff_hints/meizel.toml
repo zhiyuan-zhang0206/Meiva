@@ -20,7 +20,7 @@ exports = ["hints.py"]
 
 [uses]
 "acks.py" = ["model.py"]
-"ambient.py" = ["model.py", "names.py", "scope.py"]
+"ambient.py" = ["model.py", "names.py", "scope.py", "walk.py"]
 "branches.py" = ["model.py", "names.py", "walk.py"]
 "catalog.py" = ["model.py"]
 "diff.py" = ["model.py"]

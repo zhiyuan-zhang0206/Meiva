@@ -14,7 +14,7 @@ CASES = [
     pytest.param(
         HintId.AMBIENT_READ,
         "cli/x.py",
-        "import time\n\ndef f():\n    return time.monotonic()\n",
+        "import time\n\ndef f():\n    return time.time()\n",
         "import time\n\ndef f(now: float):\n    time.sleep(1)\n    return now\n",
         id="ambient-clock",
     ),
@@ -268,7 +268,7 @@ def test_a_hint_fires_on_its_shape_and_not_on_the_clean_shape(
 
 
 def test_a_composition_root_is_found_by_its_file_name() -> None:
-    clock = "import time\n\ndef f():\n    return time.monotonic()\n"
+    clock = "import time\n\ndef f():\n    return time.time()\n"
     locator = "def f(request):\n    return request.app.state.thing\n"
     assert hints(clock, "cli/main.py") == []
     assert hints(clock, "cli/commands/runtime.py") == []
@@ -295,22 +295,20 @@ def test_a_protocol_fires_above_base_and_not_in_base() -> None:
 
 
 def test_production_hints_do_not_judge_tests_and_test_hints_do_not_judge_production() -> None:
-    clock = "import time\n\ndef f():\n    return time.monotonic()\n"
+    clock = "import time\n\ndef f():\n    return time.time()\n"
     assert hints(clock, "cli/tests/test_x.py") == []
     spy = "def f(m):\n    m.assert_called_once()\n"
     assert hints(spy, "cli/x.py") == []
 
 
 def test_files_outside_the_application_and_test_packages_are_not_judged() -> None:
-    clock = "import time\n\ndef f():\n    return time.monotonic()\n"
+    clock = "import time\n\ndef f():\n    return time.time()\n"
     assert hints(clock, "scripts/x.py") == []
     assert hints(clock, "docs/x.txt") == []
 
 
 def test_only_added_lines_raise_a_hint() -> None:
-    source = (
-        "import time\n\ndef f():\n    return time.monotonic()\n\ndef g():\n    return time.time()\n"
-    )
+    source = "import time\n\ndef f():\n    return time.time()\n\ndef g():\n    return time.time()\n"
     assert [s.line for s in sites(source)] == [4, 7]
     assert [s.line for s in sites(source, added=frozenset({7}))] == [7]
     assert sites(source, added=frozenset({1, 2})) == []
@@ -464,3 +462,28 @@ def test_freezing_a_class_that_already_held_a_list_is_asked() -> None:
     source = "from dataclasses import dataclass\n\n@dataclass(frozen=True)\nclass V:\n    items: list[str]\n"
     assert [s.line for s in sites(source, added=frozenset({3}))] == [5]
     assert sites(source, added=frozenset({1})) == []
+
+
+def test_an_interval_clock_asks_only_where_the_function_also_sleeps() -> None:
+    duration = "import time\n\ndef f():\n    started = time.monotonic()\n    return time.monotonic() - started\n"
+    polling = (
+        "import time\n\ndef f():\n    deadline = time.monotonic() + 3\n"
+        "    while time.monotonic() < deadline:\n        time.sleep(0.1)\n"
+    )
+    asyncio_poll = (
+        "import asyncio\nimport time\n\nasync def f():\n    t = time.perf_counter()\n"
+        "    await asyncio.sleep(1)\n    return t\n"
+    )
+    nested = (
+        "import time\n\ndef f():\n    def g():\n        return time.monotonic()\n"
+        "    time.sleep(1)\n    return g\n"
+    )
+    assert hints(duration) == []
+    assert [s.hint for s in sites(polling)] == [HintId.AMBIENT_READ] * 2
+    assert hints(asyncio_poll) == [HintId.AMBIENT_READ]
+    assert hints(nested) == []
+
+
+def test_the_wall_clock_always_asks() -> None:
+    wall = "import time\nfrom datetime import UTC, datetime\n\ndef f():\n    return time.time(), datetime.now(UTC)\n"
+    assert hints(wall) == [HintId.AMBIENT_READ, HintId.AMBIENT_READ]
