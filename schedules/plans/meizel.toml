@@ -1,0 +1,27 @@
+exports = ["adversarial_cases.py", "adversarial_marker.py", "adversarial_scoreboard.py", "adversarial_spawn.py", "adversarial_workers.py", "c9_window.py", "ci_workflows.py", "debt_sweep_scan.py", "debt_sweep_worker.py", "directory_plan.py", "loop_plan.py", "scan_outcome.py", "schedule_identity.py", "stall_rule.py", "tracker_report.py", "weekly_trigger.py"]
+
+[purity]
+"__init__.py" = "strict"
+"adversarial_cases.py" = "strict"
+"adversarial_marker.py" = "strict"
+"adversarial_scoreboard.py" = "strict"
+"adversarial_spawn.py" = "strict"
+"adversarial_workers.py" = "strict"
+"c9_window.py" = "strict"
+"ci_workflows.py" = "strict"
+"debt_sweep_scan.py" = "strict"
+"debt_sweep_worker.py" = "strict"
+"directory_plan.py" = "strict"
+"loop_plan.py" = "strict"
+"scan_outcome.py" = "strict"
+"schedule_identity.py" = "strict"
+"stall_rule.py" = "strict"
+"tracker_report.py" = "strict"
+"weekly_trigger.py" = "strict"
+
+[uses]
+"adversarial_marker.py" = ["adversarial_cases.py"]
+"adversarial_scoreboard.py" = ["adversarial_spawn.py"]
+"adversarial_spawn.py" = ["adversarial_cases.py"]
+"adversarial_workers.py" = ["directory_plan.py"]
+"debt_sweep_worker.py" = ["debt_sweep_scan.py"]

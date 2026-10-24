@@ -37,4 +37,12 @@ def test_runner_catalog_refusal_precedes_transaction(
     unopened = ConnectionPool[Connection[TupleRow]]("postgresql://127.0.0.1:1/none", open=False)
     request = RestartAgentRequest(config_overlay={"llm_model": "unknown-model"})
     with pytest.raises(InvalidModelConfig, match="not a registered model"):
-        lifecycle.restart_blocking(database, event_bus, 1, request, unopened, catalog=_catalog())
+        lifecycle.restart_blocking(
+            database,
+            event_bus,
+            1,
+            request,
+            unopened,
+            catalog=_catalog(),
+            default_model="test-provider-model",
+        )

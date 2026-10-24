@@ -1,241 +1,60 @@
-from __future__ import annotations
+# meiva:link schedules/README.md
 
-import json
+import os
 import subprocess
-import sys
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from datetime import UTC, datetime
 from functools import partial
-from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any
-from zoneinfo import ZoneInfo
 
 from base.clock import SYSTEM_TIMERS
-
-import meiva
-import base
-from meiva.agents import AgentStatus as S
-from schedules.agent_status_guard import ensure_agent_status_members
-from schedules.catchup import cluster_timezone
-from schedules.daily_host import DailyLoopHooks, report_agent, run_daily_loop
-from base.daemon.schedules.inputs import ScheduleInputs
-from schedules.entry import fresh_schedule_entry, schedule_entry
-
-
-if TYPE_CHECKING:
-    from base.clock import Timers
-    from scripts.ci.pull_requests.export_process import GhProcess
-
+from base.paths.home import resolve_meiva_home
+from schedules.jobs.catchup import cluster_timezone
+from schedules.jobs.ci_metrics import CiMetrics, collect_ci_metrics
+from schedules.jobs.entry import open_schedule_entry
+from schedules.jobs.loop import CronSchedule, Trigger, run_loop
+from schedules.plans.ci_workflows import WatchedWorkflow
+from schedules.plans.directory_plan import report_recipient
+from schedules.plans.schedule_identity import parse_schedule_id
 
 CRON = "20 6 * * *"
 _REPORT_AGENT_ENV = "MEIVA_CI_METRICS_REPORT_AGENT"
 _REPORT_LABEL = "Meiva \u8d1f\u8d23\u4eba"
-_REPO_ROOT = Path(base.__file__).resolve().parents[1]
+
 # meiva:note
-# Timed workflows do not block a pull request, so a red one is silent by default: the
-# nightly duration refresh failed 6 of 8 runs and nothing said so (task #5479), and the
-# pricing refresh failed 10 in a row the same way (task #5496). Two consecutive failures
-# is already "this pipeline is broken", not "one bad night". Each entry carries what
-# stays wrong while it is red, because the alert has to say what it costs.
-_SCHEDULED_WORKFLOWS = {
-    "refresh-test-durations.yml": (
-        "CI keeps splitting shards with the previous test-duration model"
+# The timed workflows a pull request never blocks. A red one is silent by default, so each
+# entry carries what stays wrong while it fails: the alert has to say what it costs.
+_SCHEDULED_WORKFLOWS = (
+    WatchedWorkflow(
+        "refresh-test-durations.yml",
+        "CI keeps splitting shards with the previous test-duration model",
     ),
-    "update-model-pricing.yml": (
+    WatchedWorkflow(
+        "update-model-pricing.yml",
         "the price catalog stops following its sources, so every per-model cost figure "
-        "drifts from what the vendor charges"
+        "drifts from what the vendor charges",
     ),
-}
-_CONSECUTIVE_FAILURES_ALERT = 2
-
-
-def _report_agent(
-    *,
-    env: Mapping[str, str] | None = None,
-    list_agents_fn: Callable[..., Any] | None = None,
-) -> int:
-    return report_agent(_REPORT_AGENT_ENV, _REPORT_LABEL, env=env, list_agents_fn=list_agents_fn)
-
-
-def _report_failure(
-    detail: str,
-    *,
-    env: Mapping[str, str] | None = None,
-    list_agents_fn: Callable[..., Any] | None = None,
-    send_message_fn: Callable[[int, str], Any] | None = None,
-) -> None:
-    send = send_message_fn or meiva.agents.send_message
-    message = (
-        f"Dev/CI metrics collection failed:\n{detail[-1000:]}\n"
-        "Check the schedule log; backfill with `scripts/ci/pull_requests/runs_export.py --repo "
-        "zhiyuan-zhang0206/Meiva --print-snapshot`."
-    )
-    try:
-        send(_report_agent(env=env, list_agents_fn=list_agents_fn), message)
-    except Exception as exc:
-        print(f"dev-ci-metrics could not notify the P0 lead: {exc}")
-        raise
-
-
-def _load_exporter() -> Any:
-    if str(_REPO_ROOT) not in sys.path:
-        sys.path.insert(0, str(_REPO_ROOT))
-    from scripts.ci.pull_requests import runs_export
-
-    return runs_export
-
-
-def _snapshot(exporter: Any) -> dict[str, Any]:
-    from base.paths import meiva_home
-
-    path = meiva_home() / exporter._STATE_DIR_RELATIVE / "snapshot.json"
-    loaded = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(loaded, dict):
-        raise TypeError("CI-run sampler wrote an invalid snapshot")
-    return loaded
-
-
-def _day_counts(snapshot: dict[str, Any], day: str, repo: str) -> tuple[int, int]:
-    records = snapshot["repositories"][repo]["days"]
-    values = records[day]
-    return int(values["runs"]), int(values["failed_runs"])
-
-
-def _run_exporter(exporter: Any, repo: str, *, run_process: GhProcess, timers: Timers) -> None:
-    if (
-        exporter.main(
-            ["--repo", repo],
-            run_process=run_process,
-            timers=timers,
-            producer=meiva.context.clients.event_pipeline,
-        )
-        != 0
-    ):
-        raise RuntimeError("ci-runs-export exited non-zero")
-
-
-def _workflow_runs(
-    repo: str,
-    workflow: str,
-    limit: int = 10,
-    *,
-    run_process: GhProcess,
-    timers: Timers,
-) -> list[dict[str, Any]]:
-    from scripts.ci.pull_requests import runs_api
-
-    payload = runs_api.run_gh(
-        [f"repos/{repo}/actions/workflows/{workflow}/runs?per_page={limit}"],
-        runs_api.FetchStats(),
-        run_process=run_process,
-        timers=timers,
-    )
-    runs = json.loads(payload).get("workflow_runs")
-    if not isinstance(runs, list):
-        raise TypeError(f"{workflow}: the runs listing carried no workflow_runs")
-    return runs
-
-
-# meiva:note
-# Newest first: a streak ends at the first run that did not fail.
-def consecutive_failures(runs: list[dict[str, Any]]) -> int:
-    streak = 0
-    for run in runs:
-        if run.get("conclusion") != "failure":
-            break
-        streak += 1
-    return streak
-
-
-# meiva:note
-# The one outbound call, injected by tests: patching meiva.agents from a test hides
-# what it replaces from the locality checker.
-def _message_p0_lead(message: str) -> None:
-    meiva.agents.send_message(_report_agent(), message)
-
-
-def _alert_broken_scheduled_workflows(
-    repo: str,
-    *,
-    run_process: GhProcess,
-    timers: Timers,
-    notify: Callable[[str], None] = _message_p0_lead,
-) -> None:
-    for workflow, cost in _SCHEDULED_WORKFLOWS.items():
-        try:
-            runs = _workflow_runs(repo, workflow, run_process=run_process, timers=timers)
-        except Exception as exc:
-            print(f"dev-ci-metrics: {workflow} runs unreadable: {type(exc).__name__}: {exc}")
-            continue
-        streak = consecutive_failures(runs)
-        if streak < _CONSECUTIVE_FAILURES_ALERT:
-            continue
-        newest = runs[0]
-        print(f"dev-ci-metrics: {workflow} failed {streak} runs in a row")
-        notify(
-            f"Scheduled workflow {workflow} failed {streak} runs in a row. It does not "
-            "block a pull request, so a red run is silent by default: while it keeps "
-            f"failing, {cost}.\n"
-            f"Newest run: {newest.get('html_url')} ({newest.get('created_at')})\n"
-            "Find the failing step; the fix is accepted only after two consecutive "
-            "successful nights.",
-        )
-
-
-def _fire(
-    slot_end: datetime,
-    _payload: None,
-    *,
-    run_process: GhProcess,
-    timers: Timers,
-    cluster_timezone: Callable[[], str] = cluster_timezone,
-    exporter_loader: Callable[[], Any] | None = None,
-    snapshot_loader: Callable[[Any], dict[str, Any]] | None = None,
-    failure_reporter: Callable[[str], None] | None = None,
-) -> None:
-    load_exporter = exporter_loader or _load_exporter
-    load_snapshot = snapshot_loader or _snapshot
-    report_failure = failure_reporter or _report_failure
-    try:
-        exporter = load_exporter()
-        repo = exporter.DEFAULT_REPO
-        _run_exporter(exporter, repo, run_process=run_process, timers=timers)
-        day = (
-            slot_end.astimezone(ZoneInfo(cluster_timezone())).date() - timedelta(days=1)
-        ).isoformat()
-        runs, failed = _day_counts(load_snapshot(exporter), day, repo)
-        _alert_broken_scheduled_workflows(repo, run_process=run_process, timers=timers)
-        print(
-            f"[{datetime.now(UTC).isoformat()}] dev-ci-metrics: {day} — {runs} runs, {failed} failed"
-        )
-    except Exception as exc:
-        print(f"dev-ci-metrics failed: {exc}")
-        report_failure(f"{type(exc).__name__}: {exc}")
-
-
-def _main_loop(
-    *,
-    inputs: ScheduleInputs,
-    loop_fn: Callable[..., None] | None = None,
-    loop_hooks: DailyLoopHooks | None = None,
-) -> None:
-    db = inputs.database()
-    runner = loop_fn or run_daily_loop
-    fire = partial(_fire, run_process=subprocess.run, timers=SYSTEM_TIMERS)
-    if loop_hooks is not None:
-        runner(db, CRON, cluster_timezone(), fire, hooks=loop_hooks)
-    else:
-        runner(db, CRON, cluster_timezone(), fire)
+)
 
 
 if __name__ == "__main__":
-    ensure_agent_status_members(
-        S, {"IDLING", "RUNNING", "TERMINATED"}, schedule_name="dev-ci-metrics"
-    )
-    entry_inputs = globals().get("MEIVA_SCHEDULE_INPUTS")
-    if entry_inputs is None:
-        from base.log import prepare_process_logging
-
-        prepare_process_logging()
-    with fresh_schedule_entry() if entry_inputs is None else schedule_entry(entry_inputs) as inputs:
-        _main_loop(inputs=inputs)
+    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS")) as inputs:
+        schedule = CronSchedule((Trigger(CRON),), timezone=cluster_timezone())
+        job = CiMetrics(
+            tz=schedule.timezone,
+            recipient=report_recipient(
+                "dev-ci-metrics",
+                _REPORT_AGENT_ENV,
+                _REPORT_LABEL,
+                os.environ.get(_REPORT_AGENT_ENV),
+            ),
+            watched=_SCHEDULED_WORKFLOWS,
+            state_dir=resolve_meiva_home() / "state" / "ci-runs",
+            run_process=subprocess.run,
+            timers=SYSTEM_TIMERS,
+        )
+        run_loop(
+            inputs.database(),
+            schedule,
+            partial(collect_ci_metrics, job=job, inputs=inputs),
+            schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
+            started_at=datetime.now(UTC),
+        )

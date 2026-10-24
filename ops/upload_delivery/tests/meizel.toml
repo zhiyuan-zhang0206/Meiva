@@ -1,0 +1,2 @@
+[uses]
+"test_receive.py" = ["object_server.py"]

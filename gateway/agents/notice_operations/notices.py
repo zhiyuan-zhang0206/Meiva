@@ -266,6 +266,7 @@ async def post_notice_resolve(
                 _ACTION_RESOLUTION[action],
                 require_response=bool(require_response),
                 created_at=created_at,
+                now=datetime.now(UTC),
                 replied=reply is not None or resolved_answer.answer is not None,
             )
             if resolved_at is not None:

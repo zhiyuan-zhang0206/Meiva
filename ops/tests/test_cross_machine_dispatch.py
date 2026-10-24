@@ -1,9 +1,9 @@
-from __future__ import annotations
+# meiva:note
+# `dispatch_to_machine` end to end: the real registry read, the real HTTP client and the real
+# result handling, against a loopback listener registered as a runner in `machines`. The module
+# function builds its client from the process settings, as every caller that holds none does.
 
-import json
-import threading
-from collections.abc import Iterator
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from __future__ import annotations
 
 import psycopg
 import pytest
@@ -11,59 +11,7 @@ import pytest
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from ops.cluster.rpc import ClusterOpFailed, dispatch_to_machine
-
-
-class _OpsStub:
-    def __init__(self, *, status: str = "completed", fail_first: int = 0) -> None:
-        self.received: list[dict[str, object]] = []
-        self._status = status
-        self._fail_first = fail_first
-        self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
-        self.port: int = self._server.server_address[1]
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
-
-    @property
-    def url(self) -> str:
-        return f"http://127.0.0.1:{self.port}"
-
-    def _handler(self) -> type[BaseHTTPRequestHandler]:
-        stub = self
-
-        class Handler(BaseHTTPRequestHandler):
-            def log_message(self, format: str, *args: object) -> None:
-                pass
-
-            def do_POST(self) -> None:
-                length = int(self.headers.get("Content-Length", 0))
-                body = json.loads(self.rfile.read(length) or b"{}")
-                if self.path == "/ops":
-                    stub.received.append(body)
-                    if stub._fail_first > 0:
-                        stub._fail_first -= 1
-                        payload = b'{"status":"failed","result":{}}'
-                        self.send_response(503)
-                    else:
-                        payload = json.dumps(
-                            {"status": stub._status, "result": {"echo": body, "ran": True}}
-                        ).encode()
-                        self.send_response(200)
-                else:
-                    payload = b'{"status":"failed","result":{}}'
-                    self.send_response(404)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
-
-        return Handler
-
-    def __enter__(self) -> _OpsStub:
-        self._thread.start()
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self._server.shutdown()
-        self._server.server_close()
+from ops.tests.rpc_support import completed, failed, http_reply, scripted_ops_server
 
 
 def _register(conn: psycopg.Connection, name: str, ops_url: str) -> None:
@@ -77,41 +25,40 @@ def _register(conn: psycopg.Connection, name: str, ops_url: str) -> None:
     conn.commit()
 
 
-@pytest.fixture
-def ops_stub() -> Iterator[_OpsStub]:
-    with _OpsStub() as stub:
-        yield stub
-
-
 async def test_dispatch_resolves_registered_url_and_round_trips(
-    db_conn: psycopg.Connection, ops_stub: _OpsStub, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
 ) -> None:
-    _register(db_conn, "runner-x", ops_stub.url)
+    with scripted_ops_server(completed({"ran": True})) as server:
+        _register(db_conn, "runner-x", server.url)
 
-    result = await dispatch_to_machine(
-        Database.from_settings(gate=database_gate), "runner-x", "status_probe", {"foo": "bar"}
-    )
+        result = await dispatch_to_machine(
+            Database.from_settings(gate=database_gate), "runner-x", "status_probe", {"foo": "bar"}
+        )
 
-    assert ops_stub.received == [{"kind": "status_probe", "payload": {"foo": "bar"}}]
-    assert result == {"echo": {"kind": "status_probe", "payload": {"foo": "bar"}}, "ran": True}
+    assert result == {"ran": True}
+    assert [(r.path, r.body) for r in server.received] == [
+        ("/ops", {"kind": "status_probe", "payload": {"foo": "bar"}})
+    ]
 
 
 async def test_dispatch_failed_status_raises_cluster_op_failed(
     db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
 ) -> None:
-    with _OpsStub(status="failed") as stub:
-        _register(db_conn, "runner-y", stub.url)
-        with pytest.raises(ClusterOpFailed):
+    with scripted_ops_server(failed({"error": "boom"})) as server:
+        _register(db_conn, "runner-y", server.url)
+        with pytest.raises(ClusterOpFailed) as failure:
             await dispatch_to_machine(
                 Database.from_settings(gate=database_gate), "runner-y", "status_probe", {}
             )
+
+    assert failure.value.result == {"error": "boom"}
 
 
 async def test_dispatch_retries_transient_503_over_real_wire(
     db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
 ) -> None:
-    with _OpsStub(fail_first=1) as stub:
-        _register(db_conn, "runner-z", stub.url)
+    with scripted_ops_server(http_reply(503), completed({"ran": True})) as server:
+        _register(db_conn, "runner-z", server.url)
         result = await dispatch_to_machine(
             Database.from_settings(gate=database_gate),
             "runner-z",
@@ -120,8 +67,7 @@ async def test_dispatch_retries_transient_503_over_real_wire(
             retries=2,
         )
 
-    assert result == {
-        "echo": {"kind": "status_probe", "payload": {"ping": 1}},
-        "ran": True,
-    }
-    assert len(stub.received) == 2
+    assert result == {"ran": True}
+    assert [r.body for r in server.received] == [
+        {"kind": "status_probe", "payload": {"ping": 1}}
+    ] * 2

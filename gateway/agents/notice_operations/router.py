@@ -1,6 +1,7 @@
 """Versioned notice selectors requiring observed identity and transactional receipts."""
 
 import asyncio
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Request
@@ -90,6 +91,7 @@ async def dismiss_current(
                 "withdrawn",
                 require_response=record.require_response,
                 created_at=record.created_at,
+                now=datetime.now(UTC),
                 replied=record.reply is not None,
             ),
         )

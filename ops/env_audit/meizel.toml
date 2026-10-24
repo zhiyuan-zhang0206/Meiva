@@ -1,0 +1,9 @@
+[uses]
+"__init__.py" = ["integrity_plan.py", "redaction.py", "write_record.py"]
+"tests" = ["__init__.py", "integrity_plan.py", "redaction.py", "write_record.py"]
+"write_record.py" = ["redaction.py"]
+
+[purity]
+"integrity_plan.py" = "strict"
+"redaction.py" = "strict"
+"write_record.py" = "strict"

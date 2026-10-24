@@ -1,26 +1,33 @@
-"""Runner-side spawn validation and repeatable dispatcher wake."""
+# meiva:note
+# Runner-side spawn validation and repeatable dispatcher wake.
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Collection
 
 from psycopg_pool import ConnectionPool
 
 from base.agents.birth.harness import LAUNCHABLE_HARNESSES
 from base.agents.birth.spawn import latest_checkpoint_id
 from base.agents.impersonation.wake import publish_inbound_wake
-from base.api_contracts.agent_contract import ForkSourceEmpty, Harness
+from base.api_contracts.agent_contract import ForkSourceEmpty
 from base.config.agent_pins import resolve_agent_config_pins
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
-from base.lm.factory import process_provider_keys
+from base.lm.factory import process_provider_keys, validate_model_launch
+from ops.lifecycle.launch_row import StoredLaunch, require_current_launch_row
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 
 
+# meiva:note
+# Validate a gateway-created row and wake its host without changing identity.
+#
+# The gateway supplies the committed attempt and already-stored inbound. No failure here
+# terminates the row: the gateway records launch failure and the pending scan can still deliver
+# the committed first prompt.
 async def launch_agent_op(
     db: Database,
     bus: EventBus,
@@ -31,16 +38,6 @@ async def launch_agent_op(
     authority: ConfigAuthority,
     local_machine: str,
 ) -> SpawnedAgent:
-    """Validate a gateway-created row and wake its host without changing identity.
-
-    The gateway supplies the committed attempt and already-stored inbound.
-    No failure here terminates the row: the gateway records launch failure and
-    the pending scan can still deliver the committed first prompt.
-    """
-    # Lazy import: the package door re-exports this module, so a module-level
-    # import of the door would be circular.
-    from base.lm.factory import validate_model_launch
-
     keys = await asyncio.to_thread(process_provider_keys, catalog)
     validate_model_launch(
         catalog=catalog,
@@ -54,34 +51,24 @@ async def launch_agent_op(
     return SpawnedAgent(id=body.agent_id)
 
 
+# meiva:note
+# Read the agent's row and refuse a stale, misplaced or unlaunchable attempt.
 def validate_launch_row(
-    db_pool: ConnectionPool,
-    body: LaunchAgentRequest,
-    *,
-    local_machine: str,
-    launchable: Collection[Harness] = LAUNCHABLE_HARNESSES,
+    db_pool: ConnectionPool, body: LaunchAgentRequest, *, local_machine: str
 ) -> None:
-    """A stale attempt cannot wake an identity now placed somewhere else."""
     with db_pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT machine, last_launch_attempt_id, status, harness FROM agents_meta WHERE id=%s",
             (body.agent_id,),
         )
         row = cur.fetchone()
-    if row is None or row[:3] != (local_machine, body.launch_attempt_id, "idling"):
-        raise ValueError(f"agent {body.agent_id} launch attempt is stale or misplaced")
-    # meiva:note
-    # A row records the harness it was born on; refusing to wake one whose
-    # launcher does not exist keeps that record honest instead of quietly
-    # running the built-in loop under an external harness label.
-    # meiva:link base/agents/docs/harness/harness.meiva.okf.md
-    harness = Harness(row[3])
-    if harness not in launchable:
-        raise ValueError(
-            f"agent {body.agent_id} was born on harness {harness.value!r}, which has no "
-            f"launcher yet; only {sorted(item.value for item in launchable)} can "
-            f"start a session today"
-        )
+    require_current_launch_row(
+        None if row is None else StoredLaunch(*row),
+        agent_id=body.agent_id,
+        launch_attempt_id=body.launch_attempt_id,
+        local_machine=local_machine,
+        launchable=LAUNCHABLE_HARNESSES,
+    )
 
 
 def spawn_prechecks_blocking(

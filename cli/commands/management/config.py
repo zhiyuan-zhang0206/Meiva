@@ -417,8 +417,11 @@ def cmd_config_audit(
         print("[meiva config audit] --last must be between 1 and 200", file=sys.stderr)
         return 1
     if machine is None:
+        from base.host.env.dotenv_file import process_env_file
+
         records = [
-            {**record, "machine": identity.name()} for record in read_env_write_records(last)
+            {**record, "machine": identity.name()}
+            for record in read_env_write_records(last, process_env_file())
         ]
     else:
         import httpx

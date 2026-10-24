@@ -1,47 +1,57 @@
+# meiva:note
+# The `status_probe` op answers with this host's own snapshot, assembled from its real resources
+# (the throwaway database through a real pool, the home's pidfiles, the host's psutil reading).
+
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import MachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
 from ops.cluster import operations as cluster
+from ops.cluster_status import ClusterStatus
 
 
-def test_cluster_status_op_returns_snapshot(
-    monkeypatch: pytest.MonkeyPatch, database: Database, *, machine_identity: MachineIdentity
+@pytest.fixture
+def pool(db_url: str) -> Iterator[ConnectionPool]:
+    pool: ConnectionPool = ConnectionPool(
+        db_url, min_size=1, max_size=1, kwargs={"prepare_threshold": None}
+    )
+    with pool:
+        yield pool
+
+
+@pytest.mark.usefixtures("unit_home")
+def test_cluster_status_op_returns_this_hosts_snapshot(
+    database: Database, pool: ConnectionPool, tmp_path: Path, *, machine_identity: MachineIdentity
 ) -> None:
-    from ops.cluster_status import ClusterStatus
+    machine_identity.set(name="runner-a", role=frozenset({"agent-runner"}))
+    image = LoadedCommit(source_root=tmp_path, sha="abc1234")
 
-    snap = ClusterStatus(
-        machine_name="runner-a", serve_gateway=False, serve_agent_runner=True, paused=False
-    )
-    expected_pool = object()
-    expected_image = LoadedCommit(source_root=Path(__file__).parent, sha=None)
-    seen: list[object] = []
+    status = cluster.cluster_status_op(database, pool, image=image, local_machine=machine_identity)
 
-    def _snapshot(
-        _db: Database,
-        pool: object | None = None,
-        *,
-        image: LoadedCommit,
-        local_machine: MachineIdentity,
-    ) -> ClusterStatus:
-        assert local_machine is machine_identity
-        assert pool is expected_pool
-        assert image is expected_image
-        seen.append(pool)
-        return snap
+    assert status.machine_name == "runner-a"
+    assert (status.serve_gateway, status.serve_agent_runner) == (False, True)
+    assert status.running_sha == "abc1234"
+    assert status.schema_mismatch is None
+    assert status.agent_count == 0
+    assert ClusterStatus.model_validate(status.model_dump(mode="json")) == status
 
-    monkeypatch.setattr(cluster, "status_snapshot", _snapshot)
 
-    assert (
-        cluster.cluster_status_op(
-            database, expected_pool, image=expected_image, local_machine=machine_identity
-        )
-        is snap
-    )
-    assert seen == [expected_pool]
+@pytest.mark.usefixtures("unit_home")
+def test_cluster_status_op_without_a_pool_reads_through_a_direct_connection(
+    database: Database, tmp_path: Path, *, machine_identity: MachineIdentity
+) -> None:
+    machine_identity.set(name="runner-a", role=frozenset({"agent-runner"}))
+    image = LoadedCommit(source_root=tmp_path, sha=None)
+
+    status = cluster.cluster_status_op(database, image=image, local_machine=machine_identity)
+
+    assert (status.machine_name, status.running_sha) == ("runner-a", None)
+    assert status.paused_reason == "startup"

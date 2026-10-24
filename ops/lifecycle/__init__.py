@@ -6,9 +6,7 @@ import asyncio
 import json
 import logging
 import re
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import assert_never
 
 from psycopg_pool import ConnectionPool
 
@@ -28,12 +26,13 @@ from base.api_contracts.agent_contract import (
     TerminateResult,
 )
 from base.config import settings
+from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import normalize_overlay_llm_model
-from base.paths import meiva_home
+from base.paths.home import resolve_meiva_home
 from ops.agents import (
     get_agent_machine,
     get_agent_status,
@@ -43,7 +42,7 @@ from ops.agents.resurrection_retry import report_auto_resurrect_failure
 from ops.agents.wake import ResurrectTriggerStaleError
 from ops.cluster import rpc as cluster_rpc
 from ops.cluster_status import kill_agent_shells
-from ops.lifecycle import termination
+from ops.lifecycle import resurrect_plan, termination
 
 # Re-exported from `events`; callers keep module-qualified sites.
 from ops.lifecycle.events import (
@@ -63,6 +62,11 @@ from ops.lifecycle.events import (
 )
 from ops.lifecycle.events import (
     publish_page_closed as publish_page_closed,
+)
+from ops.lifecycle.hosted_turn import (
+    LocalAgentHost,
+    cancel_hosted_turn,
+    cancel_hosted_turn_best_effort,
 )
 
 # Re-exported (explicit-alias form) from `launch` so the gateway routers and
@@ -102,11 +106,6 @@ from ops.rpc_schemas import (
 )
 from ops.rpc_schemas.terminate import ShellSessionsKill
 
-
-class ShellSessionKiller(Protocol):
-    def __call__(self, agent_id: int, *, before_session_index: int) -> list[int]: ...
-
-
 _log = logging.getLogger(__name__)
 
 
@@ -121,6 +120,11 @@ _log = logging.getLogger(__name__)
 #     runtime attempts older sessions after the termination commits, after the
 #     agent's last step (`agent.ownership.hosted.apply_hosted_lifecycle`). The
 #     response's `shell_sessions` reports which of the two happened.
+#
+#     A force terminate cancels the running turn through `host`, releases the agent's
+#     browser pages and kills shells through the real local session backend. Each of
+#     those effects follows the committed row, so a failure after the commit leaves the
+#     termination durable.
 async def terminate_agent_op(
     db: Database,
     bus: EventBus,
@@ -128,15 +132,14 @@ async def terminate_agent_op(
     body: TerminateAgentRequest,
     db_pool: ConnectionPool,
     *,
-    cancel_turn: Callable[[int], Awaitable[None]],
-    kill_shells: ShellSessionKiller,
+    host: LocalAgentHost,
 ) -> TerminateAgentResponse:
     if body.force:
         _old_status, killed_page_names, _command_id, cutoff = await asyncio.to_thread(
             terminate_force_blocking, db, bus, agent_id, body, db_pool
         )
-        await cancel_turn(agent_id)
-        await release_browser_pages(agent_id, home=meiva_home())
+        await cancel_hosted_turn_best_effort(agent_id, host=host)
+        await release_browser_pages(agent_id, home=host.home)
         for page_name in killed_page_names:
             await publish_page_closed(bus, agent_id, page_name)
         _log.info(
@@ -144,14 +147,10 @@ async def terminate_agent_op(
             agent_id,
             body.source,
         )
-        # meiva:note
-        # The row is terminated; cancelling the running turn is best effort.
         return TerminateAgentResponse(
             status=TerminateResult.ENQUEUED,
             shell_sessions=await _kill_shell_sessions_now(
-                agent_id,
-                cutoff=cutoff if body.kill_all_shell_sessions else None,
-                kill_shells=kill_shells,
+                agent_id, cutoff=cutoff if body.kill_all_shell_sessions else None
             ),
         )
 
@@ -170,9 +169,7 @@ async def terminate_agent_op(
         # The kill-requesting enqueue found the row terminated under its lock.
         return TerminateAgentResponse(
             status=TerminateResult.ALREADY_TERMINATED,
-            shell_sessions=await _kill_shell_sessions_now(
-                agent_id, cutoff=cutoff, kill_shells=kill_shells
-            ),
+            shell_sessions=await _kill_shell_sessions_now(agent_id, cutoff=cutoff),
         )
     await publish_inbound_arrived(bus, agent_id, iid, "terminate", body.source, "")
     return TerminateAgentResponse(
@@ -183,17 +180,17 @@ async def terminate_agent_op(
     )
 
 
+# meiva:note
+# Attempt this host's older shells when a cutoff was captured, and report them.
+#
+# A failed kill propagates: the termination itself is already durable, so the caller sees
+# the failure and a repeat request retries the kill.
 async def _kill_shell_sessions_now(
-    agent_id: int, *, cutoff: int | None, kill_shells: ShellSessionKiller
+    agent_id: int, *, cutoff: int | None
 ) -> ShellSessionsKill | None:
-    """Attempt this host's older shells when a cutoff was captured; report them.
-
-    A failed kill propagates: the termination itself is already durable, so
-    the caller sees the failure and a repeat request retries the kill.
-    """
     if cutoff is None:
         return None
-    killed = await asyncio.to_thread(kill_shells, agent_id, before_session_index=cutoff)
+    killed = await asyncio.to_thread(kill_agent_shells, agent_id, before_session_index=cutoff)
     _log.info(
         "[gateway] agent %s terminate killed %d shell session(s): %s",
         agent_id,
@@ -204,56 +201,16 @@ async def _kill_shell_sessions_now(
 
 
 # meiva:note
-# Cancel the agent's running turn on this machine's agent host.
-#
-#     Dials the local agent-host's loopback health port (`POST /cancel-turn`);
-#     the host cancels the turn task with its bounded unwind and answers whether
-#     one was running. The agent's row is not touched.
-async def cancel_hosted_turn(agent_id: int) -> bool:
-    import httpx
-
-    from base.daemon.endpoints import ServiceEndpoints
-
-    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
-        resp = await client.post(
-            f"http://127.0.0.1:{ServiceEndpoints.from_settings().of('agent_host').health_port}/cancel-turn",
-            json={"agent_id": agent_id},
-        )
-        resp.raise_for_status()
-    return bool(resp.json()["cancelled"])
-
-
-# meiva:note
-# Accelerate a force terminate by cancelling the agent's turn task.
-#
-#     The terminated row is already committed, so a transport or HTTP-status
-#     failure is logged at WARNING with the exception and swallowed: a turn that
-#     keeps running ends at its next ownership check.
-async def cancel_hosted_turn_best_effort(agent_id: int) -> None:
-    import httpx
-
-    try:
-        await cancel_hosted_turn(agent_id)
-    except httpx.HTTPError:
-        _log.warning(
-            "hosted turn-cancel call for agent %s failed (non-fatal; the agent is "
-            "terminated and its running turn ends at the next ownership check)",
-            agent_id,
-            exc_info=True,
-        )
-
-
-# meiva:note
 # Local-target cancel of the running turn; the agent stays alive and idles.
 #
-#     `cancel` asks the home agent host to cancel the turn (`cancel_hosted_turn`).
-#     Unknown agents raise; a host that cannot be reached raises too, because the
-#     caller asked for a stop and must not be told nothing happened.
+#     The home agent host is asked to cancel the turn (`cancel_hosted_turn`). Unknown
+#     agents raise; a host that cannot be reached raises too, because the caller asked
+#     for a stop and must not be told nothing happened.
 async def cancel_agent_op(
-    db: Database, agent_id: int, *, cancel: Callable[[int], Awaitable[bool]]
+    db: Database, agent_id: int, *, host: LocalAgentHost
 ) -> CancelAgentResponse:
     await asyncio.to_thread(get_agent_status, db, agent_id)
-    cancelled = await cancel(agent_id)
+    cancelled = await cancel_hosted_turn(agent_id, host=host)
     return CancelAgentResponse(
         status=CancelResult.CANCELLED if cancelled else CancelResult.NOT_RUNNING
     )
@@ -333,29 +290,38 @@ async def resurrect_agent_op(
     return ResurrectAgentResponse(status=ResurrectResult.SPAWNED)
 
 
-@dataclass(frozen=True)
-class ResurrectPlacementHooks:
-    status_fn: Callable[[Database, int], AgentStatus] = field(
-        default_factory=lambda: get_agent_status
-    )
-    recovery_halted_fn: Callable[[Database, int], bool] = field(
-        default_factory=lambda: recovery_halted
-    )
-    notice_source_fn: Callable[[Database, int, int], str | None] = field(
-        default_factory=lambda: system_notice_source_of_trigger
-    )
-    machine_fn: Callable[[Database, int], str] = field(default_factory=lambda: get_agent_machine)
-    dispatch_fn: Callable[..., Awaitable[Any]] = field(
-        default_factory=lambda: cluster_rpc.dispatch_to_machine
-    )
-    resurrect_op_fn: Callable[..., Awaitable[ResurrectAgentResponse]] = field(
-        default_factory=lambda: resurrect_agent_op
-    )
-    clear_suppression_fn: Callable[[Database, int], None] = field(
-        default_factory=lambda: clear_wake_suppression
+def _read_resurrect_facts(
+    db: Database,
+    agent_id: int,
+    trigger_inbound_id: int,
+    trigger_inbound_kind: WakeTriggerKind,
+    local_machine: str,
+) -> resurrect_plan.ResurrectFacts:
+    return resurrect_plan.ResurrectFacts(
+        agent_id=agent_id,
+        trigger_inbound_id=trigger_inbound_id,
+        trigger_kind=trigger_inbound_kind,
+        recovery_halted=recovery_halted(db, agent_id),
+        notice_source=system_notice_source_of_trigger(db, agent_id, trigger_inbound_id),
+        home=get_agent_machine(db, agent_id),
+        local_machine=local_machine,
     )
 
 
+# meiva:note
+# Try one home-machine wake for an exact newly delivered input.
+#
+#     Fresh chat can wake a terminated agent after a fix. Background heartbeat and other
+#     automatic triggers stop after a permanent provider rejection. System chat notices
+#     cannot resurrect, including old hosted-turn recovery markers. The home CAS verifies
+#     the pending input is newer than termination and above the force fence. No watchdog
+#     retries a failed attempt. Unknown errors reach the sender; known placement and
+#     refusal conditions are logged with the input queued. A new message or explicit
+#     operator resurrection can try again later.
+#
+#     A live agent ends the call after its one status read. For a terminated agent the shell
+#     reads the recovery breaker, the trigger's notice source and the home machine, and
+#     `resurrect_plan.plan_resurrection` decides between skipping and forwarding.
 async def resurrect_if_terminated(
     db: Database,
     bus: EventBus,
@@ -364,75 +330,85 @@ async def resurrect_if_terminated(
     trigger_inbound_id: int,
     trigger_inbound_kind: WakeTriggerKind,
     local_machine: str,
-    hooks: ResurrectPlacementHooks | None = None,
 ) -> AgentStatus:
-    """Try one home-machine wake for an exact newly delivered input.
-
-    Fresh chat can wake a terminated agent after a fix. Background heartbeat and
-    other automatic triggers stop after a permanent provider rejection. System
-    chat notices cannot resurrect, including old hosted-turn recovery markers.
-    The home CAS verifies the pending input is newer than termination and above
-    the force fence. No watchdog retries a failed attempt. Unknown errors reach
-    the sender; known placement/refusal conditions are logged with the input queued.
-    A new message or explicit operator resurrection can try again later."""
-    active = hooks or ResurrectPlacementHooks()
-    status = await asyncio.to_thread(active.status_fn, db, agent_id)
+    status = await asyncio.to_thread(get_agent_status, db, agent_id)
     if status is not AgentStatus.TERMINATED:
         return status
-    if trigger_inbound_kind != "chat" and await asyncio.to_thread(
-        active.recovery_halted_fn, db, agent_id
-    ):
-        _log.warning("automatic wake stopped after a permanent provider error: agent %s", agent_id)
-        return status
-    notice_source = await asyncio.to_thread(
-        active.notice_source_fn, db, agent_id, trigger_inbound_id
+    facts = await asyncio.to_thread(
+        _read_resurrect_facts, db, agent_id, trigger_inbound_id, trigger_inbound_kind, local_machine
     )
-    if notice_source is not None:
-        _log.debug(
-            "resurrect_if_terminated: trigger %s for agent %s is a system notice "
-            "(source=%s); notifications never resurrect a terminated owner — "
-            "skipping auto-resurrect",
-            trigger_inbound_id,
-            agent_id,
-            notice_source,
-        )
-        return status
+    plan = resurrect_plan.plan_resurrection(facts)
+    match plan:
+        case resurrect_plan.RecoveryHalted():
+            _log.warning(
+                "automatic wake stopped after a permanent provider error: agent %s", agent_id
+            )
+            return status
+        case resurrect_plan.NotificationOnly(source=source):
+            _log.debug(
+                "resurrect_if_terminated: trigger %s for agent %s is a system notice "
+                "(source=%s); notifications never resurrect a terminated owner — "
+                "skipping auto-resurrect",
+                trigger_inbound_id,
+                agent_id,
+                source,
+            )
+            return status
+        case resurrect_plan.Forward():
+            return await _forward_resurrection(db, bus, agent_id, plan, status=status)
+        case _:
+            assert_never(plan)
+
+
+# meiva:note
+# Run the forward plan: the home machine's ops server, else this process when this is home.
+#
+# An unreachable home is logged with the input queued, a refusal is reported the same way,
+# and any other failure reaches the sender.
+async def _forward_resurrection(
+    db: Database,
+    bus: EventBus,
+    agent_id: int,
+    plan: resurrect_plan.Forward,
+    *,
+    status: AgentStatus,
+) -> AgentStatus:
     body = ResurrectAgentRequest(resurrected_by="system")
     try:
-        home = await asyncio.to_thread(active.machine_fn, db, agent_id)
         try:
-            lifecycle_payload: dict[str, object] = {
-                "path": f"/api/agents/{agent_id}/resurrect-if-pending-work",
-                "body": body.model_dump(),
-                "trigger_inbound_id": trigger_inbound_id,
-                "trigger_inbound_kind": trigger_inbound_kind,
-            }
-            forwarded = await active.dispatch_fn(
+            forwarded = await cluster_rpc.dispatch_to_machine(
                 db,
-                target_machine=home,
+                target_machine=plan.home,
                 kind="lifecycle",
-                payload=lifecycle_payload,
+                payload={
+                    "path": plan.path,
+                    "body": body.model_dump(),
+                    "trigger_inbound_id": plan.trigger_inbound_id,
+                    "trigger_inbound_kind": plan.trigger_inbound_kind,
+                },
             )
-            result_status = ResurrectAgentResponse.model_validate(forwarded).status
+            result = ResurrectAgentResponse.model_validate(forwarded).status
         except cluster_rpc.ClusterOpUnreachable:
-            if home == local_machine:
-                # Local ops server not reachable (test / single-process):
-                # fall back to in-process resurrect.
-                result_status = (
-                    await active.resurrect_op_fn(
-                        db,
-                        bus,
-                        agent_id,
-                        body,
-                        trigger_inbound_id=trigger_inbound_id,
-                        trigger_inbound_kind=trigger_inbound_kind,
-                    )
-                ).status
-            else:
+            if not plan.run_here_if_unreachable:
                 raise
-        if result_status == ResurrectResult.SPAWNED:
-            await asyncio.to_thread(active.clear_suppression_fn, db, agent_id)
-            status = await asyncio.to_thread(active.status_fn, db, agent_id)
+            result = (
+                await resurrect_agent_op(
+                    db,
+                    bus,
+                    agent_id,
+                    body,
+                    trigger_inbound_id=plan.trigger_inbound_id,
+                    trigger_inbound_kind=plan.trigger_inbound_kind,
+                )
+            ).status
+        for step in resurrect_plan.plan_after_result(result):
+            match step:
+                case resurrect_plan.ClearWakeSuppression():
+                    await asyncio.to_thread(clear_wake_suppression, db, agent_id)
+                case resurrect_plan.RereadStatus():
+                    status = await asyncio.to_thread(get_agent_status, db, agent_id)
+                case _:
+                    assert_never(step)
     except cluster_rpc.ClusterOpUnreachable as exc:
         _log.info(
             "resurrect_if_terminated: agent %s home machine unreachable, skipping "
@@ -446,6 +422,10 @@ async def resurrect_if_terminated(
     return status
 
 
+# meiva:note
+# Sync restart section, run through `to_thread`. Returns the inbound id, or None when the agent
+# is already terminated. `default_model` is the model an agent runs on when neither its overlay
+# nor its birth config names one.
 def restart_blocking(
     db: Database,
     bus: EventBus,
@@ -454,9 +434,8 @@ def restart_blocking(
     db_pool: ConnectionPool,
     *,
     catalog: ModelCatalog,
+    default_model: str,
 ) -> int | None:
-    """Sync restart section — via to_thread. Returns the inbound id, or None
-    when the agent is already terminated."""
     from base.db.transaction import write_transaction
     from base.packages.plugins.config_registration import validate_config_overlay
     from base.packages.plugins.plugin_errors import InvalidConfigOverlay
@@ -493,7 +472,7 @@ def restart_blocking(
                     agent_id,
                     overlay,
                     catalog=catalog,
-                    default_model=settings.lm.llm_model,
+                    default_model=default_model,
                 )
             if model_receipt is not None:
                 _log.warning(
@@ -537,10 +516,18 @@ async def restart_agent_op(
     db_pool: ConnectionPool,
     *,
     catalog: ModelCatalog,
+    default_model: str,
 ) -> RestartAgentResponse:
     """Local-target restart — INSERT one kind='restart' inbound."""
     iid = await asyncio.to_thread(
-        restart_blocking, db, bus, agent_id, body, db_pool, catalog=catalog
+        restart_blocking,
+        db,
+        bus,
+        agent_id,
+        body,
+        db_pool,
+        catalog=catalog,
+        default_model=default_model,
     )
     if iid is None:
         return RestartAgentResponse(status=RestartResult.ALREADY_TERMINATED)
@@ -556,6 +543,18 @@ _LIFECYCLE_PATH = re.compile(
 
 
 # meiva:note
+# This machine's agent host, from the settings and the home this process runs under.
+#
+# `ops/ambient_roots.toml` names this module as the one place of the package that builds the
+# endpoint table, so the op entry reads the port once and hands the value down.
+def _local_agent_host() -> LocalAgentHost:
+    return LocalAgentHost(
+        home=resolve_meiva_home(),
+        health_port=ServiceEndpoints.from_settings().of("agent_host").health_port,
+    )
+
+
+# meiva:note
 # Dispatch terminate, restart, cancel and explicit or exact-pending-input resurrection.
 #
 #     Retired billing recovery and crash-harvest paths fail validation without effects.
@@ -564,7 +563,7 @@ async def lifecycle_op(
     db: Database,
     bus: EventBus,
     path: str,
-    body: dict[str, Any],
+    body: dict[str, object],
     db_pool: ConnectionPool,
     *,
     catalog: ModelCatalog,
@@ -583,7 +582,7 @@ async def lifecycle_op(
             f"trigger inbound is only valid for resurrect-if-pending-work, not {action!r}"
         )
     if action == "cancel":
-        return await cancel_agent_op(db, agent_id, cancel=cancel_hosted_turn)
+        return await cancel_agent_op(db, agent_id, host=_local_agent_host())
     if action == "terminate":
         return await terminate_agent_op(
             db,
@@ -591,8 +590,7 @@ async def lifecycle_op(
             agent_id,
             TerminateAgentRequest.model_validate(body),
             db_pool,
-            cancel_turn=cancel_hosted_turn_best_effort,
-            kill_shells=kill_agent_shells,
+            host=_local_agent_host(),
         )
     if action == "resurrect-explicit":
         return await resurrect_agent_op(
@@ -613,13 +611,19 @@ async def lifecycle_op(
         )
     if action == "restart":
         return await restart_agent_op(
-            db, bus, agent_id, RestartAgentRequest.model_validate(body), db_pool, catalog=catalog
+            db,
+            bus,
+            agent_id,
+            RestartAgentRequest.model_validate(body),
+            db_pool,
+            catalog=catalog,
+            default_model=settings.lm.llm_model,
         )
     raise AssertionError(f"unreachable: action={action!r}")
 
 
 def _pending_work_resurrection_request(
-    body: dict[str, Any], trigger_inbound_id: int | None
+    body: dict[str, object], trigger_inbound_id: int | None
 ) -> ResurrectAgentRequest:
     """Keep the guarded resurrection boundary independent of action routing."""
     if trigger_inbound_id is None:

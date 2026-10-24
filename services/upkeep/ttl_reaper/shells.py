@@ -77,7 +77,9 @@ _MACHINE_CONCURRENCY = 8
 # budget, so it only cuts a dispatch the client's own timeout and retry budgets did not. The
 # daemon reads it once into `TtlReaperConfig.shell_kill_deadline_s`.
 def dispatch_deadline_s() -> float:
-    return cluster_rpc.worst_case_dispatch_seconds(_SHELL_KILL_TIMEOUT_S)
+    return cluster_rpc.worst_case_dispatch_seconds(
+        cluster_rpc.rpc_config_from_settings(), _SHELL_KILL_TIMEOUT_S
+    )
 
 
 # meiva:note

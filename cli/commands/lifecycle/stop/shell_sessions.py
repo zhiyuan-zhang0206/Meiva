@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import sys
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
@@ -187,7 +188,10 @@ def _write_close_notices(
     command: CommandRuntime,
 ) -> None:
     notices = pty_close_notices.notices_for(
-        closed, reason=reason, local_machine=command.machine.name()
+        closed,
+        reason=reason,
+        local_machine=command.machine.name(),
+        closed_at=datetime.now(UTC).isoformat(),
     )
     if not notices:
         return

@@ -1,22 +1,23 @@
-"""Host-scope config read / write RPC ops.
-
-Read this machine's host-scope config fields (sensitive values masked) and apply
-a validated all-or-nothing override write. One of the op clusters beside
-`ops.lifecycle`, `ops.cluster.operations` and `ops.inventory`; each cluster is
-self-contained.
-
-Dispatched by the agent-runner ops server (`services/agent_runner/agent_ops/daemon.py`) and
-called by the gateway config router. `SENSITIVE_MASK` is re-imported by the
-router to render masked fields consistently.
-"""
+# meiva:note
+# Host-scope config read / write RPC ops.
+#
+# Read this machine's host-scope config fields (sensitive values masked) and apply a validated
+# all-or-nothing override write. One of the op clusters beside `ops.lifecycle`,
+# `ops.cluster.operations` and `ops.inventory`; each cluster is self-contained.
+#
+# Dispatched by the agent-runner ops server (`services/agent_runner/agent_ops/daemon.py`) and
+# called by the gateway config router. `SENSITIVE_MASK` is re-imported by the router to render
+# masked fields consistently. The unit's `.env` path and the configured Chrome binary come from
+# the `ConfigAuthority` every op takes, never from process-wide settings.
 
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
 
-from base.config import field_domain, runtime_config, settings
+from base.config import field_domain, runtime_config
 from base.config.admin.candidate import validate_env_patch_for_write
 from base.config.admin.editing import coerce_config_scalar, field_editable, split_reducer_patch
+from base.config.admin.metadata import ConfigFieldMeta
 from base.config.env_changed import EnvChangedError
 from base.config.service_read import ConfigAuthority
 from base.host import config_validators
@@ -42,23 +43,29 @@ from ops.rpc_schemas import (
 SENSITIVE_MASK = "••••••••"
 
 
+# meiva:note
+# The configured Chrome binary override (`MEIVA_CHROME_BINARY`) as this unit's authority holds it.
+def _chrome_binary(authority: ConfigAuthority) -> str | None:
+    return authority.service_field_value("chrome_binary")
+
+
+# meiva:note
+# Read this machine's host-scope config fields and return them with metadata.
+#
+# Returns a ConfigReadResult with:
+#   - machine: this machine's name
+#   - host_fields: one entry per host-scope field with effective value (sensitive fields
+#     masked), set-in-.env flag, remote_writable flag, and optional read-time capability hint
+#   - raw_overrides: the host's editable override set ({field: value} for the remotely-writable
+#     host fields set in this machine's .env), sensitive keys omitted (the frontend deltas
+#     against this to build a write payload)
 def config_read_op(
     *, authority: ConfigAuthority, local_machine: str, host: Host
 ) -> ConfigReadResult:
-    """Read this machine's host-scope config fields and return them with metadata.
-
-    Returns a ConfigReadResult with:
-      - machine: this machine's name
-      - host_fields: one entry per host-scope field with effective value (sensitive
-        fields masked), set-in-.env flag, remote_writable flag, and optional
-        read-time capability hint
-      - raw_overrides: the host's editable override set ({field: value} for the
-        remotely-writable host fields set in this machine's .env), sensitive keys
-        omitted (the frontend deltas against this to build a write payload)
-    """
     metas = panel_metadata(authority=authority)
     metas_by_name = {m.name: m for m in metas}
-    set_fields = set(runtime_config.env_set_field_names(process_env_file()))
+    chrome_binary = _chrome_binary(authority)
+    set_fields = set(runtime_config.env_set_field_names(authority.env_path))
     set_fields.update(panel_overrides(authority=authority))
     overrides = panel_overrides(authority=authority)
     host_fields: dict[str, HostConfigField] = {}
@@ -69,7 +76,7 @@ def config_read_op(
         if meta.sensitive and value:
             value = SENSITIVE_MASK
         cap = config_validators.read_time_capability(
-            meta.name, chrome_binary=settings.services.chrome_binary, host=host
+            meta.name, chrome_binary=chrome_binary, host=host
         )
         host_fields[meta.name] = HostConfigField(
             value=value,
@@ -92,15 +99,28 @@ def config_read_op(
     )
 
 
+# meiva:note
+# Read this machine's most recent `.env`-write audit records (newest first).
+#
+# Still resolves the process's own `.env`: its callers (the ops daemon's dispatch and the gateway's
+# in-process read) hold no `ConfigAuthority` at this call yet, and each would hand
+# `authority.env_path` here once their roots thread it.
 def config_audit_read_op(last: int, *, local_machine: str) -> ConfigAuditReadResult:
-    """Read this machine's most recent `.env`-write audit records (newest first)."""
-    return ConfigAuditReadResult(machine=local_machine, records=read_env_write_records(last))
+    return ConfigAuditReadResult(
+        machine=local_machine, records=read_env_write_records(last, process_env_file())
+    )
 
 
+# meiva:note
+# Per-field gate: known, host-scope, editable here, and (unless an unset) valid.
 def _field_verdicts(
-    overrides: dict[str, Any], metas: dict[str, Any], *, local: bool, host: Host
+    overrides: dict[str, object],
+    metas: dict[str, ConfigFieldMeta],
+    *,
+    local: bool,
+    chrome_binary: str | None,
+    host: Host,
 ) -> dict[str, FieldWriteResult]:
-    """Per-field gate: known, host-scope, editable here, and (unless an unset) valid."""
     results: dict[str, FieldWriteResult] = {}
     for field, value in overrides.items():
         if field not in metas:
@@ -116,7 +136,8 @@ def _field_verdicts(
             )
             continue
         if value is None:
-            # Explicit unset — no value to validate.
+            # meiva:note
+            # An explicit unset has no value to validate.
             results[field] = FieldWriteResult(ok=True, reason=None)
             continue
         if meta.owner is not None:
@@ -126,19 +147,18 @@ def _field_verdicts(
             except (ValueError, TypeError):
                 results[field] = FieldWriteResult(ok=False, reason="invalid declared scalar")
             continue
-        vr = config_validators.validate(
-            field, value, chrome_binary=settings.services.chrome_binary, host=host
-        )
+        vr = config_validators.validate(field, value, chrome_binary=chrome_binary, host=host)
         results[field] = FieldWriteResult(ok=vr.ok, reason=vr.reason)
     return results
 
 
+# meiva:note
+# Fail the fields whose domain the candidate rejected (the first patched field if none).
 def _reject_candidate(
     errors_by_domain: dict[str, list[str]],
     patched_fields: set[str],
     results: dict[str, FieldWriteResult],
 ) -> None:
-    """Fail the fields whose domain the candidate rejected (the first patched field if none)."""
     rejected_fields = {field for field in patched_fields if field_domain(field) in errors_by_domain}
     if not rejected_fields:
         rejected_fields = {next(iter(sorted(patched_fields)))}
@@ -148,20 +168,21 @@ def _reject_candidate(
         results[field] = FieldWriteResult(ok=False, reason=reason)
 
 
+# meiva:note
+# Candidate-validate then write the patch to `env_path`; `(applied, restart_required)`.
+#
+# A rejected candidate or a lost concurrent-write race flips the affected fields in `results`.
 def _apply_patch(
-    overrides: dict[str, Any],
-    metas: dict[str, Any],
+    overrides: dict[str, object],
+    metas: dict[str, ConfigFieldMeta],
     results: dict[str, FieldWriteResult],
     *,
+    env_path: Path,
     actor: str | None,
     trace_id: str | None,
 ) -> tuple[bool, list[str]]:
-    """Candidate-validate then write the patch; `(applied, restart_required)`.
-
-    A rejected candidate or a lost concurrent-write race flips the affected fields in `results`.
-    """
     writes, removals = split_reducer_patch(overrides, metas)
-    candidate = validate_env_patch_for_write(writes, removals)
+    candidate = validate_env_patch_for_write(writes, removals, path=env_path)
     errors_by_domain = candidate.errors_by_domain
     if errors_by_domain:
         _reject_candidate(errors_by_domain, set(writes) | removals, results)
@@ -174,6 +195,7 @@ def _apply_patch(
                 removals,
                 expected_digest=candidate.expected_digest,
                 audit=EnvWriteAudit(site="ops_config_write", actor=actor, trace_id=trace_id),
+                path=env_path,
             )
         except EnvChangedError:
             applied = False
@@ -192,13 +214,14 @@ def _apply_patch(
     return applied, restart_required
 
 
+# meiva:note
+# Commit one schema owner; report candidate or concurrent-write rejection.
 def _apply_plugin_patch(
     owner: PluginConfigOwner,
-    overrides: dict[str, Any],
-    metas: dict[str, Any],
+    overrides: dict[str, object],
+    metas: dict[str, ConfigFieldMeta],
     results: dict[str, FieldWriteResult],
 ) -> tuple[bool, list[str]]:
-    """Commit one schema owner; report candidate or concurrent-write rejection."""
     writes, removals = split_reducer_patch(overrides, metas)
     typed = {
         k: coerce_config_scalar(metas[k].field_type, v, metas[k].choices) for k, v in writes.items()
@@ -212,8 +235,28 @@ def _apply_plugin_patch(
     return True, sorted({metas[f].restart_required for f in overrides if metas[f].restart_required})
 
 
+# meiva:note
+# Validate and merge this machine's host overrides into its .env (reducer semantics).
+#
+# `overrides` is a JSON-merge-patch over the host `.env`: a key with a value is
+# set/replaced, a key mapped to `None` is unset (reverted to its default), and a
+# key that is ABSENT is left untouched. Deletion is always explicit (a null
+# value) — never inferred from absence — so a partial payload can never silently
+# drop a field it did not mention (a full-replace once wiped a cluster's secrets
+# that way). Validates every field against host-scope + editability checks, then
+# the host-side capability validator (skipped for an unset — there is no value to
+# validate). Only writes if every field passes (atomic). Returns per-field
+# results, applied flag, and the union of restart_required values from the
+# changed fields.
+#
+# `local` distinguishes a self-target edit (the gateway editing its OWN host
+# fields) from a remote one. A host field is editable iff `writable` when local,
+# else `remote_writable` — `writable` means "a human may edit it on its own host",
+# `remote_writable` is the narrower allowlist for editing a *remote* host's field.
+# The gate is `base.config.admin.editing.field_editable` — the same definition the
+# gateway's PUT /api/config gate uses, so the two write paths cannot drift.
 def config_write_op(
-    overrides: dict[str, Any],
+    overrides: dict[str, object],
     *,
     authority: ConfigAuthority,
     local: bool = False,
@@ -222,26 +265,6 @@ def config_write_op(
     local_machine: str,
     host: Host,
 ) -> ConfigWriteOpResult:
-    """Validate and merge this machine's host overrides into its .env (reducer semantics).
-
-    `overrides` is a JSON-merge-patch over the host `.env`: a key with a value is
-    set/replaced, a key mapped to `None` is unset (reverted to its default), and a
-    key that is ABSENT is left untouched. Deletion is always explicit (a null
-    value) — never inferred from absence — so a partial payload can never silently
-    drop a field it did not mention (a full-replace once wiped a cluster's secrets
-    that way). Validates every field against host-scope + editability checks, then
-    the host-side capability validator (skipped for an unset — there is no value to
-    validate). Only writes if every field passes (atomic). Returns per-field
-    results, applied flag, and the union of restart_required values from the
-    changed fields.
-
-    `local` distinguishes a self-target edit (the gateway editing its OWN host
-    fields) from a remote one. A host field is editable iff `writable` when local,
-    else `remote_writable` — `writable` means "a human may edit it on its own host",
-    `remote_writable` is the narrower allowlist for editing a *remote* host's field.
-    The gate is `base.config.admin.editing.field_editable` — the same definition the
-    gateway's PUT /api/config gate uses, so the two write paths cannot drift.
-    """
     metas = {m.name: m for m in panel_metadata(authority=authority)}
     try:
         owner = patch_owner(set(overrides))
@@ -253,9 +276,12 @@ def config_write_op(
             restart_required=[],
         )
 
-    results = _field_verdicts(overrides, metas, local=local, host=host)
+    results = _field_verdicts(
+        overrides, metas, local=local, chrome_binary=_chrome_binary(authority), host=host
+    )
 
-    # all() over an empty dict is True, so an empty payload is trivially applied.
+    # meiva:note
+    # `all()` over an empty dict is True, so an empty payload is trivially applied.
     applied = all(r.ok for r in results.values())
 
     restart_required: list[str] = []
@@ -263,7 +289,7 @@ def config_write_op(
         applied, restart_required = _apply_plugin_patch(owner, overrides, metas, results)
     elif applied:
         applied, restart_required = _apply_patch(
-            overrides, metas, results, actor=actor, trace_id=trace_id
+            overrides, metas, results, env_path=authority.env_path, actor=actor, trace_id=trace_id
         )
 
     return ConfigWriteOpResult(

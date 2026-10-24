@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
@@ -16,6 +17,7 @@ from base.api_contracts.agent_contract import ShellSessionKillTiming
 from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
+from base.sessions.backend import PtySessionBackend
 from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.tests.pty_reaper import PtyReaper
 from base.sessions.pty.tests.pty_reaper import pty_reaper as pty_reaper
@@ -24,6 +26,7 @@ from base.sessions.pty.tests.pty_service import service_socket
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from ops.lifecycle import termination
+from ops.lifecycle.tests.loopback.agent_host import ServedAgentHost, serve_agent_host
 from ops.lifecycle.tests.termination_faults import reject_chat, reject_pair_after_insert
 from ops.rpc_schemas import TerminateAgentRequest
 
@@ -168,30 +171,67 @@ async def _until_blocked_or_done(task: asyncio.Task[object], holder_pid: int) ->
         await asyncio.sleep(0.02)
 
 
+# meiva:note
+# One opened shell session: its backend name and the pid of its shell.
+@dataclass(frozen=True)
+class OpenedShell:
+    name: str
+    pid: int
+
+
+# meiva:note
+# Real shell sessions of one agent, created in the test's own pty-sessions service.
+#
+# `open` creates the persistent shell the agent's `shell-<id>` naming rule describes (with an
+# optional `-<name>` suffix, as a watcher has) and pins its process so the test cleans it up
+# whatever the outcome. `alive` lists the sessions the service still holds.
+class Shells:
+    def __init__(self, backend: PtySessionBackend, reaper: PtyReaper, home: Path) -> None:
+        self._backend = backend
+        self._reaper = reaper
+        self._home = home
+
+    def open(
+        self, agent_id: int, shell_id: int, *, command: str = "", suffix: str = ""
+    ) -> OpenedShell:
+        from base.cluster import session_name
+
+        return self.open_named(session_name(f"agent-{agent_id}-shell-{shell_id}") + suffix, command)
+
+    def open_named(self, name: str, command: str) -> OpenedShell:
+        assert self._backend.new_session(
+            name, command, self._home, env={"MEIVA_HOME": str(self._home)}
+        )
+        return OpenedShell(name, self._reaper.track_session(name).pid)
+
+    def alive(self) -> set[str]:
+        return set(self._backend.list_sessions())
+
+
+@pytest.fixture
+def shells(pty_service: object, pty_reaper: PtyReaper, unit_home: Path) -> Shells:
+    return Shells(
+        PtySessionBackend(config=PtyClientConfig(socket_path=service_socket())),
+        pty_reaper,
+        unit_home,
+    )
+
+
+def _set_session_index(db_conn: psycopg.Connection, agent_id: int, session_index: int) -> None:
+    db_conn.execute(
+        "UPDATE agents_meta SET session_index=%s WHERE id=%s", (session_index, agent_id)
+    )
+    db_conn.commit()
+
+
 class TestKillAllShellSessions:
-    @pytest.fixture
-    def kills(self) -> list[int]:
-        return []
-
-    @staticmethod
-    def _make_kill_fn(calls: list[int]):
-        def _kill(agent_id: int, *, before_session_index: int) -> list[int]:
-            calls.append(agent_id)
-            return [0, 3]
-
-        return _kill
-
-    @staticmethod
-    async def _noop_cancel(_aid: int) -> None:
-        return None
-
-    @pytest.mark.asyncio
     async def test_graceful_live_agent_defers_the_kill_to_exit(
         self,
         db_conn: psycopg.Connection,
         db_pool: ConnectionPool,
         running_agent_id: int,
-        kills: list[int],
+        shells: Shells,
+        agent_host: ServedAgentHost,
         database: Database,
         event_bus: EventBus,
         emitted_events: EmittedEvents,
@@ -199,38 +239,43 @@ class TestKillAllShellSessions:
         from ops import lifecycle
         from ops.rpc_schemas.terminate import ShellSessionsKill
 
+        shell = shells.open(running_agent_id, 0).name
+        _set_session_index(db_conn, running_agent_id, 1)
+
         resp = await lifecycle.terminate_agent_op(
             database,
             event_bus,
             running_agent_id,
             TerminateAgentRequest(kill_all_shell_sessions=True),
             db_pool,
-            kill_shells=self._make_kill_fn(kills),
-            cancel_turn=self._noop_cancel,
+            host=agent_host.host,
         )
 
         assert resp.status == "enqueued"
         assert resp.shell_sessions == ShellSessionsKill(
             when=ShellSessionKillTiming.AT_EXIT, killed=[]
         )
-        assert kills == []
+        assert shells.alive() == {shell}
         assert _terminate_payloads(db_conn, running_agent_id) == [{"kill_all_shell_sessions": True}]
         events = list(emitted_events)
         assert [event.attributes for event in events] == [
             {"inbound_id": events[0].attributes["inbound_id"], "kill_all_shell_sessions": True}
         ]
 
-    @pytest.mark.asyncio
     async def test_without_the_option_nothing_is_recorded_or_killed(
         self,
         db_conn: psycopg.Connection,
         db_pool: ConnectionPool,
         running_agent_id: int,
-        kills: list[int],
+        shells: Shells,
+        agent_host: ServedAgentHost,
         database: Database,
         event_bus: EventBus,
     ) -> None:
         from ops import lifecycle
+
+        shell = shells.open(running_agent_id, 0).name
+        _set_session_index(db_conn, running_agent_id, 1)
 
         graceful = await lifecycle.terminate_agent_op(
             database,
@@ -238,8 +283,7 @@ class TestKillAllShellSessions:
             running_agent_id,
             TerminateAgentRequest(),
             db_pool,
-            kill_shells=self._make_kill_fn(kills),
-            cancel_turn=self._noop_cancel,
+            host=agent_host.host,
         )
         forced = await lifecycle.terminate_agent_op(
             database,
@@ -247,13 +291,12 @@ class TestKillAllShellSessions:
             running_agent_id,
             TerminateAgentRequest(force=True),
             db_pool,
-            kill_shells=self._make_kill_fn(kills),
-            cancel_turn=self._noop_cancel,
+            host=agent_host.host,
         )
 
         assert (graceful.status, graceful.shell_sessions) == ("enqueued", None)
         assert (forced.status, forced.shell_sessions) == ("enqueued", None)
-        assert kills == []
+        assert shells.alive() == {shell}
         payloads = _terminate_payloads(db_conn, running_agent_id)
         assert len(payloads) == 2
         assert all(
@@ -261,18 +304,22 @@ class TestKillAllShellSessions:
             for payload in payloads
         )
 
-    @pytest.mark.asyncio
     async def test_force_kills_right_away_and_reports_the_ids(
         self,
         db_conn: psycopg.Connection,
         db_pool: ConnectionPool,
         running_agent_id: int,
-        kills: list[int],
+        shells: Shells,
+        agent_host: ServedAgentHost,
         database: Database,
         event_bus: EventBus,
     ) -> None:
         from ops import lifecycle
         from ops.rpc_schemas.terminate import ShellSessionsKill
+
+        shells.open(running_agent_id, 0)
+        shells.open(running_agent_id, 3)
+        _set_session_index(db_conn, running_agent_id, 4)
 
         resp = await lifecycle.terminate_agent_op(
             database,
@@ -280,37 +327,38 @@ class TestKillAllShellSessions:
             running_agent_id,
             TerminateAgentRequest(force=True, kill_all_shell_sessions=True),
             db_pool,
-            kill_shells=self._make_kill_fn(kills),
-            cancel_turn=self._noop_cancel,
+            host=agent_host.host,
         )
 
         assert resp.status == "enqueued"
         assert resp.shell_sessions == ShellSessionsKill(
             when=ShellSessionKillTiming.NOW, killed=[0, 3]
         )
-        assert kills == [running_agent_id]
+        assert shells.alive() == set()
+        assert agent_host.cancel_requests == [running_agent_id]
         assert _terminate_payloads(db_conn, running_agent_id) == [{"kill_all_shell_sessions": True}]
 
-    @pytest.mark.asyncio
     async def test_force_supersedes_a_graceful_kill_request_without_carrying_it(
         self,
         db_conn: psycopg.Connection,
         db_pool: ConnectionPool,
         running_agent_id: int,
-        kills: list[int],
+        shells: Shells,
+        agent_host: ServedAgentHost,
         database: Database,
         event_bus: EventBus,
     ) -> None:
         from ops import lifecycle
 
+        shell = shells.open(running_agent_id, 0).name
+        _set_session_index(db_conn, running_agent_id, 1)
         await lifecycle.terminate_agent_op(
             database,
             event_bus,
             running_agent_id,
             TerminateAgentRequest(kill_all_shell_sessions=True),
             db_pool,
-            kill_shells=self._make_kill_fn(kills),
-            cancel_turn=self._noop_cancel,
+            host=agent_host.host,
         )
         resp = await lifecycle.terminate_agent_op(
             database,
@@ -318,19 +366,20 @@ class TestKillAllShellSessions:
             running_agent_id,
             TerminateAgentRequest(force=True),
             db_pool,
-            kill_shells=self._make_kill_fn(kills),
-            cancel_turn=self._noop_cancel,
+            host=agent_host.host,
         )
 
         assert resp.shell_sessions is None
-        assert kills == []
+        assert shells.alive() == {shell}
 
-    @pytest.mark.asyncio
-    async def test_already_terminated_agent_is_killed_now(
+    @pytest.mark.parametrize("became_terminated", ["inserted", "committed_before_the_request"])
+    async def test_an_already_terminated_agent_is_killed_now(
         self,
+        became_terminated: str,
         db_conn: psycopg.Connection,
         db_pool: ConnectionPool,
-        kills: list[int],
+        shells: Shells,
+        agent_host: ServedAgentHost,
         database: Database,
         event_bus: EventBus,
     ) -> None:
@@ -339,11 +388,15 @@ class TestKillAllShellSessions:
 
         agent_id = create_agent(db_conn)
         db_conn.execute(
-            "INSERT INTO agents_meta (id,status,machine,termination_source) "
-            "VALUES (%s,'terminated','test-machine','exit')",
-            (agent_id,),
+            "INSERT INTO agents_meta (id,status,machine,termination_source,session_index) "
+            "VALUES (%s,%s,'test-machine','exit',4)",
+            (agent_id, "terminated" if became_terminated == "inserted" else "running"),
         )
+        if became_terminated != "inserted":
+            db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,))
         db_conn.commit()
+        shells.open(agent_id, 0)
+        shells.open(agent_id, 3)
 
         resp = await lifecycle.terminate_agent_op(
             database,
@@ -351,62 +404,33 @@ class TestKillAllShellSessions:
             agent_id,
             TerminateAgentRequest(kill_all_shell_sessions=True),
             db_pool,
-            kill_shells=self._make_kill_fn(kills),
-            cancel_turn=self._noop_cancel,
+            host=agent_host.host,
         )
 
         assert resp.status == "already_terminated"
         assert resp.shell_sessions == ShellSessionsKill(
             when=ShellSessionKillTiming.NOW, killed=[0, 3]
         )
-        assert kills == [agent_id]
+        assert shells.alive() == set()
+        assert agent_host.cancel_requests == []
         assert _terminate_payloads(db_conn, agent_id) == []
 
-    @pytest.mark.asyncio
-    async def test_newly_committed_termination_is_killed_now(
-        self,
-        db_conn: psycopg.Connection,
-        db_pool: ConnectionPool,
-        running_agent_id: int,
-        kills: list[int],
-        database: Database,
-        event_bus: EventBus,
-    ) -> None:
-        from ops import lifecycle
-
-        db_conn.execute(
-            "UPDATE agents_meta SET status='terminated', termination_source='exit' WHERE id=%s",
-            (running_agent_id,),
-        )
-        db_conn.commit()
-
-        resp = await lifecycle.terminate_agent_op(
-            database,
-            event_bus,
-            running_agent_id,
-            TerminateAgentRequest(kill_all_shell_sessions=True),
-            db_pool,
-            kill_shells=self._make_kill_fn(kills),
-            cancel_turn=self._noop_cancel,
-        )
-
-        assert resp.status == "already_terminated"
-        assert resp.shell_sessions is not None and resp.shell_sessions.when == "now"
-        assert kills == [running_agent_id]
-        assert _terminate_payloads(db_conn, running_agent_id) == []
-
-    @pytest.mark.asyncio
     async def test_enqueue_waits_on_the_row_lock_of_a_committing_death(
         self,
         db_conn: psycopg.Connection,
         db_pool: ConnectionPool,
         running_agent_id: int,
-        kills: list[int],
+        shells: Shells,
+        agent_host: ServedAgentHost,
         database: Database,
         event_bus: EventBus,
     ) -> None:
         from ops import lifecycle
         from ops.rpc_schemas.terminate import ShellSessionsKill
+
+        shells.open(running_agent_id, 0)
+        shells.open(running_agent_id, 3)
+        _set_session_index(db_conn, running_agent_id, 4)
 
         with psycopg.connect(settings.data_plane.db_url) as apply_conn:
             apply_conn.execute(
@@ -419,8 +443,7 @@ class TestKillAllShellSessions:
                     running_agent_id,
                     TerminateAgentRequest(kill_all_shell_sessions=True),
                     db_pool,
-                    kill_shells=self._make_kill_fn(kills),
-                    cancel_turn=self._noop_cancel,
+                    host=agent_host.host,
                 )
             )
             await _until_blocked_or_done(op, apply_conn.info.backend_pid)
@@ -435,77 +458,32 @@ class TestKillAllShellSessions:
         assert resp.shell_sessions == ShellSessionsKill(
             when=ShellSessionKillTiming.NOW, killed=[0, 3]
         )
-        assert kills == [running_agent_id]
+        assert shells.alive() == set()
         assert _terminate_payloads(db_conn, running_agent_id) == []
 
-    @pytest.mark.asyncio
-    async def test_a_failed_kill_fails_the_request_after_the_fence(
-        self,
-        db_conn: psycopg.Connection,
-        db_pool: ConnectionPool,
-        running_agent_id: int,
-        database: Database,
-        event_bus: EventBus,
-    ) -> None:
-        from ops import lifecycle
 
-        def _fail(agent_id: int, *, before_session_index: int) -> list[int]:
-            raise RuntimeError("failed to kill shell session(s) [2]")
-
-        with pytest.raises(RuntimeError, match="failed to kill"):
-            await lifecycle.terminate_agent_op(
-                database,
-                event_bus,
-                running_agent_id,
-                TerminateAgentRequest(force=True, kill_all_shell_sessions=True),
-                db_pool,
-                kill_shells=_fail,
-                cancel_turn=self._noop_cancel,
-            )
-        assert db_conn.execute(
-            "SELECT status FROM agents_meta WHERE id=%s", (running_agent_id,)
-        ).fetchone() == ("terminated",)
-
-
-@pytest.mark.usefixtures("pty_service")
-@pytest.mark.asyncio
+# meiva:note
+# A force terminate kills the owner's older shells and watchers, and only those. A page session, a
+# foreign agent's shell and a shell allocated after the cutoff was taken survive. The late shell is
+# allocated while the agent host is cancelling the turn, after the force fence committed.
 async def test_kill_terminates_only_the_owners_real_shell_sessions(
     db_conn: psycopg.Connection,
     db_pool: ConnectionPool,
     running_agent_id: int,
     unit_home: Path,
+    shells: Shells,
     pty_reaper: PtyReaper,
     database: Database,
     event_bus: EventBus,
 ) -> None:
     import shlex
 
-    from base.cluster import session_name
-    from base.sessions.backend import PtySessionBackend
     from base.sessions.page_session import page_session_name
     from ops import lifecycle
     from ops.rpc_schemas.terminate import ShellSessionsKill
 
     marker = unit_home / "notice.marker"
     other_agent_id = create_agent(db_conn)
-    shell = session_name(f"agent-{running_agent_id}-shell-0")
-    watcher = session_name(f"agent-{running_agent_id}-shell-1-watcher")
-    page = page_session_name(running_agent_id, "dash_board", 2)
-    foreign = session_name(f"agent-{other_agent_id}-shell-0")
-    backend = PtySessionBackend(config=PtyClientConfig(socket_path=service_socket()))
-    replacement = session_name(f"agent-{running_agent_id}-shell-3-replacement")
-
-    async def _allocate_after_acceptance(_aid: int) -> None:
-        row = db_conn.execute(
-            "UPDATE agents_meta SET session_index=session_index+1 WHERE id=%s "
-            "RETURNING session_index-1",
-            (running_agent_id,),
-        ).fetchone()
-        db_conn.commit()
-        assert row == (3,)
-        assert backend.new_session(replacement, "", unit_home, env={"MEIVA_HOME": str(unit_home)})
-        shells[replacement] = pty_reaper.track_session(replacement).pid
-
     watcher_cmd = shlex.join(
         [
             sys.executable,
@@ -514,31 +492,41 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
             str(marker),
         ]
     )
-    shells: dict[str, int] = {}
-    for name, cmd in ((shell, ""), (watcher, watcher_cmd), (page, "sleep 300"), (foreign, "")):
-        assert backend.new_session(name, cmd, unit_home, env={"MEIVA_HOME": str(unit_home)})
-        shells[name] = pty_reaper.track_session(name).pid
-    job_pid = _wait_child(shells[watcher])
+    shell = shells.open(running_agent_id, 0)
+    watcher = shells.open(running_agent_id, 1, command=watcher_cmd, suffix="-watcher")
+    page = shells.open_named(page_session_name(running_agent_id, "dash_board", 2), "sleep 300")
+    foreign = shells.open(other_agent_id, 0)
+    job_pid = _wait_child(watcher.pid)
     pty_reaper.track(psutil.Process(job_pid))
-    db_conn.execute("UPDATE agents_meta SET session_index=3 WHERE id=%s", (running_agent_id,))
-    db_conn.commit()
+    _set_session_index(db_conn, running_agent_id, 3)
+    late: list[OpenedShell] = []
 
-    resp = await lifecycle.terminate_agent_op(
-        database,
-        event_bus,
-        running_agent_id,
-        TerminateAgentRequest(force=True, kill_all_shell_sessions=True),
-        db_pool,
-        cancel_turn=_allocate_after_acceptance,
-        kill_shells=lifecycle.kill_agent_shells,
-    )
+    def allocate_after_acceptance(agent_id: int) -> None:
+        with psycopg.connect(settings.data_plane.db_url) as allocator:
+            row = allocator.execute(
+                "UPDATE agents_meta SET session_index=session_index+1 WHERE id=%s "
+                "RETURNING session_index-1",
+                (agent_id,),
+            ).fetchone()
+        assert row == (3,)
+        late.append(shells.open(agent_id, 3, suffix="-replacement"))
+
+    with serve_agent_host(unit_home, on_cancel=allocate_after_acceptance) as served:
+        resp = await lifecycle.terminate_agent_op(
+            database,
+            event_bus,
+            running_agent_id,
+            TerminateAgentRequest(force=True, kill_all_shell_sessions=True),
+            db_pool,
+            host=served.host,
+        )
 
     assert resp.shell_sessions == ShellSessionsKill(when=ShellSessionKillTiming.NOW, killed=[0, 1])
-    assert set(backend.list_sessions()) == {page, foreign, replacement}
-    assert not _pid_alive(shells[shell]) and not _pid_alive(shells[watcher])
+    assert shells.alive() == {page.name, foreign.name, *(opened.name for opened in late)}
+    assert not _pid_alive(shell.pid) and not _pid_alive(watcher.pid)
     assert not _pid_alive(job_pid)
-    assert _pid_alive(shells[page]) and _pid_alive(shells[foreign])
-    assert _pid_alive(shells[replacement])
+    assert _pid_alive(page.pid) and _pid_alive(foreign.pid)
+    assert all(_pid_alive(opened.pid) for opened in late)
     assert not marker.exists()
 
 

@@ -245,7 +245,11 @@ async def _dispatch_config_write(
 )
 async def get_config(request: Request, machine: str | None = None) -> ConfigView:
 
-    await asyncio.to_thread(check_env_integrity, machine_reader=request.app.state.machine.name)
+    await asyncio.to_thread(
+        check_env_integrity,
+        env_path=request.app.state.config_authority.env_path,
+        machine_name=request.app.state.machine.name(),
+    )
     target = machine or request.app.state.machine.name()
     await asyncio.to_thread(
         _assert_machine_known,

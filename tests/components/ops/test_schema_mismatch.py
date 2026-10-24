@@ -1,11 +1,16 @@
-"""Current schema status must work from an installed image without Git or watchdog history."""
+# meiva:note
+# Current schema status must work from an installed image without Git or watchdog history.
+#
+# The two migration sets are the real ones: the throwaway database's applied names, and the
+# running image's migration directory. A mismatch is made by changing the applied set inside a
+# rolled-back transaction, an unreadable database by a closed connection or a held table lock,
+# and a broken image by naming a directory that is not there.
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from functools import partial
 from pathlib import Path
-from typing import NoReturn, cast
+from typing import cast
 
 import psycopg
 import pytest
@@ -14,14 +19,9 @@ from base.api_contracts.status import MachineStatus, SchemaMismatchKind, SchemaM
 from base.cluster.machine import MachineIdentity
 from base.db import Database
 from base.deploy.schema.migration_errors import MigrationLayoutError
-from base.deploy.schema.migration_layout import required_migration_set
 from base.deploy.schema.migrations import applied_migration_names
 from cli.commands.cluster.plans.roster_table import schema_mismatch_banner
 from ops.cluster_status import ClusterStatus, schema_mismatch
-
-
-def _unexpected(*_args: object, **_kwargs: object) -> NoReturn:
-    raise AssertionError("schema diagnosis reached retired pin/Git authority")
 
 
 @pytest.mark.parametrize(
@@ -66,20 +66,46 @@ def _assert_status_is_visible(status: SchemaMismatchStatus) -> None:
     assert "blocked round" not in banner[0] and "held back" not in banner[0]
 
 
+_EXTRA_MIGRATION = "99999999T999999_extra"
+
+
+def _newest_applied(conn: psycopg.Connection) -> str:
+    return max(applied_migration_names(conn))
+
+
+@pytest.mark.parametrize(
+    ("kind", "detail"),
+    [
+        ("schema-ahead-of-code", "DB has 1 migration(s) this image lacks"),
+        ("schema-behind-code", "DB lacks 1 migration(s) required by this image"),
+        (
+            "divergent",
+            "DB has 1 migration(s) this image lacks and lacks 1 required by this image",
+        ),
+    ],
+)
 def test_status_and_cli_expose_current_diagnosis_only(
-    monkeypatch: pytest.MonkeyPatch, database: Database, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection,
+    database: Database,
+    kind: SchemaMismatchKind,
+    detail: str,
+    *,
+    machine_identity: MachineIdentity,
 ) -> None:
-    mismatch = schema_mismatch.classify({"base", "new"}, {"base"})
-    assert mismatch is not None
-    monkeypatch.setattr(schema_mismatch, "detect", lambda _db: mismatch)  # pyright: ignore[reportUnknownArgumentType]
     machine_identity.set(name="gateway")
-    status = schema_mismatch.status(database, local_machine=machine_identity.name())
+    with db_conn.transaction(force_rollback=True):
+        if kind != "schema-ahead-of-code":
+            db_conn.execute(
+                "DELETE FROM schema_migrations WHERE name = %s", (_newest_applied(db_conn),)
+            )
+        if kind != "schema-behind-code":
+            db_conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (_EXTRA_MIGRATION,))
+        status = schema_mismatch.status(
+            database, conn=db_conn, local_machine=machine_identity.name()
+        )
+
     assert status is not None
-    assert status.model_dump() == {
-        "kind": "schema-ahead-of-code",
-        "machine": "gateway",
-        "detail": "DB has 1 migration(s) this image lacks",
-    }
+    assert status.model_dump() == {"kind": kind, "machine": "gateway", "detail": detail}
     _assert_status_is_visible(status)
 
 
@@ -115,26 +141,41 @@ def test_malformed_real_catalog_is_invalid_in_status_and_cli(
     )
 
 
-@pytest.mark.parametrize(
-    "error", [psycopg.OperationalError("offline"), psycopg.errors.QueryCanceled()]
-)
-def test_query_failure_is_explicitly_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
-    error: psycopg.Error,
+def test_a_closed_connection_is_explicitly_unavailable(
+    db_url: str, database: Database, *, machine_identity: MachineIdentity
+) -> None:
+    conn = psycopg.connect(db_url)
+    conn.close()
+
+    status = schema_mismatch.status(database, conn=conn, local_machine=machine_identity.name())
+
+    assert status is not None
+    assert status.kind == "unavailable"
+    assert "OperationalError" in status.detail
+    _assert_status_is_visible(status)
+
+
+# meiva:note
+# A query the server cancels (here: the registry read waits on a table lock past the statement
+# timeout) is an unavailable diagnosis, not a mismatch and not a crash.
+def test_a_query_the_server_cancels_is_explicitly_unavailable(
+    db_url: str,
+    db_conn: psycopg.Connection,
     database: Database,
     *,
     machine_identity: MachineIdentity,
 ) -> None:
-    def failed(_conn: object) -> set[str]:
-        raise error
+    with psycopg.connect(db_url) as holder:
+        holder.execute("LOCK TABLE schema_migrations IN ACCESS EXCLUSIVE MODE")
+        db_conn.execute("SET statement_timeout = '200ms'")
 
-    monkeypatch.setattr(schema_mismatch, "applied_migration_names", failed)
-    status = schema_mismatch.status(
-        database, conn=cast(psycopg.Connection, object()), local_machine=machine_identity.name()
-    )
+        status = schema_mismatch.status(
+            database, conn=db_conn, local_machine=machine_identity.name()
+        )
+
     assert status is not None
     assert status.kind == "unavailable"
-    assert type(error).__name__ in status.detail
+    assert "QueryCanceled" in status.detail
     _assert_status_is_visible(status)
 
 
@@ -149,7 +190,7 @@ def test_invalid_image_layout_is_not_a_set_divergence(
         database,
         conn=db_conn,
         local_machine=machine_identity.name(),
-        required_reader=partial(required_migration_set, migrations_dir=tmp_path / "absent"),
+        migrations_dir=tmp_path / "absent",
     )
     assert status is not None
     assert status.kind == "invalid-migration-layout"
@@ -158,16 +199,11 @@ def test_invalid_image_layout_is_not_a_set_divergence(
     _assert_status_is_visible(status)
 
 
-def test_unexpected_programming_failure_is_not_silently_graded(
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
-) -> None:
-    def failed(_conn: object) -> set[str]:
-        raise RuntimeError("programming defect")
-
-    monkeypatch.setattr(schema_mismatch, "applied_migration_names", failed)
-    with pytest.raises(RuntimeError, match="programming defect"):
-        schema_mismatch.detect(database, conn=cast(psycopg.Connection, object()))
+def test_unexpected_programming_failure_is_not_silently_graded(database: Database) -> None:
+    with pytest.raises(AttributeError):
+        schema_mismatch.status(
+            database, conn=cast(psycopg.Connection, object()), local_machine="gateway"
+        )
 
 
 @pytest.mark.parametrize("kind", ["invalid-migration-layout", "unavailable"])

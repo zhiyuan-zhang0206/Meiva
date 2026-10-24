@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -198,3 +200,51 @@ def test_archived_entry_skips_disk_check(tmp_path: Path) -> None:
     outcomes = verify(root, manifest)
     assert outcomes[0].ok is False
     assert outcomes[0].errors == ("file is missing",)
+
+
+# meiva:note
+# Without `--root` the CLI verifies the process home's source checkout. The child's argv is fixed
+# and its environment names the home.
+def test_cli_defaults_the_root_to_the_homes_source_checkout(tmp_path: Path) -> None:
+    root, _source_repo, manifest = _fixture(tmp_path)
+    home = tmp_path / "meiva-home"
+    home.mkdir()
+    shutil.copytree(root, home / "source")
+
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-m", "ops.private_files", "verify", "--manifest", str(manifest)],
+        cwd=_REPO_ROOT,
+        env={**os.environ, "MEIVA_HOME": str(home)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"OK example {_RELATIVE_PATH.as_posix()}\n"
+
+
+# meiva:note
+# A status other than active or archived is refused, never read as one of them.
+def test_verify_rejects_an_unsupported_entry_status(tmp_path: Path) -> None:
+    root, _source_repo, manifest = _fixture(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["entries"][0]["status"] = "retired"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unsupported private-files entry status"):
+        verify(root, manifest)
+
+
+# meiva:note
+# A durable source whose bytes drifted fails even while the checked file still matches.
+def test_verify_reports_a_source_that_differs_from_the_registered_digest(tmp_path: Path) -> None:
+    root, source_repo, manifest = _fixture(tmp_path)
+    (source_repo / _RELATIVE_PATH).write_bytes(b"drifted\n")
+    _git(source_repo, "commit", "-am", "drift")
+
+    outcome = verify(root, manifest)[0]
+
+    assert outcome.ok is False
+    assert len(outcome.errors) == 1
+    assert outcome.errors[0].startswith("source sha256 mismatch:")

@@ -196,13 +196,13 @@ EVENTS: dict[str, EventSpec] = {
         "ci_usage_daily",
         "daily CI-minute reconciliation totals (C9)",
         payload=CiUsageDaily,
-        site="schedules/c9-daily-report-schedule.py:_fire (positional emit)",
+        site="schedules/jobs/c9_report.py:report_day (positional emit)",
     ),
     "debt_sweep_daily": telemetry_event(
         "debt_sweep_daily",
         "daily tech-debt mechanical scan and clearing-worker dispatch",
         payload=DebtSweepDaily,
-        site="schedules/debt-sweep-daily-schedule.py:_fire (positional emit)",
+        site="schedules/jobs/debt_sweep.py:sweep_day (positional emit)",
     ),
     "pr_flow_daily": telemetry_event(
         "pr_flow_daily",

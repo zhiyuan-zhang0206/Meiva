@@ -33,7 +33,6 @@ class TestResurrectAgent:
     def test_resurrects_terminated_agent_and_inserts_resurrect_inbound(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
         *,
@@ -71,7 +70,6 @@ class TestResurrectAgent:
     def test_resurrect_without_prompt_inserts_only_lifecycle_inbound(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
         *,
@@ -104,7 +102,6 @@ class TestResurrectAgent:
     def test_resurrect_records_resurrected_by_in_inbound_source(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
         *,
@@ -141,7 +138,6 @@ class TestResurrectAgent:
     def test_resurrect_with_prompt_chat_inbound_has_wrappable_source(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
         *,
@@ -182,7 +178,6 @@ class TestResurrectAgent:
     def test_resurrect_nonexistent_raises_agent_not_found(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
         *,
@@ -204,7 +199,6 @@ class TestResurrectAgent:
     def test_resurrect_alive_agent_raises_already_alive(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         alive_status: str,
         database: Database,
         event_bus: EventBus,
@@ -273,7 +267,6 @@ class TestResurrectAgent:
     def test_subclasses_inherit_from_resurrect_error(
         self,
         db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
         database: Database,
         event_bus: EventBus,
         *,

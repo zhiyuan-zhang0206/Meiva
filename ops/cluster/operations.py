@@ -1,18 +1,22 @@
-"""Cluster-ops RPC implementations.
-
-Stopping announcements, live status snapshots, persistent-shell probes and the
-per-agent command view. One of the op clusters beside `ops.lifecycle`,
-`ops.host_config` and `ops.inventory`; each cluster is self-contained.
-
-Most of these are thin wrappers; this layer is the agent-runner-callable RPC
-surface the ops server dispatches (`services/agent_runner/agent_ops/daemon.py:_dispatch`) and
-the gateway cluster router calls.
-"""
+# meiva:note
+# Cluster-ops RPC implementations.
+#
+# Stopping announcements, live status snapshots, persistent-shell probes and the per-agent command
+# view. One of the op clusters beside `ops.lifecycle`, `ops.host_config` and `ops.inventory`; each
+# cluster is self-contained.
+#
+# Most of these are thin wrappers; this layer is the agent-runner-callable RPC surface the ops
+# server dispatches (`services/agent_runner/agent_ops/daemon.py:_dispatch`) and the gateway
+# cluster router calls.
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, cast
+
+from psycopg import Connection
+from psycopg.rows import DictRow
+from psycopg_pool import ConnectionPool
 
 from base.agents.birth.harness import probe_local_harnesses
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
@@ -22,11 +26,14 @@ from base.cluster.machines import mark_stopping
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
+from base.packages.composer_commands import Command
 from base.packages.skills import project_skill_roots
+from base.packages.skills.tree import Skill
 from ops.cluster_status import (
     ClusterStatus,
     agent_shell_sessions,
     capture_shell,
+    cluster_now,
     kill_shell,
     status_snapshot,
 )
@@ -41,6 +48,14 @@ from ops.rpc_schemas import (
 )
 
 
+# meiva:note
+# Record an intentional shutdown announced by the (machine, home) unit.
+#
+# `meiva stop` calls this (best-effort) just before tearing the local stack down, so the cluster
+# view shows the host as "stopped" rather than "offline" (a live probe cannot tell an intentional
+# stop from a crash). Stamps the unit's `stopped_at` and recomputes the composed `machines` row;
+# `meiva start` clears it. `home` is the stopping unit's $MEIVA_HOME, sent on the wire so a
+# co-located peer's caps are not retracted along with this unit's.
 def cluster_stopping_op(
     db: Database,
     machine: str,
@@ -48,15 +63,6 @@ def cluster_stopping_op(
     maintenance_for_seconds: int | None = None,
     maintenance_reason: str | None = None,
 ) -> dict[str, str]:
-    """Record an intentional shutdown announced by the (machine, home) unit.
-
-    `meiva stop` calls this (best-effort) just before tearing the local stack
-    down, so the cluster view shows the host as "stopped" rather than "offline"
-    (a live probe cannot tell an intentional stop from a crash). Stamps the
-    unit's `stopped_at` and recomputes the composed `machines` row; `meiva start`
-    clears it. `home` is the stopping unit's $MEIVA_HOME, sent on the wire so a
-    co-located peer's caps are not retracted along with this unit's.
-    """
     mark_stopping(
         db,
         machine,
@@ -67,10 +73,15 @@ def cluster_stopping_op(
     return {"machine": machine}
 
 
+# meiva:note
+# Local snapshot — assembled by `status_snapshot()`.
 def cluster_status_op(
-    db: Database, pool: Any | None = None, *, image: LoadedCommit, local_machine: MachineIdentity
+    db: Database,
+    pool: ConnectionPool | None = None,
+    *,
+    image: LoadedCommit,
+    local_machine: MachineIdentity,
 ) -> ClusterStatus:
-    """Local snapshot — assembled by `status_snapshot()`."""
     return status_snapshot(db, pool=pool, image=image, local_machine=local_machine)
 
 
@@ -103,38 +114,40 @@ def harness_probe_op(machine: str) -> HarnessProbeResult:
     )
 
 
+# meiva:note
+# This host's live persistent-shell sessions for one agent.
+#
+# The runner-side half of the inspector panel's `shells` list: the gateway dispatches this op
+# when the agent runs on this machine rather than on the gateway's own box
+# (`agent_shell_sessions` is host-scoped, so a local probe on the gateway would always read empty
+# for a remote agent). The listing's times render in the cluster's zone, so the instant is read
+# here, at the op's entry.
 def shell_probe_op(agent_id: int) -> ShellProbeResult:
-    """This host's live persistent-shell sessions for one agent.
-
-    The runner-side half of the inspector panel's `shells` list: the gateway
-    dispatches this op when the agent runs on this machine rather than on the
-    gateway's own box (`agent_shell_sessions` is host-scoped, so a local probe
-    on the gateway would always read empty for a remote agent).
-    """
-    return ShellProbeResult(shells=agent_shell_sessions(agent_id))
+    return ShellProbeResult(shells=agent_shell_sessions(agent_id, now=cluster_now()))
 
 
+# meiva:note
+# Kill one persistent shell on this runner for TTL reclamation.
+#
+# ``interrupted`` reports whether the kill cut short a running job — the gateway notifies the
+# owner only then (an empty shell's reaping is silent).
 def shell_kill_op(agent_id: int, session_id: int) -> ShellKillResult:
-    """Kill one persistent shell on this runner for TTL reclamation.
-
-    ``interrupted`` reports whether the kill cut short a running job — the
-    gateway notifies the owner only then (an empty shell's reaping is silent)."""
-    raw_mode, interrupted, name = kill_shell(agent_id, session_id)
-    mode = ShellKillMode(raw_mode)
+    mode, interrupted, name = kill_shell(agent_id, session_id)
     if mode is ShellKillMode.ABSENT:
         return ShellKillResult(mode=mode)
     return ShellKillResult(mode=mode, interrupted=interrupted, name=name)
 
 
-def agent_skill_view_inputs(pool: Any, agent_id: int) -> tuple[Path | None, list[str] | None]:
-    """The persisted cwd and effective skill-index narrowing for one agent.
-
-    The daemon's shared pool keeps this read on the agent's machine.  ``cwd`` is
-    the meiva-code plugin's private channel key, following ``PluginStateHandle``'s
-    ``<plugin>__<field>`` convention in ``agent/state.py``.  An old agent with
-    no checkpoint has no project-local roots; an old row with no frozen/overlay
-    value falls through to the normal unfiltered (``["*"]``) command view.
-    """
+# meiva:note
+# The persisted cwd and effective skill-index narrowing for one agent.
+#
+# The daemon's shared pool keeps this read on the agent's machine. ``cwd`` is the meiva-code
+# plugin's private channel key, following ``PluginStateHandle``'s ``<plugin>__<field>`` convention
+# in ``agent/state.py``. An old agent with no checkpoint has no project-local roots; an old row
+# with no frozen/overlay value falls through to the normal unfiltered (``["*"]``) command view.
+def agent_skill_view_inputs(
+    pool: ConnectionPool, agent_id: int
+) -> tuple[Path | None, list[str] | None]:
     from langgraph.checkpoint.postgres import PostgresSaver
 
     from base.agents.history.checkpoint_serializer import CheckpointSerializer
@@ -152,7 +165,7 @@ def agent_skill_view_inputs(pool: Any, agent_id: int) -> tuple[Path | None, list
         wanted = pins.get("skills_to_inject_into_system_prompt")
 
         saver = PostgresSaver(
-            conn=conn,
+            conn=cast(Connection[DictRow], conn),
             serde=CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES),
         )
         checkpoint = saver.get({"configurable": {"thread_id": str(agent_id)}})
@@ -163,19 +176,20 @@ def agent_skill_view_inputs(pool: Any, agent_id: int) -> tuple[Path | None, list
 
 
 def _project_skill_roots(cwd: Path | None) -> list[Path]:
-    """Project-local skill roots for the agent's working directory; none before it has one."""
     return [] if cwd is None else project_skill_roots(cwd)
 
 
-def _narrow_commands(commands: list[Any], wanted: list[str] | None, loaded: list[Any]) -> list[Any]:
-    """Keep explicit commands plus skill commands selected as prompt capabilities.
-
-    This intentionally mirrors ``agent.graph.prompt.capabilities.resolve_prompt_skills``:
-    ``*`` selects all loaded skills; otherwise a configured value matches the
-    dotted identifier first and then the bare frontmatter name under the common
-    dash/underscore fold.  Only skill-as-command entries are narrowed; explicit
-    command files remain available to every agent as they are not capabilities.
-    """
+# meiva:note
+# Keep explicit commands plus skill commands selected as prompt capabilities.
+#
+# This intentionally mirrors ``agent.graph.prompt.capabilities.resolve_prompt_skills``: ``*``
+# selects all loaded skills; otherwise a configured value matches the dotted identifier first and
+# then the bare frontmatter name under the common dash/underscore fold. Only skill-as-command
+# entries are narrowed; explicit command files remain available to every agent as they are not
+# capabilities.
+def _narrow_commands(
+    commands: list[Command], wanted: list[str] | None, loaded: list[Skill]
+) -> list[Command]:
     if wanted is None or "*" in wanted:
         return commands
 
@@ -196,15 +210,14 @@ def _narrow_commands(commands: list[Any], wanted: list[str] | None, loaded: list
     ]
 
 
-def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
-    """Build the command-autocomplete view that ``agent_id`` sees on this host.
-
-    Converged skills are discovered on the target runner, with the agent's
-    checkpointed cwd contributing project-local roots only for this call.  The
-    provider is scoped to this call (and only it is taken back), so one request cannot leak its
-    project skills into a later agent's result.  The
-    result also carries this runner's enabled MCP names as phase-2 groundwork.
-    """
+# meiva:note
+# Build the command-autocomplete view that ``agent_id`` sees on this host.
+#
+# Converged skills are discovered on the target runner, with the agent's checkpointed cwd
+# contributing project-local roots only for this call. The provider is scoped to this call (and
+# only it is taken back), so one request cannot leak its project skills into a later agent's
+# result. The result also carries this runner's enabled MCP names as phase-2 groundwork.
+def agent_skill_view_op(agent_id: int, pool: ConnectionPool) -> AgentSkillViewResult:
     from base.packages.composer_commands import CommandCatalog, load_skill_names
     from base.packages.mcp_config import load_mcp_config
     from base.packages.plugins.mcp_enabled import read_enabled
@@ -229,25 +242,25 @@ def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
     )
 
 
+# meiva:note
+# Capture one of an agent's persistent shells' terminal tail, locally.
+#
+# The runner-side half of the shell-monitor endpoint (`capture_shell` — resolves the session
+# against this host's pty sessions and captures its tail). The gateway dispatches this op when the
+# agent runs on this machine; `capture_shell` raises ShellNotFoundError / RuntimeError when the
+# session is absent or died mid-capture, which the ops daemon surfaces as a 'failed' op result.
+#
+# The `lines` default is a direct-call fallback: the gateway resolves the configured default
+# (display.shell_capture_default_lines) before dispatching, and every programmatic caller passes
+# an explicit window.
+#
+# Raises:
+#     ShellNotFoundError: no live shell with `session_id` on this host.
+#     RuntimeError: the session capture failed.
 def shell_capture_op(agent_id: int, session_id: int, lines: int = 200) -> ShellCaptureResult:
-    """Capture one of an agent's persistent shells' terminal tail, locally.
-
-    The runner-side half of the shell-monitor endpoint (`capture_shell` —
-    resolves the session against this host's pty sessions, reconstructs the full
-    session name, runs capture-pane). The gateway dispatches this op when the
-    agent runs on this machine; `capture_shell` raises ShellNotFoundError /
-    RuntimeError when the session is absent or died mid-capture, which the ops
-    daemon surfaces as a 'failed' op result.
-
-    The `lines` default is a direct-call fallback: the gateway resolves the
-    configured default (display.shell_capture_default_lines) before
-    dispatching, and every programmatic caller passes an explicit window.
-
-    Raises:
-        ShellNotFoundError: no live shell with `session_id` on this host.
-        RuntimeError: the session capture failed.
-    """
-    full_name, captured, created_at, uptime_seconds = capture_shell(agent_id, session_id, lines)
+    full_name, captured, created_at, uptime_seconds = capture_shell(
+        agent_id, session_id, lines, now=cluster_now()
+    )
     return ShellCaptureResult(
         session_name=full_name,
         lines=captured,

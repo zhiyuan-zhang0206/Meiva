@@ -4,6 +4,7 @@
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from fastapi import Header, HTTPException, Request
 from psycopg import Connection
@@ -127,7 +128,10 @@ def register(
                 body.host,
                 body.title,
                 body.serve_dir,
-                body.ttl_seconds if body.ttl_seconds is not None else round(default_ttl_seconds),
+                ttl_seconds=(
+                    body.ttl_seconds if body.ttl_seconds is not None else round(default_ttl_seconds)
+                ),
+                now=datetime.now(UTC),
             )
             record = record.model_copy(update={"url": absolute_base + record.url})
             finish_receipt(conn, key, digest, record)

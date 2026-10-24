@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from psycopg_pool import ConnectionPool
@@ -17,6 +18,7 @@ from base.packages.tests.model_catalog import add_models as add_models
 from base.packages.tests.model_catalog import model_catalog as model_catalog
 from base.packages.tests.model_catalog import set_prices as set_prices
 from base.paths.tests.homes import unit_home as unit_home
+from ops.lifecycle.tests.loopback.agent_host import ServedAgentHost, serve_agent_host
 
 
 @pytest.fixture
@@ -44,3 +46,9 @@ def db_pool(db_url: str) -> Iterator[ConnectionPool]:
     )
     with pool:
         yield pool
+
+
+@pytest.fixture
+def agent_host(unit_home: Path) -> Iterator[ServedAgentHost]:
+    with serve_agent_host(unit_home) as served:
+        yield served
