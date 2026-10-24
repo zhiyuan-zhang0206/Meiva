@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from base.telemetry.metrics.core import catalog, exec_envelope, frontend, observability
-from base.telemetry.metrics.logql import validate_logql
+from base.telemetry.metrics.logql import HARNESS_ORDER, validate_logql
 from base.telemetry.metrics.plugin_metrics import (
     InvalidMetricQuery,
     MetricSpec,
@@ -12,7 +12,13 @@ from base.telemetry.metrics.plugin_metrics import (
 )
 
 EXPECTED = {
-    "meiva_obs_llm_cost_usd": ("timeseries", ["grafana"], "llm_usage", "telemetry", 4),
+    "meiva_obs_llm_cost_usd": (
+        "timeseries",
+        ["grafana"],
+        "llm_usage",
+        "telemetry",
+        len(HARNESS_ORDER),
+    ),
     "meiva_obs_agent_llm_cost_usd": ("timeseries", ["inspector"], "llm_usage", "telemetry", 1),
     "meiva_obs_llm_error_rate": (
         "timeseries",
