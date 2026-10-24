@@ -339,6 +339,25 @@ def _pyproject_tables(text: str) -> dict[str, object]:
     return tables
 
 
+# meiva:note
+# The gaps that keep a test from being certified for this change. A load the analysis cannot
+# resolve can run any code, so it always blocks. A read whose path cannot be anchored can only
+# matter to a data file (Python sources reach tests through the import graph, and the tests that
+# read source text are the pinned tree-scan family), so it blocks only when the change includes one.
+def blocking_gaps(impact: Impact, *, data_changed: bool) -> tuple[Unknown, ...]:
+    return tuple(item for item in impact.unknown if data_changed or item.reason != UNANCHORED_READ)
+
+
+# meiva:note
+# The tests whose runtime graph reaches an input the analysis could not bound.
+def unbounded_tests(impact: Impact, *, data_changed: bool) -> set[str]:
+    return {
+        test
+        for item in blocking_gaps(impact, data_changed=data_changed)
+        for test in impact.tests_by_input.get(item.path, ())
+    }
+
+
 def unknown_diagnostics(items: Iterable[Unknown], *, tree: str) -> tuple[str, ...]:
     """Stable, visible reasons why the runtime graph cannot certify a subset."""
     return tuple(
