@@ -86,6 +86,8 @@ async def serve_until_sigterm(
 
     def request() -> None:
         nonlocal requested
+        if requested:
+            return
         requested = True
         serving.cancel()
 

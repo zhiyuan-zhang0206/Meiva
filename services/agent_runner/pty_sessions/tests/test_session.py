@@ -8,7 +8,11 @@ simulated refusal, which only works inside the test process).
 from __future__ import annotations
 
 import os
+import pty
+import signal
+import socket
 import subprocess
+import sys
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import replace
@@ -20,10 +24,9 @@ import pytest
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.ownership import OwnedProcess
-from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.native_process.tests.fake_process_control import FakeProcessControl
 from base.paths import meiva_home
-from base.sessions.pty import client
+from base.sessions.pty import client, protocol
 from base.sessions.pty.tests.pty_reaper import pty_reaper as pty_reaper
 from base.sessions.pty.tests.pty_service import service_socket
 from base.sessions.record import SessionRecord
@@ -32,6 +35,11 @@ from services.agent_runner.pty_sessions.service import PtyService
 from services.agent_runner.pty_sessions.session import PtySession
 
 MakeSession = Callable[[str, int], PtySession]
+_TTY_LEADER = Path(__file__).with_name("child_tty_leader.py")
+_SHELL_WITH_JOB = Path(__file__).with_name("child_shell_with_job.py")
+# meiva:note
+# A descriptor number no process holds, so closing it fails the way a vanished descriptor does.
+_UNOPENED_FD = 1_000_000
 
 
 @pytest.fixture
@@ -114,8 +122,18 @@ def test_a_transcript_write_failure_is_reported_not_swallowed(
     assert session._log_write_failures == 1
 
 
-def _live(_identity: OwnedProcess) -> bool:
-    return True
+# meiva:note
+# Point a session at a real process: its pid and recorded birth are that process's own.
+def _adopt(session: PtySession, process_id: int) -> PtySession:
+    identity = OwnedProcess.capture(psutil.Process(process_id))
+    session.pid = identity.pid
+    session.record = replace(
+        session.record,
+        pid=identity.pid,
+        create_time=identity.birth,
+        starttime=identity.starttime,
+    )
+    return session
 
 
 @pytest.fixture
@@ -125,16 +143,7 @@ def live_session(make_session: MakeSession) -> Iterator[MakeSession]:
     def make(name: str, log_cap: int) -> PtySession:
         child = subprocess.Popen(["sleep", "300"], start_new_session=True)
         children.append(child)
-        identity = OwnedProcess.capture(psutil.Process(child.pid))
-        session = make_session(name, log_cap)
-        session.pid = identity.pid
-        session.record = replace(
-            session.record,
-            pid=identity.pid,
-            create_time=identity.birth,
-            starttime=identity.starttime,
-        )
-        return session
+        return _adopt(make_session(name, log_cap), child.pid)
 
     try:
         yield make
@@ -142,6 +151,81 @@ def live_session(make_session: MakeSession) -> Iterator[MakeSession]:
         for child in children:
             child.kill()
             child.wait(timeout=10)
+
+
+ShellWithJob = Callable[[str], tuple[PtySession, int]]
+
+
+# meiva:note
+# The fixed test-owned script is started in a session of its own; the test reads its stdout.
+@pytest.fixture
+def shell_with_job(make_session: MakeSession) -> Iterator[ShellWithJob]:
+    shells: list[subprocess.Popen[str]] = []
+
+    def make(name: str) -> tuple[PtySession, int]:
+        # meiva:note
+        # The command is a fixed argv of the interpreter and an in-repo script: no shell, no user input.
+        shell = subprocess.Popen(  # noqa: S603
+            [sys.executable, str(_SHELL_WITH_JOB)],
+            stdout=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        shells.append(shell)
+        assert shell.stdout is not None
+        job_pid = int(shell.stdout.readline())
+        return _adopt(make_session(name, 1024), shell.pid), job_pid
+
+    try:
+        yield make
+    finally:
+        for shell in shells:
+            os.killpg(shell.pid, signal.SIGKILL)
+            shell.wait(timeout=10)
+
+
+TtySession = Callable[[str], tuple[PtySession, int]]
+
+
+# meiva:note
+# The fixed test-owned script is started in a session of its own; the test reads its stdout.
+@pytest.fixture
+def tty_session(tmp_path: Path) -> Iterator[TtySession]:
+    """A session whose master is a real pty with a foreground group led by another process."""
+    processes: list[subprocess.Popen[str] | subprocess.Popen[bytes]] = []
+    sessions: list[PtySession] = []
+
+    def make(name: str) -> tuple[PtySession, int]:
+        master, slave = pty.openpty()
+        # meiva:note
+        # The command is a fixed argv of the interpreter and an in-repo script: no shell, no user input.
+        leader = subprocess.Popen(  # noqa: S603
+            [sys.executable, str(_TTY_LEADER), str(slave)],
+            pass_fds=(slave,),
+            stdout=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        processes.append(leader)
+        os.close(slave)
+        assert leader.stdout is not None
+        assert leader.stdout.readline() == "ready\n"
+        shell = subprocess.Popen(["sleep", "300"], start_new_session=True)
+        processes.append(shell)
+        record = SessionRecord(pid=shell.pid, create_time=0.0, cmd="", cwd="", started_at=0.0)
+        session = PtySession(name, shell.pid, master, 120, 40, record, tmp_path / f"{name}.out.log")
+        sessions.append(session)
+        return _adopt(session, shell.pid), leader.pid
+
+    try:
+        yield make
+    finally:
+        for process in processes:
+            process.kill()
+            process.wait(timeout=10)
+        for session in sessions:
+            os.close(session.master_fd)
+            os.close(session._log_fd)
 
 
 def test_a_concrete_group_signal_error_is_not_a_success(live_session: MakeSession) -> None:
@@ -163,123 +247,117 @@ def test_a_live_shell_cannot_be_reported_closed(live_session: MakeSession) -> No
         )
 
 
-def test_unknown_foreground_is_interrupted_without_discovering_processes(
-    make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
+def test_unknown_foreground_is_interrupted_without_touching_the_shells_jobs(
+    shell_with_job: ShellWithJob, loguru_records: LogRecords
 ) -> None:
-    session = make_session("meiva-test-unknown", 1024)
-    monkeypatch.setattr(session_module.OwnedProcess, "live", _live)
+    session, job_pid = shell_with_job("meiva-test-unknown")
+    # meiva:note
+    # An earlier observation must not survive an unknown foreground.
+    session.known_groups = (session.shell,)
 
-    def unavailable(_fd: int) -> int:
-        raise OSError("foreground unavailable")
-
-    def forbidden(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("cleanup must not enumerate or freeze processes")
-
-    session.known_groups = (
-        session.shell,
-    )  # an earlier observation must not survive unknown foreground
-    monkeypatch.setattr(os, "tcgetpgrp", unavailable)
-    monkeypatch.setattr(psutil, "process_iter", forbidden)
-    monkeypatch.setattr(psutil, "pids", forbidden)
-    monkeypatch.setattr(psutil.Process, "children", forbidden)
-    monkeypatch.setattr(psutil.Process, "suspend", forbidden)
     assert session.capture_foreground() is True
+
     assert session.known_groups == ()
+    assert any(
+        "foreground target unknown" in message for message in loguru_records.messages("WARNING")
+    )
+    assert psutil.Process(job_pid).status() != psutil.STATUS_STOPPED
 
 
-def test_foreground_in_another_session_is_not_adopted(
-    make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    session = make_session("meiva-test-wrong-session", 1024)
-    monkeypatch.setattr(session_module.OwnedProcess, "live", _live)
+def test_foreground_in_another_session_is_not_adopted(tty_session: TtySession) -> None:
+    session, leader_pid = tty_session("meiva-test-wrong-session")
+    assert os.tcgetpgrp(session.master_fd) == leader_pid, "the terminal's foreground group"
 
-    def own_pid(_fd: int) -> int:
-        return os.getpid()
-
-    def another_session(_pid: int) -> int:
-        return session.pid + 1
-
-    monkeypatch.setattr(os, "tcgetpgrp", own_pid)
-    session.pid = os.getpid() + 1
-    monkeypatch.setattr(os, "getpgid", own_pid)
-    monkeypatch.setattr(os, "getsid", another_session)
     assert session.capture_foreground() is True
+
     assert session.known_groups == ()
 
 
 def test_master_close_failure_is_visible_after_the_teardown_claim(
-    make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
+    make_session: MakeSession,
 ) -> None:
     session = make_session("meiva-test-close-error", 1024)
+    master = session.master_fd
+    session.master_fd = _UNOPENED_FD
 
-    def no_reap(_session: PtySession) -> None:
-        pass
-
-    monkeypatch.setattr(session_module, "reap_child", no_reap)
-    real_close = os.close
-
-    def close(fd: int) -> None:
-        if fd == session.master_fd:
-            raise OSError("master close failed")
-        real_close(fd)
-
-    with monkeypatch.context() as patch:
-        patch.setattr(os, "close", close)
-        with pytest.raises(OSError, match="master close failed"):
-            session_module.finish(session, lambda _session: None)
-    with pytest.raises(OSError, match="master close failed"):
+    with pytest.raises(OSError):
+        session_module.finish(session, lambda _session: None)
+    with pytest.raises(OSError):
         session.wait_dead(0)
+    session.master_fd = master
     # finish already closed the transcript; keep the factory cleanup valid.
     session._log_fd = os.open(os.devnull, os.O_WRONLY)
 
 
-def test_reap_and_callback_errors_still_close_the_master(
-    make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
+def test_a_failed_callback_and_a_failed_close_keep_the_first_failure_and_log_the_second(
+    make_session: MakeSession, loguru_records: LogRecords
 ) -> None:
-    session = make_session("meiva-test-reap-error", 1024)
-
-    def failed_reap(_session: PtySession) -> None:
-        raise RuntimeError("reap failed")
+    session = make_session("meiva-test-two-failures", 1024)
+    transcript = session._log_fd
+    session._log_fd = _UNOPENED_FD
 
     def failed_callback(_session: PtySession) -> None:
         raise RuntimeError("callback failed")
 
-    monkeypatch.setattr(session_module, "reap_child", failed_reap)
     with pytest.raises(RuntimeError, match="callback failed"):
         session_module.finish(session, failed_callback)
+
     with pytest.raises(OSError):
         os.fstat(session.master_fd)
     with pytest.raises(RuntimeError, match="callback failed"):
         session.wait_dead(0)
+    assert any(
+        "additional teardown failure" in message for message in loguru_records.messages("WARNING")
+    )
     session.master_fd = os.open(os.devnull, os.O_RDONLY)
-    session._log_fd = os.open(os.devnull, os.O_WRONLY)
+    session._log_fd = transcript
 
 
-def test_closure_preparation_error_releases_the_allocation_fence(
-    make_session: MakeSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    session = make_session("meiva-test-preparation-error", 1024)
-    service = PtyService(home=meiva_home(), process_control=SYSTEM_PROCESS_CONTROL)
-    service._sessions[session.name] = session
+def test_closure_error_releases_the_allocation_fence(live_session: MakeSession) -> None:
+    session = live_session("meiva-test-closure-error", 1024)
+    control = FakeProcessControl(groups={session.pid: session.pid})
+    control.refuse(session.pid, PermissionError("group signal denied"))
+    refusing = PtyService(home=meiva_home(), process_control=control)
+    refusing._sessions[session.name] = session
 
-    def failed_capture() -> bool:
-        raise PermissionError("foreground preparation failed")
+    with pytest.raises(PermissionError, match="group signal denied"):
+        refusing.close_everything(grace_s=0, kill_s=0)
 
-    monkeypatch.setattr(session, "capture_foreground", failed_capture)
-    with pytest.raises(PermissionError, match="foreground preparation failed"):
-        service.close_everything(grace_s=0, kill_s=0)
-    assert service._closing is False
+    assert refusing._closing is False
 
 
-def test_the_client_reads_survivors_from_a_kill_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+# meiva:note
+# A listener on the service's socket that answers every request with one kill verdict.
+class _KillAnswerService:
+    def __init__(self) -> None:
+        self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._server.bind(str(service_socket()))
+        self._server.listen(1)
+        self._thread = threading.Thread(target=self._answer_once, daemon=True)
+        self._thread.start()
+
+    def _answer_once(self) -> None:
+        conn, _ = self._server.accept()
+        with conn:
+            line = protocol.read_line(conn)
+            assert line is not None
+            request = protocol.decode_object(line)
+            assert request["method"] == "kill"
+            verdict = {"mode": "forced", "interrupted": True, "survivors": [4242]}
+            conn.sendall(protocol.encode(protocol.ok(request["id"], verdict)))
+
+    def close(self) -> None:
+        self._thread.join(timeout=5)
+        self._server.close()
+
+
+def test_the_client_reads_survivors_from_a_kill_answer(unit_home: Path) -> None:
     """A finished but interrupted kill reaches the caller as a verdict, survivors named."""
+    (unit_home / "run").mkdir(exist_ok=True)
+    service = _KillAnswerService()
+    try:
+        verdict = client.kill("meiva-test-race-2", graceful=False, socket_path=service_socket())
+    finally:
+        service.close()
 
-    def request(method: str, **_fields: object) -> dict[str, object]:
-        assert method == "kill"
-        return {"mode": "forced", "interrupted": True, "survivors": [4242]}
-
-    monkeypatch.setattr(client, "request", request)
-
-    assert client.kill(
-        "meiva-test-race-2", graceful=False, socket_path=service_socket()
-    ) == client.KillVerdict("forced", True, (4242,))
+    assert verdict == client.KillVerdict("forced", True, (4242,))

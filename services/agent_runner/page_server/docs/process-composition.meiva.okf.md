@@ -26,8 +26,17 @@ separate progress trackers: a crashing loop cancels its sibling. Cleanup keeps
 its original order: stop health, close the pool, remove the pidfile. Signal
 handling, bounded cancellation drain and hard exit keep their existing entry
 behavior; this composition does not change page leases or child resources.
-The entry test records logging, named shutdown registration and running in order.
-Its signal substitute isolates real process handlers; OS delivery is a separate boundary.
+The entry test starts the real daemon as a child process against the test cluster:
+it serves its health endpoint with both loops registered, its database connections
+carry one `page_server` application name, SIGTERM ends it with code 0 and no pidfile,
+and a second instance exits with code 1.
+
+Decisions between effects are values in, plan out. `page_plan` decides the page
+command, which handles are stale, whether a row is adopted, created or closed, when a
+server is probed and which shell supervises which page; `occupant_plan` decides which
+detached servers are kept, skipped or killed. `daemon.reconcile_rows` executes those
+plans over one snapshot of the open rows, so a caller that holds an older snapshot
+reproduces a row that closed after it was read.
 
 Endpoint and pidfile operations are defined by `page_server.resources`. They
 borrow the entry's prepared config and resolved runtime path; each lookup uses

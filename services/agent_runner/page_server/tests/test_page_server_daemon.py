@@ -1,530 +1,190 @@
-"""Page-server daemon tests for persistent agent page shells."""
+# meiva:note
+# Page-server daemon pass against the real pty service, real shells and the throwaway Postgres.
 
 from __future__ import annotations
 
-import dataclasses
-import os
 import secrets
-import sys
-from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any
+from typing import Literal
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
 import services.agent_runner.page_server.daemon as psd
-from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config.service_read import ConfigAuthority
-from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus
-from base.lm.catalog import ModelCatalog
-from services.agent_runner.page_server.tests.page_shell import PageShellBackend
+from base.sessions.pty import client
+from base.sessions.pty.tests.pty_service import service_socket
+from services.agent_runner.page_server.page_plan import PageKey, ServerHandle
+from services.agent_runner.page_server.tests.page_pty import (
+    HOST,
+    close_row,
+    free_port,
+    insert_page_row,
+    leaving_open_set_after_claim,
+    page_state,
+    reconcile,
+    reconcile_snapshot,
+    session_names,
+    wait_until_healthy,
+)
 
-HOST = "127.0.0.1"
-_ACTIVE_BACKEND: list[PageShellBackend] = []
-
-
-@pytest.fixture(autouse=True)
-def page_server_identity(machine_identity: MachineIdentity) -> None:
-    machine_identity.set(host=HOST)
-
-
-@pytest.fixture
-def backend() -> Iterator[PageShellBackend]:
-    fake = PageShellBackend()
-    _ACTIVE_BACKEND.append(fake)
-    try:
-        yield fake
-    finally:
-        _ACTIVE_BACKEND.pop()
+pytestmark = pytest.mark.usefixtures("page_server_identity", "pty_service")
 
 
-def default_reconcile_deps(fake: PageShellBackend | None = None) -> psd.ReconcileDeps:
-    active = fake if fake is not None else _ACTIVE_BACKEND[-1]
-    return psd.ReconcileDeps(
-        backend_factory=lambda: active,
-        occupants_fn=dict,
-        shell_pids_fn=lambda _wanted, _live=None: {},
-        live_sessions_fn=lambda: {name: SimpleNamespace(pid=12345) for name in active.sessions},
-    )
-
-
-@pytest.fixture
-def sync_pool(db_conn: psycopg.Connection) -> Iterator[ConnectionPool]:
-    from base.config import settings
-
-    pool: ConnectionPool = ConnectionPool(
-        settings.data_plane.db_url, min_size=1, max_size=2, open=True
-    )
-    yield pool
-    pool.close()
-
-
-def insert_page_row(
-    conn: psycopg.Connection,
+def test_open_row_creates_a_persistent_page_session_that_serves_with_its_token(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
     agent_id: int,
-    name: str,
-    port: int,
     serve_dir: Path,
-    *,
-    token: str | None = None,
-    session: str | None = None,
 ) -> None:
-    with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_pages (agent_id, name, port, host, serve_dir, server_token, session_name) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (agent_id, name, port, HOST, str(serve_dir), token, session),
-        )
-    conn.commit()
-
-
-def _close_row(conn: psycopg.Connection, agent_id: int, name: str) -> None:
-    with conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agent_pages SET closed_at = now() WHERE agent_id = %s AND name = %s",
-            (agent_id, name),
-        )
-    conn.commit()
-
-
-def reconcile(
-    pool: ConnectionPool,
-    managed: dict[tuple[int, str], psd.ServerHandle],
-    *,
-    deps: psd.ReconcileDeps | None = None,
-    **overrides: Any,
-) -> None:
-    base_deps = default_reconcile_deps() if deps is None else deps
-    if overrides:
-        base_deps = dataclasses.replace(base_deps, **overrides)
-    psd.reconcile_once(pool, managed, HOST, EventBus.from_settings(), deps=base_deps)
-
-
-def _token_and_session(conn: psycopg.Connection, agent_id: int, name: str) -> tuple[str, str]:
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT server_token, session_name FROM agent_pages WHERE agent_id = %s AND name = %s",
-            (agent_id, name),
-        )
-        row = cur.fetchone()
-    assert row is not None and row[0] is not None and row[1] is not None
-    return str(row[0]), str(row[1])
-
-
-def test_open_row_creates_persistent_page_session_and_persists_token(
-    redis_url: str,
-    sync_pool: ConnectionPool,
-    db_conn: psycopg.Connection,
-    backend: PageShellBackend,
-    tmp_path: Path,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    insert_page_row(db_conn, agent_id, "My_Page", 12001, tmp_path)
-    managed: dict[tuple[int, str], psd.ServerHandle] = {}
+    port = free_port()
+    insert_page_row(db_conn, agent_id, "My_Page", port, serve_dir)
+    managed: dict[PageKey, ServerHandle] = {}
 
     reconcile(sync_pool, managed)
 
-    token, page_session = _token_and_session(db_conn, agent_id, "My_Page")
-    assert page_session == f"meiva-agent-{agent_id}-shell-0-page-my-page"
+    state = page_state(db_conn, agent_id, "My_Page")
+    assert state.session_name == f"meiva-agent-{agent_id}-shell-0-page-my-page"
+    assert state.session_name is not None and state.token is not None
     assert set(managed) == {(agent_id, "My_Page")}
-    assert backend.new_calls == [
-        (
-            page_session,
-            f"{sys.executable} -m services.agent_runner.page_server.server --port 12001 --host {HOST} --dir {tmp_path}",
-            tmp_path,
-            {**os.environ, "PAGE_SERVER_TOKEN": token},
-        )
-    ]
+    assert session_names() == {state.session_name}
+    assert client.live_sessions(socket_path=service_socket())[state.session_name].cwd == str(
+        serve_dir
+    )
+    wait_until_healthy(port, state.token)
 
     reconcile(sync_pool, managed)
-    assert _token_and_session(db_conn, agent_id, "My_Page") == (token, page_session)
-    assert len(backend.new_calls) == 1
+    assert page_state(db_conn, agent_id, "My_Page") == state
+    assert session_names() == {state.session_name}
 
 
-def test_new_row_session_created_before_slow_housekeeping(
-    redis_url: str,
+def test_a_restarted_daemon_adopts_the_live_session_of_a_healthy_page(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: PageShellBackend,
-    tmp_path: Path,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    agent_id: int,
+    serve_dir: Path,
 ) -> None:
-    """A freshly registered row's session is created BEFORE the pass's slow
-    housekeeping (the process scan) — serve()'s wait is one poll, not one
-    full pass. The re-scan after creation must keep the new session alive
-    through the rest of the pass (a stale scan would reap it as dead)."""
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    key = (agent_id, "fast-lane")
-    insert_page_row(db_conn, agent_id, key[1], 12030, tmp_path)
-    events: list[str] = []
+    port = free_port()
+    insert_page_row(db_conn, agent_id, "adopted", port, serve_dir)
+    reconcile(sync_pool, {})
+    state = page_state(db_conn, agent_id, "adopted")
+    assert state.token is not None
+    wait_until_healthy(port, state.token)
+    (before,) = client.list_sessions(socket_path=service_socket())
 
-    def _occupants() -> dict[int, tuple[int, str | None]]:
-        events.append("occupants")
-        return {}
+    restarted: dict[PageKey, ServerHandle] = {}
+    reconcile(sync_pool, restarted)
 
-    # The fixture's pty record scan mirrors the fake backend's session set: the
-    # session created in the fast path appears in the post-creation re-scan.
-    orig_new = backend.new_session
-
-    def _new(name: str, command: str, cwd: Path, *, env: dict[str, str], **_kw: object) -> bool:
-        events.append("create")
-        return orig_new(name, command, cwd, env=env, **_kw)
-
-    backend.new_session = _new
-    managed: dict[tuple[int, str], psd.ServerHandle] = {}
-
-    reconcile(sync_pool, managed, occupants_fn=_occupants)
-
-    assert events[0] == "create"
-    assert "occupants" in events
-    assert set(managed) == {key}
-    assert backend.killed == []
-
-
-def test_managed_row_liveness_uses_record_scan_not_backend_round_trip(
-    redis_url: str,
-    sync_pool: ConnectionPool,
-    db_conn: psycopg.Connection,
-    backend: PageShellBackend,
-    tmp_path: Path,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    """Managed-row liveness comes from the pass's in-process pty record scan,
-    not the backend's per-name has_session — a subprocess round-trip (~0.25s)
-    per row that stretched a pass to tens of seconds."""
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    key = (agent_id, "scan-live")
-    page_session = f"meiva-agent-{agent_id}-shell-9-page-scan-live"
-    insert_page_row(
-        db_conn,
-        agent_id,
-        key[1],
-        12031,
-        tmp_path,
-        token=secrets.token_hex(16),
-        session=page_session,
-    )
-    calls: list[str] = []
-    orig_has = backend.has_session
-
-    def _has(name: str) -> bool:
-        calls.append(name)
-        return orig_has(name)
-
-    backend.has_session = _has
-    managed: dict[tuple[int, str], psd.ServerHandle] = {}
-
-    reconcile(
-        sync_pool,
-        managed,
-        live_sessions_fn=lambda: {page_session: SimpleNamespace(pid=12345)},
-        server_healthy_fn=lambda *_args: True,
-    )
-
-    assert set(managed) == {key}
-    assert backend.new_calls == []
-    assert calls == []
-
-
-def test_healthy_page_is_not_resent(
-    redis_url: str,
-    sync_pool: ConnectionPool,
-    db_conn: psycopg.Connection,
-    backend: PageShellBackend,
-    tmp_path: Path,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    page_session = f"meiva-agent-{agent_id}-shell-3-page-live"
-    backend.sessions.add(page_session)
-    insert_page_row(
-        db_conn,
-        agent_id,
-        "live",
-        12002,
-        tmp_path,
-        token=secrets.token_hex(16),
-        session=page_session,
-    )
-    managed: dict[tuple[int, str], psd.ServerHandle] = {}
-
-    reconcile(sync_pool, managed, server_healthy_fn=lambda *_args: True)
-
-    assert set(managed) == {(agent_id, "live")}
-    assert backend.new_calls == []
-    assert backend.sent == []
+    assert set(restarted) == {(agent_id, "adopted")}
+    assert restarted[(agent_id, "adopted")].session_name == state.session_name
+    assert [info.pid for info in client.list_sessions(socket_path=service_socket())] == [before.pid]
+    wait_until_healthy(port, state.token)
 
 
 def test_closed_row_kills_its_page_session(
-    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: PageShellBackend,
-    tmp_path: Path,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    agent_id: int,
+    serve_dir: Path,
 ) -> None:
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    insert_page_row(db_conn, agent_id, "closed", 12006, tmp_path)
-    managed: dict[tuple[int, str], psd.ServerHandle] = {}
-
+    insert_page_row(db_conn, agent_id, "closed", free_port(), serve_dir)
+    managed: dict[PageKey, ServerHandle] = {}
     reconcile(sync_pool, managed)
     page_session = managed[(agent_id, "closed")].session_name
-    _close_row(db_conn, agent_id, "closed")
+    assert session_names() == {page_session}
+
+    close_row(db_conn, agent_id, "closed")
     reconcile(sync_pool, managed)
 
-    assert backend.killed == [page_session]
+    assert session_names() == set()
     assert managed == {}
 
 
 def test_stale_snapshot_never_creates_session_for_closed_row(
-    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: PageShellBackend,
-    tmp_path: Path,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    agent_id: int,
+    serve_dir: Path,
 ) -> None:
     """The pass snapshot can be seconds stale (process scans, session spawns
     happen after the row read). A row closed after the snapshot must not get a
     session created for it — the next pass would reap the fresh session as an
     orphan, the user-visible serve 502 race (rows 1643/1667 incidents)."""
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    key = (agent_id, "stale-race")
-    insert_page_row(db_conn, agent_id, key[1], 12020, tmp_path)
-    stale = psd.open_rows(sync_pool, HOST)[0]
-    _close_row(db_conn, agent_id, key[1])
-    managed: dict[tuple[int, str], psd.ServerHandle] = {}
+    insert_page_row(db_conn, agent_id, "stale-race", free_port(), serve_dir)
+    stale = psd.open_rows(sync_pool, HOST)
+    close_row(db_conn, agent_id, "stale-race")
+    managed: dict[PageKey, ServerHandle] = {}
 
-    reconcile(sync_pool, managed, open_rows_fn=lambda _pool, _host: [stale])
+    reconcile_snapshot(sync_pool, managed, stale)
 
-    assert backend.new_calls == []
-    assert backend.killed == []
+    assert session_names() == set()
     assert managed == {}
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT session_name, server_token FROM agent_pages WHERE agent_id = %s AND name = %s",
-            (agent_id, key[1]),
-        )
-        row = cur.fetchone()
-        assert row is not None and row[0] is None
-        # No token is minted for a closed row (the mint is deferred until
-        # after the liveness re-check, never evaluated eagerly).
-        assert row[1] is None
+    state = page_state(db_conn, agent_id, "stale-race")
+    # No token is minted for a closed row (the mint is deferred until
+    # after the liveness re-check, never evaluated eagerly).
+    assert (state.session_name, state.token) == (None, None)
 
 
 def test_stale_snapshot_skips_row_re_registered_mid_pass(
-    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: PageShellBackend,
-    tmp_path: Path,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    agent_id: int,
+    serve_dir: Path,
 ) -> None:
     """A row re-registered (port/serve_dir changed) after the snapshot must
     not be created from the obsolete state either — the new registration is
     adopted on the next pass instead."""
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
+    insert_page_row(db_conn, agent_id, "re-registered", free_port(), serve_dir)
+    stale = psd.open_rows(sync_pool, HOST)
+    db_conn.execute(
+        "UPDATE agent_pages SET port = %s WHERE agent_id = %s AND name = 're-registered'",
+        (free_port(), agent_id),
     )
-    key = (agent_id, "re-registered")
-    insert_page_row(db_conn, agent_id, key[1], 12021, tmp_path)
-    stale = psd.open_rows(sync_pool, HOST)[0]
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agent_pages SET port = 12022 WHERE agent_id = %s AND name = %s",
-            (agent_id, key[1]),
-        )
     db_conn.commit()
-    managed: dict[tuple[int, str], psd.ServerHandle] = {}
+    managed: dict[PageKey, ServerHandle] = {}
 
-    reconcile(sync_pool, managed, open_rows_fn=lambda _pool, _host: [stale])
+    reconcile_snapshot(sync_pool, managed, stale)
 
-    assert backend.new_calls == []
+    assert session_names() == set()
     assert managed == {}
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT session_name FROM agent_pages WHERE agent_id = %s AND name = %s",
-            (agent_id, key[1]),
-        )
-        row = cur.fetchone()
-        assert row is not None and row[0] is None
+    assert page_state(db_conn, agent_id, "re-registered").session_name is None
 
 
-def test_session_rolled_back_when_row_expires_during_create(
-    redis_url: str,
+# meiva:note
+# The row can still close or expire in the narrow window between the claim and the
+# session_name write that follows the shell's creation. The just-created session is rolled
+# back (killed) instead of lingering as a recordless ghost the next pass would reap as an
+# orphan.
+@pytest.mark.parametrize("column", ["expired_at", "closed_at"])
+def test_a_session_created_for_a_row_that_left_the_open_set_is_rolled_back(
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: PageShellBackend,
-    tmp_path: Path,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    agent_id: int,
+    serve_dir: Path,
+    column: Literal["expired_at", "closed_at"],
 ) -> None:
-    """A row that expires in the window between the liveness re-check and the
-    session_name write is rolled back too — the UPDATE's liveness condition
-    matches the re-check, so an expired row never keeps a ghost session."""
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    key = (agent_id, "mid-create-expire")
-    insert_page_row(db_conn, agent_id, key[1], 12024, tmp_path)
-    stale = psd.open_rows(sync_pool, HOST)[0]
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agent_pages SET expired_at = now() WHERE agent_id = %s AND name = %s",
-            (agent_id, key[1]),
-        )
-    db_conn.commit()
-    managed: dict[tuple[int, str], psd.ServerHandle] = {}
+    insert_page_row(db_conn, agent_id, "mid-create", free_port(), serve_dir)
+    managed: dict[PageKey, ServerHandle] = {}
 
-    reconcile(
-        sync_pool,
-        managed,
-        open_rows_fn=lambda _pool, _host: [stale],
-        row_matches_fn=lambda _pool, _row: True,
-    )
+    with leaving_open_set_after_claim(db_conn, column):
+        reconcile(sync_pool, managed)
 
-    assert backend.new_calls == []
-    assert backend.killed == []
+    assert session_names() == set()
     assert managed == {}
-
-
-def test_session_created_for_row_closed_during_create_is_rolled_back(
-    redis_url: str,
-    sync_pool: ConnectionPool,
-    db_conn: psycopg.Connection,
-    backend: PageShellBackend,
-    tmp_path: Path,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
-) -> None:
-    """The row can still close in the narrow window between the liveness
-    re-check and the session_name write. The just-created session is rolled
-    back (killed) instead of lingering as a recordless ghost the next pass
-    would reap as an orphan."""
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    key = (agent_id, "mid-create-close")
-    insert_page_row(db_conn, agent_id, key[1], 12023, tmp_path)
-    stale = psd.open_rows(sync_pool, HOST)[0]
-    _close_row(db_conn, agent_id, key[1])
-    managed: dict[tuple[int, str], psd.ServerHandle] = {}
-
-    reconcile(
-        sync_pool,
-        managed,
-        open_rows_fn=lambda _pool, _host: [stale],
-        row_matches_fn=lambda _pool, _row: True,
-    )
-
-    assert backend.new_calls == []
-    assert backend.killed == []
-    assert managed == {}
+    assert page_state(db_conn, agent_id, "mid-create").closed
 
 
 def test_terminated_agent_keeps_daemon_page_session(
-    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: PageShellBackend,
-    tmp_path: Path,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    agent_id: int,
+    serve_dir: Path,
 ) -> None:
     """Agent termination does not close a daemon-supervised page row or shell."""
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
     key = (agent_id, "persistent")
-    insert_page_row(db_conn, agent_id, key[1], 12016, tmp_path)
-    managed: dict[tuple[int, str], psd.ServerHandle] = {}
-
+    insert_page_row(db_conn, agent_id, key[1], free_port(), serve_dir)
+    managed: dict[PageKey, ServerHandle] = {}
     reconcile(sync_pool, managed)
     page_session = managed[key].session_name
     with db_conn.cursor() as cur:
@@ -533,82 +193,109 @@ def test_terminated_agent_keeps_daemon_page_session(
 
     reconcile(sync_pool, managed)
 
-    assert backend.killed == []
-    assert backend.sessions == {page_session}
+    assert session_names() == {page_session}
     assert set(managed) == {key}
     assert [(row.agent_id, row.name) for row in psd.open_rows(sync_pool, HOST)] == [key]
 
 
 def test_daemon_restart_kills_the_persisted_session_of_a_closed_row(
-    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: PageShellBackend,
-    tmp_path: Path,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    agent_id: int,
+    serve_dir: Path,
 ) -> None:
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    page_session = f"meiva-agent-{agent_id}-shell-4-page-closed-after-restart"
-    backend.sessions.add(page_session)
-    insert_page_row(
-        db_conn, agent_id, "closed-after-restart", 12014, tmp_path, session=page_session
-    )
-    _close_row(db_conn, agent_id, "closed-after-restart")
+    insert_page_row(db_conn, agent_id, "closed-after-restart", free_port(), serve_dir)
+    reconcile(sync_pool, {})
+    assert len(session_names()) == 1
+    close_row(db_conn, agent_id, "closed-after-restart")
 
     reconcile(sync_pool, {})
 
-    assert backend.killed == [page_session]
+    assert session_names() == set()
 
 
 def test_lost_page_session_is_closed_without_relaunch_or_agent_notice(
-    redis_url: str,
     sync_pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    backend: PageShellBackend,
-    tmp_path: Path,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    agent_id: int,
+    serve_dir: Path,
 ) -> None:
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
     insert_page_row(
         db_conn,
         agent_id,
         "lost",
-        12111,
-        tmp_path,
+        free_port(),
+        serve_dir,
         token=secrets.token_hex(16),
         session=f"meiva-agent-{agent_id}-shell-1-page-lost",
     )
     before = db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent_id,)
     ).fetchone()
+
     for _ in range(3):
         reconcile(sync_pool, {})  # New in-memory state, as after a daemon restart.
-    assert backend.new_calls == []
-    assert db_conn.execute(
-        "SELECT closed_at IS NOT NULL FROM agent_pages WHERE agent_id = %s AND name = 'lost'",
-        (agent_id,),
-    ).fetchone() == (True,)
+
+    assert session_names() == set()
+    assert page_state(db_conn, agent_id, "lost").closed
     assert (
         db_conn.execute(
             "SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent_id,)
         ).fetchone()
         == before
     )
+
+
+# meiva:note
+# The handle as it is once its spawn window is over.
+def _aged(handle: ServerHandle, *, launch: str | None = None) -> ServerHandle:
+    return replace(
+        handle,
+        token=handle.token if launch is None else launch,
+        last_launch_monotonic=handle.last_launch_monotonic - 60.0,
+    )
+
+
+def test_an_aged_handle_whose_server_answers_with_its_token_is_kept(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    agent_id: int,
+    serve_dir: Path,
+) -> None:
+    key = (agent_id, "answering")
+    port = free_port()
+    insert_page_row(db_conn, agent_id, key[1], port, serve_dir)
+    managed: dict[PageKey, ServerHandle] = {}
+    reconcile(sync_pool, managed)
+    wait_until_healthy(port, managed[key].token)
+    managed[key] = _aged(managed[key])
+
+    reconcile(sync_pool, managed)
+
+    assert not page_state(db_conn, agent_id, key[1]).closed
+    assert session_names() == {managed[key].session_name}
+
+
+# meiva:note
+# The token is what proves the server on the port is the one this launch started: a
+# server that answers with another one is unavailable once the spawn window is over. The page
+# closes, its shell is killed and nothing relaunches it.
+def test_a_server_that_does_not_answer_with_the_launch_token_is_unavailable(
+    sync_pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    agent_id: int,
+    serve_dir: Path,
+) -> None:
+    key = (agent_id, "silent")
+    port = free_port()
+    insert_page_row(db_conn, agent_id, key[1], port, serve_dir)
+    managed: dict[PageKey, ServerHandle] = {}
+    reconcile(sync_pool, managed)
+    wait_until_healthy(port, managed[key].token)
+    managed[key] = _aged(managed[key], launch="another-launch")
+
+    reconcile(sync_pool, managed)
+
+    assert page_state(db_conn, agent_id, key[1]).closed
+    assert session_names() == set()
+    assert managed == {}

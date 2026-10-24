@@ -1,193 +1,169 @@
-"""The executable owns one image, admission gate and bounded event writer."""
+# meiva:note
+# The ops executable, started as a supervisor starts it, against the test cluster.
 
 from __future__ import annotations
 
-import asyncio
 import signal
-from collections.abc import Callable
+import socket
+import sys
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
-from typing import Any, cast
 
-import pytest
+import psycopg
 
-from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
-from base.config.tests.configuration import snapshot_process_config
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.db.config import DbConfig, db_config_from_boot
-from base.host.system.hostport import Host
-from base.native_process.loaded_commit import LoadedCommit
-from base.telemetry.delivery.pipeline import EventPipeline
-from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus
-from services.agent_runner.agent_ops import daemon
+from services.agent_runner.agent_ops import boot
+from services.agent_runner.tests.real_daemon import run_to_exit, running_daemon
+
+_DAEMON = [sys.executable, "-m", "services.agent_runner.agent_ops.daemon"]
+# meiva:note
+# The supervisor's stop window: the daemon must leave well inside it.
+_STOP_WINDOW_S = 8.0
 
 
-class _ExitError(Exception):
-    def __init__(self, code: int) -> None:
-        self.code = code
-
-
-def _assert_run_owner(
-    database: Callable[[], Database],
-    image: LoadedCommit,
-    captures: list[object],
-    roots: list[tuple[Callable[[], Database], MachineIdentity]],
-    gates: list[ProcessDbGate],
-    readers: list[Callable[[], str]],
-    machine: MachineIdentity,
-) -> None:
-    """The run borrows exactly the entry's image, database factory and identity."""
-    assert image is captures[0]
-    assert len(roots) == 1 and roots[0][0] is database
-    assert roots[0][1] is machine
-    assert database() is database()
-    assert gates[0] is gates[1]
-    assert readers == [machine.host, machine.host]
-
-
-@pytest.mark.parametrize("sha", ["captured-image", None])
-@pytest.mark.parametrize("failure", [None, RuntimeError("dispatch crash"), KeyboardInterrupt()])
-def test_entry_shares_image_gate_factory_and_closes_writer(  # noqa: PLR0915 -- one entry litany: image, gate, factory, writer and the stop's signal posture.
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    database: Database,
+def test_the_daemon_serves_registers_and_stops_cleanly_on_sigterm(
+    unit_home: Path,
+    db_conn: psycopg.Connection,
     process_config: ConfigBoot,
-    sha: str | None,
-    failure: BaseException | None,
+    db_url: str,
+    redis_url: str,
 ) -> None:
-    image = LoadedCommit(source_root=tmp_path, sha=sha)
-    captures: list[object] = []
-    gates: list[ProcessDbGate] = []
-    events: list[object] = []
-    roots: list[tuple[Callable[[], Database], MachineIdentity]] = []
-    readers: list[Callable[[], str]] = []
-    runner = asyncio.Runner()
+    runtime = unit_home / "run"
+    port = boot.endpoint(process_config, runtime=runtime).health_port
 
-    class Pipeline:
-        def stop(self, timeout: float) -> DrainResult:
-            events.append(("stop", timeout))
-            return DrainResult(DrainStatus.COMPLETED, DrainPhase.STOP)
+    with running_daemon(
+        _DAEMON,
+        home=unit_home,
+        health_port=port,
+        machine_name="ops-entry",
+        db_url=db_url,
+        redis_url=redis_url,
+    ) as daemon:
+        report = daemon.healthz()
+        registered = db_conn.execute("SELECT name FROM machines").fetchall()
+        pidfile_exists = (runtime / "ops.pid").exists()
+        unauthenticated = _post_ops_status(port)
 
-    pipeline = Pipeline()
+        code = daemon.stop()
 
-    def capture() -> LoadedCommit:
-        captures.append(image)
-        return image
+    assert (report["name"], report["status"], report["saturation"]) == ("ops", "ok", 0.0)
+    assert [component["name"] for component in report["components"]] == ["loop", "ops"]
+    assert ("ops-entry",) in registered
+    assert pidfile_exists
+    assert unauthenticated == 401, "/ops answers nothing to a caller without a bearer"
+    assert code == 0
+    assert not (runtime / "ops.pid").exists()
 
-    def build_database(
-        value: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
-    ) -> Database:
-        assert value == db_config_from_boot(process_config)
-        gates.append(gate)
-        readers.append(direct_url.local_host)
-        return database
 
-    def build_pipeline(
-        *, database: Callable[[], Database], machine: MachineIdentity, home: Path
-    ) -> EventPipeline:
-        roots.append((database, machine))
-        return cast(EventPipeline, pipeline)
-
-    def init(**kwargs: Any) -> None:
-        assert kwargs["name"] == "ops"
-        assert kwargs["image"] is image
-        assert kwargs["producer"]() is pipeline
-        assert kwargs["producer"]() is pipeline
-        assert kwargs["machine_reader"] == roots[0][1].name
-        events.append("logging")
-
-    async def run(
-        *,
-        database: Callable[[], Database],
-        image: LoadedCommit,
-        local_machine: MachineIdentity,
-        config: ConfigBoot,
-        host: Host,
-    ) -> None:
-        _assert_run_owner(database, image, captures, roots, gates, readers, local_machine)
-        events.append("run")
-        if isinstance(failure, KeyboardInterrupt):
-            # The stop's real shape: it unwinds through the internal TaskGroup,
-            # whose drain replays the same interrupt (task #5129).
-            interruption = failure
-
-            async def stop() -> None:
-                raise interruption
-
-            try:
-                async with asyncio.TaskGroup() as group:
-                    group.create_task(stop())
-                    await asyncio.Event().wait()
-            finally:
-                events.append("cleanup-start")
-                await asyncio.sleep(0.01)
-                events.append("cleanup-end")
-            return
-        if failure is not None:
-            raise failure
-
-    def hard_exit(code: int) -> None:
-        raise _ExitError(code)
-
-    def install_shutdown(name: str) -> None:
-        assert name == "ops"
-        events.append("shutdown")
-
-    previous_sigterm = signal.getsignal(signal.SIGTERM)
+def _post_ops_status(port: int) -> int:
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}/ops",
+        data=b'{"kind": "config_read", "payload": {}}',
+        method="POST",
+    )
     try:
-        with pytest.raises(_ExitError) as exited:
-            daemon.main(
-                argv=[],
-                exit_process=hard_exit,
-                capture_image=capture,
-                config_factory=lambda: process_config,
-                database_cls=build_database,
-                pipeline_builder=build_pipeline,
-                init_process=init,
-                install_shutdown=install_shutdown,
-                runner_factory=lambda: runner,
-                serve_daemon=run,
-            )
-        assert exited.value.code == (1 if isinstance(failure, Exception) else 0)
-        assert captures == [image]
-        assert events == (
-            ["logging", "shutdown", "run", "cleanup-start", "cleanup-end", ("stop", 2)]
-            if isinstance(failure, KeyboardInterrupt)
-            else ["logging", "shutdown", "run", ("stop", 2)]
+        # meiva:note
+        # See the directive.
+        with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
+            return response.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+
+
+def test_a_second_daemon_leaves_with_code_one_while_the_first_runs(
+    unit_home: Path, process_config: ConfigBoot, db_url: str, redis_url: str
+) -> None:
+    port = boot.endpoint(process_config, runtime=unit_home / "run").health_port
+    with running_daemon(
+        _DAEMON,
+        home=unit_home,
+        health_port=port,
+        machine_name="ops-a",
+        db_url=db_url,
+        redis_url=redis_url,
+    ):
+        code, log = run_to_exit(
+            _DAEMON, home=unit_home, machine_name="ops-b", db_url=db_url, redis_url=redis_url
         )
-        if isinstance(failure, KeyboardInterrupt):
-            # The stop path ignores a retried SIGTERM, so its drain always reaches
-            # the bounded hard exit instead of interpreter teardown.
-            assert signal.getsignal(signal.SIGTERM) is signal.SIG_IGN
+
+    assert code == 1
+    assert "indicates another instance is alive" in log
+
+
+def test_a_daemon_on_a_database_without_the_schema_leaves_with_code_one(
+    unit_home: Path, db_conn: psycopg.Connection, db_url: str, redis_url: str
+) -> None:
+    db_conn.autocommit = True
+    db_conn.execute("CREATE DATABASE ops_without_schema")
+    empty_url = db_url.rsplit("/", 1)[0] + "/ops_without_schema"
+    try:
+        code, log = run_to_exit(
+            _DAEMON,
+            home=unit_home,
+            machine_name="ops-bad-schema",
+            db_url=empty_url,
+            redis_url=redis_url,
+        )
     finally:
-        signal.signal(signal.SIGTERM, previous_sigterm)
-        runner.close()
+        db_conn.execute("DROP DATABASE ops_without_schema WITH (FORCE)")
+
+    assert code == 1
+    assert "schema version mismatch on ops-server startup" in log
+    assert not (unit_home / "run" / "ops.pid").exists(), "the failed start left its pidfile"
 
 
-def test_entry_keeps_startup_failure_when_writer_close_also_fails(tmp_path: Path) -> None:
-    primary = RuntimeError("logging startup refused")
-    closed: list[float] = []
+# meiva:note
+# The health port is held by another listener, so the daemon cannot serve: the failure
+# escapes `serve_ops_daemon` and still reaches the log, and the supervisor sees a code.
+def test_a_crash_escaping_the_daemon_is_logged_with_its_traceback_and_leaves_a_nonzero_code(
+    unit_home: Path, db_url: str, redis_url: str
+) -> None:
+    with socket.socket() as holder:
+        holder.bind(("127.0.0.1", 0))
+        holder.listen(1)
+        port = holder.getsockname()[1]
 
-    def init(**_kwargs: Any) -> None:
-        raise primary
-
-    class _FailingClientSet(daemon.ClientSet):
-        def close(self, *, pipeline_timeout: float = 2) -> None:
-            closed.append(pipeline_timeout)
-            raise RuntimeError("writer stop refused")
-
-    with pytest.raises(RuntimeError) as raised:
-        daemon.main(
-            argv=[],
-            capture_image=lambda: LoadedCommit(source_root=tmp_path, sha=None),
-            config_factory=snapshot_process_config,
-            client_set_cls=_FailingClientSet,
-            init_process=init,
+        code, log = run_to_exit(
+            _DAEMON,
+            home=unit_home,
+            machine_name="ops-crash",
+            db_url=db_url,
+            redis_url=redis_url,
+            extra={"MEIVA_OPS_HEALTH_PORT": str(port)},
         )
-    assert raised.value is primary
-    assert closed == [2]
-    assert raised.value.__notes__ == [
-        "ops event pipeline shutdown failed: RuntimeError('writer stop refused')"
-    ]
+
+    assert code == 1
+    assert "daemon crashed" in log
+    assert "address already in use" in log.lower()
+    assert not (unit_home / "run" / "ops.pid").exists(), "the crashed start left its pidfile"
+
+
+# meiva:note
+# A second SIGTERM that lands while the first is draining must not skip the hard exit into
+# interpreter teardown (task #5129): the process leaves inside the stop window with code 0.
+def test_a_retried_stop_does_not_abort_the_bounded_exit(
+    unit_home: Path, process_config: ConfigBoot, db_url: str, redis_url: str
+) -> None:
+    port = boot.endpoint(process_config, runtime=unit_home / "run").health_port
+    workspace = unit_home / "workspaces" / "7"
+    workspace.mkdir(parents=True)
+    (workspace / "to_user.md").write_text("pending")
+
+    with running_daemon(
+        _DAEMON,
+        home=unit_home,
+        health_port=port,
+        machine_name="ops-retried-stop",
+        db_url=db_url,
+        redis_url=redis_url,
+    ) as daemon:
+        began = time.monotonic()
+        daemon.process.send_signal(signal.SIGTERM)
+        daemon.process.send_signal(signal.SIGTERM)
+        code = daemon.process.wait(timeout=_STOP_WINDOW_S + 5)
+        elapsed = time.monotonic() - began
+
+    assert code == 0, daemon.log()
+    assert elapsed < _STOP_WINDOW_S, f"the stop took {elapsed:.2f}s"

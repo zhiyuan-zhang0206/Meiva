@@ -16,14 +16,12 @@ if __name__ == "__main__":
 
 import asyncio
 import functools
-import hashlib
-import json
 import logging
 import signal
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, assert_never
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -57,8 +55,8 @@ from base.telemetry import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from ops import lifecycle
 from ops.cluster_status import ShellNotFoundError
-from ops.rpc_schemas import LaunchAgentRequest, LifecyclePayload, OpEnvelope, OpStatus, is_op_kind
-from services.agent_runner.agent_ops import boot, health, in_flight
+from ops.rpc_schemas import LaunchAgentRequest, LifecyclePayload, OpStatus, is_op_kind
+from services.agent_runner.agent_ops import boot, health, idempotency_plan, in_flight, ops_plan
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
 from services.agent_runner.agent_ops.to_user_resource import resource_route
 from services.agent_runner.agent_ops.to_user_watch import watch_to_user
@@ -71,7 +69,7 @@ DEDUP_WAIT_ATTEMPTS = 30
 
 
 DISPATCH_RETRY_ATTEMPTS = 3
-_DISPATCH_RETRY_BACKOFF_S = 0.5
+DISPATCH_RETRY_BACKOFF_S = 0.5
 
 
 ActiveOps = dict[str, tuple[str, float]]
@@ -90,10 +88,8 @@ async def run_arm(
     image: LoadedCommit,
     local_machine: MachineIdentity,
     host: Host,
-    dispatch_arm: Callable[..., Any] | None = None,
 ) -> tuple[OpStatus, dict[str, object]]:
 
-    arm_fn = bind_dispatch_sync if dispatch_arm is None else dispatch_arm
     loop = asyncio.get_running_loop()
     active = (kind, time.monotonic())
     active_ops[kind] = active
@@ -101,7 +97,7 @@ async def run_arm(
         future = loop.run_in_executor(
             executor,
             functools.partial(
-                arm_fn,
+                _dispatch_in_thread,
                 kind,
                 payload,
                 pool=pool,
@@ -119,7 +115,7 @@ async def run_arm(
             active_ops.pop(kind)
 
 
-def bind_dispatch_sync(
+def _dispatch_in_thread(
     kind: str,
     payload: dict[str, Any],
     *,
@@ -129,7 +125,6 @@ def bind_dispatch_sync(
     image: LoadedCommit,
     local_machine: MachineIdentity,
     host: Host,
-    **kwargs: Any,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     return dispatch_sync(
@@ -141,14 +136,7 @@ def bind_dispatch_sync(
         image=image,
         local_machine=local_machine,
         host=host,
-        **kwargs,
     )
-
-
-async def _reconcile_launch_op(*args: Any, **kwargs: Any) -> Any:
-    from ops.lifecycle.launch_reconcile import reconcile_launch_op
-
-    return await reconcile_launch_op(*args, **kwargs)
 
 
 async def dispatch(
@@ -165,20 +153,16 @@ async def dispatch(
     image: LoadedCommit,
     local_machine: MachineIdentity,
     host: Host,
-    dispatch_arm: Callable[..., Any] | None = None,
-    launch_agent: Callable[..., Any] = lifecycle.launch_agent_op,
-    reconcile_launch: Callable[..., Any] = _reconcile_launch_op,
-    run_lifecycle: Callable[..., Any] = lifecycle.lifecycle_op,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     if not is_op_kind(kind):
-        return OpStatus.FAILED, {"error": f"unknown kind: {kind!r}"}
+        return ops_plan.unknown_kind(kind)
 
     try:
         match kind:
             case "spawn-launch":
                 db, bus = boot.ops_handles(database=database, authority=authority)
-                spawned = await launch_agent(
+                spawned = await lifecycle.launch_agent_op(
                     db,
                     bus,
                     LaunchAgentRequest.model_validate(payload),
@@ -190,8 +174,10 @@ async def dispatch(
 
                 return OpStatus.COMPLETED, spawned.model_dump(mode="json", exclude_none=True)
             case "launch-reconcile":
+                from ops.lifecycle.launch_reconcile import reconcile_launch_op
+
                 db, bus = boot.ops_handles(database=database, authority=authority)
-                result = await reconcile_launch(
+                result = await reconcile_launch_op(
                     db,
                     bus,
                     LaunchReconcileRequest.model_validate(payload),
@@ -202,7 +188,7 @@ async def dispatch(
             case "lifecycle":
                 lc = LifecyclePayload.model_validate(payload)
                 db, bus = boot.ops_handles(database=database, authority=authority)
-                resp = await run_lifecycle(
+                resp = await lifecycle.lifecycle_op(
                     db,
                     bus,
                     lc.path,
@@ -226,21 +212,15 @@ async def dispatch(
                     image=image,
                     local_machine=local_machine,
                     host=host,
-                    dispatch_arm=dispatch_arm,
                 )
-    except MeivaAgentError as exc:
-        return OpStatus.FAILED, {
-            "error": f"{type(exc).__name__}: {exc}",
-            "detail": str(exc),
-            "reason": exc.reason.value,
-        }
-    except (ValidationError, ValueError, InvalidConfigOverlay) as exc:
-        return OpStatus.FAILED, {"error": f"{type(exc).__name__}: {exc}"}
-    except ShellNotFoundError as exc:
-        return OpStatus.FAILED, {"error": f"{type(exc).__name__}: {exc}"}
-
-
-_dispatch = dispatch
+    except (
+        MeivaAgentError,
+        ValidationError,
+        ValueError,
+        InvalidConfigOverlay,
+        ShellNotFoundError,
+    ) as exc:
+        return ops_plan.failure_result(exc)
 
 
 async def dispatch_idempotent(
@@ -258,33 +238,16 @@ async def dispatch_idempotent(
     image: LoadedCommit,
     local_machine: MachineIdentity,
     host: Host,
-    dispatch_op: Callable[..., Any] = dispatch,
-    sleep: Callable[[float], Any] = asyncio.sleep,
     dedup_wait_attempts: int = DEDUP_WAIT_ATTEMPTS,
     dedup_wait_step_s: float = DEDUP_WAIT_STEP_S,
-    run_pass: Callable[..., Any] | None = None,
+    retry_backoff_s: float = DISPATCH_RETRY_BACKOFF_S,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     if not is_op_kind(kind):
-        return OpStatus.FAILED, {"error": f"unknown kind: {kind!r}"}
-    for attempt in range(DISPATCH_RETRY_ATTEMPTS):
+        return ops_plan.unknown_kind(kind)
+    failed_attempts = 0
+    while True:
         try:
-            if run_pass is not None:
-                return await run_pass(
-                    kind,
-                    payload,
-                    key,
-                    pool,
-                    active_ops=active_ops,
-                    workers=workers,
-                    executor=executor,
-                    catalog=catalog,
-                    authority=authority,
-                    database=database,
-                    image=image,
-                    local_machine=local_machine,
-                    host=host,
-                )
             return await dispatch_idempotent_pass(
                 kind,
                 payload,
@@ -299,21 +262,19 @@ async def dispatch_idempotent(
                 image=image,
                 local_machine=local_machine,
                 host=host,
-                dispatch_op=dispatch_op,
-                sleep=sleep,
                 dedup_wait_attempts=dedup_wait_attempts,
                 dedup_wait_step_s=dedup_wait_step_s,
             )
         except psycopg.OperationalError:
-            if attempt + 1 >= DISPATCH_RETRY_ATTEMPTS:
+            failed_attempts += 1
+            if not idempotency_plan.retry_pass(failed_attempts, DISPATCH_RETRY_ATTEMPTS):
                 raise
             _log.warning(
                 "dispatch idempotent pass died with OperationalError (attempt %d/%d); retrying",
-                attempt + 1,
+                failed_attempts,
                 DISPATCH_RETRY_ATTEMPTS,
             )
-            await sleep(_DISPATCH_RETRY_BACKOFF_S)
-    raise AssertionError("unreachable")
+            await asyncio.sleep(retry_backoff_s)
 
 
 async def dispatch_idempotent_pass(
@@ -331,25 +292,21 @@ async def dispatch_idempotent_pass(
     image: LoadedCommit,
     local_machine: MachineIdentity,
     host: Host,
-    dispatch_op: Callable[..., Any] = dispatch,
-    sleep: Callable[[float], Any] = asyncio.sleep,
     dedup_wait_attempts: int = DEDUP_WAIT_ATTEMPTS,
     dedup_wait_step_s: float = DEDUP_WAIT_STEP_S,
 ) -> tuple[OpStatus, dict[str, object]]:
 
-    request_hash = hashlib.sha256(
-        json.dumps([kind, payload], sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
-    ).hexdigest()
+    digest = idempotency_plan.request_hash(kind, payload)
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO api_idempotency (key, method, path, response_body, request_hash) "
             "VALUES (%s, 'ops', %s, %s, %s) "
             "ON CONFLICT (key) DO NOTHING RETURNING key",
-            (key, kind, json.dumps(payload), request_hash),
+            (key, kind, idempotency_plan.stored_body(payload), digest),
         )
         owned = cur.fetchone() is not None
     if owned:
-        status, result = await dispatch_op(
+        status, result = await dispatch(
             kind,
             payload,
             active_ops=active_ops,
@@ -368,7 +325,7 @@ async def dispatch_idempotent_pass(
             cur.execute(
                 "UPDATE api_idempotency SET op_status = %s, response_body = %s, "
                 "completed_at = now() WHERE key = %s AND method = 'ops'",
-                (status, json.dumps(result, default=str), key),
+                (status, idempotency_plan.stored_body(result), key),
             )
         return status, result
 
@@ -380,20 +337,17 @@ async def dispatch_idempotent_pass(
                 (key,),
             )
             row = cur.fetchone()
-        if row is not None:
-            if row[0] != "ops" or row[1] != kind or row[2] != request_hash:
-                return OpStatus.FAILED, {
-                    "error": "idempotency request identity conflict or legacy identity unavailable; "
-                    "the stored operation was not re-executed"
-                }
-            if row[3] is not None:
-                result: dict[str, object] = row[4] or {}
-                return OpStatus(row[3]), result
-        await sleep(dedup_wait_step_s)
-    return OpStatus.FAILED, {
-        "error": f"idempotency key {key!r} is owned by another dispatch that never "
-        "completed; outcome uncertain, inspect the stored operation before recovery"
-    }
+        stored = idempotency_plan.stored_verdict(row, kind, digest)
+        match stored:
+            case idempotency_plan.Conflict():
+                return idempotency_plan.conflict_failure()
+            case idempotency_plan.Replay(status=stored_status, result=stored_result):
+                return stored_status, stored_result
+            case idempotency_plan.Wait():
+                await asyncio.sleep(dedup_wait_step_s)
+            case _:
+                assert_never(stored)
+    return idempotency_plan.uncertain_failure(key)
 
 
 async def ops_route(
@@ -411,30 +365,12 @@ async def ops_route(
     image: LoadedCommit,
     local_machine: MachineIdentity,
     host: Host,
-    dispatch_op: Callable[..., Any] = dispatch,
 ) -> tuple[int, bytes, str]:
 
-    try:
-        parsed = json.loads(body)
-    except json.JSONDecodeError as exc:
-        return 400, json.dumps({"error": f"invalid JSON body: {exc}"}).encode(), "application/json"
-    try:
-        envelope = OpEnvelope.model_validate(parsed)
-    except ValidationError as exc:
-        return (
-            400,
-            json.dumps({"error": f"body must be {{kind: str, payload: dict}}: {exc}"}).encode(),
-            "application/json",
-        )
-
-    if not is_op_kind(envelope.kind):
-        return (
-            200,
-            json.dumps(
-                {"status": OpStatus.FAILED, "result": {"error": f"unknown kind: {envelope.kind!r}"}}
-            ).encode(),
-            "application/json",
-        )
+    request = ops_plan.read_request(body)
+    if isinstance(request, ops_plan.OpReply):
+        return request.status_code, request.body, request.content_type
+    envelope = request
 
     # meiva:note
     # Counted from arrival, before the semaphore: a request still queued when SIGTERM drains
@@ -457,10 +393,9 @@ async def ops_route(
                         image=image,
                         local_machine=local_machine,
                         host=host,
-                        dispatch_op=dispatch_op,
                     )
                 else:
-                    status, result = await dispatch_op(
+                    status, result = await dispatch(
                         envelope.kind,
                         envelope.payload,
                         active_ops=active_ops,
@@ -476,20 +411,9 @@ async def ops_route(
                     )
             except Exception as exc:
                 _log.exception("dispatch refused or crashed for kind=%s", envelope.kind)
-                status, result = OpStatus.FAILED, {"error": f"{type(exc).__name__}: {exc}"}
-    status = OpStatus(status)
-
-    return (
-        200,
-        json.dumps({"status": status, "result": result}, default=str).encode(),
-        "application/json",
-    )
-
-
-def _assert_schema_current(db_url: str) -> None:
-    from base.deploy.schema.migrations import assert_schema_current
-
-    assert_schema_current(db_url)
+                status, result = ops_plan.failure_result(exc)
+    reply = ops_plan.op_reply(OpStatus(status), result)
+    return reply.status_code, reply.body, reply.content_type
 
 
 async def serve_ops_daemon(
@@ -499,17 +423,9 @@ async def serve_ops_daemon(
     local_machine: MachineIdentity,
     config: ConfigBoot,
     host: Host,
-    is_running: Callable[..., bool] = boot.is_running,
-    write_pidfile: Callable[..., None] = boot.write_pidfile,
-    remove_pidfile: Callable[..., None] = boot.remove_pidfile,
-    check_schema_current: Callable[[str], None] = _assert_schema_current,
-    open_db_pool: Callable[..., Any] = boot.open_db_pool,
-    ops_acceptance: Callable[[], frozenset[str]] = boot.ops_acceptance,
-    ops_bind_host: Callable[..., str] = boot.ops_bind_host,
-    register_boot: Callable[..., None] = boot.register_boot,
-    start_health: Callable[..., Any] = start_health_server,
-    stop_health: Callable[..., Any] = stop_health_server,
 ) -> None:
+    from base.deploy.schema.migrations import assert_schema_current
+
     runtime = config.ensure_eager()
     catalog = build_model_catalog()
     authority = ConfigAuthority(
@@ -522,40 +438,41 @@ async def serve_ops_daemon(
     requests: in_flight.RequestTokens = set()
     workers: in_flight.WorkerFutures = set()
     runtime_dir = paths.run_dir(paths.meiva_home())
-    if is_running(config, runtime=runtime_dir):
+    if boot.is_running(config, runtime=runtime_dir):
         _log.info(
             "meiva-ops pidfile %s indicates another instance is alive — exiting",
             boot.pidfile(config, runtime=runtime_dir),
         )
         sys.exit(1)
-    write_pidfile(config, runtime=runtime_dir)
+    boot.write_pidfile(config, runtime=runtime_dir)
 
     dispatch_sem = asyncio.Semaphore(config.view.services.ops_concurrency)
 
     our_machine = local_machine.name()
 
     try:
-        check_schema_current(config.view.data_plane.db_url)
+        assert_schema_current(config.view.data_plane.db_url)
     except Exception as exc:
         _log.error(
             "schema version mismatch on ops-server startup: %s — run `git pull && uv sync && meiva start --all-services` (or this unit's own service selection) to catch up",
             exc,
         )
+        boot.remove_pidfile(config, runtime=runtime_dir)
         sys.exit(1)
 
-    pool = open_db_pool(database=database, authority=authority)
+    pool = boot.open_db_pool(database=database, authority=authority)
     executor = boot.op_thread_pool(authority=authority)
     liveness = LivenessGroup(timers=SYSTEM_TIMERS)
 
     try:
-        acceptance = ops_acceptance()
-        bind_host = ops_bind_host(machine=local_machine)
+        acceptance = boot.ops_acceptance()
+        bind_host = boot.ops_bind_host(machine=local_machine)
         if bind_host != "127.0.0.1":
             verify_transport_encryption_declaration(
                 bind_host, config.view.data_plane.transport_encryption, authenticated=True
             )
         endpoint = boot.endpoint(config, runtime=runtime_dir)
-        server = await start_health(
+        server = await start_health_server(
             "ops",
             endpoint.health_port,
             host=bind_host,
@@ -601,7 +518,7 @@ async def serve_ops_daemon(
             bind_host,
             endpoint.health_port,
         )
-        register_boot(
+        boot.register_boot(
             database=database,
             config=config,
             machine=local_machine,
@@ -618,30 +535,17 @@ async def serve_ops_daemon(
                     watcher.cancel()
         finally:
             await bus.async_redis().aclose()
-            await stop_health(server)
-            remove_pidfile(config, runtime=runtime_dir)
+            await stop_health_server(server)
     finally:
         pool.close()
         boot.shutdown_op_pool(executor)
+        boot.remove_pidfile(config, runtime=runtime_dir)
 
 
-def main(
-    *,
-    argv: list[str] | None = None,
-    exit_process: Callable[[int], None] = hard_exit,
-    capture_image: Callable[[], LoadedCommit] = LoadedCommit.capture,
-    config_factory: Callable[[], ConfigBoot] = ConfigBoot,
-    database_cls: Callable[..., Database] = Database,
-    client_set_cls: Callable[..., Any] = ClientSet,
-    pipeline_builder: Callable[..., Any] = build_pipeline,
-    init_process: Callable[..., None] = init_gateway_process,
-    install_shutdown: Callable[[str], None] = install_graceful_shutdown,
-    runner_factory: Callable[[], asyncio.Runner] = asyncio.Runner,
-    serve_daemon: Callable[..., Any] = serve_ops_daemon,
-) -> None:
+def main(*, argv: list[str] | None = None) -> None:
     argparse.ArgumentParser(description=__doc__).parse_args(argv)
-    image = capture_image()
-    config = config_factory()
+    image = LoadedCommit.capture()
+    config = ConfigBoot()
     config.boot()
     config.ensure_eager()
     machine = machine_from_boot(config)
@@ -649,15 +553,15 @@ def main(
     gate = ProcessDbGate(version=version.get, process="ops", exempt=False)
 
     def database() -> Database:
-        return database_cls(
+        return Database(
             db_config_from_boot(config),
             gate=gate,
             direct_url=ClusterDirectUrl(machine.host),
         )
 
-    clients = client_set_cls(
+    clients = ClientSet(
         database=database,
-        pipeline_factory=lambda: pipeline_builder(
+        pipeline_factory=lambda: build_pipeline(
             database=database, machine=machine, home=paths.meiva_home().resolve()
         ),
     )
@@ -665,14 +569,14 @@ def main(
     primary: BaseException | None = None
 
     try:
-        init_process(
+        init_gateway_process(
             name="ops", producer=clients.event_pipeline, machine_reader=machine.name, image=image
         )
-        install_shutdown("ops")
-        runner = runner_factory()
+        install_graceful_shutdown("ops")
+        runner = asyncio.Runner()
         try:
             runner.run(
-                serve_daemon(
+                serve_ops_daemon(
                     database=database,
                     image=image,
                     local_machine=machine,
@@ -703,7 +607,7 @@ def main(
                 failure.add_note(f"ops event pipeline shutdown failed: {exc!r}")
             _log.exception("[ops] event pipeline shutdown failed")
             code = 1
-    exit_process(code)
+    hard_exit(code)
 
 
 if __name__ == "__main__":

@@ -659,10 +659,10 @@ def test_the_literal_finder_refuses_an_unproven_dependency_instance(change: str)
 @pytest.mark.parametrize(
     ("module", "call", "health_name"),
     [
-        ("services.agent_runner.agent_ops.daemon", 'install_shutdown("ops")', "ops"),
+        ("services.agent_runner.agent_ops.daemon", 'install_graceful_shutdown("ops")', "ops"),
         (
             "services.agent_runner.page_server.daemon",
-            'deps.install_shutdown_fn("page_server")',
+            'install_graceful_shutdown("page_server")',
             "page_server",
         ),
     ],

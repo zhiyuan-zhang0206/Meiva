@@ -1,3 +1,10 @@
+# meiva:note
+# The two ways the ops daemon leaves its process: past a worker thread that never returns, and
+# with the exit code it was handed.
+#
+# Both end in the shared `hard_exit`, which skips interpreter teardown (a wedged worker thread
+# would otherwise be joined forever). The scenario is the first argument.
+
 import pathlib
 import sys
 import time
@@ -5,23 +12,6 @@ import time
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
 from services.agent_runner.agent_ops import boot, daemon
-
-
-def _crash() -> None:
-    async def _boom(
-        *, database: object, image: object, local_machine: object, config: object, host: object
-    ) -> None:
-        raise RuntimeError("db pool exploded mid-loop")
-
-    def _silent(*_args: object, **_kwargs: object) -> None:
-        return None
-
-    daemon.main(
-        argv=[],
-        init_process=_silent,
-        install_shutdown=_silent,
-        serve_daemon=_boom,
-    )
 
 
 def _wedged_arm(home: pathlib.Path, ready: pathlib.Path) -> None:
@@ -42,9 +32,7 @@ def _wedged_arm(home: pathlib.Path, ready: pathlib.Path) -> None:
 
 
 if __name__ == "__main__":
-    if sys.argv[1] == "crash":
-        _crash()
-    elif sys.argv[1] == "wedged_arm":
+    if sys.argv[1] == "wedged_arm":
         _wedged_arm(pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3]))
     elif sys.argv[1] == "hard_exit":
         daemon.hard_exit(int(sys.argv[2]))
