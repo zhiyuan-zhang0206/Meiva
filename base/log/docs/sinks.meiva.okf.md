@@ -49,6 +49,9 @@ live in the process-global logger manager: a later test may format a bad record
 that an earlier level gate discarded. The fixture restores root and previously
 named levels, and resets newly created loggers to NOTSET; it does not assume
 all third-party loggers began at DEBUG.
+Only changed levels go through `Logger.setLevel`, which also invalidates
+descendants' effective-level caches. An unchanged logger needs no reset: each
+unconditional `setLevel` would clear the caches of every logger in the process.
 
 Process initialization tests run each role in a fresh interpreter and inspect actual
 JSONL files, stderr and event records. Repeated calls produce one record per sink
