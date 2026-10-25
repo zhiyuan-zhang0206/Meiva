@@ -210,3 +210,113 @@ def test_lambda_bodies_do_not_leak_walrus_bindings_to_the_module(
 ) -> None:
     result = scan(tmp_path, "import os\nlookup = " + expression + "\nvalue = os.getenv('GLOBAL')\n")
     assert [item.target for item in result.ambient] == ["os.getenv"]
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "def lookup(value=BOUND):",
+        "def lookup(*, value=BOUND):",
+        "async def lookup(value=BOUND):",
+        "@BOUND\ndef lookup():",
+        "def lookup(value: BOUND):",
+        "def lookup(value: BOUND, /):",
+        "def lookup(*, value: BOUND):",
+        "def lookup(*values: BOUND):",
+        "def lookup(**values: BOUND):",
+        "def lookup() -> BOUND:",
+        "class Owner(BOUND):",
+        "class Owner(metaclass=BOUND):",
+        "@BOUND\nclass Owner:",
+    ],
+)
+def test_definition_headers_bind_in_the_enclosing_scope(tmp_path: Path, header: str) -> None:
+    source = "import os\n" + header.replace("BOUND", "(os := provider)")
+    source += "\n    pass\nvalue = os.getenv('KEY')\n"
+    assert scan(tmp_path, source).ambient == []
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "def lookup(value=BOUND):",
+        "def lookup(*, value=BOUND):",
+        "async def lookup(value=BOUND):",
+        "@BOUND\ndef lookup():",
+        "def lookup(value: BOUND):",
+        "def lookup() -> BOUND:",
+        "class Owner(BOUND):",
+        "class Owner(metaclass=BOUND):",
+        "@BOUND\nclass Owner:",
+    ],
+)
+def test_definition_headers_preserve_real_import_facts(tmp_path: Path, header: str) -> None:
+    source = "from lib import api\n" + header.replace("BOUND", "api.VALUE") + "\n    pass\n"
+    result = scan(tmp_path, source)
+    assert [(fact.dst, fact.names) for fact in result.facts if fact.kind is FactKind.ATTRIBUTE] == [
+        ("lib/api.py", ("VALUE",))
+    ]
+
+
+@pytest.mark.parametrize("shadow", [True, False], ids=["local", "imported"])
+@pytest.mark.parametrize(
+    "header",
+    ["def lookup(value=BOUND):", "@BOUND\ndef lookup():", "class Owner(BOUND):"],
+)
+@pytest.mark.parametrize(
+    ("consumer", "imported", "name", "expression"),
+    [
+        ("ambient", "import os", "os", "os.getenv('KEY')"),
+        ("purity", "import time", "time", "time.time()"),
+        ("import", "from lib import api", "api", "api.VALUE"),
+        ("patch", "import time", "time", "setattr(time, 'sleep', None)"),
+    ],
+)
+def test_definition_header_bindings_reach_existing_consumers(
+    tmp_path: Path,
+    consumer: str,
+    imported: str,
+    name: str,
+    expression: str,
+    header: str,
+    shadow: bool,
+) -> None:
+    binding = name if shadow else "other"
+    source = imported + "\n" + header.replace("BOUND", f"({binding} := provider)")
+    source += "\n    pass\nvalue = " + expression + "\n"
+    result = scan(tmp_path, source)
+    observed = {
+        "ambient": bool(result.ambient),
+        "purity": any(item.code is Code.IMPURE_CALL for item in result.purity),
+        "import": any(fact.kind is FactKind.ATTRIBUTE for fact in result.facts),
+        "patch": bool(result.patches),
+    }
+    assert observed[consumer] is not shadow
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "def lookup():\n    os = provider",
+        "async def lookup():\n    os = provider",
+        "class Owner:\n    os = provider",
+        "def lookup(value=(lambda: (os := provider))):\n    pass",
+        "class Owner((lambda: (os := provider))):\n    pass",
+    ],
+)
+def test_definition_bodies_do_not_bind_names_in_the_outer_scope(tmp_path: Path, body: str) -> None:
+    source = "import os\n" + body + "\nvalue = os.getenv('KEY')\n"
+    assert [item.target for item in scan(tmp_path, source).ambient] == ["os.getenv"]
+
+
+@pytest.mark.parametrize("header", ["def lookup[os]():", "class Owner[os]:"])
+def test_type_parameters_do_not_leak_into_the_outer_scope(tmp_path: Path, header: str) -> None:
+    source = "import os\n" + header + "\n    pass\nvalue = os.getenv('KEY')\n"
+    assert [item.target for item in scan(tmp_path, source).ambient] == ["os.getenv"]
+
+
+@pytest.mark.parametrize("header", ["def lookup[T](value=BOUND):", "@BOUND\nclass Owner[T]:"])
+def test_generic_definition_outer_headers_keep_their_bindings(tmp_path: Path, header: str) -> None:
+    source = "import os\n" + header.replace("BOUND", "(os := provider)")
+    source += "\n    pass\nvalue = os.getenv('KEY')\n"
+    assert scan(tmp_path, source).ambient == []

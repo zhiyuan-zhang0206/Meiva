@@ -184,12 +184,31 @@ def _collect_compound(
             stack.extend(handler.body)
 
 
+def _definition_header(
+    node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef,
+) -> Iterable[ast.AST]:
+    yield from node.decorator_list
+    if isinstance(node, ast.ClassDef):
+        yield from node.bases
+        yield from node.keywords
+        return
+    args = node.args
+    yield from args.defaults
+    yield from (default for default in args.kw_defaults if default is not None)
+    for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg):
+        if arg is not None and arg.annotation is not None:
+            yield arg.annotation
+    if node.returns is not None:
+        yield node.returns
+
+
 def _collect_everything(scope: Scope, body: Iterable[ast.AST], package: list[str]) -> None:
     stack = list(body)
     while stack:
         node = stack.pop()
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             scope.shadowed.add(node.name)
+            stack.extend(_definition_header(node))
             continue
         if isinstance(node, ast.Lambda):
             stack.extend(d for d in (*node.args.defaults, *node.args.kw_defaults) if d is not None)
