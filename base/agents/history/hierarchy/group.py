@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 
 from base.agents.history.hierarchy.generate import (
     UNDERSTANDING_RETRY_ATTEMPTS,
@@ -114,7 +114,7 @@ class GroupCall:
     round: int
     model: str
     request: str
-    response: Any | None
+    response: BaseMessage | None
     duration_ms: float
     problem: str | None
     error: str | None

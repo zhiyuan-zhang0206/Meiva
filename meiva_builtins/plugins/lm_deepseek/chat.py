@@ -39,8 +39,8 @@ class DeepSeekChatModel(ThinkingTokensChatAnthropic):
         *,
         include_raw: bool = False,
         method: Literal["function_calling", "json_schema"] = "function_calling",
-        http_client: Any | None = None,
-        http_async_client: Any | None = None,
+        http_client: object = None,
+        http_async_client: object = None,
         **kwargs: Any,
     ) -> Runnable[LanguageModelInput, dict[str, Any] | BaseModel]:
         """Use native schema output with optional caller-owned HTTP clients."""

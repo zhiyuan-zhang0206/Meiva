@@ -81,7 +81,7 @@ class KimiSession(BaseHarnessSession[KimiConfig]):
         agent_id: int | None = None,
         registry: SessionRegistry | None = None,
         probe: ChildProbe | None = None,
-        connect: Any | None = None,
+        connect: Callable[..., Any] | None = None,
         kill: Callable[[int, int], None] | None = None,
         prices: PriceBook | None = None,
     ) -> None:

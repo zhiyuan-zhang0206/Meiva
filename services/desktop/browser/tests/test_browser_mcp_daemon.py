@@ -112,10 +112,11 @@ def new_daemon(
     *,
     default_ttl_seconds: float = page_lifecycle.DEFAULT_PAGE_TTL_SECONDS,
 ) -> ChromeMcpDaemon:
+    groups: Any = tab_groups if tab_groups is not None else NoTabGroups()
     return ChromeMcpDaemon(
         upstream,
         PageRegistry(default_ttl_seconds=default_ttl_seconds),
-        tab_groups if tab_groups is not None else NoTabGroups(),
+        groups,
     )
 
 

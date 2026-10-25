@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
+from google.genai.types import MediaResolution
 from loguru import logger
 
 from base.api_contracts.agent_contract import Harness
@@ -54,11 +55,9 @@ def _thinking_level(ctx: BuildContext, *, thinking_disabled: bool) -> str | None
     return thinking_level
 
 
-def _media_resolution(setting: str | None) -> Any | None:
+def _media_resolution(setting: str | None) -> MediaResolution | None:
     if setting is None:
         return None
-    from google.genai.types import MediaResolution
-
     resolutions = {
         "low": MediaResolution.MEDIA_RESOLUTION_LOW,
         "medium": MediaResolution.MEDIA_RESOLUTION_MEDIUM,

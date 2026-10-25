@@ -594,7 +594,7 @@ def pool(
     timeout: float = DEFAULT_POOL_TIMEOUT_S,
     check_connections: bool = False,
     autocommit: bool = False,
-    row_factory: Any | None = None,
+    row_factory: object = None,
     config: DbConfig | None = None,
     gate: ProcessDbGate,
     direct_url: DirectUrlResolver | None = None,

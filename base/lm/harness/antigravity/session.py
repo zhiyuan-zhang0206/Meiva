@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from typing import Any
 
@@ -66,7 +66,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         agent_id: int | None = None,
         registry: SessionRegistry | None = None,
         probe: ChildProbe | None = None,
-        transport_factory: Any | None = None,
+        transport_factory: Callable[[], Any] | None = None,
     ) -> None:
         super().__init__(
             config,
