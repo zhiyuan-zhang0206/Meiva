@@ -1,39 +1,34 @@
 from __future__ import annotations
 
 import json
+import socket
+import tempfile
+import threading
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
 
 import jsonschema
 import pytest
 
-from base.agents.impersonation import manifest
 from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.host.permissions_helper import client
 from base.host.permissions_helper.client import PermissionsHelperClient
 
 from ..computer.config import ComputerUseConfig
 from ..computer.mcp_daemon import ComputerMcpDaemon
+from ..computer.tests.slices import AuditLog
 
-Desktop = tuple[ComputerMcpDaemon, list[dict[str, Any]], list[Any]]
 
+class RequestLog(list[dict[str, Any]]):
+    def __init__(self) -> None:
+        super().__init__()
+        self.error: str | None = None
 
-class HelperSocket:
-    def __init__(self, requests: list[dict[str, Any]], error: str | None) -> None:
-        self.requests = requests
-        self.error = error
-        self.reply = b""
-
-    def settimeout(self, timeout: float) -> None:
-        assert timeout > 0
-
-    def sendall(self, data: bytes) -> None:
-        request = json.loads(data)
-        self.requests.append(request)
+    def respond(self, request: dict[str, Any]) -> dict[str, Any]:
+        self.append(request)
         method = request["method"]
         if method == "drag":
-            result = {
+            result: dict[str, Any] = {
                 "start": {"x": request["start_x"], "y": request["start_y"]},
                 "end": {"x": request["end_x"], "y": request["end_y"]},
             }
@@ -47,43 +42,57 @@ class HelperSocket:
             result = {"app": "TestTarget"}
         else:
             raise AssertionError(f"unexpected helper method {method}")
-        response = {"ok": True, "result": result}
         if self.error and method == "drag":
-            response = {"ok": False, "error": self.error}
-        self.reply = (json.dumps(response) + "\n").encode()
+            return {"ok": False, "error": self.error}
+        return {"ok": True, "result": result}
 
-    def recv(self, size: int) -> bytes:
-        reply, self.reply = self.reply[:size], self.reply[size:]
-        return reply
 
-    def close(self) -> None:
-        pass
+Desktop = tuple[ComputerMcpDaemon, RequestLog, AuditLog]
 
 
 @pytest.fixture
-def desktop(monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate) -> Desktop:
-    requests: list[dict[str, Any]] = []
-    events: list[Any] = []
+def desktop(database: Database) -> Iterator[Desktop]:
+    requests = RequestLog()
+    events = AuditLog(database)
+    events.clear()
+    errors: list[BaseException] = []
+    stopped = threading.Event()
+    with tempfile.TemporaryDirectory(prefix="meiva-drag-", dir="/tmp") as directory:
+        path = Path(directory) / "helper.sock"
+        daemon = ComputerMcpDaemon(
+            ComputerUseConfig(30, 0.01, 30, 60, 1),
+            database,
+            sock="/unused.sock",
+            helper=PermissionsHelperClient(path),
+        )
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+            listener.bind(str(path))
+            listener.listen(1)
+            listener.settimeout(0.1)
 
-    def connect(_path: str) -> HelperSocket:
-        return HelperSocket(requests, None)
+            def serve() -> None:
+                while not stopped.is_set():
+                    try:
+                        connection, _ = listener.accept()
+                    except TimeoutError:
+                        continue
+                    try:
+                        with connection, connection.makefile("rb") as stream:
+                            response = requests.respond(json.loads(stream.readline()))
+                            connection.sendall(json.dumps(response).encode() + b"\n")
+                    except BaseException as exc:
+                        errors.append(exc)
+                        return
 
-    def record(_db: object, event: Any) -> None:
-        events.append(event)
-
-    monkeypatch.setattr(client, "connect", connect)
-    monkeypatch.setattr(
-        manifest,
-        "emit_recorded_central_event",
-        record,
-    )
-    daemon = ComputerMcpDaemon(
-        ComputerUseConfig(30, 0.01, 30, 60, 1),
-        Database.from_settings(gate=database_gate),
-        sock="/unused.sock",
-        helper=PermissionsHelperClient("/unused.sock"),
-    )
-    return daemon, requests, events
+            worker = threading.Thread(target=serve, daemon=True)
+            worker.start()
+            try:
+                yield daemon, requests, events
+            finally:
+                stopped.set()
+                worker.join(timeout=3)
+                assert not worker.is_alive()
+                assert not errors, errors
 
 
 ARGS = {"start_x": -100, "start_y": 200, "end_x": 500, "end_y": 600}
@@ -203,14 +212,10 @@ async def test_drag_requires_every_endpoint_coordinate(desktop: Desktop, key: st
 
 
 async def test_drag_permission_refusal_and_busy_screen_do_not_change_pointer(
-    desktop: Desktop, monkeypatch: pytest.MonkeyPatch
+    desktop: Desktop,
 ) -> None:
     daemon, requests, events = desktop
-
-    def connect(_path: str) -> HelperSocket:
-        return HelperSocket(requests, "Accessibility grant missing")
-
-    monkeypatch.setattr(client, "connect", connect)
+    requests.error = "Accessibility grant missing"
     response = await daemon._dispatch(
         {"id": 1, "method": "call_tool", "tool": "drag", "args": ARGS, "agent_id": 7}
     )

@@ -32,7 +32,7 @@ class Request(TypedDict):
 class OkResponse(TypedDict):
     id: int | None  # echoes the request id; None when the request never parsed
     ok: Literal[True]
-    result: Any  # tool dicts / tool result / "pong"
+    result: dict[str, Any] | list[dict[str, Any]] | str | None  # tool dicts / tool result / "pong"
 
 
 class ErrResponse(TypedDict):

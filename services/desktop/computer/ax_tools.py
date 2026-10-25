@@ -15,15 +15,15 @@ filtering, truncation and the quality verdict are tested without a desktop.
 from __future__ import annotations
 
 import re
-from typing import Any, Literal, NamedTuple, cast
+from typing import Any, Literal, NamedTuple
 
-from base.host.permissions_helper.client import AxNode, AxTreeResult, PermissionsHelperClient
+from base.host.permissions_helper.wire import AxNode, AxTreeResult
 
 from . import ax_gap
 from .ax_gap import Frame
 from .ax_ids import AxSession
 from .errors import ComputerUseError
-from .screen import current_scale
+from .screen import DesktopHelper, current_scale
 from .targets import AppTarget, app_selector
 
 Mode = Literal["interactive", "text", "full"]
@@ -344,9 +344,15 @@ class TreeArgs(NamedTuple):
 
 
 def _args(args: dict[str, Any]) -> TreeArgs:
-    mode = str(args.get("mode") or "interactive")
-    if mode not in _MODES:
-        raise ComputerUseError(f"mode must be one of {', '.join(_MODES)}, got {mode!r}")
+    raw_mode = str(args.get("mode") or "interactive")
+    if raw_mode == "interactive":
+        mode: Mode = "interactive"
+    elif raw_mode == "text":
+        mode = "text"
+    elif raw_mode == "full":
+        mode = "full"
+    else:
+        raise ComputerUseError(f"mode must be one of {', '.join(_MODES)}, got {raw_mode!r}")
     max_nodes = int(args.get("max_nodes", DEFAULT_MAX_NODES))
     if not 1 <= max_nodes <= _MAX_NODES_LIMIT:
         raise ComputerUseError(f"max_nodes must be 1..{_MAX_NODES_LIMIT}, got {max_nodes}")
@@ -357,7 +363,7 @@ def _args(args: dict[str, Any]) -> TreeArgs:
     if ocr_gap and scope is not None:
         raise ComputerUseError("include_ocr_gap needs a whole-window ax_tree: drop scope")
     return TreeArgs(
-        cast(Mode, mode),
+        mode,
         max_nodes,
         None if scope is None else str(scope),
         bool(args.get("enable_ax", True)),
@@ -365,7 +371,7 @@ def _args(args: dict[str, Any]) -> TreeArgs:
     )
 
 
-def require_helper_support(helper: PermissionsHelperClient, capability: str, tool: str) -> None:
+def require_helper_support(helper: DesktopHelper, capability: str, tool: str) -> None:
     """Fail with the rebuild instruction when the running helper lacks `tool`."""
     if not helper.ping().get(capability):
         raise ComputerUseError(
@@ -403,7 +409,7 @@ def _visual_gap(
 
 
 def ax_tree_tool(
-    helper: PermissionsHelperClient,
+    helper: DesktopHelper,
     args: dict[str, Any],
     agent_id: int,
     scale: float | None,
@@ -466,7 +472,7 @@ def ax_tree_tool(
 
 
 def _app_request(
-    helper: PermissionsHelperClient, args: dict[str, Any]
+    helper: DesktopHelper, args: dict[str, Any]
 ) -> tuple[str | None, dict[str, object] | None]:
     if "target" in args:
         if "app" in args:

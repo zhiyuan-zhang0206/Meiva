@@ -2,16 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from services.desktop.computer import ocr
 
 
-def test_the_binary_path_follows_the_variable_after_import(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_the_binary_path_follows_the_variable_after_import(tmp_path: Path) -> None:
     first, second = tmp_path / "first", tmp_path / "second"
-    monkeypatch.setenv("MEIVA_HOME", str(first))
-    assert ocr.bin_path() == first / "logs" / "computer" / "ocr-bin" / "ocr"
-    monkeypatch.setenv("MEIVA_HOME", str(second))
-    assert ocr.bin_path() == second / "logs" / "computer" / "ocr-bin" / "ocr"
+    assert ocr.bin_path(first) == first / "logs" / "computer" / "ocr-bin" / "ocr"
+    assert ocr.bin_path(second) == second / "logs" / "computer" / "ocr-bin" / "ocr"

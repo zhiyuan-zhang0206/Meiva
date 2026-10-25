@@ -10,67 +10,46 @@ it — so no stale job can resolve onto the prod install.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
 import pytest
 
-from base import paths
 from base.config import settings
-from base.host.system import logs_job, packages_job, pr_flow_job, walg_job
+from base.host.system import logs_content, logs_job, packages_job, pr_flow_job, walg_job
 from base.host.system.boot_autostart import registration as autostart
 from base.host.system.boot_autostart.content import launchd_plist_content
 from base.host.system.cron import health_content, health_job, mechanics
 from base.host.system.hostport import Host
-from base.host.system.job_values import JobRoots
+from base.host.system.job_values import JobRoots, cron_environment, plist_path
 from base.host.system.packages_content import RefreshSchedule
-from base.host.system.tests.fake_commands import fake_host
+from base.host.system.tests.fake_commands import DARWIN_ARM64, FakeCommands, Reply, fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 
 
-def _allow_pr_flow(*, production: bool, roots: JobRoots, host: Host) -> None:
-    """Credentials are present; registration still applies its home and switch gates."""
-    _ = production
+@dataclass(frozen=True)
+class _ProbePlatform:
+    system: str = "probe"
+    machine: str = "x86_64"
+    python: str = "/usr/bin/python3"
 
 
-def _exploding_platform(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every registration or removal that reaches the host scheduler is a test failure."""
-
-    def reached(*_a: object, **_k: object) -> None:
-        raise AssertionError("a job reached the host scheduler")
-
-    for module in (mechanics, autostart):
-        monkeypatch.setattr(module, "register_platform_job", reached)
-        monkeypatch.setattr(module, "unregister_platform_job", reached)
+_PROBE_PLATFORM = _ProbePlatform()
 
 
-class _RecordedPlatform:
-    """The platform dispatch of every OS job, recorded instead of run."""
-
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-
-    def register(self, what: str, **_platforms: object) -> None:
-        self.calls.append(what)
-
-    def unregister(self, *, macos: Callable[[], int], **_platforms: object) -> None:
-        self.calls.append(f"unregister-{macos.__module__.rpartition('.')[2]}")
-
-
-@pytest.fixture()
-def backend(monkeypatch: pytest.MonkeyPatch) -> _RecordedPlatform:
-    rec = _RecordedPlatform()
-    for module in (mechanics, autostart):
-        monkeypatch.setattr(module, "register_platform_job", rec.register)
-        monkeypatch.setattr(module, "unregister_platform_job", rec.unregister)
-    return rec
-
-
-@pytest.fixture()
-def gate_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The suite pins the gate OFF for every test (tests/fixtures/env_bootstrap.py); the few
-    cases that assert the ENABLED behaviour turn it back on for themselves."""
-    monkeypatch.setattr(settings.general, "os_jobs_enabled", True)
+# meiva:note
+# Build a Host whose platform system ("probe") is neither darwin nor linux so
+# reaching the platform dispatcher raises RuntimeError before touching disk or OS jobs.
+def _probe_host(user_home: Path | None = None) -> Host:
+    if user_home is not None:
+        token = user_home / ".trunk" / "api-token"
+        token.parent.mkdir(parents=True, exist_ok=True)
+        token.write_text("test-token\n", encoding="utf-8")
+    return fake_host(
+        platform=_PROBE_PLATFORM,  # pyright: ignore[reportArgumentType]
+        programs={"gh": "/usr/bin/gh"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -85,50 +64,55 @@ def test_suite_default_is_off() -> None:
     assert settings.general.os_jobs_enabled is False
 
 
-_REGISTERS = [
-    pytest.param(
-        partial(health_job.register_os_cron, enabled=settings.general.os_jobs_enabled),
-        id="health-probe",
-    ),
-    pytest.param(
-        partial(
-            autostart.register_autostart,
-            services=frozenset({"gateway"}),
-            enabled=settings.general.os_jobs_enabled,
+def _register_calls(enabled: bool) -> list[object]:
+    return [
+        pytest.param(
+            partial(health_job.register_os_cron, enabled=enabled),
+            id="health-probe",
         ),
-        id="autostart",
-    ),
-    pytest.param(
-        partial(logs_job.register_logs_job, enabled=settings.general.os_jobs_enabled),
-        id="logs-maintenance",
-    ),
-    pytest.param(
-        partial(
-            packages_job.register_packages_job,
-            enabled=settings.general.os_jobs_enabled,
-            schedule=RefreshSchedule(
-                refresh_enabled=settings.packages.refresh_enabled,
-                tick_seconds=settings.packages.refresh_tick_seconds,
+        pytest.param(
+            partial(
+                autostart.register_autostart,
+                services=frozenset({"gateway"}),
+                enabled=enabled,
             ),
+            id="autostart",
         ),
-        id="packages-refresh",
-    ),
-    pytest.param(
-        partial(
-            pr_flow_job.register_pr_flow_job,
-            enabled=settings.general.os_jobs_enabled,
+        pytest.param(
+            partial(logs_job.register_logs_job, enabled=enabled),
+            id="logs-maintenance",
         ),
-        id="pr-flow",
-    ),
-    pytest.param(
-        partial(
-            walg_job.register_walg_job,
-            enabled=settings.general.os_jobs_enabled,
-            backup_hour=settings.services.backup_hour,
+        pytest.param(
+            partial(
+                packages_job.register_packages_job,
+                enabled=enabled,
+                schedule=RefreshSchedule(
+                    refresh_enabled=settings.packages.refresh_enabled,
+                    tick_seconds=settings.packages.refresh_tick_seconds,
+                ),
+            ),
+            id="packages-refresh",
         ),
-        id="walg",
-    ),
-]
+        pytest.param(
+            partial(
+                pr_flow_job.register_pr_flow_job,
+                enabled=enabled,
+            ),
+            id="pr-flow",
+        ),
+        pytest.param(
+            partial(
+                walg_job.register_walg_job,
+                enabled=enabled,
+                backup_hour=settings.services.backup_hour,
+            ),
+            id="walg",
+        ),
+    ]
+
+
+_REGISTERS = _register_calls(settings.general.os_jobs_enabled)
+_REGISTERS_ENABLED = _register_calls(True)
 _UNREGISTER_CALLS: dict[str, Callable[..., None]] = {
     "health-probe": health_job.unregister_os_cron,
     "autostart": autostart.unregister_autostart,
@@ -144,15 +128,14 @@ _UNREGISTERS = [pytest.param(call, id=name) for name, call in _UNREGISTER_CALLS.
 def test_registration_never_reaches_the_backend_when_gated(
     call: object,
     default_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _exploding_platform(monkeypatch)
+    host = _probe_host(default_home)
     assert callable(call)
     if isinstance(call, partial) and call.func is pr_flow_job.register_pr_flow_job:
         call(
             production=True,
             roots=JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home),
-            host=fake_host(),
+            host=host,
         )
     elif isinstance(call, partial) and call.func in (
         logs_job.register_logs_job,
@@ -161,76 +144,62 @@ def test_registration_never_reaches_the_backend_when_gated(
     ):
         call(
             roots=JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home),
-            host=fake_host(),
+            host=host,
         )
     else:
-        call(host=fake_host())  # no AssertionError == the gate held
+        call(host=host)
 
 
 def test_registration_dispatches_when_enabled(
-    gate_on: None,
     default_home: Path,
-    backend: _RecordedPlatform,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(pr_flow_job, "credential_blocker", _allow_pr_flow)
-    health_job.register_os_cron(enabled=settings.general.os_jobs_enabled, host=fake_host())
-    autostart.register_autostart(
-        services=frozenset({"gateway"}),
-        enabled=settings.general.os_jobs_enabled,
-        host=fake_host(),
-    )
-    logs_job.register_logs_job(
-        roots=JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home),
-        enabled=settings.general.os_jobs_enabled,
-        host=fake_host(),
-    )
-    packages_job.register_packages_job(
-        roots=JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home),
-        enabled=settings.general.os_jobs_enabled,
-        schedule=RefreshSchedule(
-            refresh_enabled=settings.packages.refresh_enabled,
-            tick_seconds=settings.packages.refresh_tick_seconds,
+    host = _probe_host(default_home)
+    roots = JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home)
+    calls: list[Callable[[], None]] = [
+        lambda: health_job.register_os_cron(enabled=True, host=host),
+        lambda: autostart.register_autostart(
+            services=frozenset({"gateway"}),
+            enabled=True,
+            host=host,
         ),
-        host=fake_host(),
-    )
-    pr_flow_job.register_pr_flow_job(
-        roots=JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home),
-        enabled=settings.general.os_jobs_enabled,
-        production=True,
-        host=fake_host(),
-    )
-    walg_job.register_walg_job(
-        roots=JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home),
-        enabled=settings.general.os_jobs_enabled,
-        backup_hour=settings.services.backup_hour,
-        host=fake_host(),
-    )
-    assert backend.calls == [
-        "cron",
-        "autostart",
-        "logs-maintenance",
-        "packages-refresh",
-        "PR-flow",
-        "WAL-G tick",
+        lambda: logs_job.register_logs_job(roots=roots, enabled=True, host=host),
+        lambda: packages_job.register_packages_job(
+            roots=roots,
+            enabled=True,
+            schedule=RefreshSchedule(
+                refresh_enabled=settings.packages.refresh_enabled,
+                tick_seconds=settings.packages.refresh_tick_seconds,
+            ),
+            host=host,
+        ),
+        lambda: pr_flow_job.register_pr_flow_job(
+            roots=roots,
+            enabled=True,
+            production=True,
+            host=host,
+        ),
+        lambda: walg_job.register_walg_job(
+            roots=roots,
+            enabled=True,
+            backup_hour=settings.services.backup_hour,
+            host=host,
+        ),
     ]
+    for call in calls:
+        with pytest.raises(RuntimeError, match="unsupported host platform for OS jobs"):
+            call()
 
 
 def test_deregistration_is_not_gated_by_the_os_jobs_switch(
-    default_home: Path, backend: _RecordedPlatform
+    default_home: Path,
 ) -> None:
     """Cleanup has to work wherever registration is switched off (the suite runs
     with it off) — otherwise a leak under an older build can never be swept."""
+    _ = default_home
+    host = _probe_host()
     for call in _UNREGISTER_CALLS.values():
-        call(host=fake_host())
-    assert backend.calls == [
-        "unregister-health_job",
-        "unregister-registration",
-        "unregister-logs_job",
-        "unregister-packages_job",
-        "unregister-pr_flow_job",
-        "unregister-walg_job",
-    ]
+        with pytest.raises(RuntimeError, match="unsupported host platform for OS jobs"):
+            call(host=host)
 
 
 # ---------------------------------------------------------------------------
@@ -243,21 +212,18 @@ def test_deregistration_is_not_gated_by_the_os_jobs_switch(
 # `launchctl bootout` from a test would take a production job down.
 
 
-@pytest.mark.parametrize("call", _REGISTERS)
+@pytest.mark.parametrize("call", _REGISTERS_ENABLED)
 def test_a_scratch_home_registers_nothing(
     call: object,
-    gate_on: None,
     unit_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _exploding_platform(monkeypatch)
-    monkeypatch.setattr(pr_flow_job, "credential_blocker", _allow_pr_flow)
+    host = _probe_host(unit_home)
     assert callable(call)
     if isinstance(call, partial) and call.func is pr_flow_job.register_pr_flow_job:
         call(
             production=True,
             roots=JobRoots(home=unit_home, repo=unit_home, user_home=unit_home),
-            host=fake_host(),
+            host=host,
         )
     elif isinstance(call, partial) and call.func in (
         logs_job.register_logs_job,
@@ -266,29 +232,27 @@ def test_a_scratch_home_registers_nothing(
     ):
         call(
             roots=JobRoots(home=unit_home, repo=unit_home, user_home=unit_home),
-            host=fake_host(),
+            host=host,
         )
     else:
-        call(host=fake_host())  # no AssertionError == nothing reached the scheduler
+        call(host=host)
 
 
 @pytest.mark.parametrize("call", _UNREGISTERS)
-def test_a_scratch_home_removes_nothing(
-    call: object, unit_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _exploding_platform(monkeypatch)
+def test_a_scratch_home_removes_nothing(call: object, unit_home: Path) -> None:
+    _ = unit_home
     assert callable(call)
-    call(host=fake_host())
+    call(host=_probe_host())
 
 
 def test_the_default_home_owns_the_jobs_however_it_is_spelled(
-    default_home: Path, monkeypatch: pytest.MonkeyPatch
+    default_home: Path,
 ) -> None:
     assert mechanics.owns_os_jobs("autostart")
-    monkeypatch.setenv("MEIVA_HOME", str(default_home / "elsewhere" / ".." / ".meiva"))
-    assert mechanics.owns_os_jobs("autostart")
-    monkeypatch.setenv("MEIVA_HOME", str(default_home / ".meiva-preview"))
-    assert not mechanics.owns_os_jobs("autostart")
+    assert mechanics.owns_os_job_home(
+        "autostart", home=default_home / "elsewhere" / ".." / ".meiva"
+    )
+    assert not mechanics.owns_os_job_home("autostart", home=default_home / ".meiva-preview")
 
 
 # ---------------------------------------------------------------------------
@@ -309,11 +273,19 @@ def test_meiva_binary_path_prefers_this_checkout_over_path() -> None:
 
 
 def test_meiva_binary_path_falls_back_to_path_without_a_venv(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(paths, "repo_root", lambda: tmp_path)
-    host = fake_host(programs={"meiva": "/usr/local/bin/meiva"})
-    assert mechanics.meiva_binary_path(host=host) == "/usr/local/bin/meiva"
+    commands = FakeCommands()
+    commands.on("launchctl", Reply("", "", 0), repeat=True)
+    host = fake_host(
+        commands,
+        platform=DARWIN_ARM64,
+        programs={"meiva": "/usr/local/bin/meiva"},
+    )
+    roots = JobRoots(home=tmp_path / "home", repo=tmp_path / "repo", user_home=tmp_path / "user")
+    assert logs_job.register_macos(roots=roots, host=host) == 0
+    written = plist_path(logs_content.LABEL, user_home=roots.user_home).read_text(encoding="utf-8")
+    assert "/usr/local/bin/meiva" in written
 
 
 def test_health_probe_plist_pins_meiva_home(tmp_path: Path) -> None:
@@ -349,13 +321,12 @@ def test_every_launchagent_pins_meiva_home(tmp_path: Path) -> None:
 
 
 def test_cron_env_prefix_scopes_to_one_command(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     """`MEIVA_HOME=<home> <cmd>` and not a bare `MEIVA_HOME=` line: cron applies a
     standalone assignment to the WHOLE crontab, which would silently retarget a
     co-located cluster's entries."""
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / ".meiva-x"))
-    prefix = mechanics.cron_env_prefix()
+    prefix = cron_environment(tmp_path / ".meiva-x")
     assert prefix == f"MEIVA_HOME={tmp_path / '.meiva-x'} "
     assert not prefix.startswith("\n")
 

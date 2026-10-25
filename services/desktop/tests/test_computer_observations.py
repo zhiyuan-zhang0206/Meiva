@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
-from ..computer import execute
 from ..computer.protocol import Response
+from ..computer.tests.slices import FakeOcr
 from .test_computer_input import Desktop
 from .test_computer_input import desktop as desktop
 
@@ -18,15 +17,11 @@ def payload(response: Response) -> dict[str, Any]:
 
 
 async def test_region_snapshot_preserves_global_scale_and_ocr_cache(
-    desktop: Desktop, monkeypatch: pytest.MonkeyPatch
+    desktop: Desktop,
 ) -> None:
     desktop.daemon._scale = 1
     desktop.daemon._ocr_cache["items"] = [{"text": "previous whole-screen text"}]
-
-    def ocr(_path: str | Path) -> list[dict[str, float | str]]:
-        return [{"text": "region text", "x": 10, "y": 20}]
-
-    monkeypatch.setattr(execute.ocr_mod, "ocr_image", ocr)
+    FakeOcr([{"text": "region text", "x": 10.0, "y": 20.0}])
     result = payload(
         await desktop.call(
             "snapshot", {"region": {"x": 100, "y": 150, "w": 200, "h": 100}, "include_ocr": True}

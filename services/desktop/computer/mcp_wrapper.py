@@ -88,11 +88,11 @@ class ReconnectingSocketLink(ReconnectingLink):
 async def _serve(*, timeout_reader: Callable[[], float]) -> None:
     link = ReconnectingSocketLink(timeout_reader=timeout_reader, agent_id=_agent_id())
 
-    async def _list_tools(_ctx: Any, _params: Any) -> types.ListToolsResult:
+    async def _list_tools(_ctx: object, _params: object) -> types.ListToolsResult:
         tools = await link.request({"method": "list_tools"})
         return types.ListToolsResult(tools=[types.Tool.model_validate(t) for t in tools])
 
-    async def _call_tool(_ctx: Any, params: types.CallToolRequestParams) -> types.CallToolResult:
+    async def _call_tool(_ctx: object, params: types.CallToolRequestParams) -> types.CallToolResult:
         result = await link.request(
             {"method": "call_tool", "tool": params.name, "args": params.arguments or {}}
         )
@@ -104,10 +104,15 @@ async def _serve(*, timeout_reader: Callable[[], float]) -> None:
         await server.run(server_read, server_write, server.create_initialization_options())
 
 
+def timeout_reader(config: ConfigBoot | None = None) -> tuple[ConfigBoot, Callable[[], float]]:
+    boot = ConfigBoot() if config is None else config
+    boot.boot()
+    return boot, lambda: boot.view.sandbox.mcp_connect_timeout_seconds
+
+
 def main() -> None:
-    config = ConfigBoot()
-    config.boot()
-    asyncio.run(_serve(timeout_reader=lambda: config.view.sandbox.mcp_connect_timeout_seconds))
+    _, reader = timeout_reader()
+    asyncio.run(_serve(timeout_reader=reader))
 
 
 if __name__ == "__main__":

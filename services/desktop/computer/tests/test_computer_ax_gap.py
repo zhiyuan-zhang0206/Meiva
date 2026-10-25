@@ -13,12 +13,12 @@ from typing import Any
 import pytest
 
 from base.db import Database
-from base.host.permissions_helper.client import AxNode, AxTreeResult, PermissionsHelperClient
+from base.host.permissions_helper.client import AxNode, AxTreeResult
 from services.desktop.computer import ax_gap
-from services.desktop.computer.ax_gap import Frame, GapRead, VisualBox
+from services.desktop.computer.ax_gap import Frame, VisualBox
 from services.desktop.computer.errors import ComputerUseError
 from services.desktop.computer.mcp_daemon import ComputerMcpDaemon
-from services.desktop.computer.tests.slices import computer_use_config
+from services.desktop.computer.tests.slices import FakeDesktopHelper, FakeOcr, computer_use_config
 
 WINDOW = (0.0, 0.0, 1000.0, 800.0)
 
@@ -79,11 +79,10 @@ def _node(nid: int, parent: int | None, role: str, frame: Frame, **kw: Any) -> A
     return out  # pyright: ignore[reportReturnType]
 
 
-class FakeAxHelper(PermissionsHelperClient):
+class FakeAxHelper(FakeDesktopHelper):
     """A window (1000x800 logical) holding one Send button at (10,20,100,40)."""
 
     def __init__(self) -> None:
-        super().__init__("/nonexistent-test-helper.sock")
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.clicks: list[tuple[float, float]] = []
         nodes = [
@@ -104,20 +103,20 @@ class FakeAxHelper(PermissionsHelperClient):
             "elapsed_ms": 1,
         }
 
-    def ping(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def ping(self, **kw: Any) -> dict[str, Any]:
         return {"pong": True, "ax_tree_v1": True, "ax_target_v1": True}
 
-    def frontmost_app(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def frontmost_app(self, **kw: Any) -> dict[str, Any]:
         return {"app": "Mail"}
 
-    def click(self, x: float, y: float, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def click(self, x: float, y: float, **kw: Any) -> dict[str, Any]:
         self.clicks.append((x, y))
         return {"clicked": {"x": x, "y": y}, "double": False}
 
-    def screen_size(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def screen_size(self, **kw: Any) -> dict[str, Any]:
         return {"x": 0.0, "y": 0.0, "w": 1512.0, "h": 982.0, "scale": 2.0}
 
-    def ax_tree(self, app: str, **kw: Any) -> AxTreeResult:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def ax_tree(self, app: str | None = None, **kw: Any) -> AxTreeResult:
         self.calls.append(("ax_tree", {"app": app, **kw}))
         return self.tree
 
@@ -128,16 +127,8 @@ def fake_ax() -> FakeAxHelper:
 
 
 @pytest.fixture
-def gap(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    state: dict[str, Any] = {
-        "read": GapRead([ocr("Send", 30, 30), ocr("Canvas label", 600, 400)], 2.0, None)
-    }
-
-    def read_screen(_helper: PermissionsHelperClient, _agent_id: int) -> GapRead:
-        return state["read"]
-
-    monkeypatch.setattr(ax_gap, "read_screen", read_screen)
-    return state
+def gap() -> FakeOcr:
+    return FakeOcr([ocr("Send", 30, 30), ocr("Canvas label", 600, 400)])
 
 
 @pytest.fixture
@@ -154,11 +145,13 @@ async def call(
     )
     if resp["ok"] is False:
         raise ComputerUseError(resp["error"])
-    return json.loads(resp["result"]["content"][0]["text"])
+    res = resp["result"]
+    assert isinstance(res, dict)
+    return json.loads(res["content"][0]["text"])
 
 
 async def test_include_ocr_gap_appends_only_the_text_the_tree_misses(
-    fake_ax: FakeAxHelper, gap: dict[str, Any], database: Database
+    fake_ax: FakeAxHelper, gap: FakeOcr, database: Database
 ) -> None:
     out = await call(
         ComputerMcpDaemon(computer_use_config(), database, sock="/x.sock", helper=fake_ax),
@@ -172,21 +165,21 @@ async def test_include_ocr_gap_appends_only_the_text_the_tree_misses(
 
 
 async def test_ocr_failure_is_soft_the_tree_is_still_returned(
-    fake_ax: FakeAxHelper, gap: dict[str, Any], database: Database
+    fake_ax: FakeAxHelper, database: Database
 ) -> None:
-    gap["read"] = GapRead([], 2.0, "swiftc not found on PATH")
+    FakeOcr(error="swiftc not found on PATH")
     out = await call(
         ComputerMcpDaemon(computer_use_config(), database, sock="/x.sock", helper=fake_ax),
         "ax_tree",
         {"include_ocr_gap": True},
     )
     assert (
-        out["tree"].startswith("[e1] window") and out["ocr_gap_error"] == "swiftc not found on PATH"
+        out["tree"].startswith("[e1] window") and "swiftc not found on PATH" in out["ocr_gap_error"]
     )
 
 
 async def test_the_gap_needs_a_whole_window_read(
-    fake_ax: FakeAxHelper, gap: dict[str, Any], database: Database
+    fake_ax: FakeAxHelper, gap: FakeOcr, database: Database
 ) -> None:
     with pytest.raises(ComputerUseError, match="drop scope"):
         await call(
@@ -207,7 +200,7 @@ async def test_enable_ax_reaches_the_helper_and_defaults_on(
 
 
 async def test_a_px_press_clicks_the_text_center_in_logical_points(
-    fake_ax: FakeAxHelper, gap: dict[str, Any], clicks: FakeAxHelper, database: Database
+    fake_ax: FakeAxHelper, gap: FakeOcr, clicks: FakeAxHelper, database: Database
 ) -> None:
     daemon = ComputerMcpDaemon(computer_use_config(), database, sock="/x.sock", helper=fake_ax)
     await call(daemon, "ax_tree", {"include_ocr_gap": True})
@@ -233,7 +226,7 @@ async def test_a_px_press_clicks_the_text_center_in_logical_points(
 )
 async def test_px_elements_only_press_and_only_the_latest_ones(
     fake_ax: FakeAxHelper,
-    gap: dict[str, Any],
+    gap: FakeOcr,
     clicks: FakeAxHelper,
     args: dict[str, Any],
     database: Database,
@@ -246,7 +239,7 @@ async def test_px_elements_only_press_and_only_the_latest_ones(
 
 
 async def test_a_later_ax_tree_without_the_gap_retires_the_px_ids(
-    fake_ax: FakeAxHelper, gap: dict[str, Any], clicks: FakeAxHelper, database: Database
+    fake_ax: FakeAxHelper, gap: FakeOcr, clicks: FakeAxHelper, database: Database
 ) -> None:
     daemon = ComputerMcpDaemon(computer_use_config(), database, sock="/x.sock", helper=fake_ax)
     await call(daemon, "ax_tree", {"include_ocr_gap": True})

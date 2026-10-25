@@ -10,15 +10,20 @@ from services.desktop.computer import mcp_daemon
 from services.desktop.computer.config import beat_interval_s, effective_stall_s, loop_is_silent
 
 
-def test_the_slice_carries_the_live_value_of_every_field(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.daemon, "computer_use_lease_s", 7.5)
-    monkeypatch.setattr(settings.daemon, "computer_use_session_idle_s", 3.25)
-    monkeypatch.setattr(settings.daemon, "computer_use_loop_stall_s", 42.0)
-    monkeypatch.setattr(settings.daemon, "computer_use_shutdown_drain_s", 1.5)
-    config = mcp_daemon.computer_use_config()
-    for field in dataclasses.fields(config):
+def test_the_slice_carries_the_live_value_of_every_field() -> None:
+    default_config = mcp_daemon.computer_use_config()
+    for field in dataclasses.fields(default_config):
         flat: Any = get_field(field.name)
-        assert getattr(config, field.name) == flat, field.name
+        assert getattr(default_config, field.name) == flat, field.name
+    custom_daemon = settings.daemon.model_copy(
+        update={
+            "computer_use_lease_s": 7.5,
+            "computer_use_session_idle_s": 3.25,
+            "computer_use_loop_stall_s": 42.0,
+            "computer_use_shutdown_drain_s": 1.5,
+        }
+    )
+    config = mcp_daemon.computer_use_config(custom_daemon)
     assert (
         config.computer_use_lease_s,
         config.computer_use_session_idle_s,

@@ -13,11 +13,9 @@ from typing import Any
 
 import pytest
 
-from base.agents.impersonation import manifest
 from base.db import Database
 from base.host.permissions_helper.client import (
     AxNode,
-    PermissionsHelperClient,
     PermissionsHelperError,
 )
 
@@ -25,7 +23,7 @@ from .. import ax_act as ax_action_tools
 from ..ax_ids import AxIdTable, AxSession
 from ..errors import ComputerUseError
 from ..mcp_daemon import ComputerMcpDaemon
-from .slices import computer_use_config
+from .slices import AuditLog, FakeDesktopHelper, computer_use_config
 
 TYPED_TEXT = "hunter2-s3cret"
 
@@ -41,11 +39,10 @@ def el(fp: str, role: str, parent: str | None, title: str = "", **kw: Any) -> di
     }
 
 
-class FakeAxApp(PermissionsHelperClient):
+class FakeAxApp(FakeDesktopHelper):
     """The helper's element table and walk numbering for one app."""
 
     def __init__(self) -> None:
-        super().__init__("/nonexistent-test-helper.sock")
         self.clicks: list[tuple[float, float]] = []
         self.elements: list[dict[str, Any]] = [
             el("win", "AXWindow", None, "Compose"),
@@ -75,20 +72,20 @@ class FakeAxApp(PermissionsHelperClient):
         self.table = {}
 
     # -- helper surface
-    def ping(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def ping(self, **kw: Any) -> dict[str, Any]:
         return {"pong": True, **self.caps}
 
-    def frontmost_app(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def frontmost_app(self, **kw: Any) -> dict[str, Any]:
         return {"app": "Mail"}
 
-    def click(self, x: float, y: float, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def click(self, x: float, y: float, **kw: Any) -> dict[str, Any]:
         self.clicks.append((x, y))
         return {"clicked": {"x": x, "y": y}, "double": False}
 
-    def screen_size(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def screen_size(self, **kw: Any) -> dict[str, Any]:
         return {"x": 0.0, "y": 0.0, "w": 1512.0, "h": 982.0, "scale": 2.0}
 
-    def ax_tree(self, app: str, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def ax_tree(self, app: str | None = None, **kw: Any) -> Any:
         self.calls.append(("ax_tree", {"app": app, **kw}))
         scope_raw = kw.get("scope")
         if scope_raw is None:
@@ -117,7 +114,7 @@ class FakeAxApp(PermissionsHelperClient):
             if depth_first["parent"] in raw_of:
                 node["parent"] = raw_of[depth_first["parent"]]
             nodes.append(node)  # pyright: ignore[reportArgumentType]
-        return {  # pyright: ignore[reportReturnType]
+        return {
             "app": app or "Mail",
             "pid": self.pid,
             "windows": 1,
@@ -134,9 +131,9 @@ class FakeAxApp(PermissionsHelperClient):
     def _under(self, element: dict[str, Any], top: str) -> bool:
         return element["parent"] == top
 
-    def ax_act(  # pyright: ignore[reportIncompatibleMethodOverride]
+    def ax_act(
         self, app: str, raw_id: int, action: str, *, value: str | None = None, **kw: Any
-    ) -> dict[str, Any]:
+    ) -> Any:
         self.calls.append(("ax_act", {"app": app, "raw_id": raw_id, "action": action, **kw}))
         fp = self.table.get(raw_id)
         found = next((e for e in self.elements if e["fp"] == fp), None)
@@ -163,13 +160,9 @@ def app() -> FakeAxApp:
 
 
 @pytest.fixture
-def audit_log(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    log: list[dict[str, Any]] = []
-
-    def record(_db: object, event: Any) -> None:
-        log.append({"event_type": event.event_name, "payload": event.attributes})
-
-    monkeypatch.setattr(manifest, "emit_recorded_central_event", record)
+def audit_log(database: Database) -> AuditLog:
+    log = AuditLog(database)
+    log.clear()
     return log
 
 
@@ -188,7 +181,9 @@ async def call(
     )
     if resp["ok"] is False:
         raise ComputerUseError(resp["error"])
-    return json.loads(resp["result"]["content"][0]["text"])
+    res = resp["result"]
+    assert isinstance(res, dict)
+    return json.loads(res["content"][0]["text"])
 
 
 def ids_in(tree: str) -> dict[str, str]:
@@ -405,7 +400,7 @@ async def test_bad_arguments_are_rejected_before_the_helper(
 
 
 async def test_set_value_reaches_the_field_and_is_not_echoed_or_audited(
-    app: FakeAxApp, daemon: ComputerMcpDaemon, audit_log: list[dict[str, Any]]
+    app: FakeAxApp, daemon: ComputerMcpDaemon, audit_log: AuditLog
 ) -> None:
     ids = ids_in((await call(daemon, "ax_tree", {"app": "Mail"}))["tree"])
     out = await call(
@@ -416,11 +411,11 @@ async def test_set_value_reaches_the_field_and_is_not_echoed_or_audited(
     acted = [e for e in audit_log if e["payload"]["action"] == "ax_act"]
     assert [e["payload"]["outcome"] for e in acted] == ["ok"]
     assert acted[0]["payload"]["coords"] == "120,80,set_value"
-    assert TYPED_TEXT not in json.dumps(audit_log)
+    assert TYPED_TEXT not in json.dumps(list(audit_log))
 
 
 async def test_a_failed_set_value_leaves_the_value_out_of_the_audit_too(
-    app: FakeAxApp, daemon: ComputerMcpDaemon, audit_log: list[dict[str, Any]]
+    app: FakeAxApp, daemon: ComputerMcpDaemon, audit_log: AuditLog
 ) -> None:
     ids = ids_in((await call(daemon, "ax_tree", {"app": "Mail"}))["tree"])
     app.act_error = "element value is not settable"
@@ -430,7 +425,7 @@ async def test_a_failed_set_value_leaves_the_value_out_of_the_audit_too(
         )
     failed = [e for e in audit_log if e["payload"]["action"] == "ax_act"]
     assert [e["payload"]["outcome"] for e in failed] == ["error"]
-    assert TYPED_TEXT not in json.dumps(audit_log)
+    assert TYPED_TEXT not in json.dumps(list(audit_log))
 
 
 async def test_ax_act_is_declared_with_its_required_arguments(database: Database) -> None:
@@ -439,7 +434,8 @@ async def test_ax_act_is_declared_with_its_required_arguments(database: Database
     )
     resp = await daemon._dispatch({"id": 1, "method": "list_tools"})
     assert resp["ok"] is True
-    tools: list[dict[str, Any]] = resp["result"]
+    tools = resp["result"]
+    assert isinstance(tools, list)
     declared = next(t for t in tools if t["name"] == "ax_act")
     assert declared["input_schema"]["required"] == ["id", "action"]
 
@@ -467,7 +463,7 @@ async def test_perform_action_forwards_a_reported_platform_identifier(
 async def test_select_text_forwards_matching_context_without_echoing_or_auditing_it(
     app: FakeAxApp,
     daemon: ComputerMcpDaemon,
-    audit_log: list[dict[str, Any]],
+    audit_log: AuditLog,
     selection: str | None,
 ) -> None:
     ids = ids_in((await call(daemon, "ax_tree", {"app": "Mail"}))["tree"])
@@ -488,8 +484,8 @@ async def test_select_text_forwards_matching_context_without_echoing_or_auditing
         "after-private",
         selection or "text",
     )
-    assert TYPED_TEXT not in json.dumps(out) + json.dumps(audit_log)
-    assert "after-private" not in json.dumps(out) + json.dumps(audit_log)
+    assert TYPED_TEXT not in json.dumps(out) + json.dumps(list(audit_log))
+    assert "after-private" not in json.dumps(out) + json.dumps(list(audit_log))
     acted = [e for e in audit_log if e["payload"]["action"] == "ax_act"]
     assert acted[0]["payload"]["coords"] == "120,80,select_text"
 
@@ -574,7 +570,7 @@ async def test_extended_actions_never_rewalk_a_stale_window(
 
 
 async def test_a_failed_selection_keeps_text_and_context_out_of_the_audit(
-    app: FakeAxApp, daemon: ComputerMcpDaemon, audit_log: list[dict[str, Any]]
+    app: FakeAxApp, daemon: ComputerMcpDaemon, audit_log: AuditLog
 ) -> None:
     ids = ids_in((await call(daemon, "ax_tree", {"app": "Mail"}))["tree"])
     app.act_error = "text selection is ambiguous; add prefix or suffix"
@@ -589,8 +585,8 @@ async def test_a_failed_selection_keeps_text_and_context_out_of_the_audit(
                 "prefix": "private-context",
             },
         )
-    assert TYPED_TEXT not in json.dumps(audit_log) and "private-context" not in json.dumps(
-        audit_log
+    assert TYPED_TEXT not in json.dumps(list(audit_log)) and "private-context" not in json.dumps(
+        list(audit_log)
     )
     assert [e["payload"]["outcome"] for e in audit_log if e["payload"]["action"] == "ax_act"] == [
         "error"

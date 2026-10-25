@@ -126,9 +126,7 @@ class _FakeServer:
         self.waited = True
 
 
-async def test_bounded_cleanup_cancels_clients_and_waits_for_the_listener(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_bounded_cleanup_cancels_clients_and_waits_for_the_listener() -> None:
     hung = asyncio.Event()
 
     async def client() -> None:
@@ -137,54 +135,16 @@ async def test_bounded_cleanup_cancels_clients_and_waits_for_the_listener(
     task = asyncio.create_task(client())
     await asyncio.sleep(0)
     server = _FakeServer()
-    dumped: list[str] = []
-    monkeypatch.setattr(daemon_mod, "dump_and_exit", dumped.append)
 
     await daemon_mod.bounded_cleanup(cast(asyncio.AbstractServer, server), {task}, drain_s=1.0)
 
     assert task.cancelled()
     assert server.waited
-    assert dumped == []
 
 
-class _DumpAndExitCalledError(Exception):
-    pass
+def test_bounded_cleanup_dumps_and_exits_when_a_client_survives_cancel() -> None:
+    result = _run_child("stubborn-cleanup")
 
-
-async def test_bounded_cleanup_dumps_and_exits_when_a_client_survives_cancel(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    release = asyncio.Event()
-
-    async def stubborn() -> None:
-        while True:
-            try:
-                await asyncio.Event().wait()
-            except asyncio.CancelledError:
-                if release.is_set():
-                    raise
-
-    task = asyncio.create_task(stubborn())
-    await asyncio.sleep(0)
-    server = _FakeServer()
-    dumped: list[str] = []
-
-    def _record_and_exit(reason: str) -> None:
-        dumped.append(reason)
-        raise _DumpAndExitCalledError(reason)
-
-    monkeypatch.setattr(daemon_mod, "dump_and_exit", _record_and_exit)
-
-    try:
-        with pytest.raises(_DumpAndExitCalledError, match=re.escape("did not finish within 0.05s")):
-            await daemon_mod.bounded_cleanup(
-                cast(asyncio.AbstractServer, server), {task}, drain_s=0.05
-            )
-
-        assert dumped == ["shutdown cleanup did not finish within 0.05s"]
-        assert not server.waited
-    finally:
-        release.set()
-        task.cancel()
-        _, still_running = await asyncio.wait({task}, timeout=2.0)
-        assert not still_running, "stubborn handler survived the test cleanup"
+    assert result.returncode == 1
+    assert re.search(r"shutdown cleanup did not finish within 0\.05s", result.stderr)
+    assert "thread stacks follow; exiting for a supervisor restart" in result.stderr
