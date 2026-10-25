@@ -5,7 +5,6 @@ import json
 import re
 import subprocess
 import sys
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -71,27 +70,27 @@ def decision_evidence(output: str) -> tuple[list[str], set[str]]:
     return list(dict.fromkeys(rows)), decided
 
 
-def tccd_log(
-    start: datetime,
-    window: int,
-    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
-) -> str:
+def tccd_log_argv(start: datetime, window: int) -> list[str]:
     local = start.astimezone()
     end = local + timedelta(seconds=window)
     fmt = "%Y-%m-%d %H:%M:%S"
-    done = run(
-        [
-            "log",
-            "show",
-            "--start",
-            local.strftime(fmt),
-            "--end",
-            end.strftime(fmt),
-            "--predicate",
-            'process == "tccd"',
-            "--style",
-            "compact",
-        ],
+    return [
+        "log",
+        "show",
+        "--start",
+        local.strftime(fmt),
+        "--end",
+        end.strftime(fmt),
+        "--predicate",
+        'process == "tccd"',
+        "--style",
+        "compact",
+    ]
+
+
+def tccd_log(start: datetime, window: int) -> str:
+    done = subprocess.run(  # noqa: S603 — fixed log show argv
+        tccd_log_argv(start, window),
         capture_output=True,
         text=True,
         check=False,
@@ -99,13 +98,7 @@ def tccd_log(
     return done.stdout or ""
 
 
-def main(
-    argv: list[str] | None = None,
-    *,
-    client: HelperChannel | None = None,
-    platform: str | None = None,
-    log_reader: Callable[[datetime, int], str] = tccd_log,
-) -> int:
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=DESCRIPTION)
     parser.add_argument("--out", help="evidence directory (default: $MEIVA_HOME/tcc-evidence)")
     parser.add_argument("--window", type=int, default=120, help="seconds after the request")
@@ -114,14 +107,15 @@ def main(
         choices=GRANT_SERVICES,
         help="also require a decision line for this service (Screen Recording acceptance)",
     )
-    args = parser.parse_args(argv)
-    if (platform or sys.platform) != "darwin":
+    return parser.parse_args(argv)
+
+
+def _request_helper_grants(
+    client: HelperChannel, *, platform: str
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]] | int:
+    if platform != "darwin":
         print("this evidence run needs macOS", file=sys.stderr)
         return 2
-    if client is None:
-        from services.desktop.permissions_helper.onboarding import helper_client
-
-        client = helper_client()
     try:
         before: dict[str, Any] = dict(client.ping())
     except Exception as exc:
@@ -133,10 +127,21 @@ def main(
             file=sys.stderr,
         )
         return 2
-    started = datetime.now(UTC)
     requested = dict(client.request_grants())
     after = dict(client.ping())
-    lines, decided = decision_evidence(log_reader(started, args.window))
+    return before, requested, after
+
+
+def _write_evidence(
+    args: argparse.Namespace,
+    *,
+    started: datetime,
+    before: dict[str, Any],
+    requested: dict[str, Any],
+    after: dict[str, Any],
+    log_output: str,
+) -> int:
+    lines, decided = decision_evidence(log_output)
     from base.paths import meiva_home
 
     out = Path(args.out) if args.out else meiva_home() / "tcc-evidence"
@@ -171,6 +176,51 @@ def main(
         )
         return 1
     return 0
+
+
+def run_evidence(
+    argv: list[str],
+    *,
+    client: HelperChannel,
+    platform: str,
+    now: datetime,
+    log_output: str,
+) -> int:
+    args = _parse_args(argv)
+    outcome = _request_helper_grants(client, platform=platform)
+    if isinstance(outcome, int):
+        return outcome
+    before, requested, after = outcome
+    return _write_evidence(
+        args,
+        started=now,
+        before=before,
+        requested=requested,
+        after=after,
+        log_output=log_output,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    if sys.platform != "darwin":
+        print("this evidence run needs macOS", file=sys.stderr)
+        return 2
+    from services.desktop.permissions_helper.onboarding import helper_client
+
+    started = datetime.now(UTC)
+    outcome = _request_helper_grants(helper_client(), platform=sys.platform)
+    if isinstance(outcome, int):
+        return outcome
+    before, requested, after = outcome
+    return _write_evidence(
+        args,
+        started=started,
+        before=before,
+        requested=requested,
+        after=after,
+        log_output=tccd_log(started, args.window),
+    )
 
 
 if __name__ == "__main__":

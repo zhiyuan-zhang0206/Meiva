@@ -1,11 +1,1 @@
-[debt.env-patch]
-"test_container.py#monkeypatch.setenv os.environ.HOME" = 2
-"test_tart_run.py#monkeypatch.setenv os.environ.FAKE_TART_HOME" = 1
-"test_tart_run.py#monkeypatch.setenv os.environ.HOME" = 2
 
-[debt.first-party-patch]
-"test_tart_run.py#monkeypatch.setattr scripts.verify.tart_vm.time.sleep" = 1
-
-[debt.test-subclass-override]
-"test_tart_golden.py#subclass scripts.verify.tart_vm.Tart.vms" = 1
-"test_tart_run.py#subclass scripts.verify.tart_vm.Tart.delete_run_vm" = 2

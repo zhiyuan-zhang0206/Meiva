@@ -33,10 +33,9 @@ def inject(data: OkfGraphData, out: Path) -> None:
     print(f"  wrote {out} ({len(html)} bytes)", file=sys.stderr)
 
 
-def serve(d: Path, port: int) -> None:
+def serve(d: Path, port: int, *, host: str) -> None:
     os.chdir(d)
-    h = socket.gethostbyname(socket.gethostname())
-    url = f"http://{h}:{port}/okf-d3.html"
+    url = f"http://{host}:{port}/okf-d3.html"
     print(f"\n  OKF D3 Viz -> {url}")
     print("  Press Ctrl+C to stop.\n")
     srv = http.server.HTTPServer(("", port), http.server.SimpleHTTPRequestHandler)
@@ -61,7 +60,8 @@ def main() -> None:
     print(f"  {n} nodes, {t} tree, {c} cross", file=sys.stderr)
     inject(d, REPO / a.output)
     if not a.no_serve:
-        serve(REPO, a.port)
+        host = socket.gethostbyname(socket.gethostname())
+        serve(REPO, a.port, host=host)
 
 
 if __name__ == "__main__":

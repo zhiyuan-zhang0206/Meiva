@@ -30,7 +30,7 @@ import tomllib
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Literal, cast
+from typing import Literal, TypeGuard
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
@@ -293,23 +293,36 @@ class TierConfig:
         return "error" if rule in _STRICT_ENABLED_RULES else "none"
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _as_mapping(value: object, label: str) -> dict[str, object]:
-    if not isinstance(value, dict):
+    if not _is_raw_dict(value):
         raise TypeError(f"{label} must be a TOML table")
-    mapping = cast(dict[object, object], value)
-    if not all(isinstance(key, str) for key in mapping):
+    if not _is_str_dict(value):
         raise ValueError(f"{label} must be a TOML table")
-    return cast(dict[str, object], mapping)
+    return value
 
 
 def _diagnostic_level(value: object, label: str) -> DiagnosticLevel:
-    if value is True:
+    if value is True or value == "error":
         return "error"
-    if value is False:
+    if value is False or value == "none":
         return "none"
-    if value not in {"error", "warning", "information", "none"}:
-        raise ValueError(f"{label} has unknown diagnostic level {value!r}")
-    return cast(DiagnosticLevel, value)
+    if value == "warning":
+        return "warning"
+    if value == "information":
+        return "information"
+    raise ValueError(f"{label} has unknown diagnostic level {value!r}")
 
 
 def load_tier_config(path: Path) -> TierConfig:
@@ -326,9 +339,9 @@ def load_tier_config(path: Path) -> TierConfig:
 
     environments: dict[str, dict[str, DiagnosticLevel]] = {}
     raw_environments = pyright["executionEnvironments"]
-    if not isinstance(raw_environments, list):
+    if not _is_object_list(raw_environments):
         raise TypeError("tool.pyright.executionEnvironments must be an array of tables")
-    for index, raw_environment in enumerate(cast(list[object], raw_environments)):
+    for index, raw_environment in enumerate(raw_environments):
         environment = _as_mapping(raw_environment, f"tool.pyright.executionEnvironments[{index}]")
         root_value = environment["root"]
         if not isinstance(root_value, str):
@@ -536,11 +549,11 @@ def pyright_errors(path: Path) -> frozenset[tuple[int, str]]:
             f"Pyright did not return valid JSON for {path}: {result.stderr.strip()}"
         ) from exc
     diagnostics = payload["generalDiagnostics"]
-    if not isinstance(diagnostics, list):
+    if not _is_object_list(diagnostics):
         raise TypeError("Pyright generalDiagnostics must be an array")
 
     errors: set[tuple[int, str]] = set()
-    for raw_diagnostic in cast(list[object], diagnostics):
+    for raw_diagnostic in diagnostics:
         diagnostic = _as_mapping(raw_diagnostic, "Pyright diagnostic")
         if diagnostic["severity"] != "error" or "rule" not in diagnostic:
             continue
@@ -681,16 +694,18 @@ def main(
     if args.all_tier and args.strip is None:
         build_parser().error("--all-tier requires --strip")
 
-    if args.verify is not None:
+    verify_files: list[str] | None = args.verify
+    if verify_files is not None:
         verification, scan = _verify_selected(
-            cast(list[str], args.verify), repo_root=root, errors_fn=errors_fn
+            verify_files, repo_root=root, errors_fn=errors_fn
         )
         _print_entries(scan.invalid, "invalid")
         print(_verification_json(verification))
         return 0
 
-    if args.strip is not None:
-        files = cast(list[str], args.strip)
+    strip_files: list[str] | None = args.strip
+    if strip_files is not None:
+        files = strip_files
         selected = _selected_ignores(files, repo_root=root)
         if args.all_tier:
             all_ignores = [ignore for _, ignores in selected.values() for ignore in ignores]

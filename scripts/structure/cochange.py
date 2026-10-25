@@ -43,7 +43,7 @@ import subprocess
 import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from scripts.structure import imports
@@ -527,12 +527,12 @@ def _render_markdown(report: Report) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _window_description(*, branch: str, days: int | None, commits: int | None) -> str:
+def _window_description(*, branch: str, days: int | None, commits: int | None, today: date) -> str:
     if commits is not None:
         return f"last {commits} first-parent commits on {branch}"
     if days is None:
         raise AssertionError("main() must resolve one of --days/--commits before rendering")
-    since = datetime.now(UTC).date() - timedelta(days=days)
+    since = today - timedelta(days=days)
     return f"last {days} days (since {since.isoformat()}) on {branch}, first-parent"
 
 
@@ -558,7 +558,12 @@ def main(argv: list[str] | None = None) -> int:
         days = args.days
     else:
         days = None if args.commits is not None else _DEFAULT_DAYS
-    window_desc = _window_description(branch=args.branch, days=days, commits=args.commits)
+    window_desc = _window_description(
+        branch=args.branch,
+        days=days,
+        commits=args.commits,
+        today=datetime.now(UTC).date(),
+    )
 
     try:
         log_text = _run_git_log(repo, args.branch, days=days, commits=args.commits)

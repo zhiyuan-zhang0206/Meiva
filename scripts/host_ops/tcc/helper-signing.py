@@ -193,14 +193,14 @@ def import_identity(path: str, *, password_file: str | None) -> int:
     return status()
 
 
-def switch(*, start: bool) -> int:
+def switch(*, start: bool, now: datetime) -> int:
     from base.paths import permissions_helper_app_dir
     from services.desktop.permissions_helper import lifecycle, signing_identity
 
     home = permissions_helper_app_dir()
     app = home / "MeivaPermissionsHelper.app"
     state = home / "build-state.json"
-    backup = home / f"backup-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
+    backup = home / f"backup-{now.strftime('%Y%m%dT%H%M%SZ')}"
     before_dr = _codesign("-d", "-r-", app=app) if app.exists() else ""
     if app.exists():
         backup.mkdir(parents=True, exist_ok=False)
@@ -346,7 +346,7 @@ def main(argv: list[str]) -> int:
         "status": status,
         "facts": facts,
         "provision": provision,
-        "switch": lambda: switch(start=args.start),
+        "switch": lambda: switch(start=args.start, now=datetime.now(UTC)),
         "export": lambda: export(args.path or ""),
         "import": lambda: import_identity((args.path or ""), password_file=args.password_file),
     }[args.command]()

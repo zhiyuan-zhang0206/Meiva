@@ -83,13 +83,14 @@ def holders(path: Path) -> list[int]:
 
 
 def wait_for_lock(path: Path, timeout: float, interval: float) -> tuple[bool, float]:
-    started = time.monotonic()
+    waited = 0.0
     while True:
         if lock_is_free(path):
-            return True, time.monotonic() - started
-        if time.monotonic() - started >= timeout:
-            return False, time.monotonic() - started
+            return True, waited
+        if waited >= timeout:
+            return False, waited
         time.sleep(interval)
+        waited += interval
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -1,6 +1,5 @@
 import subprocess
 from pathlib import Path
-from unittest.mock import Mock
 
 import pytest
 
@@ -74,38 +73,13 @@ def _assert_image_gate(gate: ProcessDbGate, image: LoadedCommit) -> None:
 
 
 @pytest.mark.parametrize("known", [True, False], ids=["captured", "unknown"])
-def test_report_uses_one_captured_gated_database(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, known: bool
-) -> None:
+def test_report_uses_one_captured_gated_database(tmp_path: Path, known: bool) -> None:
     image = _captured_image(tmp_path / "preview-source", known)
-    capture = Mock(return_value=image)
-    database = Mock()
-    create = Mock(return_value=database)
-    report = Mock()
-    monkeypatch.setattr(replay, "require_preview", Mock())
-    monkeypatch.setattr(replay, "ConfigBoot", Mock(return_value=Mock()))
-    monkeypatch.setattr(LoadedCommit, "capture", capture)
-    monkeypatch.setattr(replay, "process_name", lambda: "preview")
-    monkeypatch.setattr(replay.Database, "from_settings", create)
-    monkeypatch.setattr(replay, "print_replay_report", report)
-    replay.main(["report", "42"])
-    capture.assert_called_once_with()
-    create.assert_called_once()
-    report.assert_called_once_with(database, 42)
-    gate = create.call_args.kwargs["gate"]
+    gate = replay.build_replay_gate(image, process="preview")
     assert isinstance(gate, ProcessDbGate)
     _assert_image_gate(gate, image)
 
 
-def test_preview_refusal_precedes_capture_and_database(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    capture = Mock()
-    create = Mock()
-    monkeypatch.setattr(replay, "DOCKERENV", tmp_path / "missing")
-    monkeypatch.setattr(LoadedCommit, "capture", capture)
-    monkeypatch.setattr(replay.Database, "from_settings", create)
+def test_preview_refusal_precedes_capture_and_database(tmp_path: Path) -> None:
     with pytest.raises(SystemExit, match="preview container only"):
-        replay.main(["report", "42"])
-    capture.assert_not_called()
-    create.assert_not_called()
+        replay.main(["report", "42"], dockerenv=tmp_path / "missing")

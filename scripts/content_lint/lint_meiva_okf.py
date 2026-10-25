@@ -10,7 +10,7 @@ import sys
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 import yaml
 
@@ -88,6 +88,14 @@ def find_files(paths: list[str]) -> list[Path]:
     return sorted(set(files))
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def parse_frontmatter(text: str) -> tuple[dict[object, object], str, int]:
     lines = text.split("\n")
     if not lines or lines[0].strip() != "---":
@@ -99,7 +107,7 @@ def parse_frontmatter(text: str) -> tuple[dict[object, object], str, int]:
                 raw: object = yaml.safe_load(fm_text)
             except yaml.YAMLError:
                 return {}, text, i + 1
-            fm = cast("dict[object, object]", raw) if isinstance(raw, dict) else {}
+            fm = raw if _is_raw_dict(raw) else {}
             return fm, "\n".join(lines[i + 1 :]).lstrip("\n"), i + 1
     return {}, text, 0
 
@@ -279,10 +287,10 @@ def _tags_errors(path_str: str, fm: Mapping[object, object]) -> list[LintError]:
     if "tags" not in fm:
         return errors
     tags = fm["tags"]
-    if not isinstance(tags, list):
+    if not _is_object_list(tags):
         errors.append(LintError(path_str, 1, "E005", "'tags' must be a list of strings"))
         return errors
-    for i, t in enumerate(cast("list[object]", tags)):
+    for i, t in enumerate(tags):
         if not isinstance(t, str):
             errors.append(
                 LintError(

@@ -25,7 +25,7 @@ import json
 import subprocess
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
-from typing import cast
+from typing import TypeGuard
 
 SHARD_DIR = "scripts/structure/baseline"
 RULES_FILE = "rules.json"
@@ -191,15 +191,25 @@ def read_at(repo_root: Path, rev: str, *, git_executable: str = "git") -> dict[s
     return _batch_texts(batch.stdout, filenames)
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
 def parse_rules(text: str) -> dict[str, int]:
     """The rule versions of a `rules.json` text: section -> integer version >= 1."""
-    rules = cast("object", json.loads(text))
-    if not isinstance(rules, dict) or any(
-        type(version) is not int or version < 1
-        for version in cast("dict[str, object]", rules).values()
-    ):
+    rules: object = json.loads(text)
+    if not _is_str_object_dict(rules):
         raise ValueError(f"{RULES_FILE} must map a section to an integer rule version >= 1")
-    return cast("dict[str, int]", rules)
+    result: dict[str, int] = {}
+    for section, version in rules.items():
+        if type(version) is not int or version < 1:
+            raise ValueError(f"{RULES_FILE} must map a section to an integer rule version >= 1")
+        result[section] = version
+    return result
 
 
 def read_rules_worktree(repo_root: Path) -> dict[str, int]:

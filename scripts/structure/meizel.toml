@@ -10,13 +10,5 @@ exports = ["baseline_shards.py", "budgets", "imports", "lazy_modules.py", "local
 "tests_location.py" = ["placement.py", "placement_evidence.py", "tests_location_allowed.py", "tests_location_suggest.py"]
 "tests_location_suggest.py" = ["placement.py", "placement_evidence.py", "tests_location_allowed.py"]
 
-[debt.ambient-read]
-"cochange.py#clock datetime.datetime.now" = 1
-
-[debt.type-cast]
-"baseline_shards.py#cast parse_rules" = 3
-"locality.py#cast validate_entries" = 1
-"platform_lane_coverage.py#cast jobs" = 3
-"platform_lane_coverage.py#cast lanes" = 2
-"skip_sites.py#cast load" = 1
-"skip_sites.py#cast load.<dictcomp>" = 1
+[roots]
+"cochange.py" = { kinds = ["clock"], why = "CLI sweeper entrypoint resolves the current UTC date to describe the rolling --days window" }

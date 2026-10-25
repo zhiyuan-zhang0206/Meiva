@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import sys
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -32,38 +32,42 @@ from base.cluster.machine.ambient import gateway_access_from_settings
 from base.host.net.http_dial import post as dial_post
 
 
-class _PostResponse(Protocol):
-    def raise_for_status(self) -> object: ...
-
-    def json(self) -> Mapping[str, object]: ...
-
-
-class _PostFn(Protocol):
-    def __call__(
-        self, url: str, *, json: dict[str, str], headers: dict[str, str]
-    ) -> _PostResponse: ...
+@dataclass(frozen=True)
+class SpawnRequest:
+    url: str
+    json: dict[str, str]
+    headers: dict[str, str]
 
 
-def main(
-    *,
-    api_base_fn: Callable[[str], str] = gateway_api_base,
-    auth_headers_fn: Callable[[GatewayAccess], dict[str, str]] = gateway_auth_headers,
-    post_fn: _PostFn = dial_post,
-) -> None:
-    access = gateway_access_from_settings()  # ambient: O
-    base = api_base_fn(
-        access.gateway_url
-    )  # role-blind: the configured gateway_url (localhost on a dev cluster)
+def build_spawn_request(access: GatewayAccess, *, idempotency_key: str) -> SpawnRequest:
+    base = gateway_api_base(access.gateway_url)
     # The keyed spawn route is authenticated: present the machine API token (or the
     # cluster secret) as a Bearer token; without it the gateway rejects this spawn with 401.
     headers = {
-        **auth_headers_fn(access),
-        "Idempotency-Key": uuid.uuid4().hex,
+        **gateway_auth_headers(access),
+        "Idempotency-Key": idempotency_key,
         SCOPE_HEADER: PRINCIPAL_SCOPE,
     }
-    resp = post_fn(f"{base}/api/keyed/v1/agents", json={"spawner": "user"}, headers=headers)
+    return SpawnRequest(
+        url=f"{base}/api/keyed/v1/agents",
+        json={"spawner": "user"},
+        headers=headers,
+    )
+
+
+def parse_spawn_agent_id(payload: Mapping[str, object]) -> int:
+    raw_id = payload["id"]
+    if not isinstance(raw_id, int | str):
+        raise TypeError(f"spawn response id must be int or str, got {type(raw_id).__name__}")
+    return int(raw_id)
+
+
+def main() -> None:
+    access = gateway_access_from_settings()
+    request = build_spawn_request(access, idempotency_key=uuid.uuid4().hex)
+    resp = dial_post(request.url, json=request.json, headers=request.headers)
     resp.raise_for_status()
-    agent_id = int(cast("int | str", resp.json()["id"]))
+    agent_id = parse_spawn_agent_id(resp.json())
     print(f"agent_id={agent_id}")
 
 

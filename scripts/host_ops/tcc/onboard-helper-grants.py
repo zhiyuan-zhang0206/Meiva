@@ -47,13 +47,14 @@ import os
 import signal
 import sys
 import time
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from base.host.permissions_helper.client import PermissionsHelperClient
 from base.host.permissions_helper.grants import probe as permissions_probe
 from base.host.permissions_helper.grants import triggers
 from base.host.permissions_helper.grants.catalog import Grant
@@ -177,7 +178,7 @@ def fill_request_error(
     return None
 
 
-def helper_client() -> Any:
+def helper_client() -> PermissionsHelperClient:
     try:
         from base.sessions.helperproc import helper_client as sessions_helper_client
     except ImportError as exc:
@@ -195,13 +196,15 @@ def child_env() -> dict[str, str]:
     return env_forwarding.forward_env_dict(process_environment(), activate_venv=False)
 
 
-def spawn_child(client: Any, workdir: Path, name: str, argv: list[str], tag: str) -> int:
+def spawn_child(
+    client: PermissionsHelperClient, workdir: Path, name: str, argv: list[str], tag: str
+) -> int:
     return permissions_probe.spawn_child(
         client, name=name, argv=argv, env=child_env(), workdir=workdir, tag=tag
     )
 
 
-def preflight_matrix(client: Any, workdir: Path, run_id: str) -> dict[str, str]:
+def preflight_matrix(client: PermissionsHelperClient, workdir: Path, run_id: str) -> dict[str, str]:
     grants = permissions_probe.run_preflight(
         client,
         workdir=workdir,
@@ -212,7 +215,7 @@ def preflight_matrix(client: Any, workdir: Path, run_id: str) -> dict[str, str]:
     return {service: _SCRIPT_WORDS[grant] for service, grant in grants.items()}
 
 
-def reap_child(client: Any, spawn_name: str) -> str:
+def reap_child(client: PermissionsHelperClient, spawn_name: str) -> str:
     """Kill a child that is still waiting after a timeout (SIGTERM, then
     SIGKILL as needed) so no dialog is left pending past the run."""
     try:
@@ -229,7 +232,7 @@ def reap_child(client: Any, spawn_name: str) -> str:
 
 
 def wait_for_item(
-    client: Any,
+    client: PermissionsHelperClient,
     workdir: Path,
     run_id: str,
     tag: str,
@@ -243,10 +246,11 @@ def wait_for_item(
     spawn_name = f"tcc-onboard-{run_id}-{tag}"
     spawn_child(client, workdir, spawn_name, argv, f"{tag}-{run_id}")
     print(f"  [{tag}] request sent -- click Allow in the system dialog (if shown).")
-    deadline = time.monotonic() + timeout_s
+    waited = 0.0
     polls = 0
-    while time.monotonic() < deadline:
+    while waited < timeout_s:
         time.sleep(POLL_S)
+        waited += POLL_S
         text = read_result(result_path)
         if text is not None:
             return text
@@ -362,11 +366,13 @@ def _parse_args() -> argparse.Namespace:
 def _folder_grants(
     items: list[str],
     args: argparse.Namespace,
-    client: Any,
+    client: PermissionsHelperClient,
     matrix: dict[str, str],
     workdir: Path,
     run_id: str,
     statuses: dict[str, str],
+    *,
+    home: Path,
 ) -> None:
     if "folders" in items:
         print("\n== file & folders block ==")
@@ -386,7 +392,7 @@ def _folder_grants(
                 item_id,
                 triggers.child_argv(
                     next(key for key, sub in triggers.FOLDER_PATHS.items() if sub == folder),
-                    home=Path.home(),
+                    home=home,
                     result_path=result_path,
                 )
                 or [],
@@ -401,10 +407,12 @@ def _folder_grants(
 def _apple_event_grants(
     items: list[str],
     args: argparse.Namespace,
-    client: Any,
+    client: PermissionsHelperClient,
     workdir: Path,
     run_id: str,
     statuses: dict[str, str],
+    *,
+    home: Path,
 ) -> None:
     if "apple-events" in items and not args.check:
         print("\n== AppleEvents block (Automation dialogs, one per target app) ==")
@@ -422,7 +430,7 @@ def _apple_event_grants(
                         for key, event in triggers.APPLE_EVENT_SCRIPTS.items()
                         if event == script
                     ),
-                    home=Path.home(),
+                    home=home,
                     result_path=result_path,
                 )
                 or [],
@@ -438,7 +446,9 @@ def _apple_event_grants(
         )
 
 
-def _screen_access_grants(items: list[str], ping: dict[str, Any], statuses: dict[str, str]) -> None:
+def _screen_access_grants(
+    items: list[str], ping: Mapping[str, object], statuses: dict[str, str]
+) -> None:
     if "sr-ax" in items:
         print("\n== Screen Recording / Accessibility ==")
         if ping.get("preflight_screen"):
@@ -464,10 +474,12 @@ def _screen_access_grants(items: list[str], ping: dict[str, Any], statuses: dict
 def _fill_pending_grants(
     extended: list[str],
     args: argparse.Namespace,
-    client: Any,
+    client: PermissionsHelperClient,
     matrix: dict[str, str],
     workdir: Path,
     run_id: str,
+    *,
+    home: Path,
 ) -> tuple[dict[str, str], dict[str, str], set[str]]:
     fill_results: dict[str, str] = {}
     fill_attempted: set[str] = set()
@@ -492,7 +504,7 @@ def _fill_pending_grants(
                         [
                             sys.executable,
                             str(Path(__file__).with_name("scan_child.py")),
-                            str(Path.home() / rel),
+                            str(home / rel),
                             str(result_path),
                         ],
                         result_path,
@@ -521,13 +533,15 @@ def _report_result(
     matrix: dict[str, str],
     fill_attempted: set[str],
     fill_results: dict[str, str],
+    *,
+    host: str,
 ) -> int:
     unresolved_count = count_unresolved(statuses)
     unresolved = unresolved_count > 0
 
     report = {
         "run_id": run_id,
-        "host": os.uname().nodename,
+        "host": host,
         "tier": args.tier,
         "groups": items,
         "extended_groups": extended,
@@ -647,15 +661,16 @@ def main() -> int:
     extended = _describe_extended(args, items, matrix)
 
     statuses: dict[str, str] = {}
+    home = Path.home()
 
-    _folder_grants(items, args, client, matrix, workdir, run_id, statuses)
+    _folder_grants(items, args, client, matrix, workdir, run_id, statuses, home=home)
 
-    _apple_event_grants(items, args, client, workdir, run_id, statuses)
+    _apple_event_grants(items, args, client, workdir, run_id, statuses, home=home)
 
     _screen_access_grants(items, ping, statuses)
 
     matrix, fill_results, fill_attempted = _fill_pending_grants(
-        extended, args, client, matrix, workdir, run_id
+        extended, args, client, matrix, workdir, run_id, home=home
     )
 
     for group in extended:
@@ -664,7 +679,16 @@ def main() -> int:
         )
 
     return _report_result(
-        statuses, args, workdir, run_id, items, extended, matrix, fill_attempted, fill_results
+        statuses,
+        args,
+        workdir,
+        run_id,
+        items,
+        extended,
+        matrix,
+        fill_attempted,
+        fill_results,
+        host=os.uname().nodename,
     )
 
 
