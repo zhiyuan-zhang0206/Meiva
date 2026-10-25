@@ -1,11 +1,16 @@
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 
 import psutil
 import pytest
 
 from base.cluster import postgres as pg
+
+
+@dataclass(frozen=True)
+class _Uids:
+    real: int
 
 
 # meiva:note
@@ -16,27 +21,33 @@ class ScriptedProcess:
         self,
         *,
         pid: int = 321,
+        name: str = "postgres",
         argv: list[str] | None = None,
         cwd: Path,
+        refuses_uids: bool = False,
         refuses_argv: bool = False,
         running: bool = True,
         status: str = psutil.STATUS_RUNNING,
     ) -> None:
         self.pid = pid
+        self._name = name
         self._argv = argv if argv is not None else ["postgres: checkpointer"]
         self._cwd = cwd
+        self._refuses_uids = refuses_uids
         self._refuses_argv = refuses_argv
         self._running = running
         self._status = status
 
-    def uids(self) -> SimpleNamespace:
-        return SimpleNamespace(real=os.getuid())
+    def uids(self) -> _Uids:
+        if self._refuses_uids:
+            raise psutil.AccessDenied(self.pid, self._name)
+        return _Uids(real=os.getuid())
 
     def status(self) -> str:
         return self._status
 
     def name(self) -> str:
-        return "postgres"
+        return self._name
 
     def cwd(self) -> str:
         return str(self._cwd)

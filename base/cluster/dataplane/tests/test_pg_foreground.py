@@ -15,7 +15,6 @@ import tempfile
 from collections.abc import Iterator
 from contextlib import nullcontext
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import psutil
 import psycopg
@@ -128,29 +127,44 @@ def test_readiness_rejects_an_unrelated_postgres_on_the_selected_port(
     with pytest.raises(RuntimeError, match="another data directory"):
         pg_plan.verify_foreground_data_dir(str(tmp_path / "other-db"), tmp_path / "owned-db")
 
-    process = MagicMock(spec=subprocess.Popen)
-    process.poll.return_value = None
-    process.wait.return_value = 0
+    bin_dir = _write_stub_pg_bindir(tmp_path / "bin")
     port = int(str(conninfo_to_dict(db_url)["port"]))
-
-    with pytest.raises(RuntimeError, match="another data directory"):
-        pg_foreground.wait_foreground_postgres(
-            process, data=tmp_path / "owned-db", log=tmp_path / "pg.log", port=port
-        )
+    log = tmp_path / "pg.log"
+    process = pg_foreground.start_foreground_postgres(
+        [str(bin_dir / "postgres"), "-D", str(tmp_path / "owned-db")],
+        log=log,
+        env=pg_tools.pg_start_env(),
+    )
+    try:
+        with pytest.raises(RuntimeError, match="another data directory"):
+            pg_foreground.wait_foreground_postgres(
+                process, data=tmp_path / "owned-db", log=log, port=port
+            )
+    finally:
+        process.terminate()
+        process.wait(timeout=5)
 
 
 def test_readiness_timeout_is_bounded(tmp_path: Path) -> None:
-    process = MagicMock(spec=subprocess.Popen)
-    process.poll.return_value = None
-
-    with pytest.raises(TimeoutError, match="did not become ready"):
-        pg_foreground.wait_foreground_postgres(
-            process,
-            data=tmp_path / "data",
-            log=tmp_path / "pg.log",
-            port=1,
-            timeout_s=0,
-        )
+    bin_dir = _write_stub_pg_bindir(tmp_path / "bin")
+    log = tmp_path / "pg.log"
+    process = pg_foreground.start_foreground_postgres(
+        [str(bin_dir / "postgres"), "-D", str(tmp_path / "data")],
+        log=log,
+        env=pg_tools.pg_start_env(),
+    )
+    try:
+        with pytest.raises(TimeoutError, match="did not become ready"):
+            pg_foreground.wait_foreground_postgres(
+                process,
+                data=tmp_path / "data",
+                log=log,
+                port=1,
+                timeout_s=0,
+            )
+    finally:
+        process.terminate()
+        process.wait(timeout=5)
 
 
 def _write_stub_pg_bindir(
@@ -230,10 +244,11 @@ def test_unreapable_foreground_retains_data_and_registration(
     sentinel = data / "retained"
     sentinel.write_text("must survive unconfirmed shutdown")
     registration = pg_tools.register_throwaway(instance, 5559)
-    process = MagicMock(spec=subprocess.Popen)
-    process.poll.return_value = None
-    process.wait.side_effect = subprocess.TimeoutExpired("postgres", 2)
-    process.args = [str(bin_dir / "postgres"), "-D", str(data)]
+    process = pg_foreground.start_foreground_postgres(
+        [str(bin_dir / "postgres"), "-D", str(data)],
+        log=instance / "pg.log",
+        env=pg_tools.pg_start_env(),
+    )
     try:
         with pytest.raises(subprocess.TimeoutExpired):
             pg_tools.teardown_throwaway(
@@ -248,6 +263,8 @@ def test_unreapable_foreground_retains_data_and_registration(
         assert sentinel.read_text() == "must survive unconfirmed shutdown"
         assert registration.lock.is_file()
     finally:
+        process.terminate()
+        process.wait(timeout=5)
         pg_tools.unregister_throwaway(registration)
 
 

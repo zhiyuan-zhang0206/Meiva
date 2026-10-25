@@ -116,11 +116,16 @@ _read = read_receipt
 # meiva:note
 # What `require_closed` asks of one process: `psutil.Process` is one, a scripted process that
 # exits or refuses to be read mid-look is the other.
+class ProcessUids(Protocol):
+    @property
+    def real(self) -> int: ...
+
+
 class ProcessView(Protocol):
     @property
     def pid(self) -> int: ...
 
-    def uids(self) -> Any: ...
+    def uids(self) -> ProcessUids: ...
 
     def status(self) -> str: ...
 

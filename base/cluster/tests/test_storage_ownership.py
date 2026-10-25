@@ -7,9 +7,8 @@ import os
 import signal
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any, cast
 
 import psutil
 import pytest
@@ -19,6 +18,48 @@ from base.cluster import postgres as pg
 from base.native_process.ownership import OwnedProcess
 
 _PG_TEST_CHILD = Path(__file__).with_name("_pg_test_child.py")
+
+
+@dataclass(frozen=True)
+class _Uids:
+    real: int
+
+
+class _ScriptedProcess:
+    def __init__(
+        self,
+        *,
+        pid: int,
+        name: str,
+        cwd: Path,
+        cmdline: list[str],
+        refuses_uids: bool = False,
+    ) -> None:
+        self.pid = pid
+        self._name = name
+        self._cwd = cwd
+        self._cmdline = cmdline
+        self._refuses_uids = refuses_uids
+
+    def uids(self) -> _Uids:
+        if self._refuses_uids:
+            raise psutil.AccessDenied(pid=self.pid)
+        return _Uids(real=os.getuid())
+
+    def status(self) -> str:
+        return "running"
+
+    def name(self) -> str:
+        return self._name
+
+    def cwd(self) -> str:
+        return str(self._cwd)
+
+    def cmdline(self) -> list[str]:
+        return self._cmdline
+
+    def is_running(self) -> bool:
+        return True
 
 
 @pytest.fixture
@@ -145,37 +186,27 @@ def test_dead_postmaster_with_surviving_worker_refuses_restart(
     name: str,
 ) -> None:
     receipt = _pg_receipt(pg_data, pid=os.getsid(os.getpid()))
-    worker = SimpleNamespace(
-        info={"pid": os.getpid()},
-        name=lambda: name,
+    worker = _ScriptedProcess(
         pid=os.getpid(),
-        uids=lambda: SimpleNamespace(real=os.getuid()),
-        status=lambda: "running",
-        cwd=lambda: str(pg_data),
-        cmdline=lambda: ["postgres: checkpoint"],
-        is_running=lambda: True,
+        name=name,
+        cwd=pg_data,
+        cmdline=["postgres: checkpoint"],
     )
     with pytest.raises(RuntimeError, match="descendants"):
-        pg.require_closed(pg_data, receipt, processes=[cast("pg.ProcessView", worker)])
+        pg.require_closed(pg_data, receipt, processes=[worker])
 
 
 def test_closed_postgres_with_unknown_scan_refuses_restart(pg_data: Path) -> None:
     receipt = _pg_receipt(pg_data)
-
-    def deny_uids() -> Any:
-        raise psutil.AccessDenied(pid=999)
-
-    unreadable = SimpleNamespace(
+    unreadable = _ScriptedProcess(
         pid=999,
-        uids=deny_uids,
-        status=lambda: "running",
-        name=lambda: "postgres",
-        cwd=lambda: str(pg_data),
-        cmdline=lambda: ["postgres"],
-        is_running=lambda: True,
+        name="postgres",
+        cwd=pg_data,
+        cmdline=["postgres"],
+        refuses_uids=True,
     )
     with pytest.raises(psutil.AccessDenied):
-        pg.require_closed(pg_data, receipt, processes=[cast("pg.ProcessView", unreadable)])
+        pg.require_closed(pg_data, receipt, processes=[unreadable])
 
 
 def test_failed_pg_exec_is_not_started_but_ambiguous_spawn_stays_pending(

@@ -2,67 +2,61 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 
 from base.cluster import frontend_build
 
 
-def _recording_build(calls: list[Path]) -> Callable[[Path], int]:
-    def build(frontend_dir: Path) -> int:
-        calls.append(frontend_dir)
-        return 0
-
-    return build
-
-
 def test_a_matching_key_skips_the_build(tmp_path: Path) -> None:
-    calls: list[Path] = []
     frontend_build.record(tmp_path, "k")
-    code = frontend_build.run_ensure_build(
+    decision = frontend_build.plan_frontend_build(
         tmp_path,
         current_key="k",
-        build=_recording_build(calls),
+        recorded=frontend_build.recorded_key(tmp_path),
     )
 
-    assert code == 0
-    assert calls == []
+    assert decision.action == "reuse"
+    assert "reusing .next" in decision.message
 
 
 def test_a_changed_key_rebuilds_and_records(tmp_path: Path) -> None:
-    calls: list[Path] = []
     frontend_build.record(tmp_path, "old")
-    code = frontend_build.run_ensure_build(
+    decision = frontend_build.plan_frontend_build(
         tmp_path,
         current_key="new",
-        build=_recording_build(calls),
+        recorded=frontend_build.recorded_key(tmp_path),
     )
+    assert decision.action == "build"
+    code = frontend_build.finalize_frontend_build(tmp_path, current_key="new", exit_code=0)
 
-    assert (code, calls) == (0, [tmp_path])
+    assert code == 0
     assert frontend_build.recorded_key(tmp_path) == "new"
 
 
 def test_a_failed_build_records_nothing(tmp_path: Path) -> None:
     frontend_build.record(tmp_path, "old")
-
-    def failing(_dir: Path) -> int:
-        return 3
-
-    code = frontend_build.run_ensure_build(tmp_path, current_key="new", build=failing)
+    decision = frontend_build.plan_frontend_build(
+        tmp_path,
+        current_key="new",
+        recorded=frontend_build.recorded_key(tmp_path),
+    )
+    assert decision.action == "build"
+    code = frontend_build.finalize_frontend_build(tmp_path, current_key="new", exit_code=3)
 
     assert code == 3
     assert frontend_build.recorded_key(tmp_path) == "old"
 
 
 def test_an_unprovable_key_always_builds(tmp_path: Path) -> None:
-    calls: list[Path] = []
-    code = frontend_build.run_ensure_build(
+    decision = frontend_build.plan_frontend_build(
         tmp_path,
         current_key=None,
-        build=_recording_build(calls),
+        recorded=frontend_build.recorded_key(tmp_path),
     )
+    assert decision.action == "build"
+    code = frontend_build.finalize_frontend_build(tmp_path, current_key=None, exit_code=0)
 
-    assert (code, calls) == (0, [tmp_path])
+    assert code == 0
     assert frontend_build.recorded_key(tmp_path) is None
 
 
