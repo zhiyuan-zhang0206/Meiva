@@ -68,11 +68,28 @@ separate hook. A new package is declared in one place or the check says where.
   application package. Where production code reads the world is `ambient-read` in
   `check` ([[meizel/docs/checker/ambient.meiva.okf.md|ambient reads]]).
 - `language/` — restrictions on how Python is written:
-  `type_checking.py` (no `if TYPE_CHECKING:` import folding outside a listed
-  file), `path_imports.py` (code under `meiva_builtins/` reaches other code
+  `path_imports.py` (code under `meiva_builtins/` reaches other code
   through packages, never a file path) and `no_script_sibling_imports.py`
   (a script-mode file restores `sys.path` before importing a sibling).
 
 Each rule group keeps its tests in its own `tests/` directory. The gate-level
 tests that drive `scripts/lint/code_structure.py` end to end stay with that
 script.
+
+## Type-only guards
+
+`type-checking` is a hard diagnostic, not recordable debt or a purity mode. The Python scanner
+records direct guards resolved to `typing.TYPE_CHECKING` while retaining all facts inside both
+branches. Analysis applies the checked root manifest's application/tooling/templates/tests roles
+and that root's `[type-checking.files]` policy. Helpers and root/package conftest entries are
+covered; direct `test_*.py` modules, examples and frontend helpers are not newly governed.
+Boolean formulas, negated guards and dynamic lookups are outside this direct-guard rule.
+
+The standalone code-structure adapter shares one checked-repository Universe, Policy and role
+set per invocation and reuses parsed trees in the same scanner. It preserves untracked and
+explicit resolved-alias coverage that tracked-regular-file analysis cannot replace. The
+sibling-import and harness-runtime import accounting rules retain their separate contracts.
+
+`diagnose(..., policy=...)` uses the explicit policy for type-only guard diagnostics. Its legacy
+purity pass still uses its original empty Policy; this API does not promise that all existing
+purity diagnostics equal full analysis.

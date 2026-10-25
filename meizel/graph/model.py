@@ -73,6 +73,7 @@ class Code(StrEnum):
     PATCH_RAISING_FALSE = "patch-raising-false"
     TEST_SUBCLASS_OVERRIDE = "test-subclass-override"
     TYPE_CAST = "type-cast"
+    TYPE_CHECKING = "type-checking"
     AMBIENT_READ = "ambient-read"
     STALE_ROOT = "stale-root"
     IMPURE_EDGE = "impure-edge"

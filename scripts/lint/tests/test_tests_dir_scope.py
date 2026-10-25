@@ -167,6 +167,10 @@ machine_role()
 def test_ast_rules_do_not_govern_a_package_tests_directory(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], location: str
 ) -> None:
+    pkg = location.split("/", 1)[0]
+    _module(tmp_path / "meizel.toml", f'[roles]\napplication = ["{pkg}"]\n')
+    _module(tmp_path / f"{pkg}/__init__.py", "")
+    _git(tmp_path, "add", "meizel.toml", f"{pkg}/__init__.py")
     _module(tmp_path / location, _BREAKS_EVERY_AST_RULE)
     assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 0
     assert capsys.readouterr().out == ""
@@ -177,6 +181,10 @@ def test_the_same_source_outside_tests_is_governed(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], location: str
 ) -> None:
     """The control: the exemption is the location, not a weakened rule."""
+    pkg = location.split("/", 1)[0]
+    _module(tmp_path / "meizel.toml", f'[roles]\napplication = ["{pkg}"]\n')
+    _module(tmp_path / f"{pkg}/__init__.py", "")
+    _git(tmp_path, "add", "meizel.toml", f"{pkg}/__init__.py")
     _module(tmp_path / location, _BREAKS_EVERY_AST_RULE)
     assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 1
     out = capsys.readouterr().out

@@ -12,8 +12,10 @@ Pydantic do runtime `get_type_hints()` / `inspect.signature` introspection
 that would `NameError` on a TYPE_CHECKING-only import.
 
 Genuine exceptions (circular imports, `import torch`-class heavy deps) go in
-`[type-checking.files]` in `meizel.policy.toml` with a reason. This rule is lint-enforced by
-`scripts/lint/code_structure.py`.
+`[type-checking.files]` in `meizel.policy.toml` with a reason. This is a hard `type-checking` diagnostic in `meizel check`, independent of purity or recorded debt.
+The shared lexical scanner recognizes direct guards by their `typing.TYPE_CHECKING` import
+identity, including aliases, without treating comments, strings or shadowed names as guards.
+`code_structure.py` uses that same scanner for explicit, untracked and resolved-alias inputs.
 
 ## Per-file line budget: 800 lines
 
@@ -26,8 +28,10 @@ subpackage with a narrow `meizel.toml` exports door. Mechanical `_part2` or
 
 The budget covers the eight governed
 packages (`agent`, `meiva`, `meiva_builtins`, `gateway`, `base`, `services`, `ops`,
-`cli`) plus `tests/` and `scripts/`. The TYPE_CHECKING ban and retired ambient machine_role()
-call rejection apply only to the eight packages.
+`cli`) plus `tests/` and `scripts/`. The retired ambient machine_role() call rejection applies only to the eight packages.
+The TYPE_CHECKING ban follows the checked repository's application, tooling, template and
+test roles, including helper modules and root/package `conftest.py`; direct `test_*.py`
+modules are excluded. Its reviewed allowances come from that repository's own policy.
 
 A script shipped with a skill or plugin gets no exemption. When one outgrows
 the budget, its logic moves into a governed package the script imports

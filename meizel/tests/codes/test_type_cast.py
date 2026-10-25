@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from meizel.contracts.analysis import analyze, diagnose
+from meizel.contracts.analysis import analyze, diagnose, load_policy
 from meizel.graph.model import Code, Sources
 from meizel.graph.universe import Universe
 from meizel.language.scan import FileScan, scan_source
@@ -168,7 +168,11 @@ def test_same_line_calls_survive_both_diagnostic_consumers_and_ledger(
     found = analysis_of(root)
     full = [d for d in found.diagnostics if d.code is Code.TYPE_CAST]
     single = [
-        d for d in diagnose(found.scans["app.py"], found.manifests) if d.code is Code.TYPE_CAST
+        d
+        for d in diagnose(
+            found.scans["app.py"], found.manifests, policy=load_policy(found.universe)[0]
+        )
+        if d.code is Code.TYPE_CAST
     ]
     assert full == single
     assert len(full) == 2

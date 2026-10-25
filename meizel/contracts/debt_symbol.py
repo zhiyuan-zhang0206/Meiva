@@ -120,7 +120,7 @@ def symbol_debt(
     found: Counter[tuple[Code, str, str]] = Counter()
     policy, _ = load_policy(universe)
     scan = scan_source(universe, path, source, sources_from(manifests, policy))
-    for item in diagnose(scan, manifests):
+    for item in diagnose(scan, manifests, policy=policy):
         if item.debt is not None and span[0] <= item.line <= span[1]:
             found[(item.code, item.debt.owner, item.debt.key)] += 1
     return dict(found)

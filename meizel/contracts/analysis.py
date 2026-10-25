@@ -28,8 +28,23 @@ from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind, Patch,
 from meizel.graph.universe import Universe, load_universe
 from meizel.language.fixtures import FixtureIndex, fixture_facts
 from meizel.language.scan import EXTERNAL_FORMS, FileScan, mount_facts, scan_file
+from meizel.roles import select_packages
 
-__all__ = ["POLICY", "Analysis", "analyze", "diagnose", "render_policy", "scan_all", "set_debt"]
+__all__ = [
+    "POLICY",
+    "Analysis",
+    "Policy",
+    "analyze",
+    "diagnose",
+    "load_manifests",
+    "load_policy",
+    "render_policy",
+    "scan_all",
+    "set_debt",
+    "sources_from",
+    "type_checking_in_scope",
+    "type_checking_violations",
+]
 
 _PARALLEL_FROM = 200
 _WORKER: dict[str, tuple[Universe, Sources]] = {}
@@ -411,14 +426,62 @@ def _type_cast_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]:
     ]
 
 
-def diagnose(scan: FileScan, manifests: dict[str, Manifest]) -> list[Diagnostic]:
-    """The violations one scanned file contributes by itself, as `analyze` finds them."""
+def type_checking_in_scope(path: str, packages: tuple[str, ...]) -> bool:
+    if path == "conftest.py":
+        return True
+    return (
+        path.endswith(".py")
+        and not path.rsplit("/", 1)[-1].startswith("test_")
+        and path.split("/", 1)[0] in packages
+    )
+
+
+def type_checking_violations(
+    lines: tuple[int, ...],
+    rel_path: str,
+    allowed: Collection[str],
+    packages: tuple[str, ...],
+) -> list[tuple[int, str]]:
+    if rel_path in allowed or not type_checking_in_scope(rel_path, packages):
+        return []
+    return [
+        (
+            line,
+            "`if TYPE_CHECKING:` is banned — import the real type at its light owner. "
+            "Runtime type-hint introspection cannot resolve a type-only import; "
+            "keep heavy construction in its factory rather than hiding its type.",
+        )
+        for line in lines
+    ]
+
+
+def _type_checking_diagnostics(
+    scans: Iterable[FileScan], manifests: dict[str, Manifest], policy: Policy
+) -> list[Diagnostic]:
+    root = manifests.get("")
+    packages = select_packages(
+        root.roles if root else {}, "application", "tooling", "templates", "tests"
+    )
+    allowed = policy.reasons("type-checking", "files")
+    return [
+        Diagnostic(scan.path, line, Code.TYPE_CHECKING, message)
+        for scan in scans
+        for line, message in type_checking_violations(
+            scan.type_checking, scan.path, allowed, packages
+        )
+    ]
+
+
+# meiva:note
+# The diagnostics a single file produces on its own, without whole-repository facts.
+def diagnose(scan: FileScan, manifests: dict[str, Manifest], *, policy: Policy) -> list[Diagnostic]:
     _, found, _ = _judge_facts(scan.facts, manifests)
     loaders, externals = _declared_loads(manifests), _declared_externals(manifests)
     found.extend(_source_diagnostics([scan], loaders, externals))
     found.extend(_patch_diagnostics([scan]))
     found.extend(ambient_diagnostics([scan], manifests))
     found.extend(_type_cast_diagnostics([scan]))
+    found.extend(_type_checking_diagnostics([scan], manifests, policy))
     found.extend(purity_diagnostics([scan], [scan], manifests, Policy(), include_manifests=False))
     return _distinct(found)
 
@@ -449,9 +512,10 @@ def analyze(
         else _scan_changed(universe, sources, scope, jobs)
     )
     judged = sorted(scans if scope is None else scope & scans.keys())
+    judged_scans = [scans[p] for p in judged]
     loaders = _declared_loads(manifests)
     externals = _declared_externals(manifests)
-    facts = [f for p in judged for f in scans[p].facts]
+    facts = [f for scan in judged_scans for f in scan.facts]
     facts.extend(_fixture_facts(universe, scans, judged))
     facts.extend(_load_facts(manifests))
     mounts, unmounted = mount_facts(universe, scope)
@@ -459,11 +523,12 @@ def analyze(
     diagnostics.extend(unmounted)
     projections, found, needed = _judge_facts(facts, manifests)
     diagnostics.extend(found)
-    diagnostics.extend(_source_diagnostics([scans[p] for p in judged], loaders, externals))
-    diagnostics.extend(_patch_diagnostics(scans[p] for p in judged))
-    diagnostics.extend(ambient_diagnostics((scans[p] for p in judged), manifests))
-    diagnostics.extend(_type_cast_diagnostics(scans[p] for p in judged))
-    purity_diags = purity_diagnostics(scans.values(), [scans[p] for p in judged], manifests, policy)
+    diagnostics.extend(_source_diagnostics(judged_scans, loaders, externals))
+    diagnostics.extend(_patch_diagnostics(judged_scans))
+    diagnostics.extend(ambient_diagnostics(judged_scans, manifests))
+    diagnostics.extend(_type_cast_diagnostics(judged_scans))
+    diagnostics.extend(_type_checking_diagnostics(judged_scans, manifests, policy))
+    purity_diags = purity_diagnostics(scans.values(), judged_scans, manifests, policy)
     stale = StaleDeclarations()
     if scope is None:
         export_diags, unused_exports = stale_exports(manifests, projections)
