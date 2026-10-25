@@ -357,6 +357,31 @@ async def read_last_active_at(pool: AsyncConnectionPool, agent_id: int) -> datet
     return None if row is None else row[0]
 
 
+# meiva:note
+# How a retired session's exit status is recorded: (agent id, three-state code).
+# A callable rather than the pool itself so the host can keep owning its connection
+# policy and the retirement path stays testable without a database.
+ExitRecorder = Callable[[int, "int | None"], Awaitable[None]]
+
+
+# meiva:note
+# Write how an agent's external harness session ended (task #5616): the code and the
+# moment it was read, in one statement so the pair cannot disagree. `exit_code` is one
+# of three states and the column comment is their only owner: None (still running /
+# never recorded — the built-in meiva loop has no child), 0 (the CLI exited normally),
+# non-zero (it exited abnormally). Only the host's session retirement calls this, and
+# only for a session that closed. Raising is the caller's problem: it logs and
+# continues, because a missing diagnostic must never cost the agent its teardown.
+async def record_harness_exit(
+    pool: AsyncConnectionPool, agent_id: int, exit_code: int | None
+) -> None:
+    async with pool.connection() as conn:
+        await conn.execute(
+            "UPDATE agents_meta SET harness_exit_code = %s, harness_exit_at = now() WHERE id = %s",
+            (exit_code, agent_id),
+        )
+
+
 async def build_runtime(
     agent_id: int,
     fingerprint: str,
@@ -464,8 +489,13 @@ class HarnessSessions:
     # session id while the first one is still being reaped. `retire` therefore keeps the
     # close per agent, and `join` is what the next turn waits on before building.
     # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
-    def __init__(self, registrations: RegistrationStore) -> None:
+    def __init__(self, registrations: RegistrationStore, *, record_exit: ExitRecorder) -> None:
         self._registrations = registrations
+        # meiva:note
+        # How a retired session's exit status reaches the agent row. Required rather
+        # than optional: a host that forgets to wire it would silently stop recording
+        # instead of failing at wiring time (task #5616).
+        self._store_exit = record_exit
         self._tasks = asyncio.TaskGroup()
         self._started = False
         self._pending: set[asyncio.Task[BaseException | None]] = set()
@@ -492,7 +522,8 @@ class HarnessSessions:
         if agent_id in self._retiring:
             raise RuntimeError(f"agent {agent_id} already has a retiring harness session")
         task = self._tasks.create_task(
-            self._close(bridge, reason), name=f"harness-close-{runtime.harness.value}-{agent_id}"
+            self._close(agent_id, bridge, reason),
+            name=f"harness-close-{runtime.harness.value}-{agent_id}",
         )
         self._pending.add(task)
         self._retiring[agent_id] = task
@@ -534,12 +565,32 @@ class HarnessSessions:
     # One agent's failed teardown is a retained admission fence, not a TaskGroup
     # failure that cancels the other agents' teardown tasks.
     # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
-    async def _close(self, bridge: TurnEngine, reason: str) -> BaseException | None:
+    async def _close(self, agent_id: int, bridge: TurnEngine, reason: str) -> BaseException | None:
         try:
             await bridge.close(reason=reason)
         except BaseException as error:
             return error
+        # meiva:note
+        # Only a close that succeeded reports an exit status: a failed teardown keeps
+        # the previous value (or NULL) rather than recording a code nobody observed.
+        await self._record_exit(agent_id, bridge.exit_code)
         return None
+
+    # meiva:note
+    # The exit status is a diagnostic, not part of the teardown contract: a write that
+    # raises must not turn a successful close into a retained admission fence (this
+    # task's return value is what the next `join` raises on), so it is logged and
+    # dropped instead of propagated.
+    async def _record_exit(self, agent_id: int, exit_code: int | None) -> None:
+        try:
+            await self._store_exit(agent_id, exit_code)
+        except BaseException as error:
+            logger.opt(exception=error).warning(
+                "[{label}] {body}",
+                label="harness",
+                event="harness_exit_record_failed",
+                body=f"recording exit code {exit_code!r} for agent {agent_id} raised: {error!r}",
+            )
 
     async def aclose(self) -> None:
         if not self._started:

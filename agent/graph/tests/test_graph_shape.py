@@ -57,6 +57,7 @@ class FakeEngine:
     def __init__(self) -> None:
         self.harness = Harness.CLAUDE_CODE
         self.model = "claude-sonnet-5-5"
+        self.exit_code: int | None = None
         self.submitted: list[str] = []
 
     async def run_turn(self, text: str, *, key: str, on_event: Any = None) -> HarnessTurn:

@@ -34,7 +34,14 @@ from base.lm.harness.events import (
     is_droppable,
 )
 from base.lm.harness.handoff import Handoff
-from base.lm.harness.process import ChildProbe, PsutilChildProbe, settle_close, snapshot, watch_tree
+from base.lm.harness.process import (
+    ChildProbe,
+    ExitStatus,
+    PsutilChildProbe,
+    settle_close,
+    snapshot,
+    watch_tree,
+)
 from base.lm.harness.registry import SessionRecord, SessionRegistry
 
 # meiva:note
@@ -131,7 +138,7 @@ class TurnTicket:
 
 # meiva:note
 # One `agy` conversation as a turn engine.
-class AgySession:
+class AgySession(ExitStatus):
     def __init__(
         self,
         config: AntigravityConfig,
@@ -154,6 +161,9 @@ class AgySession:
         self._active: TurnTicket | None = None
         self._transport: AgyTransport | None = None
         self._retired: AgyTransport | None = None
+        # meiva:note
+        # The CLI child's exit status once this session closed it (three states: None
+        # while running/never observed, 0 normal, non-zero abnormal). Task #5616.
         self._reader: asyncio.Task[None] | None = None
         self._deadlines: dict[str, asyncio.Task[None]] = {}
         self._tasks = asyncio.TaskGroup()
@@ -218,6 +228,10 @@ class AgySession:
             self.config.cancel_settle_seconds,
             agent_id=self.agent_id,
         )
+        # meiva:note
+        # After the child was reaped: `settle_close` above waited for its tree, and
+        # `transport.close()` waited for the process itself, so this is final.
+        self._exit_code = transport.returncode if transport is not None else None
         self._emit(SessionClosed(turn_id=None, reason=reason))
         self._events.put_nowait(EVENT_STREAM_END)
 

@@ -16,6 +16,10 @@ class FakeConnection:
     ) -> None:
         self.scripts = scripts or {}
         self.pid = pid
+        # meiva:note
+        # The exit status the session records on close (task #5616); a fake
+        # connection has no child process, so None unless a test sets one.
+        self.returncode: int | None = None
         self.session_id = session_id
         self.closed = False
         self.requests: list[tuple[str, dict[str, Any]]] = []

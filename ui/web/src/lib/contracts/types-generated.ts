@@ -2282,6 +2282,8 @@ export interface components {
             heartbeat_paused_until: string | null;
             open_impersonation_session_id: number | null;
             open_impersonation_status: ("requested" | "accepted" | "active") | null;
+            harness_exit_code?: number | null;
+            harness_exit_at?: string | null;
         };
         AgentCost: {
             cost_usd: number;
@@ -2414,6 +2416,8 @@ export interface components {
             notices_awaiting_response: components["schemas"]["OpenNotice"][];
             unread_notice_count: number;
             heartbeat_paused_until: string | null;
+            harness_exit_code?: number | null;
+            harness_exit_at?: string | null;
         };
         AgentStats: {
             turn_total: number;

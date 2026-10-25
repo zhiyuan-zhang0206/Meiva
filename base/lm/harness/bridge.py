@@ -110,10 +110,19 @@ class HarnessBridge:
         self._digest: str | None = None
         self._closed = False
         self._close_error: BaseException | None = None
+        # meiva:note
+        # The exit status of the session this bridge retired last (three states: None
+        # while a session runs or none was ever started, 0 normal, non-zero abnormal).
+        # Recorded on the agent row by the host at retirement (task #5616).
+        self._exit_code: int | None = None
 
     @property
     def model(self) -> str | None:
         return self._model
+
+    @property
+    def exit_code(self) -> int | None:
+        return self._exit_code
 
     @property
     def handoff(self) -> Handoff | None:
@@ -144,6 +153,7 @@ class HarnessBridge:
         except BaseException:
             await self._retire(session, "session start failed")
             raise
+        self._exit_code = None
         self._session = session
         return session
 
@@ -216,6 +226,10 @@ class HarnessBridge:
         except BaseException as error:
             self._close_error = error
             raise
+        # meiva:note
+        # Only a session that closed reports an exit status; a failed close leaves
+        # the field at None rather than inventing one.
+        self._exit_code = session.exit_code
 
     # meiva:note
     # Every row carries an expiry, and the bridge rewrites it at the start of each turn:

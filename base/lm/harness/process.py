@@ -54,12 +54,42 @@ def _command(process: psutil.Process) -> str:
     return " ".join(parts)[:200]
 
 
+# meiva:note
+# The harness SDKs expose neither the child's pid nor its exit status, so this
+# module reads them off `client._transport._process`. `client_transport` is the one
+# place that private path lives; everything else asks it. `disconnect()` sets
+# `_transport = None` before it returns, so a caller that needs the exit status must
+# capture the transport (or the process) first and ask afterwards — asking the
+# client later answers None, which would read as "never observed".
+# meiva:note
+# The adapter's answer to `exit_code`, in one place: None until the session closes,
+# then whatever its CLI child reported (0 normal, non-zero abnormal). A session sets
+# `_exit_code` as it closes and inherits the reader from here, so five adapters cannot
+# drift into five slightly different answers.
+class ExitStatus:
+    _exit_code: int | None = None
+
+    @property
+    def exit_code(self) -> int | None:
+        return self._exit_code
+
+
+def client_transport(client: Any) -> Any | None:
+    return getattr(client, "_transport", None)
+
+
+def client_process(client: Any) -> Any | None:
+    return getattr(client_transport(client), "_process", None)
+
+
+# meiva:note
+# The child's exit status: None while it runs, or when there is no process.
+def process_returncode(process: Any) -> int | None:
+    return None if process is None else getattr(process, "returncode", None)
+
+
 def client_pid(client: Any) -> int | None:
-    transport = getattr(client, "_transport", None)
-    if transport is None:
-        return None
-    process = getattr(transport, "_process", None)
-    pid = getattr(process, "pid", None)
+    pid = getattr(client_process(client), "pid", None)
     return pid if isinstance(pid, int) else None
 
 

@@ -62,6 +62,11 @@ class AgentCard(AgentLineage):
     # agent until activation at its next safe boundary (see
     # base/agents/impersonation/status.py's OPEN tuple).
     open_impersonation_status: OpenImpersonationStatus | None
+    # meiva:note
+    # Same three states as the snapshot (task #5616): None = running / never recorded
+    # (the built-in meiva loop has no child), 0 = normal exit, non-zero = abnormal.
+    harness_exit_code: int | None = None
+    harness_exit_at: datetime | None = None
 
 
 class AgentDirectoryPage(BaseModel):
@@ -80,6 +85,7 @@ class AgentRoster(BaseModel):
 
 _CARD_COLUMNS = """
     a.id AS agent_id, a.spawner, a.fork_source_agent_id, a.status, a.harness,
+    a.harness_exit_code, a.harness_exit_at,
     a.spawned_at,
     COALESCE(a.last_active_at, a.spawned_at) AS last_active_at,
     COALESCE(im.last_inbound_at, a.spawned_at) AS last_inbound_at,
