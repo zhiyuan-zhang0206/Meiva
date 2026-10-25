@@ -1,5 +1,7 @@
+exports = ["daemon"]
+
 [uses]
-"test_meiva_root_daemon.py" = ["child_unit.py"]
+"daemon" = ["child_unit.py"]
 "test_meiva_root_left_behind.py" = ["child_unit.py"]
 "test_meiva_root_health.py" = ["child_unit.py"]
 "test_meiva_root_intent.py" = ["child_unit.py"]
@@ -18,7 +20,6 @@
 
 [debt.restricted-python]
 "child_unit.py#python -c" = 1
-"test_meiva_root_daemon.py#python -c" = 3
 "test_meiva_root_health.py#python -c" = 2
 "test_meiva_root_selfcheck.py#python -c" = 2
 "test_meiva_root_supervisor.py#python -c" = 3
