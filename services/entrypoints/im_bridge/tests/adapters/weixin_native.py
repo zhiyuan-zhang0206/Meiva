@@ -11,12 +11,11 @@ from psycopg_pool import ConnectionPool
 
 from base.db import Database, create_agent
 from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter, save_account
-from services.entrypoints.im_bridge.core import IMBridgeCore
+from services.entrypoints.im_bridge.core import IMBridgeCore, TypingCadence
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.ingress.store import WeixinIngressStore
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config
 from services.entrypoints.im_bridge.tests.support import owned_tasks
-from services.entrypoints.im_bridge.types import ChatState
 
 
 @dataclass
@@ -41,24 +40,6 @@ def message(text: str, message_id: object = "1", *, sender: str = "peer-1") -> d
         "message_state": 2,
         "item_list": [{"type": 1, "text_item": {"text": text}}],
     }
-
-
-# meiva:note
-# The real core with its two background starters (a gateway SSE subscription and the typing
-# loop) switched off: the native Weixin tests drive selection and delivery explicitly, and a
-# subscription would dial the fixture's gateway transport for traffic the tests never script.
-class QuietCore(IMBridgeCore):
-    ensured: list[int | None]
-
-    def _ensure_subscription(
-        self, state: ChatState, prev_agent: int | None = None, *, catch_up: bool = False
-    ) -> None:
-        if not hasattr(self, "ensured"):
-            self.ensured = []
-        self.ensured.append(state.current_agent_id)
-
-    def _start_typing(self, state: ChatState) -> None:
-        return None
 
 
 @pytest.fixture
@@ -111,7 +92,15 @@ async def native_weixin(
         ):
             client = GatewayClient(config, gateway_url="http://isolated-gateway", auth_headers={})
             client._client = gateway_http
-            core = QuietCore(config, client, db_pool=pool, tasks=tasks, state_dir=state_dir)
+            core = IMBridgeCore(
+                config,
+                client,
+                db_pool=pool,
+                tasks=tasks,
+                state_dir=state_dir,
+                typing=TypingCadence(max_s=0.0),
+                subscribe_timeline=False,
+            )
             adapter = WeixinAdapter(core, state_dir=state_dir, client=provider_http)
             core.register(adapter)
 

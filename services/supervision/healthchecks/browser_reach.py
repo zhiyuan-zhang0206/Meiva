@@ -14,12 +14,20 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
-from typing import Any, NamedTuple, cast
+from typing import Any, NamedTuple, Protocol
 
 import websockets
 
 from base.log import logger
 from services.desktop.browser.probe import cdp_url
+
+
+# meiva:note
+# Structural collaborator surface for a CDP websocket connection.
+class CdpSocket(Protocol):
+    async def send(self, data: str, /) -> object: ...
+
+    async def recv(self) -> str | bytes: ...
 
 
 class CanaryResult(NamedTuple):
@@ -37,14 +45,20 @@ class HostResult(NamedTuple):
 
 def read_json(url: str, timeout_s: float) -> dict[str, Any]:
     with urllib.request.urlopen(url, timeout=timeout_s) as response:  # noqa: S310 — loopback CDP URL
-        parsed: object = json.loads(response.read())
+        parsed = json.loads(response.read())
+    parsed_any: Any = parsed
     if not isinstance(parsed, dict):
         return {}
-    return cast("dict[str, Any]", parsed)
+    typed_parsed: dict[str, Any] = parsed_any
+    return typed_parsed
 
 
 async def _cdp_call(
-    ws: Any, ids: Iterator[int], method: str, params: dict[str, Any], timeout_s: float
+    ws: CdpSocket,
+    ids: Iterator[int],
+    method: str,
+    params: dict[str, Any],
+    timeout_s: float,
 ) -> dict[str, Any]:
     """Send one CDP request and return its ``result``; raises on a protocol error."""
     await ws.send(json.dumps({"id": next(ids), "method": method, "params": params}))
@@ -55,7 +69,11 @@ async def _cdp_call(
     return resp.get("result") or {}
 
 
-async def canary_async(port: int, url: str, timeout_s: float) -> CanaryResult:
+async def canary_async(
+    port: int,
+    url: str,
+    timeout_s: float,
+) -> CanaryResult:
     """The browser-path canary: hidden target in the shared context, one fetch, closed."""
     deadline = time.monotonic() + timeout_s
 
@@ -102,7 +120,9 @@ async def canary_async(port: int, url: str, timeout_s: float) -> CanaryResult:
                     )
                 except TimeoutError:
                     return CanaryResult("timeout", f"fetch did not settle within {timeout_s:.1f}s")
-            value = cast("dict[str, Any]", result.get("result") or {}).get("value")
+            inner = result.get("result")
+            inner_any: Any = inner
+            value: object = inner_any.get("value") if isinstance(inner, dict) else None
             if value == "ok":
                 return CanaryResult("ok", "fetch settled")
             if isinstance(value, str) and value.startswith("error:"):
@@ -119,7 +139,11 @@ async def canary_async(port: int, url: str, timeout_s: float) -> CanaryResult:
                 )
 
 
-def canary(port: int, url: str, timeout_s: float) -> CanaryResult:
+def canary(
+    port: int,
+    url: str,
+    timeout_s: float,
+) -> CanaryResult:
     """Total wrapper: the canary never raises — an unforeseen failure is a
     ``skip`` (no verdict), never a false reachability claim."""
     try:

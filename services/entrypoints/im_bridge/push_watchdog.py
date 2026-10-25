@@ -16,19 +16,59 @@ own message, so:
 from __future__ import annotations
 
 import logging
-import time
-from typing import Any
+from typing import Protocol
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.log import logger
 from services.entrypoints.im_bridge import copy
+from services.entrypoints.im_bridge.config import ImBridgeConfig
 from services.entrypoints.im_bridge.outbound.push_plan import recovered_hint_due
 from services.entrypoints.im_bridge.outbound.retry import retry_once_after_backoff
-from services.entrypoints.im_bridge.types import SendNotStartedError, SendOutcomeUncertainError
+from services.entrypoints.im_bridge.types import (
+    IMAdapter,
+    InboundMessage,
+    Reply,
+    SendNotStartedError,
+    SendOutcomeUncertainError,
+)
 
 _log = logging.getLogger("services.entrypoints.im_bridge.core.push_watchdog")
 
 
-async def send_with_retry(core: Any, channel: str, chat_id: str, reply: Any, adapter: Any) -> None:
+class RetryConfigCore(Protocol):
+    config: ImBridgeConfig
+
+
+class WatchdogAdapter(Protocol):
+    push_failures: int
+
+    async def send(
+        self,
+        chat_id: str,
+        text: str,
+        /,
+        *,
+        buttons: list[tuple[str, str]] | None = None,
+        markdown: bool = False,
+    ) -> None: ...
+
+
+class WatchdogCore(Protocol):
+    config: ImBridgeConfig
+    adapters: dict[str, IMAdapter]
+
+    async def _send(
+        self, channel: str, chat_id: str, reply: Reply, *, adapter: IMAdapter | None = None
+    ) -> None: ...
+
+
+async def send_with_retry(
+    core: RetryConfigCore,
+    channel: str,
+    chat_id: str,
+    reply: Reply,
+    adapter: WatchdogAdapter,
+) -> None:
     """Retry only an adapter-proven unstarted send, never an ambiguous prefix."""
 
     async def attempt() -> None:
@@ -48,7 +88,7 @@ async def send_with_retry(core: Any, channel: str, chat_id: str, reply: Any, ada
                 "push failed after retry: {channel}",
                 event="im_push_failed",
                 channel=channel,
-                failures=getattr(adapter, "push_failures", 0),
+                failures=adapter.push_failures,
             )
     except SendOutcomeUncertainError:
         _log.exception("send outcome uncertain channel=%s chat=%s; no retry", channel, chat_id)
@@ -56,25 +96,25 @@ async def send_with_retry(core: Any, channel: str, chat_id: str, reply: Any, ada
             "push outcome uncertain: {channel}",
             event="im_push_failed",
             channel=channel,
-            failures=getattr(adapter, "push_failures", 0),
+            failures=adapter.push_failures,
         )
 
 
-async def hint_recovered(core: Any, msg: Any) -> None:
+async def hint_recovered(core: WatchdogCore, msg: InboundMessage) -> None:
     """Right after a weixin push failure, the user's own message carries a
     fresh context_token and the first send succeeds — tell them the link is
     back."""
-
     if msg.channel != "weixin":
         return
     adapter = core.adapters.get("weixin")
     if adapter is None:
         return
+    clock = Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
     if not recovered_hint_due(
-        recovered_at=getattr(adapter, "push_recovered_at", None), now=time.time()
+        recovered_at=adapter.push_recovered_at,
+        now=clock.now().timestamp(),
     ):
         return
-    from services.entrypoints.im_bridge.types import Reply
 
     try:
         await core._send(

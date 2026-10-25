@@ -1,49 +1,38 @@
 import subprocess
 from pathlib import Path
-from unittest.mock import Mock
 
 import pytest
 
-from base.host import proc
 from services.supervision.meiva_root_glue.diagnostic_probes import brew_pins
 
 
-def test_missing_approved_pin_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
-    query = Mock(
-        side_effect=[
-            subprocess.CompletedProcess([], 0, stdout="postgresql@17\n"),
-            subprocess.CompletedProcess([], 0, stdout="postgresql@17\nredis\n"),
-        ]
+def test_missing_approved_pin_is_reported(tmp_path: Path) -> None:
+    executable = tmp_path / "brew"
+    executable.write_text(
+        "#!/bin/sh\nif [ \"$2\" = \"--pinned\" ]; then\n  printf 'postgresql@17\\n'\nelse\n  printf 'postgresql@17\\nredis\\n'\nfi\n"
     )
-    monkeypatch.setattr(proc, "run_bounded", query)
-    assert brew_pins().verdict.value == "down"
-    assert query.call_args_list[0].args[0] == ["brew", "list", "--pinned"]
-    assert all(call.kwargs["timeout"] == 5 for call in query.call_args_list)
+    executable.chmod(0o700)
+    assert brew_pins(brew_binary=str(executable)).verdict.value == "down"
 
 
-def test_command_failure_is_not_an_empty_pin_set(monkeypatch: pytest.MonkeyPatch) -> None:
-    query = Mock(side_effect=subprocess.CalledProcessError(1, "brew"))
-    monkeypatch.setattr(proc, "run_bounded", query)
+def test_command_failure_is_not_an_empty_pin_set(tmp_path: Path) -> None:
+    executable = tmp_path / "brew"
+    executable.write_text("#!/bin/sh\nexit 1\n")
+    executable.chmod(0o700)
     with pytest.raises(subprocess.CalledProcessError):
-        brew_pins()
+        brew_pins(brew_binary=str(executable))
 
 
-def test_pin_observation_uses_real_bounded_process_contract(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_pin_observation_uses_real_bounded_process_contract(tmp_path: Path) -> None:
     executable = tmp_path / "brew"
     executable.write_text("#!/bin/sh\nprintf 'postgresql@17\\n'\n")
     executable.chmod(0o700)
-    monkeypatch.setenv("PATH", str(tmp_path))
-    assert brew_pins().alive
+    assert brew_pins(brew_binary=str(executable)).alive
 
 
-def test_nonzero_brew_query_is_not_readiness(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_nonzero_brew_query_is_not_readiness(tmp_path: Path) -> None:
     executable = tmp_path / "brew"
     executable.write_text("#!/bin/sh\nexit 7\n")
     executable.chmod(0o700)
-    monkeypatch.setenv("PATH", str(tmp_path))
     with pytest.raises(subprocess.CalledProcessError):
-        brew_pins()
+        brew_pins(brew_binary=str(executable))

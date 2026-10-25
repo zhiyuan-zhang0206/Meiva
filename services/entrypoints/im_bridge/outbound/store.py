@@ -1,15 +1,15 @@
 """IM intents share atomic acceptance with their timeline or notice producer."""
 
+import time
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_OID, UUID, uuid5
 
 from psycopg import Connection
 from psycopg.types.json import Jsonb
-from psycopg_pool import ConnectionPool
 
-from base.db.transaction import write_transaction
+from base.db.transaction import ConnectionSource, write_transaction
 from base.telemetry.alerts.native import stamp_native_sent
 from services.entrypoints.im_bridge.cursor_store import (
     PushWatermark,
@@ -50,10 +50,15 @@ def _enforce_claim_fence(conn: Connection, fence: ClaimFence) -> None:
 
 
 class IMOutboxStore:
-    def __init__(self, pool: ConnectionPool | None) -> None:
-        self.pool = pool
+    def __init__(self, pool: ConnectionSource | None = None) -> None:
+        self.pool: ConnectionSource | None = pool
+        self._seq = 0
 
-    def _pool(self) -> ConnectionPool:
+    def _next_uuid(self) -> UUID:
+        self._seq += 1
+        return uuid5(NAMESPACE_OID, f"outbox-{self._seq}-{time.perf_counter_ns()}")
+
+    def _pool(self) -> ConnectionSource:
         if self.pool is None:
             raise RuntimeError("timeline outbound acceptance requires a database pool")
         return self.pool
@@ -552,7 +557,7 @@ class IMOutboxStore:
             ).fetchone()
             if row is None:
                 return None
-            attempt = uuid4()
+            attempt = self._next_uuid()
             conn.execute(
                 "UPDATE im_bridge_outbound_intents SET status='sending', attempt_id=%s, started_at=now(), "
                 "outcome_reason='send_result_unconfirmed' WHERE id=%s AND status='queued'",

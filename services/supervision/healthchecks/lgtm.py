@@ -13,11 +13,14 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from http.client import HTTPException
+from collections.abc import Mapping
+from http.client import HTTPException, HTTPResponse
 from pathlib import Path
 from typing import Any, assert_never
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader, MachineRoleMissing, MachineRoles
+from base.config import get_field
 from base.daemon.health import DaemonProbe
 from base.paths import meiva_home
 from services.supervision.healthchecks.plans.lgtm_plan import (
@@ -33,11 +36,17 @@ from services.supervision.healthchecks.plans.lgtm_plan import (
 )
 
 
-def open_local(request: str | urllib.request.Request, *, timeout: float) -> Any:
+def _now_ns() -> int:
+    clock = Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+    return int(clock.now().timestamp() * NANOSECONDS_PER_SECOND)
+
+
+def open_local(request: str | urllib.request.Request, *, timeout: float) -> HTTPResponse:
     """Open a loopback URL without consulting the environment's proxies."""
-    return urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+    res: Any = urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
         request, timeout=timeout
     )
+    return res
 
 
 _WRITE_PROBE_END_LAG_SECONDS = 1
@@ -45,14 +54,44 @@ _WRITE_PROBE_END_LAG_SECONDS = 1
 _WRITE_PROBE_RETRY_BACKOFF_SECONDS = (1, 2)
 
 
-def readiness_probes() -> tuple[tuple[str, str], ...]:
+def _setting(name: str, overrides: Mapping[str, str | int] | None = None) -> str | int:
+    if overrides is not None and name in overrides:
+        return overrides[name]
+    return get_field(name)
+
+
+# meiva:note
+# Wildcard bind addresses resolve to loopback for local readiness probes.
+def _backend_urls(overrides: Mapping[str, str | int] | None = None) -> dict[str, str]:
+    ports = {
+        "loki": int(_setting("lgtm_loki_port", overrides)),
+        "prometheus": int(_setting("lgtm_prometheus_port", overrides)),
+        "grafana": int(_setting("lgtm_grafana_port", overrides)),
+    }
+    grafana_host = str(_setting("lgtm_grafana_listen_host", overrides))
+    listen_host = str(_setting("lgtm_listen_host", overrides))
+    urls: dict[str, str] = {}
+    for name, port in ports.items():
+        host = grafana_host if name == "grafana" else listen_host
+        host = host.removeprefix("[").removesuffix("]")
+        if host == "0.0.0.0":  # noqa: S104
+            host = "127.0.0.1"
+        elif host == "::":
+            host = "::1"
+        urls[name] = f"http://{'[' + host + ']' if ':' in host else host}:{port}"
+    return urls
+
+
+def readiness_probes(
+    *, overrides: Mapping[str, str | int] | None = None
+) -> tuple[tuple[str, str], ...]:
     """Probe this home's native bind settings, independent of remote query URLs.
 
     Tempo is remote and cannot trigger a local backend restart.
     """
-    from base.telemetry.lgtm_local import BACKENDS, HEALTH_PATHS, backend_urls
+    from base.telemetry.lgtm_local import BACKENDS, HEALTH_PATHS
 
-    urls = backend_urls()
+    urls = _backend_urls(overrides)
     return tuple((name, f"{urls[name]}{HEALTH_PATHS[name]}") for name in BACKENDS)
 
 
@@ -83,10 +122,12 @@ def is_lgtm_host(home: Path, *, roles: MachineRoles | None) -> bool:
     return (home / "lgtm-host").exists() or (roles is not None and "observability-station" in roles)
 
 
-def protocol_readiness(name: str) -> DaemonProbe:
-    from base.telemetry.lgtm_local import HEALTH_PATHS, backend_urls
+def protocol_readiness(
+    name: str, *, overrides: Mapping[str, str | int] | None = None
+) -> DaemonProbe:
+    from base.telemetry.lgtm_local import HEALTH_PATHS
 
-    return readiness_at(name, backend_urls()[name] + HEALTH_PATHS[name])
+    return readiness_at(name, _backend_urls(overrides)[name] + HEALTH_PATHS[name])
 
 
 # meiva:note
@@ -110,14 +151,12 @@ def readiness_at(name: str, url: str) -> DaemonProbe:
     )
 
 
-def probe_backend(name: str) -> DaemonProbe:
+def probe_backend(name: str, *, overrides: Mapping[str, str | int] | None = None) -> DaemonProbe:
     """Observe the configured backend readiness protocol."""
-    from base.telemetry.lgtm_local import backend_urls
-
-    port = urllib.parse.urlsplit(backend_urls()[name]).port
+    port = urllib.parse.urlsplit(_backend_urls(overrides)[name]).port
     if port is None:
         return DaemonProbe.unavailable("backend has no explicit local port")
-    return protocol_readiness(name)
+    return protocol_readiness(name, overrides=overrides)
 
 
 # meiva:note
@@ -126,7 +165,7 @@ def probe_backend(name: str) -> DaemonProbe:
 def write_path_probe(
     loki_url: str, *, backoff_s: tuple[float, ...] = _WRITE_PROBE_RETRY_BACKOFF_SECONDS
 ) -> tuple[bool, str]:
-    now_ns = time.time_ns()
+    now_ns = _now_ns()
     marker_ns = now_ns - (_WRITE_PROBE_END_LAG_SECONDS * NANOSECONDS_PER_SECOND)
     marker, body = probe_payload(marker_ns)
     push_request = urllib.request.Request(  # noqa: S310 — configured Loki endpoint, deliberate
@@ -143,7 +182,7 @@ def write_path_probe(
     # line's timestamp. Capture a fresh now after the push (never the
     # pre-push marker time) and anchor the window on the marker instead.
     query = urllib.parse.urlencode(
-        query_params(marker=marker, marker_ns=marker_ns, query_end_ns=time.time_ns())
+        query_params(marker=marker, marker_ns=marker_ns, query_end_ns=_now_ns())
     )
     query_request = urllib.request.Request(  # noqa: S310 — configured Loki endpoint, deliberate
         f"{loki_url}/loki/api/v1/query_range?{query}",

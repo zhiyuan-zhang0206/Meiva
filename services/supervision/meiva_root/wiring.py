@@ -29,7 +29,7 @@ import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, cast, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from services.supervision.meiva_root.manifest import UnitRegistry
 from services.supervision.meiva_root.supervisor import Supervisor
@@ -100,10 +100,11 @@ def load_wiring(spec: str | None, context: WiringContext) -> tuple[WiringPartici
         produced = factory(context)
     except Exception as exc:
         raise WiringError(f"wiring factory {spec!r} raised: {exc}") from exc
+    produced_any: Any = produced
     if isinstance(produced, (list, tuple)):
-        candidates: tuple[object, ...] = tuple(cast("Sequence[object]", produced))
+        candidates: tuple[Any, ...] = tuple(produced_any)
     else:
-        candidates = (produced,)
+        candidates = (produced_any,)
     participants: list[WiringParticipant] = []
     for index, candidate in enumerate(candidates):
         if inspect.isclass(candidate):

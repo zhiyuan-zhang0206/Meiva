@@ -32,8 +32,9 @@ from services.supervision.meiva_root.tests.daemon.observations import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
+_CHILD = Path(__file__).parents[1] / "child_unit.py"
 
-_SLEEPER = [sys.executable, "-u", "-c", "import time; time.sleep(300)"]
+_SLEEPER = [sys.executable, "-u", str(_CHILD), "sleep"]
 
 _SOCKET_NAME = "meiva-root.sock"
 
@@ -275,11 +276,9 @@ def _stubborn(ready: Path) -> list[str]:
     return [
         sys.executable,
         "-u",
-        "-c",
-        (
-            "import signal,time,pathlib; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-            f"pathlib.Path({str(ready)!r}).write_text('ready'); time.sleep(300)"
-        ),
+        str(_CHILD),
+        "ignore_term",
+        str(ready),
     ]
 
 
@@ -291,7 +290,7 @@ def test_termination_after_unit_exit_exits(short_tmp: Path, reaped_first: bool) 
     # systemd's root boot unit sets SendSIGKILL=no: TERM is the only stop, so a
     # root must not wait for a second stop request. That holds too when
     # the leader was reaped before root read its birth.
-    command = [sys.executable, "-c", "pass"]
+    command = [sys.executable, str(_CHILD), "noop"]
     manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": command, "restart": "never"}])
     run_dir = short_tmp / "run"
     with _daemon(

@@ -10,7 +10,7 @@ from __future__ import annotations
 import importlib
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Any, Protocol
 
 from base.daemon.health import DaemonProbe
 
@@ -74,7 +74,8 @@ def resolve_ref(ref: str) -> Probe:
         raise ProbeError(f"module {module_name!r} has no attribute {attribute!r}") from exc
     if not callable(resolved):
         raise ProbeError(f"probe reference {ref!r} resolves to a non-callable")
-    return cast("Probe", resolved)
+    probe: Any = resolved
+    return probe
 
 
 class ProbeRegistry:

@@ -1,14 +1,32 @@
 """Bounded Redis runtime-credential protocol probe; no recovery authority."""
 
+from __future__ import annotations
+
+from typing import Any, Protocol
+
 import redis
 
-_TIMEOUT_S = 3.0
+TIMEOUT_S = 3.0
 
 
-def ping(cluster_url: str) -> None:
+class RedisPingConnection(Protocol):
+    def __enter__(self) -> RedisPingConnection: ...
+
+    def __exit__(self, exc_type: object, exc: object, tb: object, /) -> object: ...
+
+    def ping(self) -> object: ...
+
+
+def ping(cluster_url: str, *, connection: RedisPingConnection | None = None) -> None:
     """PING redis as the cluster identity; raises on auth failure or dead server."""
-    # redis-py types from_url()/ping()'s **kwargs as Unknown; both calls are fully typed here.
-    with redis.Redis.from_url(  # pyright: ignore[reportUnknownMemberType]
-        cluster_url, socket_connect_timeout=_TIMEOUT_S, socket_timeout=_TIMEOUT_S
+    if connection is not None:
+        with connection as r:
+            r.ping()
+        return
+    redis_cls: Any = redis.Redis
+    with redis_cls.from_url(
+        cluster_url,
+        socket_connect_timeout=TIMEOUT_S,
+        socket_timeout=TIMEOUT_S,
     ) as r:
-        r.ping()  # pyright: ignore[reportUnknownMemberType]
+        r.ping()

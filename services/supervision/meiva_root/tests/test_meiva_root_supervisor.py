@@ -162,8 +162,10 @@ def child_exited(child: psutil.Process) -> bool:
 
 
 def test_child_exit_observation_accepts_a_reaped_process() -> None:
-    with subprocess.Popen(
-        [sys.executable, "-c", "import sys; sys.stdin.buffer.read(1)"],
+    # meiva:note
+    # Spawn a fixed child helper process to observe reaped-process status.
+    with subprocess.Popen(  # noqa: S603
+        [sys.executable, str(_CHILD), "read_stdin_byte"],
         stdin=subprocess.PIPE,
     ) as process:
         child = psutil.Process(process.pid)
@@ -220,26 +222,26 @@ async def test_unexpected_exit_can_be_replaced_without_custody_reconciliation(
         await owner.shutdown()
 
 
-def test_changed_birth_never_signals_a_numeric_group(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from services.supervision.meiva_root.stopping import StoppingMixin
+def test_changed_birth_never_signals_a_numeric_group() -> None:
+    from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
+    from base.native_process.tests.fake_process_control import FakeProcessControl
+    from services.supervision.meiva_root.stopping import signal_owned
 
-    stranger = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(60)"], process_group=0
+    # meiva:note
+    # Spawn a fixed sleeper helper process in its own group.
+    stranger = subprocess.Popen(  # noqa: S603
+        [sys.executable, str(_CHILD), "sleep"], process_group=0
     )
     try:
         real = OwnedProcess.capture(psutil.Process(stranger.pid))
         stale = OwnedProcess(
             real.pid, real.birth - 1000, None if real.starttime is None else real.starttime - 1
         )
+        pc = FakeProcessControl(forward_to=SYSTEM_PROCESS_CONTROL)
 
-        def forbid_group_signal(group: int, signum: int) -> None:
-            raise AssertionError("a changed birth must never signal a numeric group")
-
-        monkeypatch.setattr(os, "killpg", forbid_group_signal)
-        StoppingMixin._signal_owned(stale, force=False)
-        StoppingMixin._signal_owned(stale, force=True)
+        signal_owned(stale, force=False, process_control=pc)
+        signal_owned(stale, force=True, process_control=pc)
+        assert pc.signals == []
         assert stranger.poll() is None
     finally:
         stranger.kill()
@@ -259,19 +261,23 @@ async def test_obsolete_custody_records_do_not_gate_ordinary_start(tmp_path: Pat
         await owner.shutdown()
 
 
-def test_concrete_group_signal_error_is_not_hidden(monkeypatch: pytest.MonkeyPatch) -> None:
-    from services.supervision.meiva_root.stopping import StoppingMixin
+def test_concrete_group_signal_error_is_not_hidden() -> None:
+    from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
+    from base.native_process.tests.fake_process_control import FakeProcessControl
+    from services.supervision.meiva_root.stopping import signal_owned
 
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], process_group=0)
+    # meiva:note
+    # Spawn a fixed sleeper helper process in its own group.
+    child = subprocess.Popen(  # noqa: S603
+        [sys.executable, str(_CHILD), "sleep"], process_group=0
+    )
     try:
         identity = OwnedProcess.capture(psutil.Process(child.pid))
+        pc = FakeProcessControl(forward_to=SYSTEM_PROCESS_CONTROL)
+        pc.refuse(child.pid, PermissionError("known group signal denied"))
 
-        def deny_group_signal(group: int, signum: int) -> None:
-            raise PermissionError("known group signal denied")
-
-        monkeypatch.setattr(os, "killpg", deny_group_signal)
         with pytest.raises(PermissionError, match="known group signal denied"):
-            StoppingMixin._signal_owned(identity, force=False)
+            signal_owned(identity, force=False, process_control=pc)
         assert child.poll() is None
     finally:
         child.kill()

@@ -1,17 +1,28 @@
 """Native timeline preparation and account-frozen selection transaction admission."""
 
+from __future__ import annotations
+
 import asyncio
 from dataclasses import dataclass
 from typing import Any
 
 from services.entrypoints.im_bridge.outbound.claim_fence import ClaimFence
+from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
 from services.entrypoints.im_bridge.outbound.types import (
     OutboundIntent,
+    PushWatermark,
     TimelineAcceptance,
     TimelineCandidate,
     timeline_source,
 )
-from services.entrypoints.im_bridge.types import ChatState, IMAdapter
+from services.entrypoints.im_bridge.types import (
+    BridgeCore,
+    ChatState,
+    IMAdapter,
+    InboundMessage,
+    NoticeBridgeOwner,
+    Reply,
+)
 
 
 @dataclass(frozen=True)
@@ -21,8 +32,62 @@ class SelectionAdmission:
     fence: ClaimFence
 
 
+class TimelineCore(BridgeCore):
+    adapters: dict[str, IMAdapter]
+    chats: dict[tuple[str, str], ChatState]
+    outbound_store: IMOutboxStore
+    _last_pushed: dict[tuple[str, str, int], PushWatermark]
+    _subscriptions: dict[tuple[str, str], asyncio.Task[Any]]
+    _switch_state: dict[str, int]
+
+    @property
+    def notice_bridge(self) -> NoticeBridgeOwner:
+        raise NotImplementedError
+
+    async def handle_inbound(self, msg: InboundMessage) -> None:
+        raise NotImplementedError
+
+    def _hold_selection(self, state: ChatState) -> None:
+        raise NotImplementedError
+
+    def _apply_selection(self, state: ChatState, selected: int | None) -> None:
+        raise NotImplementedError
+
+    def _stop_typing(self, state: ChatState) -> None:
+        raise NotImplementedError
+
+    def _get_or_create_state(self, channel: str, chat_id: str) -> ChatState:
+        raise NotImplementedError
+
+    async def _send(
+        self, channel: str, chat_id: str, reply: Reply, *, adapter: IMAdapter | None = None
+    ) -> None:
+        raise NotImplementedError
+
+    async def execute_spawn(
+        self, state: ChatState, *, idempotency_key: str | None = None
+    ) -> tuple[Reply, int | None]:
+        raise NotImplementedError
+
+    async def _handle_spawn_menu(
+        self, state: ChatState, text: str, *, idempotency_key: str | None = None
+    ) -> Reply | list[Reply]:
+        raise NotImplementedError
+
+    async def _handle_command(
+        self,
+        state: ChatState,
+        text: str,
+        idempotency_key: str | None = None,
+        *,
+        replay_id: str | None = None,
+        selection_admission: SelectionAdmission | None = None,
+    ) -> Reply | list[Reply] | None:
+        raise NotImplementedError
+
+
 async def accept_timeline(
-    core: Any,
+    core: TimelineCore,
     state: ChatState,
     agent_id: int,
     items: list[dict[str, Any]],
@@ -91,7 +156,7 @@ def render_item(it: dict[str, Any], agent_id: int | None = None) -> str:
 # Rebuild account-bound runtime selection.
 #
 # Account-bound adapters cannot import a peer-only legacy selection.
-async def restore_selection(core: Any, state: ChatState) -> int | None:
+async def restore_selection(core: TimelineCore, state: ChatState) -> int | None:
     adapter = core.adapters[state.channel]
     account = await adapter.outbound_account_id()
     if adapter.selection_requires_account_proof:
@@ -113,7 +178,7 @@ async def restore_selection(core: Any, state: ChatState) -> int | None:
     return selected
 
 
-def hold_selection(core: Any, state: ChatState) -> None:
+def hold_selection(core: TimelineCore, state: ChatState) -> None:
     """Discard derived runtime state without deleting historical selection or journals."""
     state.current_agent_id = None
     task = core._subscriptions.pop((state.channel, state.chat_id), None)
@@ -122,7 +187,7 @@ def hold_selection(core: Any, state: ChatState) -> None:
     core._stop_typing(state)
 
 
-def register_adapter(core: Any, adapter: IMAdapter) -> None:
+def register_adapter(core: TimelineCore, adapter: IMAdapter) -> None:
     previous = core.adapters.get(adapter.channel)
     if (
         previous is not None
@@ -142,7 +207,9 @@ def truncate(text: str, limit: int) -> str:
     return text[: limit - 3] + "..."
 
 
-async def selection_account(core: Any, state: ChatState, scope: SelectionAdmission | None) -> str:
+async def selection_account(
+    core: TimelineCore, state: ChatState, scope: SelectionAdmission | None
+) -> str:
     return (
         scope.account_id
         if scope is not None
@@ -151,7 +218,10 @@ async def selection_account(core: Any, state: ChatState, scope: SelectionAdmissi
 
 
 def apply_account_selection(
-    core: Any, state: ChatState, agent_id: int | None, scope: SelectionAdmission | None
+    core: TimelineCore,
+    state: ChatState,
+    agent_id: int | None,
+    scope: SelectionAdmission | None,
 ) -> None:
     if scope is None or core.adapters.get(state.channel) is scope.adapter:
         core._apply_selection(state, agent_id)

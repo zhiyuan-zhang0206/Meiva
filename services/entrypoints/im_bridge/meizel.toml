@@ -1,16 +1,16 @@
 exports = ["daemon.py", "gateway_client.py", "ingress", "tests", "types.py"]
 
 [uses]
-"adapters" = ["config.py", "ingress", "outbound", "state.py", "types.py"]
+"adapters" = ["config.py", "ingress", "outbound", "state.py", "timeline_acceptance.py", "types.py"]
 "alert_outbound.py" = ["outbound", "types.py"]
 "core.py" = ["config.py", "copy.py", "cursor_store.py", "gateway_client.py", "notice_bridge.py", "outbound", "push_watchdog.py", "spawn_menu.py", "state.py", "timeline_acceptance.py", "types.py"]
 "daemon.py" = ["adapters", "alert_outbound.py", "config.py", "core.py", "gateway_client.py", "outbound", "types.py"]
 "gateway_client.py" = ["config.py", "types.py"]
 "ingress" = ["copy.py", "outbound", "timeline_acceptance.py", "types.py"]
-"notice_bridge.py" = ["config.py", "copy.py", "notice_poll_store.py", "outbound", "types.py"]
+"notice_bridge.py" = ["config.py", "copy.py", "gateway_client.py", "notice_poll_store.py", "outbound", "types.py"]
 "notice_poll_store.py" = ["outbound"]
 "outbound" = ["config.py", "cursor_store.py", "types.py"]
-"push_watchdog.py" = ["copy.py", "outbound", "types.py"]
+"push_watchdog.py" = ["config.py", "copy.py", "outbound", "types.py"]
 "spawn_menu.py" = ["copy.py", "gateway_client.py", "types.py"]
 "tests" = ["adapters", "alert_outbound.py", "config.py", "copy.py", "core.py", "cursor_store.py", "daemon.py", "gateway_client.py", "ingress", "notice_bridge.py", "outbound", "push_watchdog.py", "state.py", "timeline_acceptance.py", "types.py"]
 "timeline_acceptance.py" = ["outbound", "types.py"]
@@ -22,37 +22,3 @@ exports = ["daemon.py", "gateway_client.py", "ingress", "tests", "types.py"]
 
 [roots]
 "daemon.py" = ["settings"]
-
-[debt.ambient-read]
-"core.py#clock time.monotonic" = 2
-"core.py#random uuid.uuid4" = 2
-"gateway_client.py#random uuid.uuid4" = 2
-"notice_bridge.py#clock time.time" = 5
-"notice_bridge.py#random uuid.uuid4" = 1
-"push_watchdog.py#clock time.time" = 1
-
-[debt.any-collaborator]
-"core.py#any IMBridgeCore.__init__.db_pool" = 1
-"cursor_store.py#any CursorStore.__init__.db_pool" = 1
-"daemon.py#any _adapter_class.return" = 1
-"daemon.py#any _build_adapter.core" = 1
-"daemon.py#any handle_send.core" = 1
-"daemon.py#any handle_send.return" = 1
-"daemon.py#any load_adapters.core" = 1
-"daemon.py#any notice_loop.core" = 1
-"daemon.py#any timeline_outbound_loop.core" = 1
-"notice_bridge.py#any NoticeBridge.__init__.core" = 1
-"notice_bridge.py#any NoticeBridge.__init__.db_pool" = 1
-"notice_bridge.py#any NoticeBridge._save.value" = 1
-"push_watchdog.py#any hint_recovered.core" = 1
-"push_watchdog.py#any hint_recovered.msg" = 1
-"push_watchdog.py#any send_with_retry.adapter" = 1
-"push_watchdog.py#any send_with_retry.core" = 1
-"push_watchdog.py#any send_with_retry.reply" = 1
-"timeline_acceptance.py#any accept_timeline.core" = 1
-"timeline_acceptance.py#any apply_account_selection.core" = 1
-"timeline_acceptance.py#any hold_selection.core" = 1
-"timeline_acceptance.py#any register_adapter.core" = 1
-"timeline_acceptance.py#any restore_selection.core" = 1
-"timeline_acceptance.py#any selection_account.core" = 1
-"types.py#any IMAdapter.__init__.core" = 1

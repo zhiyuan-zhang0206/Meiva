@@ -90,9 +90,10 @@ class FakeRestClient:
         self.created: list[Any] = []
         self.fail = False
         self.list_responses: list[SimpleNamespace] = []
+        self._config: Any = SimpleNamespace(timeout=0.0)
 
     @property
-    def im(self) -> SimpleNamespace:
+    def im(self) -> Any:
         return SimpleNamespace(
             v1=SimpleNamespace(message=SimpleNamespace(create=self._create, list=self._list))
         )
@@ -142,17 +143,12 @@ async def websocket_ready(adapter: FeishuAdapter) -> AsyncGenerator[None]:
             task.cancel()
 
 
-class PatchingAdapter(FeishuAdapter):
-    """Adapter with the lark ws client construction replaced by a fake."""
-
-    def __init__(
-        self, core: FakeCore, config: Any, ws_client: FakeWsClient, *, state_dir: Path
-    ) -> None:
-        super().__init__(core, config, state_dir=state_dir, proxy_configured=False)
-        self._ws_client_impl = ws_client
-
-    def _build_ws_client(self) -> Any:
-        return self._ws_client_impl
+def build_patching_adapter(
+    core: FakeCore, config: Any, ws_client: FakeWsClient, *, state_dir: Path
+) -> FeishuAdapter:
+    return FeishuAdapter(
+        core, config, state_dir=state_dir, proxy_configured=False, ws_client=ws_client
+    )
 
 
 @pytest.fixture
@@ -258,7 +254,7 @@ async def test_start_connects_with_credentials(state_dir: Path) -> None:
 
         ws_client = FakeWsClient()
         credentials = feishu_config(feishu_app_id="cli_x", feishu_app_secret="secret_x")  # noqa: S106
-        adapter = PatchingAdapter(FakeCore(), credentials, ws_client, state_dir=state_dir)
+        adapter = build_patching_adapter(FakeCore(), credentials, ws_client, state_dir=state_dir)
         await adapter.start(_owned_tasks)
         assert (adapter._app_id, adapter._app_secret) == ("cli_x", "secret_x")
         assert adapter._ws_task is not None
