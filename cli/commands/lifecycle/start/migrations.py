@@ -12,7 +12,7 @@ from typing import Any
 
 import psycopg
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.lifecycle.start.cold_start_plan import (
@@ -40,7 +40,7 @@ from cli.database import OperatorDatabaseFactory
 def cmd_migrations_apply(
     *,
     database_factory: OperatorDatabaseFactory,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     config: DataPlaneConfig,
     home: Path,
 ) -> list[str]:
@@ -75,7 +75,9 @@ def cmd_migrations_apply(
     return done
 
 
-def _apply(conn: psycopg.Connection[Any], *, machine: MachineIdentity, home: Path) -> list[str]:
+def _apply(
+    conn: psycopg.Connection[Any], *, machine: MachineIdentityReader, home: Path
+) -> list[str]:
     from base.deploy.schema.migrations import apply_pending_migrations
 
     return apply_pending_migrations(

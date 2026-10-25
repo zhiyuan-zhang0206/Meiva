@@ -33,7 +33,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
 from base.paths import meiva_home
@@ -58,7 +58,7 @@ def cmd_skill_install(
     update_mode: str | None = None,
     check_every: str | None = None,
     gateway: ExtensionGateway,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
 ) -> int:
     """`meiva skill install <git-url-or-local-path> [--ref REF] [--path SUBDIR]
     [--accept-risk] [--update-mode auto|notify|off] [--check-every DUR]` —

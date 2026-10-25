@@ -29,7 +29,7 @@ from pydantic import ValidationError
 
 from base.api_contracts.status import MachineStatus
 from base.cluster.machine import (
-    MachineIdentity,
+    MachineIdentityReader,
 )
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
@@ -217,7 +217,7 @@ class RosterEnv:
     identity_log: roster_probe.IdentityMismatchLog
     image: LoadedCommit
     home: Path
-    machine: MachineIdentity
+    machine: MachineIdentityReader
     probe_timeout_s: float
 
 

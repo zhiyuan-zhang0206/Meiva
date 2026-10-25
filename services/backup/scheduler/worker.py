@@ -17,8 +17,8 @@ from typing import Literal, assert_never
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -271,7 +271,7 @@ def execute(
 # A handle on the config as its owner holds it now; `url` redirects it to a scratch cluster.
 def worker_database(
     config: ConfigBoot,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     gate: ProcessDbGate,
     *,
     url: str | None = None,
@@ -289,7 +289,7 @@ def main() -> None:
     # The store-verified publish ACK is an INFO record: route it to the log sinks.
     config = ConfigBoot()
     config.boot()
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     process_home = meiva_home().resolve()
     image = LoadedCommit.capture()
     version = CodeVersion(image)

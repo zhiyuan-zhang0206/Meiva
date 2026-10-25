@@ -53,7 +53,7 @@ from base import telemetry
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.insert import insert_inbound_message_in_transaction
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import (
@@ -360,7 +360,7 @@ def main() -> None:
     image = LoadedCommit.capture()
     boot = ConfigBoot()
     boot.boot()
-    machine = machine_from_boot(boot)
+    machine = ConfiguredMachineIdentity(boot)
     assert_schema_current(boot.view.data_plane.db_url)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="task_maintenance", exempt=False)

@@ -15,7 +15,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base import paths, telemetry
 from base.api_contracts.agent_contract import MeivaAgentError
-from base.cluster.machine.boot import gateway_access_from_boot, machine_from_boot
+from base.cluster.machine.boot import gateway_access_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.rate_limit import LoginRateLimitConfig, LoginRateLimiter
 from base.config import ConfigBoot, Settings
 from base.config.service_read import ConfigAuthority
@@ -581,7 +582,7 @@ def create_app_from_environment() -> FastAPI:
         home=paths.meiva_home(),
         config=config,
         image=LOADED_IMAGE,
-        machine=machine_from_boot(config),
+        machine=ConfiguredMachineIdentity(config),
         host=Host.system(),
     )
     return create_app(
@@ -604,7 +605,7 @@ def openapi_schema_of(config: ConfigBoot, *, home: Path) -> dict[str, Any]:
         home=home,
         config=config,
         image=LOADED_IMAGE,
-        machine=machine_from_boot(config),
+        machine=ConfiguredMachineIdentity(config),
         host=Host.system(),
     )
     with process.lifetime():

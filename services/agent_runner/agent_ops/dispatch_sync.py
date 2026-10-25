@@ -8,7 +8,7 @@ from typing import Any
 from psycopg_pool import ConnectionPool
 
 from base.agents.to_user import ToUserReadRequest
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.host.system.hostport import Host
@@ -39,7 +39,7 @@ def dispatch_sync(
     db: Database,
     authority: ConfigAuthority,
     image: LoadedCommit,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
     host: Host,
 ) -> tuple[OpStatus, dict[str, object]]:
 

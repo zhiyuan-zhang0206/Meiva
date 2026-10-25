@@ -25,8 +25,8 @@ from dataclasses import dataclass
 from typing import TextIO
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity, MachineRoles
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine import MachineIdentityReader, MachineRoles
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -109,7 +109,7 @@ def _connect_backends(
     return True
 
 
-def _reconcile_database(boot: ConfigBoot, *, machine: MachineIdentity) -> Database:
+def _reconcile_database(boot: ConfigBoot, *, machine: MachineIdentityReader) -> Database:
     """Capture this standalone entry's gated database at its original dial boundary."""
     image = LoadedCommit.capture()
     version = CodeVersion(image)
@@ -212,7 +212,7 @@ def main(argv: Sequence[str], *, out: TextIO, err: TextIO) -> int:
 
     boot = ConfigBoot()
     boot.read_process_environment()
-    machine = machine_from_boot(boot)
+    machine = ConfiguredMachineIdentity(boot)
     queries = sample_queries(args.limit, roles=machine.role())
     if not queries:
         print("no query texts found in the memory pool", file=err)

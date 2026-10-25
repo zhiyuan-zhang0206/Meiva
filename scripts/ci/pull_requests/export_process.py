@@ -4,7 +4,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -32,7 +32,7 @@ def owned_event_pipeline(process: str, *, image: LoadedCommit | None) -> Generat
         )
 
     config = ConfigBoot()
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     pipeline = build_pipeline(database=database, machine=machine, home=meiva_home())
     primary: BaseException | None = None
     try:

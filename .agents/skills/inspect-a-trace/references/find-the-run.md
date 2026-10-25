@@ -13,13 +13,13 @@ all misbehave). Derive the direct URL the way the admin plane does:
 ```bash
 psql "$(.venv/bin/python - <<'PY'
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.db.config import db_config_from_boot
 
 boot = ConfigBoot()
 boot.boot()
-machine = machine_from_boot(boot)
+machine = ConfiguredMachineIdentity(boot)
 resolve = ClusterDirectUrl(machine.host, gateway_url_reader=lambda: boot.view.gateway.gateway_url)
 print(resolve(db_config_from_boot(boot)))
 PY

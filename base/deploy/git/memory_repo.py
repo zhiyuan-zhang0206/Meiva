@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from base.cluster.machine import GatewayAccess, MachineIdentity
+from base.cluster.machine import GatewayAccess, MachineIdentityReader
 from base.host.proc import run_bounded
 
 _DEFAULT_GITIGNORE = """\
@@ -50,7 +50,7 @@ def memory_remote(raw: str) -> str:
     )
 
 
-def branch_name(*, machine: MachineIdentity) -> str:
+def branch_name(*, machine: MachineIdentityReader) -> str:
     # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
     if "agent-runner" in machine.role():
         return f"machine-{machine.name()}"

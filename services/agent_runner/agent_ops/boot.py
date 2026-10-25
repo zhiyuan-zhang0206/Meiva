@@ -23,7 +23,7 @@ import psycopg
 from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import MachineIdentity, daemon_acceptance
+from base.cluster.machine import MachineIdentityReader, daemon_acceptance
 from base.cluster.machine.ambient import gateway_access_from_settings
 from base.cluster.port_preflight import serves_off_box
 from base.config import ConfigBoot
@@ -55,7 +55,7 @@ def register_boot(
     *,
     database: Callable[[], Database],
     config: ConfigBoot,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     ops_port: int,
     home: Path,
 ) -> None:
@@ -112,7 +112,7 @@ def register_boot(
     _log.info("registered this unit as up at %s", url)
 
 
-def ops_bind_host(*, machine: MachineIdentity) -> str:
+def ops_bind_host(*, machine: MachineIdentityReader) -> str:
     """The ops server's bind address — 0.0.0.0 when this host declares a reachable
     address other machines dial (`port_preflight.serves_off_box`), loopback otherwise.
 

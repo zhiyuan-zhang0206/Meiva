@@ -58,7 +58,7 @@ from base.cluster import postgres as owned_postgres
 from base.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
 from base.cluster.dataplane.pg_admin import pg_socket_dir as _base_pg_socket_dir
 from base.cluster.dataplane.pg_tools import pg_shm_args, pg_start_env, pg_tool, pg_tz_args
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.host.brew_pin import brew_prefix
 from base.host.net.url_secret import url_host
 from base.host.private_storage import write_private_bytes
@@ -220,7 +220,7 @@ def _await_bind(service: str, host: str, tuning: StartTuning) -> bool:
 
 # meiva:note
 # The machine's declared reachable address, or None on a single box that binds loopback alone.
-def _off_box_host(machine: MachineIdentity) -> str | None:
+def _off_box_host(machine: MachineIdentityReader) -> str | None:
     host = machine.host()
     return None if host in port_preflight.LOOPBACK_ALIASES else host
 
@@ -341,7 +341,7 @@ def _launch_postmaster(
     *,
     home: Path,
     dial_host: str,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     retained_children: list[subprocess.Popen[bytes]],
     owner: OwnedProcess | None,
     tuning: StartTuning,
@@ -385,7 +385,7 @@ def start_pg(
     *,
     home: Path,
     retained_children: list[subprocess.Popen[bytes]],
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     tuning: StartTuning = PRODUCTION_TUNING,
 ) -> int:
     data = pg_data_dir(home)
@@ -477,7 +477,7 @@ class _RedisStart:
     runtime_password: str
     identity: str
     home: Path
-    machine: MachineIdentity
+    machine: MachineIdentityReader
     tuning: StartTuning
     macos: bool
     redis_cli: str
@@ -540,7 +540,7 @@ def start_redis(
     identity: str,
     *,
     home: Path,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     macos: bool,
     tuning: StartTuning = PRODUCTION_TUNING,
 ) -> int:
@@ -577,7 +577,12 @@ def start_redis(
 # addresses it binds (`redis_plan.redis_bind_addrs`: loopback alone on macOS, else the machine's
 # declared bind addresses).
 def redis_launch_argv(
-    config: DataPlaneConfig, redis_port: int, data: Path, machine: MachineIdentity, *, macos: bool
+    config: DataPlaneConfig,
+    redis_port: int,
+    data: Path,
+    machine: MachineIdentityReader,
+    *,
+    macos: bool,
 ) -> list[str]:
     bind = redis_plan.redis_bind_addrs(
         macos=macos, declared=tuple(port_preflight.bind_addrs(machine=machine))
@@ -597,7 +602,12 @@ def redis_launch_argv(
 # Run `redis-server --daemonize yes` on the planned command line; print why and say no when it
 # exits non-zero.
 def _launch_redis(
-    config: DataPlaneConfig, redis_port: int, data: Path, machine: MachineIdentity, *, macos: bool
+    config: DataPlaneConfig,
+    redis_port: int,
+    data: Path,
+    machine: MachineIdentityReader,
+    *,
+    macos: bool,
 ) -> bool:
     result = run_bounded(
         redis_launch_argv(config, redis_port, data, machine, macos=macos),
@@ -681,7 +691,7 @@ def ensure_cluster_storage(
     redis_password: str,
     redis_user: str,
     retained_children: list[subprocess.Popen[bytes]],
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     macos: bool,
 ) -> int:
     require_storage_credentials(config.redis_admin_password, redis_password)

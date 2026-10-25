@@ -51,7 +51,7 @@ import psutil
 
 from base.cluster import ownership, port_preflight
 from base.cluster.dataplane import pooler as pooler_files
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.host.db_authority.delivery import POOLER_ADMIN
 from base.host.private_storage import write_private_bytes
 from base.host.proc import process_alive, run_bounded
@@ -109,7 +109,7 @@ class PoolerShape:
     pg_port: int
     listen_port: int
     db_name: str
-    machine: MachineIdentity
+    machine: MachineIdentityReader
     max_client_conn: int
     socket_dir: Path
 

@@ -64,7 +64,7 @@ from pathlib import Path
 from typing import Any
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -748,7 +748,7 @@ def main() -> None:
     image = LoadedCommit.capture()
     machine_config = ConfigBoot()
     machine_config.boot()
-    machine = machine_from_boot(machine_config)
+    machine = ConfiguredMachineIdentity(machine_config)
     process_home = meiva_home().resolve()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="computer-mcp")

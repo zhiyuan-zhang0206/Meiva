@@ -31,7 +31,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from base.cluster.machine import MachineIdentity, MachineNameMissing
+from base.cluster.machine import MachineIdentityReader, MachineNameMissing
 from base.host.system import macos_firewall as fw
 from base.host.system.hostport import Host
 from base.host.system.macos_firewall import FirewallAudit, FirewallRepair, FirewallVerdict
@@ -40,7 +40,7 @@ from cli.commands.converge.plans.firewall_report import converge_summary_lines
 from cli.commands.converge.spec import ConvergeCtx
 
 
-def configured_machine_name(machine: MachineIdentity) -> str | None:
+def configured_machine_name(machine: MachineIdentityReader) -> str | None:
     """The configured Meiva machine name (``MEIVA_MACHINE_NAME``), or None when unset."""
     with contextlib.suppress(MachineNameMissing):
         return machine.name()
@@ -83,7 +83,7 @@ def serving_binaries(roles: frozenset[str], *, home: Path) -> tuple[Path, ...]:
 
 
 def audit_this_host(
-    roles: frozenset[str], *, home: Path, machine: MachineIdentity, host: Host
+    roles: frozenset[str], *, home: Path, machine: MachineIdentityReader, host: Host
 ) -> FirewallAudit:
     """Audit this host's own serving binaries. The one entry point every caller shares.
 
@@ -123,7 +123,7 @@ def sync_allowlist(
     audit: FirewallAudit,
     rules: dict[str, bool],
     *,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     host: Host,
     user_home: Path,
 ) -> AllowlistSync:

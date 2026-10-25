@@ -16,8 +16,8 @@ from base.agents.context.identity import AgentIdentity
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
@@ -37,7 +37,7 @@ def _bind_schedule_actor(
     *,
     clients: ClientSet,
     clock_factory: Callable[[], Clock],
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
 ) -> None:
     process_context.bind_context(
         MeivaContext(
@@ -52,7 +52,7 @@ def _bind_schedule_actor(
 def run(schedule_id: int, revision: int | None = None) -> int:
     config = ConfigBoot()
     config.read_process_environment()
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     image = process_context.loaded_code_image()
     version = CodeVersion(image)
     gate = ProcessDbGate(process=process_name(), version=version.get)

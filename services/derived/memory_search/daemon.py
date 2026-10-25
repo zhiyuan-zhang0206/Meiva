@@ -8,7 +8,7 @@ import sys
 import uvicorn
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
@@ -86,7 +86,7 @@ def main() -> None:
     """Entry point: pidfile -> log init -> serve -> cleanup."""
     boot = ConfigBoot()
     boot.boot()
-    machine = machine_from_boot(boot)
+    machine = ConfiguredMachineIdentity(boot)
     process_home = meiva_home().resolve()
     config = memory_search_config(config=boot)
     if _is_running(config):

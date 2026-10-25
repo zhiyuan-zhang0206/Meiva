@@ -33,7 +33,7 @@ from base import cluster
 from base.cluster import authority
 from base.cluster.dataplane import pg_admin, pooler
 from base.cluster.derive import runner_db_url_projection
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.record import ClusterRecord
 from base.host.db_authority import delivery as db_delivery_files
 from base.host.db_authority import ledger, model
@@ -97,7 +97,7 @@ def ensure_pooler(
     home: Path,
     generation: Generation,
     *,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     macos: bool,
 ) -> None:
     if not config.pgbouncer_enabled:
@@ -224,7 +224,7 @@ class _Completion:
     home: Path
     environment: Mapping[str, str]
     database_factory: OperatorDatabaseFactory
-    machine: MachineIdentity
+    machine: MachineIdentityReader
     macos: bool
     local: _LocalPlane | None
 
@@ -384,7 +384,7 @@ def execute_completion(
     home: Path,
     environment: Mapping[str, str],
     database_factory: OperatorDatabaseFactory,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     macos: bool,
 ) -> None:
     local = (
@@ -426,7 +426,7 @@ def complete_gateway_data_plane(
     environment: Mapping[str, str],
     refresh_schema: bool = True,
     database_factory: OperatorDatabaseFactory,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     macos: bool,
 ) -> None:
     local = not config.is_remote

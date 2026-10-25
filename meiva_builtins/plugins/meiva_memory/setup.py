@@ -27,7 +27,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.log import logger
 
 _TEMPLATE_DIR = Path(__file__).parent / "template"
@@ -75,7 +75,7 @@ def _arm_hooks(pool: Path) -> bool:
     return True
 
 
-def _initialize_authoring(*, machine: MachineIdentity, target: Path) -> None:
+def _initialize_authoring(*, machine: MachineIdentityReader, target: Path) -> None:
     # meiva:note
     # Read each provisioning input only when the authoring stage needs it.
     # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-pool-scaffold.meiva.okf.md
@@ -129,7 +129,7 @@ def _initialize_authoring(*, machine: MachineIdentity, target: Path) -> None:
     init(root=target, branch=branch, remote=remote)
 
 
-def _ensure_memory_repo(*, machine: MachineIdentity, target: Path) -> None:
+def _ensure_memory_repo(*, machine: MachineIdentityReader, target: Path) -> None:
     # meiva:note
     # Keep the outer probe's logging and error boundary separate from init's probe.
     # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-pool-scaffold.meiva.okf.md
@@ -180,7 +180,7 @@ def _initialize_gateway(*, target: Path) -> None:
     init(root=target, branch="main", remote=remote)
 
 
-def _ensure_gateway_memory_repo(*, machine: MachineIdentity, target: Path) -> None:
+def _ensure_gateway_memory_repo(*, machine: MachineIdentityReader, target: Path) -> None:
     # meiva:note
     # Provision the captured consolidated target only for a gateway-capable unit.
     # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-pool-scaffold.meiva.okf.md
@@ -229,7 +229,7 @@ def _classify_git_init_error(stderr: str, returncode: int) -> str:
     return f"{header}(unrecognized failure shape — paste the stderr above into the runbook 'Secondary host bring-up' troubleshooting section)"
 
 
-def scaffold(*, machine: MachineIdentity) -> None:
+def scaffold(*, machine: MachineIdentityReader) -> None:
     """Bring this cluster's memory pool up during explicit initialization.
 
     Three things, in order: the agent-runner's authoring checkout, the gateway's

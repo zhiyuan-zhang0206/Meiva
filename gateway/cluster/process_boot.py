@@ -8,7 +8,7 @@ from pathlib import Path
 
 from base.agents.context.clients import ClientSet
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -35,7 +35,7 @@ class GatewayProcess:
         home: Path,
         config: ConfigBoot,
         image: LoadedCommit,
-        machine: MachineIdentity,
+        machine: MachineIdentityReader,
         host: Host,
     ) -> None:
         self.home = home

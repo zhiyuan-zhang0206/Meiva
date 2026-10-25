@@ -29,7 +29,7 @@ from base.api_contracts.config import (
     ConfigView,
     ConfigWriteResult,
 )
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from ops.env_audit import EnvWriteAudit, read_env_write_records
 
 _HTTP_TIMEOUT_S = 15.0
@@ -403,7 +403,7 @@ def _print_audit_record(record: dict[str, object]) -> None:
 
 
 def cmd_config_audit(
-    last: int, key: str | None, machine: str | None, *, identity: MachineIdentity
+    last: int, key: str | None, machine: str | None, *, identity: MachineIdentityReader
 ) -> int:
     """`meiva config audit [--last N] [--key K] [--machine M]` — the `.env` write trail.
 

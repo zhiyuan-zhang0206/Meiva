@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.telemetry.lgtm_local import BACKENDS, backend_urls
 from cli.commands.observability._lgtm_provisioning import verify_dashboard_provisioning
 from services.supervision.healthchecks.lgtm import is_lgtm_host, lgtm_roles, probe_backend
 
 
 # meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
-def cmd_lgtm_status(*, home: Path, machine: MachineIdentity) -> int:
+def cmd_lgtm_status(*, home: Path, machine: MachineIdentityReader) -> int:
     station = is_lgtm_host(home, roles=lgtm_roles(machine))
     if not station:
         print("this home is not an observability station")

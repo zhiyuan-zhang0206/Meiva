@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.host.system.hostport import Host
 from base.packages.mcp_config import load_mcp_config, server_capability
 from base.packages.plugins import enable_config, mcp_enabled
@@ -42,7 +42,7 @@ __all__ = ["inventory_read_op", "inventory_write_op"]
 #   - mcp_servers: one entry per server in the full merged map with effective enabled flag (the
 #     per-host overlay default-on), a one-line description, and a read-time capability verdict
 #     (can_enable/reason) for the `requires` precondition
-def inventory_read_op(*, local_machine: MachineIdentity, host: Host) -> InventoryReadResult:
+def inventory_read_op(*, local_machine: MachineIdentityReader, host: Host) -> InventoryReadResult:
     require_agent_runner(local_machine.role())
     discovered = enable_config.discover_plugins()
     cfg = enable_config.load_for_runtime(set(discovered))
@@ -95,7 +95,7 @@ def inventory_write_op(
     plugins: dict[str, bool],
     mcp_servers: dict[str, bool],
     *,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
     host: Host,
 ) -> InventoryWriteOpResult:
     require_agent_runner(local_machine.role())

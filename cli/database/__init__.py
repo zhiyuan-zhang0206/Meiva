@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING, Any, NoReturn
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.telemetry import DrainResult, EventPipeline
 
 if TYPE_CHECKING:
@@ -126,7 +126,7 @@ class OperatorEventPipeline:
         self,
         database_factory: OperatorDatabaseFactory,
         *,
-        machine: MachineIdentity,
+        machine: MachineIdentityReader,
         home: Path,
         flush_interval_s: float = 0.5,
     ) -> None:
@@ -179,7 +179,7 @@ class OperatorEventPipeline:
 
 
 def operator_event_pipeline(
-    database_factory: OperatorDatabaseFactory, *, machine: MachineIdentity, home: Path
+    database_factory: OperatorDatabaseFactory, *, machine: MachineIdentityReader, home: Path
 ) -> OperatorEventPipeline:
     """Construct a lazy command owner without opening a writer or database."""
     return OperatorEventPipeline(database_factory, machine=machine, home=home)

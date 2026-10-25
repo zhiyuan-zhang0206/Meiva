@@ -39,8 +39,8 @@ from base.api_contracts.agent_contract import Harness
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
-from base.cluster.machine import MachineIdentity, MachineIdentityReader
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.host.env.agent_env import AGENT_ID_ENV
 from base.lm.catalog import ModelCatalog
@@ -225,7 +225,7 @@ def context_from_description(
     config: ConfigBoot,
     original_incarnation: RuntimeIncarnation | None = None,
 ) -> MeivaContext:
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     return MeivaContext.from_description(
         description,
         clients=process_clients(
@@ -250,7 +250,7 @@ def launched_context(*, env: Mapping[str, str], config: ConfigBoot) -> MeivaCont
         return None
     if not config.prepared:
         config.read_process_environment()
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     raw_harness = env.get("MEIVA_HARNESS", "").strip()
     harness = Harness(raw_harness) if raw_harness in set(Harness) else Harness.MEIVA
     return MeivaContext(
@@ -446,7 +446,7 @@ def _load_inputs(
         config = ConfigBoot()
         config.read_process_environment()
     if machine is None:
-        machine = _context_machine(context) or machine_from_boot(config)
+        machine = _context_machine(context) or ConfiguredMachineIdentity(config)
     if clients is None:
         clients = derived_clients(config, machine)
         atexit.register(clients.close)
@@ -690,7 +690,7 @@ class BorrowedBoot:
 @dataclass(frozen=True, slots=True)
 class OwnedBoot:
     config: ConfigBoot
-    machine: MachineIdentity
+    machine: ConfiguredMachineIdentity
     database: DatabaseFactory
     clients: ClientSet
     clock: Clock
@@ -713,7 +713,7 @@ def borrow_external_process(bound: MeivaContext) -> BorrowedBoot:
 def own_external_process(config: ConfigBoot) -> OwnedBoot:
     if not config.prepared:
         config.read_process_environment()
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     database = database_factory(config=config, machine=machine)
     return OwnedBoot(
         config=config,
