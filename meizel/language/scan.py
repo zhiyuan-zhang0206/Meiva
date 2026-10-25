@@ -52,6 +52,7 @@ __all__ = [
     "mount_facts",
     "scan_file",
     "scan_source",
+    "scan_tree",
 ]
 
 # The calls that start a process, with where the argument list is: the index of the list argument,
@@ -152,6 +153,7 @@ class FileScan:
     input_appends: list[InputListAppend] = field(default_factory=list[InputListAppend])
     ambient: list[Acquisition] = field(default_factory=list[Acquisition])
     type_casts: list[TypeCastSite] = field(default_factory=list[TypeCastSite])
+    type_checking: tuple[int, ...] = ()
 
 
 class Scanner(AmbientAccess):
@@ -163,6 +165,7 @@ class Scanner(AmbientAccess):
         self.fn_depth = 0
         self.qualnames: list[str] = []
         self.type_casts: list[TypeCastSite] = []
+        self.type_checking: list[int] = []
         self.records_type_casts = not (self.test_file or is_test_path(path))
         self.owned_functions = unambiguous_function_lines(tree)
         self.fixture_requester: ast.FunctionDef | ast.AsyncFunctionDef | None = None
@@ -172,6 +175,7 @@ class Scanner(AmbientAccess):
             for n in ast.walk(tree)
         )
         self._handlers: dict[type[ast.AST], Callable[[Any], None]] = {
+            ast.If: self.visit_if,
             ast.Import: self.visit_import,
             ast.ImportFrom: self.visit_import_from,
             ast.Attribute: self.visit_attribute,
@@ -213,7 +217,16 @@ class Scanner(AmbientAccess):
             input_appends=self.input_appends,
             ambient=self.ambient.items,
             type_casts=self.type_casts,
+            type_checking=tuple(self.type_checking),
         )
+
+    def visit_if(self, node: ast.If) -> None:
+        if (
+            isinstance(node.test, ast.Name | ast.Attribute)
+            and self.dotted(node.test) == "typing.TYPE_CHECKING"
+        ):
+            self.type_checking.append(node.lineno)
+        self.children(node)
 
     def visit_compare(self, node: ast.Compare) -> None:
         purity.record_enum_subsets(self.purity_state.enum_subsets, node)
@@ -515,7 +528,13 @@ def scan_source(universe: Universe, path: str, source: bytes, sources: Sources) 
         raise MeizelError(f"{path}:{error.lineno}: cannot parse: {error.msg}") from error
     except ValueError as error:
         raise MeizelError(f"{path}: cannot read: {error}") from error
-    return Scanner(universe, path, tree, walrus=b":=" in source, sources=sources).run()
+    return scan_tree(universe, path, tree, sources, walrus=b":=" in source)
+
+
+def scan_tree(
+    universe: Universe, path: str, tree: ast.Module, sources: Sources, *, walrus: bool
+) -> FileScan:
+    return Scanner(universe, path, tree, walrus=walrus, sources=sources).run()
 
 
 def scan_file(universe: Universe, path: str, sources: Sources) -> FileScan:
