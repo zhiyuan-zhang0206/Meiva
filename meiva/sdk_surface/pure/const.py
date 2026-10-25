@@ -7,8 +7,8 @@
 
 
 import inspect
-from types import SimpleNamespace
-from typing import Any
+from types import ModuleType, SimpleNamespace
+from typing import Any, TypeGuard
 
 # meiva:note
 # Class attribute set on every type `const()` mints; `is_documented_const` reads it.
@@ -29,8 +29,8 @@ def is_skill_object(obj: object) -> bool:
     return hasattr(obj, "_meiva_skill_kind")
 
 
-def is_namespace(obj: object) -> bool:
-    return obj is not None and (inspect.ismodule(obj) or isinstance(obj, SimpleNamespace))
+def is_namespace(obj: object) -> TypeGuard[ModuleType | SimpleNamespace]:
+    return isinstance(obj, (ModuleType, SimpleNamespace))
 
 
 def format_docstring(doc: str, *, indent: str) -> str:

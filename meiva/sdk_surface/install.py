@@ -49,7 +49,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, assert_never, overload
+from typing import assert_never
 
 from pydantic import BaseModel
 
@@ -284,40 +284,6 @@ def _run(undo: list[Reversal], build: Build, primary: BaseException | None = Non
         raise failure
 
 
-@overload
-def install(
-    registry: ExtensionRegistry,
-    report: None = None,
-    *,
-    config_images: PluginConfigImages,
-    catalog: ModelCatalog | None = None,
-    provider_keys: ProviderKeys | None = None,
-    authority: ConfigAuthority | None = None,
-    sampling: SamplingPolicyOwner,
-    clock: Clock | None = None,
-    clients: EventPipelines | None = None,
-    external_caller: CallerIdentity | None = None,
-    disabled_entries: Sequence[str] = (),
-) -> ExtensionRegistry: ...
-
-
-@overload
-def install(
-    registry: ExtensionRegistry,
-    report: Reporter | None,
-    *,
-    config_images: PluginConfigImages,
-    catalog: ModelCatalog | None = None,
-    provider_keys: ProviderKeys | None = None,
-    authority: ConfigAuthority | None = None,
-    sampling: SamplingPolicyOwner,
-    clock: Clock | None = None,
-    clients: EventPipelines | None = None,
-    external_caller: CallerIdentity | None = None,
-    disabled_entries: Sequence[str] = (),
-) -> ExtensionRegistry: ...
-
-
 # meiva:note
 # Install `registry`'s SDK surface into `meiva`; return the registry of the plugins admitted.
 # Raises `RuntimeError` when a previous installation is still in place (`uninstall()` first),
@@ -325,18 +291,17 @@ def install(
 def install(
     registry: ExtensionRegistry,
     report: Reporter | None = None,
-    **options: object,
+    *,
+    config_images: PluginConfigImages,
+    catalog: ModelCatalog | None = None,
+    provider_keys: ProviderKeys | None = None,
+    authority: ConfigAuthority | None = None,
+    sampling: SamplingPolicyOwner,
+    clock: Clock | None = None,
+    clients: EventPipelines | None = None,
+    external_caller: CallerIdentity | None = None,
+    disabled_entries: Sequence[str] = (),
 ) -> ExtensionRegistry:
-    opts: dict[str, Any] = options
-    config_images: PluginConfigImages = opts["config_images"]
-    catalog: ModelCatalog | None = opts.get("catalog")
-    provider_keys: ProviderKeys | None = opts.get("provider_keys")
-    authority: ConfigAuthority | None = opts.get("authority")
-    sampling: SamplingPolicyOwner = opts["sampling"]
-    clock: Clock | None = opts.get("clock")
-    clients: EventPipelines | None = opts.get("clients")
-    external_caller: CallerIdentity | None = opts.get("external_caller")
-    disabled_entries: Sequence[str] = opts.get("disabled_entries", ())
     if installed() is not None:
         raise RuntimeError(
             "the SDK surface is already installed; uninstall() it before installing another registry"

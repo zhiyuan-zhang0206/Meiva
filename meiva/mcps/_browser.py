@@ -18,28 +18,14 @@ import asyncio
 import json
 from contextlib import AsyncExitStack, suppress
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
+
+from mcp.types import CallToolResult, ListToolsResult, Tool
 
 from base.agents.lifecycle import (
     release_agent_chrome_pages as release_agent_chrome_pages,
 )
 from base.host.net.resilience import Policy, aretry
-
-
-class _ToolItem(Protocol):
-    name: str
-    description: str | None
-
-
-class ToolListResult(Protocol):
-    tools: list[_ToolItem]
-
-
-class ToolCallResult(Protocol):
-    content: list[Any]
-    is_error: bool | None
-    structured_content: dict[str, Any] | None
-
 
 # A single tool result (screenshot / DOM snapshot) can be multi-MB on one
 # line; lift the stream buffer cap well above StreamReader's 64KiB default
@@ -141,25 +127,19 @@ class BrowserLineSession:
             raise RuntimeError(resp.get("error", "browser-mcp daemon error"))
         return resp["result"]
 
-    async def list_tools(self) -> ToolListResult:
-        from mcp import types
-
+    async def list_tools(self) -> ListToolsResult:
         # The service returns a bare tool-dict list (the wrapper validates each
         # entry the same way); wrap it in the SDK result shape the daemon's
         # request loop consumes (.tools).
         result: Any = await self._request({"method": "list_tools"})
-        out: Any = types.ListToolsResult(tools=[types.Tool.model_validate(t) for t in result])
-        return out
+        return ListToolsResult(tools=[Tool.model_validate(t) for t in result])
 
-    async def call_tool(self, name: str, args: dict[str, Any]) -> ToolCallResult:
-        from mcp import types
-
+    async def call_tool(self, name: str, args: dict[str, Any]) -> CallToolResult:
         payload: dict[str, Any] = {"method": "call_tool", "tool": name, "args": args}
         if self.client_agent_id is not None:
             payload["agent_id"] = self.client_agent_id
         result: Any = await self._request(payload)
-        out: Any = types.CallToolResult.model_validate(result)
-        return out
+        return CallToolResult.model_validate(result)
 
 
 async def _close_writer(writer: asyncio.StreamWriter) -> None:
