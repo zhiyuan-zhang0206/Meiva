@@ -9,8 +9,6 @@ import {
   normalizeDayPeriodSpace,
 } from "./time";
 
-process.env.TZ = "UTC";
-
 const SHANGHAI = "Asia/Shanghai";
 const NEW_YORK = "America/New_York";
 

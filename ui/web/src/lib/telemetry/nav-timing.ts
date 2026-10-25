@@ -1,25 +1,27 @@
 "use client";
 
 // meiva:note
-// Where a navigation's seconds actually go, measured in the reviewer's own
-// browser, plus a floor under the worst case. Measured on 2026-10-20: a click on
-// Control reported click-to-URL of 15.2 s and 17.9 s with a longest main-thread
-// task of ZERO - the router issued its RSC request (answered in 6 ms), then made
-// no request at all and committed nothing for fifteen seconds while the main
-// thread stayed idle. That is a navigation that never gets to run, not a slow
-// one, so after NAV_FALLBACK_MS without a commit this performs a real location
-// change: a full load costs ~1.5 s on the machine that reported the stall, which
-// bounds the worst case instead of leaving it unbounded.
+// Navigation timing — measures the user-visible cost of a route change from
+// the click that started it to the first frame after the new route commits.
 //
-// The floor is 5000 ms: click-to-commit measures p50 69 / p95 84 / p99 106
-// unthrottled (30 navigations, preview build, ubuntu host, 2026-10-20), p99 332 at
-// 4x CPU throttle and 655 at 8x, so 5000 is ~47x the unthrottled p99 and ~7.6x the
-// slowest healthy commit measured. It is deliberately far above any healthy
-// navigation: everything faster than it is a real measurement, so the fallback
-// never rewrites a slow-but-fine commit into a full reload, and the only rows it
-// produces are genuine non-commits. A real hang costs 5000 ms plus the ~0.6 s load
-// that follows. The user can override it with behavior.navFallbackMs.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// Why two numbers plus the longest task:
+//   - commitMs: markNavIntent() -> usePathname() changed (React committed the
+//     new route's tree). Includes RSC fetch if any and the synchronous render.
+//   - paintMs:  markNavIntent() -> the first animation frame after the commit.
+//     The gap between commit and paint is layout + paint + any passive effects
+//     that blocked the frame.
+//   - taskMs:   the longest LongTask observed between intent and 400ms after
+//     paint (late query resolves / deferred mounts). Zero when the browser has
+//     no LongTask observer or no task crossed the 50ms floor.
+//
+// All three ride in one `nav-timing` event's ≤64-char `value` (`c=...|p=...|t=...`)
+// so a single row in `frontend_telemetry` tells whether a slow switch was
+// network/render before commit, frame work at commit, or a post-mount stall.
+//
+// Fallback: if the App Router transition has not committed within 5s of a
+// sidebar click, record `key: "fallback"` with how many resources started, the
+// worst connection-queue wait and the frames actually painted while stuck, then
+// assign `window.location` so awedged transition still lands on the page.
 
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
@@ -44,21 +46,17 @@ const state = {
   observer: null as PerformanceObserver | null,
   resources: null as PerformanceObserver | null,
   fallbackTimer: null as ReturnType<typeof setTimeout> | null,
-  requestFrame: null as ((cb: FrameRequestCallback) => number) | null,
-  cancelFrame: null as ((id: number) => void) | null,
 };
 
 function countFrames(): void {
-  const req = state.requestFrame ?? requestAnimationFrame;
-  state.frameLoop = req(() => {
+  state.frameLoop = requestAnimationFrame(() => {
     state.metrics.frames += 1;
     countFrames();
   });
 }
 
 function stopFrames(): void {
-  const cancel = state.cancelFrame ?? cancelAnimationFrame;
-  if (state.frameLoop !== 0) cancel(state.frameLoop);
+  if (state.frameLoop !== 0) cancelAnimationFrame(state.frameLoop);
   state.frameLoop = 0;
 }
 
@@ -151,8 +149,7 @@ export function useNavTimingReport(pathnameOverride?: string): void {
     clearFallback();
     stopFrames();
     const commit = performance.now() - state.metrics.intentAt;
-    const req = state.requestFrame ?? requestAnimationFrame;
-    req(() => {
+    requestAnimationFrame(() => {
       if (state.metrics.intentAt === null) return;
       const paint = performance.now() - state.metrics.intentAt;
       setTimeout(() => {
@@ -169,15 +166,3 @@ export function useNavTimingReport(pathnameOverride?: string): void {
     });
   }, [pathname]);
 }
-
-export const navTimingTestControl = Object.freeze({
-  setFrameScheduler(
-    scheduler: {
-      requestAnimationFrame: (cb: FrameRequestCallback) => number;
-      cancelAnimationFrame: (id: number) => void;
-    } | null,
-  ): void {
-    state.requestFrame = scheduler?.requestAnimationFrame ?? null;
-    state.cancelFrame = scheduler?.cancelAnimationFrame ?? null;
-  },
-});

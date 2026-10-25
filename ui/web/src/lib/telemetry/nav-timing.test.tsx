@@ -14,7 +14,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   formatNavTiming,
   markNavIntent,
-  navTimingTestControl,
   setNavFallbackMs,
   useNavTimingReport,
 } from "./nav-timing";
@@ -27,30 +26,15 @@ function Reporter({ pathname }: { pathname: string }) {
   return null;
 }
 
-const frames: FrameRequestCallback[] = [];
-function flushFrame() {
-  const next = frames.shift();
-  next?.(0);
-}
-
 describe("nav timing", () => {
   beforeEach(() => {
     tracked.length = 0;
-    frames.length = 0;
     telemetryTestControl.intercept({
       onTrack: (element, opts = {}) =>
         tracked.push({ element, key: opts.key, value: opts.value, page: opts.page }),
     });
-    navTimingTestControl.setFrameScheduler({
-      requestAnimationFrame: (cb: FrameRequestCallback) => {
-        frames.push(cb);
-        return frames.length;
-      },
-      cancelAnimationFrame: () => undefined,
-    });
   });
   afterEach(() => {
-    navTimingTestControl.setFrameScheduler(null);
     telemetryTestControl.reset();
   });
 
@@ -64,18 +48,21 @@ describe("nav timing", () => {
     expect(tracked).toEqual([]);
   });
 
-  it("reports click-to-commit, click-to-paint and the longest task", async () => {
-    const { rerender } = render(<Reporter pathname="/" />);
-    markNavIntent();
-    rerender(<Reporter pathname="/control" />);
-    flushFrame();
-    flushFrame();
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    const nav = tracked.filter((e) => e.key === "nav");
-    expect(nav).toHaveLength(1);
-    expect(nav[0].element).toBe("nav-timing");
-    expect(nav[0].page).toBe("control");
-    expect(nav[0].value).toMatch(/^c=\d+\|p=\d+\|t=\d+$/);
+  it("reports click-to-commit, click-to-paint and the longest task", () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(<Reporter pathname="/" />);
+      markNavIntent();
+      rerender(<Reporter pathname="/control" />);
+      vi.advanceTimersByTime(600);
+      const nav = tracked.filter((e) => e.key === "nav");
+      expect(nav).toHaveLength(1);
+      expect(nav[0].element).toBe("nav-timing");
+      expect(nav[0].page).toBe("control");
+      expect(nav[0].value).toMatch(/^c=\d+\|p=\d+\|t=\d+$/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("waits the configured time before falling back", () => {

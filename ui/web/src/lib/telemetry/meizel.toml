@@ -3,7 +3,7 @@ exports = ["nav-timing.ts", "telemetry-page-view.tsx", "telemetry.ts"]
 [uses]
 "nav-timing.test.tsx" = ["nav-timing.ts", "telemetry.ts"]
 "nav-timing.ts" = ["nav-timing-plan.ts", "telemetry.ts"]
-"telemetry-page-view.test.tsx" = ["telemetry-page-view.tsx", "telemetry.ts"]
+"telemetry-page-view.test.tsx" = ["telemetry-page-view.tsx", "telemetry.ts", "web-vitals.ts"]
 "telemetry-page-view.tsx" = ["telemetry.ts", "web-vitals.ts"]
 "telemetry.test.ts" = ["telemetry.ts"]
 "telemetry.ts" = ["telemetry-plan.ts"]
@@ -23,12 +23,15 @@ exports = ["nav-timing.ts", "telemetry-page-view.tsx", "telemetry.ts"]
 
 [debt.impure-call]
 "nav-timing.ts#clearFallback#clearTimeout" = 1
+"nav-timing.ts#countFrames#requestAnimationFrame" = 1
 "nav-timing.ts#markNavIntent#performance.now" = 1
 "nav-timing.ts#markNavIntent#setTimeout" = 1
 "nav-timing.ts#markNavIntent#window" = 1
 "nav-timing.ts#startWatching#PerformanceObserver" = 1
 "nav-timing.ts#startWatching#new PerformanceObserver" = 1
+"nav-timing.ts#stopFrames#cancelAnimationFrame" = 1
 "nav-timing.ts#useNavTimingReport#performance.now" = 1
+"nav-timing.ts#useNavTimingReport#requestAnimationFrame" = 1
 "nav-timing.ts#useNavTimingReport#setTimeout" = 1
 "nav-timing.ts#useNavTimingReport#useEffect" = 1
 "nav-timing.ts#useNavTimingReport#useRef" = 1
