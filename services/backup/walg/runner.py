@@ -16,7 +16,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Literal, overload
 from urllib.parse import parse_qs, urlsplit
 
 from base.cluster.dataplane.walg_binary import walg_path
@@ -101,6 +101,33 @@ def run_walg_logged(
     return WalgOutput(stdout=result.stdout, stderr=result.stderr)
 
 
+@overload
+def run_walg(
+    args: Sequence[str],
+    *,
+    timeout_s: float,
+    pg_admin_url: str | None = None,
+    extra_env: Mapping[str, str] = _NO_EXTRA,
+    as_json: Literal[False] = False,
+    path: Path | None,
+) -> str: ...
+
+
+@overload
+def run_walg(
+    args: Sequence[str],
+    *,
+    timeout_s: float,
+    pg_admin_url: str | None = None,
+    extra_env: Mapping[str, str] = _NO_EXTRA,
+    as_json: Literal[True],
+    path: Path | None,
+) -> object: ...
+
+
+# meiva:note
+# Run `wal-g --config <file> *args`; stdout text, or parsed JSON with `as_json`.
+# Raises WalgConfigError when WAL-G is not configured, or WalgCommandError on non-zero exit or timeout.
 def run_walg(
     args: Sequence[str],
     *,
@@ -109,13 +136,7 @@ def run_walg(
     extra_env: Mapping[str, str] = _NO_EXTRA,
     as_json: bool = False,
     path: Path | None,
-) -> Any:
-    """Run `wal-g --config <file> *args`; stdout text, or parsed JSON with `as_json`.
-
-    Raises:
-        WalgConfigError: WAL-G is not configured.
-        WalgCommandError: non-zero exit or timeout (the stderr tail is attached).
-    """
+) -> object:
     output = run_walg_logged(
         args,
         timeout_s=timeout_s,

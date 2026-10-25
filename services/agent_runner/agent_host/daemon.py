@@ -37,7 +37,7 @@ import sys
 from collections.abc import Callable, Collection, Coroutine, Iterable
 from functools import partial
 from pathlib import Path
-from typing import cast
+from uuid import uuid4
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.log import logger, prepare_process_logging
@@ -55,7 +55,6 @@ if __name__ == "__main__":
 
 import psycopg
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from pydantic import BaseModel
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -396,7 +395,7 @@ def background_loops(
             plugins_root, interval_s=PLUGINS_POLL_INTERVAL_S
         ),
         "stdout_log_rotate": rotate_stdout_log_forever(),
-        "exec_memory_guard": run_memory_guard_forever(host_log),
+        "exec_memory_guard": run_memory_guard_forever(host_log, host_pid=os.getpid()),
         "understanding_chunks": understanding_loop_forever(
             control_pool,
             db,
@@ -433,9 +432,8 @@ async def build_checkpointer(
     from agent.state import build_checkpoint_serde
     from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 
-    saver_pool = cast(AsyncConnectionPool[psycopg.AsyncConnection[DictRow]], pool)
-    checkpointer = PooledPostgresSaver(
-        conn=saver_pool, serde=build_checkpoint_serde(plugin_state_classes)
+    checkpointer = PooledPostgresSaver.from_pool(
+        pool, serde=build_checkpoint_serde(plugin_state_classes)
     )
     wrap_saver_writes_with_loud_failure(checkpointer)
     wrap_saver_writes_with_nstep_interval(checkpointer, checkpoint_interval)
@@ -604,6 +602,7 @@ async def run(
             [cls for _plugin, cls in installation.registry.state_classes()],
             checkpoint_interval=config.view.agent.checkpoint_interval,
         )
+        stamping = handoff_source(config)
         host = AgentHost(
             pool=workload_pool,
             control_pool=control_pool,
@@ -614,12 +613,13 @@ async def run(
             db=db,
             catalog=installation.require_catalog(),
             policy=host_policy(config, keys=installation.require_provider_keys()),
-            handoff_stamping=handoff_source(config),
+            handoff_stamping=stamping,
             clients=clients,
             extensions=installation.registry,
             commands=CommandCatalog.system(skills=meiva_skills.names),
             plugin_configs=installation.configs,
             home=home,
+            runtime_owner=uuid4(),
         )
         # The clock reader is injected, not imported by the scheduler: it owns no
         # pool, and this keeps the uncancellable-turn report able to say how long
@@ -628,6 +628,7 @@ async def run(
             host.run_turn,
             activity_clock=host.last_active_at,
             config_fingerprint=host.turn_fingerprints.get,
+            clock=stamping.clock,
         )
         host.bind_wake(scheduler.wake)
         # The service owns the group across boot settle and turn drain. The
@@ -650,7 +651,7 @@ async def run(
             image=process_context.loaded_code_image(),
             liveness=liveness,
             extra_routes={
-                ("GET", "/stats"): stats_route(host, scheduler),
+                ("GET", "/stats"): stats_route(host, scheduler, pid=os.getpid()),
                 ("POST", "/cancel-turn"): cancel_turn_route(scheduler),
             },
         )

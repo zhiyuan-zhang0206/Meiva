@@ -30,38 +30,35 @@ from services.derived.memory_search.tests.test_memory_indexer import (
 # A clock the patrol loop drives: each wait advances time, runs the test's hook at that
 # tick and ends the run once the stop time has passed.
 class _Timers:
-    def __init__(self, *, stop_at: float, on_tick: Callable[[float], None] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        stop_at: float,
+        status: PatrolStatus,
+    ) -> None:
         self.now = 0.0
+        self.passes: list[tuple[float, bool]] = []
+        self.on_tick: Callable[[float], None] | None = None
         self._stop_at = stop_at
-        self._on_tick = on_tick
+        self._status = status
+        self._tick_monotonic_calls = 0
 
     def monotonic(self) -> float:
+        self._tick_monotonic_calls += 1
         return self.now
 
     def sleep(self, seconds: float) -> None:
         raise AssertionError("the patrol loop must not block its thread")
 
     async def asleep(self, seconds: float) -> None:
+        if self.now > 0.0 and self._tick_monotonic_calls >= 2:
+            self.passes.append((self.now, self._status.consecutive_failures == 0))
+        self._tick_monotonic_calls = 0
         self.now += seconds
-        if self._on_tick is not None:
-            self._on_tick(self.now)
+        if self.on_tick is not None:
+            self.on_tick(self.now)
         if self.now > self._stop_at:
             raise asyncio.CancelledError
-
-
-class _RecordingStatus(PatrolStatus):
-    def __init__(self, *, retry_limit: int, timers: _Timers) -> None:
-        super().__init__(retry_limit=retry_limit)
-        self.passes: list[tuple[float, bool]] = []
-        self._timers = timers
-
-    def failed(self) -> None:
-        super().failed()
-        self.passes.append((self._timers.now, False))
-
-    def succeeded(self) -> None:
-        super().succeeded()
-        self.passes.append((self._timers.now, True))
 
 
 async def _run_patrol(
@@ -69,7 +66,7 @@ async def _run_patrol(
     provider: FakeProvider,
     *,
     config: MemoryIndexerConfig,
-    status: _RecordingStatus,
+    status: PatrolStatus,
     timers: _Timers,
     root: Path,
 ) -> None:
@@ -116,8 +113,9 @@ async def test_a_changed_note_waits_for_the_next_patrol_without_a_file_event(
         if now == 50.0:
             assert store_backend.all_meta() == {}, "no pass has run since the note arrived"
 
-    timers = _Timers(stop_at=102.0, on_tick=on_tick)
-    status = _RecordingStatus(retry_limit=config.retry_limit, timers=timers)
+    status = PatrolStatus(retry_limit=config.retry_limit)
+    timers = _Timers(stop_at=102.0, status=status)
+    timers.on_tick = on_tick
     await _run_patrol(
         store_backend,
         FakeProvider(),
@@ -127,7 +125,7 @@ async def test_a_changed_note_waits_for_the_next_patrol_without_a_file_event(
         root=watched_root,
     )
 
-    assert status.passes == [(1.0, True), (101.0, True)]
+    assert timers.passes == [(1.0, True), (101.0, True)]
     assert list(store_backend.all_meta()) == [str(note.resolve())]
     assert status.pending == 0
 
@@ -141,8 +139,8 @@ async def test_a_failed_pass_retries_with_backoff_then_marks_over_limit(
     config = MemoryIndexerConfig(
         loop_interval_s=1.0, patrol_interval_s=900.0, retry_backoff_s=60.0, retry_limit=3
     )
-    timers = _Timers(stop_at=1330.0)
-    status = _RecordingStatus(retry_limit=config.retry_limit, timers=timers)
+    status = PatrolStatus(retry_limit=config.retry_limit)
+    timers = _Timers(stop_at=1330.0, status=status)
     await _run_patrol(
         store_backend,
         _DownProvider(),
@@ -152,7 +150,7 @@ async def test_a_failed_pass_retries_with_backoff_then_marks_over_limit(
         root=watched_root,
     )
 
-    assert status.passes == [
+    assert timers.passes == [
         (1.0, False),
         (61.0, False),
         (181.0, False),
@@ -176,8 +174,8 @@ async def test_health_lag_clears_once_a_retry_succeeds(
     config = MemoryIndexerConfig(
         loop_interval_s=1.0, patrol_interval_s=100.0, retry_backoff_s=60.0, retry_limit=3
     )
-    timers = _Timers(stop_at=70.0)
-    status = _RecordingStatus(retry_limit=config.retry_limit, timers=timers)
+    status = PatrolStatus(retry_limit=config.retry_limit)
+    timers = _Timers(stop_at=70.0, status=status)
     await _run_patrol(
         store_backend,
         _FailsOnceProvider(),
@@ -187,7 +185,7 @@ async def test_health_lag_clears_once_a_retry_succeeds(
         root=watched_root,
     )
 
-    assert status.passes == [(1.0, False), (61.0, True)]
+    assert timers.passes == [(1.0, False), (61.0, True)]
     index = status.lag()
     assert index["pending_paths"] == 0
     assert index["consecutive_failures"] == 0
@@ -205,7 +203,7 @@ def test_over_limit_only_marks_and_keeps_the_lag_pending() -> None:
     status.failed()
     assert status.over_limit is True
     assert status.pending == 3
-    status.succeeded()
+    status.succeeded(at=1.0)
     assert (status.over_limit, status.consecutive_failures, status.pending) == (False, 0, 0)
 
 

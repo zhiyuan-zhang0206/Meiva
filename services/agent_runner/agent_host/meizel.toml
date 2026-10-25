@@ -19,17 +19,4 @@ exports = ["daemon.py", "held_settle.py", "host.py", "invocation", "lifecycle", 
 "__init__.py" = "strict"
 
 [roots]
-"daemon.py" = ["endpoints"]
-
-[debt.ambient-read]
-"daemon.py#pid os.getpid" = 1
-"dispatcher.py#clock datetime.datetime.now" = 1
-"dispatcher.py#clock time.monotonic" = 2
-"dispatcher.py#settings base.config.settings" = 1
-"exec_memory_guard.py#pid os.getpid" = 1
-"health_routes.py#pid os.getpid" = 1
-"host.py#random uuid.uuid4" = 1
-
-[debt.type-cast]
-"daemon.py#cast build_checkpointer" = 1
-"dispatcher.py#cast InboundWakeDispatcher.run" = 1
+"daemon.py" = ["endpoints", "pid", "random"]

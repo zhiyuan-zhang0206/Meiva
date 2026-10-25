@@ -25,10 +25,7 @@ exports = ["blocked_streak.py", "daemon.py", "engine.py", "host_restart.py", "la
 
 [roots]
 "daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
-"runner.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
-
-[debt.ambient-read]
-"engine.py#pid os.getpid" = 1
+"runner.py" = { kinds = ["pid", "settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 
 [debt.stdlib-patch]
 "engine.py#assignment sys.argv" = 2

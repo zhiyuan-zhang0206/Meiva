@@ -41,7 +41,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from psycopg_pool import ConnectionPool
@@ -78,7 +78,12 @@ FIRE_LOG_PASS_BATCH = 50_000
 
 
 def reap_expired_notices_blocking(
-    pool: ConnectionPool, db: Database, bus: EventBus, *, zone: ZoneInfo | None
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    *,
+    zone: ZoneInfo | None,
+    now: datetime,
 ) -> list[tuple[int, int, lifecycle.NoticeResolutionFacts]]:
     with write_transaction(pool) as conn:
         with conn.cursor() as cur:
@@ -96,6 +101,7 @@ def reap_expired_notices_blocking(
         reaped: list[tuple[int, int, lifecycle.NoticeResolutionFacts]] = []
         updated_agents: set[int] = set()
         queued: list[OwnerMessage] = []
+        today = now.astimezone(zone).date()
         for (
             nid,
             agent_id,
@@ -123,7 +129,7 @@ def reap_expired_notices_blocking(
                 owner_text.notice_expired_message(
                     local_id,
                     title,
-                    owner_text.wall_clock(expire_at, zone=zone, today=datetime.now(zone).date()),
+                    owner_text.wall_clock(expire_at, zone=zone, today=today),
                 ),
                 source="system:notice-expire",
                 queue_when_terminated=True,
@@ -138,7 +144,7 @@ def reap_expired_notices_blocking(
                         "expired",
                         require_response=bool(require_response),
                         created_at=created_at,
-                        now=datetime.now(UTC),
+                        now=now,
                         replied=reply is not None or answer is not None,
                     ),
                 )
@@ -226,9 +232,13 @@ def reap_expired_web_sessions_blocking(
 # deleted. One bounded DELETE per pass: a backlog (long gateway outage, many schedules) drains
 # over successive passes instead of one long transaction.
 def prune_schedule_fire_log_blocking(
-    pool: ConnectionPool, *, retention_days: int, batch_size: int = FIRE_LOG_PASS_BATCH
+    pool: ConnectionPool,
+    *,
+    retention_days: int,
+    now: datetime,
+    batch_size: int = FIRE_LOG_PASS_BATCH,
 ) -> int:
-    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+    cutoff = now - timedelta(days=retention_days)
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
@@ -254,7 +264,10 @@ async def _slow_phases(pool: ConnectionPool, config: TtlReaperConfig) -> int:
     ):
         return 0
     return await asyncio.to_thread(
-        prune_schedule_fire_log_blocking, pool, retention_days=config.fire_log_retention_days
+        prune_schedule_fire_log_blocking,
+        pool,
+        retention_days=config.fire_log_retention_days,
+        now=config.clock.now(),
     )
 
 
@@ -276,7 +289,14 @@ async def sweep_round(
     sessions = await asyncio.to_thread(reap_expired_web_sessions_blocking, pool)
     progress.beat()
     notices = await asyncio.to_thread(
-        functools.partial(reap_expired_notices_blocking, pool, db, bus, zone=config.zone)
+        functools.partial(
+            reap_expired_notices_blocking,
+            pool,
+            db,
+            bus,
+            zone=config.zone,
+            now=config.clock.now(),
+        )
     )
     for agent_id, nid, details in notices:
         await lifecycle.publish_notice_resolved(bus, agent_id, nid, facts=details)

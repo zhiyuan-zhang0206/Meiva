@@ -4,11 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import os
 import time
-from collections.abc import Iterator
 from pathlib import Path
-from unittest.mock import patch
 
 import httpx
 import pytest
@@ -24,16 +21,6 @@ from services.derived.memory_search.config import MemorySearchConfig
 _FLAT_NAME = {"embedding_name": "embedding_backend"}
 
 
-@pytest.fixture
-def owned_config_environment() -> Iterator[None]:
-    """Restore environment delivery and the process timezone after a real ConfigBoot."""
-    try:
-        with patch.dict(os.environ):
-            yield
-    finally:
-        time.tzset()
-
-
 # meiva:note
 # One port this session holds, from the host-wide lease: the number is refused to
 # every other live holder on the host, so two workers — or two runs of one shard on
@@ -42,7 +29,6 @@ def _free_port() -> int:
     return port_lease.lease_ports(1)[0]
 
 
-@pytest.mark.usefixtures("owned_config_environment")
 def test_the_slice_carries_the_live_value_of_every_field() -> None:
     boot = ConfigBoot()
     config = daemon.memory_search_config(config=boot)

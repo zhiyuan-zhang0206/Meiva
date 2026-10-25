@@ -17,7 +17,7 @@ from services.derived.labeler import daemon
 from services.derived.labeler.tests.db_faults import table_missing
 from services.derived.labeler.tests.scripted_models import ERRORS, PERMANENT, TRANSIENT
 from services.derived.labeler.tests.slices import (
-    FailingBus,
+    failing_bus,
     generate,
     labeler_config,
     labeler_db,
@@ -167,18 +167,16 @@ async def test_notification_failure_cannot_uncommit_or_reselect_a_written_label(
 ) -> None:
     tid = create_agent(db_conn)
     _chat(db_conn, tid, "Fix labeler")
-    error = TypeError("invalid label event")
 
-    with pytest.raises(TypeError) as caught:
+    with pytest.raises(ValueError, match="Redis URL"):
         await generate(
             tid,
             "say:Fix label generation",
-            bus=FailingBus(error),
+            bus=failing_bus(),
             catalog=model_catalog,
             database_gate=database_gate,
         )
 
-    assert caught.value is error
     assert _label(db_conn, tid) == "Fix label generation"
     with db_conn.cursor() as cur:
         assert tid not in dict(daemon.select_unlabeled(cur, []))

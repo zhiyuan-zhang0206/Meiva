@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from base.host.atomic_io import write_text_atomic
 from base.log import logger
@@ -54,6 +54,16 @@ def _wire(identity: OwnedProcess) -> dict[str, Any]:
     return {"pid": identity.pid, "birth": identity.birth, "starttime": identity.starttime}
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
+def _require_str_dict(value: object, label: str) -> dict[str, Any]:
+    if not _is_str_dict(value):
+        raise TypeError(f"{label} must be an object")
+    return value
+
+
 def read(path: Path) -> list[closure.Target]:
     """The recorded sessions; empty when the ledger is absent.
 
@@ -70,7 +80,10 @@ def read(path: Path) -> list[closure.Target]:
         )
         return []
     try:
-        sessions = cast("dict[str, dict[str, Any]]", raw["sessions"])
+        sessions = _require_str_dict(
+            _require_str_dict(raw, "ledger root")["sessions"],
+            "sessions",
+        )
         return [
             closure.Target(
                 name,

@@ -9,9 +9,6 @@ from base.host.env import port_lease
 from base.native_process.loaded_commit import LoadedCommit
 from services.derived.memory_indexer import daemon
 from services.derived.memory_indexer.config import MemoryIndexerConfig
-from services.derived.memory_search.tests.memory_indexer.test_reconcile_embed_error_truncates_and_returns_false import (
-    owned_config_environment as owned_config_environment,
-)
 
 
 # meiva:note
@@ -22,7 +19,6 @@ def _free_port() -> int:
     return port_lease.lease_ports(1)[0]
 
 
-@pytest.mark.usefixtures("owned_config_environment")
 async def test_run_unknown_provider_fails_before_health_server(
     capsys: pytest.CaptureFixture[str], database: Database, tmp_path: Path
 ) -> None:

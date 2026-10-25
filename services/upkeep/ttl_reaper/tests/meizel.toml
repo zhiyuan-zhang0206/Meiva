@@ -2,6 +2,3 @@
 "test_loops.py" = ["slices.py"]
 "test_shells.py" = ["runner_stub.py", "slices.py"]
 "test_sweep.py" = ["slices.py"]
-
-[debt.test-subclass-override]
-"test_sweep.py#subclass base.events.live.bus.EventBus.publish_best_effort" = 1

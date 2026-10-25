@@ -5,7 +5,7 @@ from typing import Any
 
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus, event_bus_config_from_settings
+from base.events.live.bus import EventBus, EventBusConfig
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.packages.tests.model_catalog import inert_keys
@@ -58,28 +58,6 @@ async def generate(
 
 
 # meiva:note
-# An event bus that keeps what was published instead of sending it.
-class RecordingBus(EventBus):
-    def __init__(self) -> None:
-        super().__init__(event_bus_config_from_settings())
-        self.payloads: list[str] = []
-
-    async def publish_best_effort(
-        self, payload: str, *, channel: str | None = None, context: str = ""
-    ) -> int | None:
-        self.payloads.append(payload)
-        return 1
-
-
-# meiva:note
-# An event bus whose publish raises `error`, as a bus does that is broken in a way it does not
-# itself recover from.
-class FailingBus(EventBus):
-    def __init__(self, error: Exception) -> None:
-        super().__init__(event_bus_config_from_settings())
-        self.error = error
-
-    async def publish_best_effort(
-        self, payload: str, *, channel: str | None = None, context: str = ""
-    ) -> int | None:
-        raise self.error
+# An event bus configured with an invalid scheme so publish raises an unrecovered ValueError.
+def failing_bus() -> EventBus:
+    return EventBus(EventBusConfig(redis_url="invalid://", events_channel="meiva:events"))

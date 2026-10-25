@@ -17,7 +17,6 @@ identity probe (`services/supervision/roster/healthz.py`).
 
 import asyncio
 import logging
-import os
 import signal
 import sys
 from collections.abc import Callable
@@ -200,7 +199,7 @@ async def dispatch_loop(
     NULL or empty string — AND NOT label_user_set), so user-edited labels
     are auto-skipped.
     """
-    _log.info("[labeler] daemon started, pid=%s", os.getpid())
+    _log.info("[labeler] daemon started")
     attempted: set[int] = set()
     while True:
         liveness.beat()

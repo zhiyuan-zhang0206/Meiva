@@ -25,7 +25,8 @@ from base.config.service_read import ConfigAuthority
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus, event_bus_config_from_settings
+from base.events.live.bus import EventBus
+from base.events.live.tests.live_capture import recorded_events
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from services.agent_runner.page_server import daemon, dead_pages, resources
@@ -48,25 +49,6 @@ def pool(db_url: str, *, database_gate: ProcessDbGate) -> Iterator[ConnectionPoo
         yield p
     finally:
         p.close()
-
-
-class _RecordingBus(EventBus):
-    def __init__(self, seen: dict[str, list[Any]]) -> None:
-        super().__init__(event_bus_config_from_settings())
-        self.seen = seen
-
-    async def publish_best_effort(
-        self, payload: str, *, channel: str | None = None, context: str = ""
-    ) -> int | None:
-        del channel, context
-        self.seen["events"].append(payload)
-        return 1
-
-
-@pytest.fixture
-def published() -> dict[str, list[Any]]:
-    """Record the PageClosed frames the pass publishes."""
-    return {"events": []}
 
 
 def _page(
@@ -147,7 +129,7 @@ async def test_a_dead_show_page_is_closed_and_its_owner_told_once(
     redis_url: str,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
-    published: dict[str, list[Any]],
+    event_bus: EventBus,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -164,18 +146,25 @@ async def test_a_dead_show_page_is_closed_and_its_owner_told_once(
     _page(db_conn, agent, "dead-one", _free_port())
     _page(db_conn, agent, "dead-two", _free_port())
 
-    await _round(pool, bus=_RecordingBus(published))
+    with recorded_events(event_bus) as events:
+        await _round(pool, bus=event_bus)
 
     assert _closed(db_conn, agent, "dead-one") and _closed(db_conn, agent, "dead-two")
     assert _notices(db_conn, agent) == []
-    assert len(published["events"]) == 2
+    assert [
+        e for e in events if e.get("role") == "page_closed" and e.get("agent_id") == agent
+    ] != []
+    assert (
+        len([e for e in events if e.get("role") == "page_closed" and e.get("agent_id") == agent])
+        == 2
+    )
 
 
 async def test_a_live_show_page_and_a_dead_serve_page_are_left_alone(
     redis_url: str,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
-    published: dict[str, list[Any]],
+    event_bus: EventBus,
     tmp_path: Path,
     *,
     model_catalog: ModelCatalog,
@@ -196,11 +185,17 @@ async def test_a_live_show_page_and_a_dead_serve_page_are_left_alone(
     _page(db_conn, agent, "alive", alive_port)
     _page(db_conn, agent, "serve-dead", _free_port(), serve_dir="/data/site")
 
-    with running_page_server(tmp_path, alive_port, "show-token"):
-        await _round(pool, bus=_RecordingBus(published))
+    with (
+        running_page_server(tmp_path, alive_port, "show-token"),
+        recorded_events(event_bus) as events,
+    ):
+        await _round(pool, bus=event_bus)
 
     assert not _closed(db_conn, agent, "alive") and not _closed(db_conn, agent, "serve-dead")
-    assert _notices(db_conn, agent) == [] and published["events"] == []
+    assert _notices(db_conn, agent) == []
+    assert [
+        e for e in events if e.get("role") == "page_closed" and e.get("agent_id") == agent
+    ] == []
 
 
 async def test_the_loop_scans_at_once_then_paces(

@@ -129,30 +129,24 @@ def test_send_keys_ctrl_c_interrupts_the_foreground(unit_home: Path) -> None:
     assert client.has_session(name, socket_path=service_socket())
 
 
+_FOREGROUND_SYNC_JOB = Path(__file__).with_name("child_shell_with_job.py")
+
+
 def test_shell_foreground_wait_does_not_accept_an_interrupted_live_job(
     unit_home: Path,
 ) -> None:
     ready, interrupted, consumed, release = (
         unit_home / item for item in ("ready", "interrupted", "consumed", "release")
     )
-    code = (
-        "import pathlib,signal,sys,time\n"
-        "def interrupt(*_):\n"
-        f"    pathlib.Path({str(interrupted)!r}).touch()\n"
-        f"    target = pathlib.Path({str(consumed)!r})\n"
-        "    temporary = target.with_suffix('.tmp')\n"
-        "    temporary.write_text(sys.stdin.readline())\n"
-        "    temporary.replace(target)\n"
-        f"    while not pathlib.Path({str(release)!r}).exists(): time.sleep(0.01)\n"
-        "    raise SystemExit(0)\n"
-        "signal.signal(signal.SIGINT,interrupt)\n"
-        f"pathlib.Path({str(ready)!r}).touch()\n"
-        "while True: time.sleep(1)\n"
-    )
     name = "meiva-test-foreground-sync-1"
     new(name, unit_home)
     shell = shell_process(name)
-    type_line(name, shlex.join([sys.executable, "-u", "-c", code]))
+    type_line(
+        name,
+        shlex.join(
+            [sys.executable, "-u", str(_FOREGROUND_SYNC_JOB), "--foreground-sync", str(unit_home)]
+        ),
+    )
     assert wait_for(ready.exists)
     try:
         press(name, "C-c")

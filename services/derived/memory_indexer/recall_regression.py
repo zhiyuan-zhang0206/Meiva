@@ -16,7 +16,7 @@ import sys
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 from base.config import ConfigBoot
 
@@ -79,16 +79,22 @@ def _number(value: object) -> float:
     return float(value)
 
 
-def _case_of(raw: object) -> Case:
-    if not isinstance(raw, dict):
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _case_of(row: object) -> Case:
+    if not _is_object_dict(row):
         raise TypeError("each case must be a JSON object")
-    row = cast(dict[str, object], raw)
     expect = row["expect"]
-    if not isinstance(expect, dict):
+    if not _is_object_dict(expect):
         raise TypeError(f"case {row.get('id')!r}: expect must be an object")
-    match = cast(dict[str, object], expect)
-    path = match.get("path")
-    rank = match.get("baseline_rank")
+    path = expect.get("path")
+    rank = expect.get("baseline_rank")
     return Case(
         id=_text(row["id"]),
         group=_text(row["group"]),
@@ -98,8 +104,8 @@ def _case_of(raw: object) -> Case:
         message=_text(row["message"]),
         path=None if path is None else _text(path),
         baseline_rank=None if rank is None else int(_number(rank)),
-        baseline_score=_number(match["baseline_score"]),
-        baseline_delivered=bool(match["baseline_delivered"]),
+        baseline_score=_number(expect["baseline_score"]),
+        baseline_delivered=bool(expect["baseline_delivered"]),
     )
 
 
@@ -192,14 +198,13 @@ def report(outcomes: Iterable[Outcome], *, threshold: float, cap: int) -> str:
 
 
 def _ranked_from(entry: object) -> list[tuple[str, float]]:
-    if not isinstance(entry, list):
+    if not _is_object_list(entry):
         raise TypeError("each results entry must be a list of {path, score} objects")
     ranked: list[tuple[str, float]] = []
-    for item in cast(list[object], entry):
-        if not isinstance(item, dict):
+    for item in entry:
+        if not _is_object_dict(item):
             raise TypeError("each match must be an object with path and score")
-        match = cast(dict[str, object], item)
-        ranked.append((_text(match["path"]), _number(match["score"])))
+        ranked.append((_text(item["path"]), _number(item["score"])))
     return ranked
 
 
@@ -228,10 +233,9 @@ def main(argv: Sequence[str], *, config: ConfigBoot) -> int:
     if args.cap is not None:
         cap = args.cap
 
-    decoded: object = json.loads(args.results.read_text(encoding="utf-8"))
-    if not isinstance(decoded, dict):
+    payload: object = json.loads(args.results.read_text(encoding="utf-8"))
+    if not _is_object_dict(payload):
         raise SystemExit("results must be a JSON object mapping case id to ranked matches")
-    payload = cast(dict[str, object], decoded)
     cases = load_cases(args.cases)
     missing = [case.id for case in cases if case.id not in payload]
     if missing:

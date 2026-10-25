@@ -1,9 +1,9 @@
 import asyncio
+import contextlib
 import tempfile
 from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import override
 
 import psycopg
 import pytest
@@ -170,38 +170,62 @@ async def test_a_publication_failure_still_releases_pages_and_cleans_shells_and_
 
 
 # meiva:note
-# A bus whose publication never completes, like a stuck subscriber channel: `asked` is set
-# once the publication started, so the test can cancel the termination while it is waiting.
-class HungPublicationBus(EventBus):
-    def __init__(self) -> None:
-        super().__init__(EventBusConfig(redis_url="redis://127.0.0.1:1/0", events_channel="test"))
-        self.asked = asyncio.Event()
+# A Redis listener that accepts a PUBLISH write and never replies, like a stuck subscriber
+# channel: `asked` is set once the publication bytes arrive, so the test can cancel the
+# termination while it is waiting.
+@asynccontextmanager
+async def hung_redis_publication() -> AsyncGenerator[tuple[EventBus, asyncio.Event]]:
+    asked = asyncio.Event()
+    release = asyncio.Event()
+    writers: list[asyncio.StreamWriter] = []
 
-    @override
-    async def publish_best_effort(
-        self, payload: str, *, channel: str | None = None, context: str = ""
-    ) -> int | None:
-        self.asked.set()
-        await asyncio.Event().wait()
+    async def hold(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        writers.append(writer)
+        try:
+            with contextlib.suppress(ConnectionError):
+                await reader.read(1)
+                asked.set()
+                await release.wait()
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(hold, host="127.0.0.1", port=0)
+    try:
+        port = server.sockets[0].getsockname()[1]
+        bus = EventBus(
+            EventBusConfig(
+                redis_url=f"redis://127.0.0.1:{port}",
+                events_channel="test",
+                publish_attempt_timeout_s=60.0,
+            )
+        )
+        yield bus, asked
+    finally:
+        release.set()
+        for writer in writers:
+            writer.close()
+        server.close()
+        await server.wait_closed()
 
 
 async def test_a_cancelled_publication_still_releases_pages_and_cleans_shells(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    event_bus: EventBus,
     loguru_records: LogRecords,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
+    _ = event_bus
     owner = await _claimed_terminate(db_conn, aops_pool, database_gate, kill_shells=True)
-    bus = HungPublicationBus()
-
-    task = asyncio.create_task(
-        apply_lifecycle_command(aops_pool, owner, bus=bus, resume_turn=False, home=meiva_home())
-    )
-    await asyncio.wait_for(bus.asked.wait(), 5)
-    task.cancel("publication wait cancelled")
-    with pytest.raises(asyncio.CancelledError) as caught:
-        await asyncio.wait_for(task, 5)
+    async with hung_redis_publication() as (bus, asked):
+        task = asyncio.create_task(
+            apply_lifecycle_command(aops_pool, owner, bus=bus, resume_turn=False, home=meiva_home())
+        )
+        await asyncio.wait_for(asked.wait(), 5)
+        task.cancel("publication wait cancelled")
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await asyncio.wait_for(task, 5)
 
     assert len(_shell_cleanup_attempts(loguru_records, owner.agent_id)) == 1
     assert [m for m in loguru_records.messages() if "browser-page release" in m]

@@ -21,11 +21,11 @@ lock. A missing file is an empty state; an unreadable or malformed one is an err
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, TypeGuard
 
 from base.host.private_storage import write_private_bytes
 from base.host.verified_file import RegularFileReadError, regular_bytes
@@ -136,17 +136,27 @@ class State:
     drill: DrillRecord | None = None
 
 
-def _timestamps_to_json(record: object) -> dict[str, Any]:
+StateSection = TickRecord | RunRecord | BackupRecord | VerifyRecord | RetentionRecord | DrillRecord
+
+
+def _timestamps_to_json(record: StateSection) -> dict[str, Any]:
     return {
         key: _stamp(value) if isinstance(value, datetime) else value
-        for key, value in asdict(cast(Any, record)).items()
+        for key, value in asdict(record).items()
     }
 
 
 def to_json(state: State) -> bytes:
+    records: tuple[tuple[str, StateSection | None], ...] = (
+        ("tick", state.tick),
+        ("run", state.run),
+        ("backup", state.backup),
+        ("verify", state.verify),
+        ("retention", state.retention),
+        ("drill", state.drill),
+    )
     sections: dict[str, Any] = {"version": _VERSION}
-    for name in ("tick", "run", "backup", "verify", "retention", "drill"):
-        record = getattr(state, name)
+    for name, record in records:
         sections[name] = None if record is None else _timestamps_to_json(record)
     return (json.dumps(sections, indent=2, sort_keys=True) + "\n").encode()
 
@@ -212,9 +222,23 @@ def _drill(r: dict[str, Any]) -> DrillRecord:
     )
 
 
-def _section[R](raw: dict[str, Any], name: str, build: Callable[[dict[str, Any]], R]) -> R | None:
+def _is_object_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
+def _require_object_dict(value: object, message: str) -> dict[str, Any]:
+    if not _is_object_dict(value):
+        raise TypeError(message)
+    return value
+
+
+def _section[R](
+    raw: Mapping[str, Any], name: str, build: Callable[[dict[str, Any]], R]
+) -> R | None:
     body = raw[name]
-    return None if body is None else build(cast(dict[str, Any], body))
+    if body is None:
+        return None
+    return build(dict(_require_object_dict(body, "state section must be an object")))
 
 
 def from_json(data: bytes) -> State:
@@ -224,7 +248,7 @@ def from_json(data: bytes) -> State:
         StateError: not JSON, a different version, or a section of the wrong shape.
     """
     try:
-        raw = cast(dict[str, Any], json.loads(data))
+        raw = _require_object_dict(json.loads(data), "state file must be an object")
         version = raw["version"]
     except (ValueError, KeyError, TypeError):
         raise StateError("the WAL-G state file is malformed") from None
@@ -266,8 +290,25 @@ def write_state(state: State) -> None:
     write_private_bytes(state_path(), to_json(state))
 
 
-def update_state(**sections: Any) -> State:
+def update_state(
+    *,
+    tick: TickRecord | None = None,
+    run: RunRecord | None = None,
+    backup: BackupRecord | None = None,
+    verify: VerifyRecord | None = None,
+    retention: RetentionRecord | None = None,
+    drill: DrillRecord | None = None,
+) -> State:
     """Read, replace the named sections, write; returns the new state."""
-    state = replace(read_state(), **sections)
+    current = read_state()
+    state = replace(
+        current,
+        tick=current.tick if tick is None else tick,
+        run=current.run if run is None else run,
+        backup=current.backup if backup is None else backup,
+        verify=current.verify if verify is None else verify,
+        retention=current.retention if retention is None else retention,
+        drill=current.drill if drill is None else drill,
+    )
     write_state(state)
     return state

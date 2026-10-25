@@ -8,6 +8,3 @@ exports = ["slices.py"]
 "test_labeler_failure_boundary.py" = ["db_faults.py", "scripted_models.py", "slices.py"]
 "test_labeler_run.py" = ["db_faults.py", "service_probe.py"]
 "test_labeler_validity.py" = ["slices.py"]
-
-[debt.test-subclass-override]
-"slices.py#subclass base.events.live.bus.EventBus.publish_best_effort" = 2

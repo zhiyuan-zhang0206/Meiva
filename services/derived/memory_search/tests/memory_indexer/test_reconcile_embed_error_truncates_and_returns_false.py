@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import logging
-import os
-import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from pathlib import Path
-from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -29,16 +26,6 @@ from services.derived.memory_search.tests.test_memory_indexer import (
 from services.derived.memory_search.tests.test_memory_indexer import (
     watched_root as watched_root,
 )
-
-
-@pytest.fixture
-def owned_config_environment() -> Iterator[None]:
-    """Restore environment delivery and the process timezone after a real ConfigBoot."""
-    try:
-        with patch.dict(os.environ):
-            yield
-    finally:
-        time.tzset()
 
 
 def test_reconcile_embed_error_truncates_and_returns_false(

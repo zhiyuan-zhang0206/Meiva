@@ -63,6 +63,7 @@ class MemoryStore:
         # one — the /stats endpoint and the 60s stats flusher expose it so a
         # growing npz cost is visible before it becomes a write stall.
         self._last_save_seconds: float | None = None
+        self._saves = 0
 
     # ── persistence ──────────────────────────────────────────────────────
 
@@ -160,6 +161,7 @@ class MemoryStore:
         )
         tmp.replace(self._data_file)
         self._last_save_seconds = time.perf_counter() - start
+        self._saves += 1
 
     # ── mutations ────────────────────────────────────────────────────────
 
@@ -318,6 +320,10 @@ class MemoryStore:
         """Duration (seconds) of the most recent successful save — None until
         the first save since process start."""
         return self._last_save_seconds
+
+    @property
+    def saves(self) -> int:
+        return self._saves
 
     def __len__(self) -> int:
         return len(self._pks)

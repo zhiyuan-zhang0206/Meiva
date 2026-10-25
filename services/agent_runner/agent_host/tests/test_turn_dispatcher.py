@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from services.agent_runner.agent_host.dispatcher import (
@@ -266,13 +267,27 @@ class TestUncancellableTurn:
     async def test_the_report_carries_the_real_activity_clock(
         self, loguru_records: LogRecords
     ) -> None:
-        silent_since = datetime.now(UTC) - timedelta(minutes=20)
+        current = datetime(2026, 9, 16, 6, 20, tzinfo=UTC)
+        silent_since = current - timedelta(minutes=20)
 
         async def _clock(_agent_id: int) -> datetime:
             return silent_since
 
         turn = StuckTurn()
-        sched = TurnScheduler(turn, activity_clock=_clock, cancel_unwind_timeout_s=0.05)
+        sched = TurnScheduler(
+            turn,
+            activity_clock=_clock,
+            clock=Clock(
+                ClockConfig(
+                    timezone="UTC",
+                    authoritative_timezone="UTC",
+                    message_timestamp_weekday=False,
+                ),
+                timers=SYSTEM_TIMERS,
+                now=lambda: current,
+            ),
+            cancel_unwind_timeout_s=0.05,
+        )
         sched.wake(5)
         await asyncio.wait_for(turn.entered.wait(), 2)
 

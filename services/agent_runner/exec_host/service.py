@@ -12,11 +12,10 @@ import os
 import signal
 import subprocess
 import sys
-import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 import psutil
 
@@ -98,13 +97,15 @@ class _OutputPipe:
             self.stdout.close()
 
     async def finish(self, timeout_s: float) -> None:
-        deadline = time.monotonic() + timeout_s
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_s
         self.pump()
         while not self.closed:
             self.pump()
-            if self.closed or time.monotonic() >= deadline:
+            now = loop.time()
+            if self.closed or now >= deadline:
                 return
-            await asyncio.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
+            await asyncio.sleep(min(0.01, max(0.0, deadline - now)))
 
 
 def _validate_envelope_path(raw: object, key: str, allowed_root: Path) -> Path:
@@ -119,13 +120,17 @@ def _validate_envelope_path(raw: object, key: str, allowed_root: Path) -> Path:
     return resolved
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
 def _validate_env_overlay(raw: object) -> tuple[tuple[str, str], ...]:
     if raw is None:
         return ()
-    if not isinstance(raw, dict):
+    if not _is_object_dict(raw):
         raise RequestError(protocol.BAD_REQUEST, "env_overlay must be an object of strings")
     result: list[tuple[str, str]] = []
-    for key, value in cast("dict[object, object]", raw).items():
+    for key, value in raw.items():
         if not isinstance(key, str) or not isinstance(value, str):
             raise RequestError(protocol.BAD_REQUEST, "env_overlay must be an object of strings")
         if not key or "=" in key or "\0" in key or "\0" in value:
@@ -139,11 +144,11 @@ def _validate_env_overlay(raw: object) -> tuple[tuple[str, str], ...]:
 def _validate_optional_map_json(raw: object, key: str) -> str | None:
     if raw is None:
         return None
-    if not isinstance(raw, dict):
+    if not _is_object_dict(raw):
         raise RequestError(protocol.BAD_REQUEST, f"{key} must be a JSON object or null")
     if not raw:
         return None
-    for k in cast("dict[object, object]", raw):
+    for k in raw:
         if not isinstance(k, str):
             raise RequestError(protocol.BAD_REQUEST, f"{key} keys must be strings")
     return json.dumps(raw, sort_keys=True)
@@ -261,9 +266,10 @@ async def _wait_client_control(
 
 
 async def _await_leader_exit(domain: ExecProcessDomain, leader: psutil.Process) -> None:
-    deadline = time.monotonic() + KILL_GRACE_S
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + KILL_GRACE_S
     while not _leader_exited(leader):
-        if time.monotonic() >= deadline:
+        if loop.time() >= deadline:
             logger.warning(
                 "[{label}] exec child {pid} survived the {grace}s grace period — "
                 "hard-stopping its process group",
@@ -303,12 +309,14 @@ class ExecHostService:
         default_cwd: Path,
         source_root: Path | None,
         executable: str = sys.executable,
+        pid: int = 0,
     ) -> None:
         self._home = home
         self._executable = executable
         self._base_environ = dict(base_environ)
         self._default_cwd = default_cwd
         self._source_root = source_root
+        self._pid = pid
         self.stop_event = asyncio.Event()
         self._closing = False
         self._active_runs: set[asyncio.Event] = set()
@@ -340,7 +348,8 @@ class ExecHostService:
         cancel_event: asyncio.Event,
     ) -> tuple[bool, bool, bool]:
         reader, writer = io_pair
-        deadline = time.monotonic() + parsed.timeout_s
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + parsed.timeout_s
         disconnected = False
         while not _leader_exited(leader):
             pipe.pump()
@@ -355,7 +364,7 @@ class ExecHostService:
             if cancel_event.is_set():
                 domain.signal(signal.SIGINT)
                 return True, False, disconnected
-            if time.monotonic() >= deadline:
+            if loop.time() >= deadline:
                 domain.signal(signal.SIGTERM)
                 return False, True, disconnected
             if await _wait_client_control(reader, cancel_event, _POLL_INTERVAL_S):
@@ -468,7 +477,7 @@ class ExecHostService:
             req_id = req.get("id")
             method = req.get("method")
             if method == "ping":
-                await _write_message(writer, protocol.ok(req_id, {"pid": os.getpid()}))
+                await _write_message(writer, protocol.ok(req_id, {"pid": self._pid}))
             elif method == "run":
                 await self._handle_run(req, reader, writer)
             else:

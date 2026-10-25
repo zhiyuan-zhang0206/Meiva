@@ -1,7 +1,5 @@
 """Loopback health routes expose the actual hosted owner and cancellation boundary."""
 
-import os
-
 from base import paths
 from base.daemon.health import RouteHandler
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
@@ -36,7 +34,7 @@ def cancel_turn_route(scheduler: TurnScheduler) -> RouteHandler:
     return handler
 
 
-def stats_route(host: AgentHost, scheduler: TurnScheduler) -> RouteHandler:
+def stats_route(host: AgentHost, scheduler: TurnScheduler, *, pid: int) -> RouteHandler:
     """Expose cache/activity counters and this running boot's maintenance identity."""
     import json
 
@@ -57,7 +55,7 @@ def stats_route(host: AgentHost, scheduler: TurnScheduler) -> RouteHandler:
             "maintenance_protocol": 1,
             "runtime_owner": str(host.runtime_owner),
             "home": str(paths.meiva_home()),
-            "pid": os.getpid(),
+            "pid": pid,
             "active_agents": sorted(scheduler.active_agents),
             "active_progress": active_progress,
         }

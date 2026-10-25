@@ -1,12 +1,15 @@
 import asyncio
-from typing import override
+import contextlib
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from uuid import uuid4
 
 import pytest
 
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from base.db import Database
-from base.events.live.bus import EventBus, EventBusConfig, event_bus_config_from_settings
+from base.events.live.bus import EventBus, EventBusConfig
 from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     Build,
@@ -19,50 +22,83 @@ from services.agent_runner.agent_host.tests.runtime.host_support import (
 TURN_TIMEOUT_S = 10
 
 
-# meiva:note
-# A bus whose first publication stays half open until released, as a Redis link that accepts
-# the write and never answers; later publications go through. `publications` counts them all.
-class HalfOpenBus(EventBus):
-    def __init__(self, config: EventBusConfig) -> None:
-        super().__init__(config)
-        self.entered = asyncio.Event()
-        self.release = asyncio.Event()
-        self.publications = 0
+@dataclass
+class _HalfOpenRedisProbe:
+    bus: EventBus
+    entered: asyncio.Event = field(default_factory=asyncio.Event)
+    release: asyncio.Event = field(default_factory=asyncio.Event)
+    publications: int = 0
 
-    @override
-    async def publish_best_effort(
-        self, payload: str, *, channel: str | None = None, context: str = ""
-    ) -> int | None:
-        self.publications += 1
-        if self.publications == 1:
-            self.entered.set()
-            await self.release.wait()
-        return await super().publish_best_effort(payload, channel=channel, context=context)
+
+# meiva:note
+# A Redis listener whose first publication stays half open until released, as a Redis link
+# that accepts the write and never answers; later publications receive a normal RESP reply.
+@asynccontextmanager
+async def half_open_redis_bus() -> AsyncGenerator[_HalfOpenRedisProbe]:
+    probe: _HalfOpenRedisProbe | None = None
+    writers: list[asyncio.StreamWriter] = []
+
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        assert probe is not None
+        writers.append(writer)
+        try:
+            with contextlib.suppress(ConnectionError):
+                while await reader.read(4096):
+                    probe.publications += 1
+                    if probe.publications == 1:
+                        probe.entered.set()
+                        await probe.release.wait()
+                    writer.write(b":1\r\n")
+                    await writer.drain()
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(handle, host="127.0.0.1", port=0)
+    try:
+        port = server.sockets[0].getsockname()[1]
+        bus = EventBus(
+            EventBusConfig(
+                redis_url=f"redis://127.0.0.1:{port}",
+                events_channel="test",
+                publish_attempt_timeout_s=60.0,
+            )
+        )
+        probe = _HalfOpenRedisProbe(bus=bus)
+        yield probe
+    finally:
+        if probe is not None:
+            probe.release.set()
+        for writer in writers:
+            writer.close()
+        server.close()
+        await server.wait_closed()
 
 
 async def test_cancel_during_live_announce_settles_the_committed_admission(
     wired_with: BuildWith,
 ) -> None:
-    bus = HalfOpenBus(event_bus_config_from_settings())
-    host, graph, stored = wired_with({1: Row(status="idling")}, ScriptedGraph({}), bus=bus)
+    async with half_open_redis_bus() as probe:
+        host, graph, stored = wired_with(
+            {1: Row(status="idling")}, ScriptedGraph({}), bus=probe.bus
+        )
 
-    task = asyncio.create_task(host._run_turn(1, resources=HostedTurnResources()))
-    await asyncio.wait_for(bus.entered.wait(), timeout=TURN_TIMEOUT_S)
-    assert stored.status(1) == "running"
+        task = asyncio.create_task(host._run_turn(1, resources=HostedTurnResources()))
+        await asyncio.wait_for(probe.entered.wait(), timeout=TURN_TIMEOUT_S)
+        assert stored.status(1) == "running"
 
-    task.cancel()
-    done, _ = await asyncio.wait({task}, timeout=1.0)
-    cancellation_settled = bool(done)
-    if not cancellation_settled:
-        bus.release.set()
-        await asyncio.gather(task, return_exceptions=True)
+        task.cancel()
+        done, _ = await asyncio.wait({task}, timeout=1.0)
+        cancellation_settled = bool(done)
+        if not cancellation_settled:
+            probe.release.set()
+            await asyncio.gather(task, return_exceptions=True)
 
-    assert cancellation_settled, "announcement cancellation did not finish settlement"
-    assert task.cancelled()
-    assert stored.status(1) == "idling"
-    assert bus.publications == 2, "settlement must announce after restoring durable status"
-    assert 1 not in host._in_flight
-    assert graph.observations == []
+        assert cancellation_settled, "announcement cancellation did not finish settlement"
+        assert task.cancelled()
+        assert stored.status(1) == "idling"
+        assert probe.publications == 2, "settlement must announce after restoring durable status"
+        assert 1 not in host._in_flight
+        assert graph.observations == []
 
 
 @pytest.mark.parametrize("status", ["running", "idling"])
