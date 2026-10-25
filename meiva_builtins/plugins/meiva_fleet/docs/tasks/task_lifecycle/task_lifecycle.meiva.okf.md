@@ -63,7 +63,7 @@ Modify task fields, **pass only what you want to change**—omitted fields remai
 - `remind_interval_seconds`: **not passing or passing `None` both mean "unchanged"**—reminders cannot be disabled; only passing a positive integer (≤24h) changes it, exceeding raises `ValueError`.
 - `priority`: `None` (default) means "unchanged"; passing `"P0"`..`"P3"` writes it, illegal value raises `ValueError` (#663).
 - `note`: appends a line `[YYYY-MM-DD HH:MM:SS] <note>` to `results`, can be used alongside any status change or alone as a substitute for `log()`. The stamp is built by `base.agents.tasks.notes.task_note_line` — the same agent-facing representation and the same timezone as every other timestamp an agent reads, shared with the gateway's drain writer so the two cannot drift.
-- Any write resets the reminder counter (`last_reminded_at` / `reminder_count` zeroed).
+- A write that changes the work resets the reminder window (`last_reminded_at` / `reminder_count` / `escalated_at` zeroed); a note-only or title-only write does not (Fleet `task_reminder_reset_on`).
 - Each fresh committed write publishes `task_updated` (SSE, board invalidates and refetches).
 - `operation_key`: [[task_update_receipts.meiva.okf.md|explicit agent/task-scoped replay]] skips repeated task effects; changed effective inputs with the same key raise `ValueError`.
 

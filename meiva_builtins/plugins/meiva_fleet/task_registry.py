@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import builtins
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING, Any, cast
 
 import meiva
@@ -15,6 +15,7 @@ from base.agents.context import MeivaContext
 from base.agents.tasks.model import TASK_COLUMNS, task_from_row
 from base.agents.tasks.model import Task as Task
 from base.agents.tasks.owner_notifications import TaskOwnerNotification, owner_change_notifications
+from base.agents.tasks.reminder_window import UpdateWrite
 from base.agents.tasks.reparent import resolve_reparent
 from base.log import logger
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
@@ -308,7 +309,8 @@ def update(
     note: str | None = None,
     operation_key: str,
 ) -> None:
-    """Any write resets the reminder clock. Owner changes notify both owners; other
+    """A write that changes the work restarts the task's reminder window; recording a
+    note, or renaming the task, does not. Owner changes notify both owners; other
     updates tell the owner who changed it; a parent-only reparent stays silent.
 
     Args:
@@ -341,6 +343,23 @@ def update(
 def _update_value(value: int | Unset | None) -> int | None:
     """Normalize the two unchanged spellings at typed business-call boundaries."""
     return None if isinstance(value, Unset) else value
+
+
+# meiva:note
+# The reminder-window policy is read from this home's `meiva_fleet` config image on every write,
+# not cached for the process and not taken from the gateway's boot packet: task updates are how
+# every agent reports, so a write must not depend on what a lagging gateway sent at boot, and an
+# operator's edit (`task_reminder_reset_on`) has to take effect without a restart. The imports are
+# deferred so the config stack stays off plugin autoload (task #3816).
+def _reminder_reset_on() -> frozenset[str]:
+    """Kinds of task update that restart a task's reminder window, per this home's policy."""
+    from base.packages.plugins.config_registration import disk_image_path, read_config_image
+
+    from .default_config import FleetConfig
+
+    return frozenset(
+        read_config_image(FleetConfig, disk_image_path("meiva_fleet")).task_reminder_reset_on
+    )
 
 
 def update_in_context(
@@ -437,12 +456,22 @@ def commit_update(
     # 2026-08-27).
     parent_only = parent_id is not UNSET_FIELD and nothing_to_update(sets, note)
     # meiva:note
-    # Every update resets the reminder counters: a fresh overdue window starts from this update, so
-    # any previous reminder is stale. The delegator escalation marker goes with them, which lets
-    # the fresh window escalate on its own.
-    sets.append("last_reminded_at = NULL")
-    sets.append("reminder_count = 0")
-    sets.append("escalated_at = NULL")
+    # The reminder window restarts only for a write that changes the work (see
+    # `base.agents.tasks.reminder_window`); `write_task_update` decides that against the locked row
+    # and appends the counter clauses there.
+    write = UpdateWrite(
+        status=status,
+        title=title,
+        description=description,
+        results=results,
+        owner=_update_value(owner),
+        priority=priority,
+        parent_id=_update_value(parent_id),
+        parent_written=parent_id is not UNSET_FIELD,
+        remind_interval_seconds=_update_value(remind_interval_seconds),
+        note=note,
+    )
+    reset_on = _reminder_reset_on()
 
     from ._task_receipts import record_update, replay_update, update_identity
 
@@ -465,20 +494,22 @@ def commit_update(
         if replay_update(cur, actor, task_id, operation_key, request_body, context=context):
             return None
         if parent_id is not UNSET_FIELD:
+            # meiva:note
+            # `None` means the system root, so the change set is measured against the resolved id:
+            # a reparent to the parent a task already has is not a change.
+            resolved_parent = resolve_reparent(cur, task_id, cast(int | None, parent_id))
             sets.append("parent_id = %s")
-            params.append(resolve_reparent(cur, task_id, cast(int | None, parent_id)))
+            params.append(resolved_parent)
+            write = replace(write, parent_id=resolved_parent)
         old_owner, current_title, new_owner, updated_event = write_task_update(
             cur,
             task_id,
-            status,
             sets,
             params,
             payload,
             changes,
-            title,
-            note,
-            _update_value(owner),
-            owner_changing,
+            write,
+            reset_on,
             actor,
         )
         if parent_id is not UNSET_FIELD:

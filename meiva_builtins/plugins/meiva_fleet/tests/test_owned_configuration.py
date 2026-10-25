@@ -45,6 +45,19 @@ _PURE_RUNNER = {
 }
 
 
+# meiva:note
+# Which declared fields are host-scoped, i.e. never travel in the gateway's boot packet: the daemon
+# gate and the reminder-window policy are read from the image on the machine that writes.
+def _host_fields() -> set[str]:
+    from base.config import schema_extra
+
+    return {
+        name
+        for name, info in FleetConfig.model_fields.items()
+        if schema_extra(info).get("scope") not in {"cluster-pinned", "cluster-default"}
+    }
+
+
 @pytest.fixture(autouse=True)
 def preserve_env_file() -> Generator[None]:
     env = unit_env_path()
@@ -87,7 +100,8 @@ def compose_in_child(mode: str, env: dict[str, str]) -> dict[str, Any]:
 def test_remote_cluster_projection_never_overrides_local_host_gate() -> None:
     write_image(FleetConfig(task_maintenance_enabled=False, task_escalate_n=99))
     gateway = FleetConfig(task_escalate_n=7, reduce_context_switch=False).model_dump(mode="json")
-    gateway.pop("task_maintenance_enabled")
+    for name in _host_fields():
+        gateway.pop(name)
     composed = compose_in_child(
         "image", _PURE_RUNNER | {PLUGIN_CLUSTER_CONFIG_ENV: json.dumps({"meiva_fleet": gateway})}
     )["config"]
@@ -116,7 +130,7 @@ def test_invalid_present_projection_is_rejected_even_on_gateway(packet: str) -> 
 def test_gateway_truth_is_authoritative_and_projection_has_exact_scope() -> None:
     write_image(FleetConfig(task_escalate_n=7, task_maintenance_enabled=False))
     packet = json.loads(plugin_bootstrap_config())["meiva_fleet"]
-    assert set(packet) == set(FleetConfig.model_fields) - {"task_maintenance_enabled"}
+    assert set(packet) == set(FleetConfig.model_fields) - _host_fields()
     assert packet["task_escalate_n"] == 7
 
     def deliver(delivered: dict[str, object]) -> dict[str, Any]:

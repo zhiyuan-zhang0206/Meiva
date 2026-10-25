@@ -61,13 +61,22 @@ def set_fleet_configuration(*, reduce_context_switch: bool) -> None:
         )
 
 
+# meiva:note
+# Deliver the projection the gateway would send: the declared cluster-scoped fields only. A
+# host-scoped field (the daemon gate, the reminder-window policy) stays on its own machine's image
+# and never travels in the boot packet.
 def _deliver_cluster_config(environment: pytest.MonkeyPatch, config: object) -> None:
     import json
 
+    from base.config import schema_extra
     from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
     from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 
     assert isinstance(config, FleetConfig)
-    values = config.model_dump(mode="json")
-    values.pop("task_maintenance_enabled")
+    values = {
+        name: value
+        for name, value in config.model_dump(mode="json").items()
+        if schema_extra(FleetConfig.model_fields[name]).get("scope")
+        in {"cluster-pinned", "cluster-default"}
+    }
     environment.setenv(PLUGIN_CLUSTER_CONFIG_ENV, json.dumps({"meiva_fleet": values}))
