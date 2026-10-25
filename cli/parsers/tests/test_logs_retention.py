@@ -466,6 +466,8 @@ def test_a_flat_retention_with_no_age_and_no_configured_default_is_refused(
         ("meiva-delivery-watchdog.out.log", "watchdog"),
         ("meiva-otel-collector.out.log", "other"),
         ("meiva-agent-host.out.log", "agent"),
+        ("meiva-agent_host.out.log", "agent"),
+        ("meiva-root.out.log", "ops"),
     ],
 )
 def test_service_stdout_names_are_managed_and_follow_service_family_rules(
@@ -476,6 +478,29 @@ def test_service_stdout_names_are_managed_and_follow_service_family_rules(
     match = MANAGED_LOG_NAME.fullmatch(name)
     assert match is not None
     assert match["svcout"] == name
+    assert log_family(match) == family
+
+
+# meiva:note
+# `agent_host` and `meiva-root` arrive here without the `meiva-` prefix and with an
+# underscore, so the `agent-` prefix rule missed them and the files that carry the
+# evidence for a failed turn were the first ones deleted. The unknown name is the
+# negative case: the catch-all must stay, or a typo would silently gain 30 days.
+# meiva:link cli/commands/observability/docs/log-maintenance.md
+@pytest.mark.parametrize(
+    ("name", "family"),
+    [
+        ("agent_host.2026-10-20_00-33-19_718373.log", "agent"),
+        ("meiva-root.2026-10-19_08-00-05_763203.log", "ops"),
+        ("wibble.2026-10-20_00-33-19_718373.log", "other"),
+    ],
+)
+def test_rotated_supervisor_logs_keep_their_evidence_window(name: str, family: str) -> None:
+    from cli.commands.observability.logs import MANAGED_LOG_NAME, log_family
+
+    match = MANAGED_LOG_NAME.fullmatch(name)
+    assert match is not None
+    assert match["service"] == name.split(".", 1)[0]
     assert log_family(match) == family
 
 
