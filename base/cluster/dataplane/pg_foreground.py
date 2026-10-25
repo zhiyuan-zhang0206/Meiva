@@ -6,11 +6,21 @@ import subprocess
 import time
 from collections.abc import Mapping
 from pathlib import Path
-from typing import cast
 
 import psycopg
 
-POSTMASTER_SHUTDOWN_S = 10.0
+from base.cluster.dataplane.pg_plan import (
+    POSTMASTER_SHUTDOWN_S,
+    foreground_stop_argv,
+    verify_foreground_data_dir,
+)
+
+__all__ = [
+    "POSTMASTER_SHUTDOWN_S",
+    "start_foreground_postgres",
+    "stop_foreground_postgres",
+    "wait_foreground_postgres",
+]
 
 
 def start_foreground_postgres(
@@ -44,8 +54,7 @@ def wait_foreground_postgres(
         except psycopg.OperationalError:
             time.sleep(0.1)
             continue
-        if row is None or Path(row[0]).resolve() != data.resolve():
-            raise RuntimeError("foreground Postgres port is owned by another data directory")
+        verify_foreground_data_dir(None if row is None else str(row[0]), data)
         if process.poll() is not None:
             raise RuntimeError(f"foreground Postgres exited {process.returncode}: {log}")
         return
@@ -53,37 +62,14 @@ def wait_foreground_postgres(
 
 
 def stop_foreground_postgres(process: subprocess.Popen[bytes]) -> None:
-    """Ask pg_ctl to shut down this disposable PGDATA, then reap its direct child.
-
-    PostgreSQL owns its native child shutdown. No descendant/cwd census or
-    persisted family proof is made. A failed native stop raises and callers
-    retain the scratch data directory rather than removing a running cluster.
-    """
     if process.poll() is not None:
         return
-    argv = process.args
-    if not isinstance(argv, list) or not all(isinstance(arg, str) for arg in argv):
-        raise TypeError("foreground Postgres requires an argv list")
-    command = cast("list[str]", argv)
-    try:
-        data = command[command.index("-D") + 1]
-    except (ValueError, IndexError) as exc:
-        raise ValueError(
-            "foreground Postgres must name its private data directory with -D"
-        ) from exc
-    pg_ctl = Path(command[0]).with_name("pg_ctl")
-    subprocess.run(  # noqa: S603 -- native tool next to the launched postgres
-        [
-            str(pg_ctl),
-            "-D",
-            data,
-            "stop",
-            "-m",
-            "immediate",
-            "-w",
-            "-t",
-            str(int(POSTMASTER_SHUTDOWN_S)),
-        ],
+    stop_argv = foreground_stop_argv(process.args, shutdown_s=POSTMASTER_SHUTDOWN_S)
+    # meiva:note
+    # `stop_argv` invokes the `pg_ctl` sibling next to the launched `postgres`
+    # binary against its own `-D` data directory.
+    subprocess.run(  # noqa: S603
+        stop_argv,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,

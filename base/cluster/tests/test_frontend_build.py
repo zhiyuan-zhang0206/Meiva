@@ -16,22 +16,13 @@ def _recording_build(calls: list[Path]) -> Callable[[Path], int]:
     return build
 
 
-def _fixed_key(value: str | None) -> Callable[..., str | None]:
-    def key(_dir: Path, *, gateway_port: int, browser_origin: str) -> str | None:
-        return value
-
-    return key
-
-
 def test_a_matching_key_skips_the_build(tmp_path: Path) -> None:
     calls: list[Path] = []
     frontend_build.record(tmp_path, "k")
-    code = frontend_build.ensure_build(
+    code = frontend_build.run_ensure_build(
         tmp_path,
-        gateway_port=8000,
-        browser_origin="",
+        current_key="k",
         build=_recording_build(calls),
-        key=_fixed_key("k"),
     )
 
     assert code == 0
@@ -41,12 +32,10 @@ def test_a_matching_key_skips_the_build(tmp_path: Path) -> None:
 def test_a_changed_key_rebuilds_and_records(tmp_path: Path) -> None:
     calls: list[Path] = []
     frontend_build.record(tmp_path, "old")
-    code = frontend_build.ensure_build(
+    code = frontend_build.run_ensure_build(
         tmp_path,
-        gateway_port=8000,
-        browser_origin="",
+        current_key="new",
         build=_recording_build(calls),
-        key=_fixed_key("new"),
     )
 
     assert (code, calls) == (0, [tmp_path])
@@ -59,9 +48,7 @@ def test_a_failed_build_records_nothing(tmp_path: Path) -> None:
     def failing(_dir: Path) -> int:
         return 3
 
-    code = frontend_build.ensure_build(
-        tmp_path, gateway_port=8000, browser_origin="", build=failing, key=_fixed_key("new")
-    )
+    code = frontend_build.run_ensure_build(tmp_path, current_key="new", build=failing)
 
     assert code == 3
     assert frontend_build.recorded_key(tmp_path) == "old"
@@ -69,12 +56,10 @@ def test_a_failed_build_records_nothing(tmp_path: Path) -> None:
 
 def test_an_unprovable_key_always_builds(tmp_path: Path) -> None:
     calls: list[Path] = []
-    code = frontend_build.ensure_build(
+    code = frontend_build.run_ensure_build(
         tmp_path,
-        gateway_port=8000,
-        browser_origin="",
+        current_key=None,
         build=_recording_build(calls),
-        key=_fixed_key(None),
     )
 
     assert (code, calls) == (0, [tmp_path])

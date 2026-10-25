@@ -85,6 +85,28 @@ def _npm_build(frontend_dir: Path) -> int:
     return subprocess.run(["npm", "run", "build"], cwd=str(frontend_dir), check=False).returncode
 
 
+def run_ensure_build(
+    frontend_dir: Path,
+    *,
+    current_key: str | None,
+    build: Callable[[Path], int],
+) -> int:
+    # meiva:note
+    # The key is recorded only after the build succeeded, so an interrupted rebuild
+    # can never look current: its inputs differ from the recorded key by
+    # construction, and the next start rebuilds.
+    if current_key is not None and is_current(frontend_dir, current_key):
+        print(f"frontend build is current for {frontend_dir}; reusing .next")  # noqa: T201
+        return 0
+    print(f"frontend build inputs changed for {frontend_dir}; running npm run build")  # noqa: T201
+    code = build(frontend_dir)
+    if code != 0:
+        return code
+    if current_key is not None:
+        record(frontend_dir, current_key)
+    return 0
+
+
 # meiva:note
 # The decision is printed because a unit's stdout is the only record an operator
 # can read after a start: this one-shot module has no CLI process to carry a log
@@ -95,24 +117,9 @@ def ensure_build(
     *,
     gateway_port: int,
     browser_origin: str,
-    build: Callable[[Path], int] = _npm_build,
-    key: Callable[..., str | None] = build_key,
 ) -> int:
-    # meiva:note
-    # The key is recorded only after the build succeeded, so an interrupted rebuild
-    # can never look current: its inputs differ from the recorded key by
-    # construction, and the next start rebuilds.
-    current = key(frontend_dir, gateway_port=gateway_port, browser_origin=browser_origin)
-    if current is not None and is_current(frontend_dir, current):
-        print(f"frontend build is current for {frontend_dir}; reusing .next")  # noqa: T201
-        return 0
-    print(f"frontend build inputs changed for {frontend_dir}; running npm run build")  # noqa: T201
-    code = build(frontend_dir)
-    if code != 0:
-        return code
-    if current is not None:
-        record(frontend_dir, current)
-    return 0
+    current = build_key(frontend_dir, gateway_port=gateway_port, browser_origin=browser_origin)
+    return run_ensure_build(frontend_dir, current_key=current, build=_npm_build)
 
 
 def main(argv: list[str] | None = None) -> int:

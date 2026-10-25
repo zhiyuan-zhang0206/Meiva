@@ -30,7 +30,7 @@ from typing import Any
 
 import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
-from psycopg.rows import tuple_row
+from psycopg.rows import RowFactory, tuple_row
 
 from base.cluster.derive import db_identity, home_slug
 from base.cluster.ownership import require_postgres_connection
@@ -74,7 +74,13 @@ def pg_admin_url(pg_port: int) -> str:
 
 @contextmanager
 def connect(
-    url: str, *, expected_data_dir: Path | None = None, **kwargs: Any
+    url: str,
+    *,
+    expected_data_dir: Path | None = None,
+    autocommit: bool = False,
+    connect_timeout: int | None = None,
+    prepare_threshold: int | None = 5,
+    row_factory: RowFactory[Any] | None = None,
 ) -> Generator[psycopg.Connection[Any]]:
     """Open explicit admin authority; owned startup validates the actual connection.
 
@@ -82,7 +88,14 @@ def connect(
     Provider-managed provisioning helpers retain their explicit URL authority.
     Psycopg connections never reconnect, so validated custody lasts until close.
     """
-    with psycopg.connect(url, **kwargs) as conn:
+    actual_row_factory: RowFactory[Any] = tuple_row if row_factory is None else row_factory
+    with psycopg.connect(
+        url,
+        autocommit=autocommit,
+        connect_timeout=connect_timeout,
+        prepare_threshold=prepare_threshold,
+        row_factory=actual_row_factory,
+    ) as conn:
         if expected_data_dir is not None:
             require_postgres_connection(
                 conn, expected_data_dir, pg_socket_dir(home=expected_data_dir.parent)
@@ -117,26 +130,26 @@ def owner_session(
     database: str,
     owner: str,
     expected_data_dir: Path | None = None,
-    **kwargs: Any,
+    autocommit: bool = False,
+    connect_timeout: int | None = None,
+    prepare_threshold: int | None = 5,
+    row_factory: RowFactory[Any] | None = None,
 ) -> Generator[psycopg.Connection[Any]]:
-    """Open the administrator acting as the schema owner — the DDL authority.
-
-    Dials `owner_conninfo` with `connect`'s custody check, then proves the
-    effective role before the caller runs anything: every object the caller
-    creates is owned by `owner`, and every privilege check (DDL, GRANT, default
-    privileges declared without `FOR ROLE`) sees the owner's rights, exactly as
-    if the owner had logged in. The dial carries no statement ceiling.
-
-    Raises:
-        RuntimeError: the session's effective role is not `owner`.
-    """
     conninfo = owner_conninfo(admin_url, database=database, owner=owner)
-    with connect(conninfo, expected_data_dir=expected_data_dir, **kwargs) as conn:
+    with connect(
+        conninfo,
+        expected_data_dir=expected_data_dir,
+        autocommit=autocommit,
+        connect_timeout=connect_timeout,
+        prepare_threshold=prepare_threshold,
+        row_factory=row_factory,
+    ) as conn:
         with conn.cursor(row_factory=tuple_row) as cursor:
             row = cursor.execute("SELECT current_user").fetchone()
         if row is None or row[0] != owner:
             raise RuntimeError(f"admin session did not assume schema owner {owner!r}")
         if not conn.autocommit:
+            # meiva:note
             # Reading current_user opened a transaction; hand the caller a clean
             # session so its first statement starts its own transaction.
             conn.commit()
@@ -178,14 +191,14 @@ class OwnerAuthority:
         return self.conninfo
 
     @contextmanager
-    def session(self, **kwargs: Any) -> Generator[psycopg.Connection[Any]]:
+    def session(self, *, autocommit: bool = False) -> Generator[psycopg.Connection[Any]]:
         """A custody-checked `owner_session` on this home's database."""
         with owner_session(
             self.admin_url,
             database=self.database,
             owner=self.owner,
             expected_data_dir=self.data_dir,
-            **kwargs,
+            autocommit=autocommit,
         ) as conn:
             yield conn
 

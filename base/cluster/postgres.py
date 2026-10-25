@@ -13,7 +13,7 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Callable, Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -215,22 +215,47 @@ def read_pidfile(data: Path, receipt: Receipt) -> tuple[tuple[int, int], tuple[s
     return before, header
 
 
-def _require_process(data: Path, receipt: Receipt) -> OwnedProcess:
+def verify_captured_process(
+    data: Path,
+    receipt: Receipt,
+    *,
+    directory_inode: tuple[int, int],
+    process_name: str,
+    argv: Sequence[str],
+    cwd: Path,
+    sid: int,
+    captured_birth: OwnedProcess,
+    live: bool,
+) -> OwnedProcess:
     owner = receipt.process()
-    process = psutil.Process(owner.pid)
-    argv = process.cmdline()
     if (
-        _inode(data) != receipt.directory
-        or process.name() not in {"postgres", "postmaster"}
+        directory_inode != receipt.directory
+        or process_name not in {"postgres", "postmaster"}
         or "-D" not in argv
-        or Path(argv[argv.index("-D") + 1]).resolve() != data
-        or Path(process.cwd()).resolve() != data
-        or os.getsid(owner.pid) != owner.pid
-        or not owner.same_birth(OwnedProcess.capture(process))
-        or not owner.live()
+        or Path(argv[list(argv).index("-D") + 1]).resolve() != data
+        or cwd.resolve() != data
+        or sid != owner.pid
+        or not owner.same_birth(captured_birth)
+        or not live
     ):
         raise RuntimeError("cannot verify this home's captured PostgreSQL process")
     return owner
+
+
+def _require_process(data: Path, receipt: Receipt) -> OwnedProcess:
+    owner = receipt.process()
+    process = psutil.Process(owner.pid)
+    return verify_captured_process(
+        data,
+        receipt,
+        directory_inode=_inode(data),
+        process_name=process.name(),
+        argv=process.cmdline(),
+        cwd=Path(process.cwd()),
+        sid=os.getsid(owner.pid),
+        captured_birth=OwnedProcess.capture(process),
+        live=owner.live(),
+    )
 
 
 def observe(data: Path) -> OwnedProcess | None:
@@ -259,8 +284,7 @@ def observe(data: Path) -> OwnedProcess | None:
 
 
 @contextmanager
-def _admission() -> Generator[Callable[[], None]]:
-    """Defer Python cancellation until native custody is durable, without masking children."""
+def admission() -> Generator[Callable[[], None]]:
     pending: list[int] = []
     previous: dict[int, Callable[[int, FrameType | None], Any] | int | None] = {}
 
@@ -281,6 +305,36 @@ def _admission() -> Generator[Callable[[], None]]:
             signal.signal(signum, handler)
 
 
+_admission = admission
+
+
+def record_spawned_process(
+    data: Path,
+    receipt: Receipt,
+    child: subprocess.Popen[bytes],
+    *,
+    retained_children: list[subprocess.Popen[bytes]],
+    captured_owner: OwnedProcess | None = None,
+) -> Receipt:
+    retained_children.append(child)
+    owner = (
+        captured_owner
+        if captured_owner is not None
+        else OwnedProcess.capture(psutil.Process(child.pid))
+    )
+    owner.birth_key()
+    captured = receipt.model_copy(
+        update={
+            "state": "captured",
+            "owner": ExpectedProcess(
+                pid=owner.pid, create_time=owner.birth, starttime=owner.starttime
+            ),
+        }
+    )
+    write(data, captured)
+    return captured
+
+
 def spawn_postgres(
     data: Path,
     receipt: Receipt,
@@ -288,6 +342,7 @@ def spawn_postgres(
     env: dict[str, str],
     *,
     retained_children: list[subprocess.Popen[bytes]],
+    captured_owner: OwnedProcess | None = None,
 ) -> Receipt:
     write(data, receipt)
     with _admission(), (data / "pg.log").open("ab") as log:
@@ -302,23 +357,18 @@ def spawn_postgres(
                 start_new_session=True,
             )
         except OSError:
+            # meiva:note
             # Popen's normal exec error guarantees it reaped its child. A
             # BaseException or later error has no such guarantee: keep pending.
             write(data, receipt.model_copy(update={"state": "not-started"}))
             raise
-        retained_children.append(child)
-        owner = OwnedProcess.capture(psutil.Process(child.pid))
-        owner.birth_key()
-        captured = receipt.model_copy(
-            update={
-                "state": "captured",
-                "owner": ExpectedProcess(
-                    pid=owner.pid, create_time=owner.birth, starttime=owner.starttime
-                ),
-            }
+        return record_spawned_process(
+            data,
+            receipt,
+            child,
+            retained_children=retained_children,
+            captured_owner=captured_owner,
         )
-        write(data, captured)
-        return captured
 
 
 def _complete_start(
@@ -349,14 +399,23 @@ def _complete_start(
     raise RuntimeError(f"PostgreSQL exited before readiness; inspect {data / 'pg.log'}")
 
 
-def _retained_start(data: Path, port: int, expected: OwnedProcess) -> Receipt:
-    owner = observe(data)
-    if owner is None or not owner.same_birth(expected):
+def verify_retained_owner(
+    port: int,
+    expected: OwnedProcess,
+    observed: OwnedProcess | None,
+    receipt: Receipt | None,
+) -> Receipt:
+    if observed is None or not observed.same_birth(expected):
         raise RuntimeError("PostgreSQL identity changed before retained startup")
-    receipt = read_receipt(data)
     if receipt is None or receipt.port != port:
         raise RuntimeError("PostgreSQL retained receipt does not match the startup port")
-    if receipt.state == "ready" and not owner.send_signal(signal.SIGHUP):
+    return receipt
+
+
+def _retained_start(data: Path, port: int, expected: OwnedProcess) -> Receipt:
+    owner = observe(data)
+    receipt = verify_retained_owner(port, expected, owner, read_receipt(data))
+    if receipt.state == "ready" and (owner is None or not owner.send_signal(signal.SIGHUP)):
         raise RuntimeError("PostgreSQL exited before retained startup")
     return receipt
 
@@ -470,6 +529,13 @@ def _escalate(
     return Escalation(detail, killed)
 
 
+def reap_retained_child(owner_pid: int, retained_children: list[subprocess.Popen[bytes]]) -> None:
+    for child in tuple(retained_children):
+        if child.pid == owner_pid:
+            child.wait(timeout=1)
+            retained_children.remove(child)
+
+
 def stop(
     data: Path,
     *,
@@ -518,8 +584,5 @@ def stop(
         require_closed(data, receipt, processes=live_processes())
         require_listener(None, receipt.port, required=False)
         if retained_children is not None:
-            for child in tuple(retained_children):
-                if child.pid == owner.pid:
-                    child.wait(timeout=1)
-                    retained_children.remove(child)
+            reap_retained_child(owner.pid, retained_children)
         return escalation

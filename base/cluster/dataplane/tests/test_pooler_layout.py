@@ -2,16 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from base.cluster.dataplane import pooler
 
 
 def test_pooler_files_live_in_the_pgbouncer_directory_under_the_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     assert not (tmp_path / "pgbouncer").exists()
-    assert pooler.ini_path() == tmp_path / "pgbouncer" / "pgbouncer.ini"
-    assert pooler.pidfile_path() == tmp_path / "pgbouncer" / "pgbouncer.pid"
+    assert pooler.ini_path(tmp_path) == tmp_path / "pgbouncer" / "pgbouncer.ini"
+    assert pooler.pidfile_path(tmp_path) == tmp_path / "pgbouncer" / "pgbouncer.pid"
     assert (tmp_path / "pgbouncer").is_dir()
