@@ -19,7 +19,7 @@ from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
-from base.packages.plugins import load_report
+from base.packages.plugins.load_report import Reporter
 from base.packages.plugins.loading import StateGate
 from base.packages.plugins.loading.faces import LoadedExtensions, import_faces
 
@@ -52,7 +52,7 @@ from .installation import EventPipelines, SamplingPolicyOwner, installed
 def load_extensions(
     *,
     surface: bool = False,
-    report: load_report.Reporter | None = None,
+    report: Reporter | None = None,
     catalog: ModelCatalog | None = None,
     provider_keys: ProviderKeys | None = None,
     authority: ConfigAuthority | None = None,

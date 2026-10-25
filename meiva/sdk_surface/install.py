@@ -60,8 +60,9 @@ from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.packages.plugin_config_contracts import PluginConfigImages
-from base.packages.plugins import load_report
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from base.packages.plugins.flags import PluginFlagError, validate_flag_key
+from base.packages.plugins.load_report import Reporter, reporter
 
 from . import meiva_module, wraps
 from . import plugins as _plugins
@@ -182,7 +183,7 @@ def _apply(
     namespaces: dict[str, str],
     config_images: PluginConfigImages,
 ) -> list[str]:
-    from base.packages.plugins import config_registration, flags
+    from base.packages.plugins import config_registration
 
     promoted: list[str] = []
     for ns in contributions.sdk_namespaces:
@@ -204,7 +205,7 @@ def _apply(
         build.providers.append(provider)
         build.undo.append(ProviderAdded(provider))
     for key in contributions.flags:
-        flags.validate_flag_key(key)
+        validate_flag_key(key)
     if contributions.config is not None:
         release = config_registration.bind_plugin_config(
             config_images.owner(plugin, contributions.config), build.configs
@@ -283,9 +284,13 @@ def _run(undo: list[Reversal], build: Build, primary: BaseException | None = Non
         raise failure
 
 
+# meiva:note
+# Install `registry`'s SDK surface into `meiva`; return the registry of the plugins admitted.
+# Raises `RuntimeError` when a previous installation is still in place (`uninstall()` first),
+# or `BaseException` on unexpected application/cleanup failure after undoing applied pieces.
 def install(
     registry: ExtensionRegistry,
-    report: load_report.Reporter | None = None,
+    report: Reporter | None = None,
     *,
     config_images: PluginConfigImages,
     catalog: ModelCatalog | None = None,
@@ -297,18 +302,11 @@ def install(
     external_caller: CallerIdentity | None = None,
     disabled_entries: Sequence[str] = (),
 ) -> ExtensionRegistry:
-    """Install `registry`'s SDK surface into `meiva`; return the registry of the plugins admitted.
-
-    Raises:
-        RuntimeError: a previous installation is still in place (`uninstall()` first).
-        BaseException: an unexpected application or cleanup failure; already-applied
-            pieces are undone before the original error propagates.
-    """
     if installed() is not None:
         raise RuntimeError(
             "the SDK surface is already installed; uninstall() it before installing another registry"
         )
-    from base.packages.plugins import flags, plugin_errors
+    from base.packages.plugins import plugin_errors
 
     from . import metering, sdk_disable
 
@@ -331,14 +329,14 @@ def install(
             except (
                 _plugins.RegisterNamespaceError,
                 wraps.WrapTargetError,
-                flags.PluginFlagError,
+                PluginFlagError,
                 plugin_errors.SchemaDriftError,
                 plugin_errors.InvalidConfigData,
             ) as exc:
                 partial = build.undo[mark:]
                 del build.undo[mark:]
                 _run(partial, build)
-                load_report.reporter(report)(plugin, exc)
+                reporter(report)(plugin, exc)
                 continue
             build.namespaces.update(claimed)
             build.expansions.extend(paths)

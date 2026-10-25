@@ -14,10 +14,10 @@ from __future__ import annotations
 import json
 import socket
 import threading
-import time
 from contextlib import suppress
 from typing import Any
 
+from base.clock import SYSTEM_TIMERS
 from meiva.mcps.config import MCPCallError, MCPConnectError, ToolInfo
 
 
@@ -55,7 +55,7 @@ class RemoteMCPClient:
 
     def _request(
         self, method: str, params: dict[str, Any], *, timeout_seconds: float, agent_id: int | None
-    ) -> Any:
+    ) -> object:
         with self._lock:
             self._req_id += 1
             req_id = self._req_id
@@ -114,9 +114,9 @@ class RemoteMCPClient:
         timeout budget as the connect phase, supplied by the caller per request.
         """
         buf: bytes = b""
-        deadline = time.time() + timeout_seconds
+        deadline = SYSTEM_TIMERS.monotonic() + timeout_seconds
         while True:
-            remaining = deadline - time.time()
+            remaining = deadline - SYSTEM_TIMERS.monotonic()
             if remaining <= 0:
                 raise MCPConnectError("MCP daemon request timeout")
             sock.settimeout(remaining)
@@ -141,7 +141,7 @@ class RemoteMCPClient:
     def list_tools(
         self, server: str, *, timeout_seconds: float, agent_id: int | None
     ) -> list[ToolInfo]:
-        result = self._request(
+        result: Any = self._request(
             "list_tools", {"server": server}, timeout_seconds=timeout_seconds, agent_id=agent_id
         )
         return [
@@ -162,7 +162,7 @@ class RemoteMCPClient:
         timeout_seconds: float,
         agent_id: int | None,
     ) -> dict[str, Any]:
-        return self._request(
+        result: Any = self._request(
             "call_tool",
             {
                 "server": server,
@@ -172,6 +172,7 @@ class RemoteMCPClient:
             timeout_seconds=timeout_seconds,
             agent_id=agent_id,
         )
+        return result
 
 
 def connect_remote(socket_path: str) -> RemoteMCPClient:
