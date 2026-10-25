@@ -45,7 +45,11 @@ from services.supervision.meiva_root.intent_store import (
 )
 from services.supervision.meiva_root.left_behind import LeftBehindMixin
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitRegistry, UnknownUnitError
-from services.supervision.meiva_root.stopping import StoppingMixin, SupervisorConfig
+from services.supervision.meiva_root.stopping import (
+    StoppingMixin,
+    SupervisorConfig,
+    rotate_unit_log,
+)
 from services.supervision.meiva_root.unit_ledger import GenerationRecord
 from services.supervision.meiva_root.unit_records import Generation, UnitRuntime
 
@@ -625,10 +629,17 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         manifest = runtime.manifest
         for item in manifest.inputs:
             item.require_unchanged()
-        # One directory per unit (G5): the unit owns its log space, so naming /
-        # rotation policy can land inside it without another layout change.
+        # meiva:note
+        # One directory per unit (G5): the unit owns its log space, so the rotation
+        # policy lives inside it. This is the moment to apply it -- nothing holds the
+        # file open between generations.
         log_path = self._log_dir / manifest.id / "output.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        rotate_unit_log(
+            log_path,
+            max_bytes=self._config.unit_log_max_bytes,
+            backups=self._config.unit_log_backups,
+        )
         log_fd = os.open(log_path, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o644)
         try:
             env = inherited_process_env() | dict(manifest.env)

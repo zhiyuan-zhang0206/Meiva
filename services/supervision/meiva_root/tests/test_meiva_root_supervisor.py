@@ -15,6 +15,7 @@ import pytest
 from base.native_process.ownership import OwnedProcess
 from services.supervision.meiva_root.inputs import InputSeal
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
+from services.supervision.meiva_root.stopping import rotate_unit_log
 from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
 
 _CHILD = Path(__file__).with_name("child_unit.py")
@@ -438,3 +439,73 @@ async def test_an_early_non_zero_exit_retires_the_rewrite(tmp_path: Path) -> Non
         assert seen[1] == plain
     finally:
         await owner.shutdown()
+
+
+def _log_with_bytes(path: Path, size: int) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("x" * size)
+    return path
+
+
+def test_unit_log_a_file_below_the_cap_is_left_alone(tmp_path: Path) -> None:
+    log = _log_with_bytes(tmp_path / "unit" / "output.log", 10)
+
+    assert rotate_unit_log(log, max_bytes=11, backups=3) is False
+    assert log.read_text() == "x" * 10
+    assert not (tmp_path / "unit" / "output.log.1").exists()
+
+
+def test_unit_log_a_missing_file_is_not_created(tmp_path: Path) -> None:
+    log = tmp_path / "unit" / "output.log"
+
+    assert rotate_unit_log(log, max_bytes=1, backups=3) is False
+    assert not log.exists()
+
+
+def test_unit_log_reaching_the_cap_moves_the_file_aside_and_starts_a_fresh_one(
+    tmp_path: Path,
+) -> None:
+    log = _log_with_bytes(tmp_path / "unit" / "output.log", 8)
+
+    assert rotate_unit_log(log, max_bytes=8, backups=3) is True
+    assert not log.exists()
+    assert (tmp_path / "unit" / "output.log.1").read_text() == "x" * 8
+
+
+def test_unit_log_rotation_shifts_generations_and_drops_the_oldest(tmp_path: Path) -> None:
+    unit = tmp_path / "unit"
+    log = unit / "output.log"
+    for index, content in enumerate(("first", "second", "third"), start=1):
+        _log_with_bytes(log, len(content))
+        log.write_text(content)
+        assert rotate_unit_log(log, max_bytes=1, backups=2) is True
+        assert (unit / "output.log.1").read_text() == content
+        if index >= 2:
+            assert (unit / "output.log.2").exists()
+
+    assert sorted(p.name for p in unit.iterdir()) == ["output.log.1", "output.log.2"]
+    assert (unit / "output.log.1").read_text() == "third"
+    assert (unit / "output.log.2").read_text() == "second"
+
+
+def test_unit_log_a_rotation_failure_is_reported_not_raised(tmp_path: Path) -> None:
+    unit = tmp_path / "unit"
+    log = _log_with_bytes(unit / "output.log", 8)
+    unit.chmod(0o500)
+    try:
+        assert rotate_unit_log(log, max_bytes=1, backups=3) is False
+        assert log.exists()
+    finally:
+        unit.chmod(0o700)
+
+
+def test_unit_log_cap_and_backups_are_supervisor_configuration() -> None:
+    from services.supervision.meiva_root.stopping import SupervisorConfig
+
+    config = SupervisorConfig()
+    assert config.unit_log_max_bytes > 0
+    assert config.unit_log_backups >= 1
+    with pytest.raises(ValueError):
+        SupervisorConfig(unit_log_max_bytes=0)
+    with pytest.raises(ValueError):
+        SupervisorConfig(unit_log_backups=0)
