@@ -105,7 +105,7 @@ def record(ids: list[str], path: Path, host: str) -> Census:
     return document
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, host: str) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=_REPO_ROOT)
     parser.add_argument("--report", type=Path, default=None)
@@ -113,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     root: Path = arguments.root
     path: Path = arguments.report or root / DEFAULT_REPORT
     ids = collect(root)
-    document = record(ids, path, platform.system().lower())
+    document = record(ids, path, host)
     print(
         f"host-marks census: {document['collected']} declaration(s) selected on {document['host']}"
     )
@@ -124,4 +124,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(host=platform.system().lower()))

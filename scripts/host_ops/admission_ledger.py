@@ -18,12 +18,12 @@ from pathlib import Path
 WAIT_POLL_SECONDS = 10.0
 
 
-def current_boot_id() -> str:
+def current_boot_id(platform: str) -> str:
     # meiva:note
     # A reservation survives only inside the boot that made it: same pid after a reboot is a
     # different process. Linux names the boot; macOS exposes its second.
     try:
-        if sys.platform.startswith("linux"):
+        if platform.startswith("linux"):
             return Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
         out = subprocess.run(
             ["sysctl", "-n", "kern.boottime"], capture_output=True, text=True, check=False
@@ -43,12 +43,11 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def live_reservations(home: Path) -> list[dict[str, object]]:
+def live_reservations(home: Path, *, boot_id: str) -> list[dict[str, object]]:
     # meiva:note
     # Self-healing without a daemon: every start prunes the entries whose process is gone or
     # whose boot no longer matches, so a killed job needs no cleanup pass to stop counting.
     directory = home / "active"
-    boot = current_boot_id()
     live: list[dict[str, object]] = []
     if not directory.is_dir():
         return live
@@ -58,7 +57,7 @@ def live_reservations(home: Path) -> list[dict[str, object]]:
         except (OSError, json.JSONDecodeError):
             continue
         pid = entry.get("pid")
-        if entry.get("boot_id") != boot or not isinstance(pid, int) or not _pid_alive(pid):
+        if entry.get("boot_id") != boot_id or not isinstance(pid, int) or not _pid_alive(pid):
             with contextlib.suppress(OSError):
                 path.unlink()
             continue
@@ -90,7 +89,7 @@ def lock_path(home: Path, script: str) -> Path:
     return directory / f"{script}.lock"
 
 
-def lock_holder(path: Path) -> dict[str, object] | None:
+def lock_holder(path: Path, *, boot_id: str) -> dict[str, object] | None:
     # meiva:note
     # A lock file whose process died, or that outlived its boot, is stale: take it over
     # instead of waiting on a job nobody runs any more.
@@ -99,7 +98,7 @@ def lock_holder(path: Path) -> dict[str, object] | None:
     except (OSError, json.JSONDecodeError):
         return None
     pid = entry.get("pid")
-    if entry.get("boot_id") != current_boot_id() or not isinstance(pid, int):
+    if entry.get("boot_id") != boot_id or not isinstance(pid, int):
         return None
     return entry if _pid_alive(pid) else None
 
@@ -125,16 +124,16 @@ def wait_for_lock(
     # Waiting is not refusing: the job always starts. Whoever holds the lock is named, so a
     # waiting caller sees a reason instead of an apparently hung tool; the cap keeps a
     # forgotten lock from blocking the machine for a day.
-    started = time.monotonic()
+    boot_id = str(entry.get("boot_id", ""))
+    waited = 0.0
     while True:
         if take_lock(path, entry):
-            return "acquired", time.monotonic() - started
-        holder = lock_holder(path)
+            return "acquired", waited
+        holder = lock_holder(path, boot_id=boot_id)
         if holder is None:
             with contextlib.suppress(OSError):
                 path.unlink()
             continue
-        waited = time.monotonic() - started
         if waited >= max_wait:
             return "timeout", waited
         print(
@@ -143,4 +142,6 @@ def wait_for_lock(
             f"{holder.get('started_at')}); {max_wait - waited:.0f}s left",
             file=sys.stderr,
         )
-        sleep(min(WAIT_POLL_SECONDS, max_wait - waited))
+        step = min(WAIT_POLL_SECONDS, max_wait - waited)
+        sleep(step)
+        waited += step

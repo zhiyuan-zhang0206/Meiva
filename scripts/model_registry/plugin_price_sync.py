@@ -13,9 +13,10 @@ from __future__ import annotations
 import ast
 import json
 import sys
+from collections.abc import Mapping
 from datetime import UTC, datetime, time
 from pathlib import Path
-from typing import Any, NamedTuple, cast
+from typing import NamedTuple, TypeGuard
 
 from scripts.model_registry.plugin_price_rates import (
     FlatRates,
@@ -67,20 +68,31 @@ def _clock(value: object, *, context: str) -> str:
     return value
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _archive_windows(windows_raw: object, *, tier_context: str) -> tuple[WindowDeclaration, ...]:
-    if not isinstance(windows_raw, list):
+    if not _is_object_list(windows_raw):
         raise TypeError(f"{tier_context} utc_daily_overrides must be an array")
     windows: list[WindowDeclaration] = []
-    for index, window in enumerate(cast("list[object]", windows_raw)):
-        if not isinstance(window, dict):
+    for index, window in enumerate(windows_raw):
+        if not _is_table(window):
             raise TypeError(f"{tier_context} windows must be objects")
-        fields = cast("dict[object, object]", window)
         windows.append(
             WindowDeclaration(
-                start=_clock(fields["start"], context=f"{tier_context} window {index} start"),
-                end=_clock(fields["end"], context=f"{tier_context} window {index} end"),
+                start=_clock(window["start"], context=f"{tier_context} window {index} start"),
+                end=_clock(window["end"], context=f"{tier_context} window {index} end"),
                 rates=archive_rates(
-                    fields["rates"], context=f"{tier_context} window {index} rates"
+                    window["rates"], context=f"{tier_context} window {index} rates"
                 ),
             )
         )
@@ -90,32 +102,31 @@ def _archive_windows(windows_raw: object, *, tier_context: str) -> tuple[WindowD
 def _archive_tier(
     model: str, tier_raw: object, *, tier_context: str, expected_min: int
 ) -> TierDeclaration:
-    if not isinstance(tier_raw, dict):
+    if not _is_table(tier_raw):
         raise TypeError(f"{tier_context} must be an object")
-    fields = cast("dict[object, object]", tier_raw)
-    lower = fields["input_tokens_min"]
-    upper = fields["input_tokens_max"]
+    lower = tier_raw["input_tokens_min"]
+    upper = tier_raw["input_tokens_max"]
     if isinstance(lower, bool) or not isinstance(lower, int):
         raise TypeError(f"{tier_context} input_tokens_min must be an integer")
     if upper is not None and (isinstance(upper, bool) or not isinstance(upper, int)):
         raise TypeError(f"{tier_context} input_tokens_max must be an integer or null")
     if lower != expected_min or (upper is not None and upper < lower):
         raise RuntimeError(f"archive {model!r} has a gap or overlap in tiers")
-    windows = _archive_windows(fields["utc_daily_overrides"], tier_context=tier_context)
+    windows = _archive_windows(tier_raw["utc_daily_overrides"], tier_context=tier_context)
     return TierDeclaration(
         input_tokens_min=lower,
         input_tokens_max=upper,
-        rates=archive_rates(fields["rates"], context=f"{tier_context} rates"),
+        rates=archive_rates(tier_raw["rates"], context=f"{tier_context} rates"),
         windows=windows,
     )
 
 
 def _archive_tiers(model: str, tiers_raw: object, *, context: str) -> tuple[TierDeclaration, ...]:
-    if not isinstance(tiers_raw, list) or not tiers_raw:
+    if not _is_object_list(tiers_raw) or not tiers_raw:
         raise RuntimeError(f"{context} must contain tiers")
     tiers: list[TierDeclaration] = []
     expected_min = 0
-    for tier_index, tier_raw in enumerate(cast("list[object]", tiers_raw)):
+    for tier_index, tier_raw in enumerate(tiers_raw):
         tier = _archive_tier(
             model, tier_raw, tier_context=f"{context} tier {tier_index}", expected_min=expected_min
         )
@@ -133,20 +144,19 @@ def _period_boundary(value: object, *, context: str) -> str | None:
 
 
 def _archive_periods(model: str, raw: object) -> tuple[PeriodDeclaration, ...]:
-    if not isinstance(raw, list) or not raw:
+    if not _is_object_list(raw) or not raw:
         raise RuntimeError(f"archive {model!r} must contain periods")
     periods: list[PeriodDeclaration] = []
     previous_until: str | None = None
-    for period_index, period_raw in enumerate(cast("list[object]", raw)):
+    for period_index, period_raw in enumerate(raw):
         context = f"archive {model!r} period {period_index}"
-        if not isinstance(period_raw, dict):
+        if not _is_table(period_raw):
             raise TypeError(f"{context} must be an object")
-        fields = cast("dict[object, object]", period_raw)
         effective_from = _period_boundary(
-            fields["effective_from"], context=f"{context} effective_from"
+            period_raw["effective_from"], context=f"{context} effective_from"
         )
         effective_until = _period_boundary(
-            fields["effective_until"], context=f"{context} effective_until"
+            period_raw["effective_until"], context=f"{context} effective_until"
         )
         start = _instant(effective_from, context=f"{context} effective_from")
         end = _instant(effective_until, context=f"{context} effective_until")
@@ -156,7 +166,7 @@ def _archive_periods(model: str, raw: object) -> tuple[PeriodDeclaration, ...]:
             raise RuntimeError(f"archive {model!r} has a gap or overlap in periods")
         if start is not None and end is not None and end <= start:
             raise RuntimeError(f"{context} is empty")
-        tiers = _archive_tiers(model, fields["tiers"], context=context)
+        tiers = _archive_tiers(model, period_raw["tiers"], context=context)
         periods.append(PeriodDeclaration(effective_from, effective_until, tiers))
         previous_until = effective_until
     if periods[-1].effective_until is not None:
@@ -173,7 +183,7 @@ def _base_rates(period: PeriodDeclaration, *, context: str) -> FlatRates:
 
 def archive_price(
     model: str,
-    entry: dict[str, Any],
+    entry: Mapping[str, object],
     now: datetime,
 ) -> tuple[PriceDeclaration, tuple[tuple[str, FlatRates], ...]]:
     periods = _archive_periods(model, entry["periods"])
@@ -186,8 +196,8 @@ def archive_price(
         rates = _base_rates(period, context=context)
         if (start is None or now >= start) and (end is None or now < end):
             covering.append(period)
-        if start is not None and start > now:
-            upcoming.append((cast(str, period.effective_from), rates))
+        if start is not None and start > now and period.effective_from is not None:
+            upcoming.append((period.effective_from, rates))
     if len(covering) != 1:
         raise RuntimeError(f"archive {model!r} must have exactly one period covering now")
     current = _base_rates(covering[0], context=f"archive {model!r} current period")
@@ -391,7 +401,7 @@ def _reject_duplicate_prices(seen: set[str], manifest: ProviderManifest, *, path
 
 def _plugin_targets(
     manifest: ProviderManifest,
-    archive_models: dict[str, dict[str, Any]],
+    archive_models: Mapping[str, Mapping[str, object]],
     *,
     path: Path,
     now: datetime,
@@ -417,6 +427,21 @@ def _plugin_targets(
 # half-synchronized tree would bill from a stale declaration while the diff looks complete.
 # The loop still reports every provider, so one run names everything that is wrong instead of
 # one file per run.
+def _load_archive_models(archive: Path) -> dict[str, dict[str, object]]:
+    raw: object = json.loads(archive.read_text(encoding="utf-8"))
+    if not _is_table(raw):
+        raise TypeError("pricing archive must be a JSON object")
+    raw_models = raw.get("models")
+    if not _is_table(raw_models):
+        raise TypeError("pricing archive must contain a models object")
+    archive_models: dict[str, dict[str, object]] = {}
+    for model_name, model_entry in raw_models.items():
+        if not _is_table(model_entry):
+            raise TypeError(f"pricing archive model {model_name!r} must be an object")
+        archive_models[model_name] = model_entry
+    return archive_models
+
+
 def sync_plugin_rates(
     archive_path: Path,
     repo_root: Path,
@@ -426,8 +451,7 @@ def sync_plugin_rates(
 ) -> PluginSyncResult:
     root = repo_root.resolve(strict=True)
     archive = _regular_file(archive_path, root, label="pricing archive")
-    raw = cast(dict[str, Any], json.loads(archive.read_text(encoding="utf-8")))
-    archive_models = cast(dict[str, dict[str, Any]], raw["models"])
+    archive_models = _load_archive_models(archive)
     provider_paths = sorted((root / "meiva_builtins/plugins").glob("lm_*/provider.py"))
     if not provider_paths:
         raise RuntimeError(f"no built-in provider.py files found under {root}")

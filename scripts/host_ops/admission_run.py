@@ -31,8 +31,12 @@ from scripts.host_ops.admission_floor import (
     swap_line,
 )
 from scripts.host_ops.admission_ledger import (
-    current_boot_id,
-    live_reservations,
+    current_boot_id as _ledger_boot_id,
+)
+from scripts.host_ops.admission_ledger import (
+    live_reservations as _ledger_live_reservations,
+)
+from scripts.host_ops.admission_ledger import (
     lock_holder,
     lock_path,
     reserve,
@@ -95,6 +99,14 @@ def admission_home() -> Path:
     # The table and the event log live under the home the host already uses, so an agent
     # and an operator reading the same machine see one history.
     return Path.home() / ".meiva" / "admission"
+
+
+def current_boot_id(platform_name: str = sys.platform) -> str:
+    return _ledger_boot_id(platform_name)
+
+
+def live_reservations(home: Path, *, platform_name: str = sys.platform) -> list[dict[str, object]]:
+    return _ledger_live_reservations(home, boot_id=current_boot_id(platform_name))
 
 
 def plan(
@@ -475,13 +487,13 @@ def _announce_gate(
     # zero: the job runs at its requested concurrency and the line says why.
     if budget is None:
         print(
-            f"admission: no budget reading on {sys.platform}; keeping jobs {requested}",
+            f"admission: no budget reading on {platform_name}; keeping jobs {requested}",
             file=sys.stderr,
         )
-        emit(events, "unknown", script=script, reason="budget", platform=sys.platform)
+        emit(events, "unknown", script=script, reason="budget", platform=platform_name)
         return requested
     pressure = pressure_reader()
-    live = live_reservations(events.parent)
+    live = live_reservations(events.parent, platform_name=platform_name)
     reserved = reserved_gib(live) if budget.source == "memory" else 0.0
     room = max(0.0, budget.free_gib - reserved)
     outcome = plan(requested, peak_mb, room, pressure, reserve_gib, multiplier)
@@ -734,7 +746,7 @@ def hold(
         outcome, waited = wait_for_lock(path, entry, max_wait=max_wait, sleep=sleep)
         status = {"wait_outcome": outcome, "waited_seconds": round(waited, 1)}
         if outcome == "timeout":
-            holder = lock_holder(path) or {}
+            holder = lock_holder(path, boot_id=str(entry["boot_id"])) or {}
             print(
                 f"admission: gave up waiting {waited:.0f} s for the {script} lock "
                 f"(held by {holder.get('script')} since {holder.get('started_at')}); "

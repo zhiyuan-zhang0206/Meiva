@@ -392,9 +392,35 @@ def test_a_failing_artifact_hook_fails_the_push(freshness_repo: tuple[Path, Path
 # Frontend contribution scope across real rebase and pre-commit push ranges.
 
 
+_GIT_HOOK_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR")
+
+
+def _clean_git_env() -> dict[str, str]:
+    return {k: v for k, v in os.environ.items() if k not in _GIT_HOOK_VARS}
+
+
+def _repo_env(repo: Path, **overrides: str) -> dict[str, str]:
+    probe = repo.parent / "probe"
+    locks = repo.parent / "locks"
+    base = _clean_git_env()
+    return {
+        **base,
+        "PATH": f"{probe}{os.pathsep}{base['PATH']}",
+        "CALLS": str(repo / "calls.jsonl"),
+        "MEIVA_PREPUSH_MAX_LOAD_PER_CORE": "1000000",
+        "MEIVA_PREPUSH_LOCK_DIR": str(locks),
+        **overrides,
+    }
+
+
 def git(repo: Path, *args: str) -> str:
     return subprocess.run(
-        ["git", *args], cwd=repo, check=True, capture_output=True, text=True
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=_clean_git_env(),
     ).stdout.strip()
 
 
@@ -407,9 +433,7 @@ def commit(repo: Path, path: str, content: str) -> None:
 
 
 @pytest.fixture
-def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"):
-        monkeypatch.delenv(key, raising=False)
+def repo(tmp_path: Path) -> Path:
     result = tmp_path / "repo"
     result.mkdir()
     git(result, "init", "-q", "-b", "main")
@@ -432,14 +456,10 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             "sys.stdin.read()\n"
         )
         (probe / name).chmod(0o755)
-    monkeypatch.setenv("PATH", str(probe) + os.pathsep + os.environ["PATH"])
-    monkeypatch.setenv("CALLS", str(result / "calls.jsonl"))
-    monkeypatch.setenv("MEIVA_PREPUSH_MAX_LOAD_PER_CORE", "1000000")
-    monkeypatch.setenv("MEIVA_PREPUSH_LOCK_DIR", str(tmp_path / "locks"))
     return result
 
 
-def select(repo: Path, tool: str) -> subprocess.CompletedProcess[str]:
+def select(repo: Path, tool: str, *, tool_status: str = "0") -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(SELECTOR), tool],
         cwd=repo,
@@ -447,6 +467,7 @@ def select(repo: Path, tool: str) -> subprocess.CompletedProcess[str]:
         text=True,
         check=False,
         timeout=15,
+        env=_repo_env(repo, TOOL_STATUS=tool_status),
     )
 
 
@@ -494,6 +515,7 @@ def test_rebased_upstream_ui_does_not_invoke_tool(repo: Path, tool: str) -> None
         text=True,
         check=False,
         timeout=30,
+        env=_repo_env(repo),
     )
     assert legacy.returncode == 0, legacy.stdout + legacy.stderr
     assert calls(repo), "the old push-tip trigger must reproduce the upstream-only tool invocation"
@@ -519,6 +541,7 @@ def test_rebased_upstream_ui_does_not_invoke_tool(repo: Path, tool: str) -> None
         text=True,
         check=False,
         timeout=30,
+        env=_repo_env(repo),
     )
     assert result.returncode == 0, result.stderr + result.stdout
     assert calls(repo) == []
@@ -634,12 +657,9 @@ def test_missing_base_is_not_no_changes(repo: Path, tool: str) -> None:
     assert calls(repo) == []
 
 
-def test_empty_or_failed_related_run_stays_failed(
-    repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_empty_or_failed_related_run_stays_failed(repo: Path) -> None:
     commit(repo, "ui/web/scripts/changed.mjs", "export const x = 1")
-    monkeypatch.setenv("TOOL_STATUS", "1")
-    result = select(repo, "vitest")
+    result = select(repo, "vitest", tool_status="1")
     assert result.returncode == 1
     assert calls(repo)[0][2:7] == [
         "related",
@@ -698,11 +718,8 @@ def test_delete_only_input_checks_type_project_and_reports_test_closure(repo: Pa
     ]
 
 
-def test_eslint_pipeline_preserves_native_failure(
-    repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_eslint_pipeline_preserves_native_failure(repo: Path) -> None:
     commit(repo, "ui/web/src/changed.ts", "export const x = 1")
-    monkeypatch.setenv("TOOL_STATUS", "7")
-    result = select(repo, "eslint")
+    result = select(repo, "eslint", tool_status="7")
     assert result.returncode == 7
     assert calls(repo)[0][-1] == "src/changed.ts"

@@ -253,7 +253,25 @@ class _Checkout:
         self.pyproject.write_text(_SYNTHETIC_PYPROJECT, encoding="utf-8")
 
     def _git(self, *args: str) -> None:
-        subprocess.run(["git", "-C", str(self.root), *args], check=True, capture_output=True)  # noqa: S603
+        subprocess.run(  # noqa: S603
+            [
+                "env",
+                "-u",
+                "GIT_DIR",
+                "-u",
+                "GIT_WORK_TREE",
+                "-u",
+                "GIT_INDEX_FILE",
+                "-u",
+                "GIT_COMMON_DIR",
+                "git",
+                "-C",
+                str(self.root),
+                *args,
+            ],
+            check=True,
+            capture_output=True,
+        )
 
     def add(self, rel: str) -> None:
         path = self.root / rel
@@ -275,9 +293,7 @@ class _Checkout:
 
 
 @pytest.fixture
-def checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Checkout:
-    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"):
-        monkeypatch.delenv(name, raising=False)
+def checkout(tmp_path: Path) -> _Checkout:
     return _Checkout(tmp_path)
 
 

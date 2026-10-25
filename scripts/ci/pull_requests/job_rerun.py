@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from typing import TypedDict, cast
+from typing import TypedDict, TypeGuard
 
 from base.host.system.hostport import Host
 
@@ -69,17 +69,29 @@ class WorkflowJob(TypedDict):
     run_status: str
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _response_rows(data: object, field: str) -> list[dict[str, object]]:
-    if not isinstance(data, dict):
+    if not _is_table(data):
         raise CiJobRerunError(f"gh api {field} response must be an object")
-    raw_rows = cast("dict[str, object]", data).get(field)
-    if not isinstance(raw_rows, list):
+    raw_rows = data.get(field)
+    if not _is_object_list(raw_rows):
         raise CiJobRerunError(f"gh api {field} must be a list")
     rows: list[dict[str, object]] = []
-    for index, row in enumerate(cast("list[object]", raw_rows)):
-        if not isinstance(row, dict):
+    for index, row in enumerate(raw_rows):
+        if not _is_table(row):
             raise CiJobRerunError(f"gh api {field}[{index}] must be an object")
-        rows.append(cast("dict[str, object]", row))
+        rows.append(row)
     return rows
 
 

@@ -406,12 +406,8 @@ def reconcile_deepseek_catalog(
     return updated
 
 
-def _detected_at_now() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
-def now_utc() -> datetime:
-    return datetime.now(UTC)
+def _detected_at(now: datetime) -> str:
+    return now.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def sync_plugin_rates(
@@ -425,7 +421,7 @@ def sync_plugin_rates(
     return _sync_plugin_rates(
         archive_path,
         repo_root,
-        now=now_utc() if now is None else now,
+        now=datetime.now(UTC) if now is None else now,
         write=write,
     )
 
@@ -438,6 +434,20 @@ def _fetch_deepseek_html() -> str:
     )
     response.raise_for_status()
     return response.content.decode("utf-8")
+
+
+def _run_sync_plugins(
+    catalog_path: Path, repo_root: Path, *, write: bool, current_now: datetime
+) -> int:
+    result = sync_plugin_rates(catalog_path, repo_root, write=write, now=current_now)
+    if result.drifted_models and not write:
+        print(f"Plugin pricing drift detected for: {', '.join(result.drifted_models)}")
+        return 1
+    if result.changed_files:
+        print(f"Synchronized plugin rates in {len(result.changed_files)} provider file(s).")
+    else:
+        print("Plugin prices match the archive's full period/tier/window semantics.")
+    return 0
 
 
 def main(argv: list[str] | None = None, *, now: datetime | None = None) -> int:
@@ -478,6 +488,7 @@ def main(argv: list[str] | None = None, *, now: datetime | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    current_now = datetime.now(UTC) if now is None else now
     repo_root = args.repo_root or _REPO_ROOT
     catalog_path = args.catalog or (
         repo_root / "base/lm/pricing/pricing_catalog_archive.json"
@@ -487,15 +498,7 @@ def main(argv: list[str] | None = None, *, now: datetime | None = None) -> int:
     if args.sync_plugins:
         if args.source_file is not None or args.detected_at is not None:
             parser.error("--source-file/--detected-at cannot be used with --sync-plugins")
-        result = sync_plugin_rates(catalog_path, repo_root, write=args.write, now=now)
-        if result.drifted_models and not args.write:
-            print(f"Plugin pricing drift detected for: {', '.join(result.drifted_models)}")
-            return 1
-        if result.changed_files:
-            print(f"Synchronized plugin rates in {len(result.changed_files)} provider file(s).")
-        else:
-            print("Plugin prices match the archive's full period/tier/window semantics.")
-        return 0
+        return _run_sync_plugins(catalog_path, repo_root, write=args.write, current_now=current_now)
 
     html = (
         args.source_file.read_text(encoding="utf-8")
@@ -503,7 +506,7 @@ def main(argv: list[str] | None = None, *, now: datetime | None = None) -> int:
         else _fetch_deepseek_html()
     )
     catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
-    detected_at = args.detected_at or _detected_at_now()
+    detected_at = args.detected_at or _detected_at(current_now)
     updated = reconcile_deepseek_catalog(
         catalog,
         parse_deepseek_pricing(html),

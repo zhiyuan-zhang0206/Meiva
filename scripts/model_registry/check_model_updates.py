@@ -15,15 +15,15 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any, Literal, cast, override
+from typing import Any, Literal, override
 from urllib.parse import urlparse
 
 import requests
 from dotenv import dotenv_values
 from requests.adapters import HTTPAdapter
+from urllib3 import _base_connection
 from urllib3.connection import HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
-from urllib3.poolmanager import PoolManager
 
 from base.host.env.dotenv_file import process_env_file, read_env_aliases
 from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
@@ -144,36 +144,35 @@ class _PinnedIPHTTPSConnection(HTTPSConnection):
         self._dns_host = value
 
 
+def _pin_connection(connection: object, pinned_ip: str) -> None:
+    if not isinstance(connection, HTTPSConnection):
+        raise TypeError(f"Expected HTTPSConnection, got {type(connection).__name__}")
+    origin_host = connection.host
+    connection.__class__ = _PinnedIPHTTPSConnection
+    if not isinstance(connection, _PinnedIPHTTPSConnection):
+        raise TypeError(f"Expected _PinnedIPHTTPSConnection, got {type(connection).__name__}")
+    connection._origin_host = origin_host
+    connection._dns_host = pinned_ip
+
+
 class _PinnedIPConnectionPool(HTTPSConnectionPool):
     """Create connections that dial a pinned IP while retaining the origin host."""
 
-    ConnectionCls = cast(Any, _PinnedIPHTTPSConnection)
     pinned_ip = ""
 
-    def _new_conn(self) -> Any:
-        connection = cast(_PinnedIPHTTPSConnection, super()._new_conn())
-        connection._dns_host = self.pinned_ip
+    @override
+    def _new_conn(self) -> _base_connection.BaseHTTPSConnection:
+        connection = super()._new_conn()
+        _pin_connection(connection, self.pinned_ip)
         return connection
 
 
 class PinnedIPHTTPSAdapter(HTTPAdapter):
     """Dial the pinned IP while SNI, Host, and certificate checks use the real hostname."""
 
-    def __init__(self, pinned_ip: str, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, pinned_ip: str) -> None:
         self._pinned_ip = pinned_ip
-        super().__init__(*args, **kwargs)
-
-    @override
-    def init_poolmanager(
-        self,
-        connections: int,
-        maxsize: int,
-        block: bool = False,
-        **pool_kwargs: Any,
-    ) -> None:
-        self.poolmanager = PoolManager(
-            num_pools=connections, maxsize=maxsize, block=block, **pool_kwargs
-        )
+        super().__init__()
         pinned_pool = type(
             "_PinnedIPConnectionPool", (_PinnedIPConnectionPool,), {"pinned_ip": self._pinned_ip}
         )

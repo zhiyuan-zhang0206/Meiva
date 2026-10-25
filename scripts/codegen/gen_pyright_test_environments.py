@@ -44,7 +44,7 @@ import sys
 import tomllib
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -100,15 +100,17 @@ def tests_roots(tracked: Iterable[str], hosts: tuple[str, ...]) -> list[str]:
     return sorted(roots)
 
 
+def _is_str_list(value: object) -> TypeGuard[list[str]]:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
 def _toml_value(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, str):
         return json.dumps(value)
-    if isinstance(value, list):
-        items = cast("list[object]", value)
-        if all(isinstance(item, str) for item in items):
-            return json.dumps(items)
+    if _is_str_list(value):
+        return json.dumps(value)
     raise SystemExit(
         f"cannot repeat a {type(value).__name__} setting in a generated entry: {value!r}"
     )
@@ -162,7 +164,24 @@ def generate(pyproject_text: str, tracked: Iterable[str]) -> str:
 
 def _tracked_python_files(repo_root: Path) -> list[str]:
     result = subprocess.run(  # noqa: S603 - fixed git query in a repository
-        ["git", "-C", str(repo_root), "ls-files", "-z", "--", "*.py"],
+        [
+            "env",
+            "-u",
+            "GIT_DIR",
+            "-u",
+            "GIT_WORK_TREE",
+            "-u",
+            "GIT_INDEX_FILE",
+            "-u",
+            "GIT_COMMON_DIR",
+            "git",
+            "-C",
+            str(repo_root),
+            "ls-files",
+            "-z",
+            "--",
+            "*.py",
+        ],
         capture_output=True,
         text=True,
         check=True,

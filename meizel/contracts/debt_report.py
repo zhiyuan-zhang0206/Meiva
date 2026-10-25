@@ -11,7 +11,7 @@ import subprocess
 import tomllib
 from collections import Counter
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from meizel.contracts.debt import (
     PATCH_CODES,
@@ -148,6 +148,14 @@ def _git(root: Path, *args: str, stdin: bytes | None = None) -> bytes:
     return result.stdout
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
 def _totals_in(text: str) -> Counter[str]:
     """Recorded counts per code in one manifest text, read leniently.
 
@@ -160,12 +168,10 @@ def _totals_in(text: str) -> Counter[str]:
         return Counter()
     table = document.get(TABLE_KEY)
     counts: Counter[str] = Counter()
-    if isinstance(table, dict):
-        for code, rows in cast("dict[str, object]", table).items():
-            if isinstance(rows, dict):
-                counts[code] += sum(
-                    n for n in cast("dict[str, object]", rows).values() if isinstance(n, int)
-                )
+    if _is_table(table):
+        for code, rows in table.items():
+            if _is_table(rows):
+                counts[code] += sum(n for n in rows.values() if isinstance(n, int))
     return counts
 
 
@@ -262,10 +268,9 @@ def _tables_in(text: str) -> list[dict[str, dict[str, object]]]:
     except tomllib.TOMLDecodeError:
         return []
     table = document.get(TABLE_KEY)
-    if not isinstance(table, dict):
+    if not _is_table(table):
         return []
-    rows = cast("dict[str, object]", table)
-    return [{c: cast("dict[str, object]", r) for c, r in rows.items() if isinstance(r, dict)}]
+    return [{c: r for c, r in table.items() if _is_table(r)}]
 
 
 def _group(target: str, prefixes: list[str], depth: int) -> str:
