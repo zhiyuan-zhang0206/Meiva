@@ -17,3 +17,19 @@ exports = ["cli.py", "pull_requests", "refresh_test_durations.py", "shard_counts
 "host_marks_census.py#platform platform.system" = 1
 "pgvector_runtime_smoke.py#platform platform.machine" = 1
 "pgvector_runtime_smoke.py#platform platform.system" = 1
+
+[debt.type-cast]
+"coverage_gates.py#cast _line_counts" = 2
+"coverage_gates.py#cast main" = 2
+"dependency_audit.py#cast main" = 2
+"dependency_audit.py#cast osv_severity" = 2
+"dependency_audit.py#cast run_json" = 1
+"file_shard_shadow.py#cast _check" = 2
+"file_shard_shadow.py#cast _durations" = 1
+"file_shard_shadow.py#cast _load_group" = 1
+"file_shard_shadow.py#cast _plan" = 1
+"file_shard_shadow.py#cast _report_path" = 1
+"file_shard_shadow.py#cast _worker" = 1
+"file_shard_shadow.py#cast pytest_configure" = 2
+"file_shard_shadow.py#cast pytest_sessionfinish" = 1
+"refresh_test_durations.py#cast load_durations" = 1

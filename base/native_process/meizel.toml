@@ -32,3 +32,8 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 "ownership.py#pid os.getpid" = 1
 "ownership.py#platform sys.platform" = 6
 "pidfd.py#platform sys.platform" = 1
+
+[debt.type-cast]
+"exec_domain.py#cast ExecProcessDomain.launch_posix" = 1
+"exec_domain.py#cast ExecProcessDomain.signal" = 1
+"ownership.py#cast stable_create_time" = 1

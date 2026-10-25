@@ -9,3 +9,8 @@ exports = ["cluster_registry.py", "refresh.py", "refresh_git_plan.py", "refresh_
 
 [debt.ambient-read]
 "__init__.py#clock datetime.datetime.now" = 2
+
+[debt.type-cast]
+"__init__.py#cast _fmt_range" = 1
+"__init__.py#cast cmd_packages_policy" = 1
+"cluster_registry.py#cast _detail" = 1

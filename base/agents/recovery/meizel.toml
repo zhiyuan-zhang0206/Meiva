@@ -2,3 +2,6 @@ exports = ["breaker.py"]
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.type-cast]
+"breaker.py#cast record_permanent_reject_turn" = 1

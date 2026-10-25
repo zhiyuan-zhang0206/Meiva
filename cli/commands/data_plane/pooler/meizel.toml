@@ -10,3 +10,6 @@ exports = ["convergence.py", "identity.py", "ini.py", "stop_intent.py", "text.py
 "ini.py" = "strict"
 "stop_intent.py" = "strict"
 "text.py" = "strict"
+
+[debt.type-cast]
+"stop_intent.py#cast intent_names" = 1

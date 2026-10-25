@@ -17,3 +17,7 @@ exports = ["daemon.py", "service.py", "shutdown_budget.py"]
 "memory_guard.py#pid os.getpid" = 1
 "service.py#clock time.monotonic" = 5
 "service.py#pid os.getpid" = 1
+
+[debt.type-cast]
+"service.py#cast _validate_env_overlay" = 1
+"service.py#cast _validate_optional_map_json" = 1

@@ -14,3 +14,8 @@ exports = ["inventory.py", "notification_categories.py", "packages.py", "plugin_
 
 [debt.ambient-read]
 "inventory.py#clock datetime.datetime.now" = 1
+
+[debt.type-cast]
+"notification_categories.py#cast categories_from_manifests" = 1
+"ui_contributions.py#cast _enabled_ui_declarations" = 1
+"ui_contributions.py#cast get_ui_contributions" = 12

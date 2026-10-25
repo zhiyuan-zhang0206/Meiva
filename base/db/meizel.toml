@@ -17,3 +17,7 @@ exports = ["code_version_gate.py", "config.py", "connections.py", "test_db_guard
 "handle.py#db base.db.connections.async_pool" = 1
 "handle.py#db base.db.connections.connect" = 1
 "handle.py#db base.db.connections.pool" = 1
+
+[debt.type-cast]
+"code_version_gate.py#cast has_log_sink" = 1
+"connections.py#cast restore_budget_statement" = 1

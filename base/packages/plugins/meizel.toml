@@ -33,3 +33,26 @@ exports = ["activation.py", "config_face.py", "config_registration.py", "config_
 "config_registration.py#base/packages/plugin_config_images.py" = 1
 "config_registration.py#base/packages/plugins/config_face.py" = 1
 "config_registration.py#base/packages/plugins/config_view.py" = 1
+
+[debt.type-cast]
+"__init__.py#cast _field_is_sensitive" = 1
+"__init__.py#cast _schema_extra" = 1
+"__init__.py#cast config_from_image" = 1
+"config_registration.py#cast _reconcile_config_image" = 1
+"config_registration.py#cast _schema_extra" = 1
+"config_view.py#cast read_service_config" = 2
+"enable_config.py#cast PluginEnableStore.read" = 1
+"gate.py#cast check_manifest" = 2
+"manifest.py#cast _config_contribution" = 1
+"manifest.py#cast _str_list" = 1
+"manifest.py#cast _validate_contributions" = 1
+"manifest.py#cast _validate_dependencies" = 1
+"manifest.py#cast _validate_engines" = 1
+"manifest.py#cast _validate_host_capabilities" = 1
+"manifest.py#cast _validate_lifecycle" = 1
+"manifest.py#cast _validate_plugins" = 1
+"manifest.py#cast _validate_python_packages" = 1
+"manifest.py#cast load_manifest" = 1
+"manifest.py#cast validate" = 2
+"mcp_enabled.py#cast _read_local" = 1
+"pyproject_mirror.py#cast pyproject_dependency_specs" = 1

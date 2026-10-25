@@ -12,3 +12,6 @@ exports = ["daemon.py", "tests"]
 
 [debt.ambient-read]
 "daemon.py#pid os.getpid" = 1
+
+[debt.type-cast]
+"daemon.py#cast Handler.gate" = 1

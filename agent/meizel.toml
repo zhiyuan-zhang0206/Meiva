@@ -26,3 +26,6 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 "impersonation.py#clock datetime.datetime.now" = 2
 "impersonation.py#clock time.monotonic" = 4
 "impersonation.py#random secrets.token_urlsafe" = 1
+
+[debt.type-cast]
+"impersonation_handoff.py#cast flush_checkpoint" = 1

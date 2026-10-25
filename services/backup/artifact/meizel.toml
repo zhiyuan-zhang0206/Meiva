@@ -10,3 +10,8 @@ exports = ["intermediates.py", "names.py", "offsite.py", "offsite_plan.py", "pas
 
 [debt.ambient-read]
 "passphrase.py#random secrets.token_hex" = 1
+
+[debt.type-cast]
+"offsite.py#cast _verified" = 1
+"offsite.py#cast open_bucket" = 1
+"offsite.py#cast put_if_absent" = 2

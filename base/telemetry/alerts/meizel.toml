@@ -11,3 +11,7 @@ exports = ["copy.py", "native.py", "shadow.py"]
 [debt.ambient-read]
 "__init__.py#settings base.config.settings" = 1
 "native.py#settings base.config.settings" = 1
+
+[debt.type-cast]
+"__init__.py#cast _group_head.<listcomp>" = 1
+"__init__.py#cast _summary" = 1

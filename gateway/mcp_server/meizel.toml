@@ -2,3 +2,7 @@ exports = ["endpoint.py"]
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.type-cast]
+"endpoint.py#cast _call_api" = 1
+"endpoint.py#cast _register_tools" = 1

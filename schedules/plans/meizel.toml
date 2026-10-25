@@ -25,3 +25,12 @@ exports = ["adversarial_cases.py", "adversarial_marker.py", "adversarial_scorebo
 "adversarial_spawn.py" = ["adversarial_cases.py"]
 "adversarial_workers.py" = ["directory_plan.py"]
 "debt_sweep_worker.py" = ["debt_sweep_scan.py"]
+
+[debt.type-cast]
+"adversarial_marker.py#cast _worker_ids" = 1
+"adversarial_marker.py#cast read_marker" = 1
+"ci_workflows.py#cast _field" = 1
+"ci_workflows.py#cast _run" = 1
+"ci_workflows.py#cast parse_workflow_runs" = 2
+"tracker_report.py#cast _object" = 1
+"tracker_report.py#cast candidate_message" = 5

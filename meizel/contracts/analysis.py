@@ -389,6 +389,28 @@ def _judge_facts(
     return projections, found, dict(needed)
 
 
+def _type_cast_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]:
+    return [
+        Diagnostic(
+            scan.path,
+            site.line,
+            Code.TYPE_CAST,
+            f"typing.cast call in {site.qualname} at byte column {site.column}",
+            (
+                "why: typing.cast asserts a type without validating the value",
+                "instead: validate or narrow the value at its boundary",
+                "see: meizel/docs/checker/type-cast.meiva.okf.md",
+            ),
+            DebtKey(
+                scan.path.rpartition("/")[0],
+                file_key(scan.path.rpartition("/")[0], scan.path, f"cast {site.qualname}"),
+            ),
+        )
+        for scan in scans
+        for site in scan.type_casts
+    ]
+
+
 def diagnose(scan: FileScan, manifests: dict[str, Manifest]) -> list[Diagnostic]:
     """The violations one scanned file contributes by itself, as `analyze` finds them."""
     _, found, _ = _judge_facts(scan.facts, manifests)
@@ -396,6 +418,7 @@ def diagnose(scan: FileScan, manifests: dict[str, Manifest]) -> list[Diagnostic]
     found.extend(_source_diagnostics([scan], loaders, externals))
     found.extend(_patch_diagnostics([scan]))
     found.extend(ambient_diagnostics([scan], manifests))
+    found.extend(_type_cast_diagnostics([scan]))
     found.extend(purity_diagnostics([scan], [scan], manifests, Policy(), include_manifests=False))
     return _distinct(found)
 
@@ -439,6 +462,7 @@ def analyze(
     diagnostics.extend(_source_diagnostics([scans[p] for p in judged], loaders, externals))
     diagnostics.extend(_patch_diagnostics(scans[p] for p in judged))
     diagnostics.extend(ambient_diagnostics((scans[p] for p in judged), manifests))
+    diagnostics.extend(_type_cast_diagnostics(scans[p] for p in judged))
     purity_diags = purity_diagnostics(scans.values(), [scans[p] for p in judged], manifests, policy)
     stale = StaleDeclarations()
     if scope is None:

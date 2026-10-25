@@ -33,3 +33,8 @@ exports = ["admission.py", "attachment.py"]
 "attachment.py#base/native_process/ownership.py" = 1
 "attachment.py#base/packages/plugins/config_view.py" = 1
 "attachment.py#meiva/boot.py" = 1
+
+[debt.type-cast]
+"attachment.py#cast Attachment._prepare" = 1
+"attachment.py#cast Attachment._seal_wait_seconds" = 1
+"attachment.py#cast _Codec.encode_plugin_delta" = 1

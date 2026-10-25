@@ -5,3 +5,6 @@ exports = ["retry.py"]
 "retry.py#import httpx" = 1
 "retry.py#import psycopg" = 1
 "retry.py#import psycopg_pool" = 1
+
+[debt.type-cast]
+"retry.py#cast retryable_response" = 1

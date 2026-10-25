@@ -16,3 +16,18 @@ exports = ["update_model_pricing.py"]
 
 [debt.ambient-read]
 "update_model_pricing.py#clock datetime.datetime.now" = 2
+
+[debt.type-cast]
+"check_model_updates.py#cast _PinnedIPConnectionPool" = 1
+"check_model_updates.py#cast _PinnedIPConnectionPool._new_conn" = 1
+"plugin_price_rates.py#cast archive_rates" = 1
+"plugin_price_source.py#cast _call_fields.<dictcomp>" = 1
+"plugin_price_source.py#cast _integer_literal" = 1
+"plugin_price_source.py#cast _mapping_keys.<genexpr>" = 1
+"plugin_price_source.py#cast _model_key" = 1
+"plugin_price_sync.py#cast _archive_periods" = 2
+"plugin_price_sync.py#cast _archive_tier" = 1
+"plugin_price_sync.py#cast _archive_tiers" = 1
+"plugin_price_sync.py#cast _archive_windows" = 2
+"plugin_price_sync.py#cast archive_price" = 1
+"plugin_price_sync.py#cast sync_plugin_rates" = 2

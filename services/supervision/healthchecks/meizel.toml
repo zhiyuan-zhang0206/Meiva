@@ -15,3 +15,9 @@ exports = ["browser_reach.py", "frontend.py", "gate.py", "lgtm.py", "memory_sear
 "lgtm.py#clock time.time_ns" = 2
 "otel_collector.py#settings base.config.settings" = 1
 "protocol_probe.py#settings base.config.settings" = 1
+
+[debt.type-cast]
+"browser_reach.py#cast canary_async" = 1
+"browser_reach.py#cast read_json" = 1
+"gate.py#cast probe" = 1
+"insights.py#cast insights_probe" = 2

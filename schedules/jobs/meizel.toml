@@ -29,3 +29,6 @@ exports = ["adversarial_batch.py", "adversarial_scenario.py", "adversarial_worke
 "self_evolution_weekly.py#clock datetime.datetime.now" = 3
 "stall_watch.py#clock datetime.datetime.now" = 2
 "stall_watch.py#clock time.time" = 1
+
+[debt.type-cast]
+"adversarial_scenario.py#cast _ScenarioHandler.do_GET" = 1

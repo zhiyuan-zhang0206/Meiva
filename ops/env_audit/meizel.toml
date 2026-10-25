@@ -11,3 +11,8 @@
 [debt.ambient-read]
 "__init__.py#clock datetime.datetime.now" = 2
 "__init__.py#pid os.getpid" = 1
+
+[debt.type-cast]
+"__init__.py#cast _read_history" = 1
+"__init__.py#cast read_env_write_records" = 1
+"integrity_plan.py#cast _names" = 1

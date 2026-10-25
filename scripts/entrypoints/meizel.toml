@@ -12,3 +12,6 @@ purity = "strict-to-be"
 [debt.impure-edge]
 "agent.py#base/host/net/http_dial.py" = 1
 "gateway.py#gateway/app.py" = 1
+
+[debt.type-cast]
+"agent.py#cast main" = 1

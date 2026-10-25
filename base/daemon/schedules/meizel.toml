@@ -8,3 +8,8 @@ exports = ["builtin_schedules.py", "completion_notices.py", "inputs.py", "watche
 
 [debt.ambient-read]
 "watcher.py#clock datetime.datetime.now" = 1
+
+[debt.type-cast]
+"builtin_schedules.py#cast load_manifest" = 3
+"completion_notices.py#cast pending_digests" = 1
+"completion_notices.py#cast policy_for_agent" = 1

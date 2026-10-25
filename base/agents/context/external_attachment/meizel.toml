@@ -12,3 +12,11 @@ exports = ["core.py", "nodes.py", "plugin_state_codec.py", "state_channels.py", 
 "identity.py" = "strict"
 "nodes.py" = "strict"
 "state_channels.py" = "strict"
+
+[debt.type-cast]
+"core.py#cast ExternalAttachment._flush" = 1
+"plugin_state_codec.py#cast _validate_messages_delta" = 1
+"plugin_state_codec.py#cast apply_plugin_delta" = 2
+"plugin_state_codec.py#cast decode_plugin_delta" = 1
+"plugin_state_codec.py#cast load_snapshot" = 2
+"state_schema.py#cast accumulate_delta" = 2

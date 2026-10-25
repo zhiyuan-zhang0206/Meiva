@@ -14,3 +14,11 @@ exports = ["__init__.py", "config.py", "session.py", "usage.py"]
 "session.py#clock time.monotonic" = 3
 "session.py#clock time.perf_counter" = 2
 "session.py#random uuid.uuid4" = 1
+
+[debt.type-cast]
+"mapping.py#cast _content_text" = 3
+"mapping.py#cast _text_of" = 1
+"mapping.py#cast _tool_use" = 1
+"session.py#cast KimiSession._dispatch" = 1
+"usage.py#cast _parse" = 2
+"usage.py#cast _unwrap_event" = 2

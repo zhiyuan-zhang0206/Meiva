@@ -6,3 +6,6 @@
 
 [debt.ambient-read]
 "send_file.py#settings base.config.settings" = 1
+
+[debt.type-cast]
+"telegram_delivery.py#cast _json_object" = 1

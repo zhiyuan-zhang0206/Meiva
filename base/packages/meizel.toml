@@ -23,3 +23,8 @@ exports = ["composer_commands.py", "dashboard_supply.py", "docs", "extensions", 
 
 [debt.ambient-read]
 "composer_commands.py#settings base.config.settings" = 1
+
+[debt.type-cast]
+"mcp_config.py#cast read_servers" = 3
+"mcp_config.py#cast server_url" = 1
+"mcp_config.py#cast validate_requirements" = 1

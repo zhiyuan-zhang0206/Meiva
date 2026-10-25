@@ -6,3 +6,8 @@ purity = "strict"
 "loader.py" = ["decode.py", "model.py"]
 "decode.py" = ["model.py"]
 "render.py" = ["model.py"]
+
+[debt.type-cast]
+"decode.py#cast _object" = 1
+"decode.py#cast _sequence" = 1
+"loader.py#cast _version" = 1

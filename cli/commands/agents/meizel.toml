@@ -22,3 +22,12 @@ exports = ["cleanup_after.py", "computer.py", "control.py", "impersonation.py", 
 "control.py#random uuid.uuid4" = 1
 "impersonation_relay.py#clock datetime.datetime.now" = 1
 "notices.py#random uuid.uuid4" = 1
+
+[debt.type-cast]
+"notices_audit.py#cast _candidates_section" = 1
+"notices_audit.py#cast _explain_section" = 1
+"notices_audit.py#cast _per_category_section" = 1
+"notices_audit.py#cast _per_day_section" = 3
+"notices_audit.py#cast _per_hour_section" = 1
+"notices_audit.py#cast _simulation_section" = 1
+"notices_audit.py#cast render_text" = 5

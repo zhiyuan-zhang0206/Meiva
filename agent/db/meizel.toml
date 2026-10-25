@@ -1,2 +1,5 @@
 [uses]
 "tests" = ["__init__.py"]
+
+[debt.type-cast]
+"__init__.py#cast enqueue_fatal_provider_report_to_nearest_alive_ancestor" = 2
