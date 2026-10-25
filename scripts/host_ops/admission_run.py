@@ -7,7 +7,7 @@
 # are lowered (never refused) when it does not fit. Every lowered or bypassed start leaves
 # one line and one JSON event. The linked document owns the formula, the per-platform
 # readings and the boundary with the disk and agent-host guards.
-# meiva:link scripts/host_ops/docs/admission-run.meiva.okf.md
+# meiva:link scripts/host_ops/docs/admission-run/admission-run.meiva.okf.md
 from __future__ import annotations
 
 import argparse
@@ -23,6 +23,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from scripts.host_ops.admission_floor import (
+    DEFAULT_DISK_REFUSE_GIB,
+    DEFAULT_DISK_WARN_GIB,
+    disk_floor,
+    floor_line,
+    swap_line,
+)
 from scripts.host_ops.admission_ledger import (
     current_boot_id,
     live_reservations,
@@ -312,34 +319,6 @@ def read_pressure() -> int:
         return 1
 
 
-def swap_line(
-    platform: str = sys.platform,
-    sysctl: Sequence[str] = ("sysctl", "-n", "vm.swapusage"),
-) -> str:
-    # meiva:note
-    # Printed for the reader, never a criterion: used/total is dominated by stale pages.
-    # The platform and the command are parameters for the same reason main()'s readers are:
-    # a test drives both branches without patching this module.
-    if platform != "darwin":
-        values: dict[str, float] = {}
-        with contextlib.suppress(OSError):
-            for line in Path(MEM_INFO).read_text(encoding="utf-8").splitlines():
-                if line.startswith(("SwapTotal:", "SwapFree:")):
-                    key, _, rest = line.partition(":")
-                    values[key] = int(rest.split()[0]) / (1024 * 1024)
-        if "SwapTotal" in values:
-            used = values["SwapTotal"] - values.get("SwapFree", 0.0)
-            return f"swap {used:.1f}/{values['SwapTotal']:.1f} GiB"
-        return "swap unknown"
-    try:
-        done = subprocess.run(  # noqa: S603
-            list(sysctl), capture_output=True, text=True, check=False
-        )
-    except OSError:
-        return "unknown"
-    return done.stdout.strip() if done.returncode == 0 else "unknown"
-
-
 def emit(path: Path, kind: str, **fields: object) -> None:
     # meiva:note
     # A failing log never fails the job it describes.
@@ -438,6 +417,41 @@ def run_measured(
     return code
 
 
+def _floor_report(
+    verdict: str,
+    *,
+    budget: Reading,
+    script: str,
+    floor_gib: float,
+    pressure: int,
+    events: Path,
+    platform_name: str,
+) -> None:
+    print(
+        floor_line(
+            verdict,
+            script=script,
+            free_gib=budget.free_gib,
+            detail=budget.detail,
+            swap=swap_line(platform_name),
+            pressure=pressure,
+            floor_gib=floor_gib,
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+    emit(
+        events,
+        "refused" if verdict == "refuse" else "warned",
+        script=script,
+        free_gib=round(budget.free_gib, 2),
+        source=budget.source,
+        detail=budget.detail,
+        floor_gib=floor_gib,
+        pressure=pressure,
+    )
+
+
 def _announce_gate(
     *,
     script: str,
@@ -445,11 +459,12 @@ def _announce_gate(
     peak_mb: float,
     reserve_gib: float,
     multiplier: float,
-    budget_reader: Callable[[], Reading | None],
+    budget: Reading | None,
     pressure_reader: Callable[[], int],
     psi_reader: Callable[[], float | None],
     gpu_reader: Callable[[], tuple[float, float] | None],
     events: Path,
+    platform_name: str,
 ) -> int:
     # meiva:note
     # The whole visible half of the gate: decide, print the one line when it changed, and
@@ -458,7 +473,6 @@ def _announce_gate(
     # reads the same whether the budget held one worker or none (task #5481). A
     # reader that cannot answer is recorded as unknown and never read as a comfortable
     # zero: the job runs at its requested concurrency and the line says why.
-    budget = budget_reader()
     if budget is None:
         print(
             f"admission: no budget reading on {sys.platform}; keeping jobs {requested}",
@@ -495,7 +509,7 @@ def _announce_gate(
         f"admission: {choice} ({why}: free {budget.free_gib:.1f} GiB "
         f"({budget.source}) - reserved {reserved:.1f} - reserve {reserve_gib:.1f} = "
         f"{outcome.budget_gib:.1f} GiB / "
-        f"{outcome.cost_gib:.2f} GiB per worker; pressure {pressure}; {swap_line()})",
+        f"{outcome.cost_gib:.2f} GiB per worker; pressure {pressure}; {swap_line(platform_name)})",
         flush=True,
     )
     gpu = gpu_reader()
@@ -575,6 +589,7 @@ def main(
     gpu_reader: Callable[[], tuple[float, float] | None] = read_gpu,
     executor: Callable[[Sequence[str], dict[str, object]], int] | None = None,
     home: Path | None = None,
+    platform_name: str = sys.platform,
 ) -> int:
     # meiva:note
     # Readers, the executor and the home are parameters so a test drives the decision with a
@@ -584,6 +599,18 @@ def main(
     parser.add_argument("--jobs", type=int, help="requested concurrency (else from the command)")
     parser.add_argument("--reserve-gib", type=float, default=DEFAULT_RESERVE_GIB)
     parser.add_argument("--swap-multiplier", type=float, default=DEFAULT_SWAP_MULTIPLIER)
+    parser.add_argument(
+        "--disk-floor-gib",
+        type=float,
+        default=DEFAULT_DISK_REFUSE_GIB,
+        help="refuse to start below this much free space on the data volume (0 disables)",
+    )
+    parser.add_argument(
+        "--disk-warn-gib",
+        type=float,
+        default=DEFAULT_DISK_WARN_GIB,
+        help="warn below this much free space, then start (0 disables)",
+    )
     parser.add_argument("--no-admission", metavar="REASON", help="run unchanged and record why")
     parser.add_argument(
         "--max-wait",
@@ -609,6 +636,29 @@ def main(
         emit(events, "bypassed", script=script, reason=args.no_admission, command=command)
         return _start(executor, command, script, 1, 1, resolved_home)
 
+    # meiva:note
+    # The floor is read before the job's peak: a machine below the refuse line says no without
+    # asking a caller to declare its memory first, and a dry run (which starts nothing) keeps
+    # printing its plan even there. The budget is read once and shared with the plan below, so
+    # one decision cannot see two different disks.
+    budget = budget_reader()
+    if budget is not None and budget.source == "disk" and not args.dry_run:
+        verdict = disk_floor(
+            budget.free_gib, refuse_gib=args.disk_floor_gib, warn_gib=args.disk_warn_gib
+        )
+        if verdict != "ok":
+            _floor_report(
+                verdict,
+                budget=budget,
+                script=script,
+                floor_gib=args.disk_floor_gib if verdict == "refuse" else args.disk_warn_gib,
+                pressure=pressure_reader(),
+                events=events,
+                platform_name=platform_name,
+            )
+        if verdict == "refuse":
+            return 3
+
     peak_mb = _declared_peak(args, resolved_home, script)
     if peak_mb is None:
         return 2
@@ -621,11 +671,12 @@ def main(
         peak_mb=peak_mb,
         reserve_gib=args.reserve_gib,
         multiplier=args.swap_multiplier,
-        budget_reader=budget_reader,
+        budget=budget,
         pressure_reader=pressure_reader,
         psi_reader=psi_reader,
         gpu_reader=gpu_reader,
         events=events,
+        platform_name=platform_name,
     )
     if args.dry_run:
         print(f"admission: dry run — would start {jobs} of {requested} workers", flush=True)

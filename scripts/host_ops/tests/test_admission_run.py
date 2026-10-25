@@ -8,13 +8,19 @@ from pathlib import Path
 
 import pytest
 
+from scripts.host_ops import admission_floor
 from scripts.host_ops import admission_run as admission
 
 
-def _collect(free_gib: float = 26.1, pressure: int = 1, unstable: bool = False):
+def _collect(
+    free_gib: float = 26.1,
+    pressure: int = 1,
+    unstable: bool = False,
+    source: str = "disk",
+):
     def reader() -> admission.Reading:
         return admission.Reading(
-            free_gib=free_gib, source="disk", unstable=unstable, detail="df 84.0%"
+            free_gib=free_gib, source=source, unstable=unstable, detail="df 84.0%"
         )
 
     return reader, lambda: pressure
@@ -29,7 +35,7 @@ class _Recorder:
         return 0
 
 
-# meiva:link scripts/host_ops/docs/admission-run.meiva.okf.md
+# meiva:link scripts/host_ops/docs/admission-run/admission-run.meiva.okf.md
 class TestPlan:
     def test_the_documented_example_lands_on_two_workers(self) -> None:
         outcome = admission.plan(8, 2800, 26.1, 1, 12.0, 2.0)
@@ -100,10 +106,11 @@ def _run(
     free_gib: float = 26.1,
     pressure: int = 1,
     unstable: bool = False,
+    source: str = "disk",
     tmp_path: Path,
 ) -> tuple[int, _Recorder]:
     recorder = _Recorder()
-    disk, pressure_reader = _collect(free_gib, pressure, unstable)
+    disk, pressure_reader = _collect(free_gib, pressure, unstable, source)
     code = admission.main(
         argv,
         budget_reader=disk,
@@ -133,7 +140,17 @@ class TestStart:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         code, recorder = _run(
-            ["--peak-mb", "600", "--", "python", "audit.py", "--eval-jobs", "8"],
+            [
+                "--peak-mb",
+                "600",
+                "--disk-floor-gib",
+                "0",
+                "--",
+                "python",
+                "audit.py",
+                "--eval-jobs",
+                "8",
+            ],
             free_gib=13.0,
             tmp_path=tmp_path,
         )
@@ -496,7 +513,10 @@ class TestOptionalProbesOnAHostWithoutThem:
         assert admission.read_df("/nonexistent/volume") is None
 
     def test_a_missing_sysctl_reports_unknown_swap(self) -> None:
-        assert admission.swap_line(platform="darwin", sysctl=("/nonexistent/sysctl",)) == "unknown"
+        assert (
+            admission_floor.swap_line(platform="darwin", sysctl=("/nonexistent/sysctl",))
+            == "unknown"
+        )
 
     def test_a_lowered_job_starts_and_records_without_a_gpu_tool(self, tmp_path: Path) -> None:
         recorder = _Recorder()
@@ -515,3 +535,115 @@ class TestOptionalProbesOnAHostWithoutThem:
         event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
         assert event["kind"] == "adjusted"
         assert event["gpu_max_used_mib"] is None
+
+
+# meiva:note
+# The disk floor (task #5630): a machine below the refuse line starts nothing, a machine
+# between the two lines starts and says so, and a Linux reading (the kernel's MemAvailable)
+# is not a data volume at all, so the floor does not apply to it.
+class TestDiskFloor:
+    def test_below_the_floor_starts_nothing_and_records_why(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, recorder = _run(
+            ["--peak-mb", "600", "--", "python", "eval.py", "--jobs", "8"],
+            free_gib=22.0,
+            tmp_path=tmp_path,
+        )
+
+        err = capsys.readouterr().err
+        assert code == 3
+        assert "refusing to start eval.py" in err
+        assert "23.0 GiB floor" in err
+        assert recorder.calls == []
+        event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
+        assert event["kind"] == "refused"
+        assert event["free_gib"] == pytest.approx(22.0)
+        assert event["floor_gib"] == pytest.approx(admission_floor.DEFAULT_DISK_REFUSE_GIB)
+        assert event["source"] == "disk"
+
+    def test_between_the_lines_starts_with_a_warning(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, recorder = _run(
+            ["--peak-mb", "600", "--", "python", "eval.py", "--jobs", "8"],
+            free_gib=23.5,
+            tmp_path=tmp_path,
+        )
+
+        assert code == 0
+        assert "warning eval.py" in capsys.readouterr().err
+        assert recorder.calls == [["python", "eval.py", "--jobs", "8"]]
+        event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
+        assert event["kind"] == "warned"
+
+    # meiva:note
+    # The reverse check: the same 22 GiB host runs once the floor is out of the way.
+    def test_a_zero_floor_lets_the_same_host_start(self, tmp_path: Path) -> None:
+        code, recorder = _run(
+            [
+                "--peak-mb",
+                "600",
+                "--disk-floor-gib",
+                "0",
+                "--disk-warn-gib",
+                "0",
+                "--",
+                "python",
+                "eval.py",
+                "--jobs",
+                "8",
+            ],
+            free_gib=22.0,
+            tmp_path=tmp_path,
+        )
+
+        assert code == 0
+        assert recorder.calls == [["python", "eval.py", "--jobs", "8"]]
+
+    def test_a_memory_budget_is_not_a_data_volume(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # meiva:note
+        # A Linux reading prices MemAvailable, where swap does not grow the volume.
+        code, recorder = _run(
+            ["--peak-mb", "600", "--", "python", "eval.py", "--jobs", "8"],
+            free_gib=4.0,
+            source="memory",
+            tmp_path=tmp_path,
+        )
+
+        assert code == 0
+        assert "refusing" not in capsys.readouterr().err
+        assert len(recorder.calls) == 1
+
+    def test_a_dry_run_prints_its_plan_below_the_floor(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, recorder = _run(
+            ["--peak-mb", "600", "--dry-run", "--", "python", "eval.py", "--jobs", "8"],
+            free_gib=22.0,
+            tmp_path=tmp_path,
+        )
+
+        assert code == 0
+        assert "would start" in capsys.readouterr().out
+        assert recorder.calls == []
+
+    @pytest.mark.parametrize(
+        ("free_gib", "refuse_gib", "warn_gib", "expected"),
+        [
+            (22.9, 23.0, 24.0, "refuse"),
+            (23.0, 23.0, 24.0, "warn"),
+            (23.9, 23.0, 24.0, "warn"),
+            (24.0, 23.0, 24.0, "ok"),
+            (0.0, 0.0, 0.0, "ok"),
+        ],
+    )
+    def test_the_verdict_is_the_line_itself(
+        self, free_gib: float, refuse_gib: float, warn_gib: float, expected: str
+    ) -> None:
+        assert (
+            admission_floor.disk_floor(free_gib, refuse_gib=refuse_gib, warn_gib=warn_gib)
+            == expected
+        )
