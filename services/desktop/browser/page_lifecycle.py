@@ -37,27 +37,30 @@ from __future__ import annotations
 import asyncio
 import math
 import re
-import time
 from contextlib import suppress
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import Any, Protocol
 
 from mcp import types
 
 from base import telemetry
-from base.config import settings
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig, Timers
 from base.log import logger
 from services.desktop.browser.protocol import Request, Response
 
+# meiva:note
 # Expiry sweep cadence: a page is closed on the first pass after its TTL
 # deadline, so it can outlive the deadline by up to one interval.
 PAGE_SWEEP_INTERVAL_S = 600.0
 
+# meiva:note
 # Hard cap on one renewal grant — at most 24h, the same cap persistent shell
 # sessions live under (user ruling 2026-09-01). The initial (creation) deadline
 # is the configured default, `chrome_page_default_ttl_seconds`.
+DEFAULT_PAGE_TTL_SECONDS = 86_400.0
 _MAX_TTL_SECONDS = 86_400.0
 
+# meiva:note
 # The ``renew_page`` tool this module owns. Lives beside the TTL machinery
 # because the daemon appends it to the upstream tool list verbatim passthrough
 # (``chrome-devtools-mcp`` has no TTL concept of its own).
@@ -96,6 +99,7 @@ def renew_page_tool_dump() -> dict[str, Any]:
     ).model_dump(mode="json", by_alias=True)
 
 
+# meiva:note
 # Page-list line shapes, mirroring chrome-devtools-mcp's renderer: an untitled
 # page is `  <id>: <url>`, a titled one `  <id>: <title> (<url>)`; either may
 # end in ` [selected]` and zero or more ` key=value` suffixes (an isolated-
@@ -138,7 +142,21 @@ class PageRegistry:
       moved on to another tab.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        default_ttl_seconds: float = DEFAULT_PAGE_TTL_SECONDS,
+        *,
+        timers: Timers = SYSTEM_TIMERS,
+    ) -> None:
+        self.default_ttl_seconds = float(default_ttl_seconds)
+        self._clock = Clock(
+            ClockConfig(
+                timezone="UTC",
+                authoritative_timezone="UTC",
+                message_timestamp_weekday=False,
+            ),
+            timers=timers,
+        )
         self.affinity: dict[int, int | None] = {}
         self.ttl_deadlines: dict[int, float] = {}
         self.page_owners: dict[int, int] = {}
@@ -162,7 +180,7 @@ class PageRegistry:
         """
         if page_id is None:
             return
-        self.ttl_deadlines[page_id] = time.monotonic() + _default_page_ttl_seconds()
+        self.ttl_deadlines[page_id] = self._clock.monotonic() + self.default_ttl_seconds
         if agent_id is not None:
             self.page_owners[page_id] = agent_id
 
@@ -261,6 +279,7 @@ async def release_agent_page(daemon: _PageDaemon, agent_id: int) -> int | None:
         last_closed: int | None = None
         for page_id in to_close:
             result = await daemon._call("close_page", {"pageId": page_id})
+            # meiva:note
             # A close of an already-gone page errors upstream; either way the slot
             # is released — this agent is done with the browser. Only a transport
             # failure (upstream down) aborts the release, and then the exception
@@ -277,7 +296,9 @@ async def release_agent_page(daemon: _PageDaemon, agent_id: int) -> int | None:
         return current_id if current_id in to_close else last_closed
 
 
-async def handle_release_agent_page(daemon: _PageDaemon, req: Request, req_id: Any) -> Response:
+async def handle_release_agent_page(
+    daemon: _PageDaemon, req: Request, req_id: int | None
+) -> Response:
     """Release affinity, closing created pages, on a ``release_agent_page`` request.
 
     The request is a terminated agent's exit hook telling the service it is
@@ -307,14 +328,10 @@ def parse_page_listing(text: str) -> dict[int, str]:
     for line in text.splitlines():
         m = _PAGE_LINE_RE.match(line)
         if m:
+            # meiva:note
             # Titled label -> the `(…)` group; untitled -> the bare token.
             pages[int(m.group(1))] = m.group(2) or m.group(3)
     return pages
-
-
-def _default_page_ttl_seconds() -> float:
-    """The configured default TTL for a newly created page."""
-    return float(settings.daemon.chrome_page_default_ttl_seconds)
 
 
 def _tool_ok(text: str) -> types.CallToolResult:
@@ -345,7 +362,7 @@ async def renew_agent_page(
         return _tool_error(f"renew_page got unexpected argument(s): {sorted(unknown)}")
     raw = args.get("ttl")
     if raw is None:
-        ttl = _default_page_ttl_seconds()
+        ttl = daemon.pages.default_ttl_seconds
     elif (
         isinstance(raw, bool)
         or not isinstance(raw, (int, float))
@@ -367,13 +384,13 @@ async def renew_agent_page(
                 f"page {page_id} has no page TTL to renew (not created through this "
                 "browser, or already closed); open a new page"
             )
-        now = time.monotonic()
+        now = daemon.pages._clock.monotonic()
         if now >= deadline:
             return _tool_error(
                 f"page {page_id} is past its TTL deadline and cannot be renewed; open a new page"
             )
         daemon.pages.ttl_deadlines[page_id] = now + ttl
-        new_expires = datetime.now(UTC) + timedelta(seconds=ttl)
+        new_expires = daemon.pages._clock.now() + timedelta(seconds=ttl)
         telemetry.emit(
             "telemetry",
             "chrome_page_ttl_renewed",
@@ -381,6 +398,7 @@ async def renew_agent_page(
             agent_id=agent_id,
             attributes={
                 "page_id": page_id,
+                # meiva:note
                 # Same-class cast as task #4011 (stable emitted metric kind).
                 "ttl_s": round(ttl),
                 "new_expires_at": new_expires.isoformat(),
@@ -415,7 +433,7 @@ async def reap_expired_pages(daemon: _PageDaemon) -> int:
     Returns the number of pages closed.
     """
     async with daemon._lock:
-        now = time.monotonic()
+        now = daemon.pages._clock.monotonic()
         expired: list[int] = []
         for page_id, deadline in list(daemon.pages.ttl_deadlines.items()):
             if now >= deadline:
@@ -430,6 +448,7 @@ async def reap_expired_pages(daemon: _PageDaemon) -> int:
         for page_id in expired:
             url = page_urls.get(page_id)
             if url is None:
+                # meiva:note
                 # Already closed underneath us (close_page / release / a
                 # manual tab close) — nothing to close; just drop the slot.
                 daemon.pages.clear_affinity_for_page(page_id)
@@ -458,7 +477,12 @@ async def reap_expired_pages(daemon: _PageDaemon) -> int:
         return closed
 
 
-async def expired_page_reaper(daemon: _PageDaemon, stop: asyncio.Event) -> None:
+async def expired_page_reaper(
+    daemon: _PageDaemon,
+    stop: asyncio.Event,
+    *,
+    sweep_interval_s: float = PAGE_SWEEP_INTERVAL_S,
+) -> None:
     """Periodically close pages past their hard TTL deadline (see
     ``reap_expired_pages`` — up to one sweep interval of lag on the deadline).
     Runs for the daemon's upstream connection like its watchdog; a pass that
@@ -466,14 +490,16 @@ async def expired_page_reaper(daemon: _PageDaemon, stop: asyncio.Event) -> None:
     """
     while not stop.is_set():
         with suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(stop.wait(), timeout=PAGE_SWEEP_INTERVAL_S)
+            await asyncio.wait_for(stop.wait(), timeout=sweep_interval_s)
         if stop.is_set():
             return
         try:
             await reap_expired_pages(daemon)
         except RuntimeError:
+            # meiva:note
             # Upstream died mid-pass — daemon.dead is set; the daemon exits.
             return
         except Exception as e:
+            # meiva:note
             # One bad pass must not kill the reaper.
             logger.warning(f"[browser-mcp] expired-page reaper pass failed: {e!r}")

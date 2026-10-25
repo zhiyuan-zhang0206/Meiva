@@ -20,17 +20,19 @@ must relaunch the service from the GUI domain.
 from __future__ import annotations
 
 import logging
-import os
 import pwd
 import subprocess
-import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 import base.host.proc
+from base.clock import SYSTEM_TIMERS, Timers
+from base.host.system.hostport import Host
 from base.native_process.os_platform import is_macos
 
 _log = logging.getLogger("services.desktop.browser.macos_readiness")
+_SYSTEM_HOST = Host.system()
 
 _PROBE_TIMEOUT_S = 5.0
 READINESS_RETRY_S = 5.0
@@ -78,8 +80,105 @@ def current_account() -> tuple[str, Path]:
     environment variables, which may describe the SSH caller rather than the
     launch context of the detached service.
     """
-    entry = pwd.getpwuid(os.getuid())
+    entry = pwd.getpwuid(_SYSTEM_HOST.uid)
     return entry.pw_name, Path(entry.pw_dir)
+
+
+# meiva:note
+# Build the four read-only macOS system probe command lines for `uid` and `home`.
+def macos_probe_commands(uid: int, home: Path) -> tuple[list[str], list[str], list[str], list[str]]:
+    keychain = home / "Library" / "Keychains" / "login.keychain-db"
+    return (
+        ["/usr/bin/stat", "-f%Su", "/dev/console"],
+        ["/bin/launchctl", "print", f"gui/{uid}"],
+        ["/bin/launchctl", "managername"],
+        ["/usr/bin/security", "show-keychain-info", str(keychain)],
+    )
+
+
+# meiva:note
+# Evaluate the console-user, launchctl GUI namespace, and launchd management domain probes.
+# Returns None when all three pass and the caller should proceed to the login Keychain check.
+def evaluate_console_and_gui(
+    *,
+    macos: bool,
+    uid: int,
+    account: str,
+    console: ProbeResult,
+    gui: ProbeResult,
+    domain: ProbeResult,
+) -> StartupReadiness | None:
+    if not macos:
+        return StartupReadiness(ready=True)
+
+    console_user = console.stdout.strip()
+    if console.returncode != 0 or console_user != account:
+        actual = console_user or "none"
+        return StartupReadiness(
+            ready=False,
+            reason=f"no active GUI login session for {account} (console user is {actual})",
+        )
+
+    if gui.returncode != 0:
+        return StartupReadiness(
+            ready=False,
+            reason=f"no active GUI login session for {account} (launchctl gui/{uid} unavailable)",
+        )
+
+    # meiva:note
+    # A GUI session existing for this account is not the same as THIS chain
+    # running in it: launchd inherits the management domain down the process
+    # chain, and a daemon respawned from an agent or SSH chain lands in
+    # "Background", where securityd denies every login-Keychain query ("User
+    # interaction is not allowed") no matter how unlocked and ready the
+    # Keychain is. Report that distinctly — the Keychain probe below can only
+    # blame the Keychain, and waiting never fixes a wrong domain. An empty or
+    # failed answer is not evidence either way and falls through.
+    managed = domain.stdout.strip()
+    if domain.returncode == 0 and managed and managed != "Aqua":
+        return StartupReadiness(
+            ready=False,
+            reason=(
+                f"this process is not in the GUI login session "
+                f"(launchd managername: {managed}); the login Keychain is unreachable "
+                f"from this process chain and a relaunch from the GUI domain is required"
+            ),
+        )
+    return None
+
+
+# meiva:note
+# Evaluate the `security show-keychain-info` probe output.
+def evaluate_keychain(keychain_probe: ProbeResult) -> StartupReadiness:
+    if keychain_probe.returncode != 0:
+        detail = keychain_probe.stderr.strip().splitlines()[-1:] or ["not available"]
+        return StartupReadiness(ready=False, reason=f"login Keychain is not ready ({detail[0]})")
+    return StartupReadiness(ready=True)
+
+
+# meiva:note
+# Pure evaluation of macOS startup readiness from pre-collected probe results.
+def evaluate_startup_readiness(
+    *,
+    macos: bool,
+    uid: int,
+    account: str,
+    console: ProbeResult,
+    gui: ProbeResult,
+    domain: ProbeResult,
+    keychain: ProbeResult,
+) -> StartupReadiness:
+    pre_keychain = evaluate_console_and_gui(
+        macos=macos,
+        uid=uid,
+        account=account,
+        console=console,
+        gui=gui,
+        domain=domain,
+    )
+    if pre_keychain is not None:
+        return pre_keychain
+    return evaluate_keychain(keychain)
 
 
 def probe_startup_readiness() -> StartupReadiness:
@@ -96,8 +195,10 @@ def probe_startup_readiness() -> StartupReadiness:
     if not is_macos():
         return StartupReadiness(ready=True)
 
+    uid = _SYSTEM_HOST.uid
     account, home = current_account()
-    console = run_probe(["/usr/bin/stat", "-f%Su", "/dev/console"])
+    console_cmd, gui_cmd, domain_cmd, keychain_cmd = macos_probe_commands(uid, home)
+    console = run_probe(console_cmd)
     console_user = console.stdout.strip()
     if console.returncode != 0 or console_user != account:
         actual = console_user or "none"
@@ -106,39 +207,40 @@ def probe_startup_readiness() -> StartupReadiness:
             reason=f"no active GUI login session for {account} (console user is {actual})",
         )
 
-    gui = run_probe(["/bin/launchctl", "print", f"gui/{os.getuid()}"])
+    gui = run_probe(gui_cmd)
     if gui.returncode != 0:
         return StartupReadiness(
             ready=False,
-            reason=f"no active GUI login session for {account} (launchctl gui/{os.getuid()} unavailable)",
+            reason=f"no active GUI login session for {account} (launchctl gui/{uid} unavailable)",
         )
 
-    # A GUI session existing for this account is not the same as THIS chain
-    # running in it: launchd inherits the management domain down the process
-    # chain, and a daemon respawned from an agent or SSH chain lands in
-    # "Background", where securityd denies every login-Keychain query ("User
-    # interaction is not allowed") no matter how unlocked and ready the
-    # Keychain is. Report that distinctly — the Keychain probe below can only
-    # blame the Keychain, and waiting never fixes a wrong domain. An empty or
-    # failed answer is not evidence either way and falls through.
-    domain = run_probe(["/bin/launchctl", "managername"])
-    managed = domain.stdout.strip()
-    if domain.returncode == 0 and managed and managed != "Aqua":
-        return StartupReadiness(
-            ready=False,
-            reason=(
-                f"this process is not in the GUI login session "
-                f"(launchd managername: {managed}); the login Keychain is unreachable "
-                f"from this process chain and a relaunch from the GUI domain is required"
-            ),
-        )
+    domain = run_probe(domain_cmd)
+    pre_keychain = evaluate_console_and_gui(
+        macos=True,
+        uid=uid,
+        account=account,
+        console=console,
+        gui=gui,
+        domain=domain,
+    )
+    if pre_keychain is not None:
+        return pre_keychain
 
-    keychain = home / "Library" / "Keychains" / "login.keychain-db"
-    keychain_probe = run_probe(["/usr/bin/security", "show-keychain-info", str(keychain)])
-    if keychain_probe.returncode != 0:
-        detail = keychain_probe.stderr.strip().splitlines()[-1:] or ["not available"]
-        return StartupReadiness(ready=False, reason=f"login Keychain is not ready ({detail[0]})")
-    return StartupReadiness(ready=True)
+    return evaluate_keychain(run_probe(keychain_cmd))
+
+
+# meiva:note
+# Pure decision converting a `StartupReadiness` or probe exception into the optional wait reason.
+def degraded_reason_from_outcome(
+    outcome: StartupReadiness | Exception, *, macos: bool
+) -> str | None:
+    if isinstance(outcome, Exception):
+        if macos:
+            return "macOS startup readiness could not be probed"
+        return None
+    if outcome.ready:
+        return None
+    return outcome.reason or "macOS browser startup readiness is unavailable"
 
 
 def degraded_wait_reason() -> str | None:
@@ -149,27 +251,31 @@ def degraded_wait_reason() -> str | None:
     launching Chrome without an answer about its prerequisites.
     """
     try:
-        readiness = probe_startup_readiness()
-    except Exception:  # Healthchecks must not turn an unknown readiness state into a crash loop.
+        outcome: StartupReadiness | Exception = probe_startup_readiness()
+    except (
+        Exception
+    ) as exc:  # Healthchecks must not turn an unknown readiness state into a crash loop.
         _log.exception("meiva-browser: startup readiness probe failed")
-        if is_macos():
-            return "macOS startup readiness could not be probed"
-        return None
-    if readiness.ready:
-        return None
-    return readiness.reason or "macOS browser startup readiness is unavailable"
+        outcome = exc
+    return degraded_reason_from_outcome(outcome, macos=is_macos())
 
 
-def wait_for_browser_startup_readiness() -> None:
+def wait_for_browser_startup_readiness(
+    *,
+    timers: Timers = SYSTEM_TIMERS,
+    readiness_sequence: Iterable[StartupReadiness] = (),
+) -> None:
     """Block the supervised daemon until macOS can safely serve Chrome's keys."""
     last_reason: str | None = None
     last_reported_at = 0.0
+    provided = iter(readiness_sequence)
+    use_sequence = bool(readiness_sequence)
     while True:
-        readiness = probe_startup_readiness()
+        readiness = next(provided) if use_sequence else probe_startup_readiness()
         if readiness.ready:
             return
         reason = readiness.reason or "macOS browser startup readiness is unavailable"
-        now = time.monotonic()
+        now = timers.monotonic()
         if reason != last_reason or now - last_reported_at >= _READINESS_REPORT_INTERVAL_S:
             _log.warning(
                 "meiva-browser DEGRADED: %s; waiting before Chrome launch and retrying every %.0fs",
@@ -178,4 +284,4 @@ def wait_for_browser_startup_readiness() -> None:
             )
             last_reason = reason
             last_reported_at = now
-        time.sleep(READINESS_RETRY_S)
+        timers.sleep(READINESS_RETRY_S)

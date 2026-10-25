@@ -8,16 +8,23 @@ refresh loop) as implemented by ``services.desktop.browser.gateway_session``.
 from __future__ import annotations
 
 import asyncio
+import http
 import itertools
 import json
-import time
+import socket
+from collections.abc import AsyncIterator
+from contextlib import suppress
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 import pytest
+import websockets.asyncio.server
+from websockets.asyncio.server import ServerConnection
+from websockets.http11 import Request, Response
 
-from base.cluster.machine import GatewayApiBaseMissing
-from base.cluster.machine.tests.gateway_stubs import gateway_api_base_stub
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.cluster.machine import GatewayAccess
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from services.desktop.browser import gateway_session
@@ -26,6 +33,24 @@ from services.desktop.browser.gateway_session import GatewaySession
 
 SECRET = "test-cluster-secret"  # noqa: S105
 GATEWAY = "http://gateway.example:8000"
+
+
+def _fixed_clock(now_ts: float = 1_700_000_000.0) -> Clock:
+    return Clock(
+        ClockConfig(
+            timezone="UTC",
+            authoritative_timezone="UTC",
+            message_timestamp_weekday=False,
+        ),
+        timers=SYSTEM_TIMERS,
+        now=lambda: datetime.fromtimestamp(now_ts, tz=UTC),
+    )
+
+
+def _closed_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
 
 
 class FakeWS:
@@ -48,90 +73,193 @@ class FakeWS:
         return json.dumps(self._responses.pop(0))
 
 
-def _install_fake_gateway_login(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_login(gateway_url: str, secret: str) -> tuple[str, str, int]:
-        assert gateway_url == GATEWAY
-        assert secret == SECRET
-        return "meiva_session", "opaque-session", 1_800_000_000
+# meiva:note
+# Loopback HTTP + WebSocket server faking the gateway login and Chrome CDP.
+class _LoopbackSessionStack:
+    def __init__(
+        self,
+        *,
+        login_status: int = 200,
+        set_cookie: str | None = "meiva_session=opaque-session; HttpOnly; Max-Age=86400; Path=/",
+        cookie_accepted: bool = True,
+    ) -> None:
+        self.login_status = login_status
+        self.set_cookie = set_cookie
+        self.cookie_accepted = cookie_accepted
+        self.login_calls: list[tuple[str, dict[str, str], dict[str, str]]] = []
+        self.browser_sent: list[dict[str, Any]] = []
+        self.page_sent: list[dict[str, Any]] = []
+        self.stop_on_login: asyncio.Event | None = None
+        self.port: int = 0
+        self.http_port: int = 0
+        self._http_server: asyncio.Server | None = None
+        self._ws_server: websockets.asyncio.server.Server | None = None
 
-    monkeypatch.setattr(sess, "gateway_session_login", fake_login)
+    @property
+    def gateway_url(self) -> str:
+        return f"http://127.0.0.1:{self.http_port}"
+
+    def access(
+        self,
+        *,
+        gateway_url: str | None = None,
+        cluster_secret: str = SECRET,
+        machine_token: str | None = SECRET,
+    ) -> GatewayAccess:
+        return GatewayAccess(
+            gateway_url=self.gateway_url if gateway_url is None else gateway_url,
+            cluster_secret=cluster_secret,
+            remote_plane=False,
+            machine_token=machine_token,
+            launcher_profile="runner",
+            gateway_home=False,
+        )
+
+    @classmethod
+    async def start(
+        cls,
+        *,
+        login_status: int = 200,
+        set_cookie: str | None = "meiva_session=opaque-session; HttpOnly; Max-Age=86400; Path=/",
+        cookie_accepted: bool = True,
+    ) -> _LoopbackSessionStack:
+        stack = cls(
+            login_status=login_status,
+            set_cookie=set_cookie,
+            cookie_accepted=cookie_accepted,
+        )
+        ws_server = await websockets.asyncio.server.serve(
+            stack._handle_ws,
+            "127.0.0.1",
+            0,
+            process_request=stack._process_ws_http,
+        )
+        stack._ws_server = ws_server
+        ws_sock = next(iter(ws_server.sockets))
+        ws_addr: tuple[str, int] = ws_sock.getsockname()
+        stack.port = ws_addr[1]
+        http_server = await asyncio.start_server(stack._handle_http, "127.0.0.1", 0)
+        stack._http_server = http_server
+        http_sock = next(iter(http_server.sockets or ()))
+        http_addr: tuple[str, int] = http_sock.getsockname()
+        stack.http_port = http_addr[1]
+        _STACKS.append(stack)
+        return stack
+
+    def _process_ws_http(self, conn: ServerConnection, request: Request) -> Response | None:
+        if request.path == "/json/version":
+            payload = {"webSocketDebuggerUrl": f"ws://127.0.0.1:{self.port}/devtools/browser"}
+            resp = conn.respond(http.HTTPStatus.OK, json.dumps(payload))
+            resp.headers["Content-Type"] = "application/json"
+            return resp
+        return None
+
+    async def close(self) -> None:
+        if self._ws_server is not None:
+            self._ws_server.close()
+            await self._ws_server.wait_closed()
+        if self._http_server is not None:
+            self._http_server.close()
+            await self._http_server.wait_closed()
+
+    async def _handle_http(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        try:
+            raw_head = await reader.readuntil(b"\r\n\r\n")
+            lines = raw_head.decode("latin-1").split("\r\n")
+            _method, path, _proto = lines[0].split(" ", 2)
+            headers: dict[str, str] = {}
+            for line in lines[1:]:
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    headers[k.strip().lower()] = v.strip()
+            content_length = int(headers.get("content-length", "0"))
+            raw_body = await reader.readexactly(content_length) if content_length else b""
+            raw_json: Any = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+            raw_json_obj: object = raw_json
+            raw_dict: dict[str, Any] = raw_json if isinstance(raw_json_obj, dict) else {}
+            body_json: dict[str, str] = {str(k): str(v) for k, v in raw_dict.items()}
+            self.login_calls.append(
+                (
+                    f"{self.gateway_url}{path}",
+                    body_json,
+                    {"User-Agent": headers.get("user-agent", "")},
+                )
+            )
+            if self.stop_on_login is not None:
+                self.stop_on_login.set()
+            cookie_header = (
+                f"Set-Cookie: {self.set_cookie}\r\n" if self.set_cookie is not None else ""
+            )
+            resp = (
+                f"HTTP/1.1 {self.login_status} OK\r\n"
+                f"{cookie_header}"
+                "Content-Length: 0\r\n"
+                "Connection: close\r\n\r\n"
+            ).encode("latin-1")
+            writer.write(resp)
+            await writer.drain()
+        finally:
+            writer.close()
+            with suppress(OSError):
+                await writer.wait_closed()
+
+    async def _handle_ws(self, conn: ServerConnection) -> None:
+        path = conn.request.path if conn.request is not None else ""
+        is_browser = "browser" in path
+        with suppress(websockets.ConnectionClosed):
+            async for raw_msg in conn:
+                data = raw_msg if isinstance(raw_msg, str) else raw_msg.decode("utf-8")
+                req = json.loads(data)
+                req_id = req["id"]
+                method = req["method"]
+                if is_browser:
+                    self.browser_sent.append(req)
+                    result = {"targetId": "t-1"} if method == "Target.createTarget" else {}
+                    await conn.send(json.dumps({"id": req_id, "result": result}))
+                else:
+                    self.page_sent.append(req)
+                    await conn.send(
+                        json.dumps({"id": req_id, "result": {"success": self.cookie_accepted}})
+                    )
 
 
-def _install_fake_cdp(monkeypatch: pytest.MonkeyPatch) -> dict[str, FakeWS]:
-    """Point session's HTTP + websocket surfaces at fakes; return them by role.
-
-    The fake websocket factory answers Target.createTarget / Target.closeTarget
-    on the browser connection and Network.setCookie on the page connection.
-    """
-    http_calls: list[str] = []
-
-    async def fake_http_json(url: str) -> dict[str, Any]:
-        http_calls.append(url)
-        return {"webSocketDebuggerUrl": "ws://browser"}
-
-    browser_ws = FakeWS([{"id": 1, "result": {"targetId": "t-1"}}, {"id": 3, "result": {}}])
-    page_ws = FakeWS([{"id": 2, "result": {"success": True}}])
-
-    def fake_connect(url: str, **kwargs: Any) -> FakeWS:
-        return browser_ws if "browser" in url else page_ws
-
-    _install_fake_gateway_login(monkeypatch)
-    monkeypatch.setattr(sess, "http_json", fake_http_json)
-    monkeypatch.setattr(sess.websockets, "connect", fake_connect)
-    return {"browser": browser_ws, "page": page_ws}
+_STACKS: list[_LoopbackSessionStack] = []
 
 
-def _install_login_response(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    status_code: int = 200,
-    set_cookie: str | None = "meiva_session=opaque-session; HttpOnly; Max-Age=86400; Path=/",
-) -> list[tuple[str, dict[str, str], dict[str, str]]]:
-    calls: list[tuple[str, dict[str, str], dict[str, str]]] = []
-
-    class FakeClient:
-        def __init__(self, *, timeout: float) -> None:
-            assert timeout == 5.0
-
-        async def __aenter__(self) -> FakeClient:
-            return self
-
-        async def __aexit__(self, *exc: Any) -> bool:
-            return False
-
-        async def post(
-            self, url: str, *, json: dict[str, str], headers: dict[str, str]
-        ) -> httpx.Response:
-            calls.append((url, json, headers))
-            headers = {"Set-Cookie": set_cookie} if set_cookie is not None else {}
-            return httpx.Response(status_code, headers=headers)
-
-    monkeypatch.setattr(sess.httpx, "AsyncClient", FakeClient)
-    return calls
+@pytest.fixture(autouse=True)
+async def _cleanup_stacks() -> AsyncIterator[None]:
+    try:
+        yield
+    finally:
+        while _STACKS:
+            await _STACKS.pop().close()
 
 
-async def test_gateway_session_login_returns_server_cookie(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls = _install_login_response(monkeypatch)
-    monkeypatch.setattr(time, "time", lambda: 1_700_000_000.0)
+async def test_gateway_session_login_returns_server_cookie() -> None:
+    stack = await _LoopbackSessionStack.start()
 
-    result = await sess.gateway_session_login(GATEWAY, SECRET)
+    assert sess.parse_login_cookie(200, stack.set_cookie, now=1_700_000_000) == (
+        "meiva_session",
+        "opaque-session",
+        1_700_086_400,
+    )
+    name, value, expires = await sess.gateway_session_login(stack.gateway_url, SECRET)
 
-    assert result == ("meiva_session", "opaque-session", 1_700_086_400)
-    url, body, headers = calls[0]
-    assert (url, body) == (f"{GATEWAY}/api/auth/login", {"password": SECRET})
+    assert (name, value) == ("meiva_session", "opaque-session")
+    assert expires > 0
+    url, body, headers = stack.login_calls[0]
+    assert (url, body) == (f"{stack.gateway_url}/api/auth/login", {"password": SECRET})
     # the managed-browser marker lets the sessions list label this row
     assert headers == {"User-Agent": sess.MANAGED_BROWSER_USER_AGENT}
 
 
-async def test_gateway_session_login_rejects_non_200(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _install_login_response(monkeypatch, status_code=401)
+async def test_gateway_session_login_rejects_non_200() -> None:
+    stack = await _LoopbackSessionStack.start(login_status=401)
 
     with pytest.raises(RuntimeError, match="HTTP 401"):
-        await sess.gateway_session_login(GATEWAY, SECRET)
+        await sess.gateway_session_login(stack.gateway_url, SECRET)
 
 
 @pytest.mark.parametrize(
@@ -144,56 +272,44 @@ async def test_gateway_session_login_rejects_non_200(
     ],
 )
 async def test_gateway_session_login_rejects_malformed_cookie(
-    monkeypatch: pytest.MonkeyPatch,
     set_cookie: str | None,
 ) -> None:
-    _install_login_response(monkeypatch, set_cookie=set_cookie)
+    stack = await _LoopbackSessionStack.start(set_cookie=set_cookie)
 
     with pytest.raises(RuntimeError, match="session cookie"):
-        await sess.gateway_session_login(GATEWAY, SECRET)
+        await sess.gateway_session_login(stack.gateway_url, SECRET)
 
 
-async def test_inject_sets_cookie_with_login_flags(monkeypatch: pytest.MonkeyPatch) -> None:
-    ws = _install_fake_cdp(monkeypatch)
-    await sess.inject_session_cookie(9222, GATEWAY, SECRET)
+async def test_inject_sets_cookie_with_login_flags() -> None:
+    stack = await _LoopbackSessionStack.start()
+    await sess.inject_session_cookie(
+        stack.port,
+        stack.gateway_url,
+        SECRET,
+    )
 
     # create a throwaway tab, set the cookie on it, close it
-    browser_calls = [c["method"] for c in ws["browser"].sent]
+    browser_calls = [c["method"] for c in stack.browser_sent]
     assert browser_calls == ["Target.createTarget", "Target.closeTarget"]
-    assert ws["browser"].sent[0]["params"] == {"url": "about:blank"}
-    assert ws["browser"].sent[1]["params"] == {"targetId": "t-1"}
+    assert stack.browser_sent[0]["params"] == {"url": "about:blank"}
+    assert stack.browser_sent[1]["params"] == {"targetId": "t-1"}
 
-    set_cookie = ws["page"].sent[0]
+    set_cookie = stack.page_sent[0]
     assert set_cookie["method"] == "Network.setCookie"
     params = set_cookie["params"]
     assert params["name"] == "meiva_session"
-    assert params["url"] == GATEWAY + "/"  # host-only, trailing slash normalized
+    assert params["url"] == stack.gateway_url + "/"  # host-only, trailing slash normalized
     assert params["path"] == "/"
     assert params["httpOnly"] is True
     assert params["sameSite"] == "Lax"
     assert params["value"] == "opaque-session"
-    assert params["expires"] == 1_800_000_000
+    assert isinstance(params["expires"], int) and params["expires"] > 0
 
 
-async def test_inject_raises_when_browser_rejects_cookie(monkeypatch: pytest.MonkeyPatch) -> None:
-    _install_fake_cdp(monkeypatch)
-    # make the page connection answer "rejected"
-    import services.desktop.browser.session as s2
-
-    class RejectingPageWS(FakeWS):
-        def __init__(self) -> None:
-            super().__init__([{"id": 2, "result": {"success": False}}])
-
-    def fake_connect(url: str, **kwargs: Any) -> FakeWS:
-        return (
-            RejectingPageWS()
-            if "browser" not in url
-            else FakeWS([{"id": 1, "result": {"targetId": "t-1"}}, {"id": 3, "result": {}}])
-        )
-
-    monkeypatch.setattr(s2.websockets, "connect", fake_connect)
+async def test_inject_raises_when_browser_rejects_cookie() -> None:
+    stack = await _LoopbackSessionStack.start(cookie_accepted=False)
     with pytest.raises(RuntimeError, match="rejected"):
-        await sess.inject_session_cookie(9222, GATEWAY, SECRET)
+        await sess.inject_session_cookie(stack.port, stack.gateway_url, SECRET)
 
 
 async def test_cdp_call_raises_on_protocol_error() -> None:
@@ -202,81 +318,77 @@ async def test_cdp_call_raises_on_protocol_error() -> None:
         await sess.cdp_call(ws, itertools.count(1), "Network.setCookie", {})
 
 
-async def test_inject_raises_when_chrome_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def boom(url: str) -> dict[str, Any]:
-        raise httpx.ConnectError("connection refused")
-
-    _install_fake_gateway_login(monkeypatch)
-    monkeypatch.setattr(sess, "http_json", boom)
+async def test_inject_raises_when_chrome_unreachable() -> None:
+    stack = await _LoopbackSessionStack.start()
     with pytest.raises(httpx.ConnectError):
-        await sess.inject_session_cookie(9222, GATEWAY, SECRET)
+        await sess.inject_session_cookie(_closed_port(), stack.gateway_url, SECRET)
 
 
-# --- gateway-session wiring ---
+# meiva:note
+# gateway-session wiring
 
 
-async def test_inject_once_skips_when_gateway_url_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    def raise_missing(_gateway_url: str) -> str:
-        raise GatewayApiBaseMissing("gateway_url unset")
-
-    calls: list[tuple[int, str, str]] = []
-
-    async def fake_inject(port: int, url: str, secret: str) -> None:
-        calls.append((port, url, secret))
-
-    monkeypatch.setattr(gateway_session, "gateway_api_base", raise_missing)
-    monkeypatch.setattr(gateway_session, "inject_session_cookie", fake_inject)
-    await GatewaySession(asyncio.TaskGroup()).inject_once()  # must not raise
-    assert calls == []
+async def test_inject_once_skips_when_gateway_url_unset() -> None:
+    stack = await _LoopbackSessionStack.start()
+    keeper = GatewaySession(asyncio.TaskGroup(), stack.port, access=stack.access(gateway_url=""))
+    await keeper.inject_once()  # must not raise
+    assert stack.login_calls == []
 
 
-async def test_inject_once_skips_on_empty_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[int, str, str]] = []
-
-    async def fake_inject(port: int, url: str, secret: str) -> None:
-        calls.append((port, url, secret))
-
-    monkeypatch.setattr(gateway_session, "gateway_api_base", gateway_api_base_stub(GATEWAY))
-    monkeypatch.setattr(gateway_session, "inject_session_cookie", fake_inject)
-    monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", "")
-    await GatewaySession(asyncio.TaskGroup()).inject_once()
-    assert calls == []
-
-
-async def test_inject_once_injects_with_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[int, str, str]] = []
-
-    async def fake_inject(port: int, url: str, secret: str) -> None:
-        calls.append((port, url, secret))
-
-    monkeypatch.setattr(gateway_session, "gateway_api_base", gateway_api_base_stub(GATEWAY))
-    monkeypatch.setattr(gateway_session, "inject_session_cookie", fake_inject)
-    monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
-    await GatewaySession(asyncio.TaskGroup()).inject_once()
-    assert calls == [(gateway_session.settings.services.browser_cdp_port, GATEWAY, SECRET)]
+async def test_inject_once_skips_on_empty_secret() -> None:
+    stack = await _LoopbackSessionStack.start()
+    access = GatewayAccess(
+        gateway_url=stack.gateway_url,
+        cluster_secret="",
+        remote_plane=False,
+        machine_token=None,
+        launcher_profile=None,
+        gateway_home=True,
+    )
+    keeper = GatewaySession(asyncio.TaskGroup(), stack.port, access=access)
+    await keeper.inject_once()
+    assert stack.login_calls == []
 
 
-def test_session_params_present_the_delivered_runner_token(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(gateway_session, "gateway_api_base", gateway_api_base_stub(GATEWAY))
-    monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
-    monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "runner")
-    monkeypatch.setenv("MEIVA_API_TOKEN", "delivered-runner-token")
-    assert gateway_session.gateway_session_params() == (GATEWAY, "delivered-runner-token")
+async def test_inject_once_injects_with_settings() -> None:
+    stack = await _LoopbackSessionStack.start()
+    keeper = GatewaySession(asyncio.TaskGroup(), stack.port, access=stack.access())
+    await keeper.inject_once()
+    assert len(stack.login_calls) == 1
+    assert len(stack.page_sent) == 1
+
+
+def test_session_params_present_the_delivered_runner_token() -> None:
+    delivered = "delivered-runner-value"
+    access = GatewayAccess(
+        gateway_url=GATEWAY,
+        cluster_secret=SECRET,
+        remote_plane=False,
+        machine_token=delivered,
+        launcher_profile="runner",
+        gateway_home=False,
+    )
+    assert gateway_session.resolve_gateway_session_params(access) == (
+        GATEWAY,
+        delivered,
+    )
 
 
 def test_session_params_without_a_token_log_the_defect_instead_of_using_the_secret(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
+    loguru_records: LogRecords,
 ) -> None:
     """The daemon keeps serving without the cookie (best effort), but a launch
     that delivered no token is an error, and the human secret never stands in."""
-    monkeypatch.setattr(gateway_session, "gateway_api_base", gateway_api_base_stub(GATEWAY))
-    monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
-    monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "runner")
-    monkeypatch.delenv("MEIVA_API_TOKEN", raising=False)
+    access = GatewayAccess(
+        gateway_url=GATEWAY,
+        cluster_secret=SECRET,
+        remote_plane=False,
+        machine_token=None,
+        launcher_profile="runner",
+        gateway_home=False,
+    )
 
-    assert gateway_session.gateway_session_params() is None
+    assert gateway_session.resolve_gateway_session_params(access) is None
 
     errors = loguru_records.messages("ERROR")
     assert len(errors) == 1
@@ -284,57 +396,36 @@ def test_session_params_without_a_token_log_the_defect_instead_of_using_the_secr
     assert SECRET not in errors[0]
 
 
-async def test_inject_once_swallows_injection_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def boom(port: int, url: str, secret: str) -> None:
-        raise RuntimeError("cdp down")
-
-    monkeypatch.setattr(gateway_session, "gateway_api_base", gateway_api_base_stub(GATEWAY))
-    monkeypatch.setattr(gateway_session, "inject_session_cookie", boom)
-    monkeypatch.setattr(gateway_session.settings.data_plane, "cluster_secret", SECRET)
-    await GatewaySession(asyncio.TaskGroup()).inject_once()  # must not raise
+async def test_inject_once_swallows_injection_failure() -> None:
+    stack = await _LoopbackSessionStack.start(login_status=500)
+    keeper = GatewaySession(asyncio.TaskGroup(), stack.port, access=stack.access())
+    await keeper.inject_once()  # must not raise
 
 
-async def test_session_loop_injects_then_waits(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[str] = []
-
-    keeper = GatewaySession(asyncio.TaskGroup())
-
-    async def fake_inject_once() -> None:
-        calls.append("inject")
-
-    async def stop_after_first(stop: asyncio.Event, timeout: float) -> None:
-        stop.set()
-
-    monkeypatch.setattr(keeper, "inject_once", fake_inject_once)
-    monkeypatch.setattr(gateway_session, "await_stop_or_timeout", stop_after_first)
-    await keeper.refresh_loop(asyncio.Event())
-    assert calls == ["inject"]
+async def test_session_loop_injects_then_waits() -> None:
+    stack = await _LoopbackSessionStack.start()
+    stop = asyncio.Event()
+    stack.stop_on_login = stop
+    keeper = GatewaySession(asyncio.TaskGroup(), stack.port, access=stack.access())
+    await keeper.refresh_loop(stop)
+    assert len(stack.login_calls) == 1
 
 
-async def test_spawn_inject_tracks_task(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_spawn_inject_tracks_task() -> None:
+    stack = await _LoopbackSessionStack.start()
     async with asyncio.TaskGroup() as tasks:
-        keeper = GatewaySession(tasks)
-
-        async def fake_inject_once() -> None:
-            pass
-
-        monkeypatch.setattr(keeper, "inject_once", fake_inject_once)
+        keeper = GatewaySession(tasks, stack.port, access=stack.access())
         keeper.spawn_inject()
         assert len(keeper.inject_tasks) == 1
         # let the task finish so its done-callback clears the set
         await asyncio.gather(*keeper.inject_tasks)
     assert keeper.inject_tasks == set()
+    assert len(stack.login_calls) == 1
 
 
-async def test_a_failing_one_shot_does_not_abort_its_group(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_a_failing_one_shot_does_not_abort_its_group() -> None:
+    stack = await _LoopbackSessionStack.start(login_status=500)
     async with asyncio.TaskGroup() as tasks:
-        keeper = GatewaySession(tasks)
-
-        async def broken_inject_once() -> None:
-            raise RuntimeError("defect")
-
-        monkeypatch.setattr(keeper, "inject_once", broken_inject_once)
+        keeper = GatewaySession(tasks, stack.port, access=stack.access())
         keeper.spawn_inject()
         await asyncio.gather(*keeper.inject_tasks)

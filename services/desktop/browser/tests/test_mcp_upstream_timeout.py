@@ -1,15 +1,16 @@
 import asyncio
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+import sys
+from pathlib import Path
 from typing import cast
 
 import pytest
-from mcp import ClientSession
+from mcp import ClientSession, StdioServerParameters
 
-from services.desktop.browser import mcp_upstream
 from services.desktop.browser.mcp_upstream import (
     StoppingError,
     initialize_until_stop_or_timeout,
+    open_upstream,
+    upstream_server_params,
 )
 
 
@@ -78,36 +79,34 @@ async def test_original_initialization_error_is_preserved() -> None:
 
 
 async def test_create_upstream_passes_reader_and_closes_failed_connect(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    closed: list[str] = []
-    session = Initializer(blocked=True)
+    params = upstream_server_params("http://example.test")
+    assert params.command == "npx"
+    assert "http://example.test" in params.args
+
+    marker = tmp_path / "stdio_lifecycle.txt"
+    child_code = (
+        "import pathlib, sys\n"
+        f"marker = pathlib.Path({str(marker)!r})\n"
+        "marker.write_text('opened\\n', encoding='utf-8')\n"
+        "try:\n"
+        "    sys.stdin.read()\n"
+        "finally:\n"
+        "    with marker.open('a', encoding='utf-8') as f:\n"
+        "        f.write('closed\\n')\n"
+    )
     reads: list[float] = []
 
-    @asynccontextmanager
-    async def stdio(_params: object) -> AsyncGenerator[tuple[object, object], None]:
-        try:
-            yield object(), object()
-        finally:
-            closed.append("stdio")
-
-    @asynccontextmanager
-    async def client(*_args: object, **_kwargs: object) -> AsyncGenerator[Initializer, None]:
-        try:
-            yield session
-        finally:
-            closed.append("session")
-
     def timeout_reader() -> float:
-        reads.append(0.01)
-        return 0.01
+        reads.append(0.05)
+        return 0.05
 
-    monkeypatch.setattr(mcp_upstream, "stdio_client", stdio)
-    monkeypatch.setattr(mcp_upstream, "ClientSession", client)
     with pytest.raises(TimeoutError):
-        await mcp_upstream.create_upstream(
-            "http://example.test", asyncio.Event(), connect_timeout_reader=timeout_reader
+        await open_upstream(
+            StdioServerParameters(command=sys.executable, args=["-c", child_code]),
+            asyncio.Event(),
+            connect_timeout_reader=timeout_reader,
         )
-    assert reads == [0.01]
-    assert session.cancelled
-    assert closed == ["session", "stdio"]
+    assert reads == [0.05]
+    assert marker.read_text(encoding="utf-8").splitlines() == ["opened", "closed"]

@@ -14,10 +14,13 @@ import hashlib
 import json
 import re
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 import pytest
+import websockets.asyncio.server
+from websockets.asyncio.server import ServerConnection
 
 from services.desktop.browser.tab_groups import grouping
 from services.desktop.browser.tab_groups.grouping import (
@@ -27,43 +30,14 @@ from services.desktop.browser.tab_groups.grouping import (
 )
 
 EXTENSION_ID = "ext0123456789abcdefghijklmnopabcd"
-PORT = 19477
 
 
+# meiva:note
+# Recorded CDP websocket state for assertions.
 class FakeCdpWS:
-    """A browser-level CDP websocket: answers each request from a method table.
-
-    ``handlers`` maps a CDP method to its ``result`` dict or a callable taking
-    the request params. A CDP event is interleaved before every reply: the
-    client must skip traffic that is not the reply to its own request.
-    """
-
     def __init__(self, handlers: dict[str, Any]) -> None:
         self.handlers = handlers
         self.sent: list[dict[str, Any]] = []
-        self._pending: list[str] = []
-
-    async def __aenter__(self) -> FakeCdpWS:
-        return self
-
-    async def __aexit__(self, *exc: Any) -> bool:
-        return False
-
-    async def send(self, data: str) -> None:
-        request = json.loads(data)
-        self.sent.append(request)
-        handler = self.handlers[request["method"]]
-        outcome = handler(request.get("params", {})) if callable(handler) else handler
-        reply: dict[str, Any] = {"id": request["id"]}
-        if isinstance(outcome, Exception):
-            reply["error"] = {"code": -32000, "message": str(outcome)}
-        else:
-            reply["result"] = outcome
-        self._pending += [json.dumps({"method": "Target.targetInfoChanged", "params": {}})]
-        self._pending += [json.dumps(reply)]
-
-    async def recv(self) -> str:
-        return self._pending.pop(0)
 
     def methods(self) -> list[str]:
         return [r["method"] for r in self.sent]
@@ -140,44 +114,166 @@ def _chrome_handlers() -> dict[str, Any]:
     return ChromeModel().handlers()
 
 
+# meiva:note
+# Loopback HTTP + websocket surfaces of one Chrome.
 class FakeChrome:
-    """HTTP + websocket surfaces of one Chrome, installed over ``grouping``."""
-
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, handlers: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        handlers: dict[str, Any],
+        *,
+        wedged_http: bool = False,
+        wedged_ws: bool = False,
+        racy_groups: list[str] | None = None,
+    ) -> None:
         self.listings: list[Any] = []
         self.ws = FakeCdpWS(handlers)
         self.http_urls: list[str] = []
-        monkeypatch.setattr(grouping, "http_json", self._http_json)
-        monkeypatch.setattr(grouping.websockets, "connect", self._connect)
+        self.port: int = 0
+        self.ws_port: int = 0
+        self.wedged_http = wedged_http
+        self.wedged_ws = wedged_ws
+        self.racy_groups = racy_groups
+        self.ws_entered = asyncio.Event()
+        self._unwedge = asyncio.Event()
+        self._http_server: asyncio.Server | None = None
+        self._ws_server: websockets.asyncio.server.Server | None = None
 
-    def _connect(self, url: str, **kwargs: Any) -> FakeCdpWS:
-        assert url == "ws://browser"
-        return self.ws
+    @classmethod
+    async def start(
+        cls,
+        handlers: dict[str, Any],
+        *,
+        wedged_http: bool = False,
+        wedged_ws: bool = False,
+        racy_groups: list[str] | None = None,
+    ) -> FakeChrome:
+        chrome = cls(
+            handlers,
+            wedged_http=wedged_http,
+            wedged_ws=wedged_ws,
+            racy_groups=racy_groups,
+        )
+        ws_server = await websockets.asyncio.server.serve(chrome._handle_ws, "127.0.0.1", 0)
+        chrome._ws_server = ws_server
+        ws_sock = next(iter(ws_server.sockets))
+        ws_addr: tuple[str, int] = ws_sock.getsockname()
+        chrome.ws_port = ws_addr[1]
+        http_server = await asyncio.start_server(chrome._handle_http, "127.0.0.1", 0)
+        chrome._http_server = http_server
+        http_sock = next(iter(http_server.sockets or ()))
+        http_addr: tuple[str, int] = http_sock.getsockname()
+        chrome.port = http_addr[1]
+        _CLEANUPS.append(chrome)
+        return chrome
 
-    async def _http_json(self, url: str) -> Any:
-        self.http_urls.append(url)
-        if url.endswith("/json/version"):
-            return {"webSocketDebuggerUrl": "ws://browser"}
-        outcome = self.listings.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
+    async def close(self) -> None:
+        self._unwedge.set()
+        if self._ws_server is not None:
+            self._ws_server.close()
+            await self._ws_server.wait_closed()
+        if self._http_server is not None:
+            self._http_server.close()
+            await self._http_server.wait_closed()
+
+    def groups(
+        self,
+        *,
+        listing_timeout_s: float = grouping.LISTING_TIMEOUT_S,
+        group_timeout_s: float = grouping.GROUP_TIMEOUT_S,
+        worker_wait_s: float = grouping.WORKER_WAIT_S,
+    ) -> AgentTabGroups:
+        return AgentTabGroups(
+            self.port,
+            _TASK_GROUPS[0],
+            listing_timeout_s=listing_timeout_s,
+            group_timeout_s=group_timeout_s,
+            worker_wait_s=worker_wait_s,
+        )
+
+    async def _handle_http(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        try:
+            raw = await reader.readuntil(b"\r\n\r\n")
+            first_line = raw.decode("latin-1").splitlines()[0]
+            path = first_line.split(" ")[1]
+            self.http_urls.append(f"http://127.0.0.1:{self.port}{path}")
+            if self.wedged_http:
+                await self._unwedge.wait()
+                return
+            if path.endswith("/json/version"):
+                payload = {
+                    "webSocketDebuggerUrl": f"ws://127.0.0.1:{self.ws_port}/devtools/browser"
+                }
+            else:
+                outcome = self.listings.pop(0)
+                if isinstance(outcome, Exception):
+                    return
+                payload = outcome
+            body = json.dumps(payload).encode("utf-8")
+            header = (
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: application/json\r\n"
+                f"Content-Length: {len(body)}\r\n"
+                "Connection: close\r\n\r\n"
+            ).encode("latin-1")
+            writer.write(header + body)
+            await writer.drain()
+        finally:
+            writer.close()
+            with suppress(OSError):
+                await writer.wait_closed()
+
+    async def _handle_ws(self, conn: ServerConnection) -> None:
+        self.ws_entered.set()
+        if self.wedged_ws:
+            await self._unwedge.wait()
+            return
+        with suppress(websockets.ConnectionClosed):
+            async for raw_msg in conn:
+                data = raw_msg if isinstance(raw_msg, str) else raw_msg.decode("utf-8")
+                request = json.loads(data)
+                self.ws.sent.append(request)
+                exists: bool | None = None
+                title = ""
+                if self.racy_groups is not None:
+                    match = re.fullmatch(
+                        r'meivaGroup\("[^"]+", "([^"]+)"\)',
+                        request.get("params", {}).get("expression", ""),
+                    )
+                    if request["method"] == "Runtime.evaluate" and match:
+                        title = match.group(1)
+                        exists = title in self.racy_groups
+                handler = self.ws.handlers[request["method"]]
+                outcome = handler(request.get("params", {})) if callable(handler) else handler
+                reply: dict[str, Any] = {"id": request["id"]}
+                if isinstance(outcome, Exception):
+                    reply["error"] = {"code": -32000, "message": str(outcome)}
+                else:
+                    reply["result"] = outcome
+                await conn.send(json.dumps({"method": "Target.targetInfoChanged", "params": {}}))
+                if exists is not None and self.racy_groups is not None:
+                    await asyncio.sleep(0.02)
+                    if not exists:
+                        self.racy_groups.append(title)
+                await conn.send(json.dumps(reply))
 
 
 _TASK_GROUPS: list[asyncio.TaskGroup] = []
+_CLEANUPS: list[FakeChrome] = []
 
 
 @pytest.fixture(autouse=True)
 async def _daemon_task_group() -> AsyncIterator[None]:
     """The daemon's root TaskGroup, which owns the background grouping tasks."""
-    async with asyncio.TaskGroup() as tg:
-        _TASK_GROUPS.append(tg)
-        yield
-    _TASK_GROUPS.clear()
-
-
-def _groups() -> AgentTabGroups:
-    return AgentTabGroups(PORT, _TASK_GROUPS[0])
+    try:
+        async with asyncio.TaskGroup() as tg:
+            _TASK_GROUPS.append(tg)
+            yield
+    finally:
+        _TASK_GROUPS.clear()
+        while _CLEANUPS:
+            await _CLEANUPS.pop().close()
 
 
 async def _group(
@@ -255,8 +351,8 @@ def test_worker_is_stateless_and_only_ever_ungroups_an_agents_last_tab() -> None
 # ── snapshot: which page targets exist right now ───────────────────────────
 
 
-async def test_snapshot_lists_page_targets_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    chrome = FakeChrome(monkeypatch, {})
+async def test_snapshot_lists_page_targets_only() -> None:
+    chrome = await FakeChrome.start({})
     chrome.listings.append(
         [
             _page("T1"),
@@ -265,30 +361,31 @@ async def test_snapshot_lists_page_targets_only(monkeypatch: pytest.MonkeyPatch)
             _page("T2"),
         ]
     )
-    assert await _groups().snapshot() == frozenset({"T1", "T2"})
-    assert chrome.http_urls == [f"http://127.0.0.1:{PORT}/json/list"]
+    assert await chrome.groups().snapshot() == frozenset({"T1", "T2"})
+    assert chrome.http_urls == [f"http://127.0.0.1:{chrome.port}/json/list"]
 
 
 async def test_snapshot_failure_warns_and_returns_none(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    loguru_records: list[dict[str, Any]],
 ) -> None:
-    chrome = FakeChrome(monkeypatch, {})
+    chrome = await FakeChrome.start({})
     chrome.listings.append(OSError("connection refused"))
-    assert await _groups().snapshot() is None
+    assert await chrome.groups().snapshot() is None
     messages = _warnings(loguru_records)
     assert len(messages) == 1 and "tab group" in messages[0]
 
 
-# ── group_new_page: the CDP conversation ─────────────────────────────────────
+# meiva:note
+# group_new_page: the CDP conversation
 
 
 async def test_group_new_page_files_the_new_target_into_the_agent_group(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    loguru_records: list[dict[str, Any]],
 ) -> None:
-    chrome = FakeChrome(monkeypatch, _chrome_handlers())
+    chrome = await FakeChrome.start(_chrome_handlers())
     chrome.listings.append([_page("T1"), _page("T2")])
 
-    await _group(_groups(), 7, frozenset({"T1"}))
+    await _group(chrome.groups(), 7, frozenset({"T1"}))
 
     ws = chrome.ws
     assert ws.methods() == [
@@ -312,14 +409,14 @@ async def test_group_new_page_files_the_new_target_into_the_agent_group(
 
 
 async def test_waits_for_the_worker_script_to_run_after_a_fresh_load(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     """On first load the worker target can be attachable before its script ran
     (measured: `meivaGroup is not defined`), so the call waits for it."""
     model = ChromeModel(script_delay=3)
-    chrome = FakeChrome(monkeypatch, model.handlers())
+    chrome = await FakeChrome.start(model.handlers())
     chrome.listings.append([_page("T1"), _page("T2")])
-    await _group(_groups(), 7, frozenset({"T1"}))
+    await _group(chrome.groups(), 7, frozenset({"T1"}))
     evaluations = [
         r["params"]["expression"] for r in chrome.ws.sent if r["method"] == "Runtime.evaluate"
     ]
@@ -328,25 +425,22 @@ async def test_waits_for_the_worker_script_to_run_after_a_fresh_load(
 
 
 async def test_a_worker_that_never_defines_the_function_warns(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    loguru_records: list[dict[str, Any]],
 ) -> None:
-    monkeypatch.setattr(grouping, "WORKER_WAIT_S", 0.0)
-    chrome = FakeChrome(monkeypatch, ChromeModel(script_delay=10**6).handlers())
+    chrome = await FakeChrome.start(ChromeModel(script_delay=10**6).handlers())
     chrome.listings.append([_page("T1"), _page("T2")])
-    await _group(_groups(), 7, frozenset({"T1"}))
+    await _group(chrome.groups(worker_wait_s=0.0), 7, frozenset({"T1"}))
     messages = _warnings(loguru_records)
     assert len(messages) == 1 and "did not define meivaGroup" in messages[0]
 
 
-async def test_a_live_worker_is_used_without_reloading_the_extension(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_a_live_worker_is_used_without_reloading_the_extension() -> None:
     """Reloading tears the running worker down; a call that attached to the dying
     target never gets its reply (measured). A live worker is therefore left alone."""
     model = ChromeModel(loaded=True, worker=SHIPPED_WORKER)
-    chrome = FakeChrome(monkeypatch, model.handlers())
+    chrome = await FakeChrome.start(model.handlers())
     chrome.listings.append([_page("T1"), _page("T2")])
-    await _group(_groups(), 7, frozenset({"T1"}))
+    await _group(chrome.groups(), 7, frozenset({"T1"}))
     assert "Extensions.loadUnpacked" not in chrome.ws.methods()
     assert chrome.ws.methods()[-1] == "Runtime.evaluate"
 
@@ -368,59 +462,56 @@ async def test_a_live_worker_is_used_without_reloading_the_extension(
     ],
 )
 async def test_extension_is_loaded_again_when_it_is_not_serving(
-    model: ChromeModel, why: str, monkeypatch: pytest.MonkeyPatch
+    model: ChromeModel, why: str
 ) -> None:
-    chrome = FakeChrome(monkeypatch, model.handlers())
+    chrome = await FakeChrome.start(model.handlers())
     chrome.listings.append([_page("T1"), _page("T2")])
-    await _group(_groups(), 7, frozenset({"T1"}))
+    await _group(chrome.groups(), 7, frozenset({"T1"}))
     assert chrome.ws.methods().count("Extensions.loadUnpacked") == 1, why
     assert chrome.ws.methods()[-1] == "Runtime.evaluate"
     assert model.worker == SHIPPED_WORKER
 
 
-async def test_reconnect_needs_no_memory_of_an_earlier_load(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_reconnect_needs_no_memory_of_an_earlier_load() -> None:
     """Two AgentTabGroups instances (a daemon restart) against one Chrome: the
     second finds the extension loaded and does not load it again; against a
     restarted Chrome it loads it."""
     model = ChromeModel()
-    chrome = FakeChrome(monkeypatch, model.handlers())
+    chrome = await FakeChrome.start(model.handlers())
     for _ in range(2):
         chrome.listings.append([_page("T1"), _page("T2")])
-        await _group(_groups(), 7, frozenset({"T1"}))
+        await _group(chrome.groups(), 7, frozenset({"T1"}))
     assert chrome.ws.methods().count("Extensions.loadUnpacked") == 1
     model.loaded, model.worker = False, None  # Chrome restarted
     chrome.listings.append([_page("T1"), _page("T2")])
-    await _group(_groups(), 7, frozenset({"T1"}))
+    await _group(chrome.groups(), 7, frozenset({"T1"}))
     assert chrome.ws.methods().count("Extensions.loadUnpacked") == 2
 
 
-async def test_a_copy_of_the_extension_at_another_path_is_not_ours(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_a_copy_of_the_extension_at_another_path_is_not_ours() -> None:
     model = ChromeModel(loaded=True, worker=SHIPPED_WORKER)
     handlers = model.handlers()
     handlers["Extensions.getExtensions"] = {
         "extensions": [{"id": EXTENSION_ID, "path": "/somewhere/else/extension"}]
     }
-    chrome = FakeChrome(monkeypatch, handlers)
+    chrome = await FakeChrome.start(handlers)
     chrome.listings.append([_page("T1"), _page("T2")])
-    await _group(_groups(), 7, frozenset({"T1"}))
+    await _group(chrome.groups(), 7, frozenset({"T1"}))
     assert chrome.ws.methods().count("Extensions.loadUnpacked") == 1
 
 
 async def test_group_new_page_skips_when_the_snapshot_failed(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     """A failed snapshot was already reported; nothing to diff against."""
-    chrome = FakeChrome(monkeypatch, _chrome_handlers())
-    await _group(_groups(), 7, None)
+    chrome = await FakeChrome.start(_chrome_handlers())
+    await _group(chrome.groups(), 7, None)
     assert chrome.ws.sent == [] and chrome.http_urls == []
     assert _warnings(loguru_records) == []
 
 
-# ── Failure policy: warn, never raise, never guess ───────────────────────────
+# meiva:note
+# Failure policy: warn, never raise, never guess
 
 
 @pytest.mark.parametrize(
@@ -433,12 +524,11 @@ async def test_group_new_page_skips_when_the_snapshot_failed(
 async def test_ambiguous_diff_warns_and_groups_nothing(
     after: list[dict[str, str]],
     expected: str,
-    monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
 ) -> None:
-    chrome = FakeChrome(monkeypatch, _chrome_handlers())
+    chrome = await FakeChrome.start(_chrome_handlers())
     chrome.listings.append(after)
-    await _group(_groups(), 7, frozenset({"T1"}))
+    await _group(chrome.groups(), 7, frozenset({"T1"}))
     assert chrome.ws.sent == []  # never guesses which tab is the agent's
     messages = _warnings(loguru_records)
     assert len(messages) == 1
@@ -482,15 +572,13 @@ def _evaluate_throws(params: dict[str, Any]) -> dict[str, Any]:
 async def test_cdp_failure_warns_with_cause_and_never_raises(
     override: dict[str, Any],
     needle: str,
-    monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
 ) -> None:
     handlers = {**_chrome_handlers(), **override}
-    monkeypatch.setattr(grouping, "WORKER_WAIT_S", 0.0)
-    chrome = FakeChrome(monkeypatch, handlers)
+    chrome = await FakeChrome.start(handlers)
     chrome.listings.append([_page("T1"), _page("T2")])
 
-    await _group(_groups(), 7, frozenset({"T1"}))  # must not raise
+    await _group(chrome.groups(worker_wait_s=0.0), 7, frozenset({"T1"}))  # must not raise
 
     messages = _warnings(loguru_records)
     assert len(messages) == 1
@@ -499,26 +587,21 @@ async def test_cdp_failure_warns_with_cause_and_never_raises(
 
 
 async def test_chrome_unreachable_warns_and_never_raises(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    loguru_records: list[dict[str, Any]],
 ) -> None:
-    chrome = FakeChrome(monkeypatch, _chrome_handlers())
+    chrome = await FakeChrome.start(_chrome_handlers())
     chrome.listings.append(OSError("connection refused"))
-    await _group(_groups(), 7, frozenset({"T1"}))
+    await _group(chrome.groups(), 7, frozenset({"T1"}))
     assert len(_warnings(loguru_records)) == 1
 
 
 async def test_a_wedged_chrome_is_bounded(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    loguru_records: list[dict[str, Any]],
 ) -> None:
-    import asyncio
-
-    async def hang(url: str) -> Any:
-        await asyncio.sleep(3600)
-
-    monkeypatch.setattr(grouping, "http_json", hang)
-    monkeypatch.setattr(grouping, "LISTING_TIMEOUT_S", 0.05)
-    assert await _groups().snapshot() is None
-    await _group(_groups(), 7, frozenset())
+    chrome = await FakeChrome.start({}, wedged_http=True)
+    groups = chrome.groups(listing_timeout_s=0.05)
+    assert await groups.snapshot() is None
+    await _group(groups, 7, frozenset())
     assert len(_warnings(loguru_records)) == 2
 
 
@@ -531,35 +614,18 @@ def test_extension_dir_ships_inside_the_package() -> None:
     assert EXTENSION_DIR.resolve().is_relative_to(services_root)
 
 
-# ── Off the daemon's lock: the page creation never waits for the grouping ──────
-
-
-class WedgedConnect:
-    """`websockets.connect` to a Chrome that accepts the connection and never answers."""
-
-    def __init__(self) -> None:
-        self.entered = asyncio.Event()
-
-    def __call__(self, url: str, **kwargs: Any) -> WedgedConnect:
-        return self
-
-    async def __aenter__(self) -> WedgedConnect:
-        self.entered.set()
-        await asyncio.Event().wait()
-        return self
-
-    async def __aexit__(self, *exc: Any) -> bool:
-        return False
+# meiva:note
+# Off the daemon's lock: the page creation never waits for the grouping
 
 
 async def test_group_new_page_returns_before_the_grouping_runs(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     """The caller holds the daemon's serial lock: it gets control back after the one
     target listing, and the grouping (load, attach, call) happens afterwards."""
-    chrome = FakeChrome(monkeypatch, _chrome_handlers())
+    chrome = await FakeChrome.start(_chrome_handlers())
     chrome.listings.append([_page("T1"), _page("T2")])
-    groups = _groups()
+    groups = chrome.groups()
 
     await groups.group_new_page(7, frozenset({"T1"}))
 
@@ -572,17 +638,15 @@ async def test_group_new_page_returns_before_the_grouping_runs(
 
 
 async def test_a_wedged_chrome_costs_the_caller_nothing(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    loguru_records: list[dict[str, Any]],
 ) -> None:
-    chrome = FakeChrome(monkeypatch, _chrome_handlers())
-    wedged = WedgedConnect()
-    monkeypatch.setattr(grouping.websockets, "connect", wedged)
+    chrome = await FakeChrome.start(_chrome_handlers(), wedged_ws=True)
     chrome.listings.append([_page("T1"), _page("T2")])
-    groups = _groups()
+    groups = chrome.groups()
 
     await asyncio.wait_for(groups.group_new_page(7, frozenset({"T1"})), timeout=1.0)
     await asyncio.wait_for(
-        wedged.entered.wait(), timeout=1.0
+        chrome.ws_entered.wait(), timeout=1.0
     )  # grouping is stuck in the background
 
     groups.cancel_pending()
@@ -594,32 +658,28 @@ async def test_a_wedged_chrome_costs_the_caller_nothing(
 
 
 async def test_a_grouping_that_outlives_its_budget_warns(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    loguru_records: list[dict[str, Any]],
 ) -> None:
-    chrome = FakeChrome(monkeypatch, _chrome_handlers())
-    monkeypatch.setattr(grouping.websockets, "connect", WedgedConnect())
-    monkeypatch.setattr(grouping, "GROUP_TIMEOUT_S", 0.05)
+    chrome = await FakeChrome.start(_chrome_handlers(), wedged_ws=True)
     chrome.listings.append([_page("T1"), _page("T2")])
-    await _group(_groups(), 7, frozenset({"T1"}))
+    await _group(chrome.groups(group_timeout_s=0.05), 7, frozenset({"T1"}))
     assert len(_warnings(loguru_records)) == 1
 
 
-async def test_cancelling_and_failing_groupings_leave_no_unretrieved_exception(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_cancelling_and_failing_groupings_leave_no_unretrieved_exception() -> None:
     loop = asyncio.get_running_loop()
     unhandled: list[dict[str, Any]] = []
     loop.set_exception_handler(lambda _loop, context: unhandled.append(context))
     try:
         broken = {**_chrome_handlers(), "Extensions.getExtensions": RuntimeError("boom")}
-        chrome = FakeChrome(monkeypatch, broken)
+        chrome = await FakeChrome.start(broken)
         chrome.listings.append([_page("T1"), _page("T2")])
-        failing = _groups()
+        failing = chrome.groups()
         await _group(failing, 7, frozenset({"T1"}))  # fails inside the task, reported by it
 
-        monkeypatch.setattr(grouping.websockets, "connect", WedgedConnect())
+        chrome.wedged_ws = True
         chrome.listings.append([_page("T1"), _page("T2")])
-        cancelled = _groups()
+        cancelled = chrome.groups()
         await cancelled.group_new_page(8, frozenset({"T1"}))
         cancelled.cancel_pending()
         await asyncio.gather(*cancelled._tasks, return_exceptions=True)
@@ -632,59 +692,19 @@ async def test_cancelling_and_failing_groupings_leave_no_unretrieved_exception(
         loop.set_exception_handler(None)
 
 
-class RacyWorkerWS(FakeCdpWS):
-    """A worker whose `meivaGroup` is not atomic, like the real one: it looks the group
-    up by title, and creates it only after an await. Two groupings running at the
-    same time both find nothing and both create."""
-
-    def __init__(self, handlers: dict[str, Any], groups: list[str]) -> None:
-        super().__init__(handlers)
-        self.groups = groups
-        self._exists: bool | None = None
-        self._title = ""
-
-    async def send(self, data: str) -> None:
-        await super().send(data)
-        request = json.loads(data)
-        match = re.fullmatch(
-            r'meivaGroup\("[^"]+", "([^"]+)"\)', request["params"].get("expression", "")
-        )
-        if request["method"] == "Runtime.evaluate" and match:
-            self._title = match.group(1)
-            self._exists = self._title in self.groups  # the lookup happens now ...
-
-    async def recv(self) -> str:
-        if self._exists is not None:
-            await asyncio.sleep(0.02)  # ... the creation after an await
-            if not self._exists:
-                self.groups.append(self._title)
-            self._exists = None
-        return await super().recv()
-
-
-async def test_back_to_back_pages_of_one_agent_make_one_group(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_back_to_back_pages_of_one_agent_make_one_group() -> None:
     """Two groupings of one agent in flight at once would each find no group by title
     and each create it. The groupings run one at a time (their own lock)."""
     created: list[str] = []
     model = ChromeModel(loaded=True, worker=SHIPPED_WORKER)
-    listings: list[list[dict[str, str]]] = [
-        [_page("T1"), _page("T2")],
-        [_page("T1"), _page("T2"), _page("T3")],
-    ]
-
-    async def http_json(url: str) -> Any:
-        if url.endswith("/json/version"):
-            return {"webSocketDebuggerUrl": "ws://browser"}
-        return listings.pop(0)
-
-    def connect(url: str, **kwargs: Any) -> RacyWorkerWS:
-        return RacyWorkerWS(model.handlers(), created)
-
-    monkeypatch.setattr(grouping, "http_json", http_json)
-    monkeypatch.setattr(grouping.websockets, "connect", connect)
-    groups = _groups()
+    chrome = await FakeChrome.start(model.handlers(), racy_groups=created)
+    chrome.listings.extend(
+        [
+            [_page("T1"), _page("T2")],
+            [_page("T1"), _page("T2"), _page("T3")],
+        ]
+    )
+    groups = chrome.groups()
 
     await groups.group_new_page(7, frozenset({"T1"}))
     await groups.group_new_page(7, frozenset({"T1", "T2"}))
@@ -703,13 +723,11 @@ async def test_back_to_back_pages_of_one_agent_make_one_group(
 # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
 
 
-async def test_release_page_ungroups_the_recorded_target_of_the_agent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_release_page_ungroups_the_recorded_target_of_the_agent() -> None:
     model = ChromeModel(loaded=True, worker=SHIPPED_WORKER)
-    chrome = FakeChrome(monkeypatch, model.handlers())
+    chrome = await FakeChrome.start(model.handlers())
     chrome.listings.append([_page("T1"), _page("T2")])
-    groups = _groups()
+    groups = chrome.groups()
     await _group(groups, 42, frozenset({"T1"}), page_id=7)
 
     await groups.release_page(7)
@@ -720,29 +738,27 @@ async def test_release_page_ungroups_the_recorded_target_of_the_agent(
     assert "Meiva #42" in expressions[0]
 
 
-async def test_release_page_is_a_no_op_for_a_page_it_never_grouped(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_release_page_is_a_no_op_for_a_page_it_never_grouped() -> None:
     model = ChromeModel(loaded=True, worker=SHIPPED_WORKER)
-    chrome = FakeChrome(monkeypatch, model.handlers())
+    chrome = await FakeChrome.start(model.handlers())
 
-    await _groups().release_page(99)
+    await chrome.groups().release_page(99)
 
     assert chrome.http_urls == []
     assert model.expressions == []
 
 
 async def test_release_page_does_not_start_a_worker_and_only_warns(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     # meiva:note
     # A worker that is not running cannot have left a saved group, so the
     # ungroup never loads one -- it warns that the chip may be left behind.
     # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
     model = ChromeModel(loaded=False)
-    chrome = FakeChrome(monkeypatch, model.handlers())
+    chrome = await FakeChrome.start(model.handlers())
     chrome.listings.append([_page("T1"), _page("T2")])
-    groups = _groups()
+    groups = chrome.groups()
     await _group(groups, 42, frozenset({"T1"}), page_id=7)
     model.expressions.clear()
     loaded_before = chrome.ws.methods().count("Extensions.loadUnpacked")

@@ -29,6 +29,7 @@ class Request(TypedDict):
     agent_id: NotRequired[int]  # call_tool only, optional — keys page affinity per agent
 
 
+# meiva:note
 # Response is discriminated on `ok`, so `ok` and the field it guards are bound
 # together: a success carries `result`, a failure carries `error`, and neither
 # can be built without its partner. A reader that has checked `resp["ok"]` gets
@@ -38,7 +39,7 @@ class Request(TypedDict):
 class OkResponse(TypedDict):
     id: int | None  # echoes the request id
     ok: Literal[True]
-    result: Any  # tool dicts / CallToolResult dump / None
+    result: Any | None  # tool dicts / CallToolResult dump / None
 
 
 class ErrResponse(TypedDict):
