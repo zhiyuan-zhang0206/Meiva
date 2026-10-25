@@ -72,6 +72,13 @@ EXPECTED = {
         "telemetry",
         1,
     ),
+    "meiva_obs_delivery_stranded_wake_count": (
+        "stat",
+        ["grafana"],
+        "delivery_stranded_wake",
+        "telemetry",
+        1,
+    ),
     "meiva_obs_agent_delivery_stalled_count": (
         "timeseries",
         ["inspector"],
