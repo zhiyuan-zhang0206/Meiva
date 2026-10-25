@@ -96,6 +96,9 @@ SIGNALS: dict[str, Signal] = {
     "meiva-ops-root-diagnostic-browser-reach": Signal(
         "root_diagnostic", "meiva-ops-slow", "0m", "warning", 2
     ),
+    "meiva-ops-root-diagnostic-task-telemetry": Signal(
+        "root_diagnostic", "meiva-ops-slow", "0m", "warning", 1
+    ),
 }
 
 
@@ -190,7 +193,7 @@ def test_grafana_owns_five_minute_recovery_and_missing_series_grace() -> None:
         assert "keep_firing_for" not in rule
 
 
-@pytest.mark.parametrize("diagnostic", ["venv", "brew-pin", "browser-reach"])
+@pytest.mark.parametrize("diagnostic", ["venv", "brew-pin", "browser-reach", "task-telemetry"])
 def test_root_diagnostics_keep_the_machine_identity(diagnostic: str) -> None:
     rule = _rules()["meiva-ops-root-diagnostic-" + diagnostic][1]
     assert "sum by (machine)" in _query(rule)

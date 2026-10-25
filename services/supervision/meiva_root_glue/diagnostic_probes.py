@@ -254,6 +254,61 @@ def database_recovery_probe(database: Callable[[], Database]) -> Callable[[], Da
 
 
 # meiva:note
+# The reminder record the stall diagnostics read: the digests the task-maintenance daemon
+# delivered, and the telemetry rows each delivery emits. The delivered count is the
+# daemon's own durable record, so a fleet with nothing due reports a quiet healthy sample
+# instead of an alarm. Delivery without stored telemetry is the failure this exists for —
+# from 2026-10-03 the daemon kept delivering >100 digests a day while a storage filter
+# (events without `persist`) dropped every row, and nothing said so.
+#
+# One day is the window because the fleet's own delivery rate makes it unambiguous: the
+# daemon delivered 45-130 check-in digests in every 24 hours measured, so a day of
+# deliveries with no stored row is a broken record, never a quiet stretch.
+TASK_TELEMETRY_WINDOW_HOURS = 24
+_TASK_TELEMETRY_SQL = """
+SELECT
+    (SELECT count(*) FROM inbound_messages
+      WHERE kind = 'system_note' AND payload->>'note_tag' = 'task'
+        AND created_at > now() - make_interval(hours => %s)),
+    (SELECT count(*) FROM telemetry_events
+      WHERE event_name IN ('task_reminder_digest', 'task_reminder_rerouted', 'task_escalation')
+        AND ts > now() - make_interval(hours => %s))
+"""
+
+
+# meiva:note
+# Both sides in one round trip: a sample is one instant of the record, so a delivery cannot
+# be counted on one side and missed on the other by a read that straddled it. The delivered
+# side is read from `inbound_messages` because that row is written in the same transaction
+# as the counter advance, while the telemetry the delivery emits is emitted after commit.
+def task_telemetry(database: Callable[[], Database]) -> Callable[[], DaemonProbe]:
+    def probe() -> DaemonProbe:
+        import psycopg
+
+        try:
+            with database().connect(autocommit=True) as conn, conn.cursor() as cur:
+                cur.execute(
+                    _TASK_TELEMETRY_SQL,
+                    (TASK_TELEMETRY_WINDOW_HOURS, TASK_TELEMETRY_WINDOW_HOURS),
+                )
+                row = cur.fetchone()
+        except psycopg.Error as exc:
+            return DaemonProbe.unavailable(f"reminder record unread: {type(exc).__name__}")
+        delivered, stored = (0, 0) if row is None else (int(row[0]), int(row[1]))
+        if delivered and not stored:
+            return DaemonProbe.down(
+                f"{delivered} reminder notice(s) delivered in {TASK_TELEMETRY_WINDOW_HOURS}h "
+                "but telemetry_events holds no task reminder or escalation row"
+            )
+        return DaemonProbe.up(
+            f"{delivered} reminder notice(s) delivered and {stored} task telemetry row(s) "
+            f"stored in {TASK_TELEMETRY_WINDOW_HOURS}h"
+        )
+
+    return probe
+
+
+# meiva:note
 # The watchdog asks "would restarting this unit strand a live takeover?" and gets
 # `(lease_id, holder)` or None. The answer is read here, on the glue side, so the monitor
 # keeps no database client of its own: a database outage must not make the watchdog blind.
@@ -376,6 +431,10 @@ def build_diagnostics(
             checks.append(Diagnostic("redis-acl", partial(redis_acl, redis_url=redis_url)))
             if bool(_setting("pgbouncer_enabled", overrides)):
                 checks.append(Diagnostic("pgbouncer", partial(pgbouncer, machine=machine)))
+        # meiva:note
+        # Cluster-wide record, one observer: the delivery comparison reads the whole fleet's
+        # rows, so any other host's root would report the same finding.
+        checks.append(Diagnostic("task-telemetry", task_telemetry(database), interval_s=3600))
         obs_url = str(_setting("observability_url", overrides)).strip()
         if obs_url:
             from base.paths import meiva_home
