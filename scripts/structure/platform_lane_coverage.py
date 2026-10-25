@@ -21,7 +21,7 @@ import tomllib
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 import yaml
 
@@ -240,24 +240,35 @@ def all_sites(root: Path = _REPO_ROOT) -> list[Site]:
     return sorted(out, key=lambda site: site.key)
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
 def lanes(root: Path = _REPO_ROOT) -> list[Lane]:
     path = root / REGISTRY
     if not path.is_file():
         raise SystemExit(f"{REGISTRY}: missing; the gate cannot judge without the lane table")
     document = tomllib.loads(path.read_text(encoding="utf-8"))
-    table: dict[str, object] = cast("dict[str, object]", document.get("lanes") or {})
+    raw_lanes: object = document.get("lanes") or {}
+    if not _is_table(raw_lanes):
+        raise SystemExit(f"{REGISTRY}: expected a lanes table")
     out: list[Lane] = []
-    for lane_id, entry in sorted(table.items()):
-        body: dict[str, object] = cast("dict[str, object]", entry)
-        host = str(body.get("host"))
-        selects = str(body.get("selects"))
+    for lane_id, entry in sorted(raw_lanes.items()):
+        if not _is_table(entry):
+            raise SystemExit(f"{REGISTRY}: lane {lane_id} must be a table")
+        host = str(entry.get("host"))
+        selects = str(entry.get("selects"))
         if host not in SYSTEMS:
             raise SystemExit(
                 f"{REGISTRY}: lane {lane_id} names host {host!r}: {' or '.join(SYSTEMS)}"
             )
         if selects not in {"suite", "marked"}:
             raise SystemExit(f"{REGISTRY}: lane {lane_id} selects {selects!r}: suite or marked")
-        out.append(Lane(str(lane_id), host, str(body.get("ci_job")), selects))
+        out.append(Lane(str(lane_id), host, str(entry.get("ci_job")), selects))
     return out
 
 
@@ -294,20 +305,22 @@ def _runner_system(runs_on: object) -> str | None:
 
 def jobs(root: Path = _REPO_ROOT) -> dict[str, Job]:
     document: object = yaml.safe_load((root / WORKFLOW).read_text(encoding="utf-8"))
-    if not isinstance(document, dict):
+    if not _is_raw_dict(document):
         raise SystemExit(f"{WORKFLOW}: expected a workflow document")
-    fields = cast("dict[str, object]", document)
-    table: dict[str, object] = cast("dict[str, object]", fields.get("jobs") or {})
+    raw_jobs: object = document.get("jobs") or {}
+    if not _is_table(raw_jobs):
+        raise SystemExit(f"{WORKFLOW}: expected a jobs table")
     out: dict[str, Job] = {}
-    for job_id, entry in table.items():
-        body: dict[str, object] = cast("dict[str, object]", entry)
-        runs_on = body.get("runs-on")
+    for job_id, entry in raw_jobs.items():
+        if not _is_table(entry):
+            raise SystemExit(f"{WORKFLOW}: job {job_id} must be a mapping")
+        runs_on = entry.get("runs-on")
         out[str(job_id)] = Job(
             id=str(job_id),
             runs_on=runs_on if isinstance(runs_on, str) else repr(runs_on),
             system=_runner_system(runs_on),
-            blocking=not body.get("continue-on-error"),
-            selects_marker=job_runs_marker(body),
+            blocking=not entry.get("continue-on-error"),
+            selects_marker=job_runs_marker(entry),
         )
     return out
 

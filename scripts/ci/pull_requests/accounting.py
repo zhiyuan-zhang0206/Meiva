@@ -322,9 +322,13 @@ def append_ledger(path: Path, entries: list[dict[str, Any]]) -> int:
 # report_rows rolls up the last `days` per agent (runs and linux/macos minutes) and prices them at the GitHub-hosted private-repo overage rates (Linux $0.006/min, macOS $0.062/min; corrected 2026-09-06 per GitHub's published pricing). The repo is currently public, so est_usd is a private-repo overage equivalent — phase-2 quotas must gate on MINUTES, not dollars; the account's 3,000 included minutes/month are account-wide across all repos.
 # meiva:link scripts/ci/pull_requests/docs/accounting.meiva.okf.md
 def report_rows(
-    ledger: dict[int, dict[str, Any]], *, days: int, agent: int | None
+    ledger: dict[int, dict[str, Any]],
+    *,
+    days: int,
+    agent: int | None,
+    now: datetime,
 ) -> list[dict[str, Any]]:
-    cutoff = datetime.now(UTC).timestamp() - days * 86400
+    cutoff = now.timestamp() - days * 86400
     per_agent: dict[int | None, dict[str, Any]] = {}
     for entry in ledger.values():
         if agent is not None and entry.get("agent_id") != agent:
@@ -374,8 +378,8 @@ def _print_report(rows: list[dict[str, Any]], days: int) -> None:
         )
 
 
-def _report(days: int, agent: int | None, *, as_json: bool) -> None:
-    rows = report_rows(load_ledger(DEFAULT_LEDGER), days=days, agent=agent)
+def _report(days: int, agent: int | None, *, as_json: bool, now: datetime) -> None:
+    rows = report_rows(load_ledger(DEFAULT_LEDGER), days=days, agent=agent, now=now)
     if as_json:
         print(json.dumps(rows, indent=2))
     else:
@@ -417,7 +421,7 @@ def main(argv: list[str] | None = None, *, host: Host) -> int:
     if args.report:
         if args.since or args.until or args.append_ledger:
             parser.error("--report is exclusive with --since/--until/--append-ledger")
-        _report(args.days, args.agent, as_json=args.json)
+        _report(args.days, args.agent, as_json=args.json, now=datetime.now(UTC))
         return 0
 
     if not args.since or not args.until:

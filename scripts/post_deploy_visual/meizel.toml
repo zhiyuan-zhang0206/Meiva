@@ -1,5 +1,1 @@
 exports = ["layout_assertions.py"]
-
-[debt.type-cast]
-"layout_assertions.py#cast structural_failures" = 1
-"layout_assertions.py#cast visible_in_viewport_counts" = 1

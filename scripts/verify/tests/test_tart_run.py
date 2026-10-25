@@ -17,7 +17,6 @@ import stat
 import subprocess
 import sys
 import tarfile
-import time
 from pathlib import Path
 from typing import Any
 
@@ -55,13 +54,13 @@ def _logs_archive(files: dict[str, str]) -> str:
 class Fake:
     """A fake Tart installation: a binary, its state and the log of what was asked of it."""
 
-    def __init__(self, directory: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(self, directory: Path) -> None:
         self.directory = directory
+        self.home = directory / "user-home"
         directory.mkdir()
         self.binary = directory / "tart"
         self.binary.write_text(f"#!{sys.executable}\n{_FAKE.read_text()}")
         self.binary.chmod(self.binary.stat().st_mode | stat.S_IXUSR)
-        monkeypatch.setenv("FAKE_TART_HOME", str(directory))
         self.state: dict[str, Any] = {
             "vms": {name: {"running": False} for name in (GOLDEN, *EARLIER)},
             "fail_on": [],
@@ -83,19 +82,13 @@ class Fake:
     def commands(self, name: str) -> list[list[str]]:
         return [call["argv"] for call in self.calls() if call["argv"][0] == name]
 
-    def tart(self) -> Tart:
-        return Tart(str(self.binary))
+    def tart(self, *, home: Path | None = None) -> Tart:
+        return Tart(str(self.binary), home=home or self.home, poll_interval_s=0.05)
 
 
 @pytest.fixture
-def fake(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fake:
-    real_sleep = time.sleep
-
-    def quick_sleep(_seconds: float) -> None:
-        real_sleep(0.05)
-
-    monkeypatch.setattr(tart_vm.time, "sleep", quick_sleep)
-    return Fake(tmp_path / "fake", monkeypatch)
+def fake(tmp_path: Path) -> Fake:
+    return Fake(tmp_path / "fake")
 
 
 @pytest.fixture
@@ -110,8 +103,16 @@ def repo(tmp_path: Path) -> Path:
     return path
 
 
-def _run(fake: Fake, repo: Path, tmp_path: Path) -> tuple[int, dict[str, Any], Path]:
-    status = tart_run.run("HEAD", tmp_path / "evidence", repo=repo, golden=GOLDEN, tart=fake.tart())
+def _run(
+    fake: Fake, repo: Path, tmp_path: Path, *, home: Path | None = None
+) -> tuple[int, dict[str, Any], Path]:
+    status = tart_run.run(
+        "HEAD",
+        tmp_path / "evidence",
+        repo=repo,
+        golden=GOLDEN,
+        tart=fake.tart(home=home),
+    )
     (root,) = (tmp_path / "evidence").iterdir()
     return status, json.loads((root / "result.json").read_text()), root
 
@@ -160,29 +161,21 @@ def test_a_failed_step_still_collects_and_deletes_the_vm(
 
 
 def test_a_vm_that_will_not_delete_fails_the_run(fake: Fake, repo: Path, tmp_path: Path) -> None:
-    class Stubborn(Tart):
-        def delete_run_vm(self, name: str) -> bool:
-            raise subprocess.CalledProcessError(1, ["tart", "delete", name])
+    fake.state["fail_delete"] = True
+    fake.save()
 
-    status = tart_run.run(
-        "HEAD", tmp_path / "evidence", repo=repo, golden=GOLDEN, tart=Stubborn(str(fake.binary))
-    )
+    status, result, _root = _run(fake, repo, tmp_path)
 
-    (root,) = (tmp_path / "evidence").iterdir()
-    result = json.loads((root / "result.json").read_text())
     assert status == 1 and result["removed"] is False and "cleanup_error" in result
 
 
 def test_a_passing_observer_is_not_enough_when_the_vm_stays(
     fake: Fake, repo: Path, tmp_path: Path
 ) -> None:
-    class Leaves(Tart):
-        def delete_run_vm(self, name: str) -> bool:
-            return False
+    fake.state["keep_on_delete"] = True
+    fake.save()
 
-    status = tart_run.run(
-        "HEAD", tmp_path / "evidence", repo=repo, golden=GOLDEN, tart=Leaves(str(fake.binary))
-    )
+    status, _result, _root = _run(fake, repo, tmp_path)
     assert status == 1
 
 
@@ -250,13 +243,12 @@ def test_only_a_run_vm_can_be_deleted(fake: Fake) -> None:
 
 
 def test_the_only_share_is_the_commit_export_read_only_and_nothing_leaks(
-    fake: Fake, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    fake: Fake, repo: Path, tmp_path: Path
 ) -> None:
     home = tmp_path / "home"
     (home / ".meiva/source").mkdir(parents=True)
-    monkeypatch.setenv("HOME", str(home))
 
-    status, _result, _root = _run(fake, repo, tmp_path)
+    status, _result, _root = _run(fake, repo, tmp_path, home=home)
 
     assert status == 0
     (booted,) = fake.commands("run")
@@ -279,7 +271,7 @@ def test_the_export_holds_only_the_commit_and_no_remote(repo: Path, tmp_path: Pa
     destination = tmp_path / "export"
     destination.mkdir()
 
-    tart_vm.export_commit(repo, commit, destination)
+    tart_vm.export_commit(repo, commit, destination, home=tmp_path / "home")
 
     bare = destination / "source.git"
     assert _git(bare, "for-each-ref", "--format=%(refname) %(objectname)") == (
@@ -294,15 +286,14 @@ def test_the_export_holds_only_the_commit_and_no_remote(repo: Path, tmp_path: Pa
     "relative", [".", "..", ".meiva", ".meiva/source", ".tart", "Library/Keychains"]
 )
 def test_a_share_of_host_state_is_refused_before_tart_is_asked(
-    relative: str, fake: Fake, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    relative: str, fake: Fake, tmp_path: Path
 ) -> None:
     home = tmp_path / "home"
     for name in (".meiva/source", ".tart", "Library/Keychains"):
         (home / name).mkdir(parents=True)
-    monkeypatch.setenv("HOME", str(home))
 
     with pytest.raises(ValueError, match="refusing to mount host state"):
-        fake.tart().boot_argv("vm", share=home / relative, graphics=False)
+        fake.tart(home=home).boot_argv("vm", share=home / relative, graphics=False)
     assert not fake.calls()
 
 

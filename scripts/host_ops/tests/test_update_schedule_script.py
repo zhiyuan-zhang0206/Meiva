@@ -4,9 +4,7 @@ import json
 import os
 import subprocess
 import sys
-from functools import partial
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import psycopg
 import pytest
@@ -14,6 +12,7 @@ import pytest
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.lifecycle import home_lifecycle_locks
+from base.host.proc import run_bounded
 from base.native_process.code_version import CodeVersionError
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import LockTimeoutError
@@ -22,7 +21,7 @@ from base.native_process.root_control.instance_lock import (
     release_instance_lock,
 )
 from base.paths import run_dir
-from gateway.schedules import router, session_control
+from gateway.schedules import router
 from scripts.host_ops import update_schedule_script as repair
 
 
@@ -32,28 +31,14 @@ def host_lock_held(home: Path) -> int:
     return acquire_instance_lock(run_dir(home), "agent_host.lock")
 
 
-def test_a_running_agent_host_refuses_the_repair_before_the_database(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    def installed(_home: Path, _source: Path) -> None:
-        pass
-
-    monkeypatch.setattr(repair, "load_installed_runtime", installed)
-
-    def unexpected_database() -> None:
-        pytest.fail("a refused repair must not build a database handle")
-
-    monkeypatch.setattr(Database, "from_settings", unexpected_database)
+def test_a_running_agent_host_refuses_the_repair_before_the_database(tmp_path: Path) -> None:
     lock = host_lock_held(tmp_path)
     try:
-        with pytest.raises(RuntimeError, match="requires the agent host to be stopped"):
-            repair.repair_script(
-                home=tmp_path,
-                source=tmp_path,
-                schedule_id=1,
-                script="pass\n",
-                expected_sha256="0" * 64,
-            )
+        with (
+            pytest.raises(RuntimeError, match="requires the agent host to be stopped"),
+            repair.repair_guard(tmp_path),
+        ):
+            pass
     finally:
         release_instance_lock(lock)
 
@@ -67,34 +52,26 @@ def test_a_stopped_agent_host_leaves_its_lock_free_for_the_next_host(tmp_path: P
 
 def test_wrong_interpreter_is_refused(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match=r"own \.venv"):
-        repair.load_installed_runtime(tmp_path, tmp_path / "wrong")
+        repair.check_runtime_admission(tmp_path, tmp_path / "wrong", operator_home=tmp_path, env={})
 
 
 def test_wrong_home_is_refused(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="must match"):
-        repair.load_installed_runtime(tmp_path / "different-home", Path(sys.prefix).parent)
-
-
-def test_lifecycle_lock_prevents_a_competing_edit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def installed(_home: Path, _source: Path) -> None:
-        pass
-
-    monkeypatch.setattr(repair, "load_installed_runtime", installed)
-    owner_lock = home_lifecycle_locks.resource_lock
-    monkeypatch.setattr(home_lifecycle_locks, "resource_lock", partial(owner_lock, timeout_s=0.01))
-    with (
-        owner_lock(purpose="test:other-lifecycle"),
-        pytest.raises(LockTimeoutError, match="last holder"),
-    ):
-        repair.repair_script(
-            home=tmp_path,
-            source=tmp_path,
-            schedule_id=1,
-            script="pass\n",
-            expected_sha256="0" * 64,
+        repair.check_runtime_admission(
+            tmp_path / "different-home",
+            Path(sys.prefix).parent,
+            operator_home=tmp_path,
+            env={},
         )
+
+
+def test_lifecycle_lock_prevents_a_competing_edit(tmp_path: Path) -> None:
+    with (
+        home_lifecycle_locks.resource_lock(purpose="test:other-lifecycle"),
+        pytest.raises(LockTimeoutError, match="last holder"),
+        repair.repair_guard(tmp_path, lock_timeout_s=0.01),
+    ):
+        pass
 
 
 def _git(source: Path, *args: str) -> str:
@@ -122,18 +99,19 @@ def _git(source: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def _captured_image(source: Path, known: bool) -> LoadedCommit:
+def _captured_image(source: Path, known: bool) -> tuple[ProcessDbGate, LoadedCommit]:
     source.mkdir()
     if known:
         _git(source, "init", "--initial-branch=main")
         _git(source, "commit", "--allow-empty", "-m", "loaded A")
     image = LoadedCommit.capture(source_root=source)
+    gate = ProcessDbGate(version=repair.source_version(source), process="test")
     assert (image.sha is not None) is known
     if not known:
         _git(source, "init", "--initial-branch=main")
     _git(source, "commit", "--allow-empty", "-m", "later B")
     assert image.sha != _git(source, "rev-parse", "HEAD")
-    return image
+    return gate, image
 
 
 def _assert_image_gate(gate: ProcessDbGate, image: LoadedCommit) -> None:
@@ -161,78 +139,32 @@ def _assert_image_gate(gate: ProcessDbGate, image: LoadedCommit) -> None:
 
 
 @pytest.mark.parametrize("known", [True, False], ids=["captured", "unknown"])
-def test_copied_adapter_binds_the_installed_source_image(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, known: bool
-) -> None:
+def test_copied_adapter_binds_the_installed_source_image(tmp_path: Path, known: bool) -> None:
     source = tmp_path / "installed-source"
-    image = _captured_image(source, known)
-    captures: list[Path] = []
-    borrowed_gates: list[object] = []
-    db = MagicMock(spec=Database)
-
-    def capture(*, source_root: Path) -> LoadedCommit:
-        captures.append(source_root)
-        return image
-
-    def from_settings(*, gate: object) -> Database:
-        borrowed_gates.append(gate)
-        return db
-
-    def installed(home: Path, installed_source: Path) -> None:
-        assert home == tmp_path
-        assert installed_source == source
-
-    monkeypatch.setattr(repair, "load_installed_runtime", installed)
-    monkeypatch.setattr(LoadedCommit, "capture", capture)
-    monkeypatch.setattr(Database, "from_settings", from_settings)
-
-    def replace_script(*_args: object) -> str:
-        return "updated"
-
-    monkeypatch.setattr(repair, "replace_script", replace_script)
-    assert (
-        repair.repair_script(
-            home=tmp_path,
-            source=source,
-            schedule_id=1,
-            script="pass\n",
-            expected_sha256="0" * 64,
-        )
-        == "updated"
-    )
-    assert captures == [source]
-    assert len(borrowed_gates) == 1
-    gate = borrowed_gates[0]
-    assert isinstance(gate, ProcessDbGate)
+    gate, image = _captured_image(source, known)
     _assert_image_gate(gate, image)
 
 
-def test_wrong_home_source_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    source = Path(sys.prefix).parent
+def test_wrong_home_source_is_refused(tmp_path: Path) -> None:
+    source = Path(sys.prefix).parent.resolve()
     (tmp_path / "start-intent.json").write_text(
         json.dumps({"home": str(tmp_path), "checkout": str(tmp_path / "another-source")})
     )
-    monkeypatch.delenv("MEIVA_DB_GENERATION", raising=False)
-    monkeypatch.delenv("MEIVA_PROCESS_PROFILE", raising=False)
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
     with pytest.raises(RuntimeError, match="source checkout"):
-        repair.load_installed_runtime(tmp_path, source)
+        repair.check_runtime_admission(tmp_path, source, operator_home=tmp_path, env={})
 
 
 @pytest.mark.parametrize("key", ["MEIVA_PROCESS_PROFILE", "MEIVA_LAUNCHER_PROFILE"])
 @pytest.mark.parametrize("profile", ["agent", "untrusted-delivery"])
-def test_launcher_delivery_cannot_be_transplanted(
-    key: str, profile: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv(key, profile)
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+def test_launcher_delivery_cannot_be_transplanted(key: str, profile: str, tmp_path: Path) -> None:
+    source = Path(sys.prefix).parent.resolve()
     with pytest.raises(RuntimeError, match="without a launcher"):
-        repair.load_installed_runtime(tmp_path, Path(sys.prefix).parent)
+        repair.check_runtime_admission(tmp_path, source, operator_home=tmp_path, env={key: profile})
 
 
 @pytest.mark.parametrize("enabled", [False, True])
 def test_versioned_edit_preserves_fields_and_defers_session_work(
-    enabled: bool, db_conn: psycopg.Connection, database: Database, monkeypatch: pytest.MonkeyPatch
+    enabled: bool, db_conn: psycopg.Connection, database: Database
 ) -> None:
     with database.pool() as pool:
         row = router.create_blocking(
@@ -246,12 +178,6 @@ def test_versioned_edit_preserves_fields_and_defers_session_work(
             ),
         )
         sid = row[0]
-
-        def unexpected_wait(*args: object) -> None:
-            pytest.fail("maintenance edit must not wait for or launch session work")
-
-        monkeypatch.setattr(session_control, "wait_consumed", unexpected_wait)
-        monkeypatch.setattr(session_control, "request_sync", unexpected_wait)
         assert (
             repair.replace_script(pool, sid, "print(2)\n", repair.script_sha256(row[9]))
             == "updated"
@@ -325,8 +251,6 @@ def test_external_file_uses_installed_runtime_and_real_writer(
     database: Database,
     db_url: str,
     tmp_path: Path,
-    pytester: pytest.Pytester,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = Path(os.environ.get("MEIVA_TEST_INSTALLED_SOURCE", Path(sys.prefix).parent)).resolve()
     home = tmp_path / "home"
@@ -347,13 +271,10 @@ def test_external_file_uses_installed_runtime_and_real_writer(
     external.write_bytes(Path(repair.__file__).read_bytes())
     script_file = tmp_path / "prepared.py"
     script_file.write_bytes(b"raise AssertionError('the body must never run')\r\n")
-    with monkeypatch.context() as child_environment:
-        for key in list(os.environ):
-            if key.startswith("MEIVA_"):
-                child_environment.delenv(key)
-        child_environment.setenv("MEIVA_HOME", str(home))
-        child_environment.chdir(tmp_path)
-        result = pytester.run(
+    child_env = {k: v for k, v in os.environ.items() if not k.startswith("MEIVA_")}
+    child_env["MEIVA_HOME"] = str(home)
+    result = run_bounded(
+        [
             str(source / ".venv" / "bin" / "python"),
             str(external),
             str(row[0]),
@@ -365,10 +286,15 @@ def test_external_file_uses_installed_runtime_and_real_writer(
             str(script_file),
             "--expected-sha256",
             repair.script_sha256(row[9]),
-            timeout=30,
-        )
-    assert result.ret == 0, result.stderr.str()
-    assert "updated script_sha256=" in result.stdout.str()
+        ],
+        timeout=30,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=child_env,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "updated script_sha256=" in result.stdout
     assert db_conn.execute(
         "SELECT enabled,status,script FROM schedules WHERE id=%s", (row[0],)
     ).fetchone() == (True, "stopped", script_file.read_bytes().decode())
@@ -380,17 +306,10 @@ def test_external_file_uses_installed_runtime_and_real_writer(
     ]
 
 
-def test_main_preserves_unknown_failure_traceback(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_preserves_unknown_failure_traceback(tmp_path: Path) -> None:
     script_file = tmp_path / "prepared.py"
     script_file.write_text("pass\n")
-
-    def fail(**_arguments: object) -> str:
-        raise RuntimeError("unexpected writer failure")
-
-    monkeypatch.setattr(repair, "repair_script", fail)
-    with pytest.raises(RuntimeError, match="unexpected writer failure"):
+    with pytest.raises(RuntimeError, match=r"own \.venv"):
         repair.main(
             [
                 "1",

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -26,14 +25,7 @@ PREFLIGHT_VERDICT = (
     "2026-10-17 18:00:00.600000+0800 tccd[120]: AUTHREQ_RESULT: msgID=1.1,"
     " authValue=2, authReason=4"
 )
-
-
-def no_log(_start: datetime, _window: int) -> str:
-    return ""
-
-
-def decision_log(_start: datetime, _window: int) -> str:
-    return "\n".join([REQUEST, PREFLIGHT, VERDICT, PREFLIGHT_VERDICT])
+DECISION_LOG = "\n".join([REQUEST, PREFLIGHT, VERDICT, PREFLIGHT_VERDICT])
 
 
 class FakeHelper:
@@ -132,27 +124,36 @@ def test_an_unrelated_line_never_becomes_evidence() -> None:
 
 
 def test_the_log_is_read_from_the_request_window_only() -> None:
-    seen: list[list[str]] = []
-
-    def run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        seen.append(argv)
-        return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
-
-    module.tccd_log(datetime(2026, 10, 17, 10, 0, tzinfo=UTC), 30, run=run)
-    argv = seen[0]
+    argv = module.tccd_log_argv(datetime(2026, 10, 17, 10, 0, tzinfo=UTC), 30)
     assert argv[:5] == ["log", "show", "--start", argv[3], "--end"]
     assert argv[5] > argv[3]
     assert 'process == "tccd"' in argv
 
 
+NOW = datetime(2026, 10, 17, 10, 0, tzinfo=UTC)
+
+
 def test_a_host_that_is_not_macos_is_a_setup_failure(tmp_path: Path) -> None:
-    assert module.main(["--out", str(tmp_path)], platform="linux", log_reader=no_log) == 2
+    assert (
+        module.run_evidence(
+            ["--out", str(tmp_path)],
+            client=FakeHelper(),
+            platform="linux",
+            now=NOW,
+            log_output="",
+        )
+        == 2
+    )
 
 
 def test_an_old_helper_build_is_a_setup_failure(tmp_path: Path) -> None:
     helper = FakeHelper(capable=False)
-    code = module.main(
-        ["--out", str(tmp_path)], client=helper, platform="darwin", log_reader=no_log
+    code = module.run_evidence(
+        ["--out", str(tmp_path)],
+        client=helper,
+        platform="darwin",
+        now=NOW,
+        log_output="",
     )
     assert code == 2
     assert helper.requests == 0
@@ -160,8 +161,12 @@ def test_an_old_helper_build_is_a_setup_failure(tmp_path: Path) -> None:
 
 def test_the_evidence_names_what_was_requested_and_what_tccd_said(tmp_path: Path) -> None:
     helper = FakeHelper()
-    code = module.main(
-        ["--out", str(tmp_path)], client=helper, platform="darwin", log_reader=decision_log
+    code = module.run_evidence(
+        ["--out", str(tmp_path)],
+        client=helper,
+        platform="darwin",
+        now=NOW,
+        log_output=DECISION_LOG,
     )
     assert code == 0
     assert helper.requests == 1
@@ -175,34 +180,40 @@ def test_the_evidence_names_what_was_requested_and_what_tccd_said(tmp_path: Path
 
 
 def test_a_request_without_a_decision_line_is_not_evidence(tmp_path: Path) -> None:
-    code = module.main(
-        ["--out", str(tmp_path)], client=FakeHelper(), platform="darwin", log_reader=no_log
+    code = module.run_evidence(
+        ["--out", str(tmp_path)],
+        client=FakeHelper(),
+        platform="darwin",
+        now=NOW,
+        log_output="",
     )
     assert code == 1
 
 
 def test_screen_recording_acceptance_needs_its_own_line(tmp_path: Path) -> None:
-    class AccessOnly:
-        def __call__(self, _start: datetime, _window: int) -> str:
-            return "\n".join(
-                [
-                    PREFLIGHT.replace("preflight=yes", "preflight=no"),
-                    PREFLIGHT_VERDICT,
-                ]
-            )
-
-    code = module.main(
+    access_only = "\n".join(
+        [
+            PREFLIGHT.replace("preflight=yes", "preflight=no"),
+            PREFLIGHT_VERDICT,
+        ]
+    )
+    code = module.run_evidence(
         ["--out", str(tmp_path), "--require", "kTCCServiceScreenCapture"],
         client=FakeHelper(),
         platform="darwin",
-        log_reader=AccessOnly(),
+        now=NOW,
+        log_output=access_only,
     )
     assert code == 1
 
 
 def test_a_dead_helper_is_a_setup_failure(tmp_path: Path) -> None:
-    code = module.main(
-        ["--out", str(tmp_path)], client=Dead(), platform="darwin", log_reader=no_log
+    code = module.run_evidence(
+        ["--out", str(tmp_path)],
+        client=Dead(),
+        platform="darwin",
+        now=NOW,
+        log_output="",
     )
     assert code == 2
 

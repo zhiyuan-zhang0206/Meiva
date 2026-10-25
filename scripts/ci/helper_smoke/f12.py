@@ -5,7 +5,6 @@ from __future__ import annotations
 import datetime
 import json
 import re
-import time
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +45,7 @@ def _f12_round(workdir: Path, unit_id: str, tag: str, pid: int, timeout: float) 
 
 
 def f12_point(
-    workdir: Path, tag: str, units: list[tuple[str, int]], pids: list[int]
+    workdir: Path, tag: str, units: list[tuple[str, int]], pids: list[int], *, now: float
 ) -> dict[str, Any]:
     """Trigger one probe round per unit id; collect per-pid replies; snapshot chains.
 
@@ -54,7 +53,7 @@ def f12_point(
     unit that never answers times out into `error: no probe response`. The join
     skips error rows; the summary counts them as missing rounds.
     """
-    smoke_ts = round(time.time(), 3)
+    smoke_ts = round(now, 3)
     for unit_id in sorted({unit_id for unit_id, _ in units}):
         (workdir / f"unit-results-{unit_id}.json.req").write_text(tag)
     rows = []
@@ -206,9 +205,11 @@ def f12_finish(
     samples: dict[str, Any],
     label: str,
     expectations: list[tuple[str, list[int] | None, int]],
+    *,
+    now: float,
 ) -> None:
     """Join the tccd window, save the sampling record, fail on attribution violations."""
-    _f12_join_tccd(evidence, samples, name=f"{label}-tccd-window.txt")
+    _f12_join_tccd(evidence, samples, now=now, name=f"{label}-tccd-window.txt")
     print(_f12_summary_text(label, samples))
     violations = f12_expect_attribution(samples, expectations)
     if violations:
@@ -219,7 +220,11 @@ def f12_finish(
 
 
 def _f12_join_tccd(
-    evidence: Path, samples: dict[str, Any], *, name: str = "f12-tccd-window.txt"
+    evidence: Path,
+    samples: dict[str, Any],
+    *,
+    now: float,
+    name: str = "f12-tccd-window.txt",
 ) -> None:
     """Join sampled probe rounds against the tccd AUTHREQ_ATTRIBUTION log window.
 
@@ -228,7 +233,7 @@ def _f12_join_tccd(
     `samples`.
     """
     first = min(point["smoke_ts"] for point in samples["points"].values())
-    span = max(2, int((time.time() - first) / 60) + 2)
+    span = max(2, int((now - first) / 60) + 2)
     log_text = run(
         [
             "/usr/bin/log",

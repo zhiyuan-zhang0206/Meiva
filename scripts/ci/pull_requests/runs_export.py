@@ -30,6 +30,7 @@ if str(_REPO_ROOT) not in sys.path:
 # meiva:note
 # The script-mode root guard must run before importing the checkout-owned API.
 from base.clock import Timers  # noqa: E402
+from base.telemetry import EventPipeline  # noqa: E402
 from scripts.ci.pull_requests import runs_api  # noqa: E402
 from scripts.ci.pull_requests.gh_process import GhProcess  # noqa: E402
 
@@ -608,7 +609,7 @@ def build_snapshot(
     }
 
 
-def emit_snapshot(snapshot: dict[str, Any], *, pipeline: Any) -> None:
+def emit_snapshot(snapshot: dict[str, Any], *, pipeline: EventPipeline) -> None:
     """Emit absolute states after all repositories succeed, using the exporter
     process dimension for both standalone and scheduled invocation."""
     from base import telemetry
@@ -659,7 +660,7 @@ def main(
     *,
     run_process: GhProcess,
     timers: Timers,
-    producer: Callable[[], Any] | None = None,
+    producer: Callable[[], EventPipeline] | None = None,
 ) -> int:
     """Run the sampler, returning one on authoritative fetch failure."""
     args = _parse_args(argv)

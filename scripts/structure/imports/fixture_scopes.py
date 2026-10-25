@@ -5,10 +5,18 @@ from __future__ import annotations
 import os
 import tomllib
 from pathlib import Path
-from typing import NamedTuple, cast
+from typing import NamedTuple, TypeGuard
 
 SCOPE_FILE = "path_scopes.toml"
 _SKIPPED_DIRS = frozenset({"node_modules", "__pycache__"})
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_list(value: object) -> TypeGuard[list[str]]:
+    return _is_object_list(value) and all(isinstance(item, str) for item in value)
 
 
 class Scope(NamedTuple):
@@ -31,10 +39,9 @@ def declarations(root: Path) -> tuple[Declaration, ...]:
         directory = Path(current).relative_to(root).as_posix()
         declared = tomllib.loads((Path(current) / SCOPE_FILE).read_text(encoding="utf-8"))
         for module, names in declared.items():
-            listed = cast("list[str]", names)
-            if not isinstance(names, list) or not all(isinstance(n, str) for n in listed):
+            if not _is_str_list(names):
                 raise ValueError(f"{directory}/{SCOPE_FILE}: {module} must be a list of names")
-            paths = tuple(directory if name == "." else f"{directory}/{name}" for name in listed)
+            paths = tuple(directory if name == "." else f"{directory}/{name}" for name in names)
             source = (Path(directory) / SCOPE_FILE).as_posix()
             found.append(Declaration(source, module, paths))
     return tuple(sorted(found))

@@ -79,7 +79,7 @@ TOOLCHAIN = guest_script(
 PYTHON = guest_script(f'cd "{GUEST_SOURCE}" && uv sync --locked')
 
 
-def export_commit(repo: Path, commit: str, destination: Path) -> Path:
+def export_commit(repo: Path, commit: str, destination: Path, *, home: Path) -> Path:
     """A bare repository under `destination` holding only that commit's history.
 
     Built by a fresh fetch, so every file in it is new and unlinked from the host's own
@@ -91,16 +91,25 @@ def export_commit(repo: Path, commit: str, destination: Path) -> Path:
         ["git", "init", "--bare", "-q", str(bare)], check=True, capture_output=True
     )
     git(bare, "fetch", "--no-tags", "-q", str(repo), f"{commit}:refs/heads/{EXPORT_BRANCH}")
-    refuse_host_state(destination)
+    refuse_host_state(destination, home=home)
     return destination
 
 
 class Tart:
     """One Tart binary. With `dry_run`, commands are printed and never run."""
 
-    def __init__(self, binary: str, *, dry_run: bool = False) -> None:
+    def __init__(
+        self,
+        binary: str,
+        *,
+        home: Path,
+        dry_run: bool = False,
+        poll_interval_s: float = 3.0,
+    ) -> None:
         self.binary = binary
+        self.home = home
         self.dry_run = dry_run
+        self.poll_interval_s = poll_interval_s
 
     def argv(self, *args: str) -> list[str]:
         return [self.binary, *args]
@@ -157,7 +166,7 @@ class Tart:
         if not graphics:
             argv.append("--no-graphics")
         if share is not None:
-            refuse_host_state(share)
+            refuse_host_state(share, home=self.home)
             argv.append(f"--dir={SHARE_NAME}:{share}:ro")
         return self.argv(*argv, name)
 
@@ -191,13 +200,14 @@ class Tart:
             return
         if proc is None:
             raise RunFailedError(f"{name} was not booted by this run")
-        deadline = time.monotonic() + READY_TIMEOUT_S
-        while time.monotonic() < deadline:
+        waited = 0.0
+        while waited < READY_TIMEOUT_S:
             if proc.poll() is not None:
                 raise RunFailedError(f"`tart run` for {name} exited early ({proc.returncode})")
             if self.run("exec", name, "true", check=False).returncode == 0:
                 return
-            time.sleep(3)
+            time.sleep(self.poll_interval_s)
+            waited += max(self.poll_interval_s, 0.05)
         raise RunFailedError(f"the guest agent of {name} did not answer in {READY_TIMEOUT_S}s")
 
     # -------------------------------------------------------------------- shutdown

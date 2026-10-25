@@ -16,7 +16,7 @@ import tokenize
 from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
@@ -268,18 +268,26 @@ def _default_targets(root: Path) -> list[Path]:
     return [root / host for host in hosts if (root / host).is_dir()]
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
 def _read_baseline(root: Path) -> dict[str, int]:
     path = root / BASELINE
     if not path.is_file():
         return {}
     raw: object = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
+    if not _is_str_dict(raw):
         raise SystemExit(f"{BASELINE}: expected a JSON object of read -> count")
     counts: dict[str, int] = {}
-    for key, value in cast("dict[str, object]", raw).items():
+    for key, value in raw.items():
         if not isinstance(value, int):
             raise SystemExit(f"{BASELINE}: {key!r} must map to a count, not {value!r}")
-        counts[str(key)] = value
+        counts[key] = value
     return counts
 
 
@@ -366,16 +374,13 @@ def _read_exemptions(root: Path) -> tuple[int, dict[str, str]]:
     if not path.is_file():
         return 0, {}
     raw: object = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
+    if not _is_str_dict(raw):
         raise SystemExit(f"{EXEMPTIONS}: expected {{'allowed': int, 'exemptions': {{...}}}}")
-    payload = cast("dict[str, object]", raw)
-    allowed = payload.get("allowed")
-    entries = payload.get("exemptions")
-    if not isinstance(allowed, int) or not isinstance(entries, dict):
+    allowed = raw.get("allowed")
+    entries = raw.get("exemptions")
+    if not isinstance(allowed, int) or not _is_str_dict(entries):
         raise SystemExit(f"{EXEMPTIONS}: expected {{'allowed': int, 'exemptions': {{...}}}}")
-    return allowed, {
-        str(key): str(value) for key, value in cast("dict[str, object]", entries).items()
-    }
+    return allowed, {key: str(value) for key, value in entries.items()}
 
 
 def _write_exemptions(root: Path, found: dict[str, list[str]], jobs: frozenset[str]) -> None:
