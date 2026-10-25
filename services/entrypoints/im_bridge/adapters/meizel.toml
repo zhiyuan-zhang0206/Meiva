@@ -18,6 +18,32 @@ exports = ["feishu.py", "feishu_poll_cursor.py", "feishu_ws_proxy.py", "run_plan
 "weixin.py#random uuid.uuid4" = 1
 "weixin_login.py#clock time.monotonic" = 2
 
+[debt.any-collaborator]
+"feishu.py#any FeishuAdapter.__init__.core" = 1
+"feishu.py#any FeishuAdapter._build_rest_client.return" = 1
+"feishu.py#any FeishuAdapter._build_ws_client.return" = 1
+"feishu.py#any FeishuAdapter._create_message.client" = 1
+"feishu.py#any FeishuAdapter._create_message.request" = 1
+"feishu.py#any FeishuAdapter._create_message.return" = 1
+"feishu.py#any FeishuAdapter._handle_card_action.data" = 1
+"feishu.py#any FeishuAdapter._handle_event.data" = 1
+"feishu.py#any FeishuAdapter._normalize_poll_item.item" = 1
+"feishu.py#any FeishuAdapter._on_card_action.data" = 1
+"feishu.py#any FeishuAdapter._on_im_message.data" = 1
+"feishu.py#any FeishuAdapter._record_send.data" = 1
+"feishu.py#any FeishuAdapter._send_card.client" = 1
+"feishu.py#any FeishuAdapter._send_one.client" = 1
+"feishu.py#any FeishuAdapter._sender_open_id.sender" = 1
+"feishu.py#any FeishuAdapter._spawn_event.data" = 1
+"feishu_inbound.py#any normalize_card_action.data" = 1
+"feishu_inbound.py#any normalize_message.data" = 1
+"feishu_poll_cursor.py#any create_ms.item" = 1
+"feishu_poll_cursor.py#any list_chat.rest_client" = 1
+"telegram.py#any TelegramAdapter.__init__.core" = 1
+"weixin.py#any WeixinAdapter.__init__.core" = 1
+"weixin.py#any _is_stale_session_ret.errmsg" = 1
+"weixin.py#any atomic_write_json.payload" = 1
+
 [debt.third-party-patch]
 "feishu_ws_proxy.py#setattr lark_oapi.ws.client._ws_connect_kwargs" = 1
 

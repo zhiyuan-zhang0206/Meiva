@@ -20,6 +20,9 @@ exports = ["allocation_freeze.py", "client.py", "closure.py", "keys.py", "paths.
 "process_groups.py#clock time.monotonic" = 2
 "process_groups.py#pid os.getpid" = 1
 
+[debt.any-collaborator]
+"client.py#any request.fields" = 1
+
 [debt.type-cast]
 "allocation_freeze.py#cast _parse" = 1
 "client.py#cast host_generation" = 1

@@ -10,13 +10,17 @@ from __future__ import annotations
 
 import datetime
 from pathlib import Path
-from types import SimpleNamespace
 
 from base.log import FILE_SINK_SIZE_LIMIT, rotate_by_size_or_day
 
 
-def _message(t: datetime.datetime) -> SimpleNamespace:
-    return SimpleNamespace(record={"time": t})
+class _Message:
+    def __init__(self, t: datetime.datetime) -> None:
+        self.record: dict[str, datetime.datetime] = {"time": t}
+
+
+def _message(t: datetime.datetime) -> _Message:
+    return _Message(t)
 
 
 def test_no_rotation_under_limit_same_day(tmp_path: Path) -> None:

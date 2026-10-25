@@ -9,3 +9,6 @@ exports = ["mcp.py", "packages.py", "plugins.py"]
 
 [debt.ambient-read]
 "packages.py#clock datetime.datetime.now" = 1
+
+[debt.any-collaborator]
+"plugins.py#any _extension_gateway.return" = 1

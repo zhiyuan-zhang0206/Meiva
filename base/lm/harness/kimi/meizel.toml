@@ -12,6 +12,9 @@ exports = ["__init__.py", "config.py", "session.py", "usage.py"]
 "config.py#home pathlib.Path.home" = 1
 "session.py#clock time.perf_counter" = 2
 
+[debt.any-collaborator]
+"usage.py#any _int.value" = 1
+
 [debt.type-cast]
 "mapping.py#cast _content_text" = 3
 "mapping.py#cast _text_of" = 1

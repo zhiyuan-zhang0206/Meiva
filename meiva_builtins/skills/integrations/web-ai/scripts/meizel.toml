@@ -11,3 +11,6 @@
 "_dom.py#clock time.monotonic" = 2
 "_utils.py#clock datetime.datetime.now" = 1
 "webchat.py#clock time.monotonic" = 6
+
+[debt.any-collaborator]
+"webchat.py#any evaluate.return" = 1

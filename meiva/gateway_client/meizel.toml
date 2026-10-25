@@ -10,5 +10,8 @@
 [debt.ambient-read]
 "__init__.py#random uuid.uuid4" = 3
 
+[debt.any-collaborator]
+"__init__.py#any use_client.client" = 1
+
 [debt.type-cast]
 "plans.py#cast spawn_receipt" = 2

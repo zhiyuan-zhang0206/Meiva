@@ -21,6 +21,17 @@ exports = ["announce.py", "bus.py", "coalescer.py", "projection.py", "publisher.
 "redis_client.py#random random.uniform" = 1
 "redis_listener.py#settings base.config.settings" = 1
 
+[debt.any-collaborator]
+"bus.py#any _from_view.view" = 1
+"redis_client.py#any AuthRetryAsyncRedis.execute_command._execute.return" = 1
+"redis_client.py#any AuthRetryAsyncRedis.execute_command.args" = 1
+"redis_client.py#any AuthRetryAsyncRedis.execute_command.options" = 1
+"redis_client.py#any AuthRetryAsyncRedis.execute_command.return" = 1
+"redis_client.py#any AuthRetrySyncRedis.execute_command._execute.return" = 1
+"redis_client.py#any AuthRetrySyncRedis.execute_command.args" = 1
+"redis_client.py#any AuthRetrySyncRedis.execute_command.options" = 1
+"redis_client.py#any AuthRetrySyncRedis.execute_command.return" = 1
+
 [debt.type-cast]
 "redis_client.py#cast AuthRetryAsyncRedis.execute_command._execute" = 1
 "redis_client.py#cast AuthRetrySyncRedis.execute_command._execute" = 1

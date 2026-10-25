@@ -22,6 +22,9 @@ exports = ["authority", "checkpoint_schema.py", "dataplane", "derive.py", "front
 "postgres.py#pid os.getuid" = 1
 "postgres.py#platform sys.platform" = 3
 
+[debt.any-collaborator]
+"postgres.py#any ProcessView.uids.return" = 1
+
 [debt.type-cast]
 "derive.py#cast derive_env" = 1
 "ports.py#cast new_home_ports" = 1

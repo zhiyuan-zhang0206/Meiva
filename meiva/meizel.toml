@@ -26,6 +26,20 @@ exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "
 "files.py#random uuid.uuid4" = 1
 "ui.py#clock time.monotonic" = 2
 
+[debt.any-collaborator]
+"__init__.py#any _SdkModule.DB.return" = 1
+"__init__.py#any _SdkModule.REDIS.return" = 1
+"__init__.py#any _SdkModule.state.return" = 1
+"__init__.py#any _SdkModule.state.value" = 1
+"__init__.py#any _SdkModule.state_update.return" = 1
+"__init__.py#any _SdkModule.state_update.value" = 1
+"__init__.py#any __getattr__.return" = 1
+"__init__.py#any attach.return" = 1
+"boot.py#any _gateway.return" = 1
+"boot.py#any database_factory.database.return" = 1
+"boot.py#any plugin_state_codec.return" = 1
+"boot.py#any process_clients.pipeline.return" = 1
+
 [debt.type-cast]
 "security.py#cast deliver" = 1
 "ui.py#cast _error_detail" = 1

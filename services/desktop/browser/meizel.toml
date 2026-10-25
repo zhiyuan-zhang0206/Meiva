@@ -37,6 +37,35 @@ exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py
 "session_restore.py#clock datetime.datetime.now" = 2
 "session_restore.py#clock time.monotonic" = 4
 
+[debt.any-collaborator]
+"mcp_daemon.py#any _call_tool_response.req_id" = 1
+"mcp_daemon.py#any _page_id.value" = 1
+"mcp_daemon.py#any _respond.method" = 1
+"mcp_daemon.py#any _respond.req_id" = 1
+"mcp_socket_bridge.py#any ReconnectingLink.request.once.return" = 1
+"mcp_socket_bridge.py#any ReconnectingLink.request.return" = 1
+"mcp_socket_bridge.py#any SocketLink.request.return" = 1
+"mcp_socket_bridge.py#any SocketLink.request.roundtrip.return" = 1
+"mcp_wrapper.py#any _serve._call_tool._ctx" = 1
+"mcp_wrapper.py#any _serve._list_tools._ctx" = 1
+"mcp_wrapper.py#any _serve._list_tools._params" = 1
+"page_lifecycle.py#any handle_release_agent_page.req_id" = 1
+"protocol.py#any OkResponse.result" = 1
+"session.py#any cdp_call.ws" = 1
+"session.py#any http_json.return" = 1
+"session_restore.py#any CdpChrome._extension_id.ids" = 1
+"session_restore.py#any CdpChrome._extension_id.ws" = 1
+"session_restore.py#any CdpChrome._one_worker_call.return" = 1
+"session_restore.py#any CdpChrome._worker_targets.ids" = 1
+"session_restore.py#any CdpChrome._worker_targets.ws" = 1
+"session_restore.py#any CdpChrome.json.return" = 1
+"session_restore.py#any CdpChrome.worker.return" = 1
+"session_restore.py#any Chrome.json.return" = 1
+"session_restore.py#any Chrome.worker.return" = 1
+"session_restore.py#any _attach_and_evaluate.ids" = 1
+"session_restore.py#any _attach_and_evaluate.return" = 1
+"session_restore.py#any _attach_and_evaluate.ws" = 1
+
 [debt.type-cast]
 "probe.py#cast cdp_unreachable" = 1
 "session_restore.py#cast _connect" = 1

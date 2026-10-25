@@ -28,6 +28,10 @@ exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record
 "posixproc.py#clock time.time" = 1
 "tool_capabilities.py#clock datetime.datetime.now" = 3
 
+[debt.any-collaborator]
+"backend.py#any PtySessionBackend._call.args" = 1
+"backend.py#any PtySessionBackend._call.kwargs" = 1
+
 [debt.type-cast]
 "coding_session_owner_record.py#cast <module>" = 1
 "coding_session_owner_record.py#cast _parse" = 1

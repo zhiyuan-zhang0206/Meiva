@@ -125,7 +125,7 @@ def _where(
     clauses: list[sql.Composable] = []
     params: list[Any] = []
 
-    def add(clause: LiteralString, *values: Any) -> None:
+    def add(clause: LiteralString, *values: object) -> None:
         clauses.append(sql.SQL(clause))
         params.extend(values)
 

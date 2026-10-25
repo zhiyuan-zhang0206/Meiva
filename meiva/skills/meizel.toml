@@ -11,6 +11,9 @@ exports = ["skill_index.py", "skill_proxies.py"]
 [debt.ambient-read]
 "__init__.py#home pathlib.Path.home" = 1
 
+[debt.any-collaborator]
+"skill_proxies.py#any LazySkillDoc.__getattribute__.return" = 1
+
 [debt.impure-call]
 "__init__.py#Path.read_text" = 1
 
