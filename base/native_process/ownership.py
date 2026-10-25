@@ -13,7 +13,7 @@ import os
 import sys
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Protocol, TypeGuard
 
 import psutil
 
@@ -43,6 +43,22 @@ def shown_name(name: str) -> str:
     return f"{name[:_SHOWN_NAME_CHARS]!r}..."
 
 
+class _MonotonicCreateTimeProc(Protocol):
+    def create_time(self, *, monotonic: bool = ...) -> float: ...
+
+
+class _ProcessWithPlatformProc(Protocol):
+    _proc: _MonotonicCreateTimeProc
+
+
+def _has_platform_proc(process: object) -> TypeGuard[_ProcessWithPlatformProc]:
+    return hasattr(process, "_proc")
+
+
+def _sys_platform(platform: str | None = None) -> str:
+    return sys.platform if platform is None else platform
+
+
 def stable_create_time(process: psutil.Process) -> float:
     """Native start timestamp; Linux uses start ticks for identity instead.
 
@@ -56,10 +72,12 @@ def stable_create_time(process: psutil.Process) -> float:
     written and compared through that same value. Linux's public value includes
     a reconstructed boot wall time and is diagnostic, never its identity key.
     """
-    if sys.platform == "darwin":
+    if _sys_platform() == "darwin":
         # psutil's per-platform object is untyped in the public stubs; its
         # monotonic create_time is the pid-reuse key used above.
-        return float(cast("Any", process)._proc.create_time(monotonic=True))
+        if not _has_platform_proc(process):
+            raise RuntimeError(f"psutil.Process lacks _proc for PID {process.pid}")
+        return float(process._proc.create_time(monotonic=True))
     return process.create_time()
 
 
@@ -100,7 +118,7 @@ class OwnedProcess:
         observed_ticks: Sequence[int | None] | None = None,
     ) -> OwnedProcess:
         """Sample the PID's current native birth; lineage needs separate evidence."""
-        sys_platform = sys.platform if platform is None else platform
+        sys_platform = _sys_platform(platform)
         first_raw: int | None = None
         if observed_ticks is not None:
             first_raw = observed_ticks[0] if len(observed_ticks) >= 1 else None
@@ -130,12 +148,12 @@ class OwnedProcess:
             self.pid,
             self.birth,
             self.starttime,
-            platform=sys.platform if platform is None else platform,
+            platform=_sys_platform(platform),
         )
 
     def same_birth(self, other: OwnedProcess, *, platform: str | None = None) -> bool:
         """Compare captured native identities without a wall-clock fallback for ticks."""
-        sys_platform = sys.platform if platform is None else platform
+        sys_platform = _sys_platform(platform)
         if sys_platform == "linux" and (self.starttime is None or other.starttime is None):
             return False
         return self.birth_key(platform=sys_platform) == other.birth_key(platform=sys_platform)
@@ -175,7 +193,7 @@ class OwnedProcess:
         platform: str | None = None,
         observed_ticks: Sequence[int | None] | None = None,
     ) -> LiveReading | None:
-        sys_platform = sys.platform if platform is None else platform
+        sys_platform = _sys_platform(platform)
         try:
             process = psutil.Process(self.pid)
             if self.starttime is None:
@@ -233,7 +251,7 @@ class OwnedProcess:
             return False
         descriptor: int | None = None
         try:
-            if sys.platform == "linux":
+            if _sys_platform() == "linux":
                 descriptor = pidfd.open_process(self.pid)
             process = psutil.Process(self.pid)
             if not self.birth_matches(process):
@@ -417,6 +435,7 @@ def process_metadata() -> dict[str, Any]:
     nodes: list[dict[str, object]] = []
     observation_error: str | None = None
     process = psutil.Process()
+    caller_pid = process.pid
     for _depth in range(8):
         try:
             identity = OwnedProcess.capture(process)
@@ -442,7 +461,7 @@ def process_metadata() -> dict[str, Any]:
             observation_error = type(exc).__name__
             break
     return assemble_process_metadata(
-        pid=os.getpid(),
+        pid=caller_pid,
         nodes=nodes,
         codex_home=codex_home,
         observation_error=observation_error,

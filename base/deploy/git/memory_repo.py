@@ -5,7 +5,8 @@ import datetime
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+
+import httpx
 
 from base.cluster.machine import GatewayAccess, MachineIdentityReader
 from base.host.proc import run_bounded
@@ -75,7 +76,7 @@ def is_initialized(*, root: Path) -> bool:
 GIT_TIMEOUT_S = 120.0
 
 
-def run_git(*args: str, cwd: Path) -> str:
+def run_git(*args: str, cwd: Path, timeout: float = GIT_TIMEOUT_S) -> str:
     # meiva:note
     # run_git passes the per-command timeout to run_bounded, raises CalledProcessError for nonzero exits, and propagates TimeoutExpired. It returns stripped stdout only on success.
     # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
@@ -83,7 +84,7 @@ def run_git(*args: str, cwd: Path) -> str:
 
     result = run_bounded(
         argv,
-        timeout=GIT_TIMEOUT_S,
+        timeout=timeout,
         cwd=str(cwd),
         capture_output=True,
         text=True,
@@ -119,34 +120,38 @@ POOL_SNAPSHOT_MAX_BYTES = 256 * 1024 * 1024
 _POOL_FETCH_TIMEOUT_S = 120.0
 
 
-def _stream_pool(client: Any, url: str, headers: dict[str, str]) -> tuple[str | None, bytes]:
+def _stream_pool(
+    client: httpx.Client,
+    url: str,
+    headers: dict[str, str],
+    *,
+    max_bytes: int = POOL_SNAPSHOT_MAX_BYTES,
+) -> tuple[str | None, bytes]:
     # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
     with client.stream("GET", url, headers=headers) as resp:
         if resp.status_code != 200:
             raise MemoryPoolBootstrapFailed(f"GET {url} -> HTTP {resp.status_code}")
         declared = resp.headers.get("Content-Length")
-        if declared and int(declared) > POOL_SNAPSHOT_MAX_BYTES:
+        if declared and int(declared) > max_bytes:
             raise MemoryPoolBootstrapFailed(
-                f"pool snapshot declared at {declared} bytes, over the {POOL_SNAPSHOT_MAX_BYTES}-byte cap"
+                f"pool snapshot declared at {declared} bytes, over the {max_bytes}-byte cap"
             )
         buf = bytearray()
         for chunk in resp.iter_bytes():
             buf += chunk
-            if len(buf) > POOL_SNAPSHOT_MAX_BYTES:
-                raise MemoryPoolBootstrapFailed(
-                    f"pool snapshot exceeds the {POOL_SNAPSHOT_MAX_BYTES}-byte cap"
-                )
+            if len(buf) > max_bytes:
+                raise MemoryPoolBootstrapFailed(f"pool snapshot exceeds the {max_bytes}-byte cap")
         head = resp.headers.get("X-Pool-Head")
         return head, bytes(buf)
 
 
-def download_pool_snapshot(url: str, headers: dict[str, str]) -> tuple[str | None, bytes]:
+def download_pool_snapshot(
+    url: str, headers: dict[str, str], *, max_bytes: int = POOL_SNAPSHOT_MAX_BYTES
+) -> tuple[str | None, bytes]:
     # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
-    import httpx
-
     try:
         with httpx.Client(timeout=_POOL_FETCH_TIMEOUT_S) as client:
-            return _stream_pool(client, url, headers)
+            return _stream_pool(client, url, headers, max_bytes=max_bytes)
     except httpx.HTTPError as e:
         raise MemoryPoolBootstrapFailed(f"GET {url} failed: {e}") from e
 

@@ -93,9 +93,13 @@ def verify_bearer_digest(authorization: str | None, digests: Collection[str]) ->
     return matched
 
 
+def random_bytes(size: int = 32) -> bytes:
+    return token_bytes(size)
+
+
 def new_session_id() -> str:
     """Return an opaque URL-safe identifier with 256 bits of entropy."""
-    return urlsafe_b64encode(token_bytes(32)).rstrip(b"=").decode("ascii")
+    return urlsafe_b64encode(random_bytes(32)).rstrip(b"=").decode("ascii")
 
 
 def cookie_name() -> str:

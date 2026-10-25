@@ -121,18 +121,19 @@ class HarnessCli:
     harness_skip_permissions: bool
 
 
-def _value(pins: Mapping[str, Any], name: str, default_reader: Callable[[str, str], Any]) -> Any:
+def _value[T](pins: Mapping[str, Any], name: str, default_reader: Callable[[str, str], T]) -> T:
 
-    value = pins[name] if name in pins else default_reader(FIELD_DOMAINS[name], name)
-    return tuple(value) if _is_any_list(value) else value
+    value: Any = pins[name] if name in pins else default_reader(FIELD_DOMAINS[name], name)
+    result: Any = tuple(value) if _is_any_list(value) else value
+    return result
 
 
-def agent_setting(
+def agent_setting[T](
     name: str,
     pins: Mapping[str, Any] | None = None,
     *,
-    default_reader: Callable[[str, str], Any],
-) -> Any:
+    default_reader: Callable[[str, str], T],
+) -> T:
 
     return _value(pins or {}, name, default_reader)
 
@@ -191,7 +192,7 @@ class AgentSlices:
 
     pins: Mapping[str, Any]
     plugin_pins: Mapping[str, Mapping[str, Any]]
-    _plugin_view: Any = field(repr=False, compare=False)
+    _plugin_view: PluginConfigView = field(repr=False, compare=False)
     _default_reader: Callable[[str, str], Any] = field(repr=False, compare=False)
 
     @classmethod
@@ -233,11 +234,11 @@ class AgentSlices:
             return self.pins[field]
         return self._default_reader(domain, field)
 
-    def plugin_config(self, plugin: str) -> Any:
+    def plugin_config(self, plugin: str) -> BaseModel:
 
         return self._plugin_view.config_for(plugin)
 
-    def plugin_configs(self) -> dict[str, Any]:
+    def plugin_configs(self) -> dict[str, BaseModel]:
 
         return self._plugin_view.configs()
 

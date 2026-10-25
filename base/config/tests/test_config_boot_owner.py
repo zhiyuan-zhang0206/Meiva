@@ -6,7 +6,6 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event, get_ident
-from unittest.mock import patch
 
 import pytest
 
@@ -20,7 +19,8 @@ _CHILD = Path(__file__).with_name("_boot_owner_child.py")
 
 @pytest.fixture(autouse=True)
 def _isolated_owner_environment(tmp_path: Path) -> Iterator[None]:
-    with patch.dict(os.environ):
+    saved = dict(os.environ)
+    try:
         os.environ["MEIVA_HOME"] = str(tmp_path)
         (tmp_path / ".env").write_text(
             "MEIVA_MACHINE_SERVE_GATEWAY=true\n"
@@ -29,6 +29,9 @@ def _isolated_owner_environment(tmp_path: Path) -> Iterator[None]:
             encoding="utf-8",
         )
         yield
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
 
 
 def test_constructor_and_skip_boot_do_not_deliver_environment() -> None:
@@ -74,9 +77,7 @@ def test_process_entry_still_delivers_its_home_environment(tmp_path: Path) -> No
         owner.read_process_environment()
 
 
-def test_two_real_models_keep_stable_views_overlays_and_live_readers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_two_real_models_keep_stable_views_overlays_and_live_readers() -> None:
     first, second = ConfigBoot(), ConfigBoot()
     first_view, second_view = first.view, second.view
     first.set_field("llm_model", "first-model")
@@ -93,6 +94,7 @@ def test_two_real_models_keep_stable_views_overlays_and_live_readers(
     assert (first_reader(), second_reader()) == ("first-model", "second-model")
     assert (first.is_full(), second.is_full()) == (False, False)
     legacy_settings = facade.settings
+    previous_legacy_model = facade.get_field("llm_model")
     first_model = first.ensure_eager()
     second_model = second.ensure_eager()
     assert isinstance(first_model, _full.Settings)
@@ -104,11 +106,14 @@ def test_two_real_models_keep_stable_views_overlays_and_live_readers(
     assert second_view.agent.skills_to_expand_at_start == ["second-skill"]
     first.set_field("llm_model", "first-update")
     second_view.lm.llm_model = "second-update"
-    monkeypatch.setattr(facade, "settings", object())
-    assert (first_reader(), second_reader()) == ("first-update", "second-update")
-    assert first.get_field("llm_model") == "first-update"
-    assert first.ensure_eager() is first_model
-    assert first.boot_state()["upgrades"] == second.boot_state()["upgrades"] == 1
+    facade.set_field("llm_model", "legacy-model")
+    try:
+        assert (first_reader(), second_reader()) == ("first-update", "second-update")
+        assert first.get_field("llm_model") == "first-update"
+        assert first.ensure_eager() is first_model
+        assert first.boot_state()["upgrades"] == second.boot_state()["upgrades"] == 1
+    finally:
+        facade.set_field("llm_model", previous_legacy_model)
 
 
 def test_lite_derived_default_uses_its_owner() -> None:

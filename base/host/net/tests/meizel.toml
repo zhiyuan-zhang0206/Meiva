@@ -13,7 +13,3 @@ exports = ["fake_url_opener.py", "local_http.py", "retry_waits.py"]
 
 [debt.stdlib-patch]
 "test_http_dial.py#monkeypatch.setattr socket.getaddrinfo" = 1
-
-[debt.third-party-patch]
-"test_http_dial.py#monkeypatch.setattr httpx.get" = 1
-"test_http_dial.py#monkeypatch.setattr httpx.post" = 1

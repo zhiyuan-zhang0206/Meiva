@@ -50,18 +50,22 @@ class Platform:
     def current(cls) -> Platform:
         """The platform of this process."""
         return cls.from_sys_platform(
-            sys.platform, machine=platform.machine(), executable=sys.executable
+            _sys_platform(), machine=platform.machine(), executable=sys.executable
         )
+
+
+def _sys_platform() -> str:
+    return sys.platform
 
 
 def is_macos() -> bool:
     """Whether this process runs on macOS, queried directly from Python."""
-    return sys.platform == "darwin"
+    return _sys_platform() == "darwin"
 
 
 def is_linux() -> bool:
     """Whether this process runs on Linux, queried directly from Python."""
-    return sys.platform.startswith("linux")
+    return _sys_platform().startswith("linux")
 
 
 def launchd_job_label() -> str | None:

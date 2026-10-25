@@ -89,7 +89,7 @@ class _SkipReport:
         return f"{shown}; …" if len(tagged) > _SUMMARY_EXAMPLE_LIMIT else shown
 
 
-def converge_private_tree(path: Path) -> Path:
+def converge_private_tree(path: Path, *, euid: int | None = None) -> Path:
     """Recursively converge a private directory tree to owner-only modes.
 
     A unit's logs, workspaces, and memory checkout can predate the private
@@ -107,7 +107,7 @@ def converge_private_tree(path: Path) -> Path:
     itself is still converged like any other child.
     """
     skips = _SkipReport()
-    _converge_tree(path, skips)
+    _converge_tree(path, skips, euid=euid)
     if skips.total:
         logger.warning(
             "private storage convergence skipped {n} node(s) under {path} "
@@ -125,18 +125,18 @@ def converge_private_tree(path: Path) -> Path:
     return path
 
 
-def _converge_tree(path: Path, skips: _SkipReport) -> None:
+def _converge_tree(path: Path, skips: _SkipReport, *, euid: int | None = None) -> None:
     try:
         current = path.lstat()
     except FileNotFoundError:
         current = None
-    if current is not None and is_foreign_owned(current):
+    if current is not None and is_foreign_owned(current, euid=euid):
         # A directory owned by another account can never be chmod'd by
         # converge — warn and leave it (and its subtree) alone instead of
         # aborting the whole converge run (2026-09-02 boot loop).
         logger.warning("private storage convergence skipped foreign-owned path {path}", path=path)
         return
-    ensure_private_dir(path)
+    ensure_private_dir(path, euid=euid)
     for child in path.iterdir():
         current = child.lstat()
         if stat.S_ISLNK(current.st_mode):
@@ -145,7 +145,7 @@ def _converge_tree(path: Path, skips: _SkipReport) -> None:
             logger.debug("private storage convergence skipped symlink {path}", path=child)
             skips.symlinks.append(child)
             continue
-        if is_foreign_owned(current):
+        if is_foreign_owned(current, euid=euid):
             logger.debug(
                 "private storage convergence skipped foreign-owned path {path}", path=child
             )
@@ -153,10 +153,10 @@ def _converge_tree(path: Path, skips: _SkipReport) -> None:
             continue
         if stat.S_ISDIR(current.st_mode):
             if child.name == _NODE_MODULES_DIRNAME:
-                ensure_private_dir(child)
+                ensure_private_dir(child, euid=euid)
                 skips.node_modules_dirs += 1
                 continue
-            _converge_tree(child, skips)
+            _converge_tree(child, skips, euid=euid)
             continue
         if not stat.S_ISREG(current.st_mode):
             # Unix sockets and FIFOs are live-service plumbing, not storage:
@@ -221,6 +221,10 @@ def scan_non_regular_nodes(root: Path) -> list[Path]:
     return out
 
 
+def _temporary_path(path: Path) -> Path:
+    return path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+
+
 def create_private_bytes(path: Path, data: bytes) -> None:
     """Publish owner-only `data` at `path` complete or not at all; never overwrite.
 
@@ -228,7 +232,7 @@ def create_private_bytes(path: Path, data: bytes) -> None:
     reads the winner's file instead.
     """
     ensure_private_dir(path.parent)
-    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    temporary = _temporary_path(path)
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         os.fchmod(fd, 0o600)
@@ -252,7 +256,7 @@ def create_private_bytes(path: Path, data: bytes) -> None:
 def write_private_bytes(path: Path, data: bytes) -> None:
     """Atomically replace `path` with owner-only `data` in its private directory."""
     ensure_private_dir(path.parent)
-    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    temporary = _temporary_path(path)
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         os.fchmod(fd, 0o600)

@@ -134,7 +134,7 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from base.config import _lite
 from base.config._lite import (
@@ -356,7 +356,7 @@ def apply_cluster_timezone(owner: ConfigBoot | None = None) -> None:
 # The view is lite until the first eager touch and then delegates to the
 # constructed singleton; the object identity never changes, so every
 # `from base.config import settings` binding stays valid across the upgrade.
-settings = cast("Settings", _lite.settings_view())
+settings: Settings = _lite.settings_view()  # pyright: ignore[reportAssignmentType]
 
 
 def refresh_data_plane_settings() -> None:

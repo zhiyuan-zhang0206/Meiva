@@ -40,7 +40,6 @@ import base64
 import binascii
 import json
 import os
-import secrets
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -70,6 +69,7 @@ from base.host.db_authority.ledger import (
     read_secret,
 )
 from base.host.db_authority.model import AuthorityRefusedError, Digest, RoleName
+from base.host.net.auth import random_bytes
 from base.host.net.url_secret import url_with_userinfo
 from base.host.private_storage import write_private_bytes
 
@@ -239,6 +239,14 @@ def _parse[M: BaseModel](model: type[M], body: bytes, path: Path) -> M:
         raise UnitCapabilityError(f"{path} is corrupt: {exc}") from exc
 
 
+def _now(now: float | None) -> float:
+    return time.time() if now is None else now
+
+
+def _random_bytes(size: int) -> bytes:
+    return random_bytes(size)
+
+
 # ── gateway: issuance ───────────────────────────────────────────────────────
 
 
@@ -284,7 +292,7 @@ def issue_bundle(
         gateway=token_digest(secret.api.gateway),
         telemetry=telemetry_token(cluster_secret),
     )
-    issued_at = time.time() if now is None else now
+    issued_at = _now(now)
     capability = UnitCapability(
         version=1,
         unit=unit,
@@ -294,7 +302,7 @@ def issue_bundle(
         ),
         role=secret.roles.runner.name,
         password=secret.roles.runner.password,
-        bundle=secrets.token_hex(16),
+        bundle=_random_bytes(16).hex(),
         api=api,
     )
     bundle = Bundle(
@@ -306,7 +314,7 @@ def issue_bundle(
         expires_at=issued_at + ttl_s,
         capability=capability,
     )
-    key = secrets.token_bytes(_KEY_BYTES)
+    key = _random_bytes(_KEY_BYTES)
     return IssuedBundle(_seal(bundle, key), _b64(key), unit, generation.number, bundle.expires_at)
 
 
@@ -325,7 +333,7 @@ def _seal(bundle: Bundle, key: bytes) -> bytes:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
     header = _header(bundle)
-    iv = secrets.token_bytes(_IV_BYTES)
+    iv = _random_bytes(_IV_BYTES)
     ciphertext = AESGCM(key).encrypt(iv, _canonical(bundle), _canonical(header))
     envelope = _Envelope(header=header, iv=_b64(iv), ciphertext=_b64(ciphertext))
     return json.dumps(envelope.model_dump(mode="json"), sort_keys=True, indent=2).encode() + b"\n"
@@ -372,7 +380,7 @@ def open_bundle(data: bytes, transport_key: str, *, now: float | None = None) ->
     bundle = _parse(Bundle, plaintext, Path("<bundle>"))
     if _header(bundle) != envelope.header:
         raise UnitCapabilityError("the bundle's header contradicts its sealed content")
-    if (time.time() if now is None else now) >= bundle.expires_at:
+    if _now(now) >= bundle.expires_at:
         raise UnitCapabilityError("the bundle has expired; issue a new one on the gateway")
     return bundle
 

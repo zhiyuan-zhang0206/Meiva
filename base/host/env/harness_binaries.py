@@ -37,6 +37,10 @@ class HarnessBinaryNotFoundError(FileNotFoundError):
     pass
 
 
+def resolve_user_home(home: Path | None = None) -> Path:
+    return Path.home() if home is None else home
+
+
 # meiva:note
 # `HARNESS_BIN_DIRS` (or a caller's list) with the relative entries anchored at `home`.
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
@@ -44,7 +48,7 @@ def harness_bin_dirs(
     home: Path | None = None, bin_dirs: Sequence[str] | None = None
 ) -> tuple[str, ...]:
     entries = HARNESS_BIN_DIRS if bin_dirs is None else bin_dirs
-    root = Path.home() if home is None else home
+    root = resolve_user_home(home)
     return tuple(entry if Path(entry).is_absolute() else str(root / entry) for entry in entries)
 
 

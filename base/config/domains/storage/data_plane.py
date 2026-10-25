@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from pydantic import Field, field_validator, model_validator
 
@@ -21,6 +21,10 @@ from base.host.net.url_secret import (
     url_with_host,
     url_with_query_param,
 )
+
+
+def _is_default_user_home(home: Path) -> bool:
+    return home.expanduser().resolve() == (Path.home() / ".meiva").resolve()
 
 
 def self_machine_host() -> str:
@@ -93,8 +97,6 @@ def sslmode_for_url(url: str, configured: str) -> str | None:
     kwargs over the URL's conninfo params, so injecting here when the URL
     already names a mode would silently downgrade a stricter URL mode.
     """
-    from urllib.parse import parse_qs
-
     if "sslmode" in parse_qs(urlsplit(url).query):
         return None
     return configured.strip() or None
@@ -143,7 +145,7 @@ def project_service_db_url(
     """
     if profile != "agent" or not cluster_secret:
         return raw
-    if home.name != ".meiva" and home.expanduser().resolve() != (Path.home() / ".meiva").resolve():
+    if home.name != ".meiva" and not _is_default_user_home(home):
         return raw
     try:
         local_owner = (
@@ -629,8 +631,7 @@ class DataPlaneSettings(EnvSettings):
             and not _is_runner_db_url(self.db_url)
             and is_loopback_host(urlsplit(self.db_url).hostname or "")
         )
-        home = unit_home().expanduser().resolve()
-        on_default_home = home == (Path.home() / ".meiva").resolve()
+        on_default_home = _is_default_user_home(unit_home())
         # MEIVA_PROCESS_PROFILE is a launcher-only process marker, not a Settings
         # field. It must remain an environment read so agent startup can preserve
         # its injected database projection.

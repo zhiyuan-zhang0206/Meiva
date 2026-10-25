@@ -17,6 +17,7 @@ from base.telemetry.tests.otlp.identity_inputs import machine_identity
 from base.telemetry.tests.test_tracing import (
     CollectorStubServer,
     otlp_with_attrs,
+    stub_traceloop_init,
     trace_config,
     wait_init_resolved,
     warned_fields,
@@ -260,10 +261,11 @@ def test_initialize_relief_pass_runs_when_disk_over_watermark(
     recent_newer.write_bytes(os.urandom(700 * 1024))
 
     init_calls: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        "traceloop.sdk.Traceloop.init",
-        lambda **kw: init_calls.append(kw),  # pyright: ignore[reportUnknownArgumentType]
-    )
+
+    def record_init(**kw: object) -> None:
+        init_calls.append(kw)
+
+    stub_traceloop_init(monkeypatch, record_init)
 
     initialize_tracing(
         machine=machine_identity(),
@@ -299,7 +301,11 @@ def test_initialize_sets_trace_content_false(
     home = tmp_path / ".meiva"
     home.mkdir()
     calls: list[dict[str, Any]] = []
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+
+    def record_init(**kw: Any) -> None:
+        calls.append(kw)
+
+    stub_traceloop_init(monkeypatch, record_init)
 
     initialize_tracing(
         machine=machine_identity(),
@@ -331,7 +337,11 @@ def test_initialize_skips_when_collector_unreachable(
     endpoint = f"http://127.0.0.1:{port}"
 
     calls: list[dict[str, Any]] = []
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+
+    def record_init(**kw: Any) -> None:
+        calls.append(kw)
+
+    stub_traceloop_init(monkeypatch, record_init)
     initialize_tracing(
         machine=machine_identity(),
         home=home,
@@ -359,7 +369,11 @@ def test_initialize_skips_when_disk_over_watermark(
     home = tmp_path / ".meiva"
     home.mkdir()
     calls: list[dict[str, Any]] = []
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+
+    def record_init(**kw: Any) -> None:
+        calls.append(kw)
+
+    stub_traceloop_init(monkeypatch, record_init)
     initialize_tracing(
         machine=machine_identity(),
         home=home,

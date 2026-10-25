@@ -10,7 +10,7 @@ exports = ["collector_artifact.py", "editable_install.py", "python_lock.py", "st
 
 [debt.ambient-read]
 "collector_artifact.py#platform platform.machine" = 1
-"collector_artifact.py#platform platform.system" = 2
+"collector_artifact.py#platform platform.system" = 1
 
 [debt.impure-call]
 "collector_artifact.py#Path.open" = 1
@@ -18,16 +18,13 @@ exports = ["collector_artifact.py", "editable_install.py", "python_lock.py", "st
 "collector_artifact.py#Path.write_text" = 1
 "collector_artifact.py#import shutil" = 1
 "collector_artifact.py#import tempfile" = 1
-"editable_install.py#Path.exists" = 3
-"editable_install.py#Path.read_text" = 2
+"editable_install.py#Path.exists" = 1
+"editable_install.py#Path.read_text" = 1
 "python_lock.py#Path.open" = 1
 
 [debt.impure-edge]
 "collector_artifact.py#base/host/net/ports.py" = 1
 "collector_artifact.py#base/host/net/resilience.py" = 1
-
-[debt.type-cast]
-"editable_install.py#cast _direct_url_is_allowed" = 2
 
 [debt.wide-params]
 "collector_artifact.py#def stream_download" = 1

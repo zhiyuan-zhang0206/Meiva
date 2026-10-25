@@ -35,6 +35,7 @@ than building a transport from bare httpcore.
 from __future__ import annotations
 
 import socket
+import ssl
 import typing
 from urllib.parse import urlsplit
 
@@ -87,7 +88,7 @@ class _PinnedStream(httpcore.NetworkStream):
 
     def start_tls(
         self,
-        ssl_context: typing.Any,
+        ssl_context: ssl.SSLContext,
         server_hostname: str | None = None,
         timeout: float | None = None,
     ) -> httpcore.NetworkStream:
@@ -99,7 +100,7 @@ class _PinnedStream(httpcore.NetworkStream):
             raise httpcore.ConnectError(str(exc)) from exc
         return _PinnedStream(wrapped)
 
-    def get_extra_info(self, info: str) -> typing.Any:
+    def get_extra_info(self, info: str) -> object:
         if info == "client_addr":
             return self._sock.getsockname()
         if info == "server_addr":

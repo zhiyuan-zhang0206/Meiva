@@ -213,7 +213,7 @@ def connect(path: str) -> socket.socket:
     raise PermissionsHelperError(f"permissions helper not reachable at {path}: {last}")
 
 
-def _exchange(s: socket.socket, method: str, req: dict[str, object]) -> Any:
+def _exchange(s: socket.socket, method: str, req: dict[str, object]) -> dict[str, Any]:
     """Send one request line on a connected socket, read one reply, close it."""
     s.settimeout(CALL_TIMEOUT_S)
     try:
@@ -637,6 +637,18 @@ class PermissionsHelperClient(StatefulCalls):
         """Report the frontmost application's display name ("" when none)."""
         return self.call("frontmost_app")
 
+    def _ping_within(self, settle_s: float) -> PingResult | PermissionsHelperError:
+        clock = time.monotonic
+        deadline = clock() + settle_s
+        while True:
+            try:
+                return self.ping()
+            except PermissionsHelperError as exc:
+                if clock() < deadline:
+                    time.sleep(PROBE_RETRY_DELAY_S)
+                    continue
+                return exc
+
     def check_screen_capture(self, *, settle_s: float = _PROBE_SETTLE_S) -> ScreenCaptureStatus:
         """Report whether OS-level screen capture works, by asking the helper.
 
@@ -650,31 +662,25 @@ class PermissionsHelperClient(StatefulCalls):
         "no permission": the grant was not read, so claiming it is missing would be
         a guess, and the fix is a launchd one, not a System Settings one.
         """
-        deadline = time.monotonic() + settle_s
-        while True:
-            try:
-                result = self.ping()
-            except PermissionsHelperError as exc:
-                if time.monotonic() < deadline:
-                    time.sleep(PROBE_RETRY_DELAY_S)
-                    continue
-                return ScreenCaptureStatus(
-                    state=ScreenCaptureState.HELPER_UNREACHABLE,
-                    diagnostic=(
-                        f"The permissions helper did not answer on its socket ({exc}), so its "
-                        "Screen Recording grant could not be read -- this is a helper "
-                        "liveness problem, not a permission one. While it is down every "
-                        "desktop action it performs fails: OS-level screenshots, clicks, "
-                        "keystrokes, window geometry. Check its launchd job "
-                        "(`launchctl list | grep com.meiva.permissions-helper`) and "
-                        "$MEIVA_HOME/logs/permissions-helper.log."
-                    ),
-                )
-            if result["preflight_screen"]:
-                return ScreenCaptureStatus(state=ScreenCaptureState.AVAILABLE)
+        result = self._ping_within(settle_s)
+        if isinstance(result, PermissionsHelperError):
             return ScreenCaptureStatus(
-                state=ScreenCaptureState.NO_GRANT, diagnostic=_NO_GRANT_DIAGNOSTIC
+                state=ScreenCaptureState.HELPER_UNREACHABLE,
+                diagnostic=(
+                    f"The permissions helper did not answer on its socket ({result}), so its "
+                    "Screen Recording grant could not be read -- this is a helper "
+                    "liveness problem, not a permission one. While it is down every "
+                    "desktop action it performs fails: OS-level screenshots, clicks, "
+                    "keystrokes, window geometry. Check its launchd job "
+                    "(`launchctl list | grep com.meiva.permissions-helper`) and "
+                    "$MEIVA_HOME/logs/permissions-helper.log."
+                ),
             )
+        if result["preflight_screen"]:
+            return ScreenCaptureStatus(state=ScreenCaptureState.AVAILABLE)
+        return ScreenCaptureStatus(
+            state=ScreenCaptureState.NO_GRANT, diagnostic=_NO_GRANT_DIAGNOSTIC
+        )
 
     def request_grants(self) -> RequestGrantsResult:
         self.require_capability("request_grants_v1", "grant requests")
@@ -689,31 +695,25 @@ class PermissionsHelperClient(StatefulCalls):
         helper is distinct from a missing grant: its answer was never read and the
         repair is its launchd job, not System Settings.
         """
-        deadline = time.monotonic() + settle_s
-        while True:
-            try:
-                result = self.ping()
-            except PermissionsHelperError as exc:
-                if time.monotonic() < deadline:
-                    time.sleep(PROBE_RETRY_DELAY_S)
-                    continue
-                return AccessibilityStatus(
-                    state=AccessibilityState.HELPER_UNREACHABLE,
-                    diagnostic=(
-                        f"The permissions helper did not answer on its socket ({exc}), so its "
-                        "Accessibility grant could not be read -- this is a helper liveness "
-                        "problem, not a permission one. While it is down every desktop action "
-                        "it performs fails: OS-level screenshots, clicks, keystrokes, window "
-                        "geometry. Check its launchd job "
-                        "(`launchctl list | grep com.meiva.permissions-helper`) and "
-                        "$MEIVA_HOME/logs/permissions-helper.log."
-                    ),
-                )
-            if result["ax_trusted"] is True:
-                return AccessibilityStatus(state=AccessibilityState.GRANTED)
+        result = self._ping_within(settle_s)
+        if isinstance(result, PermissionsHelperError):
             return AccessibilityStatus(
-                state=AccessibilityState.NOT_GRANTED, diagnostic=_NO_AX_GRANT_DIAGNOSTIC
+                state=AccessibilityState.HELPER_UNREACHABLE,
+                diagnostic=(
+                    f"The permissions helper did not answer on its socket ({result}), so its "
+                    "Accessibility grant could not be read -- this is a helper liveness "
+                    "problem, not a permission one. While it is down every desktop action "
+                    "it performs fails: OS-level screenshots, clicks, keystrokes, window "
+                    "geometry. Check its launchd job "
+                    "(`launchctl list | grep com.meiva.permissions-helper`) and "
+                    "$MEIVA_HOME/logs/permissions-helper.log."
+                ),
             )
+        if result["ax_trusted"] is True:
+            return AccessibilityStatus(state=AccessibilityState.GRANTED)
+        return AccessibilityStatus(
+            state=AccessibilityState.NOT_GRANTED, diagnostic=_NO_AX_GRANT_DIAGNOSTIC
+        )
 
 
 HelperFactory = Callable[[], PermissionsHelperClient]

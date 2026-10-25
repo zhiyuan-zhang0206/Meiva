@@ -149,8 +149,9 @@ def run_preflight(
         workdir=workdir,
         tag=f"preflight-{run_id}",
     )
-    deadline = time.monotonic() + wait_s
-    while time.monotonic() < deadline:
+    clock = time.monotonic
+    deadline = clock() + wait_s
+    while clock() < deadline:
         text = read_result(result_path)
         if text is not None:
             data = json.loads(text)

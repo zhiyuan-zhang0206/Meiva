@@ -169,13 +169,16 @@ def _per_agent_fields_for(cls: type[BaseModel]) -> set[str]:
 
 
 # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
+def _framework_field_tables() -> tuple[set[str], set[str], Callable[[str], str]]:
+    from base.config import field_domain, field_names, per_agent_field_names
+
+    return per_agent_field_names(), field_names(), field_domain
+
+
 def resolve_overlay_targets(
     overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None
 ) -> dict[str, tuple[str | None, str]]:
-    from base.config import field_names, per_agent_field_names
-
-    framework_per_agent = per_agent_field_names()
-    framework_all = field_names()
+    framework_per_agent, framework_all, _ = _framework_field_tables()
 
     plugin_classes = overlay_config_classes(configs)
     out: dict[str, tuple[str | None, str]] = {}
@@ -305,7 +308,6 @@ def _validate_framework_overlay_ranges(updates: dict[str, object]) -> None:
 def validate_config_overlay_shape(
     overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None
 ) -> None:
-    from base.config import field_domain
     from base.config.service_read import domain_model_classes
 
     targets = resolve_overlay_targets(overlay, configs)
@@ -316,9 +318,10 @@ def validate_config_overlay_shape(
     for plugin, updates in grouped.items():
         try:
             if plugin is None:
+                _, _, domain_of = _framework_field_tables()
                 by_domain: dict[str, dict[str, object]] = {}
                 for f, v in updates.items():
-                    by_domain.setdefault(field_domain(f), {})[f] = v
+                    by_domain.setdefault(domain_of(f), {})[f] = v
                 for dom, upd in by_domain.items():
                     cls = domain_model_classes()[dom]
                     sub = cls()

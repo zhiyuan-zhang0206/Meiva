@@ -38,6 +38,10 @@ def is_expired_mirror_filename(filename: str, *, cutoff: str) -> bool:
     return len(day) == 8 and day.isdigit() and day < cutoff
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 def prune_jsonl_mirror(
     *,
     target_dir: Path | None = None,
@@ -52,7 +56,7 @@ def prune_jsonl_mirror(
     from base.paths import logs_dir
 
     resolved_dir = logs_dir() if target_dir is None else target_dir
-    cutoff = (datetime.now(UTC) - timedelta(days=retention_days)).strftime("%Y%m%d")
+    cutoff = (_utc_now() - timedelta(days=retention_days)).strftime("%Y%m%d")
     # `.rollup.jsonl` is the retired filtered tier; leftovers age out with the full mirror.
     for path in (
         *resolved_dir.glob("events-????????.jsonl"),
@@ -79,7 +83,7 @@ def append_jsonl(events: list[Event], *, target_dir: Path | None = None) -> None
     from base.paths import logs_dir
 
     resolved_dir = logs_dir() if target_dir is None else target_dir
-    day = datetime.now(UTC).strftime("%Y%m%d")
+    day = _utc_now().strftime("%Y%m%d")
     try:
         lines = [
             json.dumps(event_row(e), default=str, separators=(",", ":"), ensure_ascii=False) + "\n"

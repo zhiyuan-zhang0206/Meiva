@@ -51,6 +51,7 @@ from base.host.env.bootstrap import (
     is_delivered_unit_login,
     launcher_context,
 )
+from base.host.env.harness_binaries import resolve_user_home
 from base.paths.home import resolve_meiva_home
 
 __all__ = [
@@ -329,7 +330,9 @@ def _is_launcher_redis_url(env: Mapping[str, str], value: str | None) -> bool:
 # The SDK's watcher wiring (`meiva/watcher/wiring.py`) is the one caller: it hands a
 # watcher session the launcher's runner projection.
 def watcher_runner_env() -> dict[str, str]:
-    return project_watcher_runner_env(os.environ, home=resolve_meiva_home(), user_home=Path.home())
+    return project_watcher_runner_env(
+        os.environ, home=resolve_meiva_home(), user_home=resolve_user_home()
+    )
 
 
 # meiva:note

@@ -22,10 +22,22 @@ import os
 import sys
 from collections.abc import Iterable
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 EDITABLE_PTH_NAME = "_editable_impl_meiva.pth"
 EDITABLE_DIST_INFO_GLOB = "meiva-*.dist-info/direct_url.json"
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _path_exists(path: Path) -> bool:
+    return path.exists()
+
+
+def _read_text(path: Path) -> str:
+    return path.read_text()
 
 
 def editable_meiva_pth_paths(source_root: Path) -> tuple[Path, ...]:
@@ -72,7 +84,7 @@ def _missing_editable_meiva_pth_paths(source_root: Path) -> tuple[Path, ...]:
         record.parent.parent / EDITABLE_PTH_NAME
         for record in editable_direct_url_paths(source_root)
     }
-    return tuple(sorted((path for path in paths if not path.exists()), key=str))
+    return tuple(sorted((path for path in paths if not _path_exists(path)), key=str))
 
 
 def _pth_paths_without_sibling_direct_url(source_root: Path) -> tuple[Path, ...]:
@@ -125,14 +137,13 @@ def _direct_url_is_allowed(raw_text: str, allowed_urls: frozenset[str]) -> bool:
         payload = json.loads(raw_text)
     except json.JSONDecodeError:
         return False
-    if not isinstance(payload, dict):
+    if not _is_str_dict(payload):
         return False
-    payload = cast("dict[str, object]", payload)
     url = payload.get("url")
     dir_info = payload.get("dir_info")
-    if not isinstance(url, str) or not isinstance(dir_info, dict):
+    if not isinstance(url, str) or not _is_str_dict(dir_info):
         return False
-    if cast("dict[str, object]", dir_info).get("editable") is not True:
+    if dir_info.get("editable") is not True:
         return False
     return url.rstrip("/") in allowed_urls
 
@@ -175,7 +186,7 @@ def editable_install_violations(
         )
     for pth_path in editable_meiva_pth_paths(resolved_source):
         try:
-            raw_text = pth_path.read_text()
+            raw_text = _read_text(pth_path)
         except OSError:
             violations.append(f"{pth_path} unreadable")
             continue
@@ -186,7 +197,7 @@ def editable_install_violations(
             )
     for record in editable_direct_url_paths(resolved_source):
         try:
-            raw_text = record.read_text()
+            raw_text = _read_text(record)
         except OSError:
             violations.append(f"{record} unreadable")
             continue
@@ -203,7 +214,7 @@ def venv_python(source_root: Path) -> Path | None:
         venv / "bin" / "python3",
         venv / "bin" / "python",
     ):
-        if candidate.exists():
+        if _path_exists(candidate):
             return candidate
     return None
 
@@ -215,7 +226,7 @@ def editable_console_script_violations(source_root: Path) -> tuple[str, ...]:
     if interpreter is None:
         return ()
     console_script = interpreter.with_name("meiva")
-    if console_script.exists():
+    if _path_exists(console_script):
         return ()
     return (f"{console_script} editable console script missing",)
 

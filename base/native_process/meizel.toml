@@ -2,9 +2,11 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 
 [uses]
 "code_version.py" = ["loaded_commit.py"]
-"exec_domain.py" = ["process_control.py"]
+"exec_domain.py" = ["os_platform.py", "process_control.py"]
+"kernel_identity.py" = ["os_platform.py"]
 "ownership.py" = ["birth_key.py", "kernel_identity.py", "pidfd.py"]
-"root_control" = ["ownership.py"]
+"pidfd.py" = ["os_platform.py"]
+"root_control" = ["os_platform.py", "ownership.py"]
 "tests" = ["birth_key.py", "child_env.py", "code_version.py", "evidence.py", "kernel_identity.py", "loaded_commit.py", "os_platform.py", "ownership.py", "pidfd.py", "process_control.py", "runtime_incarnation.py", "turn_identity.py"]
 "turn_identity.py" = ["stop_timing.py"]
 
@@ -21,22 +23,10 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 "ownership.py" = { kinds = ["environ"], why = "process_metadata records CODEX_HOME, the provider routing context the impersonation relay spec needs — a child-env handoff read, not persisted cluster config" }
 
 [debt.ambient-read]
-"exec_domain.py#platform sys.platform" = 1
-"kernel_identity.py#platform sys.platform" = 3
 "os_platform.py#clock time.monotonic" = 2
 "os_platform.py#home pathlib.Path.home" = 1
 "os_platform.py#pid os.getpid" = 1
 "os_platform.py#pid os.getuid" = 1
 "os_platform.py#platform platform.machine" = 1
-"os_platform.py#platform sys.platform" = 3
-"ownership.py#pid os.getpid" = 1
-"ownership.py#platform sys.platform" = 6
-"pidfd.py#platform sys.platform" = 1
-
-[debt.any-collaborator]
-"exec_domain.py#any ExecProcessDomain.launch_posix.options" = 1
-
-[debt.type-cast]
-"exec_domain.py#cast ExecProcessDomain.launch_posix" = 1
-"exec_domain.py#cast ExecProcessDomain.signal" = 1
-"ownership.py#cast stable_create_time" = 1
+"os_platform.py#platform sys.platform" = 1
+"ownership.py#platform sys.platform" = 1

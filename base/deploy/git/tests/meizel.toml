@@ -4,12 +4,3 @@ exports = ["memory_checkouts.py", "pool_server.py"]
 "test_memory_repo.py" = ["memory_checkouts.py"]
 "test_memory_repo_bootstrap.py" = ["memory_checkouts.py", "pool_server.py"]
 "test_memory_repo_pool_snapshot.py" = ["pool_server.py"]
-
-[debt.first-party-patch]
-"test_memory_repo.py#monkeypatch.setattr base.deploy.git.memory_repo.run_bounded" = 3
-"test_memory_repo_pool_snapshot.py#monkeypatch.setattr base.deploy.git.memory_repo.POOL_SNAPSHOT_MAX_BYTES" = 2
-"test_source_tree_guard.py#monkeypatch.setattr base.deploy.git.source_tree_guard.git" = 2
-"test_source_tree_guard.py#monkeypatch.setattr base.paths.meiva_home" = 10
-
-[debt.restricted-python]
-"test_worktree_guard.py#python -c" = 2

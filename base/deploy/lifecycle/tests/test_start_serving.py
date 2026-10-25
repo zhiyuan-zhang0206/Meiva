@@ -6,6 +6,7 @@ from threading import Event, Thread
 import pytest
 
 from base.deploy.lifecycle.start_serving import RootBirth
+from base.deploy.lifecycle.tests.serving_root import override_observed_root
 
 
 @pytest.fixture
@@ -90,7 +91,6 @@ def test_old_birth_cannot_grant_after_observed_generation_changes(
     serving_root: RootBirth,
     state_path: Path,
     home: Path,
-    monkeypatch: pytest.MonkeyPatch,
     change: str,
 ) -> None:
     from base.deploy.lifecycle import start_serving
@@ -116,7 +116,7 @@ def test_old_birth_cannot_grant_after_observed_generation_changes(
             raise RootClientError("native peer unreadable")
         return observed
 
-    monkeypatch.setattr(start_serving, "observe_root", current)
+    override_observed_root(current)
     assert start_serving.born_identity(home) is None
     assert not start_serving.is_serving(home)
     with start_serving.recovery_permitted(home) as permitted:
@@ -158,7 +158,7 @@ def test_linux_birth_uses_ticks_not_recomputed_wall_clock(serving_root: RootBirt
 
 
 def test_birth_read_refuses_marker_replaced_during_native_observation(
-    serving_root: RootBirth, state_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
+    serving_root: RootBirth, state_path: Path, home: Path
 ) -> None:
     from base.deploy.lifecycle import start_serving
 
@@ -169,26 +169,29 @@ def test_birth_read_refuses_marker_replaced_during_native_observation(
         start_serving.begin_start(home)
         return serving_root
 
-    monkeypatch.setattr(start_serving, "observe_root", raced)
+    override_observed_root(raced)
     assert start_serving.born_identity(home) is None
 
 
 def test_direct_process_e2e_injects_only_its_explicit_fixture_gate(
-    tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, home: Path
 ) -> None:
     from base.deploy.lifecycle import start_serving
-    from base.deploy.lifecycle.tests.serving_entrypoint import inject_fixture_gate
+    from base.deploy.lifecycle.tests.serving_entrypoint import (
+        clear_fixture_gate,
+        inject_fixture_gate,
+    )
 
     gate = tmp_path / "e2e-serving"
-    monkeypatch.setattr(start_serving, "is_serving", start_serving.is_serving)
-    monkeypatch.setattr(start_serving, "recovery_permitted", start_serving.recovery_permitted)
+    try:
+        inject_fixture_gate(gate)
 
-    inject_fixture_gate(gate)
-
-    assert not start_serving.is_serving(home)
-    gate.write_text("ready\n")
-    assert start_serving.is_serving(home)
-    with start_serving.recovery_permitted(home) as permitted:
-        assert permitted
-    gate.unlink()
-    assert not start_serving.is_serving(home)
+        assert not start_serving.is_serving(home)
+        gate.write_text("ready\n")
+        assert start_serving.is_serving(home)
+        with start_serving.recovery_permitted(home) as permitted:
+            assert permitted
+        gate.unlink()
+        assert not start_serving.is_serving(home)
+    finally:
+        clear_fixture_gate()

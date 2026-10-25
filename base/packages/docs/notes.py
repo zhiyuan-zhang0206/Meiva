@@ -15,12 +15,16 @@ from collections.abc import Iterator
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from base.log import logger
 from base.packages.docs.frontmatter import parse_frontmatter_typed
 
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
 
 
 @dataclass(frozen=True)
@@ -53,8 +57,8 @@ def normalize_tags(raw: object) -> tuple[str, ...]:
     """
     if isinstance(raw, str):
         return (raw,)
-    if isinstance(raw, list):
-        return tuple(t for t in cast("list[object]", raw) if isinstance(t, str))
+    if _is_object_list(raw):
+        return tuple(t for t in raw if isinstance(t, str))
     return ()
 
 

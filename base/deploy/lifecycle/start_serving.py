@@ -14,12 +14,12 @@ import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Literal, Self, cast
+from typing import Literal, Self, TypeGuard
 
 import psutil
 from pydantic import model_validator
 
-from base.host.atomic_io import fsync_parent, write_text_atomic
+from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.host.runtime_interpreter import LoadedRuntimeIdentity
 from base.host.verified_file import regular_bytes
 from base.native_process.evidence import Digest, EvidenceModel, ExpectedProcess
@@ -30,6 +30,11 @@ from base.paths import run_dir
 _log = logging.getLogger("base.deploy.lifecycle.start_serving")
 _STATE_FILENAME = "start-serving.json"
 _LOCK_FILENAME = "start-serving.lock"
+_WRITER = AtomicWriter(SYSTEM_FS)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 # meiva:note
@@ -95,12 +100,11 @@ def observe_root(home: Path) -> RootBirth:
     home = home.resolve(strict=True)
     response = RootClient(home / "run/meiva-root/meiva-root.sock", timeout=2).status()
     body = response.get("result")
-    if response["ok"] is not True or not isinstance(body, dict):
+    if response["ok"] is not True or not _is_str_dict(body):
         raise RootClientError("root did not provide its birth evidence")
-    root = cast("dict[str, object]", body).get("root")
-    if not isinstance(root, dict):
+    root = body.get("root")
+    if not _is_str_dict(root):
         raise RootClientError("root omitted its running identity")
-    root = cast("dict[str, object]", root)
     if root.get("home") != str(home):
         raise RootClientError("root birth belongs to another home")
     if root.get("running") is not True:
@@ -136,33 +140,29 @@ def born_identity(home: Path) -> ServingState | None:
         return None
 
 
-def _fsync_parent(path: Path) -> None:
-    fsync_parent(path)
-
-
-def _sync_parent_or_log(path: Path) -> None:
+def _sync_parent_or_log(path: Path, *, writer: AtomicWriter) -> None:
     try:
-        _fsync_parent(path)
+        writer.fsync_parent(path)
     except OSError:
         # The replace or unlink is already visible. Preserve the safe state
         # transition rather than reporting a false failure to the caller.
         _log.warning("[start-serving] directory fsync failed after marker change", exc_info=True)
 
 
-def write_state(home: Path, state: ServingState) -> None:
+def write_state(home: Path, state: ServingState, *, writer: AtomicWriter) -> None:
     path = state_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_text_atomic(
+    writer.write_text(
         path, state.model_dump_json(), encoding="utf-8", mode=0o600, prefix=".start-serving-"
     )
-    _sync_parent_or_log(path)
+    _sync_parent_or_log(path, writer=writer)
 
 
 def begin_start(home: Path) -> str:
     """Invalidate any previous success and return this start's generation."""
     generation = str(uuid.uuid4())
     with file_lock(_lock_path(home)):
-        write_state(home, ServingState(state="starting", generation=generation))
+        write_state(home, ServingState(state="starting", generation=generation), writer=_WRITER)
     return generation
 
 
@@ -175,7 +175,11 @@ def mark_serving(home: Path, generation: str, *, runtime: LoadedRuntimeIdentity)
         birth = observe_root(home)
         if birth.runtime != runtime:
             raise RuntimeError("serving root differs from the admitted loaded runtime")
-        write_state(home, ServingState(state="serving", generation=generation, birth=birth))
+        write_state(
+            home,
+            ServingState(state="serving", generation=generation, birth=birth),
+            writer=_WRITER,
+        )
         return True
 
 
@@ -201,4 +205,4 @@ def clear_serving(home: Path) -> None:
     with file_lock(_lock_path(home)):
         path = state_path(home)
         path.unlink(missing_ok=True)
-        _sync_parent_or_log(path)
+        _sync_parent_or_log(path, writer=_WRITER)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Callable
 from typing import Any
 
 GaugeValues = dict[tuple[str, str], dict[tuple[tuple[str, Any], ...], tuple[float, dict[str, Any]]]]
@@ -9,7 +11,7 @@ GaugeValues = dict[tuple[str, str], dict[tuple[tuple[str, Any], ...], tuple[floa
 
 def record_gauge(
     gauge_values: GaugeValues,
-    gauge_lock: Any,
+    gauge_lock: threading.Lock,
     key: tuple[str, str],
     value: int | float,
     attrs: dict[str, Any],
@@ -27,11 +29,11 @@ def record_gauge(
 
 
 def observable_gauge_callback(
-    gauge_values: GaugeValues, gauge_lock: Any, key: tuple[str, str]
-) -> Any:
+    gauge_values: GaugeValues, gauge_lock: threading.Lock, key: tuple[str, str]
+) -> Callable[[object], list[Any]]:
     """Build the OTel callback that snapshots one gauge's current series."""
 
-    def observe(_options: Any) -> list[Any]:
+    def observe(_options: object) -> list[Any]:
         from opentelemetry.metrics import Observation
 
         with gauge_lock:

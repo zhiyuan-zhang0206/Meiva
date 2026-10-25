@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import timedelta
-from typing import cast
+from typing import TypeGuard
 
 EVENT_STREAM_SERVICE_NAME = "unknown_service"
 
@@ -48,6 +48,10 @@ def _retention_period_str() -> str:
     return f"{retention_hours()}h"
 
 
+def _is_str_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping)
+
+
 def validate_loki_deploy_config(config: Mapping[str, object]) -> None:
     """Reject rendered Loki retention, query-capacity, or WAL-throttle drift.
 
@@ -56,10 +60,10 @@ def validate_loki_deploy_config(config: Mapping[str, object]) -> None:
 
     raw_limits_config = config["limits_config"]
     raw_querier = config["querier"]
-    if not isinstance(raw_limits_config, Mapping) or not isinstance(raw_querier, Mapping):
+    if not _is_str_mapping(raw_limits_config) or not _is_str_mapping(raw_querier):
         raise TypeError("Loki deploy config must contain limits_config and querier mappings")
-    limits_config = cast(Mapping[str, object], raw_limits_config)
-    querier = cast(Mapping[str, object], raw_querier)
+    limits_config = raw_limits_config
+    querier = raw_querier
     retention_period = limits_config["retention_period"]
     if retention_period != _retention_period_str():
         raise ValueError(
@@ -81,13 +85,13 @@ def validate_loki_deploy_config(config: Mapping[str, object]) -> None:
     # event stream. Must stay explicitly pinned here so a re-render cannot
     # silently fall back to the flapping default.
     raw_ingester = config["ingester"]
-    if not isinstance(raw_ingester, Mapping):
+    if not _is_str_mapping(raw_ingester):
         raise TypeError("Loki deploy config must contain an ingester mapping")
-    ingester = cast(Mapping[str, object], raw_ingester)
+    ingester = raw_ingester
     raw_wal = ingester["wal"]
-    if not isinstance(raw_wal, Mapping):
+    if not _is_str_mapping(raw_wal):
         raise TypeError("Loki deploy config must contain ingester.wal mapping")
-    wal = cast(Mapping[str, object], raw_wal)
+    wal = raw_wal
     threshold = wal["disk_full_threshold"]
     if threshold != WAL_DISK_FULL_THRESHOLD:
         raise ValueError(

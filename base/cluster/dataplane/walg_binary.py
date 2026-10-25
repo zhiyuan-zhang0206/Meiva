@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import platform
 import subprocess
 import tempfile
 from collections.abc import Mapping
@@ -12,6 +11,7 @@ from pathlib import Path
 from base.cluster.dataplane.runtime_binaries import (
     download,
     download_with_opener,
+    resolve_host_platform,
     runtime_root,
 )
 from base.host.net.ports import UrlOpener
@@ -46,8 +46,7 @@ def _artifact(
     machine: str | None = None,
     artifacts: Mapping[str, tuple[str, str]] | None = None,
 ) -> tuple[str, str]:
-    sys_name = system if system is not None else platform.system()
-    arch = machine if machine is not None else platform.machine()
+    sys_name, arch = resolve_host_platform(system=system, machine=machine)
     table = artifacts if artifacts is not None else WALG_ARTIFACTS
     if sys_name == "Linux" and arch in ("x86_64", "amd64"):
         return table["linux-x86_64"]

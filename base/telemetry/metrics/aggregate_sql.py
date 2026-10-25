@@ -19,7 +19,7 @@ envelope and boot events are not outcomes.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any, LiteralString, NamedTuple, cast
+from typing import Any, NamedTuple
 
 import psycopg
 
@@ -85,11 +85,11 @@ class _Scope:
 
     def run(
         self, conn: psycopg.Connection[Any], select: str, extra: str = "", tail: str = ""
-    ) -> Any:
+    ) -> psycopg.Cursor[Any]:
         """`SELECT <select> FROM <scope> WHERE <scope> [AND extra] <tail>` as a cursor."""
         where = f"{self.where_sql} AND ({extra})" if extra else self.where_sql
         query = f"SELECT {select} FROM {self.from_sql} WHERE {where} {tail}"  # noqa: S608
-        return conn.execute(cast(LiteralString, query), self.params)
+        return conn.execute(query.encode(), self.params)
 
 
 def _cutoffs(
@@ -252,41 +252,35 @@ def _llm_cost_sums(
 def _llm_position(scope: _Scope, conn: psycopg.Connection[Any]) -> dict[str, tuple[int, int]]:
     """Cache-read and input sums in the early, mid and late thirds of each agent's `llm_usage`
     rows in time order (the buckets `third_of` defines, as integer arithmetic)."""
-    ranked = conn.execute(
-        cast(
-            LiteralString,
-            "SELECT bucket, COALESCE(sum(cached), 0)::bigint, COALESCE(sum(tin), 0)::bigint FROM ("  # noqa: S608 — keys come from the registered payload constants
-            "SELECT CASE WHEN 3 * ordinal < total THEN 'early' WHEN 3 * ordinal < 2 * total "
-            "THEN 'mid' ELSE 'late' END AS bucket, cached, tin FROM ("
-            "SELECT row_number() OVER (PARTITION BY t.agent_id ORDER BY t.ts, t.id) - 1 AS ordinal, "
-            "count(*) OVER (PARTITION BY t.agent_id) AS total, "
-            f"COALESCE({_n(LLM_USAGE_KEYS['cache_read'])}, 0) AS cached, "
-            f"COALESCE({_n(LLM_USAGE_KEYS['in_total'])}, 0) AS tin "
-            f"FROM {scope.from_sql} WHERE {scope.where_sql} AND t.event_name = 'llm_usage' "
-            f"AND {_n(LLM_USAGE_KEYS['cache_read'])} IS NOT NULL) r) s "
-            "GROUP BY bucket",
-        ),
-        scope.params,
-    ).fetchall()
+    query = (
+        "SELECT bucket, COALESCE(sum(cached), 0)::bigint, COALESCE(sum(tin), 0)::bigint FROM ("  # noqa: S608 — keys come from the registered payload constants
+        "SELECT CASE WHEN 3 * ordinal < total THEN 'early' WHEN 3 * ordinal < 2 * total "
+        "THEN 'mid' ELSE 'late' END AS bucket, cached, tin FROM ("
+        "SELECT row_number() OVER (PARTITION BY t.agent_id ORDER BY t.ts, t.id) - 1 AS ordinal, "
+        "count(*) OVER (PARTITION BY t.agent_id) AS total, "
+        f"COALESCE({_n(LLM_USAGE_KEYS['cache_read'])}, 0) AS cached, "
+        f"COALESCE({_n(LLM_USAGE_KEYS['in_total'])}, 0) AS tin "
+        f"FROM {scope.from_sql} WHERE {scope.where_sql} AND t.event_name = 'llm_usage' "
+        f"AND {_n(LLM_USAGE_KEYS['cache_read'])} IS NOT NULL) r) s "
+        "GROUP BY bucket"
+    )
+    ranked = conn.execute(query.encode(), scope.params).fetchall()
     return {str(b): (int(c), int(i)) for b, c, i in ranked}
 
 
 def _fix_events(scope: _Scope, conn: psycopg.Connection[Any]) -> list[tuple[int | None, int, str]]:
     """Each `syntax_fix` event with the number of code blocks its agent had written by then."""
-    rows = conn.execute(
-        cast(
-            LiteralString,
-            "SELECT agent_id, blk, fixes FROM ("  # noqa: S608 — keys come from the registered payload constants
-            "SELECT t.agent_id, t.ts, t.id, t.event_name, "
-            f"CASE WHEN t.event_name = 'syntax_fix' THEN COALESCE({SYNTAX_FIX_KEYS['fixes']}, '') END "
-            "AS fixes, "
-            "sum((t.event_name = 'code')::int) OVER (PARTITION BY t.agent_id ORDER BY t.ts, t.id) "
-            f"AS blk FROM {scope.from_sql} WHERE {scope.where_sql} "
-            "AND t.event_name IN ('code', 'syntax_fix')) s "
-            "WHERE event_name = 'syntax_fix' ORDER BY agent_id, ts, id",
-        ),
-        scope.params,
-    ).fetchall()
+    query = (
+        "SELECT agent_id, blk, fixes FROM ("  # noqa: S608 — keys come from the registered payload constants
+        "SELECT t.agent_id, t.ts, t.id, t.event_name, "
+        f"CASE WHEN t.event_name = 'syntax_fix' THEN COALESCE({SYNTAX_FIX_KEYS['fixes']}, '') END "
+        "AS fixes, "
+        "sum((t.event_name = 'code')::int) OVER (PARTITION BY t.agent_id ORDER BY t.ts, t.id) "
+        f"AS blk FROM {scope.from_sql} WHERE {scope.where_sql} "
+        "AND t.event_name IN ('code', 'syntax_fix')) s "
+        "WHERE event_name = 'syntax_fix' ORDER BY agent_id, ts, id"
+    )
+    rows = conn.execute(query.encode(), scope.params).fetchall()
     return [(int(a) if a is not None else None, int(b), str(f)) for a, b, f in rows]
 
 
@@ -316,6 +310,10 @@ def _per_agent_counters(
     return per_agent
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 def read_window(
     conn: psycopg.Connection[Any],
     days: int,
@@ -325,7 +323,7 @@ def read_window(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Every aggregate of the metrics window, as plain Python values."""
-    end = now or datetime.now(UTC)
+    end = now or _utc_now()
     start = end - timedelta(days=days)
     cutoffs = _cutoffs(conn, start, end, agent_id) if since_compact else {}
     scope = _Scope(start, end, agent_id, cutoffs)
@@ -376,7 +374,7 @@ def read_agent_window(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """The per-agent counters and `llm_usage` sums of the window, for `/api/metrics/agents`."""
-    end = now or datetime.now(UTC)
+    end = now or _utc_now()
     start = end - timedelta(days=days)
     cutoffs = _cutoffs(conn, start, end, None) if since_compact else {}
     scope = _Scope(start, end, None, cutoffs)

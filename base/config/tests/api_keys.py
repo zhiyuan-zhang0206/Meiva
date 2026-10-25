@@ -7,23 +7,34 @@ modules keeps its autouse batch in one alphabetical order.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 from pydantic import SecretStr
 
+from base.config import get_field, set_field
+
+_API_KEY_FIELDS = (
+    "anthropic_api_key",
+    "deepseek_api_key",
+    "gemini_api_key",
+    "openai_api_key",
+    "xiaomi_api_key",
+    "moonshot_api_key",
+    "zhipu_api_key",
+    "dashscope_api_key",
+)
+
 
 @pytest.fixture(autouse=True)
-def mock_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+def mock_api_keys() -> Iterator[None]:
     """Set all API keys to dummy values so spawn validation passes."""
-    from base.config import settings as _settings
-
-    for attr in (
-        "anthropic_api_key",
-        "deepseek_api_key",
-        "gemini_api_key",
-        "openai_api_key",
-        "xiaomi_api_key",
-        "moonshot_api_key",
-        "zhipu_api_key",
-        "dashscope_api_key",
-    ):
-        monkeypatch.setattr(_settings.lm, attr, SecretStr("sk-test"))
+    saved = {attr: get_field(attr) for attr in _API_KEY_FIELDS}
+    placeholder = SecretStr("test-api-credential")
+    for attr in _API_KEY_FIELDS:
+        set_field(attr, placeholder)
+    try:
+        yield
+    finally:
+        for attr, value in saved.items():
+            set_field(attr, value)

@@ -18,7 +18,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from threading import Lock
-from typing import Any, Literal, LiteralString, TypedDict, cast
+from typing import Any, Literal, TypedDict, TypeGuard
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -59,21 +59,31 @@ class MetricObservation:
     exec_seconds: float = 0
 
 
-def _number(value: Any) -> float:
+def _is_obj_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
+def _number(value: object) -> float:
+    if not isinstance(value, (int, float, str, Decimal)):
+        raise TypeError("observed metric must be a finite nonnegative number")
     result = float(value)
     if isinstance(value, bool) or not math.isfinite(result) or result < 0:
         raise ValueError("observed metric must be a finite nonnegative number")
     return result
 
 
-def _count(value: Any) -> int:
+def _count(value: object) -> int:
     result = Decimal(str(value))
     if not result.is_finite() or result < 0 or result != result.to_integral_value():
         raise ValueError("observed metric count must be a nonnegative integer")
     return int(result)
 
 
-def _truth(value: Any) -> bool:
+def _truth(value: object) -> bool:
     if value is True or value == "true":
         return True
     if value is False or value == "false":
@@ -89,13 +99,13 @@ class _MetricIdentity(TypedDict):
 
 def _activity(attributes: Mapping[str, Any]) -> tuple[float, float]:
     entries = attributes.get("nodes", [attributes])
-    if not isinstance(entries, list):
+    if not _is_obj_list(entries):
         raise TypeError("observed node batch must be a list")
     active = execution = 0.0
-    for raw in cast(list[Any], entries):
-        if not isinstance(raw, dict):
+    for raw in entries:
+        if not _is_str_dict(raw):
             raise TypeError("observed node entry must be an object")
-        entry = cast(dict[str, Any], raw)
+        entry = raw
         node = entry.get("node", "")
         if not isinstance(node, str):
             raise TypeError("observed node name must be text")
@@ -155,9 +165,9 @@ def observe_row(row: Mapping[str, Any]) -> MetricObservation | None:
     if not _supports(name, row["category"], row["agent_id"]):
         return None
     raw_attributes = row["attributes"]
-    if not isinstance(raw_attributes, dict):
+    if not _is_str_dict(raw_attributes):
         raise TypeError("observed event attributes must be an object")
-    attributes = cast(dict[str, Any], raw_attributes)
+    attributes = raw_attributes
     occurred_at = row["ts"]
     if isinstance(occurred_at, str):
         occurred_at = datetime.fromisoformat(occurred_at)
@@ -311,7 +321,7 @@ def write_observations(
         row["occurred_at"] = observation.occurred_at.isoformat()
         row["cost_usd"] = str(observation.cost_usd)
         rows.append(row)
-    result = db.execute(cast(LiteralString, _WRITE_SQL), (Jsonb(rows),)).fetchone()
+    result = db.execute(_WRITE_SQL.encode(), (Jsonb(rows),)).fetchone()
     if result is None:
         raise RuntimeError("observed metric insert returned no count")
     return int(result[0])

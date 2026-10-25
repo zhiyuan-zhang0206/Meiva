@@ -34,7 +34,7 @@ _LAUNCHCTL_TIMEOUT_S = 30.0
 
 
 def _autostart_plist_path() -> Path:
-    return Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+    return mechanics.user_plist_path(LABEL)
 
 
 def register_macos(*, services: frozenset[str], host: Host) -> int:
