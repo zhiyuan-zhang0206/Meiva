@@ -31,6 +31,8 @@ _DIRECTORY_CARD_KEYS = frozenset(
         "open_impersonation_status",
         "observation",
         "availability",
+        "harness_exit_code",
+        "harness_exit_at",
     }
 )
 
