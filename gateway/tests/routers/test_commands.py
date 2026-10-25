@@ -34,12 +34,13 @@ def local_command(unit_home: Path) -> dict[str, str]:
     return LOCAL_COMMAND
 
 
-def _insert_agent(db: psycopg.Connection, machine: str) -> int:
+def _insert_agent(db: psycopg.Connection, machine: str, *, harness: str = "meiva") -> int:
     row = db.execute("INSERT INTO agents (label) VALUES ('t') RETURNING id").fetchone()
     assert row is not None
     db.execute(
-        "INSERT INTO agents_meta (id, spawner, status, machine) VALUES (%s, 'user', 'idling', %s)",
-        (row[0], machine),
+        "INSERT INTO agents_meta (id, spawner, status, machine, harness) "
+        "VALUES (%s, 'user', 'idling', %s, %s)",
+        (row[0], machine, harness),
     )
     db.commit()
     return row[0]
@@ -98,3 +99,28 @@ def test_endpoint_agent_view_missing_agent_falls_back_locally(
         resp = client.get("/api/commands?agent_id=999")
     assert resp.status_code == 200, resp.text
     assert local_command in resp.json()
+
+
+def test_endpoint_agent_view_excludes_compact_for_external_harness(
+    db_conn: psycopg.Connection,
+) -> None:
+    agent_id = _insert_agent(db_conn, "runner-a", harness="claude_code")
+    view = completed(
+        {
+            "commands": [
+                {"name": "compact", "description": "c", "instruction_hint": ""},
+                {"name": "project", "description": "d", "instruction_hint": "h"},
+            ],
+            "mcp_names": [],
+        }
+    )
+
+    with (
+        runner_ops(
+            db_conn, "runner-a", {"agent_skill_view": expecting({"agent_id": agent_id}, view)}
+        ),
+        gateway_test_client() as client,
+    ):
+        resp = client.get(f"/api/commands?agent_id={agent_id}")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == [{"name": "project", "description": "d", "instruction_hint": "h"}]

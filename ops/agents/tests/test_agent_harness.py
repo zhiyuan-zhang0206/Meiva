@@ -79,7 +79,7 @@ def test_fork_inherits_the_source_harness(
     machine_identity: MachineIdentity,
 ) -> None:
     source = spawn_agent(
-        harness="claude_code",
+        harness="meiva",
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
@@ -95,7 +95,7 @@ def test_fork_inherits_the_source_harness(
         database_gate=database_gate,
         local_machine=machine_identity,
     )
-    assert _harness(db_conn, fork) == "claude_code"
+    assert _harness(db_conn, fork) == "meiva"
 
 
 def test_fork_naming_the_same_harness_is_accepted(
@@ -108,7 +108,7 @@ def test_fork_naming_the_same_harness_is_accepted(
     machine_identity: MachineIdentity,
 ) -> None:
     source = spawn_agent(
-        harness="antigravity",
+        harness="meiva",
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
@@ -119,13 +119,47 @@ def test_fork_naming_the_same_harness_is_accepted(
     fork = spawn_agent(
         fork_from=source,
         fork_checkpoint="ckpt-1",
-        harness="antigravity",
+        harness="meiva",
         config_authority=config_authority,
         model_catalog=model_catalog,
         database_gate=database_gate,
         local_machine=machine_identity,
     )
-    assert _harness(db_conn, fork) == "antigravity"
+    assert _harness(db_conn, fork) == "meiva"
+
+
+@pytest.mark.parametrize("external_harness", ["claude_code", "codex", "antigravity"])
+def test_fork_of_an_external_harness_source_is_refused(
+    external_harness: str,
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+) -> None:
+    source = spawn_agent(
+        harness=external_harness,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
+        local_machine=machine_identity,
+    )
+    insert_checkpoint(db_conn, source, "ckpt-1")
+    before = _birth_row_counts(db_conn)
+
+    with pytest.raises(ForkHarnessMismatch, match="only supported on the native 'meiva' harness"):
+        spawn_agent(
+            fork_from=source,
+            fork_checkpoint="ckpt-1",
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+
+    assert _birth_row_counts(db_conn) == before
 
 
 def test_fork_naming_another_harness_is_refused(

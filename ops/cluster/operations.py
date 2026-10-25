@@ -147,20 +147,22 @@ def shell_kill_op(agent_id: int, session_id: int) -> ShellKillResult:
 # with no frozen/overlay value falls through to the normal unfiltered (``["*"]``) command view.
 def agent_skill_view_inputs(
     pool: ConnectionPool, agent_id: int
-) -> tuple[Path | None, list[str] | None]:
+) -> tuple[Path | None, list[str] | None, str]:
     from langgraph.checkpoint.postgres import PostgresSaver
 
     from base.agents.history.checkpoint_serializer import CheckpointSerializer
 
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s", (agent_id,)
+            "SELECT config_overlay, birth_config, harness FROM agents_meta WHERE id = %s",
+            (agent_id,),
         )
         row = cur.fetchone()
         if row is None:
-            return None, None
+            return None, None, "meiva"
         overlay = cast(dict[str, Any], row[0]) if isinstance(row[0], dict) else {}
         birth = cast(dict[str, Any], row[1]) if isinstance(row[1], dict) else {}
+        harness = str(row[2]) if len(row) > 2 and row[2] is not None else "meiva"
         pins = resolve_agent_config_pins(overlay, birth)
         wanted = pins.get("skills_to_inject_into_system_prompt")
 
@@ -172,7 +174,7 @@ def agent_skill_view_inputs(
 
     cwd = checkpoint["channel_values"].get("meiva_code__cwd") if checkpoint else None
     narrowed = cast(list[str], wanted) if isinstance(wanted, list) else None
-    return (Path(cwd) if isinstance(cwd, str) else None), narrowed
+    return (Path(cwd) if isinstance(cwd, str) else None), narrowed, harness
 
 
 def _project_skill_roots(cwd: Path | None) -> list[Path]:
@@ -222,11 +224,13 @@ def agent_skill_view_op(agent_id: int, pool: ConnectionPool) -> AgentSkillViewRe
     from base.packages.mcp_config import load_mcp_config
     from base.packages.plugins.mcp_enabled import read_enabled
 
-    cwd, wanted = agent_skill_view_inputs(pool, agent_id)
+    cwd, wanted, harness = agent_skill_view_inputs(pool, agent_id)
     loaded = load_skill_names(_project_skill_roots(cwd))
     commands = _narrow_commands(
         CommandCatalog.system(skills=lambda: loaded).discover(), wanted, loaded
     )
+    if harness != "meiva":
+        commands = [c for c in commands if c["name"] != "compact"]
     merged_mcp = load_mcp_config(include_disabled=True)
     mcp_overlay = read_enabled()
     return AgentSkillViewResult(

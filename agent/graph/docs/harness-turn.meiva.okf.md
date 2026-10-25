@@ -35,36 +35,24 @@ and asserts the set of nodes that executed.
 The choice of a whole-turn node and the rejected single-LLM-call alternative are
 recorded in [the harness decision](../../../docs/decisions/agents/graph/2026-10-19-external-harness.md#the-decision).
 
-## The submission cursor
+## CQRS storage contract and submission cursor
 
-The harness owns the transcript of a resumed session; the graph owns
-`state.messages`, the display mirror. `state.harness_cursor` is how much of the
-window is covered by committed harness turns.
+For an external harness (`harness != "meiva"`), the external CLI's on-disk session
+file (`FileSessionRegistry`) is the **Execution Source of Truth**: the CLI owns its
+context window, compaction, and continuation. Postgres `state.messages` is strictly
+an **append-only UI Timeline Projection** (`state.harness_cursor` marks how much of
+`state.messages` is covered by committed harness turns and is never reset to `0`).
 
-- An empty external-harness window lays down `[SystemMessage(content=handoff.render()), *notes, *reset.tail]`
-  with `harness_cursor = 0` (`model-visible ⟺ logged`). It contains no native
-  `execute_code` prompt or `exec_timeout` note; `messages[0]` is the rendered **handoff document**
-  shown at `0.0` as the System Prompt card, followed by the standing context notes
-  (`timezone`, `memory`, `agent_id`, `agent_memory`, `inherited_memory`, `preloaded_skills`,
-  and plugin notes). The bridge never overrides the provider's system prompt flag.
-- On the first turn, `pending_messages(state)` co-delivers the handoff
-  `SystemMessage`, the standing context notes, and the first user message (or reset tail) in one submission.
-- `harness_turn` runs `harness_pre_turn_hooks` (passive memory recall, inter-agent reply
-  SDK reminder, skill recall, and newly installed skills) and `node_lifecycle(HARNESS_TURN, ...)` to emit the
-  entry `TimelineSnapshot` for newly claimed inbounds, and `HarnessTurnProjector`
-  projects `BridgeEvent`s (`TextDelta`, `AssistantText`, `ToolUse`, `ToolResult`)
-  into live SSE events and committed `state.messages` (`AIMessage` with
-  `tool_calls`, `ToolMessage`, final `AIMessage`), advancing `harness_cursor`
-  over all sent and appended messages.
-
-The projector retains one required `Clock` resource for its stream. The turn root obtains it
-after the non-empty pending-text gate; every reasoning, text, tool and finish timestamp still
-calls `Clock.now()` at its original position among publication effects. These instants are UTC:
-projection does not use timezone or weekday rendering settings, so events do not reconstruct
-a clock to re-read those unused fields. A new turn obtains its own clock from the context;
-initial clock-construction failures still propagate, and the lifecycle timestamp policy keeps
-its separate configuration read. Unknown tool results, unstamped finish fallbacks and interrupt
-settlement do not gain a timestamp read.
+- An empty window writes `[SystemMessage(content=handoff.render()), *notes, *reset.tail]`
+  with `harness_cursor = 0` (`model-visible ⟺ logged`): `messages[0]` is the rendered
+  **handoff document** at `0.0`, followed by standing context notes (`timezone`, `memory`,
+  `agent_id`, `agent_memory`, `inherited_memory`, `preloaded_skills`, plugin notes).
+- On the first turn, `pending_messages(state)` co-delivers the handoff `SystemMessage`,
+  standing context notes, and first user message in one submission.
+- `harness_turn` runs `harness_pre_turn_hooks` and `node_lifecycle(HARNESS_TURN, ...)`,
+  while `HarnessTurnProjector` projects `BridgeEvent`s (`TextDelta`, `AssistantText`,
+  `ToolUse`, `ToolResult`) into live SSE events and `state.messages`, advancing
+  `harness_cursor` over all sent and appended messages using one turn-scoped UTC `Clock`.
 
 The cursor records committed graph turns, not durable provider acknowledgements;
 a crash or cancel before commit can re-submit pending input across sessions.
@@ -116,14 +104,24 @@ cache reads outside the prompt, a model missing from the catalog — logs
 `harness_usage_log_failed` and leaves the reply in the window. The gap belongs in
 the log, not in answers the user already paid for.
 
-## What this slice does not do
+## Capability boundary
 
-Explicit `/compact` requests are not wired for external harnesses, whose sessions
-are owned by the provider CLI.
+Because an external harness CLI owns its context window and turn loop, native
+context/lifecycle mutations are native (`Harness.MEIVA`) only:
+
+- **`fork`, `compact`, `restart`, and `meiva.self.attach` are native-only**:
+  - `fork` (`fork_from`), `POST /api/agents/{id}/compact`, and `POST /api/agents/{id}/restart`
+    reject external harnesses with HTTP 400 (`ForkHarnessMismatch` on fork; guarded
+    in `claim` dispatch); the web UI hides `Fork`, `Compact`, and `Restart` (and
+    omits `/compact` from slash autocomplete) for external harnesses.
+  - Calling `meiva.self.compact()`, `meiva.self.restart()`, or `meiva.self.attach()`
+    on an external harness raises `RuntimeError`.
+- **Supported `meiva.self` surface on external harnesses**:
+  - `harness_sdk_expand_section` and `meiva.help(meiva.self)` expose only
+    `meiva.self.terminate()`, `meiva.self.pause_heartbeat(duration)`, and read-only
+    identity constants (`AGENT_ID`, `MACHINE_SPEC`, `MachineSpec`). Use `terminate`
+    and `resurrect` to stop and resume an external harness agent.
 
 A cancelled turn keeps its message in the window and does not advance the cursor,
-so the next turn re-submits it — the same shape as the built-in loop, which keeps
-the human message and answers it on the next call. Retiring the adapter discards
-its in-memory submission-key cache, so a later session resumes provider history
-but may execute the pending input again. `LAUNCHABLE_HARNESSES` gates a wake before
-any of this runs, so a harness whose adapter has not landed still refuses the turn.
+so the next turn re-submits it. `LAUNCHABLE_HARNESSES` gates a wake before any of
+this runs.

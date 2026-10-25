@@ -67,3 +67,39 @@ def test_compact_refuses_a_terminated_agent_and_queues_nothing(
 def test_compact_of_an_unknown_agent_is_404(_local_machine: MachineIdentity) -> None:
     with gateway_test_client(machine=_local_machine) as client:
         assert client.post("/api/agents/987654/compact").status_code == 404
+
+
+def test_compact_refuses_an_external_harness_agent_with_400(
+    _local_machine: MachineIdentity,
+    gateway_local_runner: RunnerOps,
+    db_conn: psycopg.Connection,
+) -> None:
+    with gateway_test_client(machine=_local_machine) as client:
+        agent_id = spawn_via_http(client, {"harness": "claude_code"}).json()["id"]
+        _set_agent(db_conn, agent_id, machine=gateway_local_runner.name, status="idling")
+        response = client.post(f"/api/agents/{agent_id}/compact")
+    assert response.status_code == 400
+    assert (
+        response.json()["detail"]
+        == "Compaction is not supported for external harness 'claude_code'; the external CLI owns its own context window."
+    )
+    assert db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id = %s AND kind = 'compact_request'",
+        (agent_id,),
+    ).fetchone() == (0,)
+
+
+def test_restart_refuses_an_external_harness_agent_with_400(
+    _local_machine: MachineIdentity,
+    gateway_local_runner: RunnerOps,
+    db_conn: psycopg.Connection,
+) -> None:
+    with gateway_test_client(machine=_local_machine) as client:
+        agent_id = spawn_via_http(client, {"harness": "codex"}).json()["id"]
+        _set_agent(db_conn, agent_id, machine=gateway_local_runner.name, status="idling")
+        response = client.post(f"/api/agents/{agent_id}/restart")
+    assert response.status_code == 400
+    assert (
+        response.json()["detail"]
+        == "Restart is not supported for external harness 'codex'; use terminate and resurrect instead."
+    )

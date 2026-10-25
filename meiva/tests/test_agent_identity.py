@@ -173,6 +173,21 @@ def test_lifecycle_self_actions_refuse_from_launched_script(db_url: str, action:
         fn("summary") if action == "compact" else fn()
 
 
+@pytest.mark.parametrize("action", ["attach", "compact", "restart"])
+def test_native_only_self_actions_refuse_on_external_harness(action: str) -> None:
+    from base.api_contracts.agent_contract import Harness
+
+    pin_agent(1, owns_loop=True, harness=Harness.CLAUDE_CODE)
+    fn = getattr(meiva.self, action)
+    with pytest.raises(RuntimeError, match="only supported on the native 'meiva' harness"):
+        if action == "compact":
+            fn("summary")
+        elif action == "attach":
+            fn("some/file.png")
+        else:
+            fn()
+
+
 def test_context_exposes_the_bound_identity() -> None:
     pin_agent(31, owns_loop=False, actor="schedule:3")
     assert meiva.context.identity is not None

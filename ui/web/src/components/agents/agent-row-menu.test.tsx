@@ -162,14 +162,18 @@ describe("AgentRow right-click context menu", () => {
     expect(screen.queryByText("End external takeover session")).toBeNull();
   });
 
-  it.each(["meiva", "claude_code", "codex"] as const)("offers native compaction only on Meiva (%s)", (harness) => {
+  it.each(["meiva", "claude_code", "codex"] as const)("offers native compaction, restart, and fork only on Meiva (%s)", (harness) => {
     const { container } = render(
       <AgentRow {...baseProps} agent={ag(1, { harness })} depth={0} ancestorsIsLast={[]} />,
     );
     openMenu(container.querySelector("li")!);
-    expect(screen.queryByText("Compact") !== null).toBe(harness === "meiva");
-    expect(screen.getByText("Restart")).toBeTruthy();
+    const isNative = harness === "meiva";
+    expect(screen.queryByText("Compact") !== null).toBe(isNative);
+    expect(screen.queryByText("Restart") !== null).toBe(isNative);
+    expect(screen.queryByText("Fork") !== null).toBe(isNative);
+    expect(screen.queryByText("Fork with prompt…") !== null).toBe(isNative);
     expect(screen.getByText("Terminate")).toBeTruthy();
+    expect(screen.getByText("Kill")).toBeTruthy();
   });
 
   it("shows the end-session item only for an open session and sends its rendered ID after confirmation", () => {

@@ -412,12 +412,14 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
           </>
         ) : (
           <>
-            <ContextMenuItem
-              onSelect={confirmRestart}
-              disabled={pending !== undefined}
-            >
-              <RotateCw className="text-emerald-500" /> {t("restart")}
-            </ContextMenuItem>
+            {agent.harness === "meiva" && (
+              <ContextMenuItem
+                onSelect={confirmRestart}
+                disabled={pending !== undefined}
+              >
+                <RotateCw className="text-emerald-500" /> {t("restart")}
+              </ContextMenuItem>
+            )}
             <ContextMenuItem
               onSelect={confirmTerminate}
               disabled={pending !== undefined}
@@ -430,16 +432,18 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
               </ContextMenuItem>
             ) : null}
             {agent.harness === "meiva" && (
-              <ContextMenuItem onSelect={onCompact} disabled={pending !== undefined}>
-                <Shrink className="text-amber-500" /> {t("compact")}
-              </ContextMenuItem>
+              <>
+                <ContextMenuItem onSelect={onCompact} disabled={pending !== undefined}>
+                  <Shrink className="text-amber-500" /> {t("compact")}
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={() => onFork()}>
+                  <GitFork /> {t("fork")}
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={() => setForkOpen(true)}>
+                  <GitFork /> {t("forkWithPrompt")}
+                </ContextMenuItem>
+              </>
             )}
-            <ContextMenuItem onSelect={() => onFork()}>
-              <GitFork /> {t("fork")}
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={() => setForkOpen(true)}>
-              <GitFork /> {t("forkWithPrompt")}
-            </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem
               variant="destructive"
@@ -451,7 +455,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
           </>
         )}
       </ContextMenuContent>
-      {forkOpen ? (
+      {forkOpen && agent.harness === "meiva" ? (
         <LazyPromptDialog
           open
           onOpenChange={setForkOpen}

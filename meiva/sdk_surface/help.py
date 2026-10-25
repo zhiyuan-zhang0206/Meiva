@@ -17,6 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+from base.api_contracts.agent_contract import Harness
 from meiva.sdk_surface import meiva_module, process_context
 
 from .attachment_transport import format_signature as format_signature
@@ -61,6 +62,16 @@ class _Render:
 
 _DEFAULT_RENDER = _Render()
 
+HARNESS_HIDDEN_SELF_MEMBERS: frozenset[str] = frozenset(
+    {
+        "meiva.self.attach",
+        "meiva.self.compact",
+        "meiva.self.restart",
+    }
+)
+
+_HARNESS_SELF_SUMMARY = "Your own runtime: AGENT_ID, MACHINE_SPEC, pause_heartbeat, terminate."
+
 # meiva:note
 # What a model reads of the SDK — which members and in which words — is declared on its
 # `ModelSpec`; this module only resolves it. The two lookups below are the whole coupling.
@@ -96,15 +107,22 @@ def _variant_text(obj: Any, style: str | None) -> str | None:
 
 
 def _doc_for(obj: Any, own_doc: str | None, render: "_Render") -> str | None:
+    if (
+        inspect.ismodule(obj)
+        and getattr(obj, "__name__", None) == "meiva.self"
+        and render.hidden_members >= HARNESS_HIDDEN_SELF_MEMBERS
+    ):
+        return _HARNESS_SELF_SUMMARY
     variant = _variant_text(obj, render.doc_style)
     return variant if variant is not None else own_doc
 
 
 # meiva:note
 # What one model sees of the SDK: the members help omits, and the text style it reads.
-# `hidden_members` merges the capability gate (a text-only model cannot attach media) with
-# the model's own `ModelSpec.sdk_hidden_members`; the prompt's SDK reference and an exec
-# turn's `meiva.help()` both build this value, so the two paths cannot disagree.
+# `hidden_members` merges the capability gate (a text-only model cannot attach media, and an
+# external harness cannot compact, restart, or attach media) with the model's own
+# `ModelSpec.sdk_hidden_members`; the prompt's SDK reference and an exec turn's `meiva.help()`
+# both build this value, so the two paths cannot disagree.
 @_dataclasses.dataclass(frozen=True)
 class ModelHelpProfile:
     hidden_members: frozenset[str] = frozenset()
@@ -114,14 +132,23 @@ class ModelHelpProfile:
     # The profile a given model's agent reads, built from the catalog row that model's
     # provider declares.
     @classmethod
-    def for_model(cls, model: str, *, catalog: Any) -> "ModelHelpProfile":
+    def for_model(
+        cls,
+        model: str,
+        *,
+        catalog: Any,
+        harness: Harness = Harness.MEIVA,
+    ) -> "ModelHelpProfile":
         from meiva.sdk_surface.attachment_transport import media_gated_members
 
         spec: Any = catalog.models.get(model)
         declared: frozenset[str] = spec.sdk_hidden_members if spec is not None else frozenset()
         style: Any = spec.sdk_doc_style if spec is not None else None
+        harness_hidden = (
+            HARNESS_HIDDEN_SELF_MEMBERS if harness is not Harness.MEIVA else frozenset[str]()
+        )
         return cls(
-            hidden_members=media_gated_members(model, catalog=catalog) | declared,
+            hidden_members=media_gated_members(model, catalog=catalog) | declared | harness_hidden,
             doc_style=style if isinstance(style, str) and style else None,
         )
 
@@ -130,12 +157,26 @@ class ModelHelpProfile:
     # which is what a bare `import meiva` sees.
     @classmethod
     def current(cls) -> "ModelHelpProfile":
-        if process_context.ambient_context() is None:
+        ctx = process_context.ambient_context()
+        if ctx is None:
             return cls()
+        is_external = ctx.harness is not Harness.MEIVA or (
+            ctx.sdk_capture is not None and getattr(ctx.sdk_capture, "handle", None) is not None
+        )
+        harness = (
+            ctx.harness
+            if ctx.harness is not Harness.MEIVA
+            else (Harness.CLAUDE_CODE if is_external else Harness.MEIVA)
+        )
         from meiva.sdk_surface import settings as sdk_settings
         from meiva.sdk_surface.attachment_transport import current_model
 
-        return cls.for_model(current_model(), catalog=sdk_settings.model_catalog())
+        try:
+            catalog = sdk_settings.model_catalog()
+            model = current_model()
+        except RuntimeError:
+            return cls(hidden_members=HARNESS_HIDDEN_SELF_MEMBERS if is_external else frozenset())
+        return cls.for_model(model, catalog=catalog, harness=harness)
 
 
 def help(*targets: object) -> None:

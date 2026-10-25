@@ -543,6 +543,8 @@ HARNESS_EXCLUDED_PLUGIN_SECTIONS: frozenset[str] = frozenset({"coding_tools_sect
 
 
 def harness_sdk_expand_section(inputs: SectionInputs) -> str:
+    from meiva.sdk_surface.help import HARNESS_HIDDEN_SELF_MEMBERS
+
     wanted = [
         path
         for path in effective_sdk_expand(
@@ -563,6 +565,7 @@ def harness_sdk_expand_section(inputs: SectionInputs) -> str:
         model=inputs.slices.brain.llm_model,
         catalog=inputs.catalog,
         report=False,
+        extra_hidden_members=HARNESS_HIDDEN_SELF_MEMBERS,
     )
 
 

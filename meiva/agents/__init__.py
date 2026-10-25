@@ -467,8 +467,9 @@ def spawn(
     `harness` is the runtime loop the agent runs on: "meiva" (the default) or an external
     harness such as "claude_code", "codex", "antigravity" or "kimi_code"; unknown names are
     refused, never replaced by the default. It is fixed for the agent's whole life: no restart or
-    resurrect changes it. Omit it to run the built-in runtime, or, on a fork, to keep the source's
-    harness; asking a fork for a different one fails instead of being applied.
+    resurrect changes it. Omit it to run the built-in runtime; forking (`fork_from`) is only
+    supported for native "meiva" agents, and asking a fork for an external harness or forking an
+    external harness agent fails with `ForkHarnessMismatch`.
     `harness_availability()` reports which ones this machine can run. A harness no launcher
     can start yet is refused with `HarnessNotLaunchable` before any row is written, and so is
     a fork of an agent born on one.
@@ -548,7 +549,17 @@ def spawn_impl(
     label = coerce_str(label, "label", allow_none=True)
     from base.agents.birth.harness import coerce_harness
 
-    harness = None if harness is None else coerce_harness(harness).value
+    coerced_harness = None if harness is None else coerce_harness(harness)
+    if (
+        fork_from is not None
+        and coerced_harness is not None
+        and coerced_harness is not Harness.MEIVA
+    ):
+        raise ForkHarnessMismatch(
+            f"cannot fork agent {fork_from} onto harness {coerced_harness.value!r}: "
+            f"forking is only supported on the native 'meiva' harness."
+        )
+    harness = None if coerced_harness is None else coerced_harness.value
     from base.api_contracts.idempotency import validate_idempotency_key
 
     idempotency_key = validate_idempotency_key(idempotency_key)

@@ -106,10 +106,11 @@ def _require_launchable(
 
 
 # meiva:note
-# A fork continues its source's identity, so it runs the source's harness. Naming
-# a different one is refused here, inside the birth transaction, so a caller that
-# skipped request validation still cannot fork across harnesses; omitting the
-# value inherits the source's.
+# A fork copies a native meiva agent's checkpointed conversation and continues
+# on the native meiva harness. External harnesses own their CLI session on disk
+# and cannot be forked, nor can a native agent be forked onto an external
+# harness. This check runs inside the birth transaction (and prechecks) so any
+# caller that skipped client-side validation still fails fast.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def resolve_birth_harness(
     cur: psycopg.Cursor[Any],
@@ -123,15 +124,23 @@ def resolve_birth_harness(
     cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (fork_from,))
     row = fetch_one(cur, "harness: read fork source")
     source = Harness(row[0])
-    if requested is None:
-        return _require_launchable(source, fork_from, launchable).value
-    requested_harness = coerce_harness(requested)
-    if requested_harness is not source:
+    if requested is not None:
+        requested_harness = coerce_harness(requested)
+        if requested_harness is not source:
+            raise ForkHarnessMismatch(
+                f"cannot fork agent {fork_from} onto harness {requested_harness.value!r}: the "
+                f"source runs on {source.value!r}, and harness is an immutable property of an "
+                f"agent. Spawn a new agent with harness={requested_harness.value!r} instead of "
+                f"forking onto it."
+            )
+    if source not in launchable:
+        _require_launchable(source, fork_from, launchable)
+    if source is not Harness.MEIVA:
         raise ForkHarnessMismatch(
-            f"cannot fork agent {fork_from} onto harness {requested_harness.value!r}: the "
-            f"source runs on {source.value!r}, and harness is an immutable property of an "
-            f"agent. Spawn a new agent with harness={requested_harness.value!r} instead of "
-            f"forking onto it."
+            f"cannot fork agent {fork_from}: source agent runs on external harness "
+            f"{source.value!r}, and forking is only supported on the native 'meiva' harness "
+            f"(external harness CLI sessions cannot be cloned). Spawn a new agent with "
+            f"harness={source.value!r} instead."
         )
     return _require_launchable(source, fork_from, launchable).value
 
