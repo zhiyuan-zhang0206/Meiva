@@ -1,165 +1,176 @@
 from __future__ import annotations
 
+# meiva:note
+# Memory search and indexer entries compose their database handle, server, and cleanup from their owners.
 import asyncio
-import os
+import json
+import socket
+import threading
 import time
-from collections.abc import Coroutine, Iterator
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
-from typing import Any
-from unittest.mock import Mock, patch
+from typing import TypedDict
 
+import psycopg
 import pytest
+from psycopg.conninfo import conninfo_to_dict
+from pydantic import SecretStr
 
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.config import ConfigBoot
 from base.db import Database
-from base.native_process import code_version
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
+from base.host.env import port_lease
 from base.native_process.loaded_commit import LoadedCommit
-from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus
+from base.telemetry.delivery.receipts import DrainStatus
+from base.telemetry.pipeline_build import build_pipeline
 from services.derived.memory_indexer import daemon as memory_indexer_daemon
+from services.derived.memory_indexer.config import MemoryIndexerConfig
 from services.derived.memory_search import daemon as memory_search_daemon
 
-_ENTRIES = (memory_search_daemon, memory_indexer_daemon)
+
+def _refused(db_url: str) -> str:
+    parts = conninfo_to_dict(db_url)
+    return f"postgresql://{parts['user']}@127.0.0.1:1/{parts['dbname']}"
 
 
-@pytest.fixture(autouse=True)
-def _owned_config_environment() -> Iterator[None]:
-    try:
-        with patch.dict(os.environ):
-            yield
-    finally:
-        time.tzset()
+def _application_name(database: Database) -> str:
+    with database.connect() as conn:
+        row = conn.execute("SHOW application_name").fetchone()
+    assert row is not None
+    return str(row[0])
 
 
-class _Runner:
-    def run(self, work: Coroutine[Any, Any, None]) -> None:
-        asyncio.run(work)
+def _free_port() -> int:
+    return port_lease.lease_ports(1)[0]
 
 
-@pytest.fixture(params=_ENTRIES, ids=lambda module: module.__name__)
-def entry(request: pytest.FixtureRequest) -> ModuleType:
-    return request.param
+def _port_refuses(port: int) -> bool:
+    with socket.socket() as probe:
+        return probe.connect_ex(("127.0.0.1", port)) != 0
 
 
-def _prepare(
-    entry: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> tuple[Mock, Mock, Mock, Mock, Mock, list[str]]:
-    capture = Mock(return_value=LoadedCommit(tmp_path, "captured-memory-entry"))
-    create = Mock(side_effect=Database)
-    events: list[str] = []
-    pipeline = Mock()
-
-    def stop(*, timeout: float) -> DrainResult:
-        assert timeout == 2
-        events.append("pipeline_stopped")
-        return DrainResult(DrainStatus.COMPLETED, DrainPhase.STOP)
-
-    pipeline.stop.side_effect = stop
-    build = Mock(return_value=pipeline)
-    logging = Mock()
-
-    def exit_entry(code: int) -> None:
-        events.append("hard_exit")
-
-    exit_process = Mock(side_effect=exit_entry)
-    monkeypatch.setattr(LoadedCommit, "capture", capture)
-    monkeypatch.setattr(entry, "Database", create)
-    monkeypatch.setattr(entry, "build_pipeline", build)
-    monkeypatch.setattr(entry, "init_gateway_process", logging)
-    monkeypatch.setattr(entry, "install_graceful_shutdown", Mock())
-    monkeypatch.setattr(entry, "asyncio", SimpleNamespace(Runner=_Runner))
-    monkeypatch.setattr(entry, "_hard_exit", exit_process)
-    monkeypatch.setattr(entry, "_is_running", Mock(return_value=False))
-    monkeypatch.setattr(entry, "acquire_pidfile", Mock(return_value=True))
-    monkeypatch.setattr(entry, "remove_pidfile", Mock())
-    return capture, create, build, logging, exit_process, events
+class _HealthPayload(TypedDict, total=False):
+    sha: str
+    index: dict[str, object]
 
 
-def test_entry_shares_gate_and_closes_pipeline_before_hard_exit(
-    entry: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    capture, create, build, logging, exit_process, events = _prepare(entry, monkeypatch, tmp_path)
-    count = Mock(return_value=7)
-    work_inputs: list[dict[str, Any]] = []
-
-    async def run(*_args: Any, **kwargs: Any) -> None:
-        work_inputs.append(kwargs)
-        if "database" in kwargs:
-            assert kwargs["image"] is capture.return_value
-            kwargs["database"]()
-
-    monkeypatch.setattr(entry, "run", run)
-    monkeypatch.setattr(code_version, "first_parent_count", count)
-    entry.main()
-    capture.assert_called_once_with()
-    count.assert_not_called()
-    factory = build.call_args.kwargs["database"]
-    factory()
-    factory()
-    gates = [call.kwargs["gate"] for call in create.call_args_list]
-    assert all(gate is gates[0] for gate in gates)
-    assert gates[0].application_name() == f"meiva:{logging.call_args.kwargs['name']}:v7"
-    assert logging.call_args.kwargs["image"] is capture.return_value
-    assert logging.call_args.kwargs["producer"]() is build.return_value
-    if "database" in work_inputs[0]:
-        assert work_inputs[0]["database"] is factory
-    else:
-        assert len(gates) == 2
-    build.return_value.stop.assert_called_once_with(timeout=2)
-    assert events == ["pipeline_stopped", "hard_exit"]
-    exit_process.assert_called_once_with(0)
+async def _healthz(port: int) -> tuple[int, _HealthPayload]:
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    writer.write(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+    await writer.drain()
+    response = await reader.read()
+    writer.close()
+    await writer.wait_closed()
+    headers, body = response.split(b"\r\n\r\n", 1)
+    return int(headers.split()[1]), json.loads(body)
 
 
-@pytest.mark.parametrize("cleanup_fault", [False, True])
-def test_logging_start_failure_preserves_primary_and_stops_pipeline(
-    entry: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cleanup_fault: bool
-) -> None:
-    _capture, _create, build, logging, exit_process, events = _prepare(entry, monkeypatch, tmp_path)
-    failure = RuntimeError("original logging startup failure")
-    logging.side_effect = failure
-    if cleanup_fault:
-        build.return_value.stop.side_effect = RuntimeError("secondary cleanup failure")
-    with pytest.raises(RuntimeError) as raised:
-        entry.main()
-    assert raised.value is failure
-    build.return_value.stop.assert_called_once_with(timeout=2)
-    assert events == ([] if cleanup_fault else ["pipeline_stopped"])
-    exit_process.assert_not_called()
+async def _wait_for_indexer_patrol(port: int, deadline: float) -> tuple[int, _HealthPayload]:
+    while True:
+        try:
+            status, payload = await _healthz(port)
+            index = payload.get("index")
+            if index is not None and index.get("last_success_at") is not None:
+                return status, payload
+        except OSError:
+            assert time.monotonic() < deadline, "memory_indexer never came up"
+        assert time.monotonic() < deadline, "memory_indexer never completed first patrol"
+        await asyncio.sleep(0.02)
 
 
-def test_failed_pipeline_stop_keeps_failed_exit(
-    entry: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    _capture, _create, build, _logging, exit_process, _events = _prepare(
-        entry, monkeypatch, tmp_path
-    )
-
-    async def run(*_args: Any, **_kwargs: Any) -> None:
-        return None
-
-    monkeypatch.setattr(entry, "run", run)
-    build.return_value.stop.side_effect = RuntimeError("pipeline cleanup failure")
-    entry.main()
-    build.return_value.stop.assert_called_once_with(timeout=2)
-    exit_process.assert_called_once_with(1)
-
-
-def test_unfinished_stop_reports_receipt_and_keeps_the_bounded_exit(
-    entry: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
+def test_memory_entries_share_gate_with_pipeline_and_read_config_owner_when_built(
+    db_url: str,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
     tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    _capture, _create, build, _logging, exit_process, _events = _prepare(
-        entry, monkeypatch, tmp_path
-    )
+    config = ConfigBoot()
+    config.read_process_environment()
+    config.view.data_plane.db_url = db_url
 
-    async def run(*_args: Any, **_kwargs: Any) -> None:
-        return None
+    def database() -> Database:
+        return Database(
+            db_config_from_boot(config),
+            gate=database_gate,
+            direct_url=ClusterDirectUrl(machine_identity.host),
+        )
 
-    monkeypatch.setattr(entry, "run", run)
-    build.return_value.stop.side_effect = None
-    build.return_value.stop.return_value = DrainResult(DrainStatus.UNFINISHED, DrainPhase.STOP)
-    entry.main()
-    build.return_value.stop.assert_called_once_with(timeout=2)
-    assert "event pipeline stop unfinished" in caplog.text
-    exit_process.assert_called_once_with(0)
+    pipeline = build_pipeline(database=database, machine=machine_identity, home=tmp_path)
+    try:
+        assert _application_name(database()) == database_gate.application_name()
+    finally:
+        drain = pipeline.stop(timeout=2)
+    assert drain.status is DrainStatus.COMPLETED
+
+    config.view.data_plane.db_url = _refused(db_url)
+    with pytest.raises(psycopg.OperationalError):
+        database().connect()
+
+
+async def test_memory_search_and_indexer_serve_and_clean_up_when_stopped(
+    db_url: str,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+    tmp_path: Path,
+) -> None:
+    search_port = _free_port()
+    indexer_port = _free_port()
+    runtime = tmp_path / "run"
+    config = ConfigBoot()
+    config.read_process_environment()
+    config.view.data_plane.db_url = db_url
+    config.view.services.memory_search_port = search_port
+    config.view.services.memory_search_pidfile = runtime / "memory_search.pid"
+    config.view.services.memory_search_data_dir = tmp_path / "search_data"
+    config.view.services.memory_search_backend = "numpy"
+    config.view.services.memory_search_uri = f"http://127.0.0.1:{search_port}"
+    config.set_field("memory_indexer_health_port", indexer_port)
+    config.set_field("gemini_api_key", SecretStr("test-key"))
+
+    search_cfg = memory_search_daemon.memory_search_config(config=config)
+    server = await memory_search_daemon.build_server(search_cfg)
+    search_thread = threading.Thread(target=server.run, daemon=True)
+    search_thread.start()
+    try:
+        deadline = time.monotonic() + 20.0
+        while not server.started:
+            assert time.monotonic() < deadline, "memory_search never came up"
+            await asyncio.sleep(0.02)
+        search_status, _ = await _healthz(search_port)
+        assert search_status == 200
+
+        def database() -> Database:
+            return Database(
+                db_config_from_boot(config),
+                gate=database_gate,
+                direct_url=ClusterDirectUrl(machine_identity.host),
+            )
+
+        indexer_task = asyncio.create_task(
+            memory_indexer_daemon.run(
+                config=config,
+                runtime=runtime,
+                database=database,
+                image=LoadedCommit(tmp_path, "captured-memory-indexer"),
+                root=tmp_path / "memory",
+                tuning=MemoryIndexerConfig(loop_interval_s=0.02),
+            )
+        )
+        try:
+            status, payload = await _wait_for_indexer_patrol(indexer_port, deadline)
+            assert status == 200
+            assert payload.get("sha") == "captured-memory-indexer"
+            assert (runtime / "memory_indexer.pid").exists()
+        finally:
+            indexer_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await indexer_task
+    finally:
+        server.should_exit = True
+        await asyncio.to_thread(search_thread.join, 5.0)
+
+    assert not (runtime / "memory_indexer.pid").exists()
+    assert _port_refuses(indexer_port)

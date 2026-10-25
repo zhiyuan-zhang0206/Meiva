@@ -393,6 +393,7 @@ def test_generation_models_are_reused_and_never_closed(
     model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     built: list[MagicMock] = []
+    closed: list[str] = []
 
     def build(
         model: str,
@@ -404,9 +405,8 @@ def test_generation_models_are_reused_and_never_closed(
         llm_override: str,
         thinking_off: bool,
     ) -> MagicMock:
-        assert catalog is model_catalog
-        assert llm_override == ""
-        built.append(llm := MagicMock(name=model))
+        assert catalog is model_catalog and llm_override == ""
+        built.append(llm := MagicMock(name=model, close=lambda: closed.append(model)))
         llm.thinking_off, llm.params = thinking_off, params
         return llm
 
@@ -414,18 +414,18 @@ def test_generation_models_are_reused_and_never_closed(
     models = loop.ModelCache(**lm_wiring(model_catalog))
     none = ModelOverrides.from_pins(None)
     first = models.get("m", none)
-    assert models.get("m", none) is first
+    assert first is built[0] and models.get("m", none) is first
     assert models.get("other", none) is not first
-    assert len(built) == 2
-    first.close.assert_not_called()
+    assert len(built) == 2 and closed == []
     # meiva:note
     # the grouping reasoning knob: empty leaves the model's tier alone, `off` disables
     # thinking, anything else is the effort asked; each is its own cached model.
     off, high = models.get("m", none, "off"), models.get("m", none, "high")
+    assert off is built[2] and high is built[3]
     assert off is not first and high is not first and off is not high
-    assert first.thinking_off is False and first.params is None
-    assert off.thinking_off is True and off.params is None
-    assert high.thinking_off is False and high.params.reasoning_effort == "high"
+    assert built[0].thinking_off is False and built[0].params is None
+    assert built[2].thinking_off is True and built[2].params is None
+    assert built[3].thinking_off is False and built[3].params.reasoning_effort == "high"
 
 
 def _call(round_: int, response: AIMessage | None, error: str | None = None) -> ChunkCall:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from fastapi import HTTPException, Request
@@ -152,9 +152,10 @@ def read(
             return cut
 
         state = SimpleNamespace(
-            run_timeline_reader=SimpleNamespace(get=snapshot, window=reader.window)
+            run_timeline_reader=SimpleNamespace(get=snapshot, window=reader.window),
+            timeline_timestamps=_TIMELINE_SOURCE,
         )
-        request = cast(Request, SimpleNamespace(app=SimpleNamespace(state=state)))
+        request = Request({"type": "http", "app": SimpleNamespace(state=state)})
         return router.get_run_timeline(request, 405, from_, to, recent_hours, (max_units, None))
     finally:
         jobs.close()

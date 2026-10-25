@@ -13,10 +13,8 @@ mirror is read; another machine's mirror is replayed by running this on that mac
 
 from __future__ import annotations
 
-import socket
 import time
 from pathlib import Path
-from typing import Any
 
 from psycopg import Connection
 
@@ -27,9 +25,9 @@ _PASS_SECONDS = 120.0
 _SOURCE_PREFIX = "telemetry_events:"
 
 
-def replay_file(conn: Connection[Any], path: Path, *, deadline: float) -> int:
+def replay_file(conn: Connection, path: Path, *, deadline: float, host: str) -> int:
     """Append one mirror file's rows from the saved position; return how many were new."""
-    source_key = f"{_SOURCE_PREFIX}{socket.gethostname()}:{path.resolve()}"
+    source_key = f"{_SOURCE_PREFIX}{host}:{path.resolve()}"
     stat = path.stat()
     identity = f"{stat.st_dev}:{stat.st_ino}"
     row = conn.execute(
@@ -66,14 +64,14 @@ def replay_file(conn: Connection[Any], path: Path, *, deadline: float) -> int:
 
 # meiva:note
 # One bounded pass over this machine's full mirror files in `logs`, newest first.
-def recover_telemetry_events(conn: Connection[Any], *, logs: Path) -> int:
+def recover_telemetry_events(conn: Connection, *, logs: Path, host: str) -> int:
     deadline = time.monotonic() + _PASS_SECONDS
     inserted = 0
     for path in sorted(logs.glob("events-????????.jsonl"), reverse=True):
         if time.monotonic() >= deadline:
             break
         try:
-            inserted += replay_file(conn, path, deadline=deadline)
+            inserted += replay_file(conn, path, deadline=deadline, host=host)
         except Exception:
             conn.rollback()
             raise

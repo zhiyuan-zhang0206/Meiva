@@ -13,15 +13,11 @@ exports = ["projection", "router.py", "schemas.py", "tests"]
 "." = "strict-to-be"
 "__init__.py" = "strict"
 
-[debt.ambient-read]
-"router.py#clock datetime.datetime.now" = 1
-
 [debt.impure-call]
 "context.py#import fastapi" = 1
 "links.py#import fastapi" = 1
 "links.py#import psycopg" = 1
 "messages.py#import fastapi" = 1
-"router.py#datetime.now" = 1
 "router.py#import fastapi" = 1
 
 [debt.impure-edge]
@@ -36,7 +32,3 @@ exports = ["projection", "router.py", "schemas.py", "tests"]
 "schemas.py#base/agents/history/context_response.py" = 1
 "tokens.py#base/agents/history/hierarchy/units.py" = 1
 "tokens.py#base/agents/history/message_tokens.py" = 1
-
-[debt.type-cast]
-"links.py#cast _link" = 2
-"links.py#cast _message_inbound" = 1

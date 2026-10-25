@@ -4,7 +4,7 @@ import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from typing import LiteralString, cast
+from typing import LiteralString
 
 import psycopg
 import pytest
@@ -243,10 +243,9 @@ def test_a_window_longer_than_a_page_is_read_completely(
 
 
 def _content(*, database_gate: ProcessDbGate, **params: int):
-    request = SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(db=Database.from_settings(gate=database_gate)))
-    )
-    return links.get_run_timeline_link_content(cast(Request, request), **params)
+    state = SimpleNamespace(db=Database.from_settings(gate=database_gate))
+    request = Request({"type": "http", "app": SimpleNamespace(state=state)})
+    return links.get_run_timeline_link_content(request, **params)
 
 
 def test_the_full_text_of_a_message_is_served_uncut(

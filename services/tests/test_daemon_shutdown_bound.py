@@ -69,7 +69,6 @@ class _DaemonCase:
 
     module: str
     interrupt_line: str
-    argv: tuple[str, ...] = ()
 
 
 _CASES: dict[str, _DaemonCase] = {
@@ -156,8 +155,6 @@ def _run_child() -> None:
     case = _CASES[os.environ[_CASE_ENV]]
     module: Any = _daemon_module(os.environ[_CASE_ENV])
     assert module.__name__ == case.module
-    if case.argv:
-        sys.argv = [case.module, *case.argv]
 
     async def wedge_run(*_args: object, **_kwargs: object) -> None:
         try:
@@ -255,8 +252,8 @@ def _spawn_child(tmp_path: Path, slug: str) -> _Child:
     env[_MARKERS_ENV] = str(markers_path)
     env[_CASE_ENV] = slug
     log_file = log_path.open("wb")
-    proc = subprocess.Popen(  # noqa: S603 -- fixed interpreter + in-repo entry, no shell
-        [sys.executable, "-c", f"from {__name__} import _run_child; _run_child()"],
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "services.tests.test_daemon_shutdown_bound"],
         cwd=_REPO_ROOT,
         env=env,
         stdout=log_file,
@@ -285,3 +282,7 @@ def test_sigterm_bounded_exit_with_wedged_executor(db_url: str, tmp_path: Path, 
         )
     finally:
         child.close()
+
+
+if __name__ == "__main__":
+    _run_child()

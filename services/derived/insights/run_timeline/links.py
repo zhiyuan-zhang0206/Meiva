@@ -11,7 +11,7 @@ assignment is a system note) -- read per page against `inbound_messages`; a sour
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any, cast, get_args
+from typing import Annotated, Any, TypeGuard, get_args
 
 import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -50,11 +50,15 @@ def _int(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 def _message_inbound(row: dict[str, object]) -> int | None:
-    attrs = row["attributes"]
-    return (
-        _int(cast(dict[str, object], attrs).get("inbound_id")) if isinstance(attrs, dict) else None
-    )
+    attrs = row.get("attributes")
+    if _is_str_dict(attrs):
+        return _int(attrs.get("inbound_id"))
+    return None
 
 
 def _chat_inbounds(conn: psycopg.Connection, page: list[dict[str, Any]]) -> set[int]:
@@ -78,15 +82,17 @@ def _link(row: dict[str, object]) -> RunTimelineLink | None:
     # An event an agent did to itself is not between agents.
     if not drawn or receiver is None or sender == receiver:
         return None
-    kind = cast(LinkKind, row["event_name"])
-    return RunTimelineLink(
-        kind=kind,
-        ts=cast(datetime, row["ts"]),
-        sender=sender,
-        receiver=receiver,
-        inbound_id=_message_inbound(row),
-        fork_from=_int(row["target_agent_id"]) if kind == "fork" else None,
-        notice_id=None,
+    kind = row["event_name"]
+    return RunTimelineLink.model_validate(
+        {
+            "kind": kind,
+            "ts": row["ts"],
+            "sender": sender,
+            "receiver": receiver,
+            "inbound_id": _message_inbound(row),
+            "fork_from": _int(row["target_agent_id"]) if kind == "fork" else None,
+            "notice_id": None,
+        }
     )
 
 

@@ -1,11 +1,12 @@
 # meiva:link services/derived/insights/run_timeline/docs/range-projection.meiva.okf.md
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from base.agents.messages.timestamp_policy import TimestampSource
 from services.derived.insights.run_timeline.context import router as context_router
 from services.derived.insights.run_timeline.links import router as links_router
 from services.derived.insights.run_timeline.messages import router as messages_router
@@ -67,6 +68,7 @@ def get_run_timeline(
 ) -> RunTimelineResponse:
     max_units, snapshot = options
     reader: TimelineReader = request.app.state.run_timeline_reader
+    timestamps: TimestampSource = request.app.state.timeline_timestamps
     if recent_hours is not None and (from_ is not None or to is not None):
         raise HTTPException(status_code=422, detail="recent_hours cannot be combined with from/to")
     for name, value in (("from", from_), ("to", to)):
@@ -75,7 +77,13 @@ def get_run_timeline(
     if from_ is not None and to is not None and from_ >= to:
         raise HTTPException(422, "from must be earlier than to")
     cut = reader.get(agent_id, snapshot)
-    start, end = _window(cut.lifetime, from_, to, datetime.now(UTC), recent_hours)
+    start, end = _window(
+        cut.lifetime,
+        from_,
+        to,
+        timestamps.clock.now(),
+        recent_hours,
+    )
     nodes, units, omitted = reader.window(cut, start, end, max_units)
     return RunTimelineResponse(
         agent_id=agent_id,
