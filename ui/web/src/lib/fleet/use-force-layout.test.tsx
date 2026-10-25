@@ -2,6 +2,10 @@
 // `prewarmTicks` the layout advances in manual, time-budgeted slices on rAF
 // and commits sparsely — never a render per tick — while the default path
 // keeps the timer-driven settle.
+
+// meiva:note
+// @vitest-environment happy-dom
+
 import { act, render } from "@testing-library/react";
 import { useEffect, useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";

@@ -22,46 +22,34 @@ import {
   type SystemEvent,
   type TimelineResponse,
 } from "../contracts/types";
-import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "../fold";
 import { noteTurnStart } from "../format/interaction-timing";
 import type { CompactTransitionBuffer } from "../layout/compact-transition";
 import { CONVERSATION_RETENTION_MS } from "../layout/switch-budget";
 import { useAgentEventStream } from "../transport/useEventStream";
+import {
+  computeOlderPageLimit,
+  findOldestTimelineCursor,
+  hasUnsettledClock,
+  isStreamingDelta,
+  startsTurn,
+  type OlderSegmentLoadResult,
+} from "./timeline-plan";
 import { useTimelineStore } from "./timeline-store";
-import { useCompactHistoryRetention, type OlderSegmentLoadResult } from "./use-compact-history-retention";
+import { useCompactHistoryRetention } from "./use-compact-history-retention";
 
 export type { ConnectionState } from "../contracts/types";
 
-/** Baked fallback for the base number of items fetched per scroll-up — the
- * live value is display.timeline_history_page_base, read at runtime from
- * GET /api/config (useDisplayLimit; task #3696). Subsequent scroll-ups fetch
- * BASE * 2^olderFetchCount items (capped at 1000), so the window grows
- * exponentially instead of linearly — fewer scroll-ups needed. */
 const OLDER_BASE_LIMIT = 50;
 const RETAINED_ITEMS_FALLBACK = 250;
 const EMPTY_ITEMS: BackendTimelineItem[] = [];
+const timelineRuntime: {
+  runTransition: (cb: () => void) => void;
+} = {
+  runTransition: startTransition,
+};
 
-function startsTurn(event: SystemEvent): boolean {
-  return (
-    event.role === "inbound_arrived" ||
-    event.role === "chat_start" ||
-    event.role === "code_start" ||
-    event.role === "reasoning_start" ||
-    event.role === "exec_start"
-  );
-}
-
-function hasUnsettledClock(items: readonly BackendTimelineItem[]): boolean {
-  for (const it of items) {
-    if (
-      (it.reasoningStartedAt != null && it.reasoning_ms == null) ||
-      it.codeStartedAt != null ||
-      (it.execStartedAt != null && it.exec_ms == null)
-    ) {
-      return true;
-    }
-  }
-  return false;
+export function setTimelineTransitionForTest(runner?: (cb: () => void) => void): void {
+  timelineRuntime.runTransition = runner ?? startTransition;
 }
 
 export interface UseTimelineResult {
@@ -218,18 +206,6 @@ export function useTimeline(
     }
   }, [timelineQuery.error, showError, clearPartialFlags]);
 
-  // -- SSE business-event handler --
-  // Wrap delta-streaming events in startTransition to lower React render
-  // priority — so successive code_delta / chat_delta chunk re-renders don't
-  // block UI interactions (e.g. clicking stop). Lifecycle events
-  // (start/committed/done/cancelled) aren't delayed — the user needs to see
-  // the button flip and reload result immediately.
-  const isStreamingDelta = (ev: SystemEvent): boolean =>
-    ev.role === "code_delta" ||
-    ev.role === "chat_delta" ||
-    ev.role === "reasoning_delta" ||
-    ev.role === "exec_output_chunk";
-
   // Compaction changes the selected read models; inactive views own no work.
   const trackCompactForInvalidation = useCallback(
     (ev: SystemEvent) => {
@@ -282,11 +258,11 @@ export function useTimeline(
       if (startsTurn(ev)) noteTurnStart(ev.agent_id);
 
       if (isStreamingDelta(ev)) {
-        startTransition(() => {
-          processSseEvent(ev);
+        timelineRuntime.runTransition(() => {
+          processSseEvent(ev, Date.now());
         });
       } else {
-        processSseEvent(ev);
+        processSseEvent(ev, Date.now());
       }
       trackCompactForInvalidation(ev);
     },
@@ -308,9 +284,9 @@ export function useTimeline(
         if (startsTurn(ev)) noteTurnStart(ev.agent_id);
       }
       const hasStreaming = filtered.some((ev) => isStreamingDelta(ev));
-      const apply = () => processSseEventBatch(filtered);
+      const apply = () => processSseEventBatch(filtered, Date.now());
       if (hasStreaming) {
-        startTransition(apply);
+        timelineRuntime.runTransition(apply);
       } else {
         apply();
       }
@@ -380,44 +356,11 @@ export function useTimeline(
     if (st.activeThreadId !== agentId) return "aborted";
     const ownerEpoch = st.compactEpoch;
     if (!st.hasMoreOlder || st.loadingOlder) return "unready";
-    // Current standing context is never a cursor: the re-attached prompt, the
-    // standing head notes (exec timeout / timezone / cluster memory / agent id
-    // / agent memory — re-attached by the gateway beside the prompt), and
-    // compact summaries. A cursor on a head note would make the gateway cross
-    // straight to the older compact segment, skipping every real item between
-    // the head and the tail window. A segment-prefixed historical summary is
-    // the bounded continuation for a summary-only checkpoint, however: its
-    // exact checkpoint id lets the server advance one segment without scanning
-    // an unbounded chain in one request.
-    const headNoteIds = standingHeadNoteIds(st.items);
-    const isRealCursor = (it: BackendTimelineItem): boolean => {
-      const parts = parseItemIdParts(it.item_id);
-      if (parts === null) return false;
-      if (headNoteIds.has(it.item_id)) return false;
-      return (
-        !isReattachedTimelineContext(it) ||
-        (parts.rank > 0 && it.kind === "inbound_compact_summary")
-      );
-    };
-    let oldest = st.items.find(isRealCursor);
-    // Head-only segment fallback (task #3698): right after a compact the
-    // current segment can hold nothing but the prompt, the standing head
-    // notes and the compact summary. With no real item, a cursor on the
-    // summary crosses to the previous segment and skips nothing — every
-    // item before it is re-attached context, exactly the gateway's
-    // `_window_or_cross` head rule. This is what lets compact-history
-    // retention re-attach the previous session before any new activity.
-    oldest ??= st.items.find((it, idx) => {
-      if (it.kind !== "inbound_compact_summary") return false;
-      if (parseItemIdParts(it.item_id)?.rank !== 0) return false;
-      return st.items
-        .slice(0, idx)
-        .every((prev) => isReattachedTimelineContext(prev) || headNoteIds.has(prev.item_id));
-    });
+    const oldest = findOldestTimelineCursor(st.items);
     if (oldest === undefined) return "unready";
     // Exponential growth: first fetch N, second 2N, third 4N, … capped at 1000
     // (the endpoint's protective le — a constant, not config).
-    const limit = Math.min(olderBaseLimit * Math.pow(2, st.olderFetchCount), 1000);
+    const limit = computeOlderPageLimit(olderBaseLimit, st.olderFetchCount);
     const controller = new AbortController();
     olderRequest.current = controller;
     beginLoadOlder();
@@ -476,13 +419,13 @@ export function useTimeline(
     prevAgentRef.current = { id: agentId, status: agentStatus };
     if (agentId === null || agentStatus === undefined || agentStatus === "running") return;
     if (prev.id === agentId && prev.status === "running") {
-      useTimelineStore.getState().settleTurn();
+      useTimelineStore.getState().settleTurn(Date.now());
       void queryClient.invalidateQueries({ queryKey: ["timeline", agentId] });
       return;
     }
     const st = useTimelineStore.getState();
     if (!st.turnActive && hasUnsettledClock(st.items)) {
-      st.settleTurn();
+      st.settleTurn(Date.now());
     }
   }, [agentId, agentStatus, queryClient]);
 

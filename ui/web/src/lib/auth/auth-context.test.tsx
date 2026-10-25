@@ -5,6 +5,9 @@
 // vs. "network-error" on failure depending on what api.login threw; logout()
 // always lands on unauthenticated. api is mocked so no network runs.
 
+// meiva:note
+// @vitest-environment happy-dom
+
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

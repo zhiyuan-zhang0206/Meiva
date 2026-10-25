@@ -1,3 +1,6 @@
+// meiva:note
+// @vitest-environment happy-dom
+
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

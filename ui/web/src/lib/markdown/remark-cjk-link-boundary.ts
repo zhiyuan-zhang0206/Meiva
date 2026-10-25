@@ -1,7 +1,7 @@
 import type { Link, Parents, Root } from "mdast";
 import type { VFile } from "vfile";
 
-import { appendRemainder, isParent, literalLinkText } from "@/lib/markdown/remark-shared";
+import { appendRemainder, isParent, literalLinkText } from "./remark-shared";
 
 const CJK_LINK_BOUNDARY =
   /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}|[\u2010-\u201F\u2026\u2E80-\u303F\u3040-\u30FF\u3300-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFE10-\uFE1F\uFE30-\uFE4F\uFF00-\uFFEF]/u;

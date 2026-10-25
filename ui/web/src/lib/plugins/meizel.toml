@@ -1,14 +1,15 @@
 exports = ["plugin-nav.ts", "plugin-stats.ts", "ui-contributions.ts", "use-theme-packs.ts"]
 
 [uses]
-"plugin-nav.ts" = ["ui-contributions.ts"]
+"plugin-nav.ts" = ["plugins-plan.ts", "ui-contributions.ts"]
 "plugin-stats.test.ts" = ["plugin-stats.ts"]
-"plugin-stats.ts" = ["ui-contributions.ts"]
+"plugin-stats.ts" = ["plugins-plan.ts", "ui-contributions.ts"]
 "use-theme-packs.ts" = ["ui-contributions.ts"]
 
 [purity]
 "." = "strict-to-be"
 "plugin-nav.ts" = "strict"
+"plugins-plan.ts" = "strict"
 "use-theme-packs.ts" = "strict"
 
 [debt.impure-call]

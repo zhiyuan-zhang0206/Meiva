@@ -86,20 +86,44 @@ describe("read-model repair", () => {
   it("does not postpone deadlines under continuous hints or conflate agent keys", async () => {
     vi.useFakeTimers();
     const client = new QueryClient();
-    client.setQueryData(["agent-detail", 1], "cached");
-    client.setQueryData(["agent-detail", 2], "cached");
-    client.setQueryData(["roster"], "cached");
-    const invalidate = vi.spyOn(client, "invalidateQueries");
+    let reads1 = 0;
+    let reads2 = 0;
+    let readsRoster = 0;
+    const obs1 = new QueryObserver(client, {
+      queryKey: ["agent-detail", 1],
+      queryFn: () => Promise.resolve(`v1-${++reads1}`),
+      initialData: "cached",
+      staleTime: Infinity,
+    });
+    const obs2 = new QueryObserver(client, {
+      queryKey: ["agent-detail", 2],
+      queryFn: () => Promise.resolve(`v2-${++reads2}`),
+      initialData: "cached",
+      staleTime: Infinity,
+    });
+    const obsRoster = new QueryObserver(client, {
+      queryKey: ["roster"],
+      queryFn: () => Promise.resolve(`r-${++readsRoster}`),
+      initialData: "cached",
+      staleTime: Infinity,
+    });
+    const unsub1 = obs1.subscribe(() => undefined);
+    const unsub2 = obs2.subscribe(() => undefined);
+    const unsubRoster = obsRoster.subscribe(() => undefined);
     const repairs = createQueryRepairScheduler(client);
     for (let n = 0; n < 10; n += 1) {
       repairs.request(["agent-detail", 1]);
       repairs.request(["agent-detail", 2]);
       await vi.advanceTimersByTimeAsync(20);
     }
-    expect(invalidate).toHaveBeenCalledTimes(2);
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["agent-detail", 1] }, { cancelRefetch: false });
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["agent-detail", 2] }, { cancelRefetch: false });
-    repairs.dispose(); client.clear();
+    expect(reads1).toBe(1);
+    expect(reads2).toBe(1);
+    expect(readsRoster).toBe(0);
+    repairs.dispose();
+    unsub1();
+    unsub2();
+    unsubRoster();
+    client.clear();
   });
 
   it("disposal removes scheduled repairs", async () => {
@@ -108,12 +132,11 @@ describe("read-model repair", () => {
     client.setQueryData(["agent-detail", 1], "cached");
     client.setQueryData(["agent-detail", 2], "cached");
     client.setQueryData(["roster"], "cached");
-    const invalidate = vi.spyOn(client, "invalidateQueries");
     const repairs = createQueryRepairScheduler(client);
     repairs.request(["roster"]);
     repairs.dispose();
     await vi.advanceTimersByTimeAsync(500);
-    expect(invalidate).not.toHaveBeenCalled();
+    expect(client.getQueryState(["roster"])?.isInvalidated).toBe(false);
     client.clear();
   });
 });
