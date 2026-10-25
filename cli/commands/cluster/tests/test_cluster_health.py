@@ -284,7 +284,7 @@ def test_an_agent_floor_of_zero_is_met_by_an_empty_cluster(cluster: Cluster) -> 
     cluster.conn.execute("UPDATE agents_meta SET status = 'terminated'")
     cluster.conn.commit()
 
-    assert cluster.probe(rules=HealthRules(0, check_schema=True, disk_watermark=0.9)) == 0
+    assert cluster.probe(rules=dataclasses.replace(cluster.options.rules, agent_min=0)) == 0
 
 
 def test_a_schema_skew_fails_the_round_and_a_disabled_check_does_not(
@@ -296,7 +296,7 @@ def test_a_schema_skew_fails_the_round_and_a_disabled_check_does_not(
     try:
         assert cluster.probe() == 1
         failing = capsys.readouterr()
-        skip = HealthRules(1, check_schema=False, disk_watermark=0.9)
+        skip = dataclasses.replace(cluster.options.rules, check_schema=False)
         assert cluster.probe(rules=skip) == 0
     finally:
         cluster.conn.execute("DELETE FROM schema_migrations WHERE name = %s", (name,))

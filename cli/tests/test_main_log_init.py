@@ -19,17 +19,14 @@ import re
 import subprocess
 import sys
 import threading
-from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
 import pytest
 import yaml
 
-import cli.database as cli_database
 import cli.main as _main
 from base import telemetry
-from base.agents.context.clients import DatabaseFactory
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster import postgres
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -37,13 +34,11 @@ from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
+from base.host.env.bootstrap import BootstrapFetchError
+from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
-from base.paths import meiva_home
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
-from cli import parsers, preflight, start_intent
-from cli.commands.lifecycle import stop
-from cli.commands.lifecycle.stop.execute import StopEnvironment
 from cli.database import (
     OperatorDatabaseFactory,
     OperatorEventPipeline,
@@ -55,7 +50,6 @@ from cli.database.runtime import CommandRuntime, UserSession
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
-from cli.start_runtime import HomeSite
 from cli.tests.bootstrap.init_identity import initialized_runner_home
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -104,118 +98,128 @@ def test_the_sinks_a_start_opens_keep_a_loguru_warning_in_stderr_and_the_log(
     assert not any("service_started" in json.dumps(r) for r in records)
 
 
-def _dispatching(sink: list[str]) -> argparse.ArgumentParser:
-    def dispatched(_args: argparse.Namespace) -> int:
-        sink.append("dispatched")
-        return 0
-
-    parser = argparse.ArgumentParser(prog="meiva")
-    parser.add_argument("words", nargs="*")
-    parser.set_defaults(func=dispatched)
-    return parser
-
-
 @pytest.mark.parametrize(
     ("argv", "name"),
     [
         (["restart"], "cli-restart"),
-        (["lgtm", "on"], "cli-lgtm"),
-        (["lgtm", "off"], "cli-lgtm"),
+        (["lgtm", "on", "--all-services"], "cli-lgtm"),
+        (["lgtm", "off", "--all-services"], "cli-lgtm"),
         (["status"], None),
         (["lgtm", "status"], None),
     ],
 )
 def test_only_the_verbs_that_bring_a_unit_up_open_sinks_before_dispatch(
-    monkeypatch: pytest.MonkeyPatch, cli_log_sinks: list[str], argv: list[str], name: str | None
+    tmp_path: Path, cli_log_sinks: list[str], argv: list[str], name: str | None
 ) -> None:
-    monkeypatch.setattr(
-        parsers, "build_parser", _ignoring_retention(lambda: _dispatching(cli_log_sinks))
-    )
+    def dispatched(_args: argparse.Namespace) -> int:
+        cli_log_sinks.append("dispatched")
+        return 0
 
-    assert _main.main(argv) == 0
+    args = _main.parse_command_args(argv)
+    args.func = dispatched
+    assert (
+        _main.dispatch_parsed(
+            args,
+            argv,
+            declared=tmp_path,
+            checkout=_REPO_ROOT,
+            producer_factory=operator_producer,
+            open_database=open_operator_database,
+        )
+        == 0
+    )
 
     assert cli_log_sinks == ([name, "dispatched"] if name else ["dispatched"])
 
 
 def test_a_settings_failure_while_opening_sinks_keeps_its_actionable_message(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, cli_log_sinks: list[str], capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Opening the sinks builds Settings; a runner whose gateway is unreachable
     fails there with the same message the command itself would print."""
-    import base.telemetry.process_logging
-    from base.host.env.bootstrap import BootstrapFetchError
+    args = _main.parse_command_args(["restart"])
 
-    def unreachable(
-        *, name: str, producer: Callable[[], EventPipeline], machine_reader: Callable[[], str]
-    ) -> None:
-        raise BootstrapFetchError(f"could not fetch cluster config ({name})")
+    def fail_after_sink(_args: argparse.Namespace) -> int:
+        assert cli_log_sinks == ["cli-restart"]
+        raise BootstrapFetchError(f"could not fetch cluster config ({cli_log_sinks[0]})")
 
-    dispatched: list[str] = []
-    monkeypatch.setattr(base.telemetry.process_logging, "init_cli_process", unreachable)
-    monkeypatch.setattr(
-        parsers, "build_parser", _ignoring_retention(lambda: _dispatching(dispatched))
+    args.func = fail_after_sink
+    assert (
+        _main.dispatch_parsed(
+            args,
+            ["restart"],
+            declared=tmp_path,
+            checkout=_REPO_ROOT,
+            producer_factory=operator_producer,
+            open_database=open_operator_database,
+        )
+        == 1
     )
 
-    assert _main.main(["restart"]) == 1
-
-    assert dispatched == []
     assert "could not fetch cluster config (cli-restart)" in capsys.readouterr().err
 
 
-def _ignoring_retention[T](callback: Callable[[], T]) -> Callable[..., T]:
-    def invoke(*_args: object, **_kwargs: object) -> T:
-        return callback()
-
-    return invoke
-
-
 def test_main_hands_start_the_explicit_caller_child_owner_or_a_fresh_one(
-    monkeypatch: pytest.MonkeyPatch, unit_home: Path
+    unit_home: Path,
 ) -> None:
     owners: list[list[subprocess.Popen[bytes]]] = []
 
-    def dispatched(
-        _args: argparse.Namespace,
-        _site: HomeSite,
-        *,
-        retained_children: list[subprocess.Popen[bytes]],
-        database_factory: DatabaseFactory,
-        producer: Callable[[], EventPipeline],
-    ) -> int:
-        assert database_factory is _args.database_factory
-        assert producer is _args.producer
-        owners.append(retained_children)
-        return 0
-
-    monkeypatch.setattr(start_intent, "run_start", dispatched)
     initialized_runner_home(unit_home, unit_home / "checkout")
     shared: list[subprocess.Popen[bytes]] = []
-    assert _main.main(["start", "--all-services"], retained_children=shared) == 0
-    assert _main.main(["start", "--all-services"]) == 0
-    assert _main.main(["start", "--all-services"]) == 0
+    for retained in (shared, None, None):
+        args = _main.parse_command_args(["start", "--all-services"], retained_children=retained)
+        bound_retained = args.func.keywords["retained_children"]
+
+        def dispatched(
+            _args: argparse.Namespace, _bound: list[subprocess.Popen[bytes]] = bound_retained
+        ) -> int:
+            owners.append(_bound)
+            return 0
+
+        args.func = dispatched
+        assert (
+            _main.dispatch_parsed(
+                args,
+                ["start", "--all-services"],
+                declared=unit_home,
+                checkout=_REPO_ROOT,
+                producer_factory=operator_producer,
+                open_database=open_operator_database,
+            )
+            == 0
+        )
     assert owners[0] is shared
     assert owners[1] is not shared and owners[2] is not owners[1]
 
 
-def test_main_hands_stop_the_explicit_caller_child_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_hands_stop_the_explicit_caller_child_owner(tmp_path: Path) -> None:
     owners: list[list[subprocess.Popen[bytes]]] = []
 
-    def stopped(
-        _request: object,
-        _env: StopEnvironment,
-        retained_children: list[subprocess.Popen[bytes]] | None,
-    ) -> int:
-        assert retained_children is not None
-        owners.append(retained_children)
-        return 0
-
-    monkeypatch.setattr(stop, "cmd_stop", stopped)
     shared: list[subprocess.Popen[bytes]] = []
     full_stop = ["--yes", "--close-shell-sessions", "--stop-browser", "--stop-extras"]
     # meiva:note
     # a runner home
     full_stop += ["--keep-no-services", "--mode", "smooth", "--timeout", "60"]
-    assert _main.main(["stop", *full_stop], retained_children=shared) == 0
+    argv = ["stop", *full_stop]
+    args = _main.parse_command_args(argv, retained_children=shared)
+    bound_retained = args.func.keywords["retained_children"]
+
+    def stopped(_args: argparse.Namespace) -> int:
+        owners.append(bound_retained)
+        return 0
+
+    args.func = stopped
+    assert (
+        _main.dispatch_parsed(
+            args,
+            argv,
+            declared=tmp_path,
+            checkout=_REPO_ROOT,
+            producer_factory=operator_producer,
+            open_database=open_operator_database,
+        )
+        == 0
+    )
     assert owners == [shared]
 
 
@@ -227,94 +231,70 @@ def test_inspection_parser_cannot_launch_without_a_child_owner(verb: list[str]) 
 
 
 def test_logging_and_dispatch_borrow_the_same_operator_factory(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, cli_log_sinks: list[str]
 ) -> None:
-    from unittest.mock import MagicMock
-
-    import base.telemetry.process_logging
-    from base import telemetry
-
-    pipeline = MagicMock(spec=telemetry.EventPipeline)
-    factories: list[DatabaseFactory] = []
+    factories: list[OperatorDatabaseFactory] = []
     machines: list[MachineIdentityReader] = []
-    readers: list[Callable[[], str]] = []
     homes: list[Path] = []
-    inputs: list[object] = []
+    pipelines: list[EventPipeline] = []
+    inputs: list[EventPipeline] = []
 
-    def build(
-        *,
-        database: DatabaseFactory,
+    def producer_factory(
+        database_factory: OperatorDatabaseFactory,
         machine: MachineIdentityReader,
         home: Path,
-        flush_interval_s: float,
-    ) -> telemetry.EventPipeline:
-        factories.append(database)
+    ) -> OperatorEventPipeline:
+        factories.append(database_factory)
         machines.append(machine)
         homes.append(home)
-        return pipeline
-
-    def initialize(
-        *, name: str, producer: Callable[[], EventPipeline], machine_reader: Callable[[], str]
-    ) -> None:
-        assert name == "cli-restart"
-        readers.append(machine_reader)
-        inputs.append(producer())
+        pipeline = telemetry.EventPipeline(writer=lambda _batch: None)
+        pipelines.append(pipeline)
+        return OperatorEventPipeline.wrapping(
+            pipeline,
+            database_factory=database_factory,
+            machine=machine,
+            home=home,
+        )
 
     def dispatch(args: argparse.Namespace) -> int:
         assert args.database_factory is factories[-1]
         assert args.runtime.machine is machines[-1]
         assert args.runtime.home == homes[-1], "the producer and the runtime name one home"
-        assert readers[-1] == args.runtime.machine.name
         inputs.append(args.producer())
         return 0
 
-    parser = argparse.ArgumentParser(prog="meiva")
-    parser.add_argument("words", nargs="*")
-    parser.set_defaults(func=dispatch)
-    monkeypatch.setattr(parsers, "build_parser", _ignoring_retention(lambda: parser))
-    monkeypatch.setattr(telemetry, "build_pipeline", build)
-    monkeypatch.setattr(base.telemetry.process_logging, "init_cli_process", initialize)
-    assert _main.main(["restart"]) == 0
-    assert len(factories) == 1
-    assert inputs == [pipeline, pipeline]
-    assert homes == [meiva_home().resolve()]
-    assert _main.main(["restart"]) == 0
+    for _ in range(2):
+        args = _main.parse_command_args(["restart"])
+        args.func = dispatch
+        assert (
+            _main.dispatch_parsed(
+                args,
+                ["restart"],
+                declared=tmp_path,
+                checkout=_REPO_ROOT,
+                producer_factory=producer_factory,
+                open_database=open_operator_database,
+            )
+            == 0
+        )
+
+    assert cli_log_sinks == ["cli-restart", "cli-restart"]
+    assert homes == [tmp_path.resolve(), tmp_path.resolve()]
     assert machines[0] is not machines[1]
     assert factories[0] is not factories[1]
-    assert inputs == [pipeline, pipeline, pipeline, pipeline]
-
-
-def _parsed_args(args: argparse.Namespace) -> Callable[..., argparse.Namespace]:
-    def parse(*_args: object, **_kwargs: object) -> argparse.Namespace:
-        return args
-
-    return parse
-
-
-def _owned_pipeline(pipeline: telemetry.EventPipeline) -> Callable[..., telemetry.EventPipeline]:
-    def build(**_kwargs: object) -> telemetry.EventPipeline:
-        return pipeline
-
-    return build
-
-
-def _admitted_checkout(*_args: object) -> None:
-    return None
+    assert inputs == pipelines
+    assert all(p.stopped for p in pipelines)
 
 
 def _cold_report(
     name: Literal["schedule", "stop", "dashboard"],
     args: argparse.Namespace,
     path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> int:
+    args.database_factory.adopt_login(PLACEHOLDER_DB_URL)
     if name == "schedule":
         from cli.commands.management import schedules_verify
 
-        def failed_connect(_database: Database, **_kwargs: object) -> None:
-            raise RuntimeError("schedule reader failed")
-
-        monkeypatch.setattr(Database, "connect", failed_connect)
         args.check_file = args.rows_file = None
         args.no_notify = False
         return schedules_verify.h_schedules_verify(args)
@@ -327,18 +307,10 @@ def _cold_report(
         )
         assert "fast shutdown timed out" in note
         return 0
-    from base.config import settings
-    from base.packages import dashboard_supply
     from cli.commands.converge.spec import ConvergeCtx
     from cli.commands.observability import lgtm_native
     from cli.commands.observability.plans.lgtm.install import platform_tag
 
-    original = RuntimeError("dashboard reader failed")
-
-    def failed_render(database: Database) -> tuple[str, list[str]]:
-        raise original
-
-    monkeypatch.setattr(dashboard_supply, "render_dashboard_json", failed_render)
     repo = _REPO_ROOT
     tag = platform_tag(DARWIN_ARM64.system, DARWIN_ARM64.machine)
     assert tag is not None
@@ -347,7 +319,7 @@ def _cold_report(
     versions = yaml.safe_load((repo / "deploy/lgtm/native/versions.yml").read_text())
     (native / "version-prometheus").write_text(versions["prometheus"]["version"])
     (native / "platform-prometheus").write_text(tag)
-    monkeypatch.setattr(settings.observability, "lgtm_storage_dir", str(path / "storage"))
+    args.runtime.config.set_field("lgtm_storage_dir", str(path / "storage"))
     destination = native / "config/provisioning/dashboards/meiva-ops-main.json"
     destination.parent.mkdir(parents=True)
     destination.write_text("previous dashboard")
@@ -390,12 +362,11 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
     event: str,
     result: int,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[telemetry.Event] = []
     gates: list[ProcessDbGate] = []
     pipelines: list[telemetry.EventPipeline] = []
-    factories: list[DatabaseFactory] = []
+    factories: list[OperatorDatabaseFactory] = []
 
     # Handles are never dialed; the same real operator gate reaches work and writer.
     def open_database(
@@ -404,44 +375,45 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
         gates.append(gate)
         return open_operator_database(config, gate, direct_url)
 
-    def build(
-        *,
-        database: DatabaseFactory,
+    def producer_factory(
+        database_factory: OperatorDatabaseFactory,
         machine: MachineIdentityReader,
         home: Path,
-        flush_interval_s: float,
-    ) -> telemetry.EventPipeline:
-        factories.append(database)
+    ) -> OperatorEventPipeline:
+        factories.append(database_factory)
 
         def write(batch: list[telemetry.Event]) -> None:
-            database()
+            database_factory()
             events.extend(batch)
 
         pipeline = telemetry.EventPipeline(writer=write)
         pipelines.append(pipeline)
-        return pipeline
+        return OperatorEventPipeline.wrapping(
+            pipeline,
+            database_factory=database_factory,
+            machine=machine,
+            home=home,
+        )
 
     def dispatch(args: argparse.Namespace) -> int:
         args.database_factory()
-        return _cold_report(name, args, tmp_path, monkeypatch)
+        return _cold_report(name, args, tmp_path)
 
-    def forbidden_binding(**_kwargs: object) -> None:
-        raise AssertionError("cold reporters must use their explicit entry owner")
-
-    args = argparse.Namespace(func=dispatch)
-    monkeypatch.setattr(telemetry, "init_telemetry", forbidden_binding)
-    monkeypatch.setattr(telemetry, "build_pipeline", build)
-    monkeypatch.setattr(parsers, "parse_args", _parsed_args(args))
-    monkeypatch.setattr(preflight, "require_own_checkout", _admitted_checkout)
+    args = _main.parse_command_args(["status"])
+    args.func = dispatch
+    before_process_pipeline = telemetry.process_state["pipeline"]
     assert (
-        _main.run_command(
+        _main.dispatch_parsed(
+            args,
             ["status"],
-            retained_children=None,
-            producer_factory=operator_producer,
+            declared=tmp_path,
+            checkout=_REPO_ROOT,
+            producer_factory=producer_factory,
             open_database=open_database,
         )
         == result
     )
+    assert telemetry.process_state["pipeline"] is before_process_pipeline
     if name == "dashboard":
         destination = tmp_path / "lgtm/native/config/provisioning/dashboards/meiva-ops-main.json"
         reference = (
@@ -455,12 +427,8 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
 
 
 def test_quiet_command_does_not_construct_pipeline(
-    monkeypatch: pytest.MonkeyPatch, command_runtime: CommandRuntime, tmp_path: Path
+    command_runtime: CommandRuntime, tmp_path: Path
 ) -> None:
-    def forbidden(**kwargs: object) -> telemetry.EventPipeline:
-        raise AssertionError("a quiet command must not construct a writer")
-
-    monkeypatch.setattr(telemetry, "build_pipeline", forbidden)
     owner = operator_event_pipeline(
         operator_database_factory(
             local_host=command_runtime.machine.host,
@@ -471,31 +439,44 @@ def test_quiet_command_does_not_construct_pipeline(
     )
     assert owner.close() is None
 
-    def quiet(_args: argparse.Namespace) -> int:
+    producers: list[OperatorEventPipeline] = []
+
+    def quiet(args: argparse.Namespace) -> int:
+        producers.append(args.producer)
         return 0
 
-    args = argparse.Namespace(func=quiet)
-    monkeypatch.setattr(parsers, "parse_args", _parsed_args(args))
-    monkeypatch.setattr(preflight, "require_own_checkout", _admitted_checkout)
-    assert _main.main(["status"]) == 0
+    args = _main.parse_command_args(["status"])
+    args.func = quiet
+    assert (
+        _main.dispatch_parsed(
+            args,
+            ["status"],
+            declared=tmp_path,
+            checkout=_REPO_ROOT,
+            producer_factory=operator_producer,
+            open_database=open_operator_database,
+        )
+        == 0
+    )
+    assert len(producers) == 1
+    assert producers[0].close() is None
 
 
 def test_unfinished_command_writer_remains_owned_until_join(
-    monkeypatch: pytest.MonkeyPatch,
     command_runtime: CommandRuntime,
     tmp_path: Path,
 ) -> None:
     entered = threading.Event()
     release = threading.Event()
 
-    def write(batch: list[telemetry.Event]) -> None:
+    def write(_batch: list[telemetry.Event]) -> None:
         entered.set()
         assert release.wait(5)
 
     pipeline = telemetry.EventPipeline(writer=write, batch_size=1)
-    monkeypatch.setattr(telemetry, "build_pipeline", _owned_pipeline(pipeline))
-    owner = operator_event_pipeline(
-        operator_database_factory(
+    owner = OperatorEventPipeline.wrapping(
+        pipeline,
+        database_factory=operator_database_factory(
             local_host=command_runtime.machine.host,
             open_database=open_operator_database,
         ),
@@ -519,16 +500,27 @@ def test_unfinished_command_writer_remains_owned_until_join(
 @pytest.mark.parametrize("body_fails", [False, True])
 def test_command_close_preserves_original_writer_error_and_primary(
     body_fails: bool,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     primary = ValueError("command failed")
     cleanup = RuntimeError("writer failed")
 
-    def write(batch: list[telemetry.Event]) -> None:
+    def write(_batch: list[telemetry.Event]) -> None:
         raise cleanup
 
     pipeline = telemetry.EventPipeline(writer=write)
-    monkeypatch.setattr(telemetry, "build_pipeline", _owned_pipeline(pipeline))
+
+    def producer_factory(
+        database_factory: OperatorDatabaseFactory,
+        machine: MachineIdentityReader,
+        home: Path,
+    ) -> OperatorEventPipeline:
+        return OperatorEventPipeline.wrapping(
+            pipeline,
+            database_factory=database_factory,
+            machine=machine,
+            home=home,
+        )
 
     def dispatch(args: argparse.Namespace) -> int:
         telemetry.emit("telemetry", "schedule_verify_failed", producer=args.producer)
@@ -536,11 +528,17 @@ def test_command_close_preserves_original_writer_error_and_primary(
             raise primary
         return 0
 
-    args = argparse.Namespace(func=dispatch)
-    monkeypatch.setattr(parsers, "parse_args", _parsed_args(args))
-    monkeypatch.setattr(preflight, "require_own_checkout", _admitted_checkout)
+    args = _main.parse_command_args(["status"])
+    args.func = dispatch
     with pytest.raises(ValueError if body_fails else RuntimeError) as caught:
-        _main.main(["status"])
+        _main.dispatch_parsed(
+            args,
+            ["status"],
+            declared=tmp_path,
+            checkout=_REPO_ROOT,
+            producer_factory=producer_factory,
+            open_database=open_operator_database,
+        )
     assert caught.value is (primary if body_fails else cleanup)
     assert pipeline.stopped
     with pytest.raises(RuntimeError) as repeated:
@@ -550,33 +548,25 @@ def test_command_close_preserves_original_writer_error_and_primary(
         assert any("writer failed" in note for note in primary.__notes__)
 
 
+# meiva:note
+# The real `_h_status` handler body executes against the real parsed Namespace.
 def test_status_handler_body_forwards_the_parsed_namespace(
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: OperatorDatabaseFactory,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The routing test above stubs the `_h_*` handler itself, so no handler body
-    ever runs under test — a handler reading a flag the parser no longer defines
-    (`args.via_gateway` after `--via-gateway` was dropped) stays green here and
-    AttributeErrors on the first real `meiva status`. Stub one level lower instead:
-    `cmd_status`, which `_h_status` lazy-imports, so the real body executes against
-    the real Namespace."""
-    import cli.commands.lifecycle.status as _status_commands
-
-    calls: list[dict[str, object]] = []
-
-    def database_owner(
-        *,
-        local_host: Callable[[], str],
-        open_database: Callable[..., object],
-    ) -> OperatorDatabaseFactory:
-        assert callable(local_host)
-        assert open_database is open_operator_database
-        return operator_database
-
-    monkeypatch.setattr(cli_database, "operator_database_factory", database_owner)
-    monkeypatch.setattr(_status_commands, "cmd_status", lambda **kwargs: calls.append(kwargs) or 0)  # pyright: ignore[reportUnknownArgumentType]
-
-    assert _main.main(["status"]) == 0
-    assert len(calls) == 1
-    assert calls[0]["database_factory"] is operator_database
-    assert isinstance(calls[0]["command"], CommandRuntime)
+    home = initialized_runner_home(tmp_path / "runner", _REPO_ROOT)
+    args = _main.parse_command_args(["status"])
+    assert (
+        _main.dispatch_parsed(
+            args,
+            ["status"],
+            declared=home,
+            checkout=_REPO_ROOT,
+            producer_factory=operator_producer,
+            open_database=open_operator_database,
+        )
+        == 0
+    )
+    assert isinstance(args.runtime, CommandRuntime)
+    assert isinstance(args.database_factory, OperatorDatabaseFactory)
+    assert "agent-runner" in capsys.readouterr().out

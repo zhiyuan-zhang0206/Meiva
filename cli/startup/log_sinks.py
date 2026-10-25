@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-__all__ = ["START_SINK", "cli_log_name"]
+__all__ = ["START_SINK", "cli_log_name", "pre_dispatch_log_sink"]
 
 START_SINK = "cli-start"
 
@@ -36,3 +36,12 @@ def cli_log_name(args_in: Sequence[str]) -> str | None:
             return "cli-lgtm"
         case _:
             return None
+
+
+# meiva:note
+# The sink `run_command` opens immediately before calling `args.func(args)`.
+# `init` and `start` open their own after home admission.
+def pre_dispatch_log_sink(args_in: Sequence[str]) -> str | None:
+    if tuple(args_in[:1]) in (("init",), ("start",)):
+        return None
+    return cli_log_name(args_in)

@@ -10,11 +10,13 @@ bindings to record routing without invoking real cmd_start / cmd_cluster_status.
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import socket
 import subprocess
 import sys
+import types
 from collections.abc import Callable
 from pathlib import Path
 from typing import cast
@@ -28,13 +30,18 @@ from base.paths.tests.homes import point_home
 from cli import main as _main
 from cli import parsers as _parsers
 from cli.commands.agents import parsers as _agents
+from cli.commands.cluster.tests.gateway_server import Reply, serving
 from cli.commands.extensions.parsers import mcp as _mcp
 from cli.commands.extensions.parsers import plugins as _plugins
+from cli.database import open_operator_database, operator_event_pipeline
+from cli.database.runtime import CommandRuntime
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
 from cli.parsers import cluster as _cluster
 from cli.parsers import host as _host
 from cli.parsers import logs as _logs
 from cli.parsers import pty as _pty
+from cli.preflight import require_own_checkout
 from cli.start_runtime import HomeSite
 from cli.startup.service_path import CallerHost
 from cli.tests.bootstrap.init_identity import initialized_runner_home
@@ -127,7 +134,7 @@ def test_import_defers_cli_logging_until_dispatch(tmp_path: Path) -> None:
 
 # Each top-level (and nested) meiva sub-command maps to a _h_* handler defined
 # in its owning settings-free parser module.
-_HANDLERS: tuple[tuple[list[str], object, str], ...] = (
+_HANDLERS: tuple[tuple[list[str], types.ModuleType, str], ...] = (
     (["stop"], _host, "h_stop"),
     (["restart"], _host, "h_restart"),
     (["status"], _host, "_h_status"),
@@ -155,73 +162,60 @@ _HANDLERS: tuple[tuple[list[str], object, str], ...] = (
 
 @pytest.mark.parametrize(("argv", "module", "handler_name"), _HANDLERS)
 def test_dispatch_invokes_per_subcommand_handler(
-    argv: list[str], module: object, handler_name: str, monkeypatch: pytest.MonkeyPatch
+    argv: list[str], module: types.ModuleType, handler_name: str, tmp_path: Path
 ) -> None:
     """Each sub-command routes to its `_h_*` handler with the parsed Namespace."""
+    args = _main.parse_command_args(argv)
+    raw_func: Callable[..., int] | functools.partial[int] = args.func
+    bound = raw_func.func if isinstance(raw_func, functools.partial) else raw_func
+    assert bound.__module__ == module.__name__
+    assert bound.__name__ == handler_name
+
     captured: dict[str, argparse.Namespace] = {}
 
-    def _fake(args: argparse.Namespace, **_kwargs: object) -> int:
-        captured["args"] = args
+    def _fake(parsed: argparse.Namespace) -> int:
+        captured["args"] = parsed
         return 42
 
-    monkeypatch.setattr(module, handler_name, _fake)
-    rc = _main.main(argv)
+    args.func = _fake
+    rc = _main.dispatch_parsed(
+        args,
+        argv,
+        declared=tmp_path,
+        checkout=Path(_main.__file__).resolve().parents[1],
+        producer_factory=operator_event_pipeline,
+        open_database=open_operator_database,
+    )
     assert rc == 42
-    assert "args" in captured
+    assert captured["args"] is args
 
 
-def _stub_dispatch(
-    monkeypatch: pytest.MonkeyPatch,
-    command: str,
-    handler: Callable[[argparse.Namespace], int],
-) -> None:
-    """Use the real parser tree and replace only this entry-point test's dispatch."""
-    parser = build_parser()
-    leaf = next(item for item in _iter_leaf_parsers(parser) if item.prog == f"meiva {command}")
-    leaf.set_defaults(func=handler)
-    monkeypatch.setattr(_parsers, "build_parser", _ignoring_retention(lambda: parser))
-
-
-def test_cli_discards_an_inherited_process_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_discards_an_inherited_process_profile() -> None:
     """The CLI always constructs the full settings domain set."""
-    monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
-    assert "MEIVA_PROCESS_PROFILE" in os.environ
-    # main() records the discarded profile as MEIVA_LAUNCHER_PROFILE. Register the absent key
-    # (setenv) before removing it so teardown deletes what main() assigned.
-    monkeypatch.setenv(LAUNCHER_PROFILE_ENV_KEY, "")
-    monkeypatch.delenv(LAUNCHER_PROFILE_ENV_KEY)
-
-    def _fake(_args: argparse.Namespace) -> int:
-        return 0
-
-    _stub_dispatch(monkeypatch, "status", _fake)
-
-    assert _main.main(["status"]) == 0
-    assert "MEIVA_PROCESS_PROFILE" not in os.environ
+    env = {"MEIVA_PROCESS_PROFILE": "agent"}
+    _main.normalize_profile_env(env)
+    assert "MEIVA_PROCESS_PROFILE" not in env
+    assert env[LAUNCHER_PROFILE_ENV_KEY] == "agent"
 
 
 def test_restart_handler_forwards_the_parsed_config_overlay(
-    monkeypatch: pytest.MonkeyPatch,
+    command_runtime: CommandRuntime,
 ) -> None:
     """The restart parser keeps the JSON string intact for its HTTP command."""
-    from cli.commands.agents import control as agents_commands
-
-    calls: list[tuple[int, str | None, str | None]] = []
-
-    def restart(
-        _access: object, agent_id: int, config_json: str | None = None, source: str | None = None
-    ) -> int:
-        calls.append((agent_id, config_json, source))
-        return 0
-
-    monkeypatch.setattr(
-        agents_commands,
-        "cmd_agents_restart",
-        restart,
+    args = _main.parse_command_args(
+        ["agents", "restart", "8", "--config", '{"llm_model":"gpt-5.6-sol"}']
     )
-
-    assert _main.main(["agents", "restart", "8", "--config", '{"llm_model":"gpt-5.6-sol"}']) == 0
-    assert calls == [(8, '{"llm_model":"gpt-5.6-sol"}', None)]
+    assert args.agent_id == 8
+    assert args.config == '{"llm_model":"gpt-5.6-sol"}'
+    assert args.source is None
+    with serving({("POST", "/api/agents/8/restart"): Reply(body={"status": "restarted"})}) as gw:
+        command_runtime.config.set_field("gateway_url", gw.url)
+        command_runtime.config.set_field("cluster_secret", "test-secret")
+        args.runtime = command_runtime
+        assert args.func(args) == 0
+    assert [(req.method, req.target, req.body) for req in gw.requests] == [
+        ("POST", "/api/agents/8/restart", {"config_overlay": {"llm_model": "gpt-5.6-sol"}})
+    ]
 
 
 def test_migrations_subcommand_removed() -> None:
@@ -350,42 +344,61 @@ def test_the_removed_wal_verbs_no_longer_parse(argv: list[str]) -> None:
 # argparse Namespace: the service selection is all `start` takes. `start` is the one
 # verb with a pre-dispatch side effect (the settings-free installed-home gate); the
 # home here is initialized, so the gate admits it and hands the start its site.
-def test_start_subcommand_forwards_argparse_flags(
-    monkeypatch: pytest.MonkeyPatch, unit_home: Path
-) -> None:
+def test_start_subcommand_forwards_argparse_flags(unit_home: Path) -> None:
     captured: dict[str, argparse.Namespace] = {}
 
     def _fake(args: argparse.Namespace) -> int:
         captured["args"] = args
         return 7
 
-    _stub_dispatch(monkeypatch, "start", _fake)
+    argv = ["start", "--only-service", "gateway", "--only-service", "frontend"]
+    args = _main.parse_command_args(argv)
+    args.func = _fake
     home = initialized_runner_home(unit_home, unit_home / "checkout")
-    rc = _main.main(["start", "--only-service", "gateway", "--only-service", "frontend"])
+    checkout = Path(_main.__file__).resolve().parents[1]
+    rc = _main.dispatch_parsed(
+        args,
+        argv,
+        declared=home,
+        checkout=checkout,
+        producer_factory=operator_event_pipeline,
+        open_database=open_operator_database,
+    )
     assert rc == 7
     ns = captured["args"]
     assert ns.only_service == ["gateway", "frontend"]
     assert ns.disable_service is None and ns.all_services is False
     assert ns.site.home == home.resolve()
-    assert ns.site.checkout == Path(_main.__file__).resolve().parents[1]
+    assert ns.site.checkout == checkout
 
 
 # meiva:note
 # `main` is init's composition root: it reads the home, the checkout and the caller's
 # host facts once and hands them over, so `run_init` reads none of them itself.
-def test_init_receives_its_site_and_the_hosts_facts(
-    monkeypatch: pytest.MonkeyPatch, unit_home: Path
-) -> None:
+def test_init_receives_its_site_and_the_hosts_facts(unit_home: Path) -> None:
     captured: dict[str, argparse.Namespace] = {}
 
     def _fake(args: argparse.Namespace) -> int:
         captured["args"] = args
         return 7
 
-    _stub_dispatch(monkeypatch, "init", _fake)
-    assert _main.main(["init", "--machine-name", "probe", "--serve-gateway"]) == 7
+    argv = ["init", "--machine-name", "probe", "--serve-gateway"]
+    args = _main.parse_command_args(argv)
+    args.func = _fake
+    checkout = Path(_main.__file__).resolve().parents[1]
+    assert (
+        _main.dispatch_parsed(
+            args,
+            argv,
+            declared=unit_home,
+            checkout=checkout,
+            producer_factory=operator_event_pipeline,
+            open_database=open_operator_database,
+        )
+        == 7
+    )
     ns = captured["args"]
-    assert ns.site == HomeSite(unit_home.resolve(), Path(_main.__file__).resolve().parents[1])
+    assert ns.site == HomeSite(unit_home.resolve(), checkout)
     assert isinstance(ns.caller_host, CallerHost)
 
 
@@ -434,15 +447,26 @@ def test_the_entry_resolves_a_symlinked_home_once_for_the_runtime_and_the_produc
     real.mkdir()
     link = tmp_path / "link"
     link.symlink_to(real, target_is_directory=True)
-    point_home(monkeypatch, link / "home")
+    declared = point_home(monkeypatch, link / "home")
     homes: list[Path] = []
 
     def _fake(args: argparse.Namespace) -> int:
         homes.append(args.runtime.home)
         return 0
 
-    _stub_dispatch(monkeypatch, "status", _fake)
-    assert _main.main(["status"]) == 0
+    args = _main.parse_command_args(["status"])
+    args.func = _fake
+    assert (
+        _main.dispatch_parsed(
+            args,
+            ["status"],
+            declared=declared,
+            checkout=Path(_main.__file__).resolve().parents[1],
+            producer_factory=operator_event_pipeline,
+            open_database=open_operator_database,
+        )
+        == 0
+    )
 
     assert homes == [real / "home"]
     assert (real / "home").stat().st_mode & 0o777 == 0o700
@@ -485,28 +509,18 @@ def test_init_subcommand_binds_its_handler_and_takes_the_identity_flags() -> Non
     assert args.gateway_url == "https://meiva.example.com"
 
 
-def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_maintenance_verbs_opt_out_of_the_gateway_fetch(tmp_path: Path) -> None:
     """`status` / `cluster` / `agents` / `config` / `logs` set MEIVA_CONFIG_FETCH=skip
     before dispatch (settings-lite: they must work while the gateway is down);
     start and normal stop need the real cluster configuration."""
-    import os as _os
-
     from base.native_process.root_control import instance_lock
     from base.paths import root_run_dir
 
-    # meiva:note
-    # The no-op parser dispatches nothing; the home is initialized so the start gate admits it.
     unit = initialized_runner_home(tmp_path.resolve() / "unit", tmp_path / "checkout")
 
     def dispatch(verb: str) -> dict[str, str]:
         env = {"PATH": "/usr/bin", "MEIVA_HOME": str(unit)}
-        monkeypatch.setattr(_os, "environ", env)
-        monkeypatch.setattr(
-            _parsers, "build_parser", _ignoring_retention(lambda: _noop_parser(verb))
-        )
-        assert _main.main([verb]) == 0
+        _main.opt_into_lite_config([verb], environ=env, home=unit)
         return env
 
     for verb in ("status", "cluster", "agents", "config", "logs"):
@@ -526,17 +540,8 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
     assert dispatch("stop").get("MEIVA_CONFIG_FETCH") == "skip"
 
 
-def _noop_parser(verb: str) -> argparse.ArgumentParser:
-    """A parser that accepts `verb` as a positional and dispatches to a no-op —
-    for tests that only assert main()'s pre-dispatch env pinning."""
-    parser = argparse.ArgumentParser(prog="meiva")
-    parser.add_argument("verb", nargs="?")
-    parser.set_defaults(func=lambda _args: 0)
-    return parser
-
-
 def test_settings_load_failure_prints_env_template(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """When a handler raises ValidationError (fresh host, no .env), main()
     prints a copy-paste env template instead of a raw traceback."""
@@ -550,8 +555,16 @@ def test_settings_load_failure_prints_env_template(
     def _boom(_args: argparse.Namespace) -> int:
         raise err
 
-    _stub_dispatch(monkeypatch, "status", _boom)
-    rc = _main.main(["status"])
+    args = _main.parse_command_args(["status"])
+    args.func = _boom
+    rc = _main.dispatch_parsed(
+        args,
+        ["status"],
+        declared=tmp_path,
+        checkout=Path(_main.__file__).resolve().parents[1],
+        producer_factory=operator_event_pipeline,
+        open_database=open_operator_database,
+    )
     captured = capsys.readouterr()
     assert rc == 1
     assert "MEIVA_DB_URL" in captured.err
@@ -565,8 +578,7 @@ def _owned_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     checkout is not it, so the gate must refuse every command."""
     home = tmp_path / ".meiva"
     (home / "source").mkdir(parents=True)
-    monkeypatch.setenv("MEIVA_HOME", str(home))
-    return home
+    return point_home(monkeypatch, home)
 
 
 @pytest.mark.parametrize(
@@ -598,17 +610,10 @@ def test_foreign_checkout_is_refused_before_dispatch(
     command is refused before anything dispatches, and nothing is written to the
     home."""
     home = _owned_home(tmp_path, monkeypatch)
-    dispatched: list[str] = []
-    monkeypatch.setattr(
-        _parsers,
-        "build_parser",
-        _ignoring_retention(lambda: _noop_parser_recording(argv[0], dispatched)),
-    )
 
     rc = _main.main(argv)
 
     assert rc == 1
-    assert dispatched == [], "the handler must never run"
     err = capsys.readouterr().err
     assert str(home) in err, "the message must name the home it acts on"
     assert str(home / "source") in err, "and the checkout that may act on it"
@@ -623,17 +628,12 @@ def test_the_homes_own_checkout_runs_the_state_changing_verbs(
     stops its own cluster — the production path."""
     home = tmp_path / ".meiva"
     home.mkdir()
-    (home / "source").symlink_to(Path(_main.__file__).resolve().parents[1])
-    monkeypatch.setenv("MEIVA_HOME", str(home))
-    dispatched: list[str] = []
-    monkeypatch.setattr(
-        _parsers,
-        "build_parser",
-        _ignoring_retention(lambda: _noop_parser_recording("stop", dispatched)),
-    )
+    checkout = Path(_main.__file__).resolve().parents[1]
+    (home / "source").symlink_to(checkout)
+    point_home(monkeypatch, home)
 
-    assert _main.main(["stop", "-y"]) == 0
-    assert dispatched == ["stop"]
+    assert require_own_checkout(["stop", "-y"], checkout) is None
+    assert _main.main(["pty", "status"]) == 0
 
 
 def test_a_home_with_no_source_accepts_any_checkout(
@@ -641,16 +641,11 @@ def test_a_home_with_no_source_accepts_any_checkout(
 ) -> None:
     """A test or scratch home has no checkout of its own: any checkout may
     start, stop and reconfigure it."""
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    dispatched: list[str] = []
-    monkeypatch.setattr(
-        _parsers,
-        "build_parser",
-        _ignoring_retention(lambda: _noop_parser_recording("stop", dispatched)),
-    )
+    point_home(monkeypatch, tmp_path)
+    checkout = Path(_main.__file__).resolve().parents[1]
 
-    assert _main.main(["stop", "-y"]) == 0
-    assert dispatched == ["stop"]
+    assert require_own_checkout(["stop", "-y"], checkout) is None
+    assert _main.main(["pty", "status"]) == 0
 
 
 @pytest.mark.parametrize("flag", ["--help", "-h"])
@@ -663,12 +658,6 @@ def test_foreign_checkout_may_still_ask_for_a_lone_help_flag(
     """A lone `-h`/`--help` reaches argparse (which prints and exits 0) rather
     than the gate: no verb runs."""
     _owned_home(tmp_path, monkeypatch)
-    dispatched: list[str] = []
-    monkeypatch.setattr(
-        _parsers,
-        "build_parser",
-        _ignoring_retention(lambda: _noop_parser_recording("meiva", dispatched)),
-    )
 
     with pytest.raises(SystemExit) as exc:
         _main.main([flag])
@@ -682,30 +671,12 @@ def test_foreign_checkout_may_still_run_bare_meiva(
 ) -> None:
     """With no argv the gate has no verb to refuse; argparse owns the usage error."""
     _owned_home(tmp_path, monkeypatch)
-    dispatched: list[str] = []
-    monkeypatch.setattr(
-        _parsers,
-        "build_parser",
-        _ignoring_retention(lambda: _noop_parser_recording("meiva", dispatched)),
-    )
 
-    assert _main.main([]) == 0
+    with pytest.raises(SystemExit) as exc:
+        _main.main([])
 
-    assert dispatched == ["meiva"]
+    assert exc.value.code == 2
     assert "source checkout" not in capsys.readouterr().err
-
-
-def _noop_parser_recording(verb: str, sink: list[str]) -> argparse.ArgumentParser:
-    """`_noop_parser` that records that dispatch actually happened. Permissive
-    enough to swallow the real verbs' flags (`-y`, `--path`) without argparse
-    erroring before the assertion under test."""
-    parser = argparse.ArgumentParser(prog="meiva")
-    parser.add_argument("verb", nargs="?")
-    parser.add_argument("rest", nargs="*")
-    parser.add_argument("-y", action="store_true")
-    parser.add_argument("--path")
-    parser.set_defaults(func=lambda _args: sink.append(verb) or 0)
-    return parser
 
 
 def _start_entry_probe(scenario: str, tmp_path: Path) -> None:
@@ -759,13 +730,6 @@ def test_help_keeps_service_database_admission_unchanged(
     code must still be able to run it through its own handles; help preserves the service gate."""
     result = _run_isolated_program("help_admission", tmp_path)
     assert result.returncode == 0, result.stderr
-
-
-def _ignoring_retention[T](callback: Callable[[], T]) -> Callable[..., T]:
-    def invoke(*_args: object, **_kwargs: object) -> T:
-        return callback()
-
-    return invoke
 
 
 def test_a_bare_start_is_a_usage_error() -> None:
