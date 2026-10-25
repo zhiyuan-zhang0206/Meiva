@@ -1,21 +1,21 @@
-exports = ["boot_autostart", "backend.py", "boot_policy.py", "boot_unit.py", "cron.py", "hostport.py", "job_values.py", "logs_content.py", "logs_job.py", "macos_firewall.py", "packages_content.py", "packages_job.py", "pr_flow_job.py", "probes.py", "tests", "walg_job.py"]
+exports = ["boot_autostart", "backend.py", "boot_policy.py", "boot_unit.py", "cron", "hostport.py", "job_values.py", "logs_content.py", "logs_job.py", "macos_firewall.py", "packages_content.py", "packages_job.py", "pr_flow_job.py", "probes.py", "tests", "walg_job.py"]
 
 [uses]
-"boot_autostart" = ["boot_policy.py", "boot_unit.py", "cron.py", "hostport.py", "job_values.py"]
+"boot_autostart" = ["boot_policy.py", "boot_unit.py", "cron", "hostport.py", "job_values.py"]
 "boot_unit.py" = ["boot_policy.py", "hostport.py"]
-"cron.py" = ["hostport.py", "job_readings.py", "job_values.py"]
+"cron" = ["hostport.py", "job_readings.py", "job_values.py"]
 "job_readings.py" = ["hostport.py"]
 "logs_content.py" = ["job_values.py"]
-"logs_job.py" = ["__init__.py", "cron.py", "hostport.py", "job_readings.py", "job_values.py", "logs_content.py"]
+"logs_job.py" = ["cron", "hostport.py", "job_readings.py", "job_values.py", "logs_content.py"]
 "macos_firewall.py" = ["hostport.py"]
 "packages_content.py" = ["job_values.py"]
-"packages_job.py" = ["__init__.py", "cron.py", "hostport.py", "job_readings.py", "job_values.py", "packages_content.py"]
+"packages_job.py" = ["cron", "hostport.py", "job_readings.py", "job_values.py", "packages_content.py"]
 "pr_flow_content.py" = ["job_values.py"]
-"pr_flow_job.py" = ["__init__.py", "cron.py", "hostport.py", "job_readings.py", "job_values.py", "pr_flow_content.py"]
+"pr_flow_job.py" = ["cron", "hostport.py", "job_readings.py", "job_values.py", "pr_flow_content.py"]
 "probes.py" = ["hostport.py"]
-"tests" = ["boot_autostart", "backend.py", "boot_policy.py", "boot_unit.py", "cron.py", "hostport.py", "job_readings.py", "job_values.py", "logs_content.py", "logs_job.py", "macos_firewall.py", "packages_content.py", "packages_job.py", "pr_flow_content.py", "pr_flow_job.py", "probes.py", "walg_content.py", "walg_job.py"]
+"tests" = ["boot_autostart", "backend.py", "boot_policy.py", "boot_unit.py", "cron", "hostport.py", "job_readings.py", "job_values.py", "logs_content.py", "logs_job.py", "macos_firewall.py", "packages_content.py", "packages_job.py", "pr_flow_content.py", "pr_flow_job.py", "probes.py", "walg_content.py", "walg_job.py"]
 "walg_content.py" = ["job_values.py"]
-"walg_job.py" = ["__init__.py", "cron.py", "hostport.py", "job_readings.py", "job_values.py", "walg_content.py"]
+"walg_job.py" = ["cron", "hostport.py", "job_readings.py", "job_values.py", "walg_content.py"]
 
 [purity]
 "job_values.py" = "strict"
@@ -30,7 +30,6 @@ exports = ["boot_autostart", "backend.py", "boot_policy.py", "boot_unit.py", "cr
 
 [debt.ambient-read]
 "boot_unit.py#pid os.getpid" = 2
-"cron.py#home pathlib.Path.home" = 2
 "hostport.py#pid os.getuid" = 1
 "logs_job.py#home pathlib.Path.home" = 1
 "macos_firewall.py#platform socket.gethostname" = 1

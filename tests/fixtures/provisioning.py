@@ -321,8 +321,8 @@ def _fail_on_leaked_os_jobs(session: pytest.Session) -> None:
         f"{len(leaked)} job(s) on the host:\n  "
         + "\n  ".join(leaked)
         + "\nThe suite runs with MEIVA_OS_JOBS_ENABLED=false (see "
-        "base.host.system.cron.os_jobs_enabled), only the default home may register "
-        "a job (base.host.system.cron.owns_os_jobs), and the helper native-effect "
+        "the explicit registrar enabled argument), only the default home may register "
+        "a job (base.host.system.cron.mechanics.owns_os_jobs), and the helper native-effect "
         "guard is on. A job listed here means a test bypassed one of these "
         "boundaries. The job was left in place: it replaced the host's own, so "
         "re-run `meiva converge` to restore it, unless this was your own `meiva start`.\n",

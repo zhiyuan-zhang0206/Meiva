@@ -400,7 +400,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 - Registry model: `base/packages/extensions/install_registry.py` (`InstalledPackage`, `Registry.version`, `tree_hash`, `copy_changed`).
 - Plugin discovery + loaders: `base/packages/plugins/enable_config.py:discover_plugins`, `agent/extensions/__init__.py:load_extensions`, `base/packages/plugin_providers.py`; roots: `base/paths/__init__.py:repo_plugins_dir/plugins_dir`, `base/host/runtime_interpreter.py:external_plugin_read_root`.
 - Manifest/engines gate: `base/packages/plugins/manifest.py` (`host_version_from_repo` in `base/host/git/host_version.py`, `check_host_engine`), `docs/conventions/extensions/plugin-spec-v2.md`.
-- OS jobs: `base/host/system/cron.py` (5-min health tick as the registrar template), `cli/commands/converge/os_jobs.py`, `MEIVA_OS_JOBS_ENABLED`.
+- OS jobs: `base/host/system/cron/health_job.py` (5-min health tick as the registrar template), `cli/commands/converge/os_jobs.py`, `MEIVA_OS_JOBS_ENABLED`.
 - Update coordination: the per-home flock and objects-only fetch in `cli/commands/extensions/packages/refresh.py`; `base/deploy/git/source_tree_guard.py` (tamper detection, alert-only).
 - Extension ownership S1/S2: `docs/decisions/extensions/plugins/2026-08-21-extension-ownership-three-tiers.md`, `future/infra/extensions/extension-ownership.md`, `base/packages/extensions/registry.py`, `base/packages/extensions/materialize.py`.
 - Four-layer model / builtin-plugin ruling: `docs/decisions/extensions/skills/2026-08-19-four-layer-modification-model.md` (revised in part: builtin plugins stay *authored* in the kernel but are *delivered* via the content channel).

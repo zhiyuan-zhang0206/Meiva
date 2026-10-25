@@ -17,9 +17,10 @@ import pytest
 
 from base import paths
 from base.config import settings
-from base.host.system import cron, logs_job, packages_job, pr_flow_job, walg_job
+from base.host.system import logs_job, packages_job, pr_flow_job, walg_job
 from base.host.system.boot_autostart import registration as autostart
 from base.host.system.boot_autostart.content import launchd_plist_content
+from base.host.system.cron import health_content, health_job, mechanics
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
 from base.host.system.packages_content import RefreshSchedule
@@ -38,7 +39,7 @@ def _exploding_platform(monkeypatch: pytest.MonkeyPatch) -> None:
     def reached(*_a: object, **_k: object) -> None:
         raise AssertionError("a job reached the host scheduler")
 
-    for module in (cron, autostart):
+    for module in (mechanics, autostart):
         monkeypatch.setattr(module, "register_platform_job", reached)
         monkeypatch.setattr(module, "unregister_platform_job", reached)
 
@@ -59,7 +60,7 @@ class _RecordedPlatform:
 @pytest.fixture()
 def backend(monkeypatch: pytest.MonkeyPatch) -> _RecordedPlatform:
     rec = _RecordedPlatform()
-    for module in (cron, autostart):
+    for module in (mechanics, autostart):
         monkeypatch.setattr(module, "register_platform_job", rec.register)
         monkeypatch.setattr(module, "unregister_platform_job", rec.unregister)
     return rec
@@ -86,7 +87,7 @@ def test_suite_default_is_off() -> None:
 
 _REGISTERS = [
     pytest.param(
-        partial(cron.register_os_cron, enabled=settings.general.os_jobs_enabled),
+        partial(health_job.register_os_cron, enabled=settings.general.os_jobs_enabled),
         id="health-probe",
     ),
     pytest.param(
@@ -129,7 +130,7 @@ _REGISTERS = [
     ),
 ]
 _UNREGISTER_CALLS: dict[str, Callable[..., None]] = {
-    "health-probe": cron.unregister_os_cron,
+    "health-probe": health_job.unregister_os_cron,
     "autostart": autostart.unregister_autostart,
     "logs-maintenance": logs_job.unregister_logs_job,
     "packages-refresh": packages_job.unregister_packages_job,
@@ -173,7 +174,7 @@ def test_registration_dispatches_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(pr_flow_job, "credential_blocker", _allow_pr_flow)
-    cron.register_os_cron(enabled=settings.general.os_jobs_enabled, host=fake_host())
+    health_job.register_os_cron(enabled=settings.general.os_jobs_enabled, host=fake_host())
     autostart.register_autostart(
         services=frozenset({"gateway"}),
         enabled=settings.general.os_jobs_enabled,
@@ -223,7 +224,7 @@ def test_deregistration_is_not_gated_by_the_os_jobs_switch(
     for call in _UNREGISTER_CALLS.values():
         call(host=fake_host())
     assert backend.calls == [
-        "unregister-cron",
+        "unregister-health_job",
         "unregister-registration",
         "unregister-logs_job",
         "unregister-packages_job",
@@ -283,11 +284,11 @@ def test_a_scratch_home_removes_nothing(
 def test_the_default_home_owns_the_jobs_however_it_is_spelled(
     default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert cron.owns_os_jobs("autostart")
+    assert mechanics.owns_os_jobs("autostart")
     monkeypatch.setenv("MEIVA_HOME", str(default_home / "elsewhere" / ".." / ".meiva"))
-    assert cron.owns_os_jobs("autostart")
+    assert mechanics.owns_os_jobs("autostart")
     monkeypatch.setenv("MEIVA_HOME", str(default_home / ".meiva-preview"))
-    assert not cron.owns_os_jobs("autostart")
+    assert not mechanics.owns_os_jobs("autostart")
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +302,7 @@ def test_meiva_binary_path_prefers_this_checkout_over_path() -> None:
     `meiva` resolved off `uv run`'s PATH — one `shutil.which` hit away from naming
     prod's."""
     resolved = Path(
-        cron.meiva_binary_path(host=fake_host(programs={"meiva": "/somewhere/else/bin/meiva"}))
+        mechanics.meiva_binary_path(host=fake_host(programs={"meiva": "/somewhere/else/bin/meiva"}))
     )
     assert resolved.parent.parent.parent == Path(__file__).resolve().parents[4]
     assert resolved.parent.parent.name == ".venv"
@@ -312,20 +313,17 @@ def test_meiva_binary_path_falls_back_to_path_without_a_venv(
 ) -> None:
     monkeypatch.setattr(paths, "repo_root", lambda: tmp_path)
     host = fake_host(programs={"meiva": "/usr/local/bin/meiva"})
-    assert cron.meiva_binary_path(host=host) == "/usr/local/bin/meiva"
+    assert mechanics.meiva_binary_path(host=host) == "/usr/local/bin/meiva"
 
 
-def test_health_probe_plist_pins_meiva_home(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """An OS probe observes its owning home and carries no release policy."""
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / ".meiva-x"))
-
-    def fake_meiva_binary_path(*, host: Host) -> str:
-        return "/x/meiva"
-
-    monkeypatch.setattr(cron, "meiva_binary_path", fake_meiva_binary_path)
-    body = cron.launchd_plist_content(300, host=fake_host())
+def test_health_probe_plist_pins_meiva_home(tmp_path: Path) -> None:
+    body = health_content.launchd_plist_content(
+        arguments=("/x/meiva", "cluster", "health-probe"),
+        interval_seconds=300,
+        log_file=tmp_path / "independent-log-home/out.log",
+        environment_home=tmp_path / ".meiva-x",
+        path_env="/x:/usr/bin",
+    )
     import plistlib
 
     assert plistlib.loads(body.encode())["ProgramArguments"] == [
@@ -357,7 +355,7 @@ def test_cron_env_prefix_scopes_to_one_command(
     standalone assignment to the WHOLE crontab, which would silently retarget a
     co-located cluster's entries."""
     monkeypatch.setenv("MEIVA_HOME", str(tmp_path / ".meiva-x"))
-    prefix = cron.cron_env_prefix()
+    prefix = mechanics.cron_env_prefix()
     assert prefix == f"MEIVA_HOME={tmp_path / '.meiva-x'} "
     assert not prefix.startswith("\n")
 

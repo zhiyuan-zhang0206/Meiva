@@ -10,7 +10,7 @@ exports = ["permissions_helper"]
 
 [debt.env-patch]
 "test_build_dir_follows_variable.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
-"test_os_jobs_gate.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 4
+"test_os_jobs_gate.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 3
 "test_permissions_helper.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 
 [debt.first-party-patch]
@@ -28,7 +28,6 @@ exports = ["permissions_helper"]
 "test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.run_tool" = 3
 "test_helper_retirement.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.source_content_hash" = 2
 "test_os_jobs_gate.py#monkeypatch.setattr base.config.settings.general.os_jobs_enabled" = 1
-"test_os_jobs_gate.py#monkeypatch.setattr base.host.system.cron.meiva_binary_path" = 1
 "test_os_jobs_gate.py#monkeypatch.setattr base.host.system.pr_flow_job.credential_blocker" = 2
 "test_os_jobs_gate.py#monkeypatch.setattr base.paths.repo_root" = 1
 "test_permissions_helper.py#monkeypatch.setattr base.paths.permissions_helper_app_dir" = 1

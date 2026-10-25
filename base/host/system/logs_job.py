@@ -11,8 +11,8 @@ from pathlib import Path
 
 from loguru import logger
 
-import base.host.system.cron
 from base.host.system import logs_content as content
+from base.host.system.cron import mechanics
 from base.host.system.hostport import Host
 from base.host.system.job_readings import read_launchd_path, read_meiva_binary
 from base.host.system.job_values import JobPaths, JobRoots, plist_path
@@ -32,7 +32,7 @@ def register_macos(*, roots: JobRoots, host: Host) -> int:
         content.launchd_plist_content(paths=paths, path_env=path_env), encoding="utf-8"
     )
 
-    if base.host.system.cron.reload_launchd_job(label, destination, host=host) != 0:
+    if mechanics.reload_launchd_job(label, destination, host=host) != 0:
         return 1
     logger.info(
         "launchd job '{}' loaded (daily at {:02d}:{:02d})", label, content.HOUR, content.MINUTE
@@ -41,14 +41,12 @@ def register_macos(*, roots: JobRoots, host: Host) -> int:
 
 
 def unregister_macos(*, host: Host) -> int:
-    retired = base.host.system.cron.remove_launchd_job(
-        content.LABEL, launchd_plist_path(), host=host
-    )
+    retired = mechanics.remove_launchd_job(content.LABEL, launchd_plist_path(), host=host)
     return 0 if retired else 1
 
 
 def register_linux(*, roots: JobRoots, host: Host) -> int:
-    missing_rc = base.host.system.cron.require_crontab(
+    missing_rc = mechanics.require_crontab(
         "  * logs maintenance: crontab not installed; daily rotation and "
         "retention cannot be registered",
         missing_returncode=1,
@@ -63,7 +61,7 @@ def register_linux(*, roots: JobRoots, host: Host) -> int:
     marker = content.MARKER
     entry = content.cron_entry(paths)
 
-    if base.host.system.cron.replace_crontab_entry(
+    if mechanics.replace_crontab_entry(
         marker,
         entry,
         skip_phrase="logs-maintenance registration",
@@ -76,18 +74,18 @@ def register_linux(*, roots: JobRoots, host: Host) -> int:
 
 
 def unregister_linux(*, host: Host) -> int:
-    return base.host.system.cron.remove_crontab_entry(
+    return mechanics.remove_crontab_entry(
         content.MARKER, write_failure_rc=1, on_removed=None, host=host
     )
 
 
 def register_logs_job(*, enabled: bool, roots: JobRoots, host: Host) -> None:
     if not enabled:
-        base.host.system.cron.skip_os_job("logs-maintenance")
+        mechanics.skip_os_job("logs-maintenance")
         return
-    if not base.host.system.cron.owns_os_job_home("logs-maintenance", home=roots.home):
+    if not mechanics.owns_os_job_home("logs-maintenance", home=roots.home):
         return
-    base.host.system.cron.register_platform_job(
+    mechanics.register_platform_job(
         "logs-maintenance",
         macos=lambda: register_macos(roots=roots, host=host),
         linux=lambda: register_linux(roots=roots, host=host),
@@ -96,9 +94,9 @@ def register_logs_job(*, enabled: bool, roots: JobRoots, host: Host) -> None:
 
 
 def unregister_logs_job(*, host: Host) -> None:
-    if not base.host.system.cron.owns_os_jobs("logs-maintenance"):
+    if not mechanics.owns_os_jobs("logs-maintenance"):
         return
-    base.host.system.cron.unregister_platform_job(
+    mechanics.unregister_platform_job(
         macos=lambda: unregister_macos(host=host),
         linux=lambda: unregister_linux(host=host),
         host=host,

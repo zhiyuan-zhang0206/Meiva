@@ -80,7 +80,7 @@ session delivery point (`wiring.session_environ`): the host's own entries first,
 then the directories harness CLIs install into (`~/.local/bin`, `~/.npm-global/bin`,
 `~/.bun/bin`, `~/.claude/local`, `/usr/local/bin`, `/opt/homebrew/bin`), then the
 system dirs. The same list feeds the probe in `base/agents/birth/harness.py` and the
-`launchd` job PATH in `base/host/system/cron.py`, so all three agree on where the
+`launchd` job PATH in `base/host/system/cron/mechanics.py`, so all three agree on where the
 CLIs live.
 
 Every unit this repository installs composes its PATH through

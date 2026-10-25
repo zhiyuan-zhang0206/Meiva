@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from base.host.system import cron
 from base.host.system import packages_content as definition
 from base.host.system import packages_job as job
+from base.host.system.cron import mechanics
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
 from base.host.system.tests.fake_commands import (
@@ -188,9 +188,9 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
 
 def test_register_is_gated_by_os_jobs(job_roots: JobRoots, monkeypatch: pytest.MonkeyPatch) -> None:
     skipped: list[str] = []
-    monkeypatch.setattr(cron, "skip_os_job", skipped.append)
+    monkeypatch.setattr(mechanics, "skip_os_job", skipped.append)
     monkeypatch.setattr(
-        cron,
+        mechanics,
         "register_platform_job",
         _refuse("registration reached the platform with the gate off"),
     )
@@ -208,7 +208,7 @@ def test_register_is_skipped_when_refresh_disabled(
     job_roots: JobRoots, default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        cron,
+        mechanics,
         "register_platform_job",
         _refuse("registration reached the platform with refresh disabled"),
     )
@@ -229,7 +229,7 @@ def test_register_dispatches_to_the_platform(
     def register(what: str, **_platforms: object) -> None:
         calls.append(f"register {what}")
 
-    monkeypatch.setattr(cron, "register_platform_job", register)
+    monkeypatch.setattr(mechanics, "register_platform_job", register)
 
     job.register_packages_job(
         roots=replace(job_roots, home=default_home / ".meiva", user_home=default_home),
@@ -244,7 +244,7 @@ def test_unregister_delegates_to_the_platform(
     default_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[str] = []
-    monkeypatch.setattr(cron, "unregister_platform_job", _recorder(calls, "unregister"))
+    monkeypatch.setattr(mechanics, "unregister_platform_job", _recorder(calls, "unregister"))
 
     job.unregister_packages_job(host=fake_host())
     assert calls == ["unregister"]

@@ -94,7 +94,7 @@ file before capturing executable locations; token contents never enter a job val
 `RefreshSchedule` belongs to `packages_content.py`, including its existing validation.
 
 `job_readings.py` is the one executable/PATH capture policy, also used by the
-health composition in `cron.py` and boot registration in
+health composition in `cron/health_job.py` and boot registration in
 `system/boot_autostart/registration.py`. `job_values.py` owns the shared
 label namespace, plist destination and environment encoding. Shell assignments
 quote the home, and XML string values escape XML characters after shell quoting.
@@ -111,3 +111,6 @@ The existing crontab lock encloses the read, decision and write; a failed read
 cannot rewrite the table. Command-protocol tests retain scheduler error/return-code
 coverage. Separate tests execute rendered commands in disposable files with bounded
 real shells and parse real XML; they do not register in the user's scheduler.
+
+Health-job value capture and custody are described in
+[[base/host/docs/health-probe-job.meiva.okf.md]].
