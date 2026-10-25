@@ -13,6 +13,9 @@ exports = ["admission.py", "attachment.py"]
 [roots]
 "attachment.py" = { kinds = ["random", "settings"], why = "External controller attachment owns process bootstrap and session UUID generation when no SDK context is bound" }
 
+[debt.any-collaborator]
+"__init__.py#any _Attachment.native_snapshot.return" = 1
+
 [debt.impure-call]
 "attachment.py#uuid.uuid4" = 1
 
