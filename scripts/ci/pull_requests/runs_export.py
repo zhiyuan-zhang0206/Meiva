@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as day_time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from zoneinfo import ZoneInfo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -29,11 +29,9 @@ if str(_REPO_ROOT) not in sys.path:
 
 # meiva:note
 # The script-mode root guard must run before importing the checkout-owned API.
+from base.clock import Timers  # noqa: E402
 from scripts.ci.pull_requests import runs_api  # noqa: E402
-
-if TYPE_CHECKING:
-    from base.clock import Timers
-    from scripts.ci.pull_requests.export_process import GhProcess
+from scripts.ci.pull_requests.gh_process import GhProcess  # noqa: E402
 
 DEFAULT_REPO = "zhiyuan-zhang0206/Meiva"
 # Thirty days matches PR flow and lets the next sampler republish a day after

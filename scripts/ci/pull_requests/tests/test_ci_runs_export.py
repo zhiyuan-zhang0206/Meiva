@@ -15,7 +15,7 @@ import pytest
 from base.clock.tests.manual_timers import ManualTimers
 from base.telemetry import EventPipeline
 from scripts.ci.pull_requests import runs_api, runs_export
-from scripts.ci.pull_requests.export_process import GhProcess
+from scripts.ci.pull_requests.gh_process import GhProcess
 
 
 def _run(**overrides: object) -> dict[str, Any]:

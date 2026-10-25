@@ -1,4 +1,5 @@
 [uses]
+"test_export_process.py" = ["gh_process_import_child.py"]
 "ci_monitor" = ["ci_evidence.py", "test_ci_monitor.py"]
 "test_ci_monitor.py" = ["ci_evidence.py"]
 "test_ci_owner_operations.py" = ["ci_evidence.py"]
