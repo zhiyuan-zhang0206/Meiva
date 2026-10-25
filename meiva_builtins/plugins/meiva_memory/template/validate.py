@@ -21,7 +21,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 import yaml
 
@@ -34,6 +34,14 @@ _OFFSET_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d
 
 _FM_KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*): (.*)$")
 _MISREAD_STRING_KEYS = ("title", "description", "name", "type", "meiva_machine", "timestamp")
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
 
 
 def _misread_frontmatter_keys(fm_raw: str) -> list[str]:
@@ -52,10 +60,10 @@ def _misread_frontmatter_keys(fm_raw: str) -> list[str]:
         if key not in _MISREAD_STRING_KEYS or not raw or raw.startswith(('"', "'", "|", ">")):
             continue
         try:
-            parsed = yaml.safe_load(line)
+            parsed: object = yaml.safe_load(line)
         except yaml.YAMLError:
             continue
-        value = cast(dict[str, Any], parsed).get(key) if isinstance(parsed, dict) else None
+        value = parsed.get(key) if _is_str_dict(parsed) else None
         if isinstance(value, str) and value != raw:
             bad.append(key)
     return bad
@@ -76,15 +84,14 @@ def _check_type_and_agent(fm: dict[str, Any], errors: list[str]) -> None:
 def _check_tags(fm: dict[str, Any], errors: list[str]) -> None:
     if "tags" not in fm:
         return
-    tags = fm["tags"]
-    if not isinstance(tags, list):
+    tags: object = fm["tags"]
+    if not _is_object_list(tags):
         errors.append("Field 'tags' must be a list")
         return
-    tags_list = cast(list[object], tags)
-    for i, tag in enumerate(tags_list):
+    for i, tag in enumerate(tags):
         if not isinstance(tag, str):
             errors.append(f"Tag at index {i} must be a string")
-    type_tags = [t for t in tags_list if isinstance(t, str) and t.startswith("type/")]
+    type_tags = [t for t in tags if isinstance(t, str) and t.startswith("type/")]
     if not type_tags:
         errors.append(
             "Missing type tag — add exactly one of "
@@ -113,16 +120,15 @@ def _check_timestamp(fm: dict[str, Any], fname: str, errors: list[str]) -> None:
 def _check_generated(fm: dict[str, Any], errors: list[str]) -> None:
     if "generated" not in fm:
         return
-    generated = fm["generated"]
-    if not isinstance(generated, dict):
+    generated: object = fm["generated"]
+    if not _is_str_dict(generated):
         errors.append("Field 'generated' must be a mapping")
         return
-    generated_dict = cast(dict[str, Any], generated)
-    generated_by = generated_dict.get("by")
+    generated_by = generated.get("by")
     if not isinstance(generated_by, str) or not generated_by.strip():
         errors.append("Field 'generated.by' must be a non-empty string")
-    if "at" in generated_dict:
-        generated_at = generated_dict["at"]
+    if "at" in generated:
+        generated_at = generated["at"]
         if not (isinstance(generated_at, str) and _OFFSET_DATETIME_RE.fullmatch(generated_at)):
             errors.append(f"Field 'generated.at' does not look like ISO 8601: {generated_at!r}")
 
@@ -135,12 +141,12 @@ def _frontmatter_problem(content: str) -> tuple[dict[str, Any] | None, str | Non
     if len(parts) < 3:
         return None, None, "Unclosed YAML frontmatter"
     try:
-        fm = yaml.safe_load(parts[1])
+        fm: object = yaml.safe_load(parts[1])
     except yaml.YAMLError as e:
         return None, None, f"Invalid YAML: {e}"
-    if not isinstance(fm, dict):
+    if not _is_str_dict(fm):
         return None, None, "Frontmatter must be a YAML mapping"
-    return cast(dict[str, Any], fm), parts[1], None
+    return fm, parts[1], None
 
 
 def validate_file(file_path: Path) -> list[str]:
@@ -200,7 +206,8 @@ def _single_note_tag_errors(fname: str, fm: dict[str, Any]) -> list[str]:
     if "tags" not in fm:
         found = _type_tag_errors(fname, [])
     else:
-        tags: list[object] = cast(list[object], fm["tags"]) if isinstance(fm["tags"], list) else []
+        raw_tags: object = fm["tags"]
+        tags: list[object] = raw_tags if _is_object_list(raw_tags) else []
         found = [
             e
             for e in _type_tag_errors(fname, [str(t) for t in tags])
@@ -309,11 +316,11 @@ def validate_type_tag(bundle: Path) -> list[str]:
     type/<x> tag, and no free-form junk tags (project/role/status/repo/archived)."""
     errors: list[str] = []
     for fp, fm in _notes_with_frontmatter(bundle):
-        raw_tags = fm.get("tags")
+        raw_tags: object = fm.get("tags")
         if isinstance(raw_tags, str):
             tags: list[object] = [raw_tags]
-        elif isinstance(raw_tags, list):
-            tags = cast(list[object], raw_tags)
+        elif _is_object_list(raw_tags):
+            tags = raw_tags
         else:
             tags = []
         errors.extend(_type_tag_errors(str(fp.relative_to(bundle)), [str(t) for t in tags]))
@@ -325,11 +332,11 @@ _CROSS_PROJECT_WORDS = {"meiva", "meiva-internal", "shared-tech", "open-source"}
 
 def _misplaced_project_note(rel: str, fm: dict[str, Any], project_words: list[str]) -> str | None:
     """The error for a note tagged with exactly one project word but living outside its tree."""
-    raw_tags = fm.get("tags")
+    raw_tags: object = fm.get("tags")
     if isinstance(raw_tags, str):
         tags: list[object] = [raw_tags]
-    elif isinstance(raw_tags, list):
-        tags = cast(list[object], raw_tags)
+    elif _is_object_list(raw_tags):
+        tags = raw_tags
     else:
         return None
     tags_l = [str(t).lower() for t in tags]
@@ -479,13 +486,11 @@ def _note_frontmatter_title(fp: Path) -> str | None:
     if len(parts) < 3:
         return None
     try:
-        fm = yaml.safe_load(parts[1])
+        fm: object = yaml.safe_load(parts[1])
     except yaml.YAMLError:
         return None
-    if isinstance(fm, dict):
-        fm_dict = cast(dict[str, Any], fm)
-        if fm_dict.get("title"):
-            return str(fm_dict["title"]).strip()
+    if _is_str_dict(fm) and fm.get("title"):
+        return str(fm["title"]).strip()
     return None
 
 

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from base.daemon.schedules.inputs import ScheduleInputs
@@ -89,7 +89,7 @@ def report_day(
             image=inputs.image,
         )
         print(
-            f"[{datetime.now(UTC).isoformat()}] c9-daily-report: {done.day} — "
+            f"[{slot_end.isoformat()}] c9-daily-report: {done.day} — "
             f"{done.runs} runs, {done.appended} appended"
         )
     except Exception as exc:

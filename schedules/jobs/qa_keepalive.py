@@ -225,7 +225,7 @@ def probe_process(settings: Settings) -> bool | None:
 # The round's problems, and whether the process probe was blind: a site that configured no
 # process to watch is never blind, it simply has nothing to ask about.
 def check(settings: Settings) -> tuple[list[str], bool]:
-    problems = []
+    problems: list[str] = []
     if not probe_page(settings):
         problems.append(f"page health check {settings.health_url} is not 200")
     if not settings.process_pattern:

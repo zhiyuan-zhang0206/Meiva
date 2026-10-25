@@ -5,10 +5,5 @@ exports = ["feed.py"]
 "yt_post.py" = "strict"
 "yt_wire.py" = "strict"
 
-[debt.ambient-read]
-"yt_run.py#clock datetime.datetime.now" = 1
-
-[debt.type-cast]
-"yt_wire.py#cast _as_object" = 1
-"yt_wire.py#cast playlist_entries" = 1
-"yt_wire.py#cast video_meta" = 2
+[roots]
+"yt_run.py" = { kinds = ["clock"], why = "YouTube sync runner stamps fetched items with current UTC time" }

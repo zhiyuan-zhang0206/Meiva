@@ -9,7 +9,7 @@ from collections import defaultdict
 from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple, cast
+from typing import NamedTuple, TypeGuard
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -31,18 +31,24 @@ _BUILTIN_HELP_ON_MEIVA_RE = re.compile(r"(?<![a-zA-Z0-9_.])help\s*\(\s*meiva\.")
 _SUBPROCESS_CALL_RE = re.compile(r"subprocess\.(run|Popen|check_output|check_call|call)\b")
 
 
+def _is_str_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping)
+
+
 # meiva:note
 # Group EventRow dicts into {agent_id: [(event_name, attributes)]}; service-level rows (agent_id None) are dropped.
 def group_by_agent(rows: Sequence[Mapping[str, object]]) -> dict[int, list[Event]]:
     out: dict[int, list[Event]] = defaultdict(list)
     for row in rows:
         agent_id = row.get("agent_id")
-        if agent_id is None:
+        if not isinstance(agent_id, int) or isinstance(agent_id, bool):
             continue
+        event_name = row["event_name"]
+        if not isinstance(event_name, str):
+            raise TypeError("event_name must be a string")
         attributes = row.get("attributes")
-        out[cast(int, agent_id)].append(
-            (cast(str, row["event_name"]), cast(Mapping[str, object], attributes or {}))
-        )
+        attrs: Mapping[str, object] = attributes if _is_str_mapping(attributes) else {}
+        out[agent_id].append((event_name, attrs))
     return out
 
 

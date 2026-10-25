@@ -2,10 +2,4 @@
 "telegram_delivery.py" = "strict"
 
 [roots]
-"send_file.py" = { kinds = ["environ"], why = "the telegram config domain is EXCLUDED from the agent process profile (Task #856 consumption matrix), so Settings cannot construct it in the skill's runtime context — the env aliases (the same values Settings itself reads from) are the only access path; same class as the child-env handoff entries" }
-
-[debt.ambient-read]
-"send_file.py#settings base.config.settings" = 1
-
-[debt.type-cast]
-"telegram_delivery.py#cast _json_object" = 1
+"send_file.py" = { kinds = ["environ", "settings"], why = "the telegram config domain is EXCLUDED from the agent process profile (Task #856 consumption matrix), so Settings cannot construct it in the skill's runtime context — the env aliases (the same values Settings itself reads from) are the only access path, with settings fallback in bare CLI contexts" }

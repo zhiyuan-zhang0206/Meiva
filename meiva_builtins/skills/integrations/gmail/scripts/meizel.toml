@@ -8,13 +8,6 @@ exports = ["feed.py"]
 "gmail_wire.py" = "strict"
 
 [roots]
-"feed.py" = { kinds = ["environ"], why = "The script entry assembles Process and AuthSources from the process environment before invoking the command" }
-
-[debt.ambient-read]
-"feed.py#clock time.time" = 1
-"feed.py#home pathlib.Path.home" = 1
-"imap.py#clock datetime.datetime.now" = 1
-"smtp.py#clock time.time" = 1
-
-[debt.any-collaborator]
-"feed.py#any _run.return" = 1
+"feed.py" = { kinds = ["clock", "environ", "home"], why = "The script entry assembles Process and AuthSources from the process environment, home directory, and clock before invoking the command" }
+"imap.py" = { kinds = ["clock"], why = "IMAP mirror helper stamps fetched messages with current UTC timestamp" }
+"smtp.py" = { kinds = ["clock"], why = "SMTP draft helper stamps IMAP APPEND internaldate with current epoch time" }

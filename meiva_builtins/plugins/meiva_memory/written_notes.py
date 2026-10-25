@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import base.paths
 import meiva
@@ -58,7 +58,11 @@ def note_location(path: str | Path) -> tuple[str, str] | None:
     return None
 
 
-def _state_handle() -> Any:
+class _StateHandle(Protocol):
+    def update(self, delta: dict[str, Any]) -> object: ...
+
+
+def _state_handle() -> _StateHandle:
     """The plugin state handle of the live exec slot, materializing a lazy slot first."""
     materialize = getattr(meiva.state, "materialize", None)
     if materialize is not None:

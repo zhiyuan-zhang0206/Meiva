@@ -1,8 +1,6 @@
 [purity]
 "context_probe.py" = "strict"
 
-[debt.ambient-read]
-"spawn_dsh.py#clock time.time" = 2
-"watch_work.py#clock datetime.datetime.now" = 1
-"watch_work.py#clock time.monotonic" = 2
-"watch_work.py#random uuid.uuid4" = 1
+[roots]
+"spawn_dsh.py" = { kinds = ["clock"], why = "External-agent launcher script tracks polling deadlines with epoch clock" }
+"watch_work.py" = { kinds = ["clock", "random"], why = "External-agent watcher script stamps log output, tracks monotonic deadlines, and generates idempotency keys" }

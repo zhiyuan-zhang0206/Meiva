@@ -13,7 +13,7 @@ import html
 import json
 import re
 from dataclasses import dataclass
-from typing import Literal, assert_never, cast
+from typing import Literal, TypeGuard, assert_never
 
 SubKind = Literal["human", "auto"]
 
@@ -147,10 +147,18 @@ def _subs_flag(kind: SubKind) -> str:
             assert_never(kind)
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _as_object(value: object, what: str) -> dict[str, object]:
-    if not isinstance(value, dict):
+    if not _is_object_dict(value):
         raise TypeError(f"{what}: expected a JSON object, got {type(value).__name__}")
-    return {str(k): v for k, v in cast(dict[object, object], value).items()}
+    return {str(k): v for k, v in value.items()}
 
 
 def _load_object(stdout: str, what: str) -> dict[str, object]:
@@ -181,9 +189,9 @@ def playlist_entries(stdout: str, playlist: str) -> tuple[PlaylistEntry, ...]:
     entries = _load_object(stdout, "playlist listing").get("entries")
     if entries is None:
         raise ValueError(f"yt-dlp returned no 'entries' for playlist {playlist!r}")
-    if not isinstance(entries, list):
+    if not _is_object_list(entries):
         raise TypeError(f"yt-dlp 'entries' for playlist {playlist!r} is not a list")
-    objects = [_as_object(raw, "playlist entry") for raw in cast(list[object], entries)]
+    objects = [_as_object(raw, "playlist entry") for raw in entries]
     return tuple(PlaylistEntry(id=_text(o, "id"), title=_text(o, "title")) for o in objects)
 
 
@@ -207,10 +215,10 @@ def source_meta(stdout: str) -> SourceMeta:
 def video_meta(stdout: str) -> VideoMeta:
     obj = _load_object(stdout, "video")
     raw_tags: object = obj.get("tags") or []
-    if not isinstance(raw_tags, list):
+    if not _is_object_list(raw_tags):
         raise TypeError("yt-dlp field 'tags' is not a list of text")
-    tags = [t for t in cast(list[object], raw_tags) if isinstance(t, str)]
-    if len(tags) != len(cast(list[object], raw_tags)):
+    tags = [t for t in raw_tags if isinstance(t, str)]
+    if len(tags) != len(raw_tags):
         raise TypeError("yt-dlp field 'tags' is not a list of text")
     return VideoMeta(
         title=_text(obj, "title"),

@@ -13,7 +13,7 @@ import warnings
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, NamedTuple, cast
+from typing import Any, NamedTuple, TypeGuard
 
 from langchain_core.messages import BaseMessage
 
@@ -160,17 +160,28 @@ def _is_exec_fail(event: str) -> bool:
     return event in _EXEC_FAIL_EVENTS
 
 
-def _msg_text(content: Any) -> str:
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
+def _is_transcript_rows(value: object) -> TypeGuard[Sequence[Mapping[str, str]]]:
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes))
+
+
+def _msg_text(content: object) -> str:
     if isinstance(content, str):
         return content
-    if isinstance(content, list):
+    if _is_object_list(content):
         parts: list[str] = []
-        for block in cast(list[Any], content):
-            if isinstance(block, dict):
-                b_dict = cast(dict[str, Any], block)
-                if b_dict.get("type") in {"thinking", "tool_use"}:
+        for block in content:
+            if _is_str_dict(block):
+                if block.get("type") in {"thinking", "tool_use"}:
                     continue
-                parts.append(b_dict.get("text") or b_dict.get("type") or "")
+                parts.append(str(block.get("text") or block.get("type") or ""))
             else:
                 parts.append(str(block))
         return " ".join(part for part in parts if part)
@@ -238,11 +249,11 @@ def _task_prompt(
 
 # meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
 def task_prompt_of(record: Mapping[str, object]) -> str:
-    raw = cast(dict[str, Any], record)
-    prompt = (raw.get("task_prompt") or "").strip()
-    if prompt:
-        return raw["task_prompt"]
-    rows = cast(Sequence[Mapping[str, str]], raw.get("transcript") or ())
+    raw_prompt = record.get("task_prompt")
+    if isinstance(raw_prompt, str) and raw_prompt.strip():
+        return raw_prompt
+    raw_rows = record.get("transcript")
+    rows: Sequence[Mapping[str, str]] = raw_rows if _is_transcript_rows(raw_rows) else ()
     return _first_human_message(transcript_facts(rows))
 
 

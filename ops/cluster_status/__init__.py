@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 
 import psycopg
 from psycopg_pool import ConnectionPool
 
+from base.clock import Clock
 from base.cluster.machine import MachineIdentityReader
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
@@ -60,9 +62,6 @@ from ops.cluster_status.sessions import (
     capture_shell as capture_shell,
 )
 from ops.cluster_status.sessions import (
-    cluster_now as cluster_now,
-)
-from ops.cluster_status.sessions import (
     collect_sessions,
 )
 from ops.cluster_status.sessions import (
@@ -73,6 +72,15 @@ from ops.cluster_status.sessions import (
 )
 
 _log = logging.getLogger(__name__)
+
+
+# meiva:note
+# The instant a snapshot is taken at, in the cluster's wall-clock zone (the host's own zone
+# only when the process holds no authoritative cluster timezone). The ambient read of the
+# zone setting lives here, once per snapshot; the listing rows take the instant as a value.
+def cluster_now() -> datetime:
+    return datetime.now().astimezone(Clock.from_settings().zone())
+
 
 # meiva:note
 # `connection(timeout=...)` overrides the pool's long-lived default for this probe. Status must

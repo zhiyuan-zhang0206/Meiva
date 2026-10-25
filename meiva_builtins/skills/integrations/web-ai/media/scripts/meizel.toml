@@ -1,2 +1,2 @@
-[debt.ambient-read]
-"generate.py#clock time.monotonic" = 6
+[roots]
+"generate.py" = { kinds = ["clock"], why = "Web-AI media generation driver polls browser progress against monotonic deadlines" }

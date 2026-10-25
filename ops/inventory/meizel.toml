@@ -4,6 +4,3 @@
 
 [purity]
 "toggles.py" = "strict"
-
-[debt.type-cast]
-"toggles.py#cast mcp_summary" = 2

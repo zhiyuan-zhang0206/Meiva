@@ -36,7 +36,7 @@ import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 from uuid import uuid4
 
 import meiva
@@ -193,6 +193,10 @@ def _reason(leak_invalidated: bool, abstain: str | None, replay_reason: str) -> 
     return replay_reason
 
 
+def _is_float_dict(value: object) -> TypeGuard[dict[str, float]]:
+    return isinstance(value, dict)
+
+
 def _mean(score_dicts: list[dict[str, float]]) -> dict[str, float] | None:
     if not score_dicts:
         return None
@@ -236,6 +240,31 @@ def gather(state: dict[str, Any], *, database: Database, gateway: GatewayAccess)
     return assemble_report(state, progress["pending"], records)
 
 
+def _evaluate_task(run: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
+    rec = dict(record)
+    if not (rec.get("task_prompt") or "").strip():
+        rec["task_prompt"] = task_prompt_of(rec)
+    replay_ok, replay_reason = verify_replay(
+        {"tools_called": run.get("original_tools_called", {})}, rec
+    )
+    leak_invalidated = rec["invalidated"]
+    scored = scores(rec)
+    raw_abstain = scored.get("abstain")
+    abstain = raw_abstain if isinstance(raw_abstain, str) else None
+    valid = replay_ok and not leak_invalidated and abstain is None
+    reason = _reason(leak_invalidated, abstain, replay_reason)
+    return {
+        "eval_agent_id": run["eval_agent_id"],
+        "source_agent_id": run["source_agent_id"],
+        "label": rec["label"],
+        "scores": scored,
+        "leak_audit": rec["leak_audit"],
+        "invalidated": leak_invalidated,
+        "valid": valid,
+        "verification": {"ok": valid, "reason": reason},
+    }
+
+
 # meiva:note
 # The report over the records collected for the finished eval agents (`records`, by eval agent
 # id; the runs without a record are not reported on). Each replay is verified against its
@@ -245,41 +274,18 @@ def gather(state: dict[str, Any], *, database: Database, gateway: GatewayAccess)
 def assemble_report(
     state: dict[str, Any], pending: list[int], records: dict[int, dict[str, Any]]
 ) -> dict[str, Any]:
-    per_task: list[dict[str, Any]] = []
-    for run in state["runs"]:
-        eval_agent_id = run["eval_agent_id"]
-        if eval_agent_id not in records:
-            continue
-        rec = dict(records[eval_agent_id])
-        if not (rec.get("task_prompt") or "").strip():
-            rec["task_prompt"] = task_prompt_of(rec)
-        replay_ok, replay_reason = verify_replay(
-            {"tools_called": run.get("original_tools_called", {})}, rec
-        )
-        leak_invalidated = rec["invalidated"]
-        scored = scores(rec)
-        abstain = cast(str | None, scored.get("abstain"))
-        valid = replay_ok and not leak_invalidated and abstain is None
-        reason = _reason(leak_invalidated, abstain, replay_reason)
-        per_task.append(
-            {
-                "eval_agent_id": eval_agent_id,
-                "source_agent_id": run["source_agent_id"],
-                "label": rec["label"],
-                "scores": scored,
-                "leak_audit": rec["leak_audit"],
-                "invalidated": leak_invalidated,
-                "valid": valid,
-                "verification": {"ok": valid, "reason": reason},
-            }
-        )
+    per_task = [
+        _evaluate_task(run, records[run["eval_agent_id"]])
+        for run in state["runs"]
+        if run["eval_agent_id"] in records
+    ]
     invalid = [task for task in per_task if not task["valid"]]
     valid = [task for task in per_task if task["valid"]]
     return {
         "skill": state["skill"],
         "stamp": state["stamp"],
         "n": len(valid),
-        "mean": _mean([cast("dict[str, float]", task["scores"]) for task in valid]),
+        "mean": _mean([s for task in valid if _is_float_dict(s := task["scores"])]),
         "per_task": per_task,
         "invalid": invalid,
         "invalidated": sum(task["invalidated"] for task in per_task),

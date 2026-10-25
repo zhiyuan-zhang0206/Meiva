@@ -8,10 +8,30 @@ handle at each call; this module imports neither, so both can depend on it.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
 import meiva
 from meiva.sdk_surface import process_context
+
+
+class _StateSnapshot(Protocol):
+    @property
+    def cwd(self) -> str: ...
+
+    @property
+    def last_seen_compact(self) -> int: ...
+
+    @property
+    def injected_paths(self) -> set[str]: ...
+
+    @property
+    def injected_hashes(self) -> set[str]: ...
+
+
+class _StateHandle(Protocol):
+    def read(self) -> _StateSnapshot: ...
+
+    def update(self, delta: dict[str, Any]) -> object: ...
 
 
 # The state class and the real handle live in the agent-runtime face
@@ -23,7 +43,7 @@ from meiva.sdk_surface import process_context
 # then runs on the real handle. Without a live slot — outside a turn (test / dev
 # REPL) — they raise exactly what the real handle raises outside an exec turn,
 # without importing the agent runtime.
-def _handle(method: str, slot: str) -> Any:
+def _handle(method: str, slot: str) -> _StateHandle:
     """The face's handle, with a live lazy state slot materialized first."""
     if not process_context.in_exec_turn():
         raise process_context.PluginStateOutsideTurnError(
@@ -38,7 +58,7 @@ def _handle(method: str, slot: str) -> Any:
     return state_handle()
 
 
-def read_state() -> Any:
+def read_state() -> _StateSnapshot:
     """The plugin's current `MeivaCodeState` snapshot."""
     return _handle("read", "meiva.state").read()
 

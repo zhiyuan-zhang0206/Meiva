@@ -5,9 +5,5 @@ exports = ["webscrape.py"]
 "scrape_post.py" = "strict"
 "scrape_wire.py" = "strict"
 
-[debt.ambient-read]
-"webscrape.py#clock datetime.datetime.now" = 1
-"webscrape.py#environ os.environ" = 1
-
-[debt.type-cast]
-"webscrape.py#cast _load_if_complete" = 1
+[roots]
+"webscrape.py" = { kinds = ["clock", "environ"], why = "Web-scrape CLI entry reads ScrapeConfig from process environment and stamps fetched posts with UTC time" }

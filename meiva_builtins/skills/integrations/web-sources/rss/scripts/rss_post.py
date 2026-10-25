@@ -13,7 +13,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, TypedDict, cast
+from typing import Any, TypedDict, TypeGuard
 
 import feedparser
 from feedparser.exceptions import ThingsNobodyCaresAboutButMe
@@ -142,7 +142,7 @@ def _iso(struct: time.struct_time) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", struct)
 
 
-def _entry(raw: Any) -> Entry:
+def _entry(raw: dict[str, Any]) -> Entry:
     published = raw.get("published_parsed") or raw.get("updated_parsed")
     link = raw.get("link")
     content = raw.get("content")
@@ -158,6 +158,10 @@ def _entry(raw: Any) -> Entry:
     )
 
 
+def _is_parse_fn(value: object) -> TypeGuard[Callable[[bytes], dict[str, Any]]]:
+    return callable(value)
+
+
 # meiva:note
 # Parse the feed bytes fetched from `feed_url`.
 #
@@ -167,7 +171,10 @@ def _entry(raw: Any) -> Entry:
 # (``bozo`` is set but the exception is not a benign ``ThingsNobodyCaresAboutButMe`` like
 # ``CharacterEncodingOverride`` — the feed is still valid, just has encoding quirks).
 def parse_feed(data: bytes, feed_url: str) -> Feed:
-    parse = cast(Callable[[bytes], dict[str, Any]], feedparser.parse)
+    parse_attr = "parse"
+    parse: object = getattr(feedparser, parse_attr)
+    if not _is_parse_fn(parse):
+        raise TypeError("feedparser.parse is not callable")
     parsed = parse(data)
     feed_meta: dict[str, Any] = parsed["feed"]
     entries: list[Any] = parsed["entries"]

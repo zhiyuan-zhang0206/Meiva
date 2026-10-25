@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import cast
+from typing import TypeGuard
 
 __all__ = [
     "Failed",
@@ -64,41 +64,53 @@ def plan_tracker_exit(returncode: int, output: str) -> TrackerVerdict:
     return Failed(failure_message(head + output[-(_DETAIL_CHARS - len(head)) :]))
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_list(value: object) -> TypeGuard[list[str]]:
+    return _is_object_list(value) and all(isinstance(item, str) for item in value)
+
+
 def candidate_message(report: object, report_file: str) -> str:
     payload = _object(report, "model update tracker JSON report")
     actionable = _object(payload["actionable_candidates"], "report actionable_candidates")
     providers = _object(payload["providers"], "report providers")
     lines = ["New upstream model candidates:"]
     for provider, model_ids in actionable.items():
-        if not isinstance(model_ids, list):
+        if not _is_object_list(model_ids):
             raise TypeError("report actionable candidate has an invalid shape")
         provider_report = _object(providers[provider], "report provider result")
         series_models = _object(provider_report["series_models"], "report series_models")
-        for model_id in cast(list[object], model_ids):
+        for model_id in model_ids:
             if not isinstance(model_id, str):
                 raise TypeError("report candidate id must be a string")
             line = f"- {provider}: {model_id}"
             known = series_models[model_id]
-            if not isinstance(known, list) or not all(
-                isinstance(value, str) for value in cast(list[object], known)
-            ):
+            if not _is_str_list(known):
                 raise ValueError("report same-series ids must be strings")
             if known:
-                joined = ", ".join(cast(list[str], known))
+                joined = ", ".join(known)
                 line += f" (registry already binds {joined} in this series; review supersession)"
             lines.append(line)
     status_changes = payload["status_changes"]
-    if not isinstance(status_changes, list) or not all(
-        isinstance(value, str) for value in cast(list[object], status_changes)
-    ):
+    if not _is_str_list(status_changes):
         raise ValueError("report status_changes must be a list of strings")
     if status_changes:
-        lines.append(f"Provider status changed: {', '.join(cast(list[str], status_changes))}")
+        lines.append(f"Provider status changed: {', '.join(status_changes)}")
     lines.append(f"Full report: {report_file}")
     return "\n".join(lines)
 
 
 def _object(value: object, what: str) -> Mapping[str, object]:
-    if not isinstance(value, dict):
+    if not _is_str_dict(value):
         raise TypeError(f"{what} must be an object")
-    return cast(Mapping[str, object], value)
+    return value

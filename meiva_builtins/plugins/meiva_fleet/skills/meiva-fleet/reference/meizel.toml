@@ -1,5 +1,2 @@
-[debt.ambient-read]
-"watch_idle.py#settings base.config.settings" = 1
-
-[debt.type-cast]
-"watch_idle.py#cast watch" = 1
+[roots]
+"watch_idle.py" = { kinds = ["settings"], why = "Reference watcher script reads launching agent's data-plane Redis URL and events channel" }

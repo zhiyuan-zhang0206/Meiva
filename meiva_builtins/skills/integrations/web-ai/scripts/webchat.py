@@ -7,7 +7,7 @@ import time
 from collections.abc import Generator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TypeGuard
 
 # meiva:note
 # The sibling modules are in this skill's own scripts/ dir, not an importable package. This module is import-only (no `__main__`), so it is always reached through a child sub-skill script (console, deep-research, media) whose own __file__-derived guard has already put this directory on `sys.path`. The children also reach `SITES`, `Places`, `assert_same_site`, `chat_url`, `download_by_click`, `downloads_root`, `now_stamp` and `system_places` through this module, so those are re-exported here (`X as X`).
@@ -61,9 +61,21 @@ import meiva
 NOT_WAITED = Answer(text="", complete=False)
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_list(value: object) -> TypeGuard[list[str]]:
+    return _is_object_list(value) and all(isinstance(item, str) for item in value)
+
+
 # meiva:note
 # Run JS in the shared browser's current page and return its parsed result. Raises if there is no fenced JSON block (the script threw, or no page is selected).
-def evaluate(js: str) -> Any:
+def evaluate(js: str) -> object:
     return parse_evaluate_response(meiva.mcps.chrome.evaluate_script(function=js))
 
 
@@ -91,7 +103,7 @@ def select(page_id: int) -> None:
 # meiva:note
 # The shared browser's current page URL (`location.href`).
 def current_url() -> str:
-    return evaluate(LOCATION_JS)
+    return str(evaluate(LOCATION_JS))
 
 
 # meiva:note
@@ -180,14 +192,16 @@ def open_chat(name: str, *, pace: Pacing = STANDARD_PACE) -> int | None:
 # Type `text` into the composer, replacing whatever is there, and raise when nothing registered (the editor rejected the programmatic insert, or the selector drifted). The script is `_js.inject_prompt_js`.
 def inject_prompt(name: str, text: str) -> None:
     prof = site(name)
-    check_inject_result(prof.label, evaluate(inject_prompt_js(prof.composer, text)))
+    raw = evaluate(inject_prompt_js(prof.composer, text))
+    check_inject_result(prof.label, raw if _is_str_dict(raw) else {})
 
 
 # meiva:note
 # Send the composed prompt: click the site's send button if present and enabled, otherwise dispatch an Enter keystroke on the composer. Returns a short tag of which path fired and raises if neither target exists.
 def submit(name: str) -> str:
     prof = site(name)
-    return submit_via(prof.label, evaluate(submit_js(prof.send, prof.composer)))
+    raw = evaluate(submit_js(prof.send, prof.composer))
+    return submit_via(prof.label, raw if _is_str_dict(raw) else {})
 
 
 # meiva:note
@@ -199,7 +213,7 @@ def is_streaming(name: str) -> bool:
 # meiva:note
 # Text of the LAST assistant message on the page, or '' if none yet.
 def read_answer(name: str) -> str:
-    return evaluate(read_answer_js(site(name).answer))
+    return str(evaluate(read_answer_js(site(name).answer)))
 
 
 # meiva:note
@@ -402,7 +416,8 @@ def attach_file(name: str, path: str | Path, *, pace: Pacing = STANDARD_PACE) ->
         )
     # meiva:note
     # The img-src baseline is taken BEFORE the upload: an image attachment registers as a NEW thumbnail, which the chip probe below recognizes against it.
-    baseline: list[str] = evaluate(IMAGE_SOURCES_JS)
+    raw_baseline = evaluate(IMAGE_SOURCES_JS)
+    baseline: list[str] = raw_baseline if _is_str_list(raw_baseline) else []
     meiva.mcps.chrome.upload_file(uid=hit.uid, filePath=str(p))
     # meiva:note
     # The chip proves the file registered. Some sites keep send enabled on text alone, so the send-state probe alone would pass before the file landed; the send probe after this covers the sites that DO disable it mid-upload.

@@ -26,7 +26,7 @@ Runtime notes:
 import json
 import time
 from collections.abc import Iterator
-from typing import Protocol, Self, cast
+from typing import Protocol, Self, TypeGuard
 
 import redis
 
@@ -55,6 +55,10 @@ class _RedisClient(Protocol):
     ) -> Self: ...
 
     def pubsub(self) -> _PubSub: ...
+
+
+def _is_redis_client_cls(value: object) -> TypeGuard[type[_RedisClient]]:
+    return isinstance(value, type)
 
 
 def _is_target_idle(event: dict[str, object], target_id: int) -> bool:
@@ -114,7 +118,10 @@ def watch(target_id: int) -> None:
     happens before the subscription is established is missed (the poll fallback
     covers the already-idle case).
     """
-    client = cast(type[_RedisClient], redis.Redis).from_url(
+    redis_cls: object = redis.Redis
+    if not _is_redis_client_cls(redis_cls):
+        raise TypeError("redis.Redis is not a class")
+    client = redis_cls.from_url(
         settings.data_plane.redis_url,
         decode_responses=True,
         # redis-py 8 defaults to 5s, which kills a quiet pubsub.listen() read.
