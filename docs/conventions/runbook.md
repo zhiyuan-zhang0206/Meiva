@@ -408,7 +408,7 @@ database it depends on answers again (and once on the first usable observation),
 and closes the breaker only on the first healthy generation.
 
 **OS-scheduled jobs.** The platform scheduler runs the health probe
-(`base/host/system/cron.py`), boot autostart (`base/host/system/boot_autostart/registration.py`),
+(`base/host/system/cron/health_job.py`), boot autostart (`base/host/system/boot_autostart/registration.py`),
 daily rotate-then-retain log maintenance (`base/host/system/logs_job.py`), and the
 per-machine content-refresh pass (`base/host/system/packages_job.py`)
 — as launchd LaunchAgents on macOS and systemd boot plus scheduled maintenance on

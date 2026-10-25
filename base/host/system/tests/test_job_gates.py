@@ -4,8 +4,9 @@ from pathlib import Path
 import pytest
 
 from base.host.proc import CommandRunner
-from base.host.system import cron, logs_job, packages_job, pr_flow_job, walg_job
+from base.host.system import logs_job, packages_job, pr_flow_job, walg_job
 from base.host.system.boot_autostart import registration as autostart
+from base.host.system.cron import health_job, mechanics
 from base.host.system.job_values import JobRoots
 from base.host.system.packages_content import RefreshSchedule
 from base.host.system.tests.fake_commands import (
@@ -41,7 +42,7 @@ def test_packages_refresh_gate_follows_home_and_precedes_platform(
     default_home: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(cron, "register_platform_job", _refuse("platform registrar reached"))
+    monkeypatch.setattr(mechanics, "register_platform_job", _refuse("platform registrar reached"))
     packages_job.register_packages_job(
         roots=JobRoots(
             home=default_home / ".meiva", repo=Path("/isolated"), user_home=default_home
@@ -172,7 +173,7 @@ def test_real_platform_job_definition_follows_the_value_given(
     "register",
     [
         autostart.register_autostart,
-        cron.register_os_cron,
+        health_job.register_os_cron,
     ],
 )
 def test_every_registrar_stops_at_the_switch_before_the_home(
@@ -182,7 +183,7 @@ def test_every_registrar_stops_at_the_switch_before_the_home(
     def owns(_kind: str) -> bool:
         pytest.fail("home reached")
 
-    monkeypatch.setattr(cron, "owns_os_jobs", owns)
+    monkeypatch.setattr(mechanics, "owns_os_jobs", owns)
     if register is autostart.register_autostart:
         register(services=frozenset({"gateway"}), enabled=False, host=fake_host())
     else:

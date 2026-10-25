@@ -23,7 +23,7 @@ from base.daemon.endpoints import ServiceEndpoints
 from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.host.db_authority.api import AcceptanceCache
 from base.host.net.auth import cookie_name
-from base.host.system.cron import register_os_cron
+from base.host.system.cron.health_job import register_os_cron
 from base.host.system.hostport import Host
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog, load_skill_names

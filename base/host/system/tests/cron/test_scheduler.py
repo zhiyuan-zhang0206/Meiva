@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import plistlib
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from base import paths
 from base.host.env.harness_binaries import require_harness_paths
-from base.host.system import cron
+from base.host.system.cron import health_job, mechanics
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import (
     DARWIN_ARM64,
@@ -35,6 +38,18 @@ def _plant_plist(fake_home: Path, label: str) -> Path:
     return p
 
 
+def _assert_probe_plist(plist: Path) -> None:
+    values = plistlib.loads(plist.read_bytes())
+    assert values["Label"] == "com.meiva.health-probe"
+    assert values["ProgramArguments"] == [
+        str(Path(__file__).resolve().parents[5] / ".venv/bin/meiva"),
+        "cluster",
+        "health-probe",
+    ]
+    assert values["StartInterval"] == 300
+    assert values["RunAtLoad"] is False
+
+
 _NOT_LOADED = Reply(returncode=113, stderr="Could not find service")
 
 
@@ -43,10 +58,6 @@ def _launchctl(print_reply: Reply = _NOT_LOADED) -> tuple[FakeCommands, Host]:
     commands.on(["launchctl", "print"], print_reply, repeat=True)
     commands.on("launchctl", Reply(), repeat=True)
     return commands, fake_host(commands, platform=DARWIN_ARM64, uid=_UID)
-
-
-def _desired_plist(_interval_s: int, *, host: Host) -> str:
-    return "<desired-plist/>"
 
 
 def _fixed_meiva(*, host: Host) -> str:
@@ -64,10 +75,9 @@ def test_register_macos_never_reloads_its_own_launchd_job(
     plist = _plant_plist(fake_home, label)
     plist.write_text("<old-plist/>")
     monkeypatch.setenv("XPC_SERVICE_NAME", label)
-    monkeypatch.setattr(cron, "launchd_plist_content", _desired_plist)
     commands, host = _launchctl()
 
-    assert cron.register_macos(300, host=host) == 0
+    assert health_job.register_macos(300, host=host) == 0
     assert plist.read_text() == "<old-plist/>"
     assert commands.argvs == []
 
@@ -78,12 +88,11 @@ def test_register_macos_still_reloads_from_another_launchd_job(
     plist = _plant_plist(fake_home, "com.meiva.health-probe")
     plist.write_text("<old-plist/>")
     monkeypatch.setenv("XPC_SERVICE_NAME", "com.meiva.autostart")
-    monkeypatch.setattr(cron, "launchd_plist_content", _desired_plist)
-    monkeypatch.setattr(cron, "descends_from_launchd_job", _never_descendant)
+    monkeypatch.setattr(health_job, "descends_from_launchd_job", _never_descendant)
     commands, host = _launchctl()
 
-    assert cron.register_macos(300, host=host) == 0
-    assert plist.read_text() == "<desired-plist/>"
+    assert health_job.register_macos(300, host=host) == 0
+    _assert_probe_plist(plist)
     assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"]
 
 
@@ -96,7 +105,7 @@ def _crontab(
     write_rc: int = 0,
     write_error: str = "",
 ) -> tuple[FakeCommands, Host]:
-    monkeypatch.setattr(cron, "meiva_binary_path", _fixed_meiva)
+    monkeypatch.setattr(mechanics, "meiva_binary_path", _fixed_meiva)
     commands = FakeCommands()
     commands.on(["crontab", "-l"], Reply(existing, read_error, read_rc), repeat=True)
     commands.on(["crontab", "-"], Reply("", write_error, write_rc), repeat=True)
@@ -114,7 +123,7 @@ def test_register_linux_aborts_when_crontab_read_fails(
 ) -> None:
     commands, host = _crontab(monkeypatch, read_rc=1, read_error="permission denied")
 
-    assert cron.register_linux(300, host=host) == 1
+    assert health_job.register_linux(300, host=host) == 1
     assert "avoid clobbering" in capsys.readouterr().err
     assert _written(commands) is None
 
@@ -122,7 +131,7 @@ def test_register_linux_aborts_when_crontab_read_fails(
 def test_register_linux_treats_no_crontab_as_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     commands, host = _crontab(monkeypatch, read_rc=1, read_error="no crontab for u")
 
-    assert cron.register_linux(300, host=host) == 0
+    assert health_job.register_linux(300, host=host) == 0
     assert "health-probe" in str(_written(commands))
 
 
@@ -135,16 +144,16 @@ def _brew_meiva(*, host: Host) -> str:
 
 
 def test_launchd_path_env_includes_brew_bin(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cron, "meiva_binary_path", _local_meiva)
-    path = cron.launchd_path_env(host=fake_host(programs={"brew": "/opt/homebrew/bin/brew"}))
+    monkeypatch.setattr(mechanics, "meiva_binary_path", _local_meiva)
+    path = mechanics.launchd_path_env(host=fake_host(programs={"brew": "/opt/homebrew/bin/brew"}))
     assert "/opt/homebrew/bin" in path
     assert "/Users/x/.local/bin" in path
     assert "/usr/bin" in path
 
 
 def test_launchd_path_env_falls_back_without_brew(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cron, "meiva_binary_path", _local_meiva)
-    path = cron.launchd_path_env(host=fake_host())
+    monkeypatch.setattr(mechanics, "meiva_binary_path", _local_meiva)
+    path = mechanics.launchd_path_env(host=fake_host())
     assert "/opt/homebrew/bin" in path
     assert "/usr/local/bin" in path
 
@@ -154,7 +163,7 @@ def test_launchd_path_env_falls_back_without_brew(monkeypatch: pytest.MonkeyPatc
 # user-local bins; a job that reaches only the venv's own dir and brew cannot start them
 # (#5491). Pin the user dirs even when `meiva` itself lives under the brew prefix.
 def test_launchd_path_env_reaches_the_user_install_dirs() -> None:
-    entries = cron.launchd_path_env(host=fake_host()).split(":")
+    entries = mechanics.launchd_path_env(host=fake_host()).split(":")
 
     assert str(Path.home() / ".local/bin") in entries
     assert str(Path.home() / ".npm-global/bin") in entries
@@ -166,21 +175,21 @@ def test_launchd_path_env_reaches_the_user_install_dirs() -> None:
 # first harness spawn (#5495).
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
 def test_the_launchd_path_passes_the_unit_check() -> None:
-    path = cron.launchd_path_env(host=fake_host(programs={"brew": "/opt/homebrew/bin/brew"}))
+    path = mechanics.launchd_path_env(host=fake_host(programs={"brew": "/opt/homebrew/bin/brew"}))
 
     assert require_harness_paths(path, what="the launchd job PATH") == path
 
 
 def test_launchd_path_env_deduplicates(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cron, "meiva_binary_path", _brew_meiva)
+    monkeypatch.setattr(mechanics, "meiva_binary_path", _brew_meiva)
     host = fake_host(programs={"brew": "/opt/homebrew/bin/brew"})
-    assert cron.launchd_path_env(host=host).split(":").count("/opt/homebrew/bin") == 1
+    assert mechanics.launchd_path_env(host=host).split(":").count("/opt/homebrew/bin") == 1
 
 
 def test_register_linux_stamps_the_fixed_marker(monkeypatch: pytest.MonkeyPatch) -> None:
     commands, host = _crontab(monkeypatch)
 
-    assert cron.register_linux(300, host=host) == 0
+    assert health_job.register_linux(300, host=host) == 0
     (line,) = str(_written(commands)).splitlines()
     assert line.endswith("cluster health-probe # meiva-health-probe")
     assert "--auto-rollback" not in line
@@ -195,7 +204,7 @@ def test_register_linux_keeps_unrelated_lines_and_reports_success(
     )
     commands, host = _crontab(monkeypatch, f"0 3 * * * backup\n{other_job}\n")
 
-    assert cron.register_linux(300, host=host) == 0
+    assert health_job.register_linux(300, host=host) == 0
     assert capsys.readouterr() == (
         "  . crontab entry added (every 5 min)\n",
         "",
@@ -237,14 +246,14 @@ def test_register_linux_failure_messages_and_rc(
         write_error=write_error,
     )
 
-    assert cron.register_linux(300, host=host) == 1
+    assert health_job.register_linux(300, host=host) == 1
     captured = capsys.readouterr()
     assert (captured.out, captured.err) == (expected_out, expected_err)
     assert (_written(commands) is not None) == (read_rc == 0)
 
 
 def test_register_linux_missing_crontab_message_and_rc(capsys: pytest.CaptureFixture[str]) -> None:
-    assert cron.register_linux(300, host=fake_host(platform=LINUX_X86)) == 0
+    assert health_job.register_linux(300, host=fake_host(platform=LINUX_X86)) == 0
     assert capsys.readouterr() == (
         "  ! health probe cron: crontab not installed on this host (skipping); cluster runs without a health-probe cron\n",
         "",
@@ -255,7 +264,7 @@ def test_unregister_linux_removes_only_the_probe_line(monkeypatch: pytest.Monkey
     probe = "*/5 * * * * /x/meiva cluster health-probe # meiva-health-probe"
     commands, host = _crontab(monkeypatch, f"{probe}\n0 3 * * * backup\n")
 
-    assert cron.unregister_linux(host=host) == 0
+    assert health_job.unregister_linux(host=host) == 0
     assert probe not in str(_written(commands))
     assert "0 3 * * * backup" in str(_written(commands))
 
@@ -264,7 +273,7 @@ def test_unregister_linux_ignores_the_watchdog_probe_lines(monkeypatch: pytest.M
     probe_line = "*/1 * * * * /x/meiva cluster watchdog-probe --role gateway  # meiva-watchdog-probe.gateway.meiva-mine"
     commands, host = _crontab(monkeypatch, f"{probe_line}\n")
 
-    assert cron.unregister_linux(host=host) == 0
+    assert health_job.unregister_linux(host=host) == 0
     assert _written(commands) is None
 
 
@@ -294,7 +303,7 @@ def test_unregister_linux_messages_and_success_gated_removal(
 ) -> None:
     commands, host = _crontab(monkeypatch, existing, read_rc=read_rc, write_rc=write_rc)
 
-    assert cron.unregister_linux(host=host) == 0
+    assert health_job.unregister_linux(host=host) == 0
     assert capsys.readouterr() == (expected_out, "")
     assert (_written(commands) is not None) == should_write
 
@@ -312,7 +321,7 @@ def test_unregister_macos_removes_only_the_probe_plist(
 
     commands, host = _launchctl()
 
-    assert cron.unregister_macos(host=host) == 0
+    assert health_job.unregister_macos(host=host) == 0
     assert not probe.exists()
     assert autostart.exists()
     assert commands.argvs == [
@@ -328,7 +337,7 @@ def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         calls.append(str(interval_s))
         return 0
 
-    monkeypatch.setattr(cron, "register_macos", register)
+    monkeypatch.setattr(health_job, "register_macos", register)
     return calls
 
 
@@ -340,7 +349,7 @@ def test_register_refused_for_worktree_checkout_against_prod_home(
     monkeypatch.setattr(paths, "repo_root", lambda: default_home / "Meiva" / ".worktrees" / "r4")
     calls = _fake_backend(monkeypatch)
 
-    cron.register_os_cron(enabled=True, host=fake_host(platform=DARWIN_ARM64))
+    health_job.register_os_cron(enabled=True, host=fake_host(platform=DARWIN_ARM64))
 
     assert calls == []
 
@@ -353,7 +362,7 @@ def test_register_allowed_from_the_homes_own_source_checkout(
     monkeypatch.setattr(paths, "repo_root", lambda: prod_home / "source")
     calls = _fake_backend(monkeypatch)
 
-    cron.register_os_cron(enabled=True, host=fake_host(platform=DARWIN_ARM64))
+    health_job.register_os_cron(enabled=True, host=fake_host(platform=DARWIN_ARM64))
 
     assert calls == ["300"]
 
@@ -364,7 +373,7 @@ def test_register_allowed_for_a_default_home_without_source(
     monkeypatch.setattr(paths, "repo_root", lambda: default_home / "dev-src")
     calls = _fake_backend(monkeypatch)
 
-    cron.register_os_cron(enabled=True, host=fake_host(platform=DARWIN_ARM64))
+    health_job.register_os_cron(enabled=True, host=fake_host(platform=DARWIN_ARM64))
 
     assert calls == ["300"]
 
@@ -376,15 +385,14 @@ def test_register_macos_defers_when_ancestry_proves_the_job(
     plist = _plant_plist(fake_home, label)
     plist.write_text("<old-plist/>")
     monkeypatch.setenv("XPC_SERVICE_NAME", "0")
-    monkeypatch.setattr(cron, "launchd_plist_content", _desired_plist)
 
     def _is_current(candidate: str) -> bool:
         return candidate == label
 
-    monkeypatch.setattr(cron, "descends_from_launchd_job", _is_current)
+    monkeypatch.setattr(health_job, "descends_from_launchd_job", _is_current)
     commands, host = _launchctl()
 
-    assert cron.register_macos(300, host=host) == 0
+    assert health_job.register_macos(300, host=host) == 0
     assert plist.read_text() == "<old-plist/>"
     assert commands.argvs == []
 
@@ -395,12 +403,11 @@ def test_register_macos_reloads_when_env_reads_zero_but_tree_is_external(
     plist = _plant_plist(fake_home, "com.meiva.health-probe")
     plist.write_text("<old-plist/>")
     monkeypatch.setenv("XPC_SERVICE_NAME", "0")
-    monkeypatch.setattr(cron, "launchd_plist_content", _desired_plist)
-    monkeypatch.setattr(cron, "descends_from_launchd_job", _never_descendant)
+    monkeypatch.setattr(health_job, "descends_from_launchd_job", _never_descendant)
     commands, host = _launchctl()
 
-    assert cron.register_macos(300, host=host) == 0
-    assert plist.read_text() == "<desired-plist/>"
+    assert health_job.register_macos(300, host=host) == 0
+    _assert_probe_plist(plist)
     assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"]
 
 
@@ -410,9 +417,51 @@ def test_unregister_macos_reports_a_job_launchd_still_holds(
     probe = _plant_plist(fake_home, "com.meiva.health-probe")
     _commands, host = _launchctl(print_reply=Reply())
 
-    assert cron.unregister_macos(host=host) == 1
+    assert health_job.unregister_macos(host=host) == 1
 
     assert not probe.exists()
     [event] = loguru_records.events("launchd_retirement")
     assert event["level"].name == "ERROR"
     assert "com.meiva.health-probe" in event["message"]
+
+
+# meiva:note
+# The child uses only private files and the existing refusing/scripted command resource;
+# HOME does not isolate the real launchctl namespace.
+def _child(scenario: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    home = tmp_path / "home & <private>"
+    home.mkdir()
+    env = {
+        "HOME": str(home),
+        "MEIVA_HOME": str(home / ".meiva"),
+        "PATH": "/usr/bin:/bin",
+        "MEIVA_CONFIG_FETCH": "skip",
+        "XPC_SERVICE_NAME": "com.meiva.health-probe" if scenario == "deferred" else "0",
+    }
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-I", str(Path(__file__).with_name("child_definition.py")), scenario],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return result
+
+
+def test_definition_import_has_no_scheduler_resource_imports(tmp_path: Path) -> None:
+    _child("cold", tmp_path)
+
+
+def test_external_registration_reloads_even_when_content_is_unchanged(tmp_path: Path) -> None:
+    _child("external", tmp_path)
+
+
+def test_own_job_defers_before_capture_or_directory_creation(tmp_path: Path) -> None:
+    _child("deferred", tmp_path)
+
+
+def test_bootstrap_failure_keeps_its_nonzero_result_and_written_plist(tmp_path: Path) -> None:
+    result = _child("failure", tmp_path)
+    assert "launchctl bootstrap failed" in result.stderr

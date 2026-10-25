@@ -255,7 +255,8 @@ os.environ.setdefault("MEIVA_CONFIG_BOOT", "eager")
 # monkeypatch that was meant to stop it never reached the child. Nine
 # `com.meiva.meiva_e2e_home_*.health-probe` LaunchAgents survived on a dev box,
 # firing `--auto-rollback` every 300s against whatever `meiva` PATH resolved to.
-# `base.host.system.cron.os_jobs_enabled` gates all four registrars on this; the
+# meiva:note
+# The explicit registrar enabled argument gates registration; the
 # unregister paths stay live so cleanup still works.
 os.environ["MEIVA_OS_JOBS_ENABLED"] = "false"
 

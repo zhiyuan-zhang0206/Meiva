@@ -29,13 +29,14 @@ def _job_roots(ctx: ConvergeCtx) -> JobRoots:
 
 
 def ensure_health_probe_cron(ctx: ConvergeCtx) -> None:
-    """Register the OS cron job for the cluster health probe.
-
-    Only runs on gateway hosts (roles gated). Delegates to `base.host.system.cron`.
-    The primary registration path is now in the gateway lifespan
-    (`gateway/app.py`); this converge step is a belt-and-suspenders fallback
-    that runs before the gateway process starts. Idempotent."""
-    from base.host.system.cron import register_os_cron
+    # meiva:note
+    # Register the OS cron job for the cluster health probe.
+    #
+    # Only runs on gateway hosts (roles gated). Delegates to `base.host.system.cron.health_job`.
+    # The primary registration path is now in the gateway lifespan
+    # (`gateway/app.py`); this converge step is a belt-and-suspenders fallback
+    # that runs before the gateway process starts. Idempotent.
+    from base.host.system.cron.health_job import register_os_cron
 
     register_os_cron(enabled=ctx.read_config().view.general.os_jobs_enabled, host=ctx.host)
     # On failure the exception propagates so converge fails fast.
@@ -55,13 +56,13 @@ def ensure_logs_maintenance(ctx: ConvergeCtx) -> None:
 # after global/home admission, and the interval only for an enabled channel. The registrar keeps
 # its own ownership check at the physical-write boundary; its command rechecks both switches.
 def ensure_packages_refresh_job(ctx: ConvergeCtx) -> None:
-    from base.host.system import cron
+    from base.host.system.cron import mechanics
     from base.host.system.packages_content import RefreshSchedule
     from base.host.system.packages_job import register_packages_job
 
     view = ctx.read_config().view
     jobs_enabled = view.general.os_jobs_enabled
-    if jobs_enabled and not cron.owns_os_job_home("packages refresh", home=ctx.meiva_home):
+    if jobs_enabled and not mechanics.owns_os_job_home("packages refresh", home=ctx.meiva_home):
         return
     refresh_enabled = view.packages.refresh_enabled if jobs_enabled else False
     register_packages_job(
@@ -105,10 +106,10 @@ def ensure_walg_job(ctx: ConvergeCtx) -> None:
     a command which now does nothing. Both directions only act in the default
     home (`owns_os_jobs`), and registration is a no-op where
     `MEIVA_OS_JOBS_ENABLED` is off. Delegates to `base.host.system.walg_job`."""
-    from base.host.system import cron
+    from base.host.system.cron import mechanics
     from base.host.system.walg_job import register_walg_job, unregister_walg_job
 
-    if not cron.owns_os_job_home("WAL-G tick", home=ctx.meiva_home):
+    if not mechanics.owns_os_job_home("WAL-G tick", home=ctx.meiva_home):
         return
     if ctx.read_config().view.walg.walg_config_file is not None:
         view = ctx.read_config().view

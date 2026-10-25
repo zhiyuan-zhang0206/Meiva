@@ -17,8 +17,8 @@ from pathlib import Path
 
 from loguru import logger
 
-import base.host.system.cron
 from base.host.system import packages_content as content
+from base.host.system.cron import mechanics
 from base.host.system.hostport import Host
 from base.host.system.job_readings import read_launchd_path, read_meiva_binary
 from base.host.system.job_values import JobPaths, JobRoots, plist_path
@@ -41,21 +41,19 @@ def register_macos(*, tick_seconds: int, roots: JobRoots, host: Host) -> int:
         encoding="utf-8",
     )
 
-    if base.host.system.cron.reload_launchd_job(label, destination, host=host) != 0:
+    if mechanics.reload_launchd_job(label, destination, host=host) != 0:
         return 1
     logger.info("launchd job '{}' loaded (every {}s)", label, tick_seconds)
     return 0
 
 
 def unregister_macos(*, host: Host) -> int:
-    retired = base.host.system.cron.remove_launchd_job(
-        content.LABEL, launchd_plist_path(), host=host
-    )
+    retired = mechanics.remove_launchd_job(content.LABEL, launchd_plist_path(), host=host)
     return 0 if retired else 1
 
 
 def register_linux(*, tick_seconds: int, roots: JobRoots, host: Host) -> int:
-    missing_rc = base.host.system.cron.require_crontab(
+    missing_rc = mechanics.require_crontab(
         "  * packages refresh: crontab not installed; the recurring refresh "
         "pass cannot be registered",
         missing_returncode=1,
@@ -72,7 +70,7 @@ def register_linux(*, tick_seconds: int, roots: JobRoots, host: Host) -> int:
     log_file.parent.mkdir(parents=True, exist_ok=True)
     entry = content.cron_entry(paths, tick_seconds=tick_seconds)
 
-    if base.host.system.cron.replace_crontab_entry(
+    if mechanics.replace_crontab_entry(
         marker,
         entry,
         skip_phrase="packages-refresh registration",
@@ -85,7 +83,7 @@ def register_linux(*, tick_seconds: int, roots: JobRoots, host: Host) -> int:
 
 
 def unregister_linux(*, host: Host) -> int:
-    return base.host.system.cron.remove_crontab_entry(
+    return mechanics.remove_crontab_entry(
         content.MARKER, write_failure_rc=1, on_removed=None, host=host
     )
 
@@ -101,9 +99,9 @@ def register_packages_job(
     *, enabled: bool, schedule: content.RefreshSchedule | None, roots: JobRoots, host: Host
 ) -> None:
     if not enabled:
-        base.host.system.cron.skip_os_job("packages refresh")
+        mechanics.skip_os_job("packages refresh")
         return
-    if not base.host.system.cron.owns_os_job_home("packages refresh", home=roots.home):
+    if not mechanics.owns_os_job_home("packages refresh", home=roots.home):
         return
     if schedule is None:
         raise ValueError("registering the packages refresh job needs its schedule")
@@ -115,7 +113,7 @@ def register_packages_job(
     tick_seconds = schedule.tick_seconds
     if tick_seconds is None:
         raise ValueError("registering the packages refresh job needs its tick")
-    base.host.system.cron.register_platform_job(
+    mechanics.register_platform_job(
         "packages-refresh",
         macos=lambda: register_macos(tick_seconds=tick_seconds, roots=roots, host=host),
         linux=lambda: register_linux(tick_seconds=tick_seconds, roots=roots, host=host),
@@ -124,9 +122,9 @@ def register_packages_job(
 
 
 def unregister_packages_job(*, host: Host) -> None:
-    if not base.host.system.cron.owns_os_jobs("packages refresh"):
+    if not mechanics.owns_os_jobs("packages refresh"):
         return
-    base.host.system.cron.unregister_platform_job(
+    mechanics.unregister_platform_job(
         macos=lambda: unregister_macos(host=host),
         linux=lambda: unregister_linux(host=host),
         host=host,

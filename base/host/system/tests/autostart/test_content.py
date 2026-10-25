@@ -50,7 +50,7 @@ def test_plist_embeds_a_path_env() -> None:
     # meiva:note
     # The plist must carry an explicit PATH — launchd's minimal PATH omits
     # Homebrew's bin, which is what made a bare `meiva start` fail to find its tools at
-    # boot. The PATH composition itself is `base.host.system.cron.launchd_path_env`
+    # boot. The PATH composition itself is `base.host.system.cron.mechanics.launchd_path_env`
     # (shared with the watchdog probe's plist) and is unit-tested there.
     xml = _definition()
     assert "<key>PATH</key>" in xml
