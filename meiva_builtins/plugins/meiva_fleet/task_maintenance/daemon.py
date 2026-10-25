@@ -54,7 +54,9 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 # owns an ancestor task (user ruling 2026-10-25 — a dead owner's queue had held the
 # reminders nobody read). The escalate pass fires at `reminder_count ==
 # task_escalate_n`, reaches the same manager, and `escalated_at` keeps the
-# delegator leg at most once per overdue window. A schema-drift exit
+# delegator leg at most once per overdue window; a write that changes the work clears
+# `escalated_at` with the reminder counters and re-arms it, while a note-only write does
+# not (the criterion is `base/agents/tasks/reminder_window.py`). A schema-drift exit
 # (`psycopg.ProgrammingError`) is revived by the root health monitor's `/healthz`
 # probe on the next round instead of staying dead.
 # meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/task-maintenance.meiva.okf.md

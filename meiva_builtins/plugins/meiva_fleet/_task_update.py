@@ -18,6 +18,12 @@ from base.agents.tasks.priority import (
 from base.agents.tasks.priority import (
     validate_remind_interval_seconds as _validate_remind_interval_seconds,
 )
+from base.agents.tasks.reminder_window import (
+    TaskSnapshot,
+    UpdateWrite,
+    changed_kinds,
+    resets_window,
+)
 from base.agents.tasks.rules import first_open_child, is_closed, open_title_holder
 
 if TYPE_CHECKING:
@@ -164,18 +170,20 @@ def collect_update_fields(
     return sets, params, payload, owner_changing, changes
 
 
+# meiva:note
+# Restarts the task's reminder window when this write changed something `reset_on` names, and only
+# then: the change set is measured against the row this function locks, so restating the current
+# value or appending a note cannot pass for progress (`base/agents/tasks/reminder_window.py`).
+# meiva:link meiva_builtins/plugins/meiva_fleet/docs/tasks/task_model/task_model_reminders.meiva.okf.md
 def write_task_update(
     cur: psycopg.Cursor,
     task_id: int,
-    status: str | None,
     sets: builtins.list[str],
     params: builtins.list[object],
     payload: dict[str, object],
     changes: builtins.list[str],
-    title: str | None,
-    note: str | None,
-    owner: int | None,
-    owner_changing: bool,  # noqa: FBT001 — internal helper flag, always passed by name
+    update: UpdateWrite,
+    reset_on: frozenset[str],
     actor: int | None,
 ) -> tuple[int | None, str, int | None, Event]:
     """Apply an update() row write inside the caller's transaction.
@@ -187,13 +195,34 @@ def write_task_update(
     # FOR UPDATE holds the row across the read -> write so two concurrent
     # reassignments cannot both act on the same stale owner.
     cur.execute(
-        "SELECT owner, title, is_root FROM agent_tasks WHERE id = %s FOR UPDATE",
+        "SELECT owner, title, is_root, status, description, results, priority, parent_id, "
+        "remind_interval_seconds FROM agent_tasks WHERE id = %s FOR UPDATE",
         (task_id,),
     )
     row = cur.fetchone()
     if row is None:
         raise ValueError(f"task {task_id} does not exist")
-    old_owner, current_title, is_root = row
+    (
+        old_owner,
+        current_title,
+        is_root,
+        old_status,
+        old_description,
+        old_results,
+        old_priority,
+        old_parent_id,
+        old_interval,
+    ) = row
+    snapshot = TaskSnapshot(
+        status=old_status,
+        title=current_title,
+        description=old_description,
+        results=old_results,
+        owner=old_owner,
+        priority=old_priority,
+        parent_id=old_parent_id,
+        remind_interval_seconds=old_interval,
+    )
     # The system root task is immutable: it is the anchor of the task tree
     # and the parent of the cluster's top-level tasks, so it can never be
     # reassigned, completed, cancelled, or otherwise edited. Fail fast rather
@@ -203,7 +232,7 @@ def write_task_update(
             f"task {task_id} is the system root task and is immutable — "
             f"it cannot be reassigned, completed, cancelled, or otherwise edited"
         )
-    if is_closed(status):
+    if is_closed(update.status):
         active_child = first_open_child(cur, task_id)
         if active_child is not None:
             child_id, child_count = active_child
@@ -213,14 +242,23 @@ def write_task_update(
             )
     # A rename must keep create()'s invariant: no two in_progress
     # tasks share a title.
-    if title is not None:
-        dup = open_title_holder(cur, title, exclude_id=task_id)
+    if update.title is not None:
+        dup = open_title_holder(cur, update.title, exclude_id=task_id)
         if dup is not None:
             raise ValueError(
-                f"task with title {title!r} already exists (task #{dup[0]} is {dup[1]}) — "
-                f"duplicate in_progress titles are not allowed"
+                f"task with title {update.title!r} already exists "
+                f"(task #{dup[0]} is {dup[1]}) — duplicate in_progress titles are not allowed"
             )
-    sql = f"UPDATE agent_tasks SET {', '.join(sets)}, updated_at = now() WHERE id = %s"  # noqa: S608
+    # meiva:note
+    # Only a real change to the work restarts the ladder (Fleet `task_reminder_reset_on`); the
+    # counters and the delegator marker are cleared together so the fresh window can escalate on
+    # its own. A note-only write leaves every counter alone and only bumps `updated_at` below.
+    if resets_window(changed_kinds(snapshot, update), reset_on):
+        sets.append("last_reminded_at = NULL")
+        sets.append("reminder_count = 0")
+        sets.append("escalated_at = NULL")
+        payload["reminder_window_reset"] = True
+    sql = f"UPDATE agent_tasks SET {', '.join([*sets, 'updated_at = now()'])} WHERE id = %s"  # noqa: S608
     # type: ignore[arg-type] — the SET clause is assembled at runtime from
     # user-passed field names; psycopg accepts any str query.
     import psycopg  # per-call: keeps the psycopg stack off plugin autoload (task #3816)
@@ -233,17 +271,18 @@ def write_task_update(
         # rejected the write. Transaction aborted — generic message, see
         # _insert_task.
         raise ValueError(
-            f"task with title {title!r} already exists among in_progress tasks — "
+            f"task with title {update.title!r} already exists among in_progress tasks — "
             "duplicate in_progress titles are not allowed (enforced by the database)"
         ) from exc
 
     # Append a timestamped note to results — works with any status or
     # standalone (no status change) as a drop-in for log().
-    if note is not None:
-        _append_note_to_results(cur, task_id, note)
+    if update.note is not None:
+        _append_note_to_results(cur, task_id, update.note)
         changes.append("note appended")
 
-    new_owner = _owner_change_payload(payload, owner, old_owner, owner_changing)
+    owner_changing = update.owner is not None
+    new_owner = _owner_change_payload(payload, update.owner, old_owner, owner_changing)
     event = _log_task_update(cur, actor, payload, owner_changing, new_owner)
     return old_owner, current_title, new_owner, event
 
