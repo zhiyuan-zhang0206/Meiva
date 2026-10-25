@@ -67,13 +67,11 @@ class CodexConfig:
     # meiva:link base/lm/harness/docs/harness.meiva.okf.md
     def resolved_binary(
         self,
-        environ: Mapping[str, str] | None,
+        environ: Mapping[str, str],
         *,
         bin_dirs: Sequence[str] | None = None,
     ) -> str:
-        return resolve_harness_binary(
-            self.binary, path_env=(environ or {}).get("PATH"), bin_dirs=bin_dirs
-        )
+        return resolve_harness_binary(self.binary, path_env=environ.get("PATH"), bin_dirs=bin_dirs)
 
     def command(self, binary: str | None = None) -> tuple[str, ...]:
         return (binary or self.binary, "app-server", "--listen", "stdio://", *self.extra_args)

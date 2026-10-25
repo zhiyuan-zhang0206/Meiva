@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 
 
@@ -22,6 +23,8 @@ def main() -> None:
         request_id = message.get("id")
         if method == "initialize":
             send({"jsonrpc": "2.0", "id": request_id, "result": {"userAgent": "fake-stdio"}})
+        elif method == "environment":
+            send({"jsonrpc": "2.0", "id": request_id, "result": dict(os.environ)})
         elif method == "emit":
             send({"jsonrpc": "2.0", "method": "test/notification", "params": {"value": 1}})
             send({"jsonrpc": "2.0", "id": request_id, "result": {}})

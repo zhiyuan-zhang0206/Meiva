@@ -1,4 +1,4 @@
-exports = ["fake_app_server.py", "fake_stdio_server.py", "support.py"]
+exports = ["child_environment_server.py", "fake_app_server.py", "fake_stdio_server.py", "support.py"]
 
 [uses]
 "support.py" = ["fake_app_server.py"]

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from base.host.env.registry import process_environment
-
 # meiva:note
 # The variables the codex binary itself reads for key material (verified against the
 # shipped binary's strings: OPENAI_API_KEY, CODEX_API_KEY, CODEX_ACCESS_TOKEN). Anything
@@ -30,9 +28,3 @@ def build_env(environ: Mapping[str, str], *, api_key_mode: bool = False) -> dict
     for name in SECRET_ENV_NAMES:
         env.pop(name, None)
     return env
-
-
-def session_env(environ: Mapping[str, str] | None, *, api_key_mode: bool) -> dict[str, str]:
-    return build_env(
-        process_environment() if environ is None else environ, api_key_mode=api_key_mode
-    )

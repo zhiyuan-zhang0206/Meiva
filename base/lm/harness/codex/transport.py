@@ -92,13 +92,13 @@ class StdioAppServer:
         command: Sequence[str],
         *,
         cwd: str | os.PathLike[str],
-        environ: Mapping[str, str] | None = None,
+        environ: Mapping[str, str],
         request_timeout: float = 120.0,
         stderr: int | None = None,
     ) -> None:
         self._command = tuple(command)
         self._cwd = str(cwd)
-        self._environ = dict(environ) if environ is not None else None
+        self._environ = dict(environ)
         self._request_timeout = request_timeout
         self._stderr = stderr
         self._process: asyncio.subprocess.Process | None = None
