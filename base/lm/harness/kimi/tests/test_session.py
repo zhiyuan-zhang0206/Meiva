@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from base.lm.harness import ClusterFact, EntryPoint, FileSessionRegistry, Handoff, SessionRecord
-from base.lm.harness.acp.transport import PermissionOption, PermissionRequest
+from base.lm.harness.acp.transport import AcpRpcError, PermissionOption, PermissionRequest
 from base.lm.harness.events import (
     AssistantText,
     HandoffInjected,
@@ -137,6 +137,10 @@ async def test_resume_from_the_registry_uses_session_resume(tmp_path: Path) -> N
 
 
 async def test_failed_resume_emits_fault_and_falls_back_to_session_new(tmp_path: Path) -> None:
+    await test_failed_resume_fails_fast(tmp_path)
+
+
+async def test_failed_resume_fails_fast(tmp_path: Path) -> None:
     registry = FileSessionRegistry(tmp_path / "registry")
     registry.save(
         SessionRecord(
@@ -148,16 +152,12 @@ async def test_failed_resume_emits_fault_and_falls_back_to_session_new(tmp_path:
             updated_at="2026-10-19T00:00:00+00:00",
         )
     )
-    harness = await start(tmp_path, agent_id=41, registry=registry, fail_resume=True)
-    try:
-        assert len(harness.requests("session/resume")) == 1
-        assert len(harness.requests("session/new")) == 1
-        assert harness.session.resumed is False
-        assert harness.session.session_id == "session-1"
-        fault = await harness.wait_for(lambda event: isinstance(event, SessionFaulted))
-        assert "stale-session" in fault.error
-    finally:
-        await harness.stop()
+    with pytest.raises(AcpRpcError, match="session not found"):
+        await start(tmp_path, agent_id=41, registry=registry, fail_resume=True)
+    record = registry.load(41)
+    assert record is not None
+    assert record.session_id == "stale-session"
+    assert record.resumes == 0
 
 
 async def test_a_turn_reports_deltas_the_answer_and_a_completion(tmp_path: Path) -> None:

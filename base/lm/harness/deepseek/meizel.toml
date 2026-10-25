@@ -15,16 +15,10 @@
 "mapping.py" = "strict"
 
 [debt.ambient-read]
-"session.py#clock datetime.datetime.now" = 2
-"session.py#clock time.monotonic" = 3
 "session.py#clock time.perf_counter" = 2
-"session.py#random uuid.uuid4" = 1
 
 [debt.impure-call]
-"session.py#async def __aenter__" = 1
-"session.py#async def __aexit__" = 1
 "session.py#async def _begin" = 1
-"session.py#async def _close_tasks" = 1
 "session.py#async def _configure" = 1
 "session.py#async def _read_loop" = 1
 "session.py#async def _reap" = 1
@@ -32,16 +26,10 @@
 "session.py#async def _sweep" = 1
 "session.py#async def _turn_usage" = 1
 "session.py#async def close" = 1
-"session.py#async def events" = 1
 "session.py#async def interrupt" = 1
 "session.py#async def permission_decision" = 1
 "session.py#async def start" = 1
-"session.py#datetime.now" = 2
 "session.py#import signal" = 1
-"session.py#time.monotonic" = 4
-"session.py#uuid.uuid4" = 1
-"types.py#async def outcome" = 1
-"types.py#time.monotonic" = 1
 "usage.py#Path.is_file" = 2
 "usage.py#Path.open" = 1
 "usage.py#Path.read_bytes" = 1
@@ -49,7 +37,7 @@
 
 [debt.impure-edge]
 "session.py#base/lm/harness/process.py" = 1
-"session.py#base/lm/harness/registry.py" = 1
+"types.py#base/lm/harness/base_session.py" = 1
 "types.py#base/lm/harness/process.py" = 1
 
 [debt.type-cast]

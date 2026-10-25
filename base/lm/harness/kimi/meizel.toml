@@ -10,10 +10,7 @@ exports = ["__init__.py", "config.py", "session.py", "usage.py"]
 
 [debt.ambient-read]
 "config.py#home pathlib.Path.home" = 1
-"session.py#clock datetime.datetime.now" = 2
-"session.py#clock time.monotonic" = 3
 "session.py#clock time.perf_counter" = 2
-"session.py#random uuid.uuid4" = 1
 
 [debt.type-cast]
 "mapping.py#cast _content_text" = 3

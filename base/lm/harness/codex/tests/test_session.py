@@ -4,12 +4,14 @@ import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from base.lm.harness.codex.tests.fake_app_server import FakeAppServer
-from base.lm.harness.codex.tests.support import handoff, start, turn_text
+from base.lm.harness.codex.tests.support import handoff, start
+from base.lm.harness.codex.transport import JsonRpcError
 from base.lm.harness.events import (
     HandoffInjected,
     SessionBound,
-    SessionFaulted,
     SessionStarted,
     TurnCompleted,
 )
@@ -133,22 +135,14 @@ async def test_resume_failure_starts_a_new_thread_and_injects_the_handoff(
         )
     )
     server = FakeAppServer(resume_fails=True)
-    harness = await start(
-        tmp_path, server=server, registry=registry, agent_id=7, handoff_doc=handoff()
-    )
-    try:
-        fault = await harness.wait_for(lambda event: isinstance(event, SessionFaulted))
-        assert "thread-gone" in fault.error
-        assert "thread/start" in server.methods()
-        injected = await harness.wait_for(lambda event: isinstance(event, HandoffInjected))
-        assert injected.agent_id == 7
-        assert harness.session.resumed is False
-        handoff_turn = harness.session.handoff_ticket
-        assert handoff_turn is not None
-        await harness.turn_started()
-        assert "Reply with one word." in turn_text(server.params_for("turn/start")[0])
-    finally:
-        await harness.stop()
+    with pytest.raises(JsonRpcError, match="thread not found"):
+        await start(tmp_path, server=server, registry=registry, agent_id=7, handoff_doc=handoff())
+    assert "thread/resume" in server.methods()
+    assert "thread/start" not in server.methods()
+    record = registry.load(7)
+    assert record is not None
+    assert record.session_id == "thread-gone"
+    assert record.resumes == 0
 
 
 async def test_thread_id_is_written_to_the_registry(tmp_path: Path) -> None:
