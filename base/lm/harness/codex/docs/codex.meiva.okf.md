@@ -121,12 +121,5 @@ client written against older docs fails outright.
 The adapter uses the **stable surface only** (105 client methods on 0.163.0); the
 experimental surface is not adopted.
 
-Authentication is the machine's `codex login` (ChatGPT subscription). The CLI
-prefers an API key found in its environment over the login stored in
-`~/.codex/auth.json`, so an inherited key — a cluster-pinned one reaches every agent
-process — silently moves a subscribed session onto per-token billing with no plan
-quota. `auth.py` therefore *removes* `OPENAI_API_KEY`, `CODEX_API_KEY` and
-`CODEX_ACCESS_TOKEN` from the environment the session hands the transport. Removal,
-not an empty value: the CLI asks whether the variable is present, and an empty string
-is still present (the Claude CLI treats an empty value as absent, which is why that
-adapter blanks instead). `api_key_mode` is the one explicit way to keep the key.
+See [Session environment](environment.meiva.okf.md) for authentication filtering,
+explicit environment inputs and construction/reconnect timing.
