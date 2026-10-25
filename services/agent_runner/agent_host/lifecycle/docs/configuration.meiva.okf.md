@@ -13,3 +13,10 @@ The root supplies handoff stamping as a separate required `TimestampSource` reso
 `stored_config.py` owns the per-turn `StoredConfig` row and its configuration fingerprint. Wake screening reads the row without importing runtime construction, model wiring or agent process boot. The host still re-reads the database row each turn; a changed fingerprint rebuilds its cached runtime. This import boundary does not change the configuration snapshot contract: the row remains a mutable dataclass and retains its supplied maps and nested references. Admission normalizes the separately resolved pins rather than rewriting those stored maps.
 
 The fingerprint keeps overlay and birth maps in separate slots, distinguishes absent maps from empty maps, sorts JSON keys and preserves `default=str` coercion for non-JSON decoded scalars. It is evaluated from the row's current maps on each access. The mutable row is not a deeply frozen configuration value.
+
+The understanding operation root is `services/agent_runner/understanding/`: it retains the concrete boot
+owner inside that root and captures model defaults, cadence, correction budgets and rendering
+values at their existing decision points. No field-reader bundle crosses into base history.
+A job's two rendering phases remain independent, cadence is re-read under its lease, and each
+rebuild horizon checks policy again. This preserves explicit owner updates without adding an
+automatic configuration-file reload channel.

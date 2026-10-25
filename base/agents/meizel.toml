@@ -3,7 +3,7 @@ exports = ["birth", "context", "history", "impersonation", "inbox", "incarnation
 [uses]
 "birth" = ["history", "impersonation", "inbox", "labels.py", "model"]
 "context" = ["history", "messages", "observation", "sdk"]
-"history" = ["impersonation", "incarnation", "messages", "model", "observation", "sdk"]
+"history" = ["impersonation", "incarnation", "messages", "model", "sdk"]
 "impersonation" = ["messages"]
 "inbox" = ["impersonation", "messages"]
 "observation" = ["impersonation", "tasks"]
