@@ -12,8 +12,6 @@ from base.config import settings
 from base.config.domains.general import GeneralSettings
 from base.host.env.dotenv_file import (
     ENV_BACKUP_KEEP,
-    env_line_export_prefix,
-    env_line_key,
     remove_env,
     snapshot_env,
     upsert_env,
@@ -254,60 +252,6 @@ def test_upsert_noop_leaves_a_symlinked_env_untouched(tmp_path: Path) -> None:
     assert target.read_text() == "A=1\n"
 
 
-@pytest.mark.parametrize(
-    ("line", "expected"),
-    [
-        ("KEY=1", "KEY"),
-        ("KEY = 1", "KEY"),
-        ("  KEY=1", "KEY"),
-        ("export KEY=1", "KEY"),
-        ("export  KEY=1", "KEY"),
-        ("export\tKEY=1", "KEY"),
-        ("\texport KEY = 1", "KEY"),
-        ("export 'KEY'=7", "KEY"),
-        ("'KEY'=1", "KEY"),
-        ('"KEY"=1', '"KEY"'),
-        ("exportKEY=1", "exportKEY"),
-        ("export=1", "export"),
-        ("exportED_KEY=1", "exportED_KEY"),
-        ("KEY=1 # note", "KEY"),
-        ('KEY="18133', "KEY"),
-        ("# KEY=1", None),
-        ("", None),
-        ("KEY", None),
-        ("KEY # note", None),
-        ("EXPORT KEY=1", None),
-        ("export KEY # note", None),
-        ("''=1", None),
-        ("'KEY=1", None),
-    ],
-)
-def test_env_line_key_follows_the_parser_grammar(line: str, expected: str | None) -> None:
-    assert env_line_key(line) == expected
-
-
-def test_env_line_key_agrees_with_dotenv_on_assignments() -> None:
-    from io import StringIO
-
-    from dotenv import dotenv_values
-
-    for line in (
-        "KEY=1",
-        "KEY = 1",
-        "export KEY=1",
-        'export  KEY = "2"',
-        "export\tKEY=6",
-        "export 'KEY'=5",
-        "'KEY'=3",
-        '"KEY"=4',
-        "exportKEY=7",
-        "export=8",
-        "KEY= # c",
-    ):
-        parsed = list(dotenv_values(stream=StringIO(line), interpolate=False))
-        assert env_line_key(line) == parsed[0], line
-
-
 def test_upsert_rewrites_an_export_prefixed_line_in_place(tmp_path: Path) -> None:
     f = tmp_path / ".env"
     f.write_text("export MEIVA_DB_URL=old\nKEEP=1\nexport\tMEIVA_CLUSTER=old2\n")
@@ -329,10 +273,56 @@ def test_remove_env_drops_export_prefixed_lines(tmp_path: Path) -> None:
     assert f.read_text() == "KEEP=1\n"
 
 
-def test_env_line_export_prefix_flags_only_real_export_prefixed_lines() -> None:
-    assert env_line_export_prefix("export KEY=1") == "export "
-    assert env_line_export_prefix("export\tKEY=1") == "export "
-    assert env_line_export_prefix("  export  KEY=1") == "export "
-    assert env_line_export_prefix("exportKEY=1") == ""
-    assert env_line_export_prefix("export=1") == ""
-    assert env_line_export_prefix("KEY=1") == ""
+# meiva:note
+# Decoded equality is insufficient: a CRLF file must take the real write path
+# when the candidate bytes use LF, retaining the previous text in its backup.
+def test_upsert_compares_the_candidate_with_raw_crlf_bytes(tmp_path: Path) -> None:
+    env = tmp_path / ".env"
+    env.write_bytes(b"A=1\r\nKEEP=2\r\n")
+
+    upsert_env(env, {"A": "1"})
+
+    assert env.read_bytes() == b"A=1\nKEEP=2\n"
+    backups = _backups(env)
+    assert len(backups) == 1
+    assert backups[0].read_text() == "A=1\nKEEP=2\n"
+
+
+@pytest.mark.parametrize("original", [b"", b"A=1\r\nKEEP=2"])
+def test_remove_without_a_matching_assignment_preserves_raw_bytes(
+    tmp_path: Path, original: bytes
+) -> None:
+    env = tmp_path / ".env"
+    env.write_bytes(original)
+
+    remove_env(env, {"ABSENT"})
+
+    assert env.read_bytes() == original
+    assert _backups(env) == []
+
+
+def test_remove_missing_file_does_not_create_a_lock_or_home(tmp_path: Path) -> None:
+    home = tmp_path / "absent-home"
+    remove_env(home / ".env", {"A"})
+    assert not home.exists()
+
+
+def test_removing_every_assignment_writes_one_newline(tmp_path: Path) -> None:
+    env = tmp_path / ".env"
+    env.write_text("A=1\nA=2\n")
+
+    remove_env(env, {"A"})
+
+    assert env.read_bytes() == b"\n"
+    assert _backups(env)[0].read_text() == "A=1\nA=2\n"
+
+
+@pytest.mark.parametrize("exists", [False, True])
+def test_empty_upsert_still_renders_a_newline(tmp_path: Path, exists: bool) -> None:
+    env = tmp_path / ".env"
+    if exists:
+        env.write_bytes(b"")
+
+    upsert_env(env, {})
+
+    assert env.read_bytes() == b"\n"
