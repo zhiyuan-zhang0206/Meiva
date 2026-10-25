@@ -2,7 +2,7 @@ exports = ["fake_commands.py", "fake_crontab.py"]
 
 [uses]
 "recurring" = ["fake_commands.py"]
-"test_autostart.py" = ["fake_commands.py"]
+"autostart" = ["fake_commands.py"]
 "test_boot_unit.py" = ["fake_commands.py"]
 "test_cron.py" = ["fake_commands.py"]
 "test_fake_commands.py" = ["fake_commands.py"]
@@ -18,8 +18,6 @@ exports = ["fake_commands.py", "fake_crontab.py"]
 "test_walg_job.py" = ["fake_commands.py", "fake_crontab.py"]
 
 [debt.env-patch]
-"test_autostart.py#monkeypatch.setenv os.environ.HOME" = 1
-"test_autostart.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_cron.py#monkeypatch.setenv os.environ.HOME" = 2
 "test_cron.py#monkeypatch.setenv os.environ.XPC_SERVICE_NAME" = 4
 "test_job_gates.py#monkeypatch.setenv os.environ.HOME" = 1
@@ -33,8 +31,6 @@ exports = ["fake_commands.py", "fake_crontab.py"]
 "test_walg_job.py#monkeypatch.setenv os.environ.HOME" = 1
 
 [debt.first-party-patch]
-"test_autostart.py#monkeypatch.setattr base.host.system.autostart.meiva_binary_path" = 1
-"test_autostart.py#monkeypatch.setattr base.host.system.cron.launchd_path_env" = 1
 "test_boot_unit.py#monkeypatch.setattr base.host.system.boot_unit.Path" = 1
 "test_boot_unit.py#monkeypatch.setattr base.host.system.boot_unit.SYSTEM_UNIT_DIR" = 4
 "test_boot_unit.py#monkeypatch.setattr base.host.system.boot_unit.in_boot_unit" = 1
@@ -66,10 +62,10 @@ exports = ["fake_commands.py", "fake_crontab.py"]
 "test_pr_flow_job.py#monkeypatch.setattr base.host.system.cron.unregister_platform_job" = 1
 "test_pr_flow_job.py#monkeypatch.setattr base.host.system.pr_flow_job.logger.error" = 1
 "test_probes.py#monkeypatch.setattr base.host.system.probes.Path.exists" = 2
-"test_system_backend.py#monkeypatch.setattr base.host.system.autostart.install" = 1
-"test_system_backend.py#monkeypatch.setattr base.host.system.autostart.uninstall" = 1
 "test_system_backend.py#monkeypatch.setattr base.host.system.backend.is_linux" = 1
 "test_system_backend.py#monkeypatch.setattr base.host.system.backend.is_macos" = 1
+"test_system_backend.py#monkeypatch.setattr base.host.system.boot_autostart.registration.install" = 1
+"test_system_backend.py#monkeypatch.setattr base.host.system.boot_autostart.registration.uninstall" = 1
 "test_system_backend.py#monkeypatch.setattr base.host.system.boot_unit.systemd_running" = 1
 "test_walg_job.py#monkeypatch.setattr base.host.system.cron.register_platform_job" = 2
 "test_walg_job.py#monkeypatch.setattr base.host.system.cron.skip_os_job" = 1

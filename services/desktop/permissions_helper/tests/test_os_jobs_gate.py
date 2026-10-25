@@ -17,7 +17,9 @@ import pytest
 
 from base import paths
 from base.config import settings
-from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job, walg_job
+from base.host.system import cron, logs_job, packages_job, pr_flow_job, walg_job
+from base.host.system.boot_autostart import registration as autostart
+from base.host.system.boot_autostart.content import launchd_plist_content
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
 from base.host.system.packages_content import RefreshSchedule
@@ -222,7 +224,7 @@ def test_deregistration_is_not_gated_by_the_os_jobs_switch(
         call(host=fake_host())
     assert backend.calls == [
         "unregister-cron",
-        "unregister-autostart",
+        "unregister-registration",
         "unregister-logs_job",
         "unregister-packages_job",
         "unregister-pr_flow_job",
@@ -336,29 +338,16 @@ def test_health_probe_plist_pins_meiva_home(
     assert "<key>PATH</key>" in body
 
 
-@pytest.mark.parametrize(
-    "render",
-    [
-        pytest.param(
-            partial(autostart.autostart_plist_content, services=frozenset({"gateway"})),
-            id="autostart",
-        ),
-    ],
-)
-def test_every_launchagent_pins_meiva_home(
-    render: object, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / ".meiva-x"))
-
-    def fake_meiva_binary_path(*, host: Host) -> str:
-        return "/x/meiva"
-
-    monkeypatch.setattr(cron, "meiva_binary_path", fake_meiva_binary_path)
-    monkeypatch.setattr(autostart, "meiva_binary_path", fake_meiva_binary_path)
-    assert callable(render)
-    body = render(host=fake_host())
-    assert isinstance(body, str)
-    assert f"<key>MEIVA_HOME</key>\n        <string>{tmp_path / '.meiva-x'}</string>" in body
+def test_every_launchagent_pins_meiva_home(tmp_path: Path) -> None:
+    home = tmp_path / ".meiva-x"
+    body = launchd_plist_content(
+        arguments=("/x/meiva", "start", "--boot", "--only-service", "gateway"),
+        retry_interval_seconds=60,
+        log_file=home / "logs/autostart.log",
+        environment_home=home,
+        path_env="/x:/usr/bin",
+    )
+    assert f"<key>MEIVA_HOME</key>\n        <string>{home}</string>" in body
 
 
 def test_cron_env_prefix_scopes_to_one_command(

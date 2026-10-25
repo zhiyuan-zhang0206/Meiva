@@ -1,0 +1,11 @@
+exports = ["content.py", "registration.py"]
+
+[uses]
+"registration.py" = ["content.py"]
+
+[purity]
+"__init__.py" = "strict"
+"content.py" = "strict"
+
+[debt.ambient-read]
+"registration.py#home pathlib.Path.home" = 1
