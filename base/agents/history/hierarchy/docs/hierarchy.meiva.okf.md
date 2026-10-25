@@ -26,11 +26,11 @@ auditing and aims to be faithful, so the two do not shape each other.
 - **Level 1** ([[base/agents/history/hierarchy/docs/chunks.meiva.okf.md|chunk calls]]): the agent's
   own request prefix plus one instruction, so the provider serves the prefix from cache; the model
   groups the numbered catalog of units and summarizes each group. `chunks.py` (queue, trigger,
-  nodes), `chunk_consumer.py` (the agent-host loop), `chunk_generate.py` (instruction, catalog,
+  nodes), `services/agent_runner/understanding/chunk_consumer.py` (the agent-host loop), `chunk_generate.py` (instruction, catalog,
   reply), `leaf_groups.py` (reply parsing).
 - **Levels above** ([[base/agents/history/hierarchy/docs/groups.meiva.okf.md|upper-level grouping]]):
   a level's open nodes are grouped by a plain-text call with no agent prefix; `group.py` (prompt,
-  reply checks), `group_consumer.py` (when a level is due), `group_store.py` (writes).
+  reply checks), `services/agent_runner/understanding/group_consumer.py` (when a level is due), `group_store.py` (writes).
 - **Reads** (`store.py`, `serve.py`, `usage.py`): the nodes with their deterministic costs for
   the run-timeline ([[services/derived/insights/run_timeline/docs/run_timeline.meiva.okf.md|run timeline]]).
 - **Provider calls** (`generate.py`): the model built the way the agent builds its own, the
@@ -61,5 +61,6 @@ live reader and is evaluated only at the existing window-selection points.
 
 Hierarchy `read_times`, `divide_units`, chunk generation, matter filtering, and
 rebuild planning carry those same explicit rendering inputs. Resident consumers
-build them from `UnderstandingReadInputs.clock_factory` and
-`UnderstandingReadInputs.timestamps_enabled`, preserving operation-time reads.
+mint them in the agent-host operation root from its owned clock configuration and
+timestamp switch at the existing phases. The base renderers receive those values,
+never configuration readers.

@@ -1,34 +1,34 @@
-"""The consumer loop for chunk-triggered understanding, run by the agent host.
-
-Producers (the llm node and the compact paths, `agent/hooks/understanding_chunks.py`)
-enqueue chunks into `understanding_chunk_jobs`; this loop claims them
-(`FOR UPDATE SKIP LOCKED`, so every runner's loop shares one queue) as soon as they are due, with no
-cap on how many run at once — one agent's jobs still run strictly in order (the claim only hands
-out an agent's oldest live job, so the jobs in flight never outnumber the agents with work),
-different agents' side by side; rate limiting is the provider's 429 and the shared retry
-backoff of `invoke_response` —
-reads the chunk's segment from the checkpoint, asks the agent's own model to
-divide it into groups of message units and summarize each, and writes one depth-1
-`understanding_nodes` row per group. The request is the
-agent's conversation up to the chunk's end plus a trailing instruction on the
-plain path (SystemMessage in-band, `execute_code` bound, the model built with
-the agent's own effort), so the provider serves the prefix from cache.
-
-No staleness judgment: a claimed chunk is always described, once. A chunk whose
-checkpoint has not caught up (the writer persists every Nth super-step) goes
-back to the queue and is claimed again after a spacing, up to a bound; every other
-failure ends the job as `failed` with the `understanding_chunk_failed` event and no
-retry: drifted indices, a generation error (a grouping reply still refused after the
-corrections included), a database error, a stopping host or a claimer that died. Each poll samples the queue's depth, with this
-runner's in-flight jobs, as the `understanding_backlog` event. A job that ends
-`done` is followed, in the same task, by the upper-level grouping checks of its agent
-(`group_consumer.py`). A manual build's upper-level rebuild (`rebuild.py`) is claimed by the same
-loop once its agent has no chunk job left.
-
-The loop never raises — a raise would cancel the whole host's task group — and neither does a
-job: each runs in a task of the loop's own `TaskGroup`, which catches everything, so one job's
-failure touches no other.
-"""
+# meiva:note
+# The consumer loop for chunk-triggered understanding, run by the agent host.
+#
+# Producers (the llm node and the compact paths, `agent/hooks/understanding_chunks.py`)
+# enqueue chunks into `understanding_chunk_jobs`; this loop claims them
+# (`FOR UPDATE SKIP LOCKED`, so every runner's loop shares one queue) as soon as they are due, with no
+# cap on how many run at once — one agent's jobs still run strictly in order (the claim only hands
+# out an agent's oldest live job, so the jobs in flight never outnumber the agents with work),
+# different agents' side by side; rate limiting is the provider's 429 and the shared retry
+# backoff of `invoke_response` —
+# reads the chunk's segment from the checkpoint, asks the agent's own model to
+# divide it into groups of message units and summarize each, and writes one depth-1
+# `understanding_nodes` row per group. The request is the
+# agent's conversation up to the chunk's end plus a trailing instruction on the
+# plain path (SystemMessage in-band, `execute_code` bound, the model built with
+# the agent's own effort), so the provider serves the prefix from cache.
+#
+# No staleness judgment: a claimed chunk is always described, once. A chunk whose
+# checkpoint has not caught up (the writer persists every Nth super-step) goes
+# back to the queue and is claimed again after a spacing, up to a bound; every other
+# failure ends the job as `failed` with the `understanding_chunk_failed` event and no
+# retry: drifted indices, a generation error (a grouping reply still refused after the
+# corrections included), a database error, a stopping host or a claimer that died. Each poll samples the queue's depth, with this
+# runner's in-flight jobs, as the `understanding_backlog` event. A job that ends
+# `done` is followed, in the same task, by the upper-level grouping checks of its agent
+# (`group_consumer.py`). A manual build's upper-level rebuild (`rebuild.py`) is claimed by the same
+# loop once its agent has no chunk job left.
+#
+# The loop never raises — a raise would cancel the whole host's task group — and neither does a
+# job: each runs in a task of the loop's own `TaskGroup`, which catches everything, so one job's
+# failure touches no other.
 
 from __future__ import annotations
 
@@ -74,11 +74,6 @@ from base.agents.history.hierarchy.chunks import (
     write_group_nodes,
 )
 from base.agents.history.hierarchy.generate import GenerateError, GenParams, build_generation_llm
-from base.agents.history.hierarchy.group_consumer import (
-    UnderstandingReadInputs,
-    run_blocking,
-    run_group_checks,
-)
 from base.agents.history.hierarchy.rebuild import (
     MAX_REBUILD_ATTEMPTS,
     RebuildJob,
@@ -86,27 +81,36 @@ from base.agents.history.hierarchy.rebuild import (
     finish_rebuild,
     rebuild_pending,
     release_rebuild,
-    run_rebuild,
 )
 from base.agents.history.hierarchy.units import divide_units
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.observation.snapshot import agent_model_target
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
+from base.config import ConfigBoot
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.log import logger
+from services.agent_runner.understanding.group_consumer import (
+    run_blocking,
+    run_group_checks,
+)
+from services.agent_runner.understanding.rebuild import run_rebuild
 
 POLL_SECONDS = 2.0
 
+# meiva:note
 # A database error that a retry can outlive (a restart, a dropped connection, a pool wait).
 _TRANSIENT = (psycopg.OperationalError, psycopg.InterfaceError, PoolTimeout)
 
 
 @dataclass(frozen=True)
 class Outcome:
-    """How one claimed job ended: done / failed / skipped, or `wait` (back to the queue) when
-    nothing about the job itself went wrong: the checkpoint has not caught up."""
+    # meiva:note
+    # How one claimed job ended: done / failed / skipped, or `wait` (back to the queue) when
+    # nothing about the job itself went wrong: the checkpoint has not caught up.
 
     status: str
     error: str | None = None
@@ -115,7 +119,8 @@ class Outcome:
 def load_segments(
     db: Database, agent_id: int, boundary_id: str | None
 ) -> tuple[FullHistory, int | None]:
-    """The stitched history and, for a closing chunk, the index of its segment."""
+    # meiva:note
+    # The stitched history and, for a closing chunk, the index of its segment.
     history = load_checkpoint_history_full(db, agent_id)
     if boundary_id is None:
         return history, None
@@ -124,26 +129,29 @@ def load_segments(
 
 
 class ModelCache:
-    """One chat model per (model, overrides), kept for the consumer's life and never closed.
-
-    Closing is wrong in a resident process: langchain-anthropic hands every
-    instance one process-wide `lru_cache`d httpx client, so closing one model's
-    client breaks every later sync call in the host.
-    Reuse also keeps providers that build a client per instance from opening a
-    new pool per job. Keys are the cluster's distinct agent model
-    configurations, so the cache stays small.
-    """
+    # meiva:note
+    # One chat model per (model, overrides), kept for the consumer's life and never closed.
+    #
+    # Closing is wrong in a resident process: langchain-anthropic hands every
+    # instance one process-wide `lru_cache`d httpx client, so closing one model's
+    # client breaks every later sync call in the host.
+    # Reuse also keeps providers that build a client per instance from opening a
+    # new pool per job. Keys are the cluster's distinct agent model
+    # configurations, so the cache stays small.
 
     def __init__(self, catalog: ModelCatalog, keys: ProviderKeys, llm_override: str) -> None:
         self.catalog = catalog
         self.keys = keys
         self.llm_override = llm_override
         self._models: dict[tuple[str, ModelOverrides, str], Any] = {}
-        self._lock = threading.Lock()  # jobs build models from several worker threads
+        # meiva:note
+        # jobs build models from several worker threads
+        self._lock = threading.Lock()
 
     def get(self, model: str, overrides: ModelOverrides, reasoning: str = "") -> Any:
-        """The model; `reasoning` is `MEIVA_UNDERSTANDING_GROUP_REASONING`'s value: empty keeps
-        the model's own tier, `off` disables thinking, anything else is the effort asked."""
+        # meiva:note
+        # The model; `reasoning` is `MEIVA_UNDERSTANDING_GROUP_REASONING`'s value: empty keeps
+        # the model's own tier, `off` disables thinking, anything else is the effort asked.
         key = (model, overrides, reasoning)
         with self._lock:
             if key not in self._models:
@@ -168,12 +176,12 @@ def describe(
     calls: list[ChunkCall],
     agent_id: int,
     *,
-    inputs: UnderstandingReadInputs,
+    config: ConfigBoot,
 ) -> ChunkResult:
-    """Blocking: the agent's own model's groups and summaries of a located chunk.
-
-    Every provider call's raw record is appended to `calls`, the failed one too.
-    """
+    # meiva:note
+    # Blocking: the agent's own model's groups and summaries of a located chunk.
+    #
+    # Every provider call's raw record is appended to `calls`, the failed one too.
     return generate_chunk(
         models.get(model, overrides),
         located.prefix,
@@ -182,16 +190,18 @@ def describe(
         catalog=models.catalog,
         agent_id=agent_id,
         tools=tools,
-        corrections=inputs.corrections(),
+        corrections=config.view.agent.understanding_group_corrections,
         on_call=calls.append,
         timeline_inputs=TimestampPolicy.from_clock(
-            inputs.clock_factory(), timestamps_enabled=inputs.timestamps_enabled()
+            Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+            timestamps_enabled=config.view.general.message_timestamps,
         ),
     )
 
 
 def _plan_nodes(result: ChunkResult, located: LocatedChunk) -> list[GroupNode]:
-    """The groups as storable nodes: stitched spans, first / last message times."""
+    # meiva:note
+    # The groups as storable nodes: stitched spans, first / last message times.
     base = located.span[0]
     nodes: list[GroupNode] = []
     for group in result.groups:
@@ -209,9 +219,10 @@ def _plan_nodes(result: ChunkResult, located: LocatedChunk) -> list[GroupNode]:
 
 
 def _report_gaps(job: ChunkJob, located: LocatedChunk, left_over: list[tuple[int, int]]) -> None:
-    """The event for what this job will not describe: uncovered runs it left for another job
-    (the part of a chunk that overlapped existing nodes in the middle) and the turns a closing
-    chunk's boundary snapshot lacks."""
+    # meiva:note
+    # The event for what this job will not describe: uncovered runs it left for another job
+    # (the part of a chunk that overlapped existing nodes in the middle) and the turns a closing
+    # chunk's boundary snapshot lacks.
     if not left_over and located.missing is None:
         return
     gaps = [f"{a}-{b}" for a, b in left_over]
@@ -225,7 +236,8 @@ def _report_gaps(job: ChunkJob, located: LocatedChunk, left_over: list[tuple[int
 
 
 def _gave_up(job: ChunkJob) -> Outcome | None:
-    """`failed` for a job that has waited too long for its checkpoint, else None."""
+    # meiva:note
+    # `failed` for a job that has waited too long for its checkpoint, else None.
     if job.age_seconds > GIVE_UP_AFTER_SECONDS:
         hours = job.age_seconds / 3600
         return Outcome("failed", f"gave up: still not describable after {hours:.0f} h")
@@ -235,11 +247,11 @@ def _gave_up(job: ChunkJob) -> Outcome | None:
 async def _undescribed_part(
     pool: AsyncConnectionPool, job: ChunkJob, located: LocatedChunk
 ) -> tuple[LocatedChunk | None, list[tuple[int, int]]]:
-    """`located` cut to its first run that no level-1 node covers, and the runs after it.
-
-    None for the chunk when nothing is left. A chunk with several uncovered runs describes the
-    first; the rest are returned for the caller to report (never dropped silently).
-    """
+    # meiva:note
+    # `located` cut to its first run that no level-1 node covers, and the runs after it.
+    #
+    # None for the chunk when nothing is left. A chunk with several uncovered runs describes the
+    # first; the rest are returned for the caller to report (never dropped silently).
     covered = await covered_spans(pool, job.agent_id, located.span)
     if not covered:
         return located, []
@@ -257,18 +269,19 @@ async def run_job(
     models: ModelCache,
     executor: ThreadPoolExecutor | None = None,
     *,
-    inputs: UnderstandingReadInputs,
+    config: ConfigBoot,
 ) -> Outcome:
-    """Describe one claimed chunk and store its nodes; the outcome says how it ended."""
+    # meiva:note
+    # Describe one claimed chunk and store its nodes; the outcome says how it ended.
     if (gave_up := _gave_up(job)) is not None:
         return gave_up
     model, overrides = await asyncio.to_thread(
         agent_model_target,
         db,
         job.agent_id,
-        fallback=inputs.hierarchy_model(),
+        fallback=config.view.lm.hierarchy_model,
         catalog=models.catalog,
-        default_model=inputs.default_model(),
+        default_model=config.view.lm.llm_model,
     )
     try:
         history, closing_segment = await asyncio.to_thread(
@@ -289,6 +302,7 @@ async def run_job(
     except ChunkNotReadyError as exc:
         return Outcome("wait", str(exc))
     except ChunkDriftError as exc:
+        # meiva:note
         # Waiting does not heal it: the indices drifted.
         return Outcome("failed", str(exc))
     except ChunkEmptyError as exc:
@@ -301,10 +315,12 @@ async def run_job(
         for unit in divide_units(
             list(located.messages),
             timeline_inputs=TimestampPolicy.from_clock(
-                inputs.clock_factory(), timestamps_enabled=inputs.timestamps_enabled()
+                Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+                timestamps_enabled=config.view.general.message_timestamps,
             ),
         )
     ):
+        # meiva:note
         # Nothing but framework-injected notes: there is no matter to describe.
         return Outcome("skipped", "the chunk holds only framework notes")
     calls: list[ChunkCall] = []
@@ -319,7 +335,7 @@ async def run_job(
             tools,
             calls,
             job.agent_id,
-            inputs=inputs,
+            config=config,
         )
     except GenerateError as exc:
         return Outcome("failed", str(exc))
@@ -331,7 +347,8 @@ async def run_job(
 
 
 async def settle_chunk_job(pool: AsyncConnectionPool, job: ChunkJob, outcome: Outcome) -> None:
-    """Record a job's outcome on its row, with the event for the ones that end without a node."""
+    # meiva:note
+    # Record a job's outcome on its row, with the event for the ones that end without a node.
     if outcome.status == "wait":
         await release_job(pool, job.id, error=outcome.error or "")
         return
@@ -361,25 +378,25 @@ async def settle_chunk_job(pool: AsyncConnectionPool, job: ChunkJob, outcome: Ou
 
 @dataclass(frozen=True)
 class Replay:
-    """A replay tool's consumer of ONE agent's already-enqueued jobs (`scripts/verify/understanding_replay.py`).
-
-    Compaction segments are independent (a closing chunk seals every open group), so the
-    segments' jobs run side by side, each segment's in order. The upper-level checks are left
-    out: leaves of later segments land before earlier ones finish, and a grouping over a
-    level with gaps would be wrong; the tool's `regroup` rebuilds them in message order.
-    """
+    # meiva:note
+    # A replay tool's consumer of ONE agent's already-enqueued jobs (`scripts/verify/understanding_replay.py`).
+    #
+    # Compaction segments are independent (a closing chunk seals every open group), so the
+    # segments' jobs run side by side, each segment's in order. The upper-level checks are left
+    # out: leaves of later segments land before earlier ones finish, and a grouping over a
+    # level with gaps would be wrong; the tool's `regroup` rebuilds them in message order.
 
     agent_id: int
 
 
 class Consumer:
-    """One runner's consumer: claims every due job, runs each in its own task.
-
-    A job is in flight from claim to the end of its upper-level checks. Each job owns a
-    one-thread pool that keeps its blocking model calls off the host's default executor and is
-    shut down when the job ends. Every task is owned by the `TaskGroup` handed to `claim`, and
-    `_process` catches everything, so no job outlives or breaks the loop.
-    """
+    # meiva:note
+    # One runner's consumer: claims every due job, runs each in its own task.
+    #
+    # A job is in flight from claim to the end of its upper-level checks. Each job owns a
+    # one-thread pool that keeps its blocking model calls off the host's default executor and is
+    # shut down when the job ends. Every task is owned by the `TaskGroup` handed to `claim`, and
+    # `_process` catches everything, so no job outlives or breaks the loop.
 
     def __init__(
         self,
@@ -391,13 +408,15 @@ class Consumer:
         catalog: ModelCatalog,
         keys: ProviderKeys,
         llm_override: str,
-        inputs: UnderstandingReadInputs,
+        config: ConfigBoot,
     ) -> None:
         self.pool, self.db, self.tools, self.replay = pool, db, tools, replay
         self.models = ModelCache(catalog, keys, llm_override)
-        self.inputs = inputs
+        self.config = config
         self.in_flight = 0
-        self.finished = asyncio.Event()  # set whenever a job ends
+        # meiva:note
+        # set whenever a job ends
+        self.finished = asyncio.Event()
 
     async def emit_backlog(self) -> None:
         depth = await backlog(self.pool)
@@ -413,8 +432,11 @@ class Consumer:
         )
 
     async def claim(self, tg: asyncio.TaskGroup) -> bool:
-        """Claim one due job and start it; False when nothing is due."""
-        self.in_flight += 1  # reserved before the await: this is the only claimer
+        # meiva:note
+        # Claim one due job and start it; False when nothing is due.
+        # meiva:note
+        # reserved before the await: this is the only claimer
+        self.in_flight += 1
         try:
             job = await claim_job(
                 self.pool,
@@ -424,6 +446,7 @@ class Consumer:
             if job is not None:
                 tg.create_task(self._process(job))
                 return True
+            # meiva:note
             # A replay leaves the upper levels to its tool's own regroup; live consumers rebuild
             # an agent's tree once its chunk jobs have all ended (`rebuild.py`).
             rebuild = await claim_rebuild(self.pool) if self.replay is None else None
@@ -437,7 +460,8 @@ class Consumer:
             raise
 
     async def _fail_stopped(self, job: ChunkJob) -> None:
-        """Fail a job this consumer holds because its host is stopping; never raises."""
+        # meiva:note
+        # Fail a job this consumer holds because its host is stopping; never raises.
         try:
             await asyncio.shield(
                 settle_chunk_job(self.pool, job, Outcome("failed", "host stopping"))
@@ -449,14 +473,16 @@ class Consumer:
             )
 
     async def _process(self, job: ChunkJob) -> None:
-        """Run, settle and group-check one claimed job; never raises."""
+        # meiva:note
+        # Run, settle and group-check one claimed job; never raises.
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="understanding")
         try:
             try:
                 outcome = await run_job(
-                    self.pool, self.db, job, self.tools, self.models, executor, inputs=self.inputs
+                    self.pool, self.db, job, self.tools, self.models, executor, config=self.config
                 )
             except asyncio.CancelledError:
+                # meiva:note
                 # The host is stopping (a rollout): a chunk is attempted once, so the job ends
                 # here rather than holding its agent's queue until the lease lapses.
                 await self._fail_stopped(job)
@@ -474,6 +500,7 @@ class Consumer:
                 and self.replay is None
                 and not await rebuild_pending(self.pool, job.agent_id)
             ):
+                # meiva:note
                 # The nodes just written may make a level due for grouping (group_consumer.py);
                 # a pending rebuild groups every leaf itself, so checks now would be redone.
                 await run_group_checks(
@@ -482,9 +509,10 @@ class Consumer:
                     self.models,
                     job.agent_id,
                     executor=executor,
-                    inputs=self.inputs,
+                    config=self.config,
                 )
         except Exception:
+            # meiva:note
             # A settle that failed leaves the row `running`; its lease lapses and fails it.
             logger.opt(exception=True).warning(
                 "understanding chunk {job} (agent {agent}) could not be settled",
@@ -497,7 +525,8 @@ class Consumer:
             self.finished.set()
 
     async def _process_rebuild(self, rebuild: RebuildJob) -> None:
-        """Run and settle one claimed upper-level rebuild; never raises."""
+        # meiva:note
+        # Run and settle one claimed upper-level rebuild; never raises.
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="understanding")
         try:
             try:
@@ -507,7 +536,7 @@ class Consumer:
                     self.models,
                     rebuild.agent_id,
                     executor=executor,
-                    inputs=self.inputs,
+                    config=self.config,
                 )
             except asyncio.CancelledError:
                 try:
@@ -550,6 +579,7 @@ class Consumer:
             else:
                 await finish_rebuild(self.pool, rebuild.id, status="done", leaves=leaves)
         except Exception:
+            # meiva:note
             # A settle that failed leaves the row `running`; its lease lapses and it is retaken.
             logger.opt(exception=True).warning(
                 "understanding rebuild {rebuild} (agent {agent}) could not be settled",
@@ -562,6 +592,8 @@ class Consumer:
             self.finished.set()
 
     async def _live_jobs(self, agent_id: int) -> int:
+        # meiva:note
+        # PostgreSQL count returns exactly one row even when no matching job exists.
         async with self.pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
                 "SELECT count(*) FROM understanding_chunk_jobs"
@@ -573,10 +605,10 @@ class Consumer:
         return int(row[0])
 
     async def run_until_idle(self) -> None:
-        """Claim and finish jobs until nothing is due and nothing is in flight (tests, tools).
-
-        A replay also waits out jobs sent back to the queue (their retry spacing).
-        """
+        # meiva:note
+        # Claim and finish jobs until nothing is due and nothing is in flight (tests, tools).
+        #
+        # A replay also waits out jobs sent back to the queue (their retry spacing).
         async with asyncio.TaskGroup() as tg:
             while True:
                 while await self.claim(tg):
@@ -616,9 +648,10 @@ async def replay_jobs(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     llm_override: str,
-    inputs: UnderstandingReadInputs,
+    config: ConfigBoot,
 ) -> None:
-    """Describe every enqueued job of one agent, its segments in parallel (the replay tool)."""
+    # meiva:note
+    # Describe every enqueued job of one agent, its segments in parallel (the replay tool).
     await Consumer(
         pool,
         db,
@@ -627,7 +660,7 @@ async def replay_jobs(
         catalog=catalog,
         keys=keys,
         llm_override=llm_override,
-        inputs=inputs,
+        config=config,
     ).run_until_idle()
 
 
@@ -639,17 +672,17 @@ async def understanding_loop_forever(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     llm_override: str,
-    inputs: UnderstandingReadInputs,
+    config: ConfigBoot,
 ) -> None:
-    """Consume the chunk queue for the host's whole life; returns at once when the feature is off.
-
-    `tools` is the agent's tool schema (`[execute_code]`), bound for cache parity;
-    the host hands it in because the kernel's schema lives above this package.
-    Every due job runs at once, one agent's never together.
-    """
-    if not inputs.enabled():
+    # meiva:note
+    # Consume the chunk queue for the host's whole life; returns at once when the feature is off.
+    #
+    # `tools` is the agent's tool schema (`[execute_code]`), bound for cache parity;
+    # the host hands it in because the kernel's schema lives above this package.
+    # Every due job runs at once, one agent's never together.
+    if not config.view.agent.understanding_enabled:
         logger.info("[agent-host] understanding consumer idle — MEIVA_UNDERSTANDING_ENABLED is off")
         return
     await Consumer(
-        pool, db, tools, catalog=catalog, keys=keys, llm_override=llm_override, inputs=inputs
+        pool, db, tools, catalog=catalog, keys=keys, llm_override=llm_override, config=config
     ).run_forever()

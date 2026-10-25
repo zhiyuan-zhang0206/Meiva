@@ -1,0 +1,33 @@
+[uses]
+"chunk_faults.py" = ["consumer_helpers.py", "consumer_history.py"]
+"test_configuration.py" = ["consumer_helpers.py", "provider_wire.py"]
+"test_provider_receipts.py" = ["consumer_helpers.py", "provider_wire.py"]
+"test_chunk_consumer.py" = ["chunk_faults.py", "consumer_helpers.py", "consumer_history.py"]
+"test_group_consumer.py" = ["consumer_helpers.py", "provider_wire.py"]
+"test_rebuild.py" = ["consumer_helpers.py", "provider_wire.py"]
+
+[debt.first-party-patch]
+"chunk_faults.py#monkeypatch.setattr services.agent_runner.understanding.chunk_consumer.agent_model_target" = 1
+"chunk_faults.py#monkeypatch.setattr services.agent_runner.understanding.chunk_consumer.describe" = 1
+"chunk_faults.py#monkeypatch.setattr services.agent_runner.understanding.chunk_consumer.load_segments" = 1
+"test_chunk_consumer.py#monkeypatch.setattr base.agents.history.hierarchy.chunks.INSERT_CALL_SQL" = 1
+"test_chunk_consumer.py#monkeypatch.setattr base.config.settings.agent.understanding_enabled" = 2
+"test_chunk_consumer.py#monkeypatch.setattr services.agent_runner.understanding.chunk_consumer.POLL_SECONDS" = 1
+"test_chunk_consumer.py#monkeypatch.setattr services.agent_runner.understanding.chunk_consumer.agent_model_target" = 1
+"test_chunk_consumer.py#monkeypatch.setattr services.agent_runner.understanding.chunk_consumer.build_generation_llm" = 1
+"test_chunk_consumer.py#monkeypatch.setattr services.agent_runner.understanding.chunk_consumer.describe" = 5
+"test_chunk_consumer.py#monkeypatch.setattr services.agent_runner.understanding.chunk_consumer.load_segments" = 3
+"test_chunk_consumer.py#monkeypatch.setattr services.agent_runner.understanding.chunk_consumer.run_group_checks" = 2
+"test_chunk_consumer.py#monkeypatch.setattr services.agent_runner.understanding.chunk_consumer.run_job" = 1
+"test_chunk_consumer.py#monkeypatch.setattr services.agent_runner.understanding.chunk_consumer.settle_chunk_job" = 1
+"test_group_consumer.py#monkeypatch.setattr services.agent_runner.understanding.group_consumer.MIN_CHECK_OPEN" = 3
+"test_group_consumer.py#monkeypatch.setattr services.agent_runner.understanding.group_consumer.agent_model_target" = 1
+"test_group_consumer.py#monkeypatch.setattr services.agent_runner.understanding.group_consumer.generate" = 4
+"test_group_consumer.py#monkeypatch.setattr services.agent_runner.understanding.group_consumer.generate_groups" = 2
+"test_group_consumer.py#monkeypatch.setattr services.agent_runner.understanding.group_consumer.group_model" = 1
+"test_rebuild.py#monkeypatch.setattr base.config.settings.agent.understanding_group_check_decay" = 1
+"test_rebuild.py#monkeypatch.setattr base.config.settings.agent.understanding_group_check_open" = 1
+"test_rebuild.py#monkeypatch.setattr base.config.settings.agent.understanding_group_model" = 1
+"test_rebuild.py#monkeypatch.setattr services.agent_runner.understanding.chunk_consumer.run_rebuild" = 2
+"test_rebuild.py#monkeypatch.setattr services.agent_runner.understanding.group_consumer.MIN_CHECK_OPEN" = 1
+"test_rebuild.py#monkeypatch.setattr services.agent_runner.understanding.group_consumer.generate_groups" = 1

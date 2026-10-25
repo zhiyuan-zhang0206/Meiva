@@ -1590,6 +1590,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/agent_runner/understanding/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/backup/artifact/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

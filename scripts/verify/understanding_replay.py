@@ -22,7 +22,6 @@ from base.agents.history.checkpoint import (  # noqa: E402
     list_compact_boundary_checkpoint_ids,
     load_checkpoint_history_full,
 )
-from base.agents.history.hierarchy.chunk_consumer import ModelCache, replay_jobs  # noqa: E402
 from base.agents.history.hierarchy.chunk_plan import (  # noqa: E402
     PlannedChunk,
     plan_history,
@@ -33,11 +32,7 @@ from base.agents.history.hierarchy.chunks import (  # noqa: E402
     enqueue_chunk,
     message_time,
 )
-from base.agents.history.hierarchy.group_consumer import UnderstandingReadInputs  # noqa: E402
-from base.agents.history.hierarchy.rebuild import run_rebuild  # noqa: E402
 from base.agents.observation.snapshot import agent_model_target  # noqa: E402
-from base.clock import SYSTEM_TIMERS, Clock  # noqa: E402
-from base.clock.configuration import clock_config_from_boot  # noqa: E402
 from base.config import ConfigBoot  # noqa: E402
 from base.db import Database  # noqa: E402
 from base.db.code_version_gate import ProcessDbGate  # noqa: E402
@@ -48,6 +43,11 @@ from base.native_process.code_version import CodeVersion  # noqa: E402
 from base.native_process.loaded_commit import LoadedCommit  # noqa: E402
 from base.packages.plugin_providers import build_model_catalog  # noqa: E402
 from base.telemetry import process_name  # noqa: E402
+from services.agent_runner.understanding.chunk_consumer import (  # noqa: E402
+    ModelCache,
+    replay_jobs,
+)
+from services.agent_runner.understanding.rebuild import run_rebuild  # noqa: E402
 
 CLI_DESCRIPTION = """Replay chunk-triggered understanding over an agent's EXISTING history (preview dev tool).
 
@@ -122,21 +122,6 @@ def _load(db: Database, agent_id: int) -> tuple[FullHistory, list[str]]:
     history = load_checkpoint_history_full(db, agent_id)
     boundaries = list(reversed(list_compact_boundary_checkpoint_ids(db, agent_id)))
     return history, boundaries
-
-
-def _understanding_inputs(config: ConfigBoot) -> UnderstandingReadInputs:
-    return UnderstandingReadInputs(
-        enabled=lambda: config.view.agent.understanding_enabled,
-        default_model=lambda: config.view.lm.llm_model,
-        hierarchy_model=lambda: config.view.lm.hierarchy_model,
-        group_model=lambda: config.view.agent.understanding_group_model,
-        check_open=lambda: config.view.agent.understanding_group_check_open,
-        check_decay=lambda: config.view.agent.understanding_group_check_decay,
-        reasoning=lambda: config.view.agent.understanding_group_reasoning,
-        corrections=lambda: config.view.agent.understanding_group_corrections,
-        clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
-        timestamps_enabled=lambda: config.view.general.message_timestamps,
-    )
 
 
 def _threshold(
@@ -228,7 +213,7 @@ async def _consume(
             catalog=catalog,
             keys=process_provider_keys(catalog),
             llm_override=config.view.lm.llm_override,
-            inputs=_understanding_inputs(config),
+            config=config,
         )
     finally:
         await pool.close()
@@ -257,7 +242,7 @@ async def _regroup(
             db,
             ModelCache(catalog, process_provider_keys(catalog), config.view.lm.llm_override),
             agent_id,
-            inputs=_understanding_inputs(config),
+            config=config,
         )
         print(f"agent {agent_id}: upper levels rebuilt over {leaves} leaves")
     finally:

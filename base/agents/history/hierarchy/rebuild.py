@@ -19,19 +19,11 @@ not claimed (`chunks.py`), so nothing writes leaves under it.
 
 from __future__ import annotations
 
-import asyncio
-from concurrent.futures import Executor
 from dataclasses import dataclass
 
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.hierarchy.chunks import CLAIM_LEASE_SECONDS, RETRY_SPACING_SECONDS
-from base.agents.history.hierarchy.group_consumer import (
-    GroupingModels,
-    UnderstandingReadInputs,
-    run_group_checks,
-)
-from base.db import Database
 from base.db.transaction import async_write_transaction
 
 # A rebuild is retried after a crash or an error this often before it is given up on.
@@ -39,7 +31,6 @@ MAX_REBUILD_ATTEMPTS = 3
 # A grouping check of an earlier leaf may still be finishing when the last chunk job ends; the
 # rebuild waits for it this long (polling) before it lifts the tree.
 IDLE_WAIT_SECONDS = 600.0
-_IDLE_POLL_SECONDS = 2.0
 
 _CLAIM_SQL = """
 UPDATE understanding_rebuilds SET status = 'running', attempts = attempts + 1, claimed_at = now()
@@ -127,8 +118,9 @@ async def rebuild_pending(pool: AsyncConnectionPool, agent_id: int) -> bool:
     return bool(row[0])
 
 
-async def _checks_idle(pool: AsyncConnectionPool, agent_id: int) -> bool:
-    """No grouping check of the agent holds a live lease."""
+async def checks_idle(pool: AsyncConnectionPool, agent_id: int) -> bool:
+    # meiva:note
+    # No grouping check of the agent holds a live lease.
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "SELECT count(*) FROM understanding_group_state WHERE agent_id = %s"
@@ -141,12 +133,12 @@ async def _checks_idle(pool: AsyncConnectionPool, agent_id: int) -> bool:
     return int(row[0]) == 0
 
 
-async def _lift_upper(pool: AsyncConnectionPool, agent_id: int) -> list[int]:
-    """Drop every node above level 1 and the grouping cursor, in one transaction.
-
-    The level-1 nodes lose their parent; the result is the message-index end of every one that can
-    take part in grouping (timed, of this pipeline), in message order.
-    """
+async def lift_upper(pool: AsyncConnectionPool, agent_id: int) -> list[int]:
+    # meiva:note
+    # Drop every node above level 1 and the grouping cursor, in one transaction.
+    #
+    # The level-1 nodes lose their parent; the result is the message-index end of every one that can
+    # take part in grouping (timed, of this pipeline), in message order.
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
         await cur.execute(
             "UPDATE understanding_nodes SET parent_id = NULL"
@@ -164,31 +156,3 @@ async def _lift_upper(pool: AsyncConnectionPool, agent_id: int) -> list[int]:
             (agent_id,),
         )
         return [int(r[0]) for r in await cur.fetchall()]
-
-
-async def run_rebuild(
-    pool: AsyncConnectionPool,
-    db: Database,
-    models: GroupingModels,
-    agent_id: int,
-    *,
-    inputs: UnderstandingReadInputs,
-    executor: Executor | None = None,
-) -> int:
-    """Rebuild the agent's upper levels from its level-1 nodes; the number of leaves replayed.
-
-    Raises:
-        TimeoutError: an earlier grouping check still holds its lease after `IDLE_WAIT_SECONDS`.
-    """
-    waited = 0.0
-    while not await _checks_idle(pool, agent_id):
-        if waited >= IDLE_WAIT_SECONDS:
-            raise TimeoutError("a grouping check of the agent is still running")
-        await asyncio.sleep(_IDLE_POLL_SECONDS)
-        waited += _IDLE_POLL_SECONDS
-    leaf_ends = await _lift_upper(pool, agent_id)
-    for end in leaf_ends:
-        await run_group_checks(
-            pool, db, models, agent_id, inputs=inputs, executor=executor, upto=end
-        )
-    return len(leaf_ends)
