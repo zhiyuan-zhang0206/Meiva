@@ -30,6 +30,7 @@ from base.native_process.ownership import OwnedProcess, stable_create_time
 from base.native_process.process_control import ProcessControl
 from base.sessions import log_prefix
 from base.sessions.pty import process_groups
+from base.sessions.pty.screen import PtyScreen
 from base.sessions.record import SessionRecord
 
 # A pid is "the same process we launched" only if its start-time matches to
@@ -137,9 +138,7 @@ class PtySession:
         self.rows = rows
         self.record = record
         self.initial_command: str | None = None
-        # Any keeps the screen module and pyte lazy; naming PtyScreen here
-        # would import them eagerly (no TYPE_CHECKING by repo convention).
-        self._screen: Any = None
+        self._screen: PtyScreen | None = None
         # Only explicitly captured foreground leaders; no session membership scan.
         self.known_groups: tuple[OwnedProcess, ...] = ()
         self._ring = bytearray()
@@ -208,7 +207,7 @@ class PtySession:
                 return
         self._feed_screen(screen, data)
 
-    def _feed_screen(self, screen: Any, data: bytes) -> None:
+    def _feed_screen(self, screen: PtyScreen, data: bytes) -> None:
         """Feed pyte; a failure is reported at WARNING once per session, not per chunk."""
         try:
             screen.feed(data)
@@ -225,7 +224,7 @@ class PtySession:
         """How many bytes the next master read may take."""
         return READ_CHUNK if self.live_screen() is None else READ_CHUNK_LIVE_SCREEN
 
-    def screen(self) -> Any:
+    def screen(self) -> PtyScreen:
         """The pyte model (a ``screen.PtyScreen``), built on first need by replaying the ring.
 
         Replaying a full ring takes seconds, so it runs outside the session lock:
@@ -238,8 +237,6 @@ class PtySession:
                 if self._screen is not None:
                     return self._screen
                 replay, self._ring = bytes(self._ring), bytearray()
-            from base.sessions.pty.screen import PtyScreen
-
             screen = PtyScreen(self.cols, self.rows)
             late = replay
             while True:
@@ -250,7 +247,7 @@ class PtySession:
                         self._screen = screen
                         return screen
 
-    def live_screen(self) -> Any:
+    def live_screen(self) -> PtyScreen | None:
         """The screen model when one was built, else None (never builds one)."""
         with self._lock:
             return self._screen
@@ -363,8 +360,7 @@ def reap_child(session: PtySession) -> None:
         session.shell.send_signal(sig)
         # SIGKILL delivery can lag on a loaded box; a single WNOHANG reap right
         # after can return 0 and leave an UNREAPED zombie. Poll briefly.
-        deadline = time.monotonic() + _CHILD_EXIT_POLL_S
-        while time.monotonic() < deadline:
+        for _ in range(int(_CHILD_EXIT_POLL_S / 0.02)):
             try:
                 pid, _status = os.waitpid(session.pid, os.WNOHANG)
             except ChildProcessError:
@@ -423,16 +419,15 @@ class InitialCommand:
 
     TICK_S = 0.1
 
-    def __init__(self, session: PtySession, cmd: str) -> None:
+    def __init__(self, session: PtySession, cmd: str, *, now: float) -> None:
         self._session = session
         self._cmd = cmd
-        self._give_up_at = time.monotonic() + _INITIAL_CMD_READY_TIMEOUT_S
+        self._give_up_at = now + _INITIAL_CMD_READY_TIMEOUT_S
         self._send_at: float | None = None
         self.done = False
 
-    def step(self) -> None:
+    def step(self, *, now: float) -> None:
         """Note the prompt, then write the command once the shell has settled."""
-        now = time.monotonic()
         if self._send_at is None:
             prompt = self._session.screen().current_line()
             if prompt.endswith(("$", "#")) or now >= self._give_up_at:

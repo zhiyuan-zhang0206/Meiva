@@ -1,2 +1,0 @@
-[debt.restricted-python]
-"test_run_with_progress_without_a_sink_defers.py#python subprocess that runs something other than a literal repository file" = 2

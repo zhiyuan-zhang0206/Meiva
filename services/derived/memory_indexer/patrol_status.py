@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 from typing import TypedDict
 
 from base import telemetry
@@ -54,10 +53,10 @@ class PatrolStatus:
             self._consecutive_failures += 1
             self._over_limit = self._consecutive_failures > self._retry_limit
 
-    def succeeded(self) -> None:
+    def succeeded(self, *, at: float) -> None:
         with self._lock:
             self._pending = 0
-            self._last_success_at = time.time()
+            self._last_success_at = at
             self._consecutive_failures = 0
             self._over_limit = False
 

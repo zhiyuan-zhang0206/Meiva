@@ -18,14 +18,27 @@ from services.backup.tests.test_backup import (
 )
 
 _TRY_LOCK = Path(__file__).parent.parent / "child_try_lock.py"
-_STAGE = """
-import sys, time
-out = sys.argv[1]
-for _ in range(30):
-    with open(out, "ab") as fh:
-        fh.write(b"x" * 65536)
-    time.sleep(0.06)
-"""
+
+
+def _run_child_stage(argv: list[str]) -> int:
+    mode = argv[1]
+    if mode == "slow":
+        out = Path(argv[2])
+        for _ in range(30):
+            with out.open("ab") as fh:
+                fh.write(b"x" * 65536)
+            time.sleep(0.06)
+        return 0
+    if mode == "hung":
+        marker = Path(argv[2])
+        time.sleep(30)
+        marker.write_text("finished", encoding="utf-8")
+        return 0
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(_run_child_stage(sys.argv))
 
 
 def test_run_with_progress_without_a_sink_is_a_plain_subprocess_run() -> None:
@@ -40,12 +53,10 @@ def test_run_with_progress_without_a_sink_is_a_plain_subprocess_run() -> None:
 def test_run_with_progress_heartbeats_while_a_slow_child_runs(tmp_path: Path) -> None:
     out = tmp_path / "slow.dump.partial"
     out.write_bytes(b"")
-    stage = tmp_path / "slow_stage.py"
-    stage.write_text(_STAGE, encoding="utf-8")
     lines: list[str] = []
 
     proc = backup.run_with_progress(
-        [sys.executable, str(stage), str(out)],
+        [sys.executable, __file__, "slow", str(out)],
         timeout_s=120.0,
         label="pg_dump",
         progress=lines.append,
@@ -66,20 +77,12 @@ def test_run_with_progress_heartbeats_while_a_slow_child_runs(tmp_path: Path) ->
 
 def test_run_with_progress_timeout_still_kills_the_child(tmp_path: Path) -> None:
     marker = tmp_path / "finished"
-    stage = tmp_path / "hung_stage.py"
-    stage.write_text(
-        "import time\n"
-        "from pathlib import Path\n"
-        "time.sleep(30)\n"
-        f"Path({str(marker)!r}).write_text('finished')\n",
-        encoding="utf-8",
-    )
     lines: list[str] = []
     started = time.monotonic()
 
     with pytest.raises(subprocess.TimeoutExpired):
         backup.run_with_progress(
-            [sys.executable, str(stage)],
+            [sys.executable, __file__, "hung", str(marker)],
             timeout_s=1.0,
             label="pg_dump",
             progress=lines.append,

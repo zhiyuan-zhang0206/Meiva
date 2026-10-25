@@ -21,7 +21,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 from urllib.parse import urlsplit
 
 from base.host.private_storage import create_private_bytes, private_file_problem
@@ -98,6 +98,10 @@ def _overwrite_guard_on(raw: object) -> bool:
     return raw is True or (isinstance(raw, str) and raw.strip().lower() == "true")
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 def read_config(path: Path) -> WalgConfig:
     """Validate the file at `path` and the key file it names; no pin is read or written.
 
@@ -107,12 +111,11 @@ def read_config(path: Path) -> WalgConfig:
     """
     _owner_only_file(path, "WAL-G config")
     try:
-        payload: object = json.loads(regular_bytes(path, max_bytes=_CONFIG_MAX_BYTES))
+        raw: object = json.loads(regular_bytes(path, max_bytes=_CONFIG_MAX_BYTES))
     except (OSError, RegularFileReadError, ValueError):
         raise WalgConfigError(f"WAL-G config {path} is not readable JSON") from None
-    if not isinstance(payload, dict):
+    if not _is_object_dict(raw):
         raise WalgConfigError(f"WAL-G config {path} must be a JSON object")
-    raw = cast(dict[str, object], payload)
 
     for name in _REQUIRED_STRINGS:
         value = raw.get(name)

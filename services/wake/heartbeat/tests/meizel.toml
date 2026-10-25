@@ -24,7 +24,3 @@
 
 [debt.patch-raising-false]
 "test_impersonation_heartbeat.py#monkeypatch.setattr meiva.__plugin_installation__" = 1
-
-[debt.test-subclass-override]
-"test_heartbeat_checkin_retry.py#subclass services.wake.heartbeat.daemon.HeartbeatDispatch.send_checkin" = 1
-"test_heartbeat_liveness.py#subclass base.events.live.bus.EventBus.publish_best_effort_sync" = 1

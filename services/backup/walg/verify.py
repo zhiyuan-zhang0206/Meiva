@@ -10,10 +10,10 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import TypeGuard
 
 from services.backup.walg.backups import QUERY_TIMEOUT_S
 from services.backup.walg.gaps import (
@@ -66,6 +66,26 @@ class ChainVerdict:
         return f"integrity {self.integrity}{detail}, timeline {self.timeline}"
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _require_object_dict(value: object, message: str) -> dict[str, object]:
+    if not _is_object_dict(value):
+        raise TypeError(message)
+    return value
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _to_int(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise TypeError("expected int")
+    return int(value)
+
+
 # meiva:note
 # The two check statuses in the report, with recorded gaps subtracted from the
 # integrity verdict: a MISSING_LOST range named in wal-gaps.json leaves the
@@ -74,12 +94,12 @@ class ChainVerdict:
 # meiva:link services/backup/walg/docs/walg-tick.meiva.okf.md
 def parse_verdict(text: str, *, recorded_gaps: Sequence[RecordedGap] = ()) -> ChainVerdict:
     try:
-        payload: Any = json.loads(text)
-        report = cast("dict[str, Any]", payload)
-        integrity = cast("dict[str, Any]", report["integrity"])
+        payload = _require_object_dict(json.loads(text), "wal-verify report must be an object")
+        integrity = _require_object_dict(payload["integrity"], "wal-verify checks must be objects")
+        timeline = _require_object_dict(payload["timeline"], "wal-verify checks must be objects")
         statuses = (
             str(integrity["status"]),
-            str(cast("dict[str, Any]", report["timeline"])["status"]),
+            str(timeline["status"]),
         )
     except (ValueError, KeyError, TypeError):
         raise VerifyOutputError(
@@ -102,21 +122,20 @@ def parse_verdict(text: str, *, recorded_gaps: Sequence[RecordedGap] = ()) -> Ch
     )
 
 
-def _missing_lost(integrity: dict[str, Any]) -> tuple[MissingRange, ...]:
+def _missing_lost(integrity: Mapping[str, object]) -> tuple[MissingRange, ...]:
     details = integrity.get("details")
-    if not isinstance(details, list):
+    if not _is_object_list(details):
         return ()
     missing: list[MissingRange] = []
-    for item in cast("list[Any]", details):
-        detail = cast("dict[str, Any]", item) if isinstance(item, dict) else {}
-        if detail.get("status") != "MISSING_LOST":
+    for item in details:
+        if not _is_object_dict(item) or item.get("status") != "MISSING_LOST":
             continue
         try:
             missing.append(
                 MissingRange(
-                    start_segment=str(detail["start_segment"]),
-                    end_segment=str(detail["end_segment"]),
-                    segments=int(detail["segments_count"]),
+                    start_segment=str(item["start_segment"]),
+                    end_segment=str(item["end_segment"]),
+                    segments=_to_int(item["segments_count"]),
                 )
             )
         except (KeyError, TypeError, ValueError):

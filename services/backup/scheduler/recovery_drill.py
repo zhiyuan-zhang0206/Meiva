@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 from base.host.private_storage import write_private_bytes
 
@@ -30,14 +30,17 @@ def record_local_dump_restore_success(now: datetime, marker: Path) -> None:
     write_private_bytes(marker, payload)
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 def _parse_success_marker(value: str) -> datetime:
     parsed: object = json.loads(value)
-    if not isinstance(parsed, dict):
+    if not _is_object_dict(parsed):
         raise TypeError("invalid marker shape")
-    raw = cast(dict[str, object], parsed)
-    if set(raw) != {"completed_at"}:
+    if set(parsed) != {"completed_at"}:
         raise ValueError("invalid marker shape")
-    completed_at = raw["completed_at"]
+    completed_at = parsed["completed_at"]
     if not isinstance(completed_at, str):
         raise TypeError("invalid marker shape")
     stamp = datetime.fromisoformat(completed_at)

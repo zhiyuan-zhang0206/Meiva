@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import itertools
-import json
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -27,7 +26,8 @@ from base.config import settings
 from base.daemon.loop_health import LoopProgress
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus, event_bus_config_from_settings
+from base.events.live.bus import EventBus
+from base.events.live.tests.live_capture import recorded_events
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.upkeep.ttl_reaper import cadence, sweep
 from services.upkeep.ttl_reaper.sweep import (
@@ -318,7 +318,9 @@ def test_prune_schedule_fire_log_deletes_every_row_past_the_window(
     _insert_fire_log(db_conn, s2, [50 * 24, 45 * 24])
     db_conn.commit()
 
-    pruned = sweep.prune_schedule_fire_log_blocking(reaper_pool, retention_days=30)
+    pruned = sweep.prune_schedule_fire_log_blocking(
+        reaper_pool, retention_days=30, now=datetime.now(UTC)
+    )
 
     assert pruned == 5
     with db_conn.cursor() as cur:
@@ -338,15 +340,31 @@ def test_prune_schedule_fire_log_is_bounded_per_pass(
     s1 = _new_schedule(db_conn, "fire-log-bounded")
     _insert_fire_log(db_conn, s1, [50 * 24, 49 * 24, 48 * 24, 47 * 24, 46 * 24])
     db_conn.commit()
+    now = datetime.now(UTC)
 
-    assert sweep.prune_schedule_fire_log_blocking(reaper_pool, retention_days=30, batch_size=2) == 2
+    assert (
+        sweep.prune_schedule_fire_log_blocking(
+            reaper_pool, retention_days=30, now=now, batch_size=2
+        )
+        == 2
+    )
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM schedule_fire_log WHERE schedule_id = %s", (s1,))
         remaining = cur.fetchone()
         assert remaining is not None and remaining[0] == 3
 
-    assert sweep.prune_schedule_fire_log_blocking(reaper_pool, retention_days=30, batch_size=2) == 2
-    assert sweep.prune_schedule_fire_log_blocking(reaper_pool, retention_days=30, batch_size=2) == 1
+    assert (
+        sweep.prune_schedule_fire_log_blocking(
+            reaper_pool, retention_days=30, now=now, batch_size=2
+        )
+        == 2
+    )
+    assert (
+        sweep.prune_schedule_fire_log_blocking(
+            reaper_pool, retention_days=30, now=now, batch_size=2
+        )
+        == 1
+    )
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM schedule_fire_log WHERE schedule_id = %s", (s1,))
         remaining = cur.fetchone()
@@ -423,18 +441,6 @@ async def test_the_prune_keeps_what_the_configured_retention_keeps(
     assert _fire_log_rows(db_conn, schedule) == 1
 
 
-class _RecordingBus(EventBus):
-    def __init__(self) -> None:
-        super().__init__(event_bus_config_from_settings())
-        self.payloads: list[dict[str, object]] = []
-
-    async def publish_best_effort(
-        self, payload: str, *, channel: str | None = None, context: str = ""
-    ) -> int | None:
-        self.payloads.append(json.loads(payload))
-        return 1
-
-
 async def test_expired_notice_publishes_observation_facts(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
@@ -455,16 +461,16 @@ async def test_expired_notice_publishes_observation_facts(
         nid = int(row[0])
     db_conn.commit()
 
-    bus = _RecordingBus()
-    await sweep.sweep_round(
-        reaper_pool,
-        database,
-        bus,
-        LoopProgress("test", 60.0, timers=SYSTEM_TIMERS),
-        reaper_config(),
-    )
+    with recorded_events(event_bus) as events:
+        await sweep.sweep_round(
+            reaper_pool,
+            database,
+            event_bus,
+            LoopProgress("test", 60.0, timers=SYSTEM_TIMERS),
+            reaper_config(),
+        )
 
-    resolved = [event for event in bus.payloads if event.get("role") == "notice_resolved"]
+    resolved = [event for event in events if event.get("role") == "notice_resolved"]
     assert len(resolved) == 1
     facts = resolved[0]
     assert facts["notice_id"] == nid
@@ -554,16 +560,16 @@ async def test_expired_notice_stays_silent_for_the_user(
     aid = _agent(db_conn, "idling")
     _expired_notice(db_conn, aid, local_id=8, title="Quiet, please")
 
-    bus = _RecordingBus()
-    await sweep.sweep_round(
-        reaper_pool,
-        database,
-        bus,
-        LoopProgress("test", 60.0, timers=SYSTEM_TIMERS),
-        reaper_config(),
-    )
+    with recorded_events(event_bus) as events:
+        await sweep.sweep_round(
+            reaper_pool,
+            database,
+            event_bus,
+            LoopProgress("test", 60.0, timers=SYSTEM_TIMERS),
+            reaper_config(),
+        )
 
-    roles = [event.get("role") for event in bus.payloads]
+    roles = [event.get("role") for event in events]
     assert "notice_posted" not in roles
     assert roles.count("notice_resolved") == 1
     with db_conn.cursor() as cur:

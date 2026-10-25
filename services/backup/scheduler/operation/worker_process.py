@@ -10,13 +10,12 @@ import signal
 import subprocess
 import sys
 import tempfile
-import time
 import types
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from services.backup.scheduler.operation.staging import (
@@ -38,6 +37,10 @@ def _interrupt(signum: int, _frame: types.FrameType | None) -> None:
     raise KeyboardInterrupt
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 def worker_request(argv: list[str]) -> tuple[dict[str, object], Path]:
     """Enter one fixed worker; SIGTERM unwinds its normal cleanup.
 
@@ -53,20 +56,20 @@ def worker_request(argv: list[str]) -> tuple[dict[str, object], Path]:
         # A launch with no request never reaches the worker body: the controller
         # writes it before the child starts.
         raise SystemExit("usage: python -m <operation worker> REQUEST RESULT")
-    value = json.loads(request_path.read_text())
-    if not isinstance(value, dict):
+    value: object = json.loads(request_path.read_text())
+    if not _is_object_dict(value):
         raise TypeError("operation request must be an object")
-    return cast(dict[str, object], value), result_path
+    return dict(value), result_path
 
 
 def _result_object(path: Path) -> dict[str, object]:
     try:
-        value = json.loads(path.read_text())
+        value: object = json.loads(path.read_text())
     except (OSError, ValueError) as exc:
         raise RuntimeError("operation result is missing or invalid") from exc
-    if not isinstance(value, dict):
+    if not _is_object_dict(value):
         raise TypeError("operation result must be an object")
-    return cast(dict[str, object], value)
+    return dict(value)
 
 
 def _deferral(result: dict[str, object]) -> OperationDeferred | None:
@@ -147,7 +150,7 @@ async def run_operation(
         future, cancelled = await _to_completion(lambda: _launch(module, work, env))
         process = future.result()
         _raise_stopped(cancelled)
-        await _await_operation(process, time.monotonic() + timeout_s)
+        await _await_operation(process, asyncio.get_running_loop().time() + timeout_s)
         result = _finished_result(process, work)
         return CompletedOperation(kind, work, result, held)
     except BaseException as original:
@@ -205,8 +208,9 @@ def _launch(module: str, work: Path, env: dict[str, str]) -> subprocess.Popen[by
 
 
 async def _await_operation(process: subprocess.Popen[bytes], deadline: float) -> None:
+    loop = asyncio.get_running_loop()
     while process.poll() is None:
-        if time.monotonic() >= deadline:
+        if loop.time() >= deadline:
             raise TimeoutError("operation exceeded its execution bound")
         await asyncio.sleep(0.05)
 

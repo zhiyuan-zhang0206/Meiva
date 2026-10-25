@@ -13,7 +13,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import TypeGuard
 
 from services.backup.walg.runner import run_walg
 
@@ -47,6 +47,20 @@ class Backup:
         return None if self.is_full else self.name.split(_DELTA_MARK, 1)[1]
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _to_int(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise TypeError("expected int")
+    return int(value)
+
+
 def parse_backups(text: str) -> list[Backup]:
     """Backups oldest first by start time. Empty output and JSON `null` mean none.
 
@@ -56,25 +70,26 @@ def parse_backups(text: str) -> list[Backup]:
     if not text.strip():
         return []
     try:
-        payload: Any = json.loads(text)
+        payload: object = json.loads(text)
     except ValueError:
         raise BackupChainError("backup-list printed output that is not JSON") from None
     if payload is None:
         return []
-    if not isinstance(payload, list):
+    if not _is_object_list(payload):
         raise BackupChainError("backup-list printed JSON that is not a list")
     backups: list[Backup] = []
-    for raw in cast(list[Any], payload):
+    for raw in payload:
+        if not _is_object_dict(raw):
+            raise BackupChainError("backup-list printed an entry of an unexpected shape")
         try:
-            entry = cast(dict[str, Any], raw)
             backups.append(
                 Backup(
-                    name=str(entry["backup_name"]),
-                    start_time=datetime.fromisoformat(str(entry["start_time"])),
-                    uncompressed_bytes=int(entry["uncompressed_size"]),
-                    compressed_bytes=int(entry["compressed_size"]),
-                    start_lsn=int(entry["start_lsn"]),
-                    finish_lsn=int(entry["finish_lsn"]),
+                    name=str(raw["backup_name"]),
+                    start_time=datetime.fromisoformat(str(raw["start_time"])),
+                    uncompressed_bytes=_to_int(raw["uncompressed_size"]),
+                    compressed_bytes=_to_int(raw["compressed_size"]),
+                    start_lsn=_to_int(raw["start_lsn"]),
+                    finish_lsn=_to_int(raw["finish_lsn"]),
                 )
             )
         except (KeyError, TypeError, ValueError):

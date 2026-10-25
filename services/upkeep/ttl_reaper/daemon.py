@@ -86,12 +86,14 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
 # is the RPC client's own worst case, which the loops also size their liveness window from.
 def ttl_reaper_config(config: ConfigBoot) -> TtlReaperConfig:
     daemon = config.view.daemon
+    clock = Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
     return TtlReaperConfig(
         poll_interval_s=daemon.ttl_reaper_poll_interval_seconds,
         fire_log_cleanup_interval_s=daemon.schedule_fire_log_cleanup_interval_seconds,
         fire_log_retention_days=daemon.schedule_fire_log_retention_days,
         shell_kill_deadline_s=shells.dispatch_deadline_s(),
-        zone=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).zone(),
+        zone=clock.zone(),
+        clock=clock,
     )
 
 

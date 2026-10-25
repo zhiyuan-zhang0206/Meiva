@@ -27,11 +27,10 @@ import re
 import signal
 import threading
 import time
-import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 import psutil
 
@@ -108,6 +107,10 @@ def _seconds(req: dict[str, Any], key: str) -> float:
     return float(value)
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
 def _child_env(overlay: object) -> dict[str, str]:
     """The shell's environment: this service's, minus its own markers, then the caller's.
 
@@ -117,12 +120,12 @@ def _child_env(overlay: object) -> dict[str, str]:
     under a runner profile fails fast), nor an activated virtualenv the caller
     did not ask for. An explicit overlay entry for either wins.
     """
-    if not isinstance(overlay, dict):
+    if not _is_object_dict(overlay):
         raise RequestError(protocol.BAD_REQUEST, "env must be an object of strings")
     env = child_env.inherited_process_env()
     env.pop("MEIVA_PROCESS_PROFILE", None)
     env.pop("VIRTUAL_ENV", None)
-    for key, value in cast("dict[object, object]", overlay).items():
+    for key, value in overlay.items():
         if not isinstance(key, str) or not isinstance(value, str):
             raise RequestError(protocol.BAD_REQUEST, "env must be an object of strings")
         if not key or "=" in key or "\0" in key or "\0" in value:
@@ -136,13 +139,23 @@ def _child_env(overlay: object) -> dict[str, str]:
 class PtyService:
     """The session table and the request handlers; `serve` runs them over a socket."""
 
-    def __init__(self, *, home: Path, process_control: ProcessControl) -> None:
+    def __init__(
+        self,
+        *,
+        home: Path,
+        process_control: ProcessControl,
+        now: Callable[[], float],
+        pid: int = 0,
+        host_generation: str = "",
+    ) -> None:
         self._home = home
         self._process_control = process_control
+        self._pid = pid
+        self._now = now
         self._sessions: dict[str, session.PtySession] = {}
         self._lock = threading.Lock()
         self._closing = False
-        self._host_generation = uuid.uuid4().hex
+        self._host_generation = host_generation
         # Set once `serve` runs: the loop and its task group, and the stop request.
         self._loop: asyncio.AbstractEventLoop | None = None
         self._tasks: asyncio.TaskGroup | None = None
@@ -197,7 +210,7 @@ class PtyService:
 
     def _ping(self, req: dict[str, Any]) -> dict[str, Any]:
         del req
-        return {"pid": os.getpid(), "host_generation": self._host_generation}
+        return {"pid": self._pid, "host_generation": self._host_generation}
 
     def _has(self, req: dict[str, Any]) -> dict[str, Any]:
         return {"alive": self._live(_text(req, "name")) is not None}
@@ -297,7 +310,7 @@ class PtyService:
                 None if create_time == session.DEAD_CHILD_SENTINEL else pid_starttime_ticks(pid)
             )
             record = SessionRecord(
-                pid, create_time, session.SHELL_COMMAND, cwd, time.time(), starttime, generation
+                pid, create_time, session.SHELL_COMMAND, cwd, self._now(), starttime, generation
             )
             created = session.PtySession(
                 name, pid, master, cols, rows, record, transcript_path(logs_dir(), name)
@@ -414,16 +427,16 @@ class PtyService:
         assert self._loop is not None  # noqa: S101
         self._loop.add_reader(created.master_fd, self._on_readable, created)
         if cmd is not None:
-            created.initial = session.InitialCommand(created, cmd)
+            created.initial = session.InitialCommand(created, cmd, now=self._loop.time())
             self._tick_initial(created)
 
     def _tick_initial(self, created: session.PtySession) -> None:
         pending = created.initial
         if pending is None or pending.done or created.ending:
             return
-        pending.step()
+        assert self._loop is not None  # noqa: S101
+        pending.step(now=self._loop.time())
         if not pending.done:
-            assert self._loop is not None  # noqa: S101
             self._loop.call_later(session.InitialCommand.TICK_S, self._tick_initial, created)
 
     def _on_readable(self, created: session.PtySession) -> None:

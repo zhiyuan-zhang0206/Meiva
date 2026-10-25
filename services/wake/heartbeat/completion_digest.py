@@ -69,7 +69,7 @@ async def flush_once(
     db: Database,
     bus: EventBus,
     *,
-    now: datetime | None = None,
+    now: datetime,
     machine: MachineIdentityReader,
 ) -> int:
     """Deliver each completed hour, then mark its persisted event rows.
@@ -77,7 +77,7 @@ async def flush_once(
     A crash after delivery but before the mark repeats the same idempotency key,
     obtaining the existing inbound receipt instead of a second digest.
     """
-    moment = now or datetime.now(UTC)
+    moment = now
     digests = await asyncio.to_thread(_pending, pool, moment)
     delivered = 0
     for digest in digests:

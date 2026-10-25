@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -85,6 +86,7 @@ def run(schedule_id: int, revision: int | None = None) -> int:
                 plugins=engine.PluginInputs(config=config, machine=machine, clients=clients),
                 policy=StallPolicy(timeout_s=config.view.gateway.schedule_stall_timeout_seconds),
                 home=meiva_home(),
+                pid=os.getpid(),
             ),
         )
     except BaseException as exc:

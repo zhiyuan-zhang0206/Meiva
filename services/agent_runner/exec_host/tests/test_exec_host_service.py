@@ -123,6 +123,7 @@ async def _running_service(home: Path) -> AsyncGenerator[Path]:
         base_environ=base_env,
         default_cwd=home,
         source_root=editable_install.current_interpreter_source_root(),
+        pid=os.getpid(),
     )
     async with asyncio.TaskGroup() as tg:
         tg.create_task(service.serve(sock_path, install_signals=False))

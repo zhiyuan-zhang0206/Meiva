@@ -7,6 +7,3 @@ exports = ["chunk_consumer.py", "group_consumer.py", "rebuild.py", "tests"]
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.ambient-read]
-"group_consumer.py#random uuid.uuid4" = 1

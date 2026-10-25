@@ -71,7 +71,7 @@ def main() -> int:
 
 async def _serve_with_guard(service: ExecHostService, path: Path, drain_s: float) -> None:
     async with asyncio.TaskGroup() as tasks:
-        tasks.create_task(run_memory_guard_forever(service.stop_event))
+        tasks.create_task(run_memory_guard_forever(service.stop_event, host_pid=os.getpid()))
         await service.serve(path, drain_timeout_s=drain_s)
 
 
@@ -81,6 +81,7 @@ def _run(home: Path, run: Path, *, default_cwd: Path) -> int:
         base_environ=child_env.inherited_process_env(),
         default_cwd=default_cwd,
         source_root=editable_install.current_interpreter_source_root(),
+        pid=os.getpid(),
     )
     path = service_socket_path(run)
     if path.parent == fallback_dir() and not _own_fallback_dir(path.parent):
