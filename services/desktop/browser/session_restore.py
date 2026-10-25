@@ -27,8 +27,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
-from collections.abc import Awaitable, Callable, Iterator
-from contextlib import AbstractAsyncContextManager
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
@@ -74,9 +73,6 @@ REPORT_POLL_S = 0.25
 
 PENDING_RESTORE = "restore"
 PENDING_LAYOUT = "layout"
-
-Fetch = Callable[[str], Awaitable[Any]]
-Connect = Callable[[str], AbstractAsyncContextManager[Any]]
 
 
 # meiva:note
@@ -510,33 +506,21 @@ def record_for_stop(*, home: Path, chrome: Chrome) -> str | None:
 # ── the CDP adapter ────────────────────────────────────────────────────────
 
 
-def _connect(url: str) -> AbstractAsyncContextManager[Any]:
-    return websockets.connect(url)
-
-
 # meiva:note
 # `Chrome` over this unit's CDP port.
-#
-#     `fetch` and `connect` are injectable so the worker ladder below can be driven
-#     by a fake; production passes neither and gets the real HTTP client and
-#     websocket.
 class CdpChrome:
     def __init__(
         self,
         cdp_port: int,
         *,
-        fetch: Fetch | None = None,
-        connect: Connect | None = None,
         timers: Timers = SYSTEM_TIMERS,
     ) -> None:
         self._cdp_port = cdp_port
-        self._fetch = fetch or http_json
-        self._connect = connect or _connect
         self._timers = timers
 
     async def json(self, path: str) -> Any | None:
         url = f"http://127.0.0.1:{self._cdp_port}{path}"
-        return await asyncio.wait_for(self._fetch(url), LISTING_TIMEOUT_S)
+        return await asyncio.wait_for(http_json(url), LISTING_TIMEOUT_S)
 
     # meiva:note
     # Evaluate `expression` in the tab-group extension's worker.
@@ -564,7 +548,7 @@ class CdpChrome:
         if type(version_obj) is not dict:
             raise RuntimeError("CDP /json/version did not return a JSON object")
         ids = itertools.count(1)
-        async with self._connect(str(version["webSocketDebuggerUrl"])) as ws:
+        async with websockets.connect(str(version["webSocketDebuggerUrl"])) as ws:
             extension_id = await self._extension_id(ws, ids, reload_first=reload_first)
             url = f"chrome-extension://{extension_id}/{shipped_worker()}"
             targets = await self._worker_targets(ws, ids, url)
@@ -579,7 +563,7 @@ class CdpChrome:
             raise RuntimeError(f"no live worker answered: {failure}")
 
     async def _extension_id(
-        self, ws: ClientConnection | Any, ids: Iterator[int], *, reload_first: bool
+        self, ws: ClientConnection, ids: Iterator[int], *, reload_first: bool
     ) -> str:
         loaded = [
             entry
@@ -595,7 +579,7 @@ class CdpChrome:
         return str(loaded[0]["id"])
 
     async def _worker_targets(
-        self, ws: ClientConnection | Any, ids: Iterator[int], url: str
+        self, ws: ClientConnection, ids: Iterator[int], url: str
     ) -> list[str]:
         deadline = self._timers.monotonic() + WORKER_SCRIPT_WAIT_S
         while True:
@@ -615,7 +599,7 @@ class CdpChrome:
 # meiva:note
 # Attach to one worker target and evaluate `expression` there (raises on failure).
 async def _attach_and_evaluate(
-    ws: ClientConnection | Any, ids: Iterator[int], target: str, expression: str
+    ws: ClientConnection, ids: Iterator[int], target: str, expression: str
 ) -> Any | None:
     session_id = (
         await asyncio.wait_for(
