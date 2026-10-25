@@ -7,10 +7,7 @@
 "_rows.py" = "strict"
 "_sites.py" = "strict"
 
-[debt.ambient-read]
-"_dom.py#clock time.monotonic" = 2
-"_utils.py#clock datetime.datetime.now" = 1
-"webchat.py#clock time.monotonic" = 6
-
-[debt.any-collaborator]
-"webchat.py#any evaluate.return" = 1
+[roots]
+"_dom.py" = { kinds = ["clock"], why = "Browser download helper polls file arrival against monotonic deadline" }
+"_utils.py" = { kinds = ["clock"], why = "Web-AI output helper stamps artifact directories with current UTC time" }
+"webchat.py" = { kinds = ["clock"], why = "Web-AI browser driver polls DOM readiness and streaming idle state against monotonic deadlines" }

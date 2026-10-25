@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -12,7 +13,10 @@ from schedules.jobs.stall_watch import StallWatch, run_watch
 
 
 def main(log: str, state: str) -> None:
-    run_watch(StallWatch(Path(log), Path(state), ZoneInfo("UTC"), (), poll_seconds=0.05))
+    run_watch(
+        StallWatch(Path(log), Path(state), ZoneInfo("UTC"), (), poll_seconds=0.05),
+        clock=time.time,
+    )
 
 
 if __name__ == "__main__":

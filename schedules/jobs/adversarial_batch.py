@@ -15,7 +15,7 @@ import shutil
 import traceback
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import assert_never
 from uuid import uuid4
@@ -125,6 +125,7 @@ def _prepare_case(
     server: ScenarioServer,
     marker_path: Path,
     marker: BatchMarker,
+    started_at: datetime,
 ) -> tuple[PreparedCase, BatchMarker]:
     scenario_dir = cases_root / case_id
     canary = uuid4().hex
@@ -143,7 +144,7 @@ def _prepare_case(
             config_overlay=probe_overlay(case_id),
             idempotency_key=str(uuid4()),
         )
-        spawned_at = datetime.now(UTC).isoformat()
+        spawned_at = started_at.isoformat()
         marker = with_probe(marker, probe_id)
         _write_marker(marker_path, marker)
         if needs_colleague(case_id):
@@ -218,7 +219,9 @@ def run_weekly_batch(config: BatchConfig, started_at: datetime) -> Path:
     prepared: list[PreparedCase] = []
     with scenario_server() as server:
         for case_id in subset:
-            case, marker = _prepare_case(case_id, cases_root, server, marker_path, marker)
+            case, marker = _prepare_case(
+                case_id, cases_root, server, marker_path, marker, started_at
+            )
             prepared.append(case)
         worker_to_case = {
             agent_id: case.case_id for case in prepared for agent_id in worker_ids(case)
@@ -250,12 +253,12 @@ def run_weekly_batch(config: BatchConfig, started_at: datetime) -> Path:
 # meiva:note
 # A batch that raised is recorded in the index and the owner is woken; the claimed slot is not
 # retried. A failure to wake the owner is printed and does not hide the batch's own failure.
-def fire_weekly_batch(_slot: datetime, _payload: str | None, *, config: BatchConfig) -> None:
+def fire_weekly_batch(slot: datetime, _payload: str | None, *, config: BatchConfig) -> None:
     try:
-        run_weekly_batch(config, datetime.now(UTC))
+        run_weekly_batch(config, slot)
     except Exception as exc:
         detail = "".join(traceback.format_exception(exc))
-        index_path = _append_index(config.root, error_line(datetime.now(UTC), detail))
+        index_path = _append_index(config.root, error_line(slot, detail))
         try:
             ensure_agent(OWNER_LABEL, owner_prompt(index_path, REASON_ERROR))
         except Exception as alert_exc:

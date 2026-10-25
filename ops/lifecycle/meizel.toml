@@ -12,7 +12,4 @@ exports = ["delivery.py", "events.py", "launch.py", "launch_reconcile.py", "term
 "resurrect_plan.py" = "strict"
 
 [roots]
-"__init__.py" = ["endpoints"]
-
-[debt.ambient-read]
-"__init__.py#settings base.config.settings" = 1
+"__init__.py" = { kinds = ["endpoints", "settings"], why = "Lifecycle op dispatch root resolves local agent-host endpoint and default model from settings" }

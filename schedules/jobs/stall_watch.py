@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,8 +39,8 @@ class StallWatch:
     poll_seconds: float = 60.0
 
 
-def _stamp(zone: ZoneInfo) -> str:
-    return f"[{datetime.now(zone):%Y-%m-%d %H:%M:%S %Z}]"
+def _stamp(now: float, zone: ZoneInfo) -> str:
+    return f"[{datetime.fromtimestamp(now, zone):%Y-%m-%d %H:%M:%S %Z}]"
 
 
 def _read_last_alert(path: Path) -> float:
@@ -51,14 +52,14 @@ def _read_last_alert(path: Path) -> float:
     return float(value) if isinstance(value, (int, float)) else 0.0
 
 
-def _write_state(path: Path, *, last_alert: float, last_sample: str | None) -> None:
+def _write_state(path: Path, *, last_alert: float, last_sample: str | None, now: float) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
             {
                 "last_alert": last_alert,
                 "last_sample": last_sample,
-                "updated": datetime.now(UTC).isoformat(timespec="seconds"),
+                "updated": datetime.fromtimestamp(now, UTC).isoformat(timespec="seconds"),
             }
         ),
         encoding="utf-8",
@@ -76,9 +77,11 @@ def poll_once(watch: StallWatch, state: WatchState, now: float) -> WatchState:
         lines = []
     plan = plan_poll(state, parse_stats(lines), now)
     for line in plan.log_lines:
-        print(f"{_stamp(watch.zone)} {line}", flush=True)
+        print(f"{_stamp(now, watch.zone)} {line}", flush=True)
     if plan.advanced:
-        _write_state(watch.state, last_alert=plan.state.last_alert, last_sample=plan.state.seen)
+        _write_state(
+            watch.state, last_alert=plan.state.last_alert, last_sample=plan.state.seen, now=now
+        )
     if plan.alert is not None:
         for agent in watch.report_agents:
             try:
@@ -88,11 +91,14 @@ def poll_once(watch: StallWatch, state: WatchState, now: float) -> WatchState:
     return plan.state
 
 
-def run_watch(watch: StallWatch) -> NoReturn:
+def run_watch(watch: StallWatch, clock: Callable[[], float]) -> NoReturn:
     state = initial_state(watch)
     while True:
+        now = clock()
         try:
-            state = poll_once(watch, state, time.time())
+            state = poll_once(watch, state, now)
         except Exception as exc:
-            print(f"{_stamp(watch.zone)} probe failed: {type(exc).__name__}: {exc}", flush=True)
+            print(
+                f"{_stamp(now, watch.zone)} probe failed: {type(exc).__name__}: {exc}", flush=True
+            )
         time.sleep(watch.poll_seconds)

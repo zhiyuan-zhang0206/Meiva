@@ -33,7 +33,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 # `webchat` lives in the parent skill's scripts/ dir, a sibling tree within
 # this same web-ai skill (not an importable package; PYTHONSAFEPATH=1 keeps a
@@ -62,6 +62,14 @@ def _slug(text: str, *, max_len: int = 40) -> str:
 # --------------------------------------------------------------------------- #
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _image_srcs(*, min_px: int) -> list[str]:
     """Srcs of every img already at least `min_px` on both sides — the
     pre-submit baseline `_wait_for_image` excludes, so a logo / avatar that
@@ -75,7 +83,8 @@ def _image_srcs(*, min_px: int) -> list[str]:
         "    .map((i) => i.currentSrc || i.src || '').filter(Boolean);"
         "}"
     )
-    return webchat.evaluate(js)
+    raw = webchat.evaluate(js)
+    return [str(x) for x in raw] if _is_object_list(raw) else []
 
 
 def _find_image_src(*, min_px: int, exclude: list[str]) -> dict[str, Any]:
@@ -96,7 +105,8 @@ def _find_image_src(*, min_px: int, exclude: list[str]) -> dict[str, Any]:
         "  return { src: el.currentSrc || el.src, w: el.naturalWidth || el.width, h: el.naturalHeight || el.height };"
         "}"
     )
-    return webchat.evaluate(js)
+    raw = webchat.evaluate(js)
+    return raw if _is_str_dict(raw) else {"src": None}
 
 
 def _find_video_src() -> dict[str, Any]:
@@ -114,7 +124,8 @@ def _find_video_src() -> dict[str, Any]:
         "  return { src, download: dl, poster: el.poster || null };"
         "}"
     )
-    return webchat.evaluate(js)
+    raw = webchat.evaluate(js)
+    return raw if _is_str_dict(raw) else {"src": None}
 
 
 def _wait_for_image(*, timeout: float, min_px: int, exclude: list[str]) -> dict[str, Any]:
@@ -178,7 +189,9 @@ def _canvas_data_url(src: str) -> str | None:
         "  catch (e) { return { dataUrl: null, err: String(e) }; }"
         "}"
     )
-    return webchat.evaluate(js).get("dataUrl")
+    raw = webchat.evaluate(js)
+    data_url = raw.get("dataUrl") if _is_str_dict(raw) else None
+    return data_url if isinstance(data_url, str) else None
 
 
 def _ext_from_url(src: str, *, default: str) -> str:

@@ -7,7 +7,7 @@ from __future__ import annotations
 import builtins
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, replace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import meiva
 import meiva.sdk_surface.agent_identity
@@ -494,11 +494,11 @@ def commit_update(
     with context.sql.transaction(), context.sql.cursor() as cur:
         if replay_update(cur, actor, task_id, operation_key, request_body, context=context):
             return None
-        if parent_id is not UNSET_FIELD:
+        if not isinstance(parent_id, Unset):
             # meiva:note
             # `None` means the system root, so the change set is measured against the resolved id:
             # a reparent to the parent a task already has is not a change.
-            resolved_parent = resolve_reparent(cur, task_id, cast(int | None, parent_id))
+            resolved_parent = resolve_reparent(cur, task_id, parent_id)
             sets.append("parent_id = %s")
             params.append(resolved_parent)
             write = replace(write, parent_id=resolved_parent)

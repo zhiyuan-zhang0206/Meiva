@@ -1,2 +1,2 @@
-[debt.ambient-read]
-"research.py#clock time.monotonic" = 10
+[roots]
+"research.py" = { kinds = ["clock"], why = "Web-AI deep-research driver polls browser progress against monotonic deadlines" }

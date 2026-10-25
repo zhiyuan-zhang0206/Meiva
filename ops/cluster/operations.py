@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from psycopg import Connection
 from psycopg.rows import DictRow
@@ -138,6 +138,26 @@ def shell_kill_op(agent_id: int, session_id: int) -> ShellKillResult:
     return ShellKillResult(mode=mode, interrupted=interrupted, name=name)
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_list(value: object) -> TypeGuard[list[str]]:
+    return _is_object_list(value) and all(isinstance(item, str) for item in value)
+
+
+def _is_saver_conn(value: object) -> TypeGuard[Connection[DictRow]]:
+    return isinstance(value, Connection)
+
+
 # meiva:note
 # The persisted cwd and effective skill-index narrowing for one agent.
 #
@@ -160,20 +180,22 @@ def agent_skill_view_inputs(
         row = cur.fetchone()
         if row is None:
             return None, None, "meiva"
-        overlay = cast(dict[str, Any], row[0]) if isinstance(row[0], dict) else {}
-        birth = cast(dict[str, Any], row[1]) if isinstance(row[1], dict) else {}
+        overlay = row[0] if _is_str_dict(row[0]) else {}
+        birth = row[1] if _is_str_dict(row[1]) else {}
         harness = str(row[2]) if len(row) > 2 and row[2] is not None else "meiva"
         pins = resolve_agent_config_pins(overlay, birth)
         wanted = pins.get("skills_to_inject_into_system_prompt")
+        if not _is_saver_conn(conn):
+            raise TypeError(f"expected psycopg Connection, got {type(conn).__name__}")
 
         saver = PostgresSaver(
-            conn=cast(Connection[DictRow], conn),
+            conn=conn,
             serde=CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES),
         )
         checkpoint = saver.get({"configurable": {"thread_id": str(agent_id)}})
 
     cwd = checkpoint["channel_values"].get("meiva_code__cwd") if checkpoint else None
-    narrowed = cast(list[str], wanted) if isinstance(wanted, list) else None
+    narrowed = wanted if _is_str_list(wanted) else None
     return (Path(cwd) if isinstance(cwd, str) else None), narrowed, harness
 
 

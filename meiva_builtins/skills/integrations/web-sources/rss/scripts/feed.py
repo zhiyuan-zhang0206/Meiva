@@ -49,7 +49,7 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 from base.paths.home import resolve_meiva_home
 
@@ -158,13 +158,18 @@ def save(post: Post, root: Path) -> Path:
     return outdir
 
 
+def _is_post(value: object) -> TypeGuard[Post]:
+    return isinstance(value, dict)
+
+
 # meiva:note
 # The saved post for an entry id, or None when its mirror has no `post.json`.
 def _read_post(root: Path, entry_id: str) -> Post | None:
     post_json = root / _entry_slug(entry_id) / "post.json"
     if not post_json.exists():
         return None
-    return cast(Post, json.loads(post_json.read_text()))
+    loaded: object = json.loads(post_json.read_text())
+    return loaded if _is_post(loaded) else None
 
 
 # meiva:note

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import assert_never, cast
+from typing import TypeGuard, assert_never
 
 __all__ = [
     "DigestlessHistory",
@@ -82,11 +82,15 @@ def recorded_history(record: Mapping[str, object]) -> RecordedHistory | Digestle
     )
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _names(value: object) -> frozenset[str]:
-    if not isinstance(value, list):
+    if not _is_object_list(value):
         return frozenset()
     names: set[str] = set()
-    for name in cast("list[object]", value):
+    for name in value:
         if not isinstance(name, str):
             return frozenset()
         names.add(name)

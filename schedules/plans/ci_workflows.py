@@ -15,7 +15,7 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import cast
+from typing import TypeGuard
 from zoneinfo import ZoneInfo
 
 __all__ = [
@@ -54,26 +54,37 @@ class WorkflowRun:
     created_at: str | None
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping)
+
+
 def parse_workflow_runs(payload: str, workflow: str) -> tuple[WorkflowRun, ...]:
     listing: object = json.loads(payload)
-    runs = (
-        cast(Mapping[str, object], listing).get("workflow_runs")
-        if isinstance(listing, dict)
-        else None
-    )
-    if not isinstance(runs, list):
+    runs = listing.get("workflow_runs") if _is_str_dict(listing) else None
+    if not _is_object_list(runs):
         raise TypeError(f"{workflow}: the runs listing carried no workflow_runs")
-    return tuple(_run(item, workflow) for item in cast(list[object], runs))
+    return tuple(_run(item, workflow) for item in runs)
 
 
 def _run(item: object, workflow: str) -> WorkflowRun:
-    if not isinstance(item, dict):
+    if not _is_str_dict(item):
         raise TypeError(f"{workflow}: a workflow run is not an object")
-    fields = cast(Mapping[str, object], item)
     return WorkflowRun(
-        _text(fields.get("conclusion")),
-        _text(fields.get("html_url")),
-        _text(fields.get("created_at")),
+        _text(item.get("conclusion")),
+        _text(item.get("html_url")),
+        _text(item.get("created_at")),
     )
 
 
@@ -126,9 +137,9 @@ def day_counts(snapshot: object, day: str, repo: str) -> tuple[int, int]:
 
 
 def _field(value: object, key: str) -> object:
-    if not isinstance(value, Mapping):
+    if not _is_str_mapping(value):
         raise TypeError(f"CI-run sampler snapshot: expected an object holding {key!r}")
-    return cast(Mapping[str, object], value)[key]
+    return value[key]
 
 
 def failure_message(detail: str) -> str:

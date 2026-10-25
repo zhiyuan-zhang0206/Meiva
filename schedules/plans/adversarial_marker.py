@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import cast
+from typing import TypeGuard
 
 from schedules.plans.adversarial_cases import batch_week
 
@@ -66,13 +66,23 @@ def render_marker(marker: BatchMarker) -> str:
     return json.dumps(payload, ensure_ascii=False) + "\n"
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _worker_ids(ids: object) -> set[int]:
-    if not isinstance(ids, list):
+    if not _is_object_list(ids):
         return set()
     return {
-        agent_id
-        for agent_id in cast(list[object], ids)
-        if isinstance(agent_id, int) and not isinstance(agent_id, bool)
+        agent_id for agent_id in ids if isinstance(agent_id, int) and not isinstance(agent_id, bool)
     }
 
 
@@ -84,11 +94,10 @@ def read_marker(text: str) -> StaleBatch:
         loaded: object = json.loads(text)
     except json.JSONDecodeError:
         return StaleBatch(None, frozenset())
-    if not isinstance(loaded, dict):
+    if not _is_str_dict(loaded):
         return StaleBatch(None, frozenset())
-    fields = cast(dict[str, object], loaded)
-    week = fields.get("week")
-    ids = _worker_ids(fields.get("probe_ids")) | _worker_ids(fields.get("colleague_ids"))
+    week = loaded.get("week")
+    ids = _worker_ids(loaded.get("probe_ids")) | _worker_ids(loaded.get("colleague_ids"))
     return StaleBatch(week if isinstance(week, str) else None, frozenset(ids))
 
 

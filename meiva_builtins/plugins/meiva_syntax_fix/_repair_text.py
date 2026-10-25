@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 REPAIR_MAX_ATTEMPTS = 3
 
@@ -58,19 +58,27 @@ def render_syntax_error(e: SyntaxError, source: str) -> str:
     return "\n".join(lines)
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 # meiva:note
 # A model reply flattened to plain text. A thinking model returns a list of blocks (thinking and
 # text); only the text blocks are kept.
 def extract_text(content: object) -> str:
     if isinstance(content, str):
         return content
-    if isinstance(content, list):
+    if _is_object_list(content):
         parts: list[str] = []
-        for block in cast(list[object], content):
-            if isinstance(block, dict):
-                fields = cast(dict[str, Any], block)
-                if fields.get("type") == "text" and isinstance(fields.get("text"), str):
-                    parts.append(fields["text"])
+        for block in content:
+            if _is_str_dict(block):
+                text = block.get("text")
+                if block.get("type") == "text" and isinstance(text, str):
+                    parts.append(text)
         return "".join(parts)
     return ""
 

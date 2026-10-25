@@ -15,7 +15,4 @@ exports = ["schema_mismatch.py"]
 "shell_plans.py" = "strict"
 
 [roots]
-"__init__.py" = ["endpoints"]
-
-[debt.ambient-read]
-"sessions.py#clock datetime.datetime.now" = 3
+"__init__.py" = { kinds = ["clock", "endpoints"], why = "Cluster status snapshot composition root resolves daemon endpoints and stamps the cluster wall-clock instant" }

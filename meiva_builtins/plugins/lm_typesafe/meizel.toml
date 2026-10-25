@@ -1,6 +1,2 @@
 [purity]
 "plugin.py" = "strict"
-
-[debt.type-cast]
-"provider.py#cast _input_tokens" = 1
-"provider.py#cast _object" = 1

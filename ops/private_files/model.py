@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Literal, TypedDict, cast
+from typing import Literal, TypedDict, TypeGuard
 
 
 class GitSource(TypedDict):
@@ -58,15 +58,24 @@ class CliArgs:
     json_output: bool
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_manifest_entries(value: object) -> TypeGuard[list[ManifestEntry]]:
+    return isinstance(value, list)
+
+
 def validate_manifest(raw: object) -> RegistryManifest:
-    if not isinstance(raw, dict):
+    if not _is_raw_dict(raw):
         raise TypeError("private-files manifest must be a JSON object")
-    manifest = cast(RegistryManifest, raw)
-    if manifest["version"] != 1:
-        raise ValueError(f"unsupported private-files manifest version: {manifest['version']!r}")
-    if not isinstance(manifest["entries"], list):
+    version = raw["version"]
+    if not isinstance(version, int) or isinstance(version, bool) or version != 1:
+        raise ValueError(f"unsupported private-files manifest version: {version!r}")
+    entries = raw["entries"]
+    if not _is_manifest_entries(entries):
         raise TypeError("private-files manifest entries must be a list")
-    return manifest
+    return {"version": version, "entries": entries}
 
 
 def relative_path(raw_path: str) -> PurePosixPath:

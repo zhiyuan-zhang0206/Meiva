@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from base.daemon.schedules.inputs import ScheduleInputs
@@ -91,9 +91,7 @@ def collect_ci_metrics(
         snapshot = json.loads((job.state_dir / "snapshot.json").read_text(encoding="utf-8"))
         runs, failed = day_counts(snapshot, day, repo)
         alert_broken_workflows(repo, job)
-        print(
-            f"[{datetime.now(UTC).isoformat()}] dev-ci-metrics: {day} — {runs} runs, {failed} failed"
-        )
+        print(f"[{slot_end.isoformat()}] dev-ci-metrics: {day} — {runs} runs, {failed} failed")
     except Exception as exc:
         print(f"dev-ci-metrics failed: {exc}")
         notify_report_agent(job.recipient, failure_message(f"{type(exc).__name__}: {exc}"))

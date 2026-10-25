@@ -7,7 +7,7 @@ Anthropic transport; this selects a wire API for the same model, never a model.
 
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, Protocol, TypeGuard
 
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.runnables import Runnable
@@ -26,8 +26,12 @@ class _StructuredOutputFactory(Protocol):
         *,
         include_raw: bool = False,
         method: Literal["function_calling", "json_schema"] = "function_calling",
-        **kwargs: Any,
+        **kwargs: object,
     ) -> Runnable[LanguageModelInput, dict[str, Any] | BaseModel]: ...
+
+
+def _is_structured_output_factory(fn: object) -> TypeGuard[_StructuredOutputFactory]:
+    return callable(fn)
 
 
 class DeepSeekChatModel(ThinkingTokensChatAnthropic):
@@ -41,13 +45,16 @@ class DeepSeekChatModel(ThinkingTokensChatAnthropic):
         method: Literal["function_calling", "json_schema"] = "function_calling",
         http_client: object = None,
         http_async_client: object = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> Runnable[LanguageModelInput, dict[str, Any] | BaseModel]:
         """Use native schema output with optional caller-owned HTTP clients."""
         if method != "json_schema":
             if http_client is not None or http_async_client is not None:
                 raise ValueError("Custom HTTP clients require method='json_schema'")
-            build = cast(_StructuredOutputFactory, super().with_structured_output)
+            attr = "with_structured_output"
+            build: object = getattr(super(), attr)
+            if not _is_structured_output_factory(build):
+                raise TypeError("super().with_structured_output is not callable")
             return build(schema, include_raw=include_raw, method=method, **kwargs)
 
         from langchain_openai import ChatOpenAI
@@ -69,5 +76,8 @@ class DeepSeekChatModel(ThinkingTokensChatAnthropic):
             http_async_client=http_async_client,
         )
         kwargs.setdefault("strict", True)
-        build = cast(_StructuredOutputFactory, model.with_structured_output)
+        attr = "with_structured_output"
+        build = getattr(model, attr)
+        if not _is_structured_output_factory(build):
+            raise TypeError("model.with_structured_output is not callable")
         return build(schema, method="json_schema", include_raw=include_raw, **kwargs)

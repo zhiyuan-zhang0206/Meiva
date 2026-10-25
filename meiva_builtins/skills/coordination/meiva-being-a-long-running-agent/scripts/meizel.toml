@@ -4,11 +4,5 @@ exports = ["agent_usage.py"]
 "usage_budget.py" = "strict"
 
 [roots]
-"agent_usage.py" = ["db"]
-
-[debt.ambient-read]
-"agent_usage.py#clock datetime.datetime.now" = 1
-"watch_idle.py#settings base.config.settings" = 1
-
-[debt.type-cast]
-"watch_idle.py#cast watch" = 1
+"agent_usage.py" = { kinds = ["clock", "db"], why = "CLI entry constructs cluster DB handle and defaults polling window end to current UTC time" }
+"watch_idle.py" = { kinds = ["settings"], why = "Reference watcher script reads launching agent's data-plane Redis URL and events channel" }
