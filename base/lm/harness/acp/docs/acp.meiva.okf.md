@@ -25,6 +25,14 @@ above it owns sessions, prompts and how a stop reason becomes a turn result.
 `start()` spawns the child in its own process group and keeps two retained
 tasks (stdout reader, stderr reader) inside a `TaskGroup`, so teardown is finite.
 
+Stdout EOF closes protocol admission, but does not finish teardown: the child
+can close its output while remaining alive, or its exit status can still await
+the process watcher. `close()` serializes callers and waits for the owned child
+and retained tasks even after EOF. Only a completed close may return early;
+cancellation leaves the next caller able to finish teardown. The existing
+shutdown and TERM/KILL budgets remain unchanged. Exhausting both signal waits
+still leaves an unobserved status as `None`; completion does not invent an exit code.
+
 ## Three deliberate refusals
 
 - **An unanswered permission request is `cancelled`.** The ACP contract lets an
