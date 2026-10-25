@@ -75,51 +75,128 @@ def _arm_hooks(pool: Path) -> bool:
     return True
 
 
-def _ensure_memory_repo(*, machine: MachineIdentity) -> None:
-    """Run init() if the memory pool is not a git repo. If already init'd but on the wrong branch, fail loud."""
-    from base.deploy.git.memory_repo import branch_name, init, is_initialized
-    from base.paths import memory_dir
-
-    if is_initialized():
-        # init() validates branch on re-call (raises on mismatch); call it once to trigger the check.
-        init(machine=machine)
-        return
+def _initialize_authoring(*, machine: MachineIdentity, target: Path) -> None:
+    # meiva:note
+    # Read each provisioning input only when the authoring stage needs it.
+    # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-pool-scaffold.meiva.okf.md
+    from base.config import settings
+    from base.deploy.git.memory_repo import (
+        MemoryPoolBootstrapFailed,
+        MemoryRemoteMissing,
+        bootstrap_from_gateway,
+        branch_name,
+        init,
+        init_local_repo,
+        is_initialized,
+        memory_remote,
+        reconcile_initialized,
+    )
 
     branch = branch_name(machine=machine)
-    print(f"    first-time setup: bring up memory pool -> {memory_dir()} on branch {branch!r}")
+    keep_local = settings.general.memory_keep_local
+    if is_initialized(root=target):
+        reconcile_initialized(
+            root=target,
+            branch=branch,
+            keep_local=keep_local,
+            allow_main_switch="gateway" in machine.role() and "agent-runner" not in machine.role(),
+        )
+        return
+    if keep_local:
+        init_local_repo(branch, target)
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
     try:
-        init(machine=machine)
-    except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
-        raise RuntimeError(_classify_git_init_error(stderr, e.returncode)) from e
+        remote = memory_remote(settings.general.memory_remote)
+    except MemoryRemoteMissing:
+        if "agent-runner" in machine.role() and "gateway" not in machine.role():
+            from base.cluster.machine.ambient import gateway_access_from_settings
+
+            access = gateway_access_from_settings()  # ambient: B2
+            try:
+                bootstrap_from_gateway(target=target, branch=branch, access=access)
+            except MemoryPoolBootstrapFailed as error:
+                raise MemoryRemoteMissing(
+                    "memory remote not configured and the gateway pool snapshot "
+                    f"fetch failed ({error}). Set MEIVA_MEMORY_REMOTE for the GitHub sync "
+                    "path, fix the gateway URL / cluster secret, or set "
+                    "MEIVA_MEMORY_KEEP_LOCAL=true "
+                    "to run an explicitly local-only pool."
+                ) from error
+            return
+        init_local_repo(branch, target)
+        return
+    init(root=target, branch=branch, remote=remote)
+
+
+def _ensure_memory_repo(*, machine: MachineIdentity, target: Path) -> None:
+    # meiva:note
+    # Keep the outer probe's logging and error boundary separate from init's probe.
+    # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-pool-scaffold.meiva.okf.md
+    from base.deploy.git.memory_repo import branch_name, is_initialized
+
+    if is_initialized(root=target):
+        _initialize_authoring(machine=machine, target=target)
+        return
+    branch = branch_name(machine=machine)
+    print(f"    first-time setup: bring up memory pool -> {target} on branch {branch!r}")
+    try:
+        _initialize_authoring(machine=machine, target=target)
+    except subprocess.CalledProcessError as error:
+        stderr = error.stderr.decode() if isinstance(error.stderr, bytes) else (error.stderr or "")
+        raise RuntimeError(_classify_git_init_error(stderr, error.returncode)) from error
     print("    memory pool ready")
 
 
-def _ensure_gateway_memory_repo(*, machine: MachineIdentity) -> None:
-    """Run init_gateway(machine=machine) to set up the gateway's consolidated memory checkout
-    on `main`. Only runs when this unit carries the gateway capability.
+def _initialize_gateway(*, target: Path) -> None:
+    # meiva:note
+    # Resolve the consolidated checkout's configuration at its own stage.
+    # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-pool-scaffold.meiva.okf.md
+    from base.config import settings
+    from base.deploy.git.memory_repo import (
+        MemoryRemoteMissing,
+        init,
+        init_local_repo,
+        is_initialized,
+        memory_remote,
+        reconcile_initialized,
+    )
 
-    On a combined unit (gateway+agent-runner) this initializes the separate
-    $MEIVA_HOME/gateway/memory checkout; on a gateway-only unit it initializes
-    the same path as the agent-runner checkout (memory_dir()).
-    """
-    from base.deploy.git.memory_repo import gateway_is_initialized, init_gateway
-    from base.paths import gateway_memory_dir
+    keep_local = settings.general.memory_keep_local
+    if is_initialized(root=target):
+        reconcile_initialized(
+            root=target, branch="main", keep_local=keep_local, allow_main_switch=True
+        )
+        return
+    if keep_local:
+        init_local_repo("main", target)
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        remote = memory_remote(settings.general.memory_remote)
+    except MemoryRemoteMissing:
+        init_local_repo("main", target)
+        return
+    init(root=target, branch="main", remote=remote)
+
+
+def _ensure_gateway_memory_repo(*, machine: MachineIdentity, target: Path) -> None:
+    # meiva:note
+    # Provision the captured consolidated target only for a gateway-capable unit.
+    # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-pool-scaffold.meiva.okf.md
+    from base.deploy.git.memory_repo import is_initialized
 
     if "gateway" not in machine.role():
         return
-
-    gmd = gateway_memory_dir(roles=machine.role())
-    if gateway_is_initialized(machine=machine):
-        init_gateway(machine=machine)  # validates branch on re-call; gateway auto-switches to main
+    if is_initialized(root=target):
+        _initialize_gateway(target=target)
         return
-
-    print(f"    first-time setup: clone gateway memory pool -> {gmd} on branch 'main'")
+    print(f"    first-time setup: clone gateway memory pool -> {target} on branch 'main'")
     try:
-        init_gateway(machine=machine)
-    except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
-        raise RuntimeError(_classify_git_init_error(stderr, e.returncode)) from e
+        _initialize_gateway(target=target)
+    except subprocess.CalledProcessError as error:
+        stderr = error.stderr.decode() if isinstance(error.stderr, bytes) else (error.stderr or "")
+        raise RuntimeError(_classify_git_init_error(stderr, error.returncode)) from error
     print("    gateway memory pool ready")
 
 
@@ -163,12 +240,12 @@ def scaffold(*, machine: MachineIdentity) -> None:
     and no checkout is created, no template is laid down, and no memory note
     reaches an agent's context.
     """
-    from base.paths import memory_dir
-
-    _ensure_memory_repo(machine=machine)
-    _ensure_gateway_memory_repo(machine=machine)
+    from base.paths import gateway_memory_dir, memory_dir
 
     pool = memory_dir()
+    consolidated = gateway_memory_dir(roles=machine.role())
+    _ensure_memory_repo(machine=machine, target=pool)
+    _ensure_gateway_memory_repo(machine=machine, target=consolidated)
     if not (pool / ".git").is_dir():
         # The bring-up above declined and said why (no remote, wrong branch).
         logger.debug("[memory-scaffold] {} is not a git checkout, skipping", pool)

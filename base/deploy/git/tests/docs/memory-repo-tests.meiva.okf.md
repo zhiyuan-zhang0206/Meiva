@@ -13,7 +13,14 @@ and keep-local operation with no remote. The gateway's Git hook test waits for
 an unrelated request to complete, proving event-loop progress during Git work
 without replacing `pull_main` or `asyncio.to_thread`.
 
-That recorder remains for initialization, which this refresh change does not
-redesign. Removing its annotation introduces reportUnknownArgumentType at the
-list append; it is not unused explanatory prose. Other initialization tests
-retain their original role, no-remote, wrong-branch and bounded-command assertions.
+Initialization operation tests now use real local checkouts and bare remotes
+for branch selection, retained dirty work, remote removal and gitignore
+publication. Provisioning decisions are exercised through the builtin public
+scaffold in its own test directory, including real loopback HTTP bundle
+bootstrap. Status reads a real checkout and FETCH_HEAD with a supplied zone.
+
+The three existing run_bounded replacements remain narrow delegation tests:
+they verify argv, per-command timeout, stripped stdout and exception propagation.
+Their historical tree-kill name is not evidence of an actual descendant process
+cleanup test. Two small cap tests still replace the existing cap constant; HTTP
+transport and response iteration themselves use a real loopback listener.
