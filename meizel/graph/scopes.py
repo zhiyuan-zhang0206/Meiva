@@ -72,10 +72,14 @@ class Scope:
             scope = scope.parent
         return scope
 
-    def annotation_scope(self, parameters: Iterable[str]) -> Scope:
+    def annotation_scope(self, parameters: Iterable[ast.type_param]) -> Scope:
         annotation = Scope(self)
         closure = Scope(self.closure_parent())
-        names = set(parameters)
+        names: set[str] = set()
+        for parameter in parameters:
+            if not isinstance(parameter, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple):
+                raise TypeError(f"unsupported type parameter node: {type(parameter).__name__}")
+            names.add(parameter.name)
         annotation.shadowed.update(names)
         closure.shadowed.update(names)
         annotation._closure_override = closure

@@ -237,6 +237,8 @@ def test_process_pool_roundtrip_preserves_source_sites(make_repo: RepoFactory) -
         "def f[t](x: t.cast(int, value)): pass",
         "def f[t]() -> t.cast(int, value): pass",
         "def f[t](): return t.cast(int, value)",
+        "def f[*t](): return t.cast(int, value)",
+        "def f[**t](): return t.cast(int, value)",
         "class C[t](t.cast(type, Base)): pass",
         "class C[t]:\n    value = t.cast(int, value)",
         "class C[t]:\n    def method(self): return t.cast(int, value)",
