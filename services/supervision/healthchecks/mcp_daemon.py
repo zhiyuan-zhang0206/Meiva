@@ -3,7 +3,6 @@
 import json
 import logging
 import socket
-from collections.abc import Callable
 from pathlib import Path
 
 from base.paths import mcp_daemon_shared_socket
@@ -33,14 +32,14 @@ def mcp_daemon_probe(home: Path) -> bool:
         sock.close()
 
 
-def is_alive(home: Path, *, probe_fn: Callable[[Path], bool] = mcp_daemon_probe) -> bool:
+def is_alive(home: Path) -> bool:
     """True when the daemon of `home` answers a ping; ANY probe failure means "not alive".
 
     The broad except below makes an unforeseen probe failure degrade to a verdict
     the watchdog can act on.
     """
     try:
-        return probe_fn(home)
+        return mcp_daemon_probe(home)
     except (OSError, json.JSONDecodeError):
         return False
     except Exception:

@@ -15,7 +15,7 @@ from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.client import RootClient, caller_identity
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.meiva_root.server import ControlServer
-from services.supervision.meiva_root.stopping import StoppingMixin, UnitStopTimeoutError
+from services.supervision.meiva_root.stopping import UnitStopTimeoutError, signal_owned
 from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
 
 _DEFAULT_WINDOW_S = 0.2
@@ -136,7 +136,7 @@ async def test_window_expiry_kills_once_and_reports_it(tmp_path: Path, recorder:
 def test_identity_change_never_signals_and_reports_the_abort() -> None:
     stale = OwnedProcess(pid=2**22 + 7, birth=0.0, starttime=None)
     assert stale.live() is False
-    assert StoppingMixin._signal_owned(stale, force=True) is False
+    assert signal_owned(stale, force=True) is False
 
 
 async def test_an_uncaptured_leader_identity_reports_its_own_reason(

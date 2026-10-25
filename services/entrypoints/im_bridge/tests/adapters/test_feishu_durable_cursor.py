@@ -85,7 +85,11 @@ def _listing(*newest_first: SimpleNamespace, next_page: str | None = None) -> Si
 
 def _adapter(rest: _Rest, store: CursorStore, state_dir: Path) -> FeishuAdapter:
     adapter = FeishuAdapter(
-        _Core(store), feishu_config(), state_dir=state_dir, proxy_configured=False
+        _Core(store),
+        feishu_config(),
+        state_dir=state_dir,
+        proxy_configured=False,
+        cursor_store=store,
     )
     adapter._rest_client = rest
     return adapter

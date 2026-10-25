@@ -8,7 +8,7 @@ import logging
 import time
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
 from psycopg_pool import ConnectionPool, PoolTimeout
@@ -16,7 +16,7 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 from base.api_contracts.idempotency import keyed_headers
 from base.api_contracts.notice_question import parse_question, question_instructions
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig, Timers
-from base.db.transaction import ConnectionSource, write_transaction
+from base.db.transaction import write_transaction
 from base.events.notifications.catalog import core_catalog
 from base.events.notifications.policy import enabled_for
 from base.events.notifications.store import read_overrides_sync
@@ -102,7 +102,7 @@ def _parse_filter_tokens(rest: list[str]) -> dict[str, Any]:
     return filters
 
 
-class NoticeBridgeCore:
+class NoticeBridgeCore(Protocol):
     adapters: dict[str, IMAdapter]
     outbound_store: IMOutboxStore
     gateway: GatewayClient
@@ -114,16 +114,16 @@ class NoticeBridge(NoticeBridgeOwner):
 
     def __init__(
         self,
-        core: NoticeBridgeCore | object,
+        core: NoticeBridgeCore,
         config: ImBridgeConfig,
         *,
-        db_pool: ConnectionPool | ConnectionSource | object = None,
+        db_pool: ConnectionPool | None = None,
         state_dir: Path,
         timers: Timers = SYSTEM_TIMERS,
     ) -> None:
         self._config = config
         self.core: Any = core
-        self.db_pool: Any = db_pool
+        self.db_pool: ConnectionPool | None = db_pool
         self._state_dir = state_dir
         self._clock = Clock(
             ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=timers

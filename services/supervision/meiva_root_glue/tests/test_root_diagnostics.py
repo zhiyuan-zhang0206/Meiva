@@ -53,8 +53,23 @@ def _unused_database() -> NoReturn:
     raise AssertionError("this diagnostic must not construct a database")
 
 
-def _no_op(**_kwargs: object) -> None:
-    return None
+class _NoOpTelemetry:
+    def start(
+        self,
+        *,
+        name: str,
+        producer: object,
+        machine_reader: object,
+        image: LoadedCommit,
+    ) -> None:
+        del name, producer, machine_reader, image
+
+    def sync(self, *, timeout: float) -> object:
+        del timeout
+        return None
+
+
+_NO_OP_TELEMETRY = _NoOpTelemetry()
 
 
 @pytest.fixture
@@ -336,8 +351,7 @@ async def test_tick_requires_both_rounds_and_does_not_mean_healthy(
         clients=ClientSet(),
         image=LoadedCommit(source_root=Path(__file__).resolve().parents[4], sha=None),
         machine=machine_identity,
-        init_logging=_no_op,
-        sync_telemetry=_no_op,
+        telemetry=_NO_OP_TELEMETRY,
     )
     task = asyncio.create_task(rounds.run_round())
     await asyncio.sleep(0.01)
@@ -365,8 +379,7 @@ async def test_expectation_precedes_first_sample_and_is_retired_on_stop(
             image=LoadedCommit(source_root=Path(__file__).resolve().parents[4], sha=None),
             tasks=tasks,
             machine=machine_identity,
-            init_logging=_no_op,
-            sync_telemetry=_no_op,
+            telemetry=_NO_OP_TELEMETRY,
         )
         await rounds.start()
         assert events[0]["event"] == "root_health_expected"
@@ -402,13 +415,19 @@ async def test_root_logging_owns_only_the_started_pipeline(
     clients = ClientSet(pipeline_factory=producer)
     seen: list[LoadedCommit] = []
 
-    def initialize(
-        *, name: str, producer: object, machine_reader: object, image: LoadedCommit
-    ) -> None:
-        assert name == "meiva-root"
-        assert callable(producer) and callable(machine_reader)
-        assert producer() is clients.event_pipeline()
-        seen.append(image)
+    class _RecordingTelemetry(_NoOpTelemetry):
+        def start(
+            self,
+            *,
+            name: str,
+            producer: object,
+            machine_reader: object,
+            image: LoadedCommit,
+        ) -> None:
+            assert name == "meiva-root"
+            assert callable(producer) and callable(machine_reader)
+            assert producer() is clients.event_pipeline()
+            seen.append(image)
 
     async with asyncio.TaskGroup() as tasks:
         rounds = RootHealthRounds(
@@ -418,8 +437,7 @@ async def test_root_logging_owns_only_the_started_pipeline(
             image=image,
             tasks=tasks,
             machine=machine_identity,
-            init_logging=initialize,
-            sync_telemetry=_no_op,
+            telemetry=_RecordingTelemetry(),
         )
         assert made == []
         await rounds.start()
@@ -441,9 +459,18 @@ async def test_logging_startup_error_stops_its_constructed_writer(
 
     clients = ClientSet(pipeline_factory=producer)
 
-    def initialize(**_inputs: object) -> NoReturn:
-        clients.event_pipeline()
-        raise error
+    class _FailingTelemetry(_NoOpTelemetry):
+        def start(
+            self,
+            *,
+            name: str,
+            producer: object,
+            machine_reader: object,
+            image: LoadedCommit,
+        ) -> NoReturn:
+            del name, producer, machine_reader, image
+            clients.event_pipeline()
+            raise error
 
     async with asyncio.TaskGroup() as tasks:
         rounds = RootHealthRounds(
@@ -453,8 +480,7 @@ async def test_logging_startup_error_stops_its_constructed_writer(
             image=LoadedCommit(source_root=tmp_path, sha=None),
             tasks=tasks,
             machine=machine_identity,
-            init_logging=initialize,
-            sync_telemetry=_no_op,
+            telemetry=_FailingTelemetry(),
         )
         with pytest.raises(ValueError) as caught:
             await rounds.start()
@@ -470,7 +496,7 @@ def test_helper_diagnostics_are_macos_only(*, machine_identity: ConfiguredMachin
             set(),
             database=_unused_database,
             machine=machine_identity,
-            macos_fn=lambda: False,
+            macos=False,
         )
     }
     assert names == {"venv"}
@@ -480,8 +506,8 @@ def test_helper_diagnostics_are_macos_only(*, machine_identity: ConfiguredMachin
             set(),
             database=_unused_database,
             machine=machine_identity,
-            macos_fn=lambda: True,
-            read_field=lambda _name: False,
+            macos=True,
+            overrides={},
         )
     }
     assert names == {"venv", "brew-pin", "permissions-helper"}
@@ -545,22 +571,33 @@ def test_station_resolution_failure_is_unavailable_and_does_not_send(unit_home: 
     assert opener.calls == []
 
 
-def test_missing_brew_probe_is_unavailable_not_an_empty_healthy_set() -> None:
-    def missing(*_args: object, **_kwargs: object) -> NoReturn:
-        raise FileNotFoundError("brew")
-
+def test_missing_brew_probe_is_unavailable_not_an_empty_healthy_set(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
-        probes.brew_pins(run_cmd=missing)
+        probes.brew_pins(brew_binary=str(tmp_path / "missing-brew"))
 
 
 def test_redis_acl_uses_runtime_ping_without_native_custody() -> None:
-    ping = Mock()
+    class _FakeRedisConnection:
+        def __init__(self) -> None:
+            self.pings = 0
+
+        def __enter__(self) -> _FakeRedisConnection:
+            return self
+
+        def __exit__(self, _exc_type: object, _exc: object, _tb: object, /) -> None:
+            return None
+
+        def ping(self) -> bool:
+            self.pings += 1
+            return True
+
+    conn = _FakeRedisConnection()
     assert not hasattr(probes, "RedisConnectionCustody")
     assert probes.redis_acl(
-        read_field=lambda _name: "redis://localhost:6380",
-        ping_fn=ping,
+        redis_url="redis://localhost:6380",
+        connection=conn,
     ).alive
-    ping.assert_called_once_with("redis://localhost:6380")
+    assert conn.pings == 1
 
 
 def test_each_root_roster_owns_its_helper_episode_reporter(
@@ -575,7 +612,7 @@ def test_each_root_roster_owns_its_helper_episode_reporter(
             set(),
             database=_unused_database,
             machine=machine_identity,
-            macos_fn=lambda: True,
+            macos=True,
         )
         if check.name == "permissions-helper"
     )
@@ -585,7 +622,7 @@ def test_each_root_roster_owns_its_helper_episode_reporter(
             set(),
             database=_unused_database,
             machine=machine_identity,
-            macos_fn=lambda: True,
+            macos=True,
         )
         if check.name == "permissions-helper"
     )

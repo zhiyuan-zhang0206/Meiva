@@ -51,6 +51,7 @@ from services.entrypoints.im_bridge.ingress.types import (
     ProviderSource,
 )
 from services.entrypoints.im_bridge.outbound.claim_fence import StalePollBindingError
+from services.entrypoints.im_bridge.timeline_acceptance import TimelineCore
 from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
     BridgeCore,
@@ -342,7 +343,7 @@ class WeixinAdapter(IMAdapter):
 
     def __init__(
         self,
-        core: BridgeCore | object,
+        core: BridgeCore | None,
         *,
         state_dir: Path,
         client: httpx.AsyncClient | None = None,
@@ -506,9 +507,11 @@ class WeixinAdapter(IMAdapter):
                 namespace = _provider_namespace(self._base_url)
                 if namespace is None or not self._account_id.strip():
                     raise ValueError("Weixin ingress requires a qualified namespace and account")
-                notice_bridge = getattr(self.core, "notice_bridge", None)
-                db_pool = getattr(notice_bridge, "db_pool", None)
-                self._ingress = WeixinIngress(self.core, WeixinIngressStore(db_pool), self)
+                if not isinstance(self.core, TimelineCore):
+                    raise TypeError("Weixin ingress requires TimelineCore")
+                self._ingress = WeixinIngress(
+                    self.core, WeixinIngressStore(self.core.outbound_store.pool), self
+                )
                 self._binding = await self._ingress.initialize(namespace, self._account_id)
             self._binding = await asyncio.to_thread(
                 self._ingress.store.refresh_binding, self._binding

@@ -13,7 +13,6 @@ from typing import Any, Literal
 from psycopg_pool import ConnectionPool
 
 from base.clock import SYSTEM_TIMERS, Timers
-from base.db.transaction import ConnectionSource
 from services.entrypoints.im_bridge import copy, notice_bridge, push_watchdog
 from services.entrypoints.im_bridge.config import ImBridgeConfig
 from services.entrypoints.im_bridge.cursor_store import CursorStore, PushWatermark
@@ -29,6 +28,7 @@ from services.entrypoints.im_bridge.spawn_menu import SpawnMenuMixin
 from services.entrypoints.im_bridge.state import load_switch_state, save_switch_state
 from services.entrypoints.im_bridge.timeline_acceptance import (
     SelectionAdmission,
+    TimelineCore,
     accept_timeline,
     apply_account_selection,
     hold_selection,
@@ -40,7 +40,6 @@ from services.entrypoints.im_bridge.timeline_acceptance import truncate as _trun
 from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
     AgentRow,
-    BridgeCore,
     ChatState,
     IMAdapter,
     InboundMessage,
@@ -96,7 +95,7 @@ DEFAULT_TYPING = TypingCadence()
 
 class IMBridgeCore(
     SpawnMenuMixin,
-    BridgeCore,
+    TimelineCore,
 ):
     """Owns per-channel chat state, command routing, and subscription pushes."""
 
@@ -104,7 +103,7 @@ class IMBridgeCore(
         self,
         config: ImBridgeConfig,
         gateway: GatewayClient,
-        db_pool: ConnectionPool | ConnectionSource | object = None,
+        db_pool: ConnectionPool | None = None,
         *,
         tasks: asyncio.TaskGroup,
         state_dir: Path,
@@ -123,7 +122,7 @@ class IMBridgeCore(
         self._op_seq = 0
         self.cursor_store = CursorStore(db_pool)
         self.outbound_store = IMOutboxStore(db_pool)
-        self.notice_bridge: notice_bridge.NoticeBridge = notice_bridge.NoticeBridge(
+        self._notice_bridge: notice_bridge.NoticeBridge = notice_bridge.NoticeBridge(
             self, config, db_pool=db_pool, state_dir=state_dir, timers=timers
         )
         self.adapters: dict[str, IMAdapter] = {}
@@ -137,6 +136,14 @@ class IMBridgeCore(
 
         self._switch_state = load_switch_state(state_dir)
         self._disabled_channels: set[str] = set(config.im_disabled_adapters)
+
+    @property
+    def notice_bridge(self) -> notice_bridge.NoticeBridge:
+        return self._notice_bridge
+
+    @notice_bridge.setter
+    def notice_bridge(self, value: notice_bridge.NoticeBridge) -> None:
+        self._notice_bridge = value
 
     def _next_replay_id(self) -> str:
         self._op_seq += 1

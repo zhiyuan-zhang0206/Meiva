@@ -29,16 +29,12 @@ def test_readiness_probes_exclude_remote_tempo() -> None:
 
 def test_readiness_probes_ignore_remote_query_urls() -> None:
     """Remote read endpoints cannot falsely mark a local native service alive."""
-    from base.config import get_field
-
     overrides: dict[str, str | int] = {
         "telemetry_loki_url": "http://loki.example:3100/loki/",
         "telemetry_prometheus_url": "http://prom.example:9090/",
         "telemetry_grafana_url": "http://grafana.example:3003",
     }
-    assert hc.readiness_probes(
-        read_field=lambda name: overrides[name] if name in overrides else get_field(name)
-    ) == (
+    assert hc.readiness_probes(overrides=overrides) == (
         ("loki", "http://127.0.0.1:3100/ready"),
         ("prometheus", "http://127.0.0.1:9090/-/ready"),
         ("grafana", "http://127.0.0.1:3003/api/health"),

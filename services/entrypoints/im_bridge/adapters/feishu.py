@@ -12,7 +12,7 @@ import json
 from collections import deque
 from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import requests
 
@@ -35,6 +35,7 @@ from services.entrypoints.im_bridge.types import (
     InboundMessage,
     OutboundAdapterKind,
     OutboundChunk,
+    PollCursorStore,
     PreparedOutboundSend,
     RetryableTransportError,
     SendNotStartedError,
@@ -46,12 +47,10 @@ from services.entrypoints.im_bridge.types import (
 MAX_SEGMENT_CHARS = 8000
 
 
-class FeishuWsClient:
-    def start(self) -> None:
-        raise NotImplementedError
+class FeishuWsClient(Protocol):
+    def start(self) -> None: ...
 
-    async def _disconnect(self) -> None:
-        raise NotImplementedError
+    async def _disconnect(self) -> None: ...
 
 
 def backoff_delay(interval: float, failures: int) -> float:
@@ -77,13 +76,14 @@ class FeishuAdapter(IMAdapter):
 
     def __init__(
         self,
-        core: BridgeCore | object,
+        core: BridgeCore | None,
         config: FeishuCredentialsConfig,
         *,
         state_dir: Path,
         proxy_configured: bool,
-        ws_client: FeishuWsClient | object = None,
-        rest_client: cursors.FeishuRestClient | object = None,
+        ws_client: FeishuWsClient | None = None,
+        rest_client: cursors.FeishuRestClient | None = None,
+        cursor_store: PollCursorStore | None = None,
     ) -> None:
         super().__init__(core)
         self._config = config
@@ -101,6 +101,7 @@ class FeishuAdapter(IMAdapter):
         self._accepting_events = False
         self._ws_client: Any = ws_client
         self._rest_client: Any = rest_client
+        self._cursor_store = cursor_store
         # Initialized here (not only in _normalize) so send_to_owner before the
         # first inbound p2p — e.g. right after a daemon restart — fails with the
         # clear "no known user chat" error instead of an AttributeError.
@@ -481,9 +482,9 @@ class FeishuAdapter(IMAdapter):
     async def _restore_cursors(self) -> None:
         """Saved chats are polled again at once; their first round replays."""
 
-        store = getattr(self.core, "cursor_store", None)
+        store = self._cursor_store
         saved: dict[str, tuple[str, int]] = (
-            await asyncio.to_thread(store.load_poll, self.channel) if store else {}
+            await asyncio.to_thread(store.load_poll, self.channel) if store is not None else {}
         )
         for chat_id, (message_id, create_ms) in saved.items():
             if message_id:
@@ -493,7 +494,7 @@ class FeishuAdapter(IMAdapter):
         self._poll_chats |= set(saved)
 
     async def _save_cursor(self, chat_id: str) -> None:
-        store = getattr(self.core, "cursor_store", None)
+        store = self._cursor_store
         if store is not None:
             await asyncio.to_thread(
                 store.save_poll,

@@ -1,7 +1,7 @@
 exports = ["daemon.py", "gateway_client.py", "ingress", "tests", "types.py"]
 
 [uses]
-"adapters" = ["config.py", "ingress", "outbound", "state.py", "types.py"]
+"adapters" = ["config.py", "ingress", "outbound", "state.py", "timeline_acceptance.py", "types.py"]
 "alert_outbound.py" = ["outbound", "types.py"]
 "core.py" = ["config.py", "copy.py", "cursor_store.py", "gateway_client.py", "notice_bridge.py", "outbound", "push_watchdog.py", "spawn_menu.py", "state.py", "timeline_acceptance.py", "types.py"]
 "daemon.py" = ["adapters", "alert_outbound.py", "config.py", "core.py", "gateway_client.py", "outbound", "types.py"]

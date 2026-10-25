@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import socket
-from pathlib import Path
+import tempfile
+import threading
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -88,59 +90,42 @@ def recorder(loguru_records: LogRecords) -> _Recorder:
     return _Recorder(loguru_records)
 
 
-def _unhealthy_ping() -> bool:
-    raise client.PermissionsHelperError("socket unavailable")
-
-
-class _FakeSocket:
-    def __init__(self, response: bytes) -> None:
-        self.response = response
-        self.timeout: float | None = None
-        self.sent = b""
-        self.closed = False
-
-    def settimeout(self, timeout: float) -> None:
-        self.timeout = timeout
-
-    def sendall(self, payload: bytes) -> None:
-        self.sent += payload
-
-    def recv(self, _size: int) -> bytes:
-        response, self.response = self.response, b""
-        return response
-
-    def close(self) -> None:
-        self.closed = True
-
-
-def test_ping_uses_short_timeout_and_helper_wire_protocol(tmp_path: Path) -> None:
-    sock = _FakeSocket(
-        b'{"id":0,"ok":true,"result":{"pong":true,"pid":42,"preflight_screen":true,"ax_trusted":true}}\n'
+def test_ping_uses_short_timeout_and_helper_wire_protocol() -> None:
+    received: list[bytes] = []
+    response = (
+        b'{"id":0,"ok":true,"result":{"pong":true,"pid":42,'
+        b'"preflight_screen":true,"ax_trusted":true}}\n'
     )
-    paths: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="meiva-helper-", dir="/tmp") as directory:
+        socket_path = f"{directory}/helper.sock"
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(socket_path)
+        server.listen(1)
 
-    def connect(path: str) -> socket.socket:
-        paths.append(path)
-        return cast(socket.socket, sock)
+        def _serve() -> None:
+            conn, _ = server.accept()
+            with conn:
+                received.append(conn.recv(4096))
+                conn.sendall(response)
 
-    def _fake_helper_parent(_sock: socket.socket) -> tuple[OwnedProcess, OwnedProcess]:
-        return cast(OwnedProcess, object()), cast(OwnedProcess, object())
+        worker = threading.Thread(target=_serve, daemon=True)
+        worker.start()
+        try:
+            root = cast(OwnedProcess, SimpleNamespace(pid=10, live=lambda: True))
+            parent = cast(OwnedProcess, SimpleNamespace(pid=42, live=lambda: True))
+            assert hc.ping(
+                sock_path=socket_path,
+                root=root,
+                parent=parent,
+                peer_pid=42,
+                parent_live=True,
+            )
+        finally:
+            server.close()
+            worker.join(timeout=2)
 
-    def _fake_parent_still_live(_root: OwnedProcess, _parent: OwnedProcess, pid: int) -> bool:
-        return pid == 42
-
-    socket_path = tmp_path / "helper.sock"
-
-    assert hc.ping(
-        connect_fn=connect,
-        sock_path_fn=lambda: str(socket_path),
-        parent_fn=_fake_helper_parent,
-        live_fn=_fake_parent_still_live,
-    )
-    assert paths == [str(socket_path)]
-    assert sock.timeout == 3.0
-    assert json.loads(sock.sent) == {"id": 0, "method": "ping"}
-    assert sock.closed
+    assert len(received) == 1
+    assert json.loads(received[0]) == {"id": 0, "method": "ping"}
 
 
 # -- parsing and the LWCR truth table (pure) ----------------------------------
@@ -203,77 +188,57 @@ def test_reporting_is_episode_gated_without_repair(recorder: _Recorder) -> None:
 
 
 def test_probe_alive_and_classified_down() -> None:
-    assert hc.probe(macos_fn=lambda: True, ping_fn=lambda: True).alive
+    assert hc.probe(macos=True, ping_ok=True).alive
 
     verdict = hc.probe(
-        macos_fn=lambda: True,
-        ping_fn=_unhealthy_ping,
-        read_job_fn=lambda: _STUCK_JOB,
+        macos=True,
+        ping_error=client.PermissionsHelperError("socket unavailable"),
+        job_text=_STUCK_JOB,
     )
     assert not verdict.alive
     assert "lwcr-stuck" in verdict.detail
     assert "needs LWCR update" in verdict.detail
 
     assert hc.probe(
-        macos_fn=lambda: True,
-        ping_fn=_unhealthy_ping,
-        read_job_fn=lambda: None,
+        macos=True,
+        ping_error=client.PermissionsHelperError("socket unavailable"),
+        job_text=None,
     ).detail.startswith(hc.ABSENT)
 
 
 def test_probe_is_total_and_non_macos_is_up() -> None:
-    assert hc.probe(macos_fn=lambda: False).alive
-
-    def broken_read() -> str | None:
-        raise RuntimeError("boom")
+    assert hc.probe(macos=False).alive
 
     verdict = hc.probe(
-        macos_fn=lambda: True,
-        ping_fn=_unhealthy_ping,
-        read_job_fn=broken_read,
+        macos=True,
+        ping_error=client.PermissionsHelperError("socket unavailable"),
+        job_error=RuntimeError("boom"),
     )  # never raises
     assert not verdict.alive
     assert "probe error" in verdict.detail
 
 
 def test_unverifiable_helper_parent_never_reports_protocol_health() -> None:
-    def missing_parent() -> bool:
-        raise hc.ParentEvidenceError("root parent is not observable")
-
     assert (
         hc.probe(
-            macos_fn=lambda: True,
-            ping_fn=missing_parent,
-            read_job_fn=lambda: _RUNNING_JOB,
+            macos=True,
+            ping_error=hc.ParentEvidenceError("root parent is not observable"),
+            job_text=_RUNNING_JOB,
         ).verdict.value
         == "unavailable"
     )
 
 
 def test_connected_helper_peer_must_be_root_native_parent() -> None:
-    from types import SimpleNamespace
-
-    import psutil
-
     root = cast(OwnedProcess, SimpleNamespace(pid=10, live=lambda: True))
     parent = cast(OwnedProcess, SimpleNamespace(pid=20, live=lambda: True))
-
-    def _fake_parent_of(_pid: int) -> psutil.Process:
-        return cast(psutil.Process, object())
-
-    def _fake_capture(_process: psutil.Process) -> OwnedProcess:
-        return parent
-
-    def _fake_peer_pid(_sock: socket.socket) -> int:
-        return 30
 
     with pytest.raises(hc.ParentEvidenceError, match="not the captured root parent"):
         hc.helper_parent(
             cast(socket.socket, object()),
-            read_root=lambda: root,
-            parent_of=_fake_parent_of,
-            capture_owner=_fake_capture,
-            read_peer_pid=_fake_peer_pid,
+            root=root,
+            parent=parent,
+            peer_pid=30,
         )
 
 

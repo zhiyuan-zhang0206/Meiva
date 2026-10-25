@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
 from http import HTTPStatus
-from typing import Any, NoReturn, TypedDict
+from typing import Any, NoReturn, Protocol, TypedDict
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
@@ -203,14 +203,13 @@ class NoticeBridgeOwner:
         raise NotImplementedError
 
 
-class BridgeCore(ABC):
-    adapters: dict[str, IMAdapter]
-    chats: dict[tuple[str, str], ChatState]
-    _switch_state: dict[str, int]
-    _subscriptions: dict[tuple[str, str], asyncio.Task[Any]]
+class PollCursorStore(Protocol):
+    def load_poll(self, channel: str) -> dict[str, tuple[str, int]]: ...
+    def save_poll(self, channel: str, chat_id: str, message_id: str, create_ms: int) -> None: ...
 
-    @abstractmethod
-    async def handle_inbound(self, msg: InboundMessage) -> None: ...
+
+class BridgeCore(Protocol):
+    async def handle_inbound(self, msg: InboundMessage, /) -> None: ...
 
 
 class IMAdapter(ABC):
@@ -224,8 +223,10 @@ class IMAdapter(ABC):
     channel: str = ""
     selection_requires_account_proof: bool = False
     """Native account-bound selection must never bootstrap from legacy peer-only state."""
+    push_failures: int = 0
+    push_recovered_at: float | None = None
 
-    def __init__(self, core: BridgeCore | object) -> None:
+    def __init__(self, core: BridgeCore | None = None) -> None:
         self.core: Any = core
 
     @abstractmethod

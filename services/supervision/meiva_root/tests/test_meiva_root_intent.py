@@ -2,17 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import signal
 import sys
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import Mock
 
 import pytest
 
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
+from base.native_process.process_control import SYSTEM_PROCESS_CONTROL, ProcessControl
+from base.native_process.tests.fake_process_control import FakeProcessControl
 from services.supervision.meiva_root import intent_store
 from services.supervision.meiva_root.inputs import InputSeal
 from services.supervision.meiva_root.intent_store import (
@@ -25,9 +24,7 @@ from services.supervision.meiva_root.intent_store import (
     merge_record_for_boot,
 )
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
-from services.supervision.meiva_root.stopping import StoppingMixin
 from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
-from services.supervision.meiva_root.unit_records import UnitRuntime
 
 _CHILD = Path(__file__).with_name("child_unit.py")
 _SLEEP_FOREVER = ("sleep",)
@@ -64,41 +61,18 @@ def _unit(
     )
 
 
-def _supervisor(run_dir: Path, units: list[UnitManifest]) -> Supervisor:
-    return Supervisor(
-        UnitRegistry(units), run_dir=run_dir, config=SupervisorConfig(stop_timeout_s=0.2)
-    )
-
-
-def _up_failure_supervisor(
+def _supervisor(
     run_dir: Path,
     units: list[UnitManifest],
     *,
-    signal_owned: Callable[..., bool] | None = None,
+    process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
 ) -> Supervisor:
-    owner_ref: list[Supervisor] = []
-
-    async def stop_after_exit(
-        runtime: UnitRuntime, *, force: bool = False, escalate: bool = True
-    ) -> None:
-        generation = runtime.generation
-        if generation is not None and generation.proc.returncode is None:
-            identity = generation.identity
-            assert identity is not None, "the fixture must capture its disposable sleeper"
-            identity.send_signal(signal.SIGKILL)
-            await generation.exited.wait()
-            assert generation.proc.returncode is not None
-        await owner_ref[0]._stop_unit_default(runtime, force=force, escalate=escalate)
-
-    owner = Supervisor(
+    return Supervisor(
         UnitRegistry(units),
         run_dir=run_dir,
         config=SupervisorConfig(stop_timeout_s=0.2),
-        signal_owned=signal_owned,
-        stop_unit_fn=stop_after_exit,
+        process_control=process_control,
     )
-    owner_ref.append(owner)
-    return owner
 
 
 def _sealed_input(tmp_path: Path, unit_id: str = "svc") -> tuple[Path, InputSeal]:
@@ -243,7 +217,7 @@ async def test_restart_up_half_failure_records_explicit_state(
     tmp_path: Path, recorder: _Recorder
 ) -> None:
     input_path, seal = _sealed_input(tmp_path)
-    owner = _up_failure_supervisor(tmp_path, [_unit(*_SLEEP_FOREVER, inputs=(seal,))])
+    owner = _supervisor(tmp_path, [_unit(*_SLEEP_FOREVER, inputs=(seal,))])
     await owner.start()
     try:
         input_path.write_text("v2")
@@ -268,11 +242,11 @@ async def test_restart_up_half_failure_retry_replaces_and_clears(
     tmp_path: Path, recorder: _Recorder
 ) -> None:
     input_path, seal = _sealed_input(tmp_path)
-    live_stop = Mock(wraps=StoppingMixin._signal_owned)
-    owner = _up_failure_supervisor(
+    pc = FakeProcessControl(forward_to=SYSTEM_PROCESS_CONTROL)
+    owner = _supervisor(
         tmp_path,
         [_unit(*_SLEEP_FOREVER, inputs=(seal,))],
-        signal_owned=live_stop,
+        process_control=pc,
     )
     await owner.start()
     original = owner._units["svc"].generation
@@ -284,6 +258,7 @@ async def test_restart_up_half_failure_retry_replaces_and_clears(
         failed = intent_store.read(tmp_path, "svc")
         assert failed is not None and failed.intent is UnitIntent.RUNNING
         assert failed.restart_failed is not None and failed.restart_failed.stage is RestartStage.UP
+        pc.signals.clear()
         input_path.write_text("v1")
         result = await owner.restart("svc")
         assert cast("list[dict[str, Any]]", result["units"])[0]["action"] == "restarted"
@@ -298,7 +273,7 @@ async def test_restart_up_half_failure_retry_replaces_and_clears(
             intent_store.read(tmp_path, "svc"),
             IntentRecord(UnitIntent.RUNNING, IntentSource.SELECTION, None),
         )
-        live_stop.assert_not_called()
+        assert pc.signals == []
         assert len(recorder.events("root_restart_failed")) == 1
         assert len(recorder.events("root_restart_cleared")) == 1
     finally:
@@ -312,15 +287,11 @@ async def test_restart_down_abort_records_stage_down_and_retry_settles(
     release = tmp_path / "release"
     unit = _unit("restart_down", str(ready), str(release))
 
-    def never_signal(_identity: object, *, force: bool = False) -> bool:
-        del force
-        return False
-
     owner = Supervisor(
         UnitRegistry([unit]),
         run_dir=tmp_path,
         config=SupervisorConfig(stop_timeout_s=0.4, stop_kill_reap_s=0.1),
-        signal_owned=never_signal,
+        process_control=FakeProcessControl(),
     )
     await owner.start()
     try:
@@ -344,7 +315,7 @@ async def test_restart_down_abort_records_stage_down_and_retry_settles(
         status = await _entry(owner)
         assert (status["restart_failed"], status["state"]) == (None, "running")
     finally:
-        owner._signal_owned_fn = StoppingMixin._signal_owned
+        owner._process_control = SYSTEM_PROCESS_CONTROL
         await owner.shutdown()
 
 
@@ -353,14 +324,14 @@ async def test_boot_carries_recorded_failure_until_a_generation_proves_it_gone(
 ) -> None:
     input_path, seal = _sealed_input(tmp_path)
     unit = _unit(*_SLEEP_FOREVER, inputs=(seal,))
-    first = _up_failure_supervisor(tmp_path, [unit])
+    first = _supervisor(tmp_path, [unit])
     await first.start()
     input_path.write_text("v2")
     await first.restart("svc")
     stored = intent_store.read(tmp_path, "svc")
     assert stored is not None and stored.restart_failed is not None
     since = stored.restart_failed.since
-    second = _up_failure_supervisor(tmp_path, [unit])
+    second = _supervisor(tmp_path, [unit])
     await second.start()
     try:
         entry = await _entry(second)

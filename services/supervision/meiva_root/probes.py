@@ -86,9 +86,8 @@ class ProbeRegistry:
     the last one written would hide it.
     """
 
-    def __init__(self, *, resolver: Callable[[str], Probe] = resolve_ref) -> None:
+    def __init__(self) -> None:
         self._entries: dict[str, _Entry] = {}
-        self._resolver = resolver
 
     def register(self, unit_id: str, probe: Probe) -> None:
         """Register `probe` for `unit_id` (the static path, direct callable)."""
@@ -128,7 +127,7 @@ class ProbeRegistry:
             ref = entry.ref
             if ref is None:
                 raise ProbeError(f"probe entry for unit {unit_id!r} carries neither probe nor ref")
-            entry.probe = self._resolver(ref)
+            entry.probe = resolve_ref(ref)
         return entry.probe
 
     def _reject_duplicate(self, unit_id: str) -> None:

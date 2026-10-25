@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 from pydantic import TypeAdapter
 
@@ -34,17 +34,13 @@ def uncertain(*replies: Reply, reason: str = "command_owner_result_unproven") ->
     return CommandVerdict(IngressStatus.UNCERTAIN, reason, None, replies)
 
 
-async def notice_reply_verdict(
-    core: TimelineCore | object, receipt: IngressReceipt
-) -> CommandVerdict:
-    core_any: Any = core
-    core_ref: TimelineCore = core_any
+async def notice_reply_verdict(core: TimelineCore, receipt: IngressReceipt) -> CommandVerdict:
     route, source = receipt.route, receipt.source
     account_id = route.command_account or ""
     if route.agent_id is None or route.notice_id is None:
         raise ValueError("frozen notice reply requires its original agent and notice IDs")
     if route.reason == "reply_mode_cancel":
-        cleared = core_ref.notice_bridge.clear_reply_target(
+        cleared = core.notice_bridge.clear_reply_target(
             source.sender_id, route.agent_id, route.notice_id, account_id=account_id
         )
         return CommandVerdict(
@@ -53,13 +49,13 @@ async def notice_reply_verdict(
             {"notice_reply_mode_closed": True, "notice_id": route.notice_id} if cleared else None,
             (Reply("Left reply mode"),),
         )
-    result = await core_ref.notice_bridge.resolve_frozen_reply(
+    result = await core.notice_bridge.resolve_frozen_reply(
         route.agent_id, route.notice_id, route.text
     )
     inbound_id = result.get("inbound_id")
     if type(inbound_id) is not int or inbound_id <= 0:
         return uncertain(reason="notice_owner_inbound_unproven")
-    core_ref.notice_bridge.clear_reply_target(
+    core.notice_bridge.clear_reply_target(
         source.sender_id, route.agent_id, route.notice_id, account_id=account_id
     )
     return CommandVerdict(
@@ -71,10 +67,8 @@ async def notice_reply_verdict(
 
 
 async def spawn_verdict(
-    core: TimelineCore | object, state: ChatState, receipt: IngressReceipt
+    core: TimelineCore, state: ChatState, receipt: IngressReceipt
 ) -> CommandVerdict:
-    core_any: Any = core
-    core_ref: TimelineCore = core_any
     route, text, key = receipt.route, receipt.route.text, source_chat_key(receipt.source)
     state.spawn_draft = (
         TypeAdapter(SpawnDraft).validate_json(json.dumps(route.spawn_draft))
@@ -82,11 +76,11 @@ async def spawn_verdict(
         else None
     )
     if text.split(":", 2)[1] == "go":
-        reply, birth_id = await core_ref.execute_spawn(state, idempotency_key=key)
+        reply, birth_id = await core.execute_spawn(state, idempotency_key=key)
         if type(birth_id) is int and birth_id > 0:
             return CommandVerdict(IngressStatus.ACCEPTED, None, {"agent_id": birth_id}, (reply,))
         return uncertain(reply, reason="spawn_owner_birth_unproven")
-    menu: Reply | list[Reply] = await core_ref._handle_spawn_menu(state, text, idempotency_key=key)
+    menu: Reply | list[Reply] = await core._handle_spawn_menu(state, text, idempotency_key=key)
     return uncertain(
         *(menu if isinstance(menu, list) else [menu]),
         reason="spawn_menu_owner_result_unproven",
@@ -94,21 +88,19 @@ async def spawn_verdict(
 
 
 async def execute_ingress_command(
-    core: TimelineCore | object,
+    core: TimelineCore,
     state: ChatState,
     receipt: IngressReceipt,
     *,
     selection_admission: SelectionAdmission,
 ) -> CommandVerdict:
-    core_any: Any = core
-    core_ref: TimelineCore = core_any
     route, source = receipt.route, receipt.source
     key = source_chat_key(source)
     if route.kind == IngressRouteKind.NOTICE_REPLY:
-        return await notice_reply_verdict(core_ref, receipt)
+        return await notice_reply_verdict(core, receipt)
     text = route.text
     if text.startswith("notice:"):
-        hint = await core_ref.notice_bridge.handle_callback(
+        hint = await core.notice_bridge.handle_callback(
             source.sender_id, text, account_id=route.command_account
         )
         return uncertain(
@@ -118,20 +110,20 @@ async def execute_ingress_command(
     if text.startswith("/notice"):
         argument = text[len("/notice") :].strip()
         hint = (
-            await core_ref.notice_bridge.list_queue()
+            await core.notice_bridge.list_queue()
             if argument == "list"
-            else core_ref.notice_bridge.cmd_notice(argument)
+            else core.notice_bridge.cmd_notice(argument)
         )
         return uncertain(
             *(Reply(hint),) if hint is not None else (),
             reason="notice_command_owner_result_unproven",
         )
     if text.startswith("spawn:"):
-        return await spawn_verdict(core_ref, state, receipt)
+        return await spawn_verdict(core, state, receipt)
     command, argument = parse_command(text)
     if command is None:
         raise ValueError("unknown slash commands must be admitted through the chat owner")
-    replies: Reply | list[Reply] | None = await core_ref._handle_command(
+    replies: Reply | list[Reply] | None = await core._handle_command(
         state, text, key, replay_id=key, selection_admission=selection_admission
     )
     hints = (
@@ -139,7 +131,7 @@ async def execute_ingress_command(
     )
     if command == CoreCommand.SWITCH:
         accepted: dict[str, object] | None = await asyncio.to_thread(
-            core_ref.outbound_store.replay_result,
+            core.outbound_store.replay_result,
             "weixin",
             route.command_account or "",
             source.sender_id,

@@ -16,7 +16,7 @@ from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from threading import Event, Lock
-from typing import Any
+from typing import Protocol
 
 from base.agents.context.clients import ClientSet
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
@@ -24,7 +24,8 @@ from base.cluster.machine import MachineIdentityReader
 from base.daemon.health import DaemonProbe, ProbeVerdict
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
-from services.supervision.meiva_root.health import HealthMonitor, ProbeRunner
+from base.telemetry.delivery.pipeline import EventPipeline
+from services.supervision.meiva_root.health import ProbeRunner
 
 _log = logging.getLogger(__name__)
 
@@ -37,28 +38,52 @@ def _wall_time() -> float:
     )
 
 
-def _default_init_logging(
-    *,
-    name: str,
-    producer: object,
-    machine_reader: Callable[[], str],
-    image: LoadedCommit,
-) -> None:
-    from base.telemetry.process_logging import init_gateway_process
+class HealthRoundOwner(Protocol):
+    def health_snapshot(self) -> dict[str, object]: ...
 
-    typed_producer: Any = producer
-    init_gateway_process(
-        name=name,
-        producer=typed_producer,
-        machine_reader=machine_reader,
-        image=image,
-    )
+    async def run_round(self) -> None: ...
+
+    async def stop(self) -> None: ...
 
 
-def _default_sync_telemetry(*, timeout: float) -> object:
-    from base import telemetry
+class ProcessTelemetry(Protocol):
+    def start(
+        self,
+        *,
+        name: str,
+        producer: Callable[[], EventPipeline],
+        machine_reader: Callable[[], str],
+        image: LoadedCommit,
+    ) -> None: ...
 
-    return telemetry.sync(timeout=timeout)
+    def sync(self, *, timeout: float) -> object: ...
+
+
+class _SystemProcessTelemetry:
+    def start(
+        self,
+        *,
+        name: str,
+        producer: Callable[[], EventPipeline],
+        machine_reader: Callable[[], str],
+        image: LoadedCommit,
+    ) -> None:
+        from base.telemetry.process_logging import init_gateway_process
+
+        init_gateway_process(
+            name=name,
+            producer=producer,
+            machine_reader=machine_reader,
+            image=image,
+        )
+
+    def sync(self, *, timeout: float) -> object:
+        from base import telemetry
+
+        return telemetry.sync(timeout=timeout)
+
+
+SYSTEM_PROCESS_TELEMETRY: ProcessTelemetry = _SystemProcessTelemetry()
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,7 +259,7 @@ class RootHealthRounds:
 
     def __init__(
         self,
-        health: HealthMonitor | object,
+        health: HealthRoundOwner,
         diagnostics: DiagnosticMonitor,
         *,
         clients: ClientSet,
@@ -242,14 +267,13 @@ class RootHealthRounds:
         machine: MachineIdentityReader,
         interval_s: float = 60.0,
         tasks: asyncio.TaskGroup | None = None,
-        init_logging: Callable[..., None] = _default_init_logging,
-        sync_telemetry: Callable[..., object] = _default_sync_telemetry,
+        telemetry: ProcessTelemetry = SYSTEM_PROCESS_TELEMETRY,
     ) -> None:
         if interval_s <= 0:
             raise ValueError("root health interval must be positive")
         self._home = str(meiva_home().resolve())
         self._home_id = hashlib.sha256(self._home.encode()).hexdigest()
-        self._health: Any = health
+        self._health = health
         self._diagnostics = diagnostics
         self._clients = clients
         self._image = image
@@ -257,8 +281,7 @@ class RootHealthRounds:
         self._interval_s = interval_s
         self._task: asyncio.Task[None] | None = None
         self._tasks = tasks
-        self._init_logging = init_logging
-        self._sync_telemetry = sync_telemetry
+        self._telemetry = telemetry
         self._expected_since: float | None = None
         self._last_completed: float | None = None
 
@@ -295,7 +318,7 @@ class RootHealthRounds:
         from base.log import logger
 
         try:
-            self._init_logging(
+            self._telemetry.start(
                 name="meiva-root",
                 producer=self._clients.event_pipeline,
                 machine_reader=self._machine.name,
@@ -350,7 +373,7 @@ class RootHealthRounds:
             )
             self._expected_since = None
             try:
-                await asyncio.to_thread(self._sync_telemetry, timeout=2)
+                await asyncio.to_thread(self._telemetry.sync, timeout=2)
             except BaseException as exc:
                 failures.append(exc)
         try:

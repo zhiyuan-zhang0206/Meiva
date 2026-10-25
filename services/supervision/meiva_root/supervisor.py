@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Awaitable, Callable, Coroutine, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from time import monotonic
 from typing import Any, Protocol
@@ -21,6 +21,7 @@ from base.host.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 from base.host.runtime_interpreter import LoadedRuntimeIdentity
 from base.native_process.child_env import inherited_process_env
 from base.native_process.ownership import OwnedProcess
+from base.native_process.process_control import SYSTEM_PROCESS_CONTROL, ProcessControl
 from base.native_process.root_control.ipc import (
     ErrorCode,
     RequestPayload,
@@ -94,10 +95,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         run_dir: Path,
         config: SupervisorConfig | None = None,
         spawn: ChildSpawn | None = None,
-        signal_owned: Callable[..., bool] | None = None,
-        stop_unit_fn: Callable[..., Awaitable[None]] | None = None,
-        watch_fn: Callable[[UnitRuntime, Generation], Coroutine[object, object, None]]
-        | None = None,
+        process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
     ) -> None:
         self._registry = registry
         # meiva:note
@@ -107,9 +105,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         self._run_dir = run_dir
         self._log_dir = run_dir / "logs"
         self._config = config if config is not None else SupervisorConfig()
-        self._signal_owned_fn = self._signal_owned if signal_owned is None else signal_owned
-        self._stop_unit_override = stop_unit_fn
-        self._watch_override = watch_fn
+        self._process_control = process_control
         # meiva:note
         # Opaque launch rewriting from the assembly; None launches the manifest as written.
         self._argv_transform: ArgvTransform | None = None
@@ -681,12 +677,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
                 identity, generation.seq, manifest.digest(), started_at=_wall_time()
             )
             unit_ledger.write(self._run_dir, manifest.id, record)
-        watch_coro = (
-            self._watch(runtime, generation)
-            if self._watch_override is None
-            else self._watch_override(runtime, generation)
-        )
-        watch = asyncio.create_task(watch_coro)
+        watch = asyncio.create_task(self._watch(runtime, generation))
         self._retain_watch(watch, generation)
         runtime.watch_task = watch
         _log.info(
@@ -714,33 +705,37 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
 
     async def _watch(self, runtime: UnitRuntime, generation: Generation) -> None:
         """Reap one direct child and make an unexpected exit eligible for replacement."""
-        returncode = await generation.proc.wait()
-        # meiva:note
-        # Positive exit inside the window retires the rewrite; negative codes are signal
-        # deaths, so a plain `stop` never costs the cap. A real crash is indistinguishable
-        # here -- we choose to lose the cap rather than risk a restart loop.
-        if (
-            generation.rewritten
-            and not self._rewrite_retired
-            and returncode > 0
-            and monotonic() - generation.started_at <= REWRITE_STARTUP_WINDOW_S
-        ):
-            self._rewrite_retired = True
-            _log.warning(
-                "unit %s: the rewritten launch exited %s within %.0fs; memory cap not "
-                "applied, the unit runs unbounded for the rest of this root's life",
-                runtime.manifest.id,
-                returncode,
-                REWRITE_STARTUP_WINDOW_S,
-            )
-        if runtime.generation is generation:
-            runtime.last_exit = _describe_exit(returncode)
-            runtime.state = UnitState.STOPPED
-            runtime.generation = None
-            if not generation.closing:
-                runtime.last_error = f"unexpected exit: {runtime.last_exit}"
-            unit_ledger.clear(self._run_dir, runtime.manifest.id, generation=generation.seq)
-        generation.exited.set()
+        try:
+            await generation.proc.wait()
+        finally:
+            returncode = generation.proc.returncode
+            if returncode is not None:
+                # meiva:note
+                # Positive exit inside the window retires the rewrite; negative codes are signal
+                # deaths, so a plain `stop` never costs the cap. A real crash is indistinguishable
+                # here -- we choose to lose the cap rather than risk a restart loop.
+                if (
+                    generation.rewritten
+                    and not self._rewrite_retired
+                    and returncode > 0
+                    and monotonic() - generation.started_at <= REWRITE_STARTUP_WINDOW_S
+                ):
+                    self._rewrite_retired = True
+                    _log.warning(
+                        "unit %s: the rewritten launch exited %s within %.0fs; memory cap not "
+                        "applied, the unit runs unbounded for the rest of this root's life",
+                        runtime.manifest.id,
+                        returncode,
+                        REWRITE_STARTUP_WINDOW_S,
+                    )
+                if runtime.generation is generation:
+                    runtime.last_exit = _describe_exit(returncode)
+                    runtime.state = UnitState.STOPPED
+                    runtime.generation = None
+                    if not generation.closing:
+                        runtime.last_error = f"unexpected exit: {runtime.last_exit}"
+                    unit_ledger.clear(self._run_dir, runtime.manifest.id, generation=generation.seq)
+                generation.exited.set()
 
     @staticmethod
     def _is_active(runtime: UnitRuntime) -> bool:

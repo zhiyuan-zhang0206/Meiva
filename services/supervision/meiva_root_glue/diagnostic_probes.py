@@ -7,8 +7,7 @@ an ensure, start, stop, launchd repair, or session command.
 from __future__ import annotations
 
 import shutil
-import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -36,21 +35,33 @@ from services.supervision.healthchecks.browser_reach import (
 from services.supervision.healthchecks.browser_reach import (
     host_probe as _default_host_probe,
 )
-from services.supervision.healthchecks.redis_acl import ping as _default_redis_ping
+from services.supervision.healthchecks.redis_acl import (
+    RedisPingConnection,
+)
+from services.supervision.healthchecks.redis_acl import (
+    ping as _default_redis_ping,
+)
 from services.supervision.meiva_root.health import LeaseProbe
 from services.supervision.meiva_root_glue.diagnostics import Diagnostic
 
-FieldReader = Callable[[str], str | int | float | bool]
+
+def _setting(
+    name: str, overrides: Mapping[str, str | int | float | bool] | None = None
+) -> str | int | float | bool:
+    if overrides is not None and name in overrides:
+        return overrides[name]
+    return get_field(name)
 
 
 def brew_pins(
     *,
     brew_binary: str = "brew",
-    run_cmd: Callable[..., subprocess.CompletedProcess[str]] = proc.run_bounded,
 ) -> DaemonProbe:
     observed: list[set[str]] = []
     for option in ("--pinned", "--formula"):
-        result = run_cmd([brew_binary, "list", option], timeout=5, capture_output=True, text=True)
+        result = proc.run_bounded(
+            [brew_binary, "list", option], timeout=5, capture_output=True, text=True
+        )
         result.check_returncode()
         observed.append(set(result.stdout.splitlines()))
     pinned, installed = observed
@@ -82,13 +93,13 @@ def venv() -> DaemonProbe:
 
 def redis_acl(
     *,
-    read_field: FieldReader = get_field,
-    ping_fn: Callable[[str], None] = _default_redis_ping,
+    redis_url: str | None = None,
+    connection: RedisPingConnection | None = None,
 ) -> DaemonProbe:
     from base.cluster import ownership
 
-    redis_url = str(read_field("redis_url"))
-    port = ownership.redis_port_of(redis_url)
+    resolved_url = str(get_field("redis_url")) if redis_url is None else redis_url
+    port = ownership.redis_port_of(resolved_url)
     if port is None:
         return DaemonProbe.unavailable("no explicit local Redis endpoint")
 
@@ -96,7 +107,7 @@ def redis_acl(
         from redis.exceptions import RedisError
 
         try:
-            ping_fn(redis_url)
+            _default_redis_ping(resolved_url, connection=connection)
         except RedisError as exc:
             return DaemonProbe.down(f"native Redis runtime ACL PING failed: {type(exc).__name__}")
         return DaemonProbe.up("Redis runtime ACL authenticated and answered PING")
@@ -131,58 +142,82 @@ def _default_public_reachable(port: int, user: str, *, machine: MachineIdentityR
 def pgbouncer(
     *,
     machine: MachineIdentityReader,
-    record_reader: Callable[[Path], ClusterRecord | None] = _default_get_record,
-    admin_password_reader: Callable[[Path], str] = _default_pooler_admin_password,
-    loopback_reachable: Callable[[int, str], bool] = _default_loopback_reachable,
-    public_reachable: Callable[..., bool] = _default_public_reachable,
+    home: Path | None = None,
+    record: ClusterRecord | None = None,
+    admin_password: str | None = None,
+    loopback: bool | None = None,
+    public: bool | None = None,
 ) -> DaemonProbe:
     from base.host.db_authority.delivery import POOLER_ADMIN
     from base.host.db_authority.model import AuthorityRefusedError
     from base.paths import meiva_home
 
-    home = meiva_home()
-    record = record_reader(home)
-    if record is None:
+    resolved_home = meiva_home() if home is None else home
+    resolved_record = _default_get_record(resolved_home) if record is None else record
+    if resolved_record is None:
         return DaemonProbe.unavailable("no registry record for the local pooler")
-    port = record.ports["pgbouncer"]
-    try:
-        admin_password = admin_password_reader(home)
-    except AuthorityRefusedError as exc:
-        return DaemonProbe.unavailable(f"no pooler admin credential: {exc}")
+    port = resolved_record.ports["pgbouncer"]
+    if admin_password is None:
+        try:
+            resolved_password = _default_pooler_admin_password(resolved_home)
+        except AuthorityRefusedError as exc:
+            return DaemonProbe.unavailable(f"no pooler admin credential: {exc}")
+    else:
+        resolved_password = admin_password
 
     def protocol() -> DaemonProbe:
-        loopback = loopback_reachable(port, admin_password)
-        public = loopback and public_reachable(port, POOLER_ADMIN, machine=machine)
-        if loopback and public:
+        loopback_ok = (
+            _default_loopback_reachable(port, resolved_password) if loopback is None else loopback
+        )
+        public_ok = loopback_ok and (
+            _default_public_reachable(port, POOLER_ADMIN, machine=machine)
+            if public is None
+            else public
+        )
+        if loopback_ok and public_ok:
             return DaemonProbe.up("native pooler admin console and required listeners answered")
-        return DaemonProbe.down(f"pooler listener failure: loopback={loopback}, public={public}")
+        return DaemonProbe.down(
+            f"pooler listener failure: loopback={loopback_ok}, public={public_ok}"
+        )
 
     return protocol()
 
 
 def browser_reach(
     *,
-    read_field: FieldReader = get_field,
-    browser_probe: Callable[[], DaemonProbe] = _default_probe_browser,
-    canary_fn: Callable[[int, str, float], CanaryResult] = _default_canary,
-    host_probe_fn: Callable[[str, float], HostResult] = _default_host_probe,
+    url: str | None = None,
+    port: int | None = None,
+    timeout_s: float | None = None,
+    browser_verdict: DaemonProbe | None = None,
+    canary_result: CanaryResult | None = None,
+    host_result: HostResult | None = None,
 ) -> DaemonProbe:
-    url = str(read_field("gateway_health_url")).strip()
-    if not url:
+    resolved_url = (str(get_field("gateway_health_url")) if url is None else url).strip()
+    if not resolved_url:
         return DaemonProbe.unavailable("gateway reachability URL is not configured")
-    port = int(read_field("browser_cdp_port"))
-    timeout_s = float(read_field("browser_reach_timeout_s"))
+    resolved_port = int(get_field("browser_cdp_port")) if port is None else port
+    resolved_timeout_s = (
+        float(get_field("browser_reach_timeout_s")) if timeout_s is None else timeout_s
+    )
 
     def protocol() -> DaemonProbe:
-        browser = browser_probe()
+        browser = _default_probe_browser() if browser_verdict is None else browser_verdict
         if not browser.alive:
             return DaemonProbe.unavailable(f"browser canary prerequisite failed: {browser.detail}")
-        canary = canary_fn(port, url, timeout_s)
+        canary = (
+            _default_canary(resolved_port, resolved_url, resolved_timeout_s)
+            if canary_result is None
+            else canary_result
+        )
         if canary.outcome == "skip":
             return DaemonProbe.unavailable(canary.detail)
         if canary.outcome == "ok":
             return DaemonProbe.up(canary.detail)
-        host = host_probe_fn(url, timeout_s)
+        host = (
+            _default_host_probe(resolved_url, resolved_timeout_s)
+            if host_result is None
+            else host_result
+        )
         detail = f"browser={canary.detail}; host={host.detail}"
         if not host.ok:
             return DaemonProbe.unavailable(f"host baseline also failed: {detail}")
@@ -321,25 +356,27 @@ def build_diagnostics(
     *,
     database: Callable[[], Database],
     machine: MachineIdentityReader,
-    read_field: FieldReader = get_field,
-    macos_fn: Callable[[], bool] = is_macos,
+    overrides: Mapping[str, str | int | float | bool] | None = None,
+    macos: bool | None = None,
 ) -> list[Diagnostic]:
     """Host policy is explicit; absent capabilities do not create fake samples."""
+    is_mac = is_macos() if macos is None else macos
     checks: list[Diagnostic] = []
-    if macos_fn():
+    if is_mac:
         checks.append(Diagnostic("brew-pin", brew_pins))
     checks.append(Diagnostic("venv", venv))
-    if macos_fn():
+    if is_mac:
         from services.supervision.healthchecks.permissions_helper import episode_reporter, probe
 
         checks.append(Diagnostic("permissions-helper", probe, report=episode_reporter()))
     if "gateway" in machine.role():
-        is_remote = names_foreign_host(str(read_field("db_url")), str(read_field("redis_url")))
+        redis_url = str(_setting("redis_url", overrides))
+        is_remote = names_foreign_host(str(_setting("db_url", overrides)), redis_url)
         if not is_remote:
-            checks.append(Diagnostic("redis-acl", partial(redis_acl, read_field=read_field)))
-            if bool(read_field("pgbouncer_enabled")):
+            checks.append(Diagnostic("redis-acl", partial(redis_acl, redis_url=redis_url)))
+            if bool(_setting("pgbouncer_enabled", overrides)):
                 checks.append(Diagnostic("pgbouncer", partial(pgbouncer, machine=machine)))
-        obs_url = str(read_field("observability_url")).strip()
+        obs_url = str(_setting("observability_url", overrides)).strip()
         if obs_url:
             from base.paths import meiva_home
 
@@ -347,19 +384,25 @@ def build_diagnostics(
                 database=database,
                 config=StationEndpointConfig(
                     observability_url=obs_url,
-                    otlp_port=int(read_field("observability_otlp_port")),
+                    otlp_port=int(_setting("observability_otlp_port", overrides)),
                 ),
                 home=meiva_home().resolve(),
                 open_url=SYSTEM_URL_OPENER,
             )
             checks.append(Diagnostic("observatory-station", station.probe))
     if "browser" in requested:
+        timeout_s = float(_setting("browser_reach_timeout_s", overrides))
         checks.append(
             Diagnostic(
                 "browser-reach",
-                partial(browser_reach, read_field=read_field),
-                interval_s=max(60.0, float(read_field("browser_reach_probe_interval_s"))),
-                timeout_s=max(20.0, float(read_field("browser_reach_timeout_s")) * 3 + 10),
+                partial(
+                    browser_reach,
+                    url=str(_setting("gateway_health_url", overrides)),
+                    port=int(_setting("browser_cdp_port", overrides)),
+                    timeout_s=timeout_s,
+                ),
+                interval_s=max(60.0, float(_setting("browser_reach_probe_interval_s", overrides))),
+                timeout_s=max(20.0, timeout_s * 3 + 10),
             )
         )
     if "loki" in requested:

@@ -1,7 +1,6 @@
 """Read-only health probes for otel collector; the root supervisor owns recovery."""
 
 import urllib.request
-from collections.abc import Callable
 from http.client import HTTPException
 from pathlib import Path
 
@@ -66,8 +65,9 @@ def probe_collector_at(otlp_port: int) -> DaemonProbe:
 # meiva:note
 # The registry's zero-argument probe: this unit's local OTLP port, read when the probe runs
 # (a remote or stale producer export override cannot redirect local liveness).
-def probe_collector(*, read_port: Callable[[str], int] = get_field) -> DaemonProbe:
-    return probe_collector_at(int(read_port("telemetry_otlp_port")))
+def probe_collector(*, port: int | None = None) -> DaemonProbe:
+    resolved_port = int(get_field("telemetry_otlp_port")) if port is None else port
+    return probe_collector_at(resolved_port)
 
 
 # meiva:note

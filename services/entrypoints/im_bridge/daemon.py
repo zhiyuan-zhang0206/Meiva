@@ -20,7 +20,7 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
 from psycopg_pool import ConnectionPool, PoolTimeout
@@ -192,34 +192,24 @@ def adapter_inputs(config: ConfigBoot, *, state_dir: Path) -> AdapterInputs:
 
 # meiva:note
 # One static import per channel: a disabled adapter's module is never imported.
-def _adapter_class(name: str) -> type[IMAdapter]:
+def _build_adapter(name: str, core: IMBridgeCore, inputs: AdapterInputs) -> IMAdapter:
     if name == "telegram":
         from services.entrypoints.im_bridge.adapters import telegram
 
-        return telegram.ADAPTER_CLASS
+        return telegram.ADAPTER_CLASS(core, inputs.telegram, state_dir=inputs.state_dir)
     if name == "weixin":
         from services.entrypoints.im_bridge.adapters import weixin
 
-        return weixin.ADAPTER_CLASS
+        return weixin.ADAPTER_CLASS(core, state_dir=inputs.state_dir)
     if name == "feishu":
         from services.entrypoints.im_bridge.adapters import feishu
 
-        return feishu.ADAPTER_CLASS
-    raise ValueError(f"unknown im_bridge adapter {name!r}")
-
-
-def _build_adapter(name: str, core: IMBridgeCore, inputs: AdapterInputs) -> IMAdapter:
-    cls: Any = _adapter_class(name)
-    if name == "telegram":
-        return cls(core, inputs.telegram, state_dir=inputs.state_dir)
-    if name == "weixin":
-        return cls(core, state_dir=inputs.state_dir)
-    if name == "feishu":
-        return cls(
+        return feishu.ADAPTER_CLASS(
             core,
             inputs.feishu,
             state_dir=inputs.state_dir,
             proxy_configured=inputs.proxy_configured,
+            cursor_store=core.cursor_store,
         )
     raise ValueError(f"unknown im_bridge adapter {name!r}")
 
@@ -279,8 +269,12 @@ async def timeline_outbound_loop(
         await asyncio.sleep(interval_s)
 
 
+class NotifyTarget(Protocol):
+    async def notify_user(self, text: str) -> dict[str, str]: ...
+
+
 async def handle_send(
-    core: IMBridgeCore | object,
+    core: NotifyTarget,
 ) -> Callable[[bytes], Coroutine[Any, Any, tuple[int, bytes, str]]]:
     """Route handler for the daemon's ``POST /send`` RPC (ops-alerts fan-out).
 
@@ -292,8 +286,6 @@ async def handle_send(
     of 200 — the caller (base/telemetry/alerts/__init__.py) keys ``notified_at`` off the status
     code, and a fake 200 would stamp a message that never reached the user.
     """
-    core_any: Any = core
-    core_ref: IMBridgeCore = core_any
 
     async def handle(body: bytes) -> tuple[int, bytes, str]:
         try:
@@ -303,7 +295,7 @@ async def handle_send(
         text = payload.get("text")
         if not isinstance(text, str) or not text.strip():
             return 400, b'{"error": "text (non-empty string) required"}', "application/json"
-        results = await core_ref.notify_user(text)
+        results = await core.notify_user(text)
         delivered = any(v == "ok" for v in results.values())
         if not delivered:
             # Nothing reached the user — report failure so the caller does not

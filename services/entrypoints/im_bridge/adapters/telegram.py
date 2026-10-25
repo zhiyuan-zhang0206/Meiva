@@ -117,7 +117,7 @@ class TelegramAdapter(IMAdapter):
 
     def __init__(
         self,
-        core: BridgeCore | object,
+        core: BridgeCore | None,
         config: TelegramCredentialsConfig,
         *,
         state_dir: Path,

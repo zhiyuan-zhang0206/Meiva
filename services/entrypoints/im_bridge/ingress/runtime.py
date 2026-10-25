@@ -27,11 +27,8 @@ from services.entrypoints.im_bridge.types import ChatState, IMAdapter, parse_com
 
 
 class WeixinIngress:
-    def __init__(
-        self, core: TimelineCore | object, store: WeixinIngressStore, adapter: IMAdapter
-    ) -> None:
-        core_any: Any = core
-        self.core: TimelineCore = core_any
+    def __init__(self, core: TimelineCore, store: WeixinIngressStore, adapter: IMAdapter) -> None:
+        self.core: TimelineCore = core
         self.store = store
         self.adapter = adapter
         self.command_states: dict[tuple[str, str, str], ChatState] = {}

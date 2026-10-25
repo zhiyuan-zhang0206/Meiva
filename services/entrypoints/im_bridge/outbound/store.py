@@ -8,7 +8,6 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 
 from psycopg import Connection
 from psycopg.types.json import Jsonb
-from psycopg_pool import ConnectionPool
 
 from base.db.transaction import ConnectionSource, write_transaction
 from base.telemetry.alerts.native import stamp_native_sent
@@ -51,9 +50,8 @@ def _enforce_claim_fence(conn: Connection, fence: ClaimFence) -> None:
 
 
 class IMOutboxStore:
-    def __init__(self, pool: ConnectionPool | ConnectionSource | object = None) -> None:
-        pool_any: Any = pool
-        self.pool: ConnectionSource | None = pool_any
+    def __init__(self, pool: ConnectionSource | None = None) -> None:
+        self.pool: ConnectionSource | None = pool
         self._seq = 0
 
     def _next_uuid(self) -> UUID:

@@ -15,7 +15,14 @@ from services.entrypoints.im_bridge.outbound.types import (
     TimelineCandidate,
     timeline_source,
 )
-from services.entrypoints.im_bridge.types import ChatState, IMAdapter, NoticeBridgeOwner, Reply
+from services.entrypoints.im_bridge.types import (
+    BridgeCore,
+    ChatState,
+    IMAdapter,
+    InboundMessage,
+    NoticeBridgeOwner,
+    Reply,
+)
 
 
 @dataclass(frozen=True)
@@ -25,13 +32,20 @@ class SelectionAdmission:
     fence: ClaimFence
 
 
-class TimelineCore:
+class TimelineCore(BridgeCore):
     adapters: dict[str, IMAdapter]
     chats: dict[tuple[str, str], ChatState]
     outbound_store: IMOutboxStore
-    notice_bridge: NoticeBridgeOwner
     _last_pushed: dict[tuple[str, str, int], PushWatermark]
     _subscriptions: dict[tuple[str, str], asyncio.Task[Any]]
+    _switch_state: dict[str, int]
+
+    @property
+    def notice_bridge(self) -> NoticeBridgeOwner:
+        raise NotImplementedError
+
+    async def handle_inbound(self, msg: InboundMessage) -> None:
+        raise NotImplementedError
 
     def _hold_selection(self, state: ChatState) -> None:
         raise NotImplementedError
@@ -73,7 +87,7 @@ class TimelineCore:
 
 
 async def accept_timeline(
-    core: TimelineCore | object,
+    core: TimelineCore,
     state: ChatState,
     agent_id: int,
     items: list[dict[str, Any]],
@@ -82,14 +96,12 @@ async def accept_timeline(
     switch_arg: str = "",
     selection_admission: SelectionAdmission | None = None,
 ) -> TimelineAcceptance:
-    core_any: Any = core
-    core_ref: TimelineCore = core_any
     adapter = (
         selection_admission.adapter
         if selection_admission is not None
-        else core_ref.adapters[state.channel]
+        else core.adapters[state.channel]
     )
-    if selection_admission is not None and core_ref.adapters.get(state.channel) is not adapter:
+    if selection_admission is not None and core.adapters.get(state.channel) is not adapter:
         raise ValueError("selection source adapter account is superseded")
     account = await adapter.outbound_account_id()
     if selection_admission is not None and account != selection_admission.account_id:
@@ -110,7 +122,7 @@ async def accept_timeline(
             )
         candidates.append(TimelineCandidate(item, intent))
     acceptance = await asyncio.to_thread(
-        core_ref.outbound_store.accept,
+        core.outbound_store.accept,
         state.channel,
         account,
         state.chat_id,
@@ -121,7 +133,7 @@ async def accept_timeline(
         fence=selection_admission.fence if selection_admission is not None else None,
     )
     if acceptance.watermark is not None and acceptance.selected_agent_id == agent_id:
-        core_ref._last_pushed[(state.channel, state.chat_id, agent_id)] = acceptance.watermark
+        core._last_pushed[(state.channel, state.chat_id, agent_id)] = acceptance.watermark
     return acceptance
 
 
@@ -144,54 +156,48 @@ def render_item(it: dict[str, Any], agent_id: int | None = None) -> str:
 # Rebuild account-bound runtime selection.
 #
 # Account-bound adapters cannot import a peer-only legacy selection.
-async def restore_selection(core: TimelineCore | object, state: ChatState) -> int | None:
-    core_any: Any = core
-    core_ref: TimelineCore = core_any
-    adapter = core_ref.adapters[state.channel]
+async def restore_selection(core: TimelineCore, state: ChatState) -> int | None:
+    adapter = core.adapters[state.channel]
     account = await adapter.outbound_account_id()
     if adapter.selection_requires_account_proof:
         selected = await asyncio.to_thread(
-            core_ref.outbound_store.native_selection, state.channel, account, state.chat_id
+            core.outbound_store.native_selection, state.channel, account, state.chat_id
         )
-        if core_ref.adapters.get(state.channel) is not adapter or selected is None:
-            core_ref._hold_selection(state)
+        if core.adapters.get(state.channel) is not adapter or selected is None:
+            core._hold_selection(state)
             return None
     else:
         selected = await asyncio.to_thread(
-            core_ref.outbound_store.selection,
+            core.outbound_store.selection,
             state.channel,
             account,
             state.chat_id,
             state.current_agent_id,
         )
-    core_ref._apply_selection(state, selected)
+    core._apply_selection(state, selected)
     return selected
 
 
-def hold_selection(core: TimelineCore | object, state: ChatState) -> None:
+def hold_selection(core: TimelineCore, state: ChatState) -> None:
     """Discard derived runtime state without deleting historical selection or journals."""
-    core_any: Any = core
-    core_ref: TimelineCore = core_any
     state.current_agent_id = None
-    task = core_ref._subscriptions.pop((state.channel, state.chat_id), None)
+    task = core._subscriptions.pop((state.channel, state.chat_id), None)
     if task is not None:
         task.cancel()
-    core_ref._stop_typing(state)
+    core._stop_typing(state)
 
 
-def register_adapter(core: TimelineCore | object, adapter: IMAdapter) -> None:
-    core_any: Any = core
-    core_ref: TimelineCore = core_any
-    previous = core_ref.adapters.get(adapter.channel)
+def register_adapter(core: TimelineCore, adapter: IMAdapter) -> None:
+    previous = core.adapters.get(adapter.channel)
     if (
         previous is not None
         and previous is not adapter
         and adapter.selection_requires_account_proof
     ):
-        for (channel, _chat), state in core_ref.chats.items():
+        for (channel, _chat), state in core.chats.items():
             if channel == adapter.channel:
-                hold_selection(core_ref, state)
-    core_ref.adapters[adapter.channel] = adapter
+                hold_selection(core, state)
+    core.adapters[adapter.channel] = adapter
 
 
 def truncate(text: str, limit: int) -> str:
@@ -202,24 +208,20 @@ def truncate(text: str, limit: int) -> str:
 
 
 async def selection_account(
-    core: TimelineCore | object, state: ChatState, scope: SelectionAdmission | None
+    core: TimelineCore, state: ChatState, scope: SelectionAdmission | None
 ) -> str:
-    core_any: Any = core
-    core_ref: TimelineCore = core_any
     return (
         scope.account_id
         if scope is not None
-        else await core_ref.adapters[state.channel].outbound_account_id()
+        else await core.adapters[state.channel].outbound_account_id()
     )
 
 
 def apply_account_selection(
-    core: TimelineCore | object,
+    core: TimelineCore,
     state: ChatState,
     agent_id: int | None,
     scope: SelectionAdmission | None,
 ) -> None:
-    core_any: Any = core
-    core_ref: TimelineCore = core_any
-    if scope is None or core_ref.adapters.get(state.channel) is scope.adapter:
-        core_ref._apply_selection(state, agent_id)
+    if scope is None or core.adapters.get(state.channel) is scope.adapter:
+        core._apply_selection(state, agent_id)
