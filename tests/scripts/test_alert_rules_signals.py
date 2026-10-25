@@ -70,6 +70,9 @@ SIGNALS: dict[str, Signal] = {
     ),
     "meiva-ops-im-push-stall": Signal("im_push_health", "meiva-ops", "2m", "warning"),
     "meiva-ops-delivery-stalled": Signal("delivery_stalled", "meiva-ops", "1m", "warning"),
+    "meiva-ops-delivery-stranded-wake": Signal(
+        "delivery_stranded_wake", "meiva-ops", "0m", "warning"
+    ),
     "meiva-ops-db-pool-acquire-slow": Signal("db_pool_acquire_slow", "meiva-ops", "2m", "warning"),
     "meiva-ops-root-unit-restart-failed": Signal(
         "root_unit_failure_state", "meiva-ops", "0m", "error"
