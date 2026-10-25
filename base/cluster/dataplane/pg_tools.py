@@ -24,7 +24,7 @@ import socket
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Generator
+from collections.abc import Generator, Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import NamedTuple, TypedDict, cast
@@ -34,6 +34,12 @@ from base.cluster.dataplane.pg_foreground import (
     start_foreground_postgres,
     stop_foreground_postgres,
     wait_foreground_postgres,
+)
+from base.cluster.dataplane.pg_plan import (
+    PG_SHM_MMAP_OK_ON_MACOS,
+    PG_TZ_ARGS,
+    build_pg_shm_args,
+    build_pg_start_env,
 )
 from base.cluster.dataplane.pg_stall_watchdog import (
     StallWatchdogConfig,
@@ -45,128 +51,49 @@ from base.log import logger
 from base.native_process.child_env import daemon_process_env
 from base.native_process.os_platform import is_macos
 
-# mmap-backed shared memory for every Postgres this codebase starts (Task #1263).
-# Both settings make Postgres keep shared memory in files under the data
-# directory instead of POSIX shm segments in /dev/shm, so an external unlink of
-# /dev/shm cannot take a running instance down (the staging incident that
-# motivated the task; the machine-side fix was the same two settings).
-_PG_SHM_ARGS = "-c shared_memory_type=mmap -c dynamic_shared_memory_type=mmap"
-
-# macOS compatibility finding (Task #1263): verified 2026-08-13 on the vendored
-# PG 17.4 — both options are accepted and effective (pg_settings, source=command
-# line); mmap is already the default for the main region on macOS and DSM mmap
-# has been supported since PG 15. If a future macOS PG build rejects either
-# option, flip this to False: `pg_shm_args` then keeps macOS on its status quo
-# (no explicit settings) while Linux keeps the pin — the fallback the task
-# named ("incompatible -> Linux only").
-PG_SHM_MMAP_OK_ON_MACOS = True
-
 
 def pg_shm_args() -> str:
-    """The `pg_ctl -o` fragments that pin mmap-backed shared memory.
-
-    Returns the two `-c` settings (no surrounding spaces) that every PG startup
-    path passes on the `pg_ctl start` command line: the per-cluster data plane
-    (`cli/commands/data_plane/cluster_instance.py`) and the throwaway test/eval clusters
-    (`throwaway_postgres`). Command-line `-c` outranks anything a machine's
-    postgresql.conf says, so Meiva's instances carry the posture no matter what
-    the host is configured with. A platform that must not set them yields "" —
-    callers splice the return value into their `-o` string, so empty is a no-op.
-    """
-    if is_macos() and not PG_SHM_MMAP_OK_ON_MACOS:
-        return ""
-    return _PG_SHM_ARGS
-
-
-# Postgres session timezone, pinned to UTC. psycopg3 returns aware datetimes in
-# the SESSION timezone (never pinned before this), so without this every
-# timestamptz the gateway/tests see round-trips with an offset that drifts
-# with the host OS timezone instead of being a stable `+00:00`. Same splice
-# points as `pg_shm_args` above: the per-cluster data plane and the throwaway
-# test/eval clusters.
-_PG_TZ_ARGS = "-c timezone=UTC"
+    return build_pg_shm_args(macos=is_macos(), mmap_ok_on_macos=PG_SHM_MMAP_OK_ON_MACOS)
 
 
 def pg_tz_args() -> str:
-    """The `pg_ctl -o` fragment that pins the Postgres session timezone to UTC.
-
-    See `_PG_TZ_ARGS` above for why. Unlike `pg_shm_args`, this one has no
-    platform exception — every PG startup path in this codebase sets it."""
-    return _PG_TZ_ARGS
-
-
-# macOS postmaster locale fallback (Task #3754). With no LC_ALL/LANG in the
-# environment, locale init goes through CoreFoundation, which spawns a thread,
-# and the postmaster refuses to run multithreaded: it aborts with "postmaster
-# became multithreaded during startup" (HINT: set LC_ALL to a valid locale).
-# A launchd job and a non-interactive ssh session both start `meiva` with no
-# locale at all — so PG is handed one instead of inheriting the caller's
-# emptiness. Verified 2026-09-17 on macOS against Homebrew postgresql@17
-# (17.11): nothing at all fails, an empty LC_ALL fails, LC_CTYPE alone fails
-# (a locale-less Python start fills exactly that one variable via its own
-# C-locale coercion — not enough), any non-empty LC_ALL/LANG starts; initdb
-# needs none of this. The environment
-# stays the override (a caller that sets LC_ALL/LANG keeps it verbatim), and
-# Linux gets nothing — its absent locale resolves to C without threads, and a
-# minimal image may not even have en_US.UTF-8 generated.
-_MACOS_PG_LOCALE = "en_US.UTF-8"
+    return PG_TZ_ARGS
 
 
 def pg_start_env() -> dict[str, str]:
-    """The child environment for starting a Postgres server.
-
-    The operator's process mechanics only (`daemon_process_env`: PATH, home,
-    user, temp dir, timezone, locale), with `LC_ALL` supplied when it carries
-    neither `LC_ALL` nor `LANG` (macOS only — see `_MACOS_PG_LOCALE`). Pass
-    this as `env=` to the `pg_ctl start` invocation (or a direct `postgres`
-    spawn): pg_ctl hands its environment to the postmaster, and the macOS
-    postmaster aborts at startup when that environment has no locale.
-
-    The postmaster outlives the `meiva start` that spawns it (it is retained
-    across releases), and that process may hold the delivered gateway login,
-    write generation and API token, the human secret and the Redis admin
-    password; none of it crosses. Nothing the postmaster runs needs it."""
-    env = daemon_process_env()
-    if is_macos() and not env.get("LC_ALL") and not env.get("LANG"):
-        env["LC_ALL"] = _MACOS_PG_LOCALE
-    return env
+    return build_pg_start_env(daemon_process_env(), macos=is_macos())
 
 
+# meiva:note
 # Prefix of every throwaway instance directory this module creates. Load-bearing:
 # the sweep below reaps ONLY `<a throwaway root>/<this prefix>*` directories.
 THROWAWAY_PREFIX = "meiva-pg-"
 
-# Where throwaway instance dirs live — the platform default (/dev/shm on Linux,
-# else the OS temp dir), the MEIVA_PG_THROWAWAY_BASE override, and the
-# capacity-aware pick — is base.cluster.dataplane.pg_throwaway_base, extracted to keep this
-# module under its line ceiling.
 
-
-def pg_tool(name: str) -> Path:
-    """Path to a Postgres client/server binary.
-
-    Resolution: the vendored relocatable Postgres under `~/.meiva/runtime/` is
-    preferred when it actually carries `name` (`base.cluster.dataplane.runtime_binaries`, fetched
-    by converge), so a clean machine needs no `brew install postgresql@17`. The
-    vendored tree is a minimal server distribution — only `initdb` / `pg_ctl` /
-    `postgres`; client tools (`pg_isready` / `psql` / `pg_dump`) are absent, so
-    those always fall through to the host install below. Same fall-through when the
-    vendored tree is missing entirely (a dev box not yet converged):
-    - macOS: Homebrew keg-only postgresql@17 path.
-    - Linux: apt postgresql-17 layout under /usr/lib/postgresql/17/bin.
-    - Other: PATH lookup via shutil.which (best-effort fallback)."""
+def pg_tool(
+    name: str,
+    *,
+    bin_dir: Path | None = None,
+    home: Path | None = None,
+    platform_bin_dir: Path | None = None,
+    path_env: str | None = None,
+) -> Path:
+    if bin_dir is not None and (bin_dir / name).exists():
+        return bin_dir / name
     from base.cluster.dataplane.runtime_binaries import vendored_pg_bin_dir
 
-    vendored = vendored_pg_bin_dir()
+    vendored = vendored_pg_bin_dir(home=home)
     if vendored is not None and (vendored / name).exists():
         return vendored / name
-    from base.host.system.backend import get_backend
+    if platform_bin_dir is not None:
+        platform_path: Path | None = platform_bin_dir / name
+    else:
+        from base.host.system.backend import get_backend
 
-    platform_path = get_backend().pg_binary_path(name)
+        platform_path = get_backend().pg_binary_path(name)
     if platform_path is not None and platform_path.exists():
         return platform_path
-    # Fall back to PATH lookup (user may have added PG bin to PATH)
-    found = shutil.which(name)
+    found = shutil.which(name) if path_env is None else shutil.which(name, path=path_env)
     if found:
         return Path(found)
     raise RuntimeError(
@@ -175,18 +102,22 @@ def pg_tool(name: str) -> Path:
     )
 
 
-# meiva:note
-# `pg_tool` raises when the box has no installation, which is right for a caller about to run
-# the tool and wrong for a `skipif`: a module-level decorator is evaluated at import, so
-# "this box has no PostgreSQL" became a collection error that stopped the whole tree - on a
-# macOS runner the lane that runs the darwin declarations could not collect anything, and a
-# `pytest --collect-only` on a dev Mac without the host install failed the same way. The
-# predicate a skip wants is "can I find it", never "find it or die". `locate` is a parameter so
-# a test can hand in the answer it wants instead of patching this module: the predicate's whole
-# job is "did the lookup succeed".
-def has_pg_tool(name: str, *, locate: Callable[[str], Path] = pg_tool) -> bool:
+def has_pg_tool(
+    name: str,
+    *,
+    bin_dir: Path | None = None,
+    home: Path | None = None,
+    platform_bin_dir: Path | None = None,
+    path_env: str | None = None,
+) -> bool:
     try:
-        locate(name)
+        pg_tool(
+            name,
+            bin_dir=bin_dir,
+            home=home,
+            platform_bin_dir=platform_bin_dir,
+            path_env=path_env,
+        )
     except RuntimeError:
         return False
     return True
@@ -265,13 +196,11 @@ CLAIM_LOCK_NAME = "owner.lock.claim"
 
 
 def _throwaway_locks(config: ThrowawayConfig) -> list[Path]:
-    """Every owner lock under any throwaway root
-    (`base.cluster.dataplane.pg_throwaway_base.throwaway_roots`), sorted for a deterministic reap
-    order. The single enumeration the sweep and the port registry share, so both
-    see the same set of instance roots."""
     return sorted(
         lock
-        for root in _throwaway_base.throwaway_roots(config.override)
+        for root in _throwaway_base.throwaway_roots(
+            config.override, default_root=config.default_root
+        )
         for lock in root.glob(f"{THROWAWAY_PREFIX}*/{OWNER_LOCK_NAME}")
     )
 
@@ -284,25 +213,24 @@ class Registration(NamedTuple):
     lock: Path
 
 
-def register_throwaway(instance_dir: Path, port: int) -> Registration:
-    """Claim `instance_dir` as this process's throwaway cluster by taking the
-    lifetime flock on its own `owner.lock`. The body carries owner diagnostics only —
-    never a path.
-
-    The claim is published already-locked — claim file, flock, body, rename — so
-    `owner.lock` comes into existence only as the rename target of the file whose
-    flock this process already holds. That is the invariant the sweep's whole
-    judgment rests on (`flock acquirable => owner dead`): it can never open a
-    created-but-unlocked `owner.lock` and reap a claim in flight (#3629)."""
+def claim_throwaway_lock(instance_dir: Path, port: int) -> Registration:
     import fcntl
 
-    lock = instance_dir / OWNER_LOCK_NAME
     claim = instance_dir / CLAIM_LOCK_NAME
     fd = os.open(claim, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o600)
     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     os.write(fd, json.dumps({"owner_pid": os.getpid(), "port": port}).encode())
-    claim.rename(lock)  # same inode: the published lock is the one already held
-    return Registration(fd, lock)
+    return Registration(fd, claim)
+
+
+def publish_throwaway_lock(claim_registration: Registration) -> Registration:
+    lock = claim_registration.lock.with_name(OWNER_LOCK_NAME)
+    claim_registration.lock.rename(lock)
+    return Registration(claim_registration.fd, lock)
+
+
+def register_throwaway(instance_dir: Path, port: int) -> Registration:
+    return publish_throwaway_lock(claim_throwaway_lock(instance_dir, port))
 
 
 def unregister_throwaway(registration: Registration) -> None:
@@ -314,17 +242,15 @@ def unregister_throwaway(registration: Registration) -> None:
 
 
 def resolved_throwaway_dir(instance_dir: Path, *, config: ThrowawayConfig) -> Path | None:
-    """`instance_dir` resolved, when it really is a throwaway instance dir this
-    module created: `THROWAWAY_PREFIX`-named, a real directory that resolves to a
-    direct child of a throwaway root under that same name, holding a `data` entry
-    that is not a symlink. None otherwise, and the sweeper then touches nothing.
-
-    The name-preservation and non-symlink checks are what stop a stray symlink from
-    aiming `pg_ctl` (or the rmtree) at a path outside every throwaway root."""
     if not instance_dir.name.startswith(THROWAWAY_PREFIX) or not instance_dir.is_dir():
         return None
     resolved = instance_dir.resolve()
-    roots = {root.resolve() for root in _throwaway_base.throwaway_roots(config.override)}
+    roots = {
+        root.resolve()
+        for root in _throwaway_base.throwaway_roots(
+            config.override, default_root=config.default_root
+        )
+    }
     if resolved.parent not in roots or resolved.name != instance_dir.name:
         return None
     if (resolved / "data").is_symlink():
@@ -381,7 +307,7 @@ def _reap_locked(lock: Path, fd: int, *, config: ThrowawayConfig) -> int:
     data = instance_dir / "data"
     if (data / "PG_VERSION").is_file():
         stop = subprocess.run(  # noqa: S603 — argv is the resolved pg_ctl path + a verified data dir
-            [pg_tool("pg_ctl"), "-D", str(data), "-m", "immediate", "stop"],
+            [pg_tool("pg_ctl", bin_dir=config.bin_dir), "-D", str(data), "-m", "immediate", "stop"],
             check=False,
             capture_output=True,
         )
@@ -482,29 +408,31 @@ def _live_throwaway_ports(config: ThrowawayConfig) -> set[int]:
     return ports
 
 
-def _port_lock_root() -> Path:
-    """Where the host-wide port-allocation flock lives. Every allocator locks the
-    SAME directory, whatever base its own instances use — a per-base lock would let
-    two allocators serialize on different roots and hand out the same port. The
-    platform default is settings-independent, so processes that disagree on
-    MEIVA_PG_THROWAWAY_BASE still rendezvous here."""
+def _port_lock_root(config: ThrowawayConfig | None = None) -> Path:
+    if config is not None and config.default_root is not None:
+        return config.default_root
     return _throwaway_base.default_base()
 
 
-def allocate_port(instance_dir: Path, *, config: ThrowawayConfig) -> tuple[int, Registration]:
-    """Reserve a localhost TCP port no LIVE throwaway cluster already holds, and
-    register it under `instance_dir`'s owner lock. Probe, registry check, and
-    registration all happen under one host-wide flock, so the reservation is
-    visible to every other worker before ours is released."""
+def allocate_port(
+    instance_dir: Path,
+    *,
+    config: ThrowawayConfig,
+    candidates: Iterator[int] | None = None,
+) -> tuple[int, Registration]:
     import fcntl
 
-    root_fd = os.open(_port_lock_root(), os.O_RDONLY)
+    root_fd = os.open(_port_lock_root(config), os.O_RDONLY)
     try:
         fcntl.flock(root_fd, fcntl.LOCK_EX)
         try:
+            live = _live_throwaway_ports(config)
+            port_iter = candidates if candidates is not None else iter(config.candidate_ports)
             while True:
-                port = free_port()
-                if port not in _live_throwaway_ports(config):
+                port = next(port_iter, None)
+                if port is None:
+                    port = free_port()
+                if port not in live:
                     break
             return port, register_throwaway(instance_dir, port)
         finally:
@@ -559,14 +487,11 @@ class ThrowawayPgStartError(subprocess.CalledProcessError):
         return "\n".join(parts)
 
 
-def _preserve_failed_fixture_log(instance_dir: Path) -> Path | None:
-    """Copy a failed throwaway cluster's pg.log out of the tmpfs before the
-    teardown rmtree deletes it, writing `NO_PG_LOG_NOTE` in its place when
-    postgres never opened one. Best-effort: an unwritable artifact dir must not
-    mask the start failure itself. Returns the artifact path, or None when
-    nothing could be written."""
+def _preserve_failed_fixture_log(
+    instance_dir: Path, *, artifact_dir: Path | None = None
+) -> Path | None:
     log = instance_dir / "pg.log"
-    dest_dir = fixture_log_artifact_dir()
+    dest_dir = artifact_dir if artifact_dir is not None else fixture_log_artifact_dir()
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / f"{instance_dir.name}.pg.log"
@@ -584,10 +509,6 @@ _PG_START_ATTEMPTS = 3
 
 
 def _is_port_bind_failure(exc: subprocess.CalledProcessError, log: Path) -> bool:
-    """True when a throwaway start failure is the port-collision race — another
-    process bound our port between allocation and the postmaster's bind — rather
-    than a genuine initdb/pg_ctl problem. The only failure worth retrying on a
-    fresh port: retrying a real fault would burn attempts and mask it."""
     return "Address already in use" in f"{exc.stderr or ''}\n{_read_log_tail(log)}"
 
 
@@ -598,15 +519,13 @@ def teardown_throwaway(
     process: subprocess.Popen[bytes] | None = None,
     *,
     foreground: bool = False,
+    bin_dir: Path | None = None,
 ) -> None:
-    """Stop (if started), delete, and unregister a throwaway cluster. Shared by the
-    retry loop (a lost start attempt is torn down before the next try) and the
-    context exit."""
     if process is not None:
         stop_foreground_postgres(process)
     elif not foreground:
         subprocess.run(  # noqa: S603 — argv is the resolved pg_ctl path + static flags
-            [pg_tool("pg_ctl"), "-D", str(data), "-m", "immediate", "stop"],
+            [pg_tool("pg_ctl", bin_dir=bin_dir), "-D", str(data), "-m", "immediate", "stop"],
             check=False,
             capture_output=True,
         )
@@ -622,40 +541,8 @@ def throwaway_postgres(
     base: Path | None = None,
     foreground: bool = False,
     watch_stalls: bool = True,
+    readiness_timeout_s: float = 60,
 ) -> Generator[str]:
-    """initdb a throwaway Postgres cluster on an ephemeral port, optionally
-    apply schema + checkpoint tables, and yield a psycopg connection URL.
-    The cluster is destroyed on context exit.
-
-    `watch_stalls=False` lets an owner with narrower database-access windows
-    hold `stall_guard` during those windows instead of this cluster's lifetime.
-
-    Entering first sweeps clusters leaked by killed runs (see the block above), so
-    an interrupted run's orphan is bounded by the next spin-up rather than held
-    until reboot.
-
-    Port allocation is serialized across workers (see the block above), and a
-    start that loses the race anyway is retried on a fresh port.
-
-    Args:
-        schema_sql: If given, applied after initdb and PostgresSaver.setup() is
-            run too. If None, yields a bare `meiva_citest` database (the caller applies
-            its own DDL, e.g. the migration smoke replaying migrations/* onto a
-            blank DB).
-        config: the root-owned override used for creation, sweeping and port registration.
-        base: where the instance dir is created. None
-            resolves through `base.cluster.dataplane.pg_throwaway_base.select_throwaway_base` (the
-            configured override, else the platform default); a caller that knows its
-            data footprint (the restore drill) passes a base from
-            `select_throwaway_base(required_bytes, override=config.override)`, so the base it reports is the
-            base used here.
-        foreground: keep Postgres as a direct child in the caller's process group.
-            Restore workers use native pg_ctl shutdown through their direct child
-            handle; this does not certify every detached descendant disappeared.
-
-    Yields:
-        A postgresql:// URL string.
-    """
     import psycopg
 
     sweep_orphaned_throwaway_clusters(config=config)
@@ -663,25 +550,26 @@ def throwaway_postgres(
     port = 0
     process: subprocess.Popen[bytes] | None = None
     attempt = 0
+    candidates = iter(config.candidate_ports)
     while True:
         attempt += 1
         tmp = Path(
             tempfile.mkdtemp(
                 prefix=THROWAWAY_PREFIX,
-                dir=base or _throwaway_base.select_throwaway_base(override=config.override),
+                dir=base
+                or _throwaway_base.select_throwaway_base(
+                    override=config.override, default_root=config.default_root
+                ),
             )
         )
         data = tmp / "data"
         log = tmp / "pg.log"
-        # Registered BEFORE initdb (inside `allocate_port`): a kill in the window
-        # between here and a running postmaster must still leave a record, or the
-        # instance dir leaks unswept.
-        port, registration = allocate_port(tmp, config=config)
+        port, registration = allocate_port(tmp, config=config, candidates=candidates)
         try:
             try:
                 subprocess.run(  # noqa: S603 — argv is the resolved initdb path + static flags
                     [
-                        pg_tool("initdb"),
+                        pg_tool("initdb", bin_dir=config.bin_dir),
                         "-D",
                         str(data),
                         "-U",
@@ -698,7 +586,7 @@ def throwaway_postgres(
                 if foreground:
                     process = start_foreground_postgres(
                         [
-                            str(pg_tool("postgres")),
+                            str(pg_tool("postgres", bin_dir=config.bin_dir)),
                             "-D",
                             str(data),
                             "-p",
@@ -718,11 +606,13 @@ def throwaway_postgres(
                         log=log,
                         env=pg_start_env(),
                     )
-                    wait_foreground_postgres(process, log=log, port=port, data=data)
+                    wait_foreground_postgres(
+                        process, log=log, port=port, data=data, timeout_s=readiness_timeout_s
+                    )
                 else:
                     subprocess.run(  # noqa: S603 — argv is the resolved pg_ctl path + static flags
                         [
-                            pg_tool("pg_ctl"),
+                            pg_tool("pg_ctl", bin_dir=config.bin_dir),
                             "-D",
                             str(data),
                             "-l",
@@ -731,12 +621,6 @@ def throwaway_postgres(
                             "-t",
                             "60",
                             "start",
-                            # unix_socket_directories -> the writable tmp dir: Debian/Ubuntu
-                            # defaults it to /var/run/postgresql (owned by the postgres user,
-                            # not the non-root CI user), where the socket lock file can't be
-                            # created. fsync/full_page_writes/synchronous_commit off: the data
-                            # is disposable, so durability is pointless and skipping it keeps
-                            # contended host disk I/O off the path.
                             "-o",
                             f"-p {port} -c listen_addresses=127.0.0.1 "
                             f"-c unix_socket_directories={tmp} "
@@ -749,20 +633,28 @@ def throwaway_postgres(
                     )
             except subprocess.CalledProcessError as exc:
                 if _is_port_bind_failure(exc, log) and attempt < _PG_START_ATTEMPTS:
-                    # Lost the race: another process bound our port before the
-                    # postmaster could. Tear this attempt down and try a fresh one.
-                    teardown_throwaway(tmp, data, registration, process, foreground=foreground)
+                    teardown_throwaway(
+                        tmp,
+                        data,
+                        registration,
+                        process,
+                        foreground=foreground,
+                        bin_dir=config.bin_dir,
+                    )
                     process = None
                     continue
-                # The cluster lives on a tmpfs and the teardown rmtree deletes it, so
-                # without this the reason pg_ctl refused to start is unrecoverable after
-                # the fact (issue #1037). Preserve pg.log into the artifact dir, then
-                # re-raise with the tail attached.
-                preserved = _preserve_failed_fixture_log(tmp)
+                preserved = _preserve_failed_fixture_log(tmp, artifact_dir=config.artifact_dir)
                 raise ThrowawayPgStartError(exc, log, preserved) from exc
             break
         except BaseException:
-            teardown_throwaway(tmp, data, registration, process, foreground=foreground)
+            teardown_throwaway(
+                tmp,
+                data,
+                registration,
+                process,
+                foreground=foreground,
+                bin_dir=config.bin_dir,
+            )
             raise
 
     admin = f"postgresql://meiva@127.0.0.1:{port}/postgres"
@@ -770,12 +662,6 @@ def throwaway_postgres(
 
     try:
         with psycopg.connect(admin, autocommit=True) as conn, conn.cursor() as cur:
-            # The test db is `meiva_citest`, carried in the URL as data (names-as-data:
-            # Settings re-applies only the password, never rewrites username/db, so a
-            # subprocess loading Settings fresh dials exactly this URL). The peer
-            # superuser role of the same name is kept for URLs that name it as the
-            # user (trust auth ignores its password). Deliberately not `meiva_main`
-            # (the prod-db guard in meiva/tests/fixtures/meiva_tests.py refuses that name).
             cur.execute("CREATE ROLE meiva_citest LOGIN SUPERUSER")
             cur.execute("CREATE DATABASE meiva_citest")
 
@@ -794,4 +680,11 @@ def throwaway_postgres(
         ):
             yield url
     finally:
-        teardown_throwaway(tmp, data, registration, process, foreground=foreground)
+        teardown_throwaway(
+            tmp,
+            data,
+            registration,
+            process,
+            foreground=foreground,
+            bin_dir=config.bin_dir,
+        )

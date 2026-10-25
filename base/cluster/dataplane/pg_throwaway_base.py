@@ -1,171 +1,104 @@
-"""Where throwaway Postgres clusters put their data — and how much room they need.
-
-Owned by `base/cluster/dataplane/pg_tools.py`'s throwaway-cluster lifecycle; extracted here to
-keep that module under its line ceiling (the same reason
-`base/cluster/dataplane/pg_stall_watchdog.py` exists). Holds the host facts and the one policy:
-
-- The **platform default base**: `/dev/shm` on Linux (RAM-backed, so scratch
-  clusters get tmpfs speed — the historical choice), else the OS temp dir (macOS
-  has no /dev/shm; its SSD-backed `$TMPDIR` is fast enough).
-- The **disk fallback base**: `/var/tmp` where it exists (on the data volume,
-  unlike the RAM-sized tmpfs), else the OS temp dir.
-- The **selection policy** (`select_throwaway_base`): the operator override wins
-  outright; a caller that declares its required capacity takes the disk fallback
-  itself — never the RAM-sized platform default — and the selection refuses
-  loudly when the disk fallback cannot hold the declared footprint.
-
-Why the capacity step exists (2026-09-14 incident): the throwaway cluster
-defaulted to /dev/shm — 7.8 GiB on that host — while a full-restore drill of a
-10.16 GiB artifact needs >=17 GiB of restored data. The postmaster died
-mid-restore when the cluster outgrew the tmpfs; the drill surfaced only
-`PQputCopyData: server closed the connection` and the host a dmesg signal 6. A
-caller that knows its footprint (the restore drill) now asks for a base with room
-before the cluster is created. A declared footprint is still a floor to clear,
-not a size guarantee (the restore drill's `_SCRATCH_SPACE_FACTOR`): on
-2026-10-05 a 15.4 GiB estimate cleared /dev/shm's 16 GiB while the actual restore
-did not — the same death mid-restore — so a capacity-declaring caller now takes
-the durable base outright instead of betting the estimate on a RAM-sized one.
-
-The root parses the host-scoped `MEIVA_PG_THROWAWAY_BASE` value once and passes
-`ThrowawayConfig` through the whole cluster lifecycle. This module never reads
-Settings; minimal contexts (test fixtures, smokes) supply their own explicit value.
-"""
-
 from __future__ import annotations
 
 import shutil
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 
+from base.cluster.dataplane.pg_plan import (
+    InsufficientThrowawaySpaceError,
+    ThrowawayConfig,
+    choose_throwaway_base,
+    dedupe_throwaway_roots,
+)
 from base.log import logger
 
-
-def default_base() -> Path:
-    """The platform default base for throwaway data dirs: `/dev/shm` on Linux (RAM, so
-    scratch clusters get tmpfs speed), else the OS temp dir (macOS has no /dev/shm; its
-    SSD-backed `$TMPDIR` is fast enough). Read from the host at
-    each call; tests replace this function."""
-    shm = Path("/dev/shm")  # noqa: S108 — deliberate tmpfs for throwaway cluster data
-    if shm.is_dir():
-        return shm
-    return Path(tempfile.gettempdir())
-
-
-def disk_fallback_base() -> Path:
-    """Disk-backed base used when the platform default cannot hold a caller's
-    required capacity: `/var/tmp` where it exists (Linux/macOS — on the data volume,
-    unlike the RAM-sized /dev/shm), else the OS temp dir."""
-    var_tmp = Path("/var/tmp")  # noqa: S108 — deliberate disk fallback for scratch clusters
-    if var_tmp.is_dir():
-        return var_tmp
-    return Path(tempfile.gettempdir())
-
-
-@dataclass(frozen=True)
-class ThrowawayConfig:
-    """One lifecycle's configured root, shared by creation, sweep and port registration."""
-
-    override: Path | None
+__all__ = [
+    "InsufficientThrowawaySpaceError",
+    "ThrowawayConfig",
+    "configured_base",
+    "default_base",
+    "disk_fallback_base",
+    "format_bytes",
+    "free_bytes",
+    "select_throwaway_base",
+    "throwaway_roots",
+]
 
 
 def configured_base(raw: str) -> Path | None:
-    """Parse the root's explicit `MEIVA_PG_THROWAWAY_BASE` value; blank means no override."""
     raw = raw.strip()
     return Path(raw) if raw else None
 
 
-def free_bytes(path: Path) -> int:
-    """Free bytes on the filesystem backing `path` — the seam the base-selection
-    tests replace, so they never depend on a real tmpfs."""
-    return shutil.disk_usage(path).free
-
-
 def format_bytes(n: int) -> str:
-    """Bytes as a short human string (GiB, or MiB below 1 GiB) for capacity
-    messages and logs."""
     if n >= 2**30:
         return f"{n / 2**30:.1f} GiB"
     return f"{n / 2**20:.0f} MiB"
 
 
-class InsufficientThrowawaySpaceError(RuntimeError):
-    """No candidate throwaway base offers the free space the caller requires."""
+# meiva:note
+# `/dev/shm` is the deliberate tmpfs target on Linux for throwaway cluster data
+# directories; fall back to the OS temp directory when `/dev/shm` is absent.
+def default_base() -> Path:
+    shm = Path("/dev/shm")  # noqa: S108
+    if shm.is_dir():
+        return shm
+    return Path(tempfile.gettempdir())
 
 
-def throwaway_roots(override: Path | None) -> tuple[Path, ...]:
-    """Every directory a throwaway instance dir may exist under: the configured
-    override (when set), the platform default `throwaway_postgres` hands to
-    `mkdtemp`, and the disk fallback the restore path demotes to — deduped, order
-    stable. The sweep and the port registry run over the whole set: an instance
-    created under any of them must be found, reaped, and counted from there. On the
-    platform default the instance dies with the tmpfs on reboot; on a disk base it
-    does not, which is exactly why the owner-lock sweep — not the OS — is the
-    durable reaper."""
-    roots: list[Path] = []
-    for root in (override, default_base(), disk_fallback_base()):
-        if root is not None and root not in roots:
-            roots.append(root)
-    return tuple(roots)
+# meiva:note
+# `/var/tmp` is the deliberate disk-backed fallback when `/dev/shm` lacks the
+# required free space for scratch clusters.
+def disk_fallback_base() -> Path:
+    var_tmp = Path("/var/tmp")  # noqa: S108
+    if var_tmp.is_dir():
+        return var_tmp
+    return Path(tempfile.gettempdir())
 
 
-def select_throwaway_base(required_bytes: int | None = None, *, override: Path | None) -> Path:
-    """Pick the base directory for a throwaway cluster's data dir.
+def free_bytes(path: Path) -> int:
+    return shutil.disk_usage(path).free
 
-    Order: the configured override (`MEIVA_PG_THROWAWAY_BASE`) when set — used as-is,
-    with a warning when `required_bytes` clearly exceeds its free space; otherwise
-    the caller's base:
 
-    - no declared capacity: the platform default, unchanged;
-    - a declared capacity (every caller that passes `required_bytes` — the restore
-      drills): the disk fallback (`disk_fallback_base`), or a loud refusal when it
-      cannot hold the requirement — never the RAM-sized platform default, because
-      a declared footprint is a floor to clear, not a size guarantee: on
-      2026-10-05 a 15.4 GiB estimate cleared /dev/shm's 16 GiB and the restore
-      still died mid-way.
+def throwaway_roots(override: Path | None, *, default_root: Path | None = None) -> tuple[Path, ...]:
+    default = default_root if default_root is not None else default_base()
+    fallback = default_root if default_root is not None else disk_fallback_base()
+    return dedupe_throwaway_roots(override, default, fallback)
 
-    `required_bytes` is the caller's estimate of the cluster's peak footprint on its
-    base — the restore drill passes a multiple of the artifact it restores. None
-    (every other caller) skips the capacity step and keeps the platform default,
-    the historical behavior.
 
-    Raises:
-        RuntimeError: the configured override is not an existing directory.
-        InsufficientThrowawaySpaceError: `required_bytes` is given and the base
-            the caller may take cannot hold it. Failing here names each base's
-            free space instead of dying mid-restore when the data outgrows its
-            base (2026-09-14, 2026-09-19, 2026-10-05).
-    """
+def select_throwaway_base(
+    required_bytes: int | None = None,
+    *,
+    override: Path | None,
+    default_root: Path | None = None,
+) -> Path:
+    default = default_root if default_root is not None else default_base()
+    fallback = default_root if default_root is not None else disk_fallback_base()
+    free_space: dict[Path, int] = {}
     if override is not None:
-        if not override.is_dir():
-            raise RuntimeError(
-                f"MEIVA_PG_THROWAWAY_BASE={override} is not an existing directory — "
-                "point it at a directory on a volume with room for scratch clusters"
-            )
-        if required_bytes is not None and free_bytes(override) < required_bytes:
-            logger.warning(
-                f"throwaway base override {override} offers "
-                f"{format_bytes(free_bytes(override))}, below the requested "
-                f"{format_bytes(required_bytes)} — proceeding anyway (explicit override)"
-            )
-        return override
+        is_dir = override.is_dir()
+        if is_dir and required_bytes is not None:
+            free_space[override] = free_bytes(override)
+        chosen, warning = choose_throwaway_base(
+            required_bytes,
+            override=override,
+            override_is_dir=is_dir,
+            default=default,
+            fallback=fallback,
+            free_space=free_space,
+        )
+        if warning is not None:
+            logger.warning(warning)
+        return chosen
 
-    if required_bytes is None:
-        return default_base()
-
-    # A declared footprint is a floor to clear, not a size guarantee, so the
-    # durable base is the only safe pick — never the RAM-sized default.
-    default = default_base()
-    fallback = disk_fallback_base()
-    durable = fallback if fallback != default else default
-    if free_bytes(durable) >= required_bytes:
-        return durable
-
-    offered = ", ".join(
-        f"{path} ({format_bytes(free_bytes(path))} free)"
-        for path in dict.fromkeys((default, fallback))
+    if required_bytes is not None:
+        for path in dict.fromkeys((default, fallback)):
+            free_space[path] = free_bytes(path)
+    chosen, _ = choose_throwaway_base(
+        required_bytes,
+        override=None,
+        default=default,
+        fallback=fallback,
+        free_space=free_space,
     )
-    raise InsufficientThrowawaySpaceError(
-        f"throwaway Postgres needs {format_bytes(required_bytes)} free on a durable base — "
-        f"{offered}. Free space, or point MEIVA_PG_THROWAWAY_BASE at a larger volume."
-    )
+    return chosen

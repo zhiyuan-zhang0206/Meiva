@@ -3,318 +3,142 @@
 from __future__ import annotations
 
 import os
-import subprocess
-from dataclasses import dataclass
+import socket
 
-import psutil
 import pytest
 
-from base.cluster import port_preflight
+from base.cluster import listener_plan, port_preflight
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
-from base.host import proc
 
 
-@dataclass(frozen=True)
-class _Connection:
-    status: str
-    laddr: tuple[str, int] | tuple[()]
-    pid: int | None = None
-
-
-def test_listener_addrs_reads_all_matching_psutil_listeners(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    connections = [
-        _Connection("LISTEN", ("0.0.0.0", 6433)),  # noqa: S104 — socket-table wildcard fixture
-        _Connection("LISTEN", ("::", 6433)),
-        _Connection("LISTEN", ("2001:db8::5", 6433)),
-        _Connection("LISTEN", ("127.0.0.1", 6434)),
-        _Connection("ESTABLISHED", ("10.0.0.72", 6433)),
-        _Connection("LISTEN", ()),
+def test_listener_addrs_reads_all_matching_psutil_listeners() -> None:
+    connections: list[tuple[str, tuple[object, ...], int | None]] = [
+        ("LISTEN", ("0.0.0.0", 6433), None),  # noqa: S104 — socket-table wildcard fixture
+        ("LISTEN", ("::", 6433), None),
+        ("LISTEN", ("2001:db8::5", 6433), None),
+        ("LISTEN", ("127.0.0.1", 6434), None),
+        ("ESTABLISHED", ("10.0.0.72", 6433), None),
+        ("LISTEN", (), None),
     ]
 
-    def _net_connections(*, kind: str) -> list[_Connection]:
-        assert kind == "tcp"
-        return connections
-
-    def _fail_lsof(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        pytest.fail("psutil results must not fall back to lsof")
-
-    monkeypatch.setattr(psutil, "net_connections", _net_connections)
-    monkeypatch.setattr(proc, "run_bounded", _fail_lsof)
-
-    assert port_preflight.listener_addrs(6433) == {
+    assert listener_plan.parse_psutil_listener_addrs(6433, connections) == {
         "0.0.0.0",  # noqa: S104 — socket-table wildcard fixture
         "::",
         "2001:db8::5",
     }
 
 
-def test_listener_addrs_falls_back_to_lsof_name_fields(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def _net_connections(*, kind: str) -> list[_Connection]:
-        assert kind == "tcp"
-        raise psutil.AccessDenied
-
-    seen: list[list[str]] = []
-
-    def _run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        seen.append(argv)
-        return subprocess.CompletedProcess(
-            argv,
-            0,
-            stdout=(
-                "p101\nn10.0.0.72:6433\n"
-                "p102\nn*:6433\n"
-                "p103\nn127.0.0.1:6433\n"
-                "p104\nn192.0.2.1:6434\n"
-            ),
-            stderr="",
-        )
-
-    def _resolve(*args: str) -> list[str]:
-        return ["/usr/sbin/lsof", *args]
-
-    # A restricted PATH hides lsof, so resolution lands on the candidate list.
-    monkeypatch.setattr(psutil, "net_connections", _net_connections)
-    monkeypatch.setattr(proc, "run_bounded", _run)
-    monkeypatch.setattr(port_preflight, "lsof_argv", _resolve)
-
-    assert port_preflight.listener_addrs(6433) == {
+def test_listener_addrs_falls_back_to_lsof_name_fields() -> None:
+    stdout = (
+        "p101\nn10.0.0.72:6433\n"
+        "p102\nn*:6433\n"
+        "p103\nn127.0.0.1:6433\n"
+        "p104\nn192.0.2.1:6434\n"
+        "p105\nn[::1]:6433\n"
+    )
+    assert listener_plan.parse_lsof_listener_addrs(6433, 0, stdout) == {
         "10.0.0.72",
         "*",
         "127.0.0.1",
+        "::1",
     }
-    assert seen == [["/usr/sbin/lsof", "-nP", "-Fpn", "-sTCP:LISTEN", "-iTCP:6433"]]
 
 
-@pytest.mark.parametrize(
-    "failure",
-    [
-        OSError("lsof unavailable"),
-        subprocess.TimeoutExpired(["lsof"], 10),
-    ],
-)
-def test_listener_addrs_returns_empty_when_lsof_cannot_run(
-    monkeypatch: pytest.MonkeyPatch,
-    failure: OSError | subprocess.TimeoutExpired,
-) -> None:
-    def _net_connections(*, kind: str) -> list[_Connection]:
-        assert kind == "tcp"
-        raise psutil.AccessDenied
-
-    def _run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        raise failure
-
-    monkeypatch.setattr(psutil, "net_connections", _net_connections)
-    monkeypatch.setattr(proc, "run_bounded", _run)
-
-    assert port_preflight.listener_addrs(6433) == set()
+def test_listener_addrs_returns_empty_when_lsof_fails() -> None:
+    assert listener_plan.parse_lsof_listener_addrs(6433, 1, "") == set()
 
 
-def test_lsof_argv_prefers_path_then_absolute_candidates(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_lsof_argv_prefers_path_then_absolute_candidates() -> None:
     """PATH resolves first; a restricted PATH lands on the candidate list."""
-
-    def _which(name: str) -> str | None:
-        return "/opt/tools/lsof" if name == "lsof" else None
-
-    monkeypatch.setattr(port_preflight.shutil, "which", _which)
-    access_calls: list[tuple[str, int]] = []
-
-    def _access(path: str, mode: int) -> bool:
-        access_calls.append((path, mode))
-        return False
-
-    monkeypatch.setattr(port_preflight.os, "access", _access)
-    assert port_preflight.lsof_argv("-nP") == ["/opt/tools/lsof", "-nP"]
-    assert access_calls == []
+    assert listener_plan.resolve_lsof_argv(
+        "-nP", path_binary="/opt/tools/lsof", executable_candidates=()
+    ) == ["/opt/tools/lsof", "-nP"]
 
 
-def test_lsof_argv_scans_candidates_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _which(name: str) -> str | None:
-        assert name == "lsof"
-        return None
-
-    monkeypatch.setattr(port_preflight.shutil, "which", _which)
-
-    def _access(path: str, _mode: int) -> bool:
-        return path == "/usr/bin/lsof"
-
-    monkeypatch.setattr(port_preflight.os, "access", _access)
-    assert port_preflight.lsof_argv("-nP") == ["/usr/bin/lsof", "-nP"]
+def test_lsof_argv_scans_candidates_in_order() -> None:
+    assert listener_plan.resolve_lsof_argv(
+        "-nP",
+        path_binary=None,
+        executable_candidates={"/usr/bin/lsof", "/sbin/lsof"},
+    ) == ["/usr/bin/lsof", "-nP"]
 
 
-def test_lsof_argv_none_when_lsof_is_nowhere(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _which(name: str) -> str | None:
-        assert name == "lsof"
-        return None
-
-    def _access(path: str, mode: int) -> bool:
-        assert path in port_preflight.LSOF_CANDIDATE_PATHS
-        assert mode == os.X_OK
-        return False
-
-    monkeypatch.setattr(port_preflight.shutil, "which", _which)
-    monkeypatch.setattr(port_preflight.os, "access", _access)
-    assert port_preflight.lsof_argv("-nP") is None
+def test_lsof_argv_none_when_lsof_is_nowhere() -> None:
+    assert (
+        listener_plan.resolve_lsof_argv("-nP", path_binary=None, executable_candidates=()) is None
+    )
 
 
-def test_strict_listeners_returns_conclusive_psutil_without_lsof(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    connections = [
-        _Connection("LISTEN", ("0.0.0.0", 6433), pid=101),  # noqa: S104 — socket-table wildcard fixture
-        _Connection("LISTEN", ("::", 6433), pid=101),
-        _Connection("LISTEN", ("127.0.0.1", 6434), pid=102),
+def test_strict_listeners_returns_conclusive_psutil_without_lsof() -> None:
+    connections: list[tuple[str, tuple[object, ...], int | None]] = [
+        ("LISTEN", ("0.0.0.0", 6433), 101),  # noqa: S104 — socket-table wildcard fixture
+        ("LISTEN", ("::", 6433), 101),
+        ("LISTEN", ("127.0.0.1", 6434), 102),
     ]
-
-    def _net_connections(*, kind: str) -> list[_Connection]:
-        assert kind == "tcp"
-        return connections
-
-    def _fail_lsof(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        pytest.fail("a conclusive psutil scan must not fall back to lsof")
-
-    monkeypatch.setattr(psutil, "net_connections", _net_connections)
-    monkeypatch.setattr(proc, "run_bounded", _fail_lsof)
-
-    assert port_preflight.strict_listeners_on(6433) == [101]
+    assert listener_plan.reconcile_strict_listeners(6433, connections, []) == [101]
 
 
-def test_strict_listeners_conclusive_absence_skips_lsof(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_strict_listeners_conclusive_absence_skips_lsof() -> None:
     """A table read that simply lacks the port proves absence — no lsof."""
-
-    def _net_connections(*, kind: str) -> list[_Connection]:
-        assert kind == "tcp"
-        return [_Connection("LISTEN", ("127.0.0.1", 6434), pid=102)]
-
-    def _fail_lsof(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        pytest.fail("an absent port in a conclusive scan must not fall back to lsof")
-
-    monkeypatch.setattr(psutil, "net_connections", _net_connections)
-    monkeypatch.setattr(proc, "run_bounded", _fail_lsof)
-
-    assert port_preflight.strict_listeners_on(6433) == []
-
-
-def test_strict_listeners_falls_back_when_psutil_cannot_attribute(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A LISTEN row with pid=None is inconclusive, not proof of absence."""
-    connections = [
-        _Connection("LISTEN", ("0.0.0.0", 6433), pid=None),  # noqa: S104 — socket-table wildcard fixture
-        _Connection("LISTEN", ("127.0.0.1", 6434), pid=102),
+    connections: list[tuple[str, tuple[object, ...], int | None]] = [
+        ("LISTEN", ("127.0.0.1", 6434), 102)
     ]
-
-    def _net_connections(*, kind: str) -> list[_Connection]:
-        assert kind == "tcp"
-        return connections
-
-    def _run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        assert argv[0] == "lsof"
-        return subprocess.CompletedProcess(argv, 0, stdout="p101\np101\n", stderr="")
-
-    def _resolve(*args: str) -> list[str]:
-        return ["lsof", *args]
-
-    monkeypatch.setattr(psutil, "net_connections", _net_connections)
-    monkeypatch.setattr(proc, "run_bounded", _run)
-    monkeypatch.setattr(port_preflight, "lsof_argv", _resolve)
-
-    assert port_preflight.strict_listeners_on(6433) == [101]
+    assert listener_plan.reconcile_strict_listeners(6433, connections, []) == []
 
 
-def test_strict_listeners_raises_when_sightings_disagree(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_strict_listeners_falls_back_when_psutil_cannot_attribute() -> None:
+    """A LISTEN row with pid=None is inconclusive, not proof of absence."""
+    connections: list[tuple[str, tuple[object, ...], int | None]] = [
+        ("LISTEN", ("0.0.0.0", 6433), None),  # noqa: S104 — socket-table wildcard fixture
+        ("LISTEN", ("127.0.0.1", 6434), 102),
+    ]
+    lsof_pids = listener_plan.parse_lsof_pids(6433, 0, "p101\np101\n", "")
+    assert listener_plan.reconcile_strict_listeners(6433, connections, lsof_pids) == [101]
+
+
+def test_strict_listeners_raises_when_sightings_disagree() -> None:
     """psutil saw a listener; lsof says no match. Two inspections disagree,
     so absence is not established — this must raise, not report empty."""
-    connections = [_Connection("LISTEN", ("0.0.0.0", 6433), pid=None)]  # noqa: S104 — socket-table wildcard fixture
-
-    def _net_connections(*, kind: str) -> list[_Connection]:
-        assert kind == "tcp"
-        return connections
-
-    def _run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="")
-
-    def _resolve(*args: str) -> list[str]:
-        return ["lsof", *args]
-
-    monkeypatch.setattr(psutil, "net_connections", _net_connections)
-    monkeypatch.setattr(proc, "run_bounded", _run)
-    monkeypatch.setattr(port_preflight, "lsof_argv", _resolve)
-
+    connections: list[tuple[str, tuple[object, ...], int | None]] = [
+        ("LISTEN", ("0.0.0.0", 6433), None)  # noqa: S104 — socket-table wildcard fixture
+    ]
+    lsof_pids = listener_plan.parse_lsof_pids(6433, 1, "", "")
     with pytest.raises(port_preflight.ListenerDiscoveryError, match="neither psutil nor lsof"):
-        port_preflight.strict_listeners_on(6433)
+        listener_plan.reconcile_strict_listeners(6433, connections, lsof_pids)
 
 
-def test_strict_listeners_raises_when_lsof_is_unreachable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """No lsof anywhere means the inspection cannot run — honest failure."""
-    connections = [_Connection("LISTEN", ("0.0.0.0", 6433), pid=None)]  # noqa: S104 — socket-table wildcard fixture
-
-    def _net_connections(*, kind: str) -> list[_Connection]:
-        assert kind == "tcp"
-        return connections
-
-    def _fail_lsof(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        pytest.fail("unreachable lsof must not be executed")
-
-    def _resolve(*args: str) -> list[str] | None:
-        assert args
-        return None
-
-    monkeypatch.setattr(psutil, "net_connections", _net_connections)
-    monkeypatch.setattr(proc, "run_bounded", _fail_lsof)
-    monkeypatch.setattr(port_preflight, "lsof_argv", _resolve)
-
-    with pytest.raises(port_preflight.ListenerDiscoveryError, match="lsof is not on PATH"):
-        port_preflight.strict_listeners_on(6433)
+def test_real_socket_listener_discovery() -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        port = server.getsockname()[1]
+        assert port_preflight.strict_listeners_on(port) == [os.getpid()]
+        assert "127.0.0.1" in port_preflight.listener_addrs(port)
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost", "ip6-localhost"])
 def test_bind_addrs_adds_nothing_for_a_loopback_reachable_host(
-    monkeypatch: pytest.MonkeyPatch,
     host: str,
     *,
     machine_identity: ConfiguredMachineIdentity,
 ) -> None:
-    """A single box names itself by any loopback alias; none of them is a second address
-    to bind, so it binds loopback alone — whatever its cluster secret (every cluster
-    has one)."""
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cret")
     machine_identity.set(host=host)
     assert port_preflight.bind_addrs(machine=machine_identity) == ["127.0.0.1"]
     assert port_preflight.serves_off_box(machine=machine_identity) is False
 
 
 def test_bind_addrs_includes_the_declared_reachable_address(
-    monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: ConfiguredMachineIdentity,
 ) -> None:
-    """A declared private-network address (`MEIVA_MACHINE_HOST`) joins loopback: the
-    posture a secret-bearing cluster has always had when its operator declared one."""
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cret")
     machine_identity.set(host="10.0.0.5")
     assert port_preflight.bind_addrs(machine=machine_identity) == ["127.0.0.1", "10.0.0.5"]
     assert port_preflight.serves_off_box(machine=machine_identity) is True
 
 
 def test_bind_addrs_ignores_the_ambient_cluster_secret(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: ConfiguredMachineIdentity
+    *, machine_identity: ConfiguredMachineIdentity
 ) -> None:
-    """Reach follows the declared address alone: neither a present nor an inherited
-    foreign secret opens the LAN of a box that declares none."""
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "foreign-sibling-secret")
     machine_identity.set(host="localhost")
     assert port_preflight.bind_addrs(machine=machine_identity) == ["127.0.0.1"]

@@ -15,7 +15,6 @@ import lzma
 import subprocess
 import tarfile
 import urllib.error
-import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -23,40 +22,27 @@ import pytest
 
 from base.cluster.dataplane import pg_tools
 from base.cluster.dataplane import runtime_binaries as rb
+from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
 from base.log.tests.log_records import LogRecords
 
 
 @pytest.fixture()
-def isolated_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def isolated_runtime(tmp_path: Path) -> Path:
     """Point the runtime root (`$MEIVA_HOME/runtime`) at a tmp home, so a test never
     touches the real ~/.meiva/runtime."""
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "home"))
+    return tmp_path / "home"
 
 
-def test_pg_tool_prefers_vendored_dir(isolated_runtime: None) -> None:
+def test_pg_tool_prefers_vendored_dir(isolated_runtime: Path) -> None:
     # Absent vendored tree -> pg_tool falls back to the host (brew/apt) path.
-    assert "runtime" not in str(pg_tools.pg_tool("initdb"))
+    assert "runtime" not in str(pg_tools.pg_tool("initdb", home=isolated_runtime))
 
     # A present vendored tree wins.
-    bin_dir = rb.vendored_pg_dir() / "bin"
+    bin_dir = rb.vendored_pg_dir(isolated_runtime) / "bin"
     bin_dir.mkdir(parents=True)
     (bin_dir / "initdb").write_text("#!/bin/sh\n")
-    assert pg_tools.pg_tool("initdb") == bin_dir / "initdb"
-    assert rb.vendored_pg_bin_dir() == bin_dir
-
-
-class _FakeResponse:
-    def __init__(self, body: bytes) -> None:
-        self._body = body
-
-    def __enter__(self) -> _FakeResponse:
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        return None
-
-    def read(self) -> bytes:
-        return self._body
+    assert pg_tools.pg_tool("initdb", home=isolated_runtime) == bin_dir / "initdb"
+    assert rb.vendored_pg_bin_dir(isolated_runtime) == bin_dir
 
 
 def _http_error(status: int) -> urllib.error.HTTPError:
@@ -65,102 +51,89 @@ def _http_error(status: int) -> urllib.error.HTTPError:
     )
 
 
-def _patch_urlopen(
-    monkeypatch: pytest.MonkeyPatch, answers: list[urllib.error.URLError | _FakeResponse]
-) -> list[str]:
-    """urlopen pops `answers` (an exception raises); returns the recorded calls.
-    The recorded call is the request's full URL (the code may pass headers)."""
-    calls: list[str] = []
-
-    def fake_urlopen(url: urllib.request.Request, timeout: float) -> _FakeResponse:
-        calls.append(url.full_url)
-        answer = answers.pop(0)
-        if isinstance(answer, urllib.error.URLError):
-            raise answer
-        return answer
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    return calls
+def _opener_for(
+    *answers: Answer | BaseException,
+) -> FakeUrlOpener:
+    opener = FakeUrlOpener()
+    opener.on("https://", *answers)
+    return opener
 
 
 def test_download_retries_transient_answers_then_succeeds(
-    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
+    retry_waits: list[float],
 ) -> None:
     """429/5xx from the mirror and socket-level failures back off and retry; the
     sha256 pin makes the eventual bytes trustworthy regardless of which attempt won."""
-    calls = _patch_urlopen(
-        monkeypatch,
-        [_http_error(429), _http_error(503), urllib.error.URLError("reset"), _FakeResponse(b"jar")],
+    opener = _opener_for(
+        _http_error(429),
+        _http_error(503),
+        urllib.error.URLError("reset"),
+        Answer(body=b"jar"),
     )
-    assert rb.download("https://repo1.invalid/x.jar") == b"jar"
-    assert len(calls) == 4
+    assert rb.download_with_opener("https://repo1.invalid/x.jar", open_url=opener) == b"jar"
+    assert len(opener.urls) == 4
     assert retry_waits == [2, 4, 8]
 
 
 @pytest.mark.parametrize("status", [403, 404, 429, 500, 502, 503, 504])
 def test_download_retries_transient_http_then_succeeds(
-    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float], status: int
+    retry_waits: list[float], status: int
 ) -> None:
-    calls = _patch_urlopen(monkeypatch, [_http_error(status), _FakeResponse(b"jar")])
-    assert rb.download("https://repo1.invalid/x.jar") == b"jar"
-    assert len(calls) == 2
+    opener = _opener_for(_http_error(status), Answer(body=b"jar"))
+    assert rb.download_with_opener("https://repo1.invalid/x.jar", open_url=opener) == b"jar"
+    assert len(opener.urls) == 2
     assert retry_waits == [2]
 
 
 def test_download_ignores_retry_after(
-    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
+    retry_waits: list[float],
 ) -> None:
     error = _http_error(429)
     error.headers["Retry-After"] = "60"
-    _patch_urlopen(monkeypatch, [error, _FakeResponse(b"jar")])
-    assert rb.download("https://repo1.invalid/x.jar") == b"jar"
+    opener = _opener_for(error, Answer(body=b"jar"))
+    assert rb.download_with_opener("https://repo1.invalid/x.jar", open_url=opener) == b"jar"
     assert retry_waits == [2]
 
 
 @pytest.mark.parametrize("status", [400, 401])
 def test_download_fails_fast_on_a_permanent_http_answer(
-    monkeypatch: pytest.MonkeyPatch,
     retry_waits: list[float],
     status: int,
 ) -> None:
     """A non-transient 4xx (bad request) fails without retry."""
     error = _http_error(status)
-    calls = _patch_urlopen(monkeypatch, [error])
+    opener = _opener_for(error)
     with pytest.raises(RuntimeError) as caught:
-        rb.download("https://repo1.invalid/x.jar")
+        rb.download_with_opener("https://repo1.invalid/x.jar", open_url=opener)
     assert (
         str(caught.value)
         == f"failed to download vendored Postgres from https://repo1.invalid/x.jar: {error}"
     )
     assert caught.value.__cause__ is error
-    assert len(calls) == 1
+    assert len(opener.urls) == 1
     assert retry_waits == []
 
 
 @pytest.mark.parametrize("status", [403, 404, 429])
-def test_download_gives_up_after_bounded_retries(
-    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float], status: int
-) -> None:
-    calls = _patch_urlopen(monkeypatch, [_http_error(status)] * rb.DOWNLOAD_ATTEMPTS)
+def test_download_gives_up_after_bounded_retries(retry_waits: list[float], status: int) -> None:
+    opener = _opener_for(*([_http_error(status)] * rb.DOWNLOAD_ATTEMPTS))
     with pytest.raises(RuntimeError, match=str(status)):
-        rb.download("https://repo1.invalid/x.jar")
-    assert len(calls) == rb.DOWNLOAD_ATTEMPTS
+        rb.download_with_opener("https://repo1.invalid/x.jar", open_url=opener)
+    assert len(opener.urls) == rb.DOWNLOAD_ATTEMPTS
     assert retry_waits == [2, 4, 8]
 
 
 def test_download_preserves_transient_warning_and_final_error(
-    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float], loguru_records: LogRecords
+    retry_waits: list[float], loguru_records: LogRecords
 ) -> None:
     url = "https://repo1.invalid/x.jar"
-    errors: list[urllib.error.URLError | _FakeResponse] = [
-        urllib.error.URLError(f"reset {i}") for i in range(1, 5)
-    ]
-    calls = _patch_urlopen(monkeypatch, errors.copy())
+    errors = [urllib.error.URLError(f"reset {i}") for i in range(1, 5)]
+    opener = _opener_for(*errors)
 
     with pytest.raises(RuntimeError) as caught:
-        rb.download(url)
+        rb.download_with_opener(url, open_url=opener)
 
-    assert calls == [url] * 4
+    assert opener.urls == [url] * 4
     assert retry_waits == [2, 4, 8]
     assert loguru_records.messages("WARNING") == [
         f"[runtime] transient error fetching {url} (<urlopen error reset {i}>); "
@@ -193,28 +166,24 @@ def _synthetic_pg_jar(artifact_name: str) -> bytes:
 
 
 def test_ensure_pg_binaries_hermetic_fixture(
-    isolated_runtime: None, monkeypatch: pytest.MonkeyPatch
+    isolated_runtime: Path,
 ) -> None:
     artifact_name = "synthetic-postgres"
     synthetic_jar = _synthetic_pg_jar(artifact_name)
     key = rb.platform_key()
-    monkeypatch.setitem(
-        rb.PG_ARTIFACTS,
-        key,
-        (artifact_name, hashlib.sha256(synthetic_jar).hexdigest()),
+    artifacts = {
+        key: (artifact_name, hashlib.sha256(synthetic_jar).hexdigest()),
+    }
+    opener = _opener_for(Answer(body=synthetic_jar))
+    assert rb.vendored_pg_bin_dir(isolated_runtime) is None
+
+    bin_dir = rb.ensure_pg_binaries(
+        home=isolated_runtime,
+        artifacts=artifacts,
+        open_url=opener,
     )
-    downloads: list[str] = []
-
-    def fake_download(url: str, *, headers: dict[str, str] | None = None) -> bytes:
-        downloads.append(url)
-        return synthetic_jar
-
-    monkeypatch.setattr(rb, "download", fake_download)
-    assert rb.vendored_pg_bin_dir() is None
-
-    bin_dir = rb.ensure_pg_binaries()
     assert (bin_dir / "initdb").exists()
-    assert rb.vendored_pg_bin_dir() == bin_dir
+    assert rb.vendored_pg_bin_dir(isolated_runtime) == bin_dir
 
     # The relocatable binary runs standalone (no brew, from its extracted path).
     out = subprocess.run(  # noqa: S603 — resolved vendored initdb path + static flag
@@ -223,8 +192,15 @@ def test_ensure_pg_binaries_hermetic_fixture(
     assert out.stdout.strip() == "17.4"
 
     # Idempotent: a second ensure is a no-op returning the same dir (no re-download).
-    assert rb.ensure_pg_binaries() == bin_dir
-    assert len(downloads) == 1
+    assert (
+        rb.ensure_pg_binaries(
+            home=isolated_runtime,
+            artifacts=artifacts,
+            open_url=opener,
+        )
+        == bin_dir
+    )
+    assert len(opener.urls) == 1
 
 
 # ── pgvector injection unit coverage ───────────────────────────────────────
@@ -315,95 +291,92 @@ def test_pgvector_extraction_fails_fast_on_missing_member() -> None:
 
 
 def test_ensure_pgvector_injects_and_is_idempotent(
-    isolated_runtime: None, monkeypatch: pytest.MonkeyPatch
+    isolated_runtime: Path,
 ) -> None:
-    (rb.vendored_pg_dir() / "bin").mkdir(parents=True)
-    (rb.vendored_pg_dir() / "bin" / "initdb").write_text("#!/bin/sh\n")
+    (rb.vendored_pg_dir(isolated_runtime) / "bin").mkdir(parents=True)
+    (rb.vendored_pg_dir(isolated_runtime) / "bin" / "initdb").write_text("#!/bin/sh\n")
     # The synthetic deb is this test's artifact, so the pin table is swapped for
     # one whose sha matches it — the pin check itself stays exercised.
     synthetic = _synthetic_deb()
     fake_url = "https://example.invalid/pgvector.deb"
-    monkeypatch.setattr(
-        rb,
-        "PGVECTOR_ARTIFACTS",
-        {"linux-x86_64": (fake_url, hashlib.sha256(synthetic).hexdigest())},
+    artifacts = {"linux-x86_64": (fake_url, hashlib.sha256(synthetic).hexdigest())}
+    opener = FakeUrlOpener()
+    opener.on(fake_url, Answer(body=synthetic), repeat=True)
+
+    rb.ensure_pgvector(
+        home=isolated_runtime,
+        system="Linux",
+        machine="x86_64",
+        artifacts=artifacts,
+        open_url=opener,
     )
-    calls: list[str] = []
-
-    def fake_download(url: str, *, headers: dict[str, str] | None = None) -> bytes:
-        calls.append(url)
-        return synthetic
-
-    monkeypatch.setattr(rb, "download", fake_download)
-    monkeypatch.setattr("platform.system", lambda: "Linux")
-    monkeypatch.setattr("platform.machine", lambda: "x86_64")
-
-    rb.ensure_pgvector()
-    pg_dir = rb.vendored_pg_dir()
+    pg_dir = rb.vendored_pg_dir(isolated_runtime)
     assert (pg_dir / "lib/postgresql/vector.so").read_bytes() == b"SO"
     assert (pg_dir / "share/postgresql/extension/vector.control").read_bytes() == b"CTRL"
     assert (pg_dir / "share/postgresql/extension" / rb.PGVECTOR_SQL).read_bytes() == b"SQL"
-    assert calls == [fake_url]
-    rb.ensure_pgvector()  # idempotent: detection files exist -> no second download
-    assert len(calls) == 1
+    assert opener.urls == [fake_url]
+    rb.ensure_pgvector(
+        home=isolated_runtime,
+        system="Linux",
+        machine="x86_64",
+        artifacts=artifacts,
+        open_url=opener,
+    )  # idempotent: detection files exist -> no second download
+    assert len(opener.urls) == 1
     # Detection covers BOTH files: deleting the module alone re-injects
     # (a partially deleted injection must not silently survive).
     (pg_dir / "lib/postgresql/vector.so").unlink()
-    rb.ensure_pgvector()
-    assert len(calls) == 2
+    rb.ensure_pgvector(
+        home=isolated_runtime,
+        system="Linux",
+        machine="x86_64",
+        artifacts=artifacts,
+        open_url=opener,
+    )
+    assert len(opener.urls) == 2
     assert (pg_dir / "lib/postgresql/vector.so").read_bytes() == b"SO"
 
 
 def test_ensure_pgvector_fails_on_checksum_mismatch(
-    isolated_runtime: None, monkeypatch: pytest.MonkeyPatch
+    isolated_runtime: Path,
 ) -> None:
-    (rb.vendored_pg_dir() / "bin" / "initdb").parent.mkdir(parents=True)
-    (rb.vendored_pg_dir() / "bin" / "initdb").write_text("#!/bin/sh\n")
-
-    def fake_download(url: str, *, headers: dict[str, str] | None = None) -> bytes:
-        return b"junk"
-
-    monkeypatch.setattr(rb, "download", fake_download)
-    monkeypatch.setattr("platform.system", lambda: "Linux")
-    monkeypatch.setattr("platform.machine", lambda: "x86_64")
+    (rb.vendored_pg_dir(isolated_runtime) / "bin" / "initdb").parent.mkdir(parents=True)
+    (rb.vendored_pg_dir(isolated_runtime) / "bin" / "initdb").write_text("#!/bin/sh\n")
+    opener = _opener_for(Answer(body=b"junk"))
     with pytest.raises(RuntimeError, match="sha256 mismatch"):
-        rb.ensure_pgvector()
+        rb.ensure_pgvector(
+            home=isolated_runtime,
+            system="Linux",
+            machine="x86_64",
+            open_url=opener,
+        )
 
 
-def test_ensure_pgvector_requires_pg_tree(isolated_runtime: None) -> None:
+def test_ensure_pgvector_requires_pg_tree(isolated_runtime: Path) -> None:
     with pytest.raises(RuntimeError, match="ensure_pg_binaries"):
-        rb.ensure_pgvector()
+        rb.ensure_pgvector(home=isolated_runtime)
 
 
-def test_download_ghcr_blob_fetches_token_then_blob(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[tuple[str, dict[str, str] | None]] = []
-
-    def fake_download(url: str, *, headers: dict[str, str] | None = None) -> bytes:
-        calls.append((url, headers))
-        return b'{"token": "tok"}' if "token" in url else b"blob"
-
-    monkeypatch.setattr(rb, "download", fake_download)
+def test_download_ghcr_blob_fetches_token_then_blob() -> None:
+    opener = FakeUrlOpener()
+    auth_url = "https://ghcr.io/token?service=ghcr.io&scope=repository:homebrew/core/pgvector:pull"
     blob_url = "https://ghcr.io/v2/homebrew/core/pgvector/blobs/sha256:abc"
-    assert rb.download_ghcr_blob(blob_url) == b"blob"
-    assert calls[0] == (
-        "https://ghcr.io/token?service=ghcr.io&scope=repository:homebrew/core/pgvector:pull",
-        None,
-    )
-    assert calls[1] == (blob_url, {"Authorization": "Bearer tok"})
+    opener.on(auth_url, Answer(body=b'{"token": "tok"}'))
+    opener.on(blob_url, Answer(body=b"blob"))
+
+    assert rb.download_ghcr_blob_with_opener(blob_url, open_url=opener) == b"blob"
+    assert opener.calls[0].url == auth_url
+    assert opener.calls[0].headers == {}
+    assert opener.calls[1].url == blob_url
+    assert opener.calls[1].headers == {"Authorization": "Bearer tok"}
 
 
-def test_pgvector_platform_key_out_of_matrix(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("platform.system", lambda: "Linux")
-    monkeypatch.setattr("platform.machine", lambda: "aarch64")
+def test_pgvector_platform_key_out_of_matrix() -> None:
     with pytest.raises(RuntimeError, match="linux/aarch64"):
-        rb.pgvector_platform_key()
+        rb.pgvector_platform_key(system="Linux", machine="aarch64")
 
 
-def test_intel_macos_has_no_pinned_pgvector_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("platform.system", lambda: "Darwin")
-    monkeypatch.setattr("platform.machine", lambda: "x86_64")
+def test_intel_macos_has_no_pinned_pgvector_artifact() -> None:
     with pytest.raises(RuntimeError, match=r"no vendored pgvector available for darwin/x86_64"):
-        rb.pgvector_platform_key()
+        rb.pgvector_platform_key(system="Darwin", machine="x86_64")
     assert set(rb.PGVECTOR_ARTIFACTS) == {"linux-x86_64", "darwin-arm64"}

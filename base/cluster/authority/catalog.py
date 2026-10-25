@@ -8,15 +8,29 @@ module never opens a connection and never infers authority from a role name.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any
 
 import psycopg
 
+from base.cluster.authority.checks import (
+    BOOTSTRAP_SUPERUSER_OID,
+    Membership,
+    RoleFacts,
+)
 from base.host.db_authority.model import AuthorityRefusedError, Groups
 
-BOOTSTRAP_SUPERUSER_OID = 10
+__all__ = [
+    "BOOTSTRAP_SUPERUSER_OID",
+    "Conn",
+    "Membership",
+    "RoleFacts",
+    "group_members",
+    "login_roles",
+    "memberships",
+    "require_admin",
+    "role_facts",
+    "transitive_members",
+]
 
 Conn = psycopg.Connection[Any]
 
@@ -37,39 +51,6 @@ def require_admin(conn: Conn) -> None:
         raise AuthorityRefusedError(
             "database authority requires the superuser session without SET ROLE"
         )
-
-
-@dataclass(frozen=True)
-class RoleFacts:
-    oid: int
-    name: str
-    login: bool
-    superuser: bool
-    inherit: bool
-    createrole: bool
-    createdb: bool
-    replication: bool
-    bypassrls: bool
-    connection_limit: int
-    valid_until: datetime | None
-    # `pg_authid.rolpassword` — a SCRAM verifier, not the plaintext login, but
-    # still credential material; hidden from repr for the same reason as
-    # `RoleSecret.verifier` (base/host/db_authority/model.py).
-    password: str | None = field(repr=False)
-    configured: bool
-    depended: bool
-    owns: bool
-
-    @property
-    def elevated(self) -> tuple[str, ...]:
-        flags = {
-            "SUPERUSER": self.superuser,
-            "CREATEROLE": self.createrole,
-            "CREATEDB": self.createdb,
-            "REPLICATION": self.replication,
-            "BYPASSRLS": self.bypassrls,
-        }
-        return tuple(name for name, held in flags.items() if held)
 
 
 _ROLE_FACTS = """
@@ -97,16 +78,6 @@ def login_roles(conn: Conn) -> dict[str, RoleFacts]:
     """Facts for every role that can currently log in."""
     names = [row[0] for row in conn.execute("SELECT rolname FROM pg_roles WHERE rolcanlogin")]
     return role_facts(conn, names)
-
-
-@dataclass(frozen=True)
-class Membership:
-    role: str
-    member: str
-    grantor: str
-    admin: bool
-    inherit: bool
-    set: bool
 
 
 _MEMBERSHIPS = """

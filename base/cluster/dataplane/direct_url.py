@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from base.cluster.record import ClusterRecord, get_record
@@ -13,13 +14,17 @@ from base.host.net.url_secret import url_with_port
 @dataclass(frozen=True)
 class ClusterDirectUrl:
     local_host: Callable[[], str]
+    home: Path | None = None
 
     def __call__(self, config: DbConfig) -> DirectResolution:
-        return resolve_direct_url(config, local_host=self.local_host)
+        return resolve_direct_url(config, local_host=self.local_host, home=self.home)
 
 
 def resolve_direct_url(
-    config: DbConfig, *, local_host: Callable[[], str] | None = None
+    config: DbConfig,
+    *,
+    local_host: Callable[[], str] | None = None,
+    home: Path | None = None,
 ) -> DirectResolution:
     url = config.db_url
     if url == PLACEHOLDER_DB_URL:
@@ -47,7 +52,7 @@ def resolve_direct_url(
                 "or point the URL at this machine's own PgBouncer or Postgres port."
             ),
         )
-    record = _record()
+    record = _record(home)
     if record is None:
         return DirectResolution(
             url=url,
@@ -84,7 +89,9 @@ def _is_local(host: str, local_host: Callable[[], str] | None) -> bool:
     return host == local_host().lower()
 
 
-def _record() -> ClusterRecord | None:
+def _record(home: Path | None = None) -> ClusterRecord | None:
+    if home is not None:
+        return get_record(home)
     from base.paths import meiva_home
 
     return get_record(meiva_home())

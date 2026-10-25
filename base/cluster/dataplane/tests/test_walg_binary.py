@@ -2,50 +2,43 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import os
 import stat
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from base.cluster.dataplane import walg_binary
+from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
 
 _FAKE_WALG = b'#!/bin/sh\necho "wal-g version v3.0.9 deadbeef 2026.08.20 PostgreSQL"\n'
 
 
-def _serving(blob: bytes) -> Callable[..., bytes]:
-    """A downloader stand-in that answers every URL with `blob`."""
+@dataclasses.dataclass
+class PinnedWalgEnv:
+    home: Path
+    artifacts: dict[str, tuple[str, str]]
+    opener: FakeUrlOpener
 
-    def download(_url: str, **_kwargs: object) -> bytes:
-        return blob
-
-    return download
+    @property
+    def fetched(self) -> list[str]:
+        return self.opener.urls
 
 
 @pytest.fixture
-def pinned(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[str]:
-    """A home under tmp, a Linux x86_64 platform, and a pin for the fake artifact.
-
-    Returns the list of URLs the (stubbed) downloader was asked for.
-    """
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(walg_binary.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(walg_binary.platform, "machine", lambda: "x86_64")
-    monkeypatch.setitem(
-        walg_binary.WALG_ARTIFACTS,
-        "linux-x86_64",
-        ("wal-g-fake", hashlib.sha256(_FAKE_WALG).hexdigest()),
+def pinned(tmp_path: Path) -> PinnedWalgEnv:
+    """A home under tmp, a Linux x86_64 platform, and a pin for the fake artifact."""
+    opener = FakeUrlOpener()
+    opener.on("https://github.com/wal-g/", Answer(body=_FAKE_WALG), repeat=True)
+    return PinnedWalgEnv(
+        home=tmp_path / "home",
+        artifacts={
+            "linux-x86_64": ("wal-g-fake", hashlib.sha256(_FAKE_WALG).hexdigest()),
+        },
+        opener=opener,
     )
-    fetched: list[str] = []
-
-    def download(url: str, **_kwargs: object) -> bytes:
-        fetched.append(url)
-        return _FAKE_WALG
-
-    monkeypatch.setattr(walg_binary, "download", download)
-    return fetched
 
 
 def test_only_linux_x86_64_is_pinned() -> None:
@@ -53,81 +46,172 @@ def test_only_linux_x86_64_is_pinned() -> None:
 
 
 @pytest.mark.parametrize(("system", "machine"), [("Darwin", "arm64"), ("Linux", "aarch64")])
-def test_other_platforms_fail_fast(
-    pinned: list[str], monkeypatch: pytest.MonkeyPatch, system: str, machine: str
-) -> None:
-    monkeypatch.setattr(walg_binary.platform, "system", lambda: system)
-    monkeypatch.setattr(walg_binary.platform, "machine", lambda: machine)
-
+def test_other_platforms_fail_fast(pinned: PinnedWalgEnv, system: str, machine: str) -> None:
     with pytest.raises(RuntimeError, match="no pinned wal-g artifact for"):
-        walg_binary.ensure_walg_binary()
+        walg_binary.ensure_walg_binary(
+            home=pinned.home,
+            system=system,
+            machine=machine,
+            artifacts=pinned.artifacts,
+            open_url=pinned.opener,
+        )
 
-    assert pinned == []
-    assert "no pinned wal-g artifact" in (walg_binary.installed_problem() or "")
+    assert pinned.fetched == []
+    assert "no pinned wal-g artifact" in (
+        walg_binary.installed_problem(
+            home=pinned.home,
+            system=system,
+            machine=machine,
+            artifacts=pinned.artifacts,
+        )
+        or ""
+    )
 
 
-def test_install_downloads_verifies_and_publishes_an_executable(pinned: list[str]) -> None:
-    path = walg_binary.ensure_walg_binary()
+def test_install_downloads_verifies_and_publishes_an_executable(pinned: PinnedWalgEnv) -> None:
+    path = walg_binary.ensure_walg_binary(
+        home=pinned.home,
+        system="Linux",
+        machine="x86_64",
+        artifacts=pinned.artifacts,
+        open_url=pinned.opener,
+    )
 
-    assert path == walg_binary.walg_path()
+    assert path == walg_binary.walg_path(pinned.home)
     assert path.name == "wal-g" and path.parent.name == "walg"
-    assert pinned == [
+    assert pinned.fetched == [
         f"https://github.com/wal-g/wal-g/releases/download/{walg_binary.WALG_VERSION}/wal-g-fake"
     ]
     assert path.read_bytes() == _FAKE_WALG
     assert stat.S_IMODE(path.stat().st_mode) == 0o755
-    assert walg_binary.installed_problem() is None
+    assert (
+        walg_binary.installed_problem(
+            home=pinned.home,
+            system="Linux",
+            machine="x86_64",
+            artifacts=pinned.artifacts,
+        )
+        is None
+    )
     assert [p.name for p in path.parent.iterdir()] == ["wal-g"], "no staging file is left behind"
 
 
-def test_install_is_idempotent(pinned: list[str]) -> None:
-    walg_binary.ensure_walg_binary()
-    walg_binary.ensure_walg_binary()
+def test_install_is_idempotent(pinned: PinnedWalgEnv) -> None:
+    walg_binary.ensure_walg_binary(
+        home=pinned.home,
+        system="Linux",
+        machine="x86_64",
+        artifacts=pinned.artifacts,
+        open_url=pinned.opener,
+    )
+    walg_binary.ensure_walg_binary(
+        home=pinned.home,
+        system="Linux",
+        machine="x86_64",
+        artifacts=pinned.artifacts,
+        open_url=pinned.opener,
+    )
 
-    assert len(pinned) == 1
+    assert len(pinned.fetched) == 1
 
 
 def test_checksum_mismatch_installs_nothing(
-    pinned: list[str], monkeypatch: pytest.MonkeyPatch
+    pinned: PinnedWalgEnv,
 ) -> None:
-    monkeypatch.setattr(walg_binary, "download", _serving(_FAKE_WALG + b"tampered"))
+    bad_opener = FakeUrlOpener()
+    bad_opener.on("https://github.com/wal-g/", Answer(body=_FAKE_WALG + b"tampered"))
 
     with pytest.raises(RuntimeError, match="sha256 mismatch"):
-        walg_binary.ensure_walg_binary()
+        walg_binary.ensure_walg_binary(
+            home=pinned.home,
+            system="Linux",
+            machine="x86_64",
+            artifacts=pinned.artifacts,
+            open_url=bad_opener,
+        )
 
-    assert not walg_binary.walg_path().exists()
+    assert not walg_binary.walg_path(pinned.home).exists()
 
 
 def test_wrong_version_never_displaces_the_installed_binary(
-    pinned: list[str], monkeypatch: pytest.MonkeyPatch
+    pinned: PinnedWalgEnv,
 ) -> None:
-    walg_binary.ensure_walg_binary()
-    stale = b'#!/bin/sh\necho "wal-g version v0.0.1"\n'
-    monkeypatch.setitem(
-        walg_binary.WALG_ARTIFACTS,
-        "linux-x86_64",
-        ("wal-g-fake", hashlib.sha256(stale).hexdigest()),
+    walg_binary.ensure_walg_binary(
+        home=pinned.home,
+        system="Linux",
+        machine="x86_64",
+        artifacts=pinned.artifacts,
+        open_url=pinned.opener,
     )
-    monkeypatch.setattr(walg_binary, "download", _serving(stale))
+    stale = b'#!/bin/sh\necho "wal-g version v0.0.1"\n'
+    stale_opener = FakeUrlOpener()
+    stale_opener.on("https://github.com/wal-g/", Answer(body=stale))
+    stale_artifacts = {
+        "linux-x86_64": ("wal-g-fake", hashlib.sha256(stale).hexdigest()),
+    }
 
     with pytest.raises(RuntimeError, match=r"does not report v3\.0\.9"):
-        walg_binary.ensure_walg_binary()
+        walg_binary.ensure_walg_binary(
+            home=pinned.home,
+            system="Linux",
+            machine="x86_64",
+            artifacts=stale_artifacts,
+            open_url=stale_opener,
+        )
 
-    assert walg_binary.walg_path().read_bytes() == _FAKE_WALG
-    assert [p.name for p in walg_binary.walg_path().parent.iterdir()] == ["wal-g"]
+    assert walg_binary.walg_path(pinned.home).read_bytes() == _FAKE_WALG
+    assert [p.name for p in walg_binary.walg_path(pinned.home).parent.iterdir()] == ["wal-g"]
 
 
-def test_installed_problem_names_each_defect(pinned: list[str]) -> None:
-    assert "is not installed" in (walg_binary.installed_problem() or "")
+def test_installed_problem_names_each_defect(pinned: PinnedWalgEnv) -> None:
+    assert "is not installed" in (
+        walg_binary.installed_problem(
+            home=pinned.home,
+            system="Linux",
+            machine="x86_64",
+            artifacts=pinned.artifacts,
+        )
+        or ""
+    )
 
-    path = walg_binary.ensure_walg_binary()
+    path = walg_binary.ensure_walg_binary(
+        home=pinned.home,
+        system="Linux",
+        machine="x86_64",
+        artifacts=pinned.artifacts,
+        open_url=pinned.opener,
+    )
     path.write_bytes(_FAKE_WALG + b"# edited by hand\n")
-    assert "is not the pinned v3.0.9 build" in (walg_binary.installed_problem() or "")
+    assert "is not the pinned v3.0.9 build" in (
+        walg_binary.installed_problem(
+            home=pinned.home,
+            system="Linux",
+            machine="x86_64",
+            artifacts=pinned.artifacts,
+        )
+        or ""
+    )
 
     path.write_bytes(_FAKE_WALG)
     path.chmod(0o644)
-    assert "is not executable" in (walg_binary.installed_problem() or "")
+    assert "is not executable" in (
+        walg_binary.installed_problem(
+            home=pinned.home,
+            system="Linux",
+            machine="x86_64",
+            artifacts=pinned.artifacts,
+        )
+        or ""
+    )
 
     path.chmod(0o755)
-    assert walg_binary.installed_problem() is None
+    assert (
+        walg_binary.installed_problem(
+            home=pinned.home,
+            system="Linux",
+            machine="x86_64",
+            artifacts=pinned.artifacts,
+        )
+        is None
+    )
     assert os.access(path, os.X_OK)

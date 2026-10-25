@@ -1,142 +1,125 @@
-"""Vendored relocatable data-plane binaries.
-
-Meiva fetches a relocatable Postgres distribution itself, so a clean machine does not
-need `brew install postgresql@17` (or the apt equivalent) before running. The
-binaries live host-level under `~/.meiva/runtime/` — shared by every cluster and
-checkout (they are read-only; only the *data* is per-cluster) — and
-`base.cluster.dataplane.pg_tools.pg_tool()` prefers them over a brew/apt install, falling back to
-brew/apt when the vendored tree is absent. ``base.cluster.dataplane.pg_runtime`` validates an
-existing installation at converge; it provisions this distribution only when
-no installation is selected.
-
-Postgres comes from zonky's `embedded-postgres-binaries` (Maven Central): a
-purpose-built relocatable distribution that links its own libs via
-`@loader_path/../lib` (macOS) / `$ORIGIN/../lib` (Linux), so `bin/ lib/ share/`
-runs from any path — unlike a brew keg, which hardcodes absolute lib paths. The
-Maven artifact is a `.jar` (a zip) wrapping one `postgres-<platform>.txz`.
-
-pgvector is injected into the extracted tree from the platform's package
-channel (PGDG deb on Linux, Homebrew bottle on macOS) — see the pin table below.
-
-Redis is vendored separately (a prebuilt we publish) — not here yet.
-"""
-
 from __future__ import annotations
 
 import hashlib
 import io
+import json
 import lzma
 import platform
 import shutil
 import tarfile
 import urllib.error
 import urllib.request
+from collections.abc import Mapping
 from pathlib import Path
 
+from base.cluster.dataplane.pg_plan import (
+    PG_ARTIFACTS,
+    PG_VERSION,
+    PGVECTOR_ARTIFACTS,
+    PGVECTOR_SQL,
+    PGVECTOR_VERSION,
+)
+from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.host.net.resilience import Policy, retry
 from base.log import logger
 
-# Pinned Postgres distribution. A major-version bump is an expand step (a new
-# version dir beside the old + re-initdb / pg_upgrade), never an in-place swap —
-# initdb and the data dir it created must share a major.
-PG_VERSION = "17.11.0"
+__all__ = [
+    "DOWNLOAD_ATTEMPTS",
+    "PGVECTOR_ARTIFACTS",
+    "PGVECTOR_SQL",
+    "PGVECTOR_VERSION",
+    "PG_ARTIFACTS",
+    "PG_VERSION",
+    "download",
+    "download_ghcr_blob",
+    "download_ghcr_blob_with_opener",
+    "download_with_opener",
+    "ensure_pg_binaries",
+    "ensure_pgvector",
+    "pgvector_extension_files",
+    "pgvector_platform_key",
+    "platform_key",
+    "runtime_root",
+    "vendored_pg_bin_dir",
+    "vendored_pg_dir",
+    "vendored_pg_supported",
+]
 
 _MAVEN_BASE = "https://repo1.maven.org/maven2/io/zonky/test/postgres"
-
-# platform key -> (maven artifact id, pinned jar sha256). The darwin artifact is a
-# universal binary (x86_64 + arm64), so one entry covers both Mac architectures.
-PG_ARTIFACTS: dict[str, tuple[str, str]] = {
-    "darwin": (
-        "embedded-postgres-binaries-darwin-arm64v8",
-        "a1c2786acb0c398f9b2d76806fc52f5dc8b222cbc8e9383a9b9702084daaf3a5",
-    ),
-    "linux-x86_64": (
-        "embedded-postgres-binaries-linux-amd64",
-        "0dd7b72b6f335b8ecfb355fa24c5781e8a93edd09880bb77eb52ebbf29b3e96d",
-    ),
-}
+_PGVECTOR_SQL = PGVECTOR_SQL
 
 
-def platform_key() -> str:
-    system = platform.system()
-    if system == "Darwin":
-        return "darwin"  # universal binary covers arm64 + x86_64
-    if system == "Linux":
-        machine = platform.machine()
-        if machine in ("x86_64", "amd64"):
+def platform_key(*, system: str | None = None, machine: str | None = None) -> str:
+    sys_name = system if system is not None else platform.system()
+    arch = machine if machine is not None else platform.machine()
+    if sys_name == "Darwin":
+        return "darwin"
+    if sys_name == "Linux":
+        if arch in ("x86_64", "amd64"):
             return "linux-x86_64"
-        raise RuntimeError(f"no vendored Postgres available for linux/{machine}")
-    raise RuntimeError(f"no vendored Postgres available for {system}")
+        raise RuntimeError(f"no vendored Postgres available for linux/{arch}")
+    raise RuntimeError(f"no vendored Postgres available for {sys_name}")
 
 
-def vendored_pg_supported() -> bool:
-    """Whether this platform has a pinned vendored Postgres artifact. Where it does,
-    the vendored tree is THE server (`ensure_pg_runtime` downloads it when the pinned
-    version is absent); where it does not (e.g. linux/arm64) an installed PostgreSQL 17
-    is the only option."""
+def vendored_pg_supported(*, system: str | None = None, machine: str | None = None) -> bool:
     try:
-        platform_key()
+        return platform_key(system=system, machine=machine) in PG_ARTIFACTS
     except RuntimeError:
         return False
-    return True
 
 
-def runtime_root() -> Path:
-    """Vendored binaries root, `$MEIVA_HOME/runtime`: the host runs one cluster, so
-    the home is the place a download is kept."""
+def runtime_root(home: Path | None = None) -> Path:
+    if home is not None:
+        return home / "runtime"
     from base.paths import meiva_home
 
     return meiva_home() / "runtime"
 
 
-def vendored_pg_dir() -> Path:
-    return runtime_root() / "pg" / PG_VERSION
+def vendored_pg_dir(home: Path | None = None, *, pg_version: str = PG_VERSION) -> Path:
+    return runtime_root(home) / "pg" / pg_version
 
 
-def vendored_pg_bin_dir() -> Path | None:
-    """The vendored Postgres `bin/` if present + initialized, else None (the caller
-    falls back to a brew/apt install). Pure resolution — never downloads."""
-    bin_dir = vendored_pg_dir() / "bin"
+def vendored_pg_bin_dir(home: Path | None = None, *, pg_version: str = PG_VERSION) -> Path | None:
+    bin_dir = vendored_pg_dir(home, pg_version=pg_version) / "bin"
     return bin_dir if (bin_dir / "initdb").exists() else None
 
 
-def ensure_pg_binaries() -> Path:
-    """Download + extract the relocatable Postgres into `vendored_pg_dir()` if it is
-    not already there (idempotent). Returns the `bin/` dir. Called by converge /
-    install — never on the resolution path. Fails fast on a download or checksum
-    mismatch rather than leaving a half-present tree.
-
-    Raises:
-        RuntimeError: the platform has no vendored artifact, the download failed, or
-            the jar's sha256 did not match the pin.
-    """
-    bin_dir = vendored_pg_dir() / "bin"
+def ensure_pg_binaries(
+    *,
+    home: Path | None = None,
+    system: str | None = None,
+    machine: str | None = None,
+    artifacts: Mapping[str, tuple[str, str]] | None = None,
+    pg_version: str = PG_VERSION,
+    open_url: UrlOpener | None = None,
+) -> Path:
+    pg_dir = vendored_pg_dir(home, pg_version=pg_version)
+    bin_dir = pg_dir / "bin"
     if (bin_dir / "initdb").exists():
         return bin_dir
 
-    key = platform_key()
-    artifact, expected_sha = PG_ARTIFACTS[key]
-    url = f"{_MAVEN_BASE}/{artifact}/{PG_VERSION}/{artifact}-{PG_VERSION}.jar"
-    logger.info(f"[runtime] fetching vendored Postgres {PG_VERSION} ({key}) from {url}")
-    jar_bytes = download(url)
+    key = platform_key(system=system, machine=machine)
+    table = artifacts if artifacts is not None else PG_ARTIFACTS
+    artifact, expected_sha = table[key]
+    url = f"{_MAVEN_BASE}/{artifact}/{pg_version}/{artifact}-{pg_version}.jar"
+    logger.info(f"[runtime] fetching vendored Postgres {pg_version} ({key}) from {url}")
+    jar_bytes = (
+        download_with_opener(url, open_url=open_url) if open_url is not None else download(url)
+    )
 
     actual_sha = hashlib.sha256(jar_bytes).hexdigest()
     if actual_sha != expected_sha:
         raise RuntimeError(
-            f"vendored Postgres jar sha256 mismatch for {artifact}-{PG_VERSION}: "
+            f"vendored Postgres jar sha256 mismatch for {artifact}-{pg_version}: "
             f"expected {expected_sha}, got {actual_sha}"
         )
 
-    _extract_pg(jar_bytes, vendored_pg_dir())
-    logger.info(f"[runtime] vendored Postgres {PG_VERSION} ready at {vendored_pg_dir()}")
+    _extract_pg(jar_bytes, pg_dir)
+    logger.info(f"[runtime] vendored Postgres {pg_version} ready at {pg_dir}")
     return bin_dir
 
 
-# These are idempotent GETs; artifact bytes are checked against pinned sha256s
-# before use, so bounded retries cannot accept the wrong artifact. In CI run
-# 35927189264 on 2026-09-24, Maven returned 404 for the pinned jar in attempt 1
-# and the same URL succeeded in attempt 2. Retry 403 as a possible intermediary
-# response too; other 4xx still fail fast.
 DOWNLOAD_ATTEMPTS = 4
 _TRANSIENT_HTTP = frozenset({403, 404, 429, 500, 502, 503, 504})
 
@@ -152,7 +135,6 @@ def _download_backoff(attempt: int) -> float:
     return float(2 ** (attempt + 1))
 
 
-# SHA-pinned GET retries only the historical urllib transient set at 2s, 4s, 8s.
 _DOWNLOAD_POLICY = Policy(
     max_attempts=DOWNLOAD_ATTEMPTS,
     backoff=_download_backoff,
@@ -165,8 +147,13 @@ _DOWNLOAD_POLICY = Policy(
 )
 
 
-def download(
-    url: str, *, headers: dict[str, str] | None = None, what: str = "vendored Postgres"
+def download_with_opener(
+    url: str,
+    *,
+    open_url: UrlOpener,
+    headers: dict[str, str] | None = None,
+    what: str = "vendored Postgres",
+    policy: Policy = _DOWNLOAD_POLICY,
 ) -> bytes:
     attempt = 0
 
@@ -174,9 +161,14 @@ def download(
         nonlocal attempt
         attempt += 1
         try:
-            request = urllib.request.Request(url, headers=headers or {})  # noqa: S310 — pinned https artifact URLs
-            with urllib.request.urlopen(request, timeout=120) as resp:  # noqa: S310
-                return resp.read()
+            # meiva:note
+            # `url` comes from the pinned HTTPS artifact tables (`PG_ARTIFACTS`,
+            # `PGVECTOR_ARTIFACTS`, `WALG_ARTIFACTS`), and every downloaded blob
+            # is SHA-256 verified before extraction or execution.
+            request = urllib.request.Request(url, headers=headers or {})  # noqa: S310
+            with open_url(request, 120.0) as resp:
+                data: bytes = resp.read()
+                return data
         except urllib.error.URLError as exc:
             if attempt < DOWNLOAD_ATTEMPTS and _is_transient_download_error(exc):
                 delay = 2**attempt
@@ -187,15 +179,18 @@ def download(
             raise
 
     try:
-        return retry(_DOWNLOAD_POLICY)(_fetch_once)
+        return retry(policy)(_fetch_once)
     except urllib.error.URLError as exc:
         raise RuntimeError(f"failed to download {what} from {url}: {exc}") from exc
 
 
+def download(
+    url: str, *, headers: dict[str, str] | None = None, what: str = "vendored Postgres"
+) -> bytes:
+    return download_with_opener(url, open_url=SYSTEM_URL_OPENER, headers=headers, what=what)
+
+
 def _extract_pg(jar_bytes: bytes, target: Path) -> None:
-    """Extract the single `postgres-*.txz` inside the jar (a zip) into `target`,
-    atomically: a fresh tree is built beside `target` and renamed in, so a crash
-    mid-extract never leaves a half-tree that `vendored_pg_bin_dir()` would accept."""
     import zipfile
 
     with zipfile.ZipFile(io.BytesIO(jar_bytes)) as jar:
@@ -209,89 +204,42 @@ def _extract_pg(jar_bytes: bytes, target: Path) -> None:
     shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir(parents=True)
     with tarfile.open(fileobj=io.BytesIO(txz_bytes), mode="r:xz") as tar:
-        # filter="data" is the safe extraction filter (rejects absolute paths /
-        # traversal). The archive is checksum-pinned, so this is free defense.
         tar.extractall(staging, filter="data")
     shutil.rmtree(target, ignore_errors=True)
     staging.rename(target)
 
 
-# ── pgvector injection ────────────────────────────────────────────────────
-#
-# zonky ships core + contrib only — no third-party extensions, pgvector
-# included (checked across every zonky version: 0 vector entries). pgvector
-# has no official prebuilt releases either, so the extension files come from
-# the platform's package channel and are copied into the extracted tree:
-# `lib/postgresql/` (pkglibdir) gets the loadable module, `share/postgresql/
-# extension/` gets the control + install SQL. Verified layout facts (see
-# future/infra/data/vendored-data-plane-binaries.md): `$libdir` resolves to
-# `<prefix>/lib/postgresql`, and the macOS module suffix is `.dylib`.
-
-# The pinned pgvector version. A PG major bump must re-pin these artifacts
-# (pgvector builds are per-major: PGDG ships postgresql-<major>-pgvector,
-# Homebrew bottles carry per-major dirs).
-PGVECTOR_VERSION = "0.8.7"
-PGVECTOR_SQL = f"vector--{PGVECTOR_VERSION}.sql"
-_PGVECTOR_SQL = PGVECTOR_SQL
-
-# platform key -> (download URL, pinned sha256 of the whole artifact).
-# The deb is a plain HTTPS file; the bottle is a content-addressed ghcr.io
-# blob (the sha256 Homebrew publishes in the formula), which needs an
-# anonymous pull token — handled by download_ghcr_blob.
-PGVECTOR_ARTIFACTS: dict[str, tuple[str, str]] = {
-    "linux-x86_64": (
-        "https://apt.postgresql.org/pub/repos/apt/pool/main/p/pgvector/"
-        "postgresql-17-pgvector_0.8.7-1.pgdg12+1_amd64.deb",
-        "acb5569b6a5bb71d5968205a4da15911ff3b2a15a57a2a9d765560882f53e3ea",
-    ),
-    # The zonky darwin jar is a universal binary, but pgvector bottles are
-    # per-arch, so macOS splits on the machine arch. Homebrew publishes no
-    # Intel (x86_64) bottle for 0.8.7, so Intel macOS has no entry.
-    "darwin-arm64": (
-        "https://ghcr.io/v2/homebrew/core/pgvector/blobs/"
-        "sha256:326bc17440a773b75b054d83d7905b46b370b1a1b6543fff077186b5a632253b",
-        "326bc17440a773b75b054d83d7905b46b370b1a1b6543fff077186b5a632253b",
-    ),
-}
-
-
-def pgvector_platform_key() -> str:
-    """The pgvector artifact key. linux/arm64 and darwin/x86_64 are deliberately
-    out of matrix (no pinned artifact: PGDG pins linux/amd64 only, Homebrew
-    ships no Intel bottle for 0.8.7) — they raise instead of pretending support."""
-    system = platform.system()
-    if system == "Darwin":
-        machine = platform.machine()
-        if machine == "arm64":
+def pgvector_platform_key(*, system: str | None = None, machine: str | None = None) -> str:
+    sys_name = system if system is not None else platform.system()
+    arch = machine if machine is not None else platform.machine()
+    if sys_name == "Darwin":
+        if arch == "arm64":
             return "darwin-arm64"
-        raise RuntimeError(f"no vendored pgvector available for darwin/{machine}")
-    if system == "Linux":
-        machine = platform.machine()
-        if machine in ("x86_64", "amd64"):
+        raise RuntimeError(f"no vendored pgvector available for darwin/{arch}")
+    if sys_name == "Linux":
+        if arch in ("x86_64", "amd64"):
             return "linux-x86_64"
-        raise RuntimeError(f"no vendored pgvector available for linux/{machine}")
-    raise RuntimeError(f"no vendored pgvector available for {system}")
+        raise RuntimeError(f"no vendored pgvector available for linux/{arch}")
+    raise RuntimeError(f"no vendored pgvector available for {sys_name}")
 
 
-def ensure_pgvector() -> None:
-    """Download + inject the pinned pgvector extension files into the vendored
-    Postgres tree (idempotent; fail-fast on download/checksum failure — the
-    same contract as `ensure_pg_binaries`). The injected files are exactly
-    what `CREATE EXTENSION vector` needs: the loadable module into
-    `lib/postgresql/` and the control + install SQL into
-    `share/postgresql/extension/`.
-
-    Called by converge right after `ensure_pg_binaries()`, and by the CI smoke
-    gate. Detection is the version-named install SQL file PLUS the platform
-    module file — a future re-pin, or a partially deleted injection, re-injects
-    instead of silently leaving stale/absent files in place.
-    """
-    pg_dir = vendored_pg_dir()
-    key = pgvector_platform_key()
+def ensure_pgvector(
+    *,
+    home: Path | None = None,
+    system: str | None = None,
+    machine: str | None = None,
+    artifacts: Mapping[str, tuple[str, str]] | None = None,
+    pg_version: str = PG_VERSION,
+    pgvector_version: str = PGVECTOR_VERSION,
+    open_url: UrlOpener | None = None,
+) -> None:
+    pg_dir = vendored_pg_dir(home, pg_version=pg_version)
+    key = pgvector_platform_key(system=system, machine=machine)
+    sql_name = f"vector--{pgvector_version}.sql"
     module_rel = (
         "lib/postgresql/vector.dylib" if key.startswith("darwin") else "lib/postgresql/vector.so"
     )
-    if (pg_dir / "share/postgresql/extension" / PGVECTOR_SQL).exists() and (
+    if (pg_dir / "share/postgresql/extension" / sql_name).exists() and (
         pg_dir / module_rel
     ).exists():
         return
@@ -299,42 +247,110 @@ def ensure_pgvector() -> None:
         raise RuntimeError(
             f"vendored Postgres tree missing at {pg_dir} — ensure_pg_binaries() must run first"
         )
-    url, expected_sha = PGVECTOR_ARTIFACTS[key]
-    logger.info(f"[runtime] fetching pgvector {PGVECTOR_VERSION} ({key}) from {url}")
-    blob = download_ghcr_blob(url) if url.startswith("https://ghcr.io/") else download(url)
+    table = artifacts if artifacts is not None else PGVECTOR_ARTIFACTS
+    url, expected_sha = table[key]
+    logger.info(f"[runtime] fetching pgvector {pgvector_version} ({key}) from {url}")
+    if url.startswith("https://ghcr.io/"):
+        blob = (
+            download_ghcr_blob_with_opener(url, open_url=open_url)
+            if open_url is not None
+            else download_ghcr_blob(url)
+        )
+    else:
+        blob = (
+            download_with_opener(url, open_url=open_url) if open_url is not None else download(url)
+        )
     actual_sha = hashlib.sha256(blob).hexdigest()
     if actual_sha != expected_sha:
         raise RuntimeError(
             f"pgvector artifact sha256 mismatch for {key}: "
             f"expected {expected_sha}, got {actual_sha}"
         )
-    for relpath, content in pgvector_extension_files(blob, key).items():
+    for relpath, content in pgvector_extension_files(
+        blob, key, pg_version=pg_version, pgvector_version=pgvector_version
+    ).items():
         target = pg_dir / relpath
         target.parent.mkdir(parents=True, exist_ok=True)
-        # Per-file tmp + atomic replace: a crash mid-injection cannot leave a
-        # truncated module behind (and the version-SQL detection re-runs the
-        # whole injection on the next converge either way).
         staging = target.with_name(f".{target.name}.tmp")
         staging.write_bytes(content)
         staging.replace(target)
-    logger.info(f"[runtime] pgvector {PGVECTOR_VERSION} injected into {pg_dir}")
+    logger.info(f"[runtime] pgvector {pgvector_version} injected into {pg_dir}")
 
 
-def pgvector_extension_files(blob: bytes, key: str) -> dict[str, bytes]:
-    """The extension files from the pinned artifact, keyed by their target path
-    inside the vendored PG tree. Fail-fast on a missing member: a renamed
-    upstream layout must be re-pinned, never silently skipped."""
-    major = PG_VERSION.split(".", 1)[0]
+def pgvector_extension_files(
+    blob: bytes,
+    key: str,
+    *,
+    pg_version: str = PG_VERSION,
+    pgvector_version: str = PGVECTOR_VERSION,
+) -> dict[str, bytes]:
+    major = pg_version.split(".", 1)[0]
     if key.startswith("darwin"):
-        return _pgvector_files_from_bottle(blob, major)
-    return _pgvector_files_from_deb(blob, major)
+        return _pgvector_files_from_bottle(blob, major, pgvector_version=pgvector_version)
+    return _pgvector_files_from_deb(blob, major, pgvector_version=pgvector_version)
+
+
+def _pgvector_files_from_bottle(
+    blob: bytes, major: str, *, pgvector_version: str = PGVECTOR_VERSION
+) -> dict[str, bytes]:
+    prefix = f"pgvector/{pgvector_version}/"
+    sql_name = f"vector--{pgvector_version}.sql"
+    with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
+        return {
+            "lib/postgresql/vector.dylib": _tar_member_bytes(
+                tar, f"{prefix}lib/postgresql@{major}/vector.dylib"
+            ),
+            "share/postgresql/extension/vector.control": _tar_member_bytes(
+                tar, f"{prefix}share/postgresql@{major}/extension/vector.control"
+            ),
+            f"share/postgresql/extension/{sql_name}": _tar_member_bytes(
+                tar, f"{prefix}share/postgresql@{major}/extension/{sql_name}"
+            ),
+        }
+
+
+def _pgvector_files_from_deb(
+    blob: bytes, major: str, *, pgvector_version: str = PGVECTOR_VERSION
+) -> dict[str, bytes]:
+    data_member = _deb_data_member(blob)
+    if not data_member.startswith(b"\xfd\x37\x7a\x58\x5a\x00"):
+        raise RuntimeError(
+            "pgvector deb data member is not xz-compressed — the artifact layout "
+            "changed; re-pin the deb and its extraction"
+        )
+    sql_name = f"vector--{pgvector_version}.sql"
+    with tarfile.open(fileobj=io.BytesIO(lzma.decompress(data_member)), mode="r:") as tar:
+        return {
+            "lib/postgresql/vector.so": _tar_member_bytes(
+                tar, f"usr/lib/postgresql/{major}/lib/vector.so"
+            ),
+            "share/postgresql/extension/vector.control": _tar_member_bytes(
+                tar, f"usr/share/postgresql/{major}/extension/vector.control"
+            ),
+            f"share/postgresql/extension/{sql_name}": _tar_member_bytes(
+                tar, f"usr/share/postgresql/{major}/extension/{sql_name}"
+            ),
+        }
+
+
+def _deb_data_member(deb: bytes) -> bytes:
+    if not deb.startswith(b"!<arch>\n"):
+        raise RuntimeError("pgvector artifact is not an ar archive (deb)")
+    pos = 8
+    while pos + 60 <= len(deb):
+        name = deb[pos : pos + 16].decode("ascii", "replace").strip().rstrip("/")
+        size_field = deb[pos + 48 : pos + 58].decode("ascii", "replace").strip()
+        if not size_field.isdigit():
+            raise RuntimeError("corrupt ar member header in the pgvector deb")
+        size = int(size_field)
+        member = deb[pos + 60 : pos + 60 + size]
+        if name in ("data.tar.xz", "data.tar.zst"):
+            return member
+        pos += 60 + size + (size % 2)
+    raise RuntimeError("no data.tar member in the pgvector deb")
 
 
 def _tar_member_bytes(tar: tarfile.TarFile, name: str) -> bytes:
-    """Read one regular member by exact name. Deb data tars carry `./` member
-    prefixes (dpkg-deb layout), so both the bare and the `./`-prefixed
-    spelling are accepted; a member present under neither raises (see
-    `pgvector_extension_files`)."""
     member = None
     for candidate in (name, f"./{name}"):
         try:
@@ -350,82 +366,28 @@ def _tar_member_bytes(tar: tarfile.TarFile, name: str) -> bytes:
     return extracted.read()
 
 
-def _pgvector_files_from_bottle(blob: bytes, major: str) -> dict[str, bytes]:
-    """Extract the PG-`major` files from the Homebrew bottle (a gzipped tar whose
-    members live under `pgvector/<version>/`). The bottle carries builds for
-    every formula dependency major (postgresql@17 + postgresql@18 today); only
-    the pinned major is taken."""
-    prefix = f"pgvector/{PGVECTOR_VERSION}/"
-    with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
-        return {
-            "lib/postgresql/vector.dylib": _tar_member_bytes(
-                tar, f"{prefix}lib/postgresql@{major}/vector.dylib"
-            ),
-            "share/postgresql/extension/vector.control": _tar_member_bytes(
-                tar, f"{prefix}share/postgresql@{major}/extension/vector.control"
-            ),
-            f"share/postgresql/extension/{PGVECTOR_SQL}": _tar_member_bytes(
-                tar, f"{prefix}share/postgresql@{major}/extension/{PGVECTOR_SQL}"
-            ),
-        }
-
-
-def _pgvector_files_from_deb(blob: bytes, major: str) -> dict[str, bytes]:
-    """Extract the PG-`major` files from the PGDG deb. The deb is an `ar` archive
-    wrapping `data.tar.xz`; the inner tar holds the install layout
-    (`usr/lib/postgresql/<major>/lib/` + `usr/share/postgresql/<major>/extension/`).
-    Pure stdlib on purpose — no `ar`/`dpkg` binary on the host is assumed."""
-    data_member = _deb_data_member(blob)
-    if not data_member.startswith(b"\xfd\x37\x7a\x58\x5a\x00"):
-        raise RuntimeError(
-            "pgvector deb data member is not xz-compressed — the artifact layout "
-            "changed; re-pin the deb and its extraction"
-        )
-    with tarfile.open(fileobj=io.BytesIO(lzma.decompress(data_member)), mode="r:") as tar:
-        return {
-            "lib/postgresql/vector.so": _tar_member_bytes(
-                tar, f"usr/lib/postgresql/{major}/lib/vector.so"
-            ),
-            "share/postgresql/extension/vector.control": _tar_member_bytes(
-                tar, f"usr/share/postgresql/{major}/extension/vector.control"
-            ),
-            f"share/postgresql/extension/{PGVECTOR_SQL}": _tar_member_bytes(
-                tar, f"usr/share/postgresql/{major}/extension/{PGVECTOR_SQL}"
-            ),
-        }
-
-
-def _deb_data_member(deb: bytes) -> bytes:
-    """The `data.tar.*` member of a deb (an `ar` archive), parsed in pure
-    stdlib: 8-byte `!<arch>` magic, then 60-byte member headers with a 16-byte
-    name field and a 10-byte size field."""
-    if not deb.startswith(b"!<arch>\n"):
-        raise RuntimeError("pgvector artifact is not an ar archive (deb)")
-    pos = 8
-    while pos + 60 <= len(deb):
-        name = deb[pos : pos + 16].decode("ascii", "replace").strip().rstrip("/")
-        size_field = deb[pos + 48 : pos + 58].decode("ascii", "replace").strip()
-        if not size_field.isdigit():
-            raise RuntimeError("corrupt ar member header in the pgvector deb")
-        size = int(size_field)
-        member = deb[pos + 60 : pos + 60 + size]
-        if name in ("data.tar.xz", "data.tar.zst"):
-            return member
-        pos += 60 + size + (size % 2)  # members are 2-byte aligned
-    raise RuntimeError("no data.tar member in the pgvector deb")
-
-
-def download_ghcr_blob(url: str) -> bytes:
-    """Fetch a ghcr.io blob. ghcr requires an anonymous pull token even for
-    public blobs: the token endpoint issues a short-lived bearer for the
-    repository, and the blob URL then answers with it."""
-    import json
-
+def download_ghcr_blob_with_opener(
+    url: str,
+    *,
+    open_url: UrlOpener,
+    policy: Policy = _DOWNLOAD_POLICY,
+) -> bytes:
     repository = url[len("https://ghcr.io/v2/") :].split("/blobs/", 1)[0]
-    token_json = download(
-        f"https://ghcr.io/token?service=ghcr.io&scope=repository:{repository}:pull"
+    token_json = download_with_opener(
+        f"https://ghcr.io/token?service=ghcr.io&scope=repository:{repository}:pull",
+        open_url=open_url,
+        policy=policy,
     )
     token = json.loads(token_json).get("token")
     if not token:
         raise RuntimeError(f"ghcr.io token endpoint answered without a token for {repository}")
-    return download(url, headers={"Authorization": f"Bearer {token}"})
+    return download_with_opener(
+        url,
+        open_url=open_url,
+        headers={"Authorization": f"Bearer {token}"},
+        policy=policy,
+    )
+
+
+def download_ghcr_blob(url: str) -> bytes:
+    return download_ghcr_blob_with_opener(url, open_url=SYSTEM_URL_OPENER)

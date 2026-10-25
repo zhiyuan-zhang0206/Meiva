@@ -1,86 +1,42 @@
 from __future__ import annotations
 
-import os
-import subprocess
-
-import psutil
 import pytest
 
-from base.cluster import port_preflight
-from base.host import proc
+from base.cluster import listener_plan, port_preflight
 
 
-@pytest.mark.parametrize("failure", ["timeout", "missing", "denied"])
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "stderr"),
+    [
+        (2, "", "timeout"),
+        (1, "p1109\n", ""),
+        (1, "", "permission denied"),
+    ],
+)
 def test_failed_listener_discovery_is_unavailable(
-    monkeypatch: pytest.MonkeyPatch, failure: str
+    returncode: int, stdout: str, stderr: str
 ) -> None:
-
-    def denied(*, kind: str) -> None:
-        raise psutil.AccessDenied
-
-    def lsof(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        if failure == "timeout":
-            raise subprocess.TimeoutExpired("lsof", 10)
-        if failure == "missing":
-            raise FileNotFoundError("lsof")
-        return subprocess.CompletedProcess(["lsof"], 1, "", "permission denied")
-
-    monkeypatch.setattr(psutil, "net_connections", denied)
-    monkeypatch.setattr(proc, "run_bounded", lsof)
     with pytest.raises(port_preflight.ListenerDiscoveryError):
-        port_preflight.strict_listeners_on(4319)
+        listener_plan.parse_lsof_pids(4319, returncode, stdout, stderr)
 
 
 @pytest.mark.parametrize(
     ("stdout", "code", "expected"), [("p1109\np1109\n", 0, [1109]), ("", 1, [])]
 )
 def test_successful_lsof_distinguishes_listeners_from_absence(
-    monkeypatch: pytest.MonkeyPatch, stdout: str, code: int, expected: list[int]
+    stdout: str, code: int, expected: list[int]
 ) -> None:
-    def denied(*, kind: str) -> None:
-        raise psutil.AccessDenied
-
-    def lsof(
-        args: list[str], *, capture_output: bool, text: bool, timeout: int
-    ) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(["lsof"], code, stdout, "")
-
-    def _resolve(*args: str) -> list[str]:
-        return ["lsof", *args]
-
-    monkeypatch.setattr(psutil, "net_connections", denied)
-    monkeypatch.setattr(proc, "run_bounded", lsof)
-    monkeypatch.setattr(port_preflight, "lsof_argv", _resolve)
-    assert port_preflight.strict_listeners_on(4319) == expected
+    pids = listener_plan.parse_lsof_pids(4319, code, stdout, "")
+    assert listener_plan.reconcile_strict_listeners(4319, None, pids) == expected
 
 
-def test_probe_resolves_lsof_through_candidates_in_restricted_context(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-
-    def denied(*, kind: str) -> None:
-        raise psutil.AccessDenied
-
-    seen: list[list[str]] = []
-
-    def lsof(
-        argv: list[str], *, capture_output: bool, text: bool, timeout: int
-    ) -> subprocess.CompletedProcess[str]:
-        seen.append(argv)
-        return subprocess.CompletedProcess(argv, 0, stdout="p1109\n", stderr="")
-
-    def _which(name: str) -> str | None:
-        assert name == "lsof"
-        return None
-
-    def _access(path: str, mode: int) -> bool:
-        assert mode == os.X_OK
-        return path == "/usr/sbin/lsof"
-
-    monkeypatch.setattr(psutil, "net_connections", denied)
-    monkeypatch.setattr(proc, "run_bounded", lsof)
-    monkeypatch.setattr(port_preflight.shutil, "which", _which)
-    monkeypatch.setattr(port_preflight.os, "access", _access)
-
-    assert port_preflight.strict_listeners_on(4319) == [1109]
-    assert seen and seen[0][0] == "/usr/sbin/lsof"
+def test_probe_resolves_lsof_through_candidates_in_restricted_context() -> None:
+    argv = listener_plan.resolve_lsof_argv(
+        "-nP",
+        "-Fp",
+        "-sTCP:LISTEN",
+        "-iTCP:4319",
+        path_binary=None,
+        executable_candidates={"/usr/sbin/lsof"},
+    )
+    assert argv == ["/usr/sbin/lsof", "-nP", "-Fp", "-sTCP:LISTEN", "-iTCP:4319"]

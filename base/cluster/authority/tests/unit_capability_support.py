@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from base.host.db_authority import delivery, unit
-from base.host.db_authority.api import API_TOKEN_ENV
-from base.host.env import dotenv_boot
+from base.host.db_authority import unit
 
 ENDPOINT = "postgresql://meiva@10.0.0.7:6433/meiva"
 MACHINE = "mini"
@@ -85,25 +82,6 @@ def runner_capability(runner_home: Path, gateway: Path) -> unit.UnitCapability:
 
 
 @pytest.fixture
-def runner_boot(
-    monkeypatch: pytest.MonkeyPatch, runner_home: Path, gateway: Path
-) -> Iterator[unit.UnitCapability]:
-    """`_install_runner` with the runner home as this process's home, for a consumer that
-    resolves the home from the process environment (the CLI). The whole environment is
-    restored afterwards."""
-    saved = dict(os.environ)
-    capability = _install_runner(runner_home, gateway)
-    monkeypatch.setenv("MEIVA_HOME", str(runner_home))
-    for key in (
-        "MEIVA_PROCESS_PROFILE",
-        dotenv_boot.LAUNCHER_PROFILE_ENV_KEY,
-        delivery.GENERATION_ENV,
-        "MEIVA_DB_URL",
-        API_TOKEN_ENV,
-    ):
-        os.environ.pop(key, None)
-    try:
-        yield capability
-    finally:
-        os.environ.clear()
-        os.environ.update(saved)
+def runner_boot(runner_home: Path, gateway: Path) -> unit.UnitCapability:
+    """`_install_runner` for a pure agent-runner home fixture."""
+    return _install_runner(runner_home, gateway)

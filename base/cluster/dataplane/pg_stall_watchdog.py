@@ -183,6 +183,7 @@ class StallWatchdog(threading.Thread):
         self._port = port
         self._config = config
         self._stop_requested = threading.Event()
+        self.probed = threading.Event()
         self.evidence_path: str | None = None
 
     def run(self) -> None:
@@ -199,6 +200,7 @@ class StallWatchdog(threading.Thread):
                 ):
                     cur.execute("SELECT 1")
                     cur.fetchone()
+                self.probed.set()
                 failures = 0
             except Exception as e:
                 if self._stop_requested.is_set():
@@ -220,14 +222,14 @@ class StallWatchdog(threading.Thread):
 @contextmanager
 def stall_guard(
     admin_url: str, port: int, *, config: StallWatchdogConfig
-) -> Generator[None, None, None]:
+) -> Generator[StallWatchdog, None, None]:
     """Run the stall watchdog over a throwaway cluster's usable lifetime; if it
     fired (cluster stalled and was killed for fail-fast), log the evidence path
     at teardown so the failure's "why" survives next to its "what"."""
     watchdog = StallWatchdog(admin_url, port, config)
     watchdog.start()
     try:
-        yield
+        yield watchdog
     finally:
         watchdog.stop()
         watchdog.join(timeout=2 * config.probe_timeout_s + 1)

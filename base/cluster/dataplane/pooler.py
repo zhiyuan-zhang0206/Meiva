@@ -13,6 +13,7 @@ from pathlib import Path
 
 from base.cluster import port_preflight
 from base.cluster.dataplane.pg_tools import is_macos
+from base.cluster.listener_plan import public_listener_bound
 from base.cluster.machine import MachineIdentityReader
 from base.host.brew_pin import brew_prefix
 from base.host.db_authority.delivery import POOLER_ADMIN
@@ -34,18 +35,19 @@ def pgbouncer_bin() -> str:
     return "pgbouncer"  # last resort — subprocess will surface a clear error
 
 
-def pooler_dir() -> Path:
-    d = meiva_home() / "pgbouncer"
+def pooler_dir(home: Path | None = None) -> Path:
+    root = home if home is not None else meiva_home()
+    d = root / "pgbouncer"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def ini_path() -> Path:
-    return pooler_dir() / "pgbouncer.ini"
+def ini_path(home: Path | None = None) -> Path:
+    return pooler_dir(home) / "pgbouncer.ini"
 
 
-def pidfile_path() -> Path:
-    return pooler_dir() / "pgbouncer.pid"
+def pidfile_path(home: Path | None = None) -> Path:
+    return pooler_dir(home) / "pgbouncer.pid"
 
 
 def admin_reachable(listen_port: int, admin_password: str, host: str = "127.0.0.1") -> bool:
@@ -96,11 +98,12 @@ def pgbouncer_public_listener_reachable(
     inspecting the socket table. `role` remains in the stable probe signature shared by
     the healthcheck and bring-up callers; socket inspection needs no credential."""
     del role
-    if port_preflight.bind_addrs(machine=machine) == ["127.0.0.1"]:
+    bind = port_preflight.bind_addrs(machine=machine)
+    if bind == ["127.0.0.1"]:
         return True
     reachable = machine.host()
     addrs = port_preflight.listener_addrs(listen_port)
-    return bool(addrs & {reachable, "0.0.0.0", "::", "*"})  # noqa: S104 — matching OS wildcard binds, not opening one
+    return public_listener_bound(bind, reachable, addrs)
 
 
 def pgbouncer_listener_reachable(listen_port: int, admin_password: str) -> bool:

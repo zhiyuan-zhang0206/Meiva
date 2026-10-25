@@ -34,8 +34,13 @@ from base.cluster.authority.catalog import (
     role_facts,
     transitive_members,
 )
+from base.cluster.authority.checks import (
+    check_acl_facts,
+    check_membership_facts,
+    check_owner_facts,
+)
 from base.cluster.authority.groups import group_violations
-from base.cluster.authority.monitor import MONITOR_ROLE, monitor_violations
+from base.cluster.authority.monitor import monitor_violations
 from base.cluster.authority.roles import verify_generation
 from base.host.db_authority.ledger import require_ledger
 from base.host.db_authority.model import (
@@ -45,37 +50,31 @@ from base.host.db_authority.model import (
     VerifiedGeneration,
 )
 
-_PUBLIC_ALLOWED = frozenset({"EXECUTE", "USAGE", "TEMPORARY"})
-_READONLY_ALLOWED = frozenset({"SELECT", "USAGE", "CONNECT"})
-
 
 def _owner_violations(conn: Conn, ledger: Ledger, database: str) -> list[str]:
     fact = role_facts(conn, (ledger.owner,)).get(ledger.owner)
     if fact is None:
         return [f"schema owner {ledger.owner} does not exist"]
-    violations: list[str] = []
-    if fact.login or fact.password is not None:
-        violations.append(f"schema owner {ledger.owner} can log in")
-    if fact.oid == BOOTSTRAP_SUPERUSER_OID or fact.elevated or fact.configured:
-        violations.append(f"schema owner {ledger.owner} holds attributes or settings")
-    if memberships(conn, (ledger.owner,)):
-        violations.append(f"schema owner {ledger.owner} has memberships")
+    owner_memberships = memberships(conn, (ledger.owner,))
     row = conn.execute(
         "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = %s", (database,)
     ).fetchone()
-    if row is None or row[0] != ledger.owner:
-        violations.append(f"database {database} is not owned by {ledger.owner}")
-    return violations
+    return check_owner_facts(
+        ledger.owner,
+        fact,
+        owner_memberships,
+        database=database,
+        database_owner=None if row is None else row[0],
+    )
 
 
 def _membership_violations(conn: Conn, ledger: Ledger) -> list[str]:
     expected: set[str] = set(ledger.generation.roles) if ledger.generation is not None else set()
-    extra = sorted(set(group_members(conn, ledger.groups)) - expected)
-    violations = [f"unexpected group members {extra}"] if extra else []
-    owner_members = transitive_members(conn, (ledger.owner,))
-    if owner_members:
-        violations.append(f"roles hold schema-owner membership: {list(owner_members)}")
-    return violations
+    return check_membership_facts(
+        expected_roles=expected,
+        actual_group_members=group_members(conn, ledger.groups),
+        owner_members=transitive_members(conn, (ledger.owner,)),
+    )
 
 
 _WRITES = """
@@ -155,35 +154,20 @@ ORDER BY 1, 2, 3
 """
 
 
-def _grant_allowed(
-    ledger: Ledger, grantee: str, privilege: str, *, own: bool, readonly: frozenset[str]
-) -> bool:
-    if own or grantee in {ledger.owner, ledger.groups.gateway, ledger.groups.runner}:
-        return True
-    if grantee == "PUBLIC":
-        return privilege in _PUBLIC_ALLOWED
-    if grantee == MONITOR_ROLE:
-        return privilege == "CONNECT"
-    return grantee in readonly and privilege in _READONLY_ALLOWED
-
-
 def _acl_violations(conn: Conn, ledger: Ledger, readonly: frozenset[str]) -> list[str]:
-    violations = [
-        f"{target} grants {privilege} to {grantee}"
-        for target, grantee, privilege, own in conn.execute(_ACLS)
-        if not _grant_allowed(ledger, grantee, privilege, own=own, readonly=readonly)
-    ]
-    for role, grantee, privilege, own in conn.execute(_DEFAULT_ACLS):
-        if role != ledger.owner:
-            violations.append(f"default privileges declared for {role}")
-        elif not _grant_allowed(ledger, grantee, privilege, own=own, readonly=readonly):
-            violations.append(f"default privileges grant {privilege} to {grantee}")
+    acls = list(conn.execute(_ACLS))
+    default_acls = list(conn.execute(_DEFAULT_ACLS))
     row = conn.execute(
         "SELECT has_database_privilege('public', current_database(), 'CONNECT')"
     ).fetchone()
-    if row is None or row[0]:
-        violations.append("PUBLIC may connect to the cluster database")
-    return violations
+    return check_acl_facts(
+        owner=ledger.owner,
+        groups=(ledger.groups.gateway, ledger.groups.runner),
+        readonly=readonly,
+        acls=acls,
+        default_acls=default_acls,
+        public_can_connect=row is None or bool(row[0]),
+    )
 
 
 def check_invariant(

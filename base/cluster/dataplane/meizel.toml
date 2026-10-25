@@ -1,14 +1,18 @@
 exports = ["direct_url.py", "pg_admin.py", "pg_foreground.py", "pg_runtime.py", "pg_stall_watchdog.py", "pg_throwaway_base.py", "pg_tools.py", "pooler.py", "redis_bridge.py", "runtime_binaries.py", "walg_binary.py"]
 
 [uses]
+"pg_foreground.py" = ["pg_plan.py"]
 "pg_runtime.py" = ["pg_tools.py", "runtime_binaries.py"]
-"pg_tools.py" = ["pg_foreground.py", "pg_stall_watchdog.py", "pg_throwaway_base.py", "runtime_binaries.py"]
+"pg_throwaway_base.py" = ["pg_plan.py"]
+"pg_tools.py" = ["pg_foreground.py", "pg_plan.py", "pg_stall_watchdog.py", "pg_throwaway_base.py", "runtime_binaries.py"]
 "pooler.py" = ["pg_tools.py"]
-"tests" = ["direct_url.py", "pg_foreground.py", "pg_runtime.py", "pg_stall_watchdog.py", "pg_throwaway_base.py", "pg_tools.py", "pooler.py", "redis_bridge.py", "runtime_binaries.py", "walg_binary.py"]
-"walg_binary.py" = ["runtime_binaries.py"]
+"runtime_binaries.py" = ["pg_plan.py"]
+"tests" = ["direct_url.py", "pg_foreground.py", "pg_plan.py", "pg_runtime.py", "pg_stall_watchdog.py", "pg_throwaway_base.py", "pg_tools.py", "pooler.py", "redis_bridge.py", "runtime_binaries.py", "walg_binary.py"]
+"walg_binary.py" = ["pg_plan.py", "runtime_binaries.py"]
 
 [purity]
 "__init__.py" = "strict"
+"pg_plan.py" = "strict"
 
 [debt.ambient-read]
 "pg_foreground.py#clock time.monotonic" = 2
@@ -17,16 +21,10 @@ exports = ["direct_url.py", "pg_admin.py", "pg_foreground.py", "pg_runtime.py", 
 "pg_tools.py#pid os.getpid" = 1
 "pg_tools.py#platform sys.platform" = 1
 "redis_bridge.py#platform sys.platform" = 1
-"runtime_binaries.py#platform platform.machine" = 3
+"runtime_binaries.py#platform platform.machine" = 2
 "runtime_binaries.py#platform platform.system" = 2
 "walg_binary.py#platform platform.machine" = 1
 "walg_binary.py#platform platform.system" = 1
 
-[debt.any-collaborator]
-"pg_admin.py#any OwnerAuthority.session.kwargs" = 1
-"pg_admin.py#any connect.kwargs" = 1
-"pg_admin.py#any owner_session.kwargs" = 1
-
 [debt.type-cast]
-"pg_foreground.py#cast stop_foreground_postgres" = 1
 "pg_tools.py#cast _read_lock_body" = 1
