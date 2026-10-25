@@ -12,6 +12,7 @@ from meizel import allowances
 from meizel.graph.imports import (
     Scope,
     absolute_base,
+    bind_target,
     collect_scope,
     dotted_chain,
     parameter_names,
@@ -166,6 +167,11 @@ class Scanner(AmbientAccess):
             ast.FunctionDef: self.visit_function,
             ast.AsyncFunctionDef: self.visit_function,
             ast.ClassDef: self.visit_class_def,
+            ast.Lambda: self.visit_lambda,
+            ast.ListComp: self.visit_comprehension,
+            ast.SetComp: self.visit_comprehension,
+            ast.DictComp: self.visit_comprehension,
+            ast.GeneratorExp: self.visit_comprehension,
             ast.Assign: self.visit_assign,
             ast.AugAssign: self.visit_store,
             ast.AnnAssign: self.visit_store,
@@ -281,8 +287,7 @@ class Scanner(AmbientAccess):
             node,
             top_level=self.fn_depth == 0 and not self.scope.is_class,
         )
-        parent = self.scope.parent if self.scope.is_class else self.scope
-        inner = Scope(parent)
+        inner = Scope(self.scope.closure_parent())
         collect_scope(inner, node.body, self.package, walrus=self.walrus)
         self.observe_input_parameters(node, inner)
         inner.shadowed.update(parameter_names(args))
@@ -315,6 +320,37 @@ class Scanner(AmbientAccess):
         collect_scope(inner, node.body, self.package, walrus=self.walrus)
         self.enter(inner, node.body)
         self.fixture_requester = previous_requester
+
+    def visit_lambda(self, node: ast.Lambda) -> None:
+        for default in (*node.args.defaults, *(d for d in node.args.kw_defaults if d is not None)):
+            self.visit(default)
+        inner = Scope(self.scope.closure_parent())
+        collect_scope(inner, [node.body], self.package, walrus=self.walrus)
+        inner.shadowed.update(parameter_names(node.args))
+        outer, self.scope = self.scope, inner
+        self.visit(node.body)
+        self.scope = outer
+
+    def visit_comprehension(
+        self, node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
+    ) -> None:
+        self.visit(node.generators[0].iter)
+        inner = Scope(self.scope.closure_parent())
+        for generator in node.generators:
+            bind_target(inner, generator.target)
+        outer, self.scope = self.scope, inner
+        for index, generator in enumerate(node.generators):
+            if index:
+                self.visit(generator.iter)
+            self.visit(generator.target)
+            for condition in generator.ifs:
+                self.visit(condition)
+        if isinstance(node, ast.DictComp):
+            self.visit(node.key)
+            self.visit(node.value)
+        else:
+            self.visit(node.elt)
+        self.scope = outer
 
     def enter(self, inner: Scope, body: list[ast.stmt]) -> None:
         outer, self.scope = self.scope, inner

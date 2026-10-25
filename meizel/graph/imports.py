@@ -8,6 +8,7 @@ from meizel.graph.model import Code, Fact, FactKind, Problem
 from meizel.graph.scopes import (
     Scope,
     absolute_base,
+    bind_target,
     collect_scope,
     dotted_chain,
     parameter_names,
@@ -18,6 +19,7 @@ __all__ = [
     "ImportAccess",
     "Scope",
     "absolute_base",
+    "bind_target",
     "collect_scope",
     "dotted_chain",
     "parameter_names",
