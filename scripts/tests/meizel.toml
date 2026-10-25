@@ -6,7 +6,6 @@
 "test_test_selector.py#monkeypatch.setenv os.environ.TEST_SELECTION_MODE" = 1
 
 [debt.first-party-patch]
-"test_understanding_replay_entry.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
 "test_understanding_replay_entry.py#monkeypatch.setattr base.native_process.loaded_commit.LoadedCommit.capture" = 2
 "test_understanding_replay_entry.py#monkeypatch.setattr scripts.verify.understanding_replay.ConfigBoot" = 1
 "test_understanding_replay_entry.py#monkeypatch.setattr scripts.verify.understanding_replay.DOCKERENV" = 1
