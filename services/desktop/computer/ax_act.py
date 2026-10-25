@@ -18,12 +18,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from base.host.permissions_helper.client import AxActResult, PermissionsHelperClient
+from base.host.permissions_helper.wire import AxActResult
 
 from .ax_ids import AxIdTable, AxSession
 from .ax_tools import require_helper_support
 from .errors import ComputerUseError
-from .screen import current_scale
+from .screen import DesktopHelper, current_scale
 
 
 class AxAction(StrEnum):
@@ -118,7 +118,7 @@ _VISUAL_ID_RE = re.compile(r"^px:(\d+)$")
 
 
 def _press_visual(
-    helper: PermissionsHelperClient, args: dict[str, Any], session: AxSession
+    helper: DesktopHelper, args: dict[str, Any], session: AxSession
 ) -> dict[str, Any]:
     """`px:N` (a visual-only text from `ax_tree(include_ocr_gap)`): the only
     thing that can be done with it is a click at its center."""
@@ -147,9 +147,7 @@ def _press_visual(
     }
 
 
-def _attempt(
-    helper: PermissionsHelperClient, table: AxIdTable, request: AxRequest
-) -> AxActResult | None:
+def _attempt(helper: DesktopHelper, table: AxIdTable, request: AxRequest) -> AxActResult | None:
     """One try through the element's current raw id; None when it has none."""
     raw = table.entry(request.sid).raw
     if raw is None:
@@ -175,7 +173,7 @@ def _attempt(
 
 
 def ax_act_tool(
-    helper: PermissionsHelperClient,
+    helper: DesktopHelper,
     args: dict[str, Any],
     _agent_id: int,
     scale: float | None,

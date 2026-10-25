@@ -9,11 +9,11 @@ import plistlib
 import socket
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from base import paths
 from base.host.converge.accessibility import AccessibilityState
 from base.host.converge.screen_capture import ScreenCaptureState
 from base.host.permissions_helper import client
@@ -28,8 +28,8 @@ from services.desktop.permissions_helper.tests.test_permissions_helper import (
     ping_reply,
     read_line,
     recorded_argvs,
+    sample_dr,
     stage_bundle,
-    test_dr,
     write_current_build_state,
 )
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
@@ -277,27 +277,29 @@ def test_call_timeout_raises(fake_helper, monkeypatch: pytest.MonkeyPatch) -> No
         PermissionsHelperClient(fake_helper(raw=raw)).ping()  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_line_limit_guard(fake_helper, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(client, "LINE_LIMIT", 16)
-
+def test_line_limit_guard(fake_helper) -> None:
     def raw(conn: socket.socket) -> None:
         read_line(conn)
-        conn.sendall(b"x" * 64)  # oversized, newline-less
+        chunk = b"x" * (1 << 20)
+        for _ in range(65):
+            try:
+                conn.sendall(chunk)
+            except OSError:
+                break
 
     with pytest.raises(PermissionsHelperError, match="exceeded line limit"):
         PermissionsHelperClient(fake_helper(raw=raw)).ping()  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_connect_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_connect_retries_then_succeeds() -> None:
     # Server binds only after the first connect attempt fails -> exercises the
     # retry loop that exists for the daemon-startup race.
-    monkeypatch.setattr(client, "CONNECT_DELAY_S", 0.1)
     path = f"/tmp/meivah-retry{os.getpid()}.sock"  # noqa: S108 — short path for AF_UNIX
     Path(path).unlink(missing_ok=True)
     holder: list[FakeHelper] = []
 
     def late_start() -> None:
-        time.sleep(0.25)
+        time.sleep(0.05)
         holder.append(
             FakeHelper(path, lambda req: {"id": req["id"], "ok": True, "result": {"pong": True}})
         )
@@ -313,14 +315,14 @@ def test_connect_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
         Path(path).unlink(missing_ok=True)
 
 
-def test_label_is_per_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_label_is_per_cluster() -> None:
     from pathlib import Path
 
     from base.cluster import home_slug
     from services.desktop.permissions_helper import lifecycle
 
-    monkeypatch.setattr(paths, "meiva_home", lambda: Path("/x/.meiva-demo"))
-    assert lifecycle.label() == f"com.meiva.permissions-helper.{home_slug(Path('/x/.meiva-demo'))}"
+    demo = Path("/x/.meiva-demo")
+    assert lifecycle.label(demo) == f"com.meiva.permissions-helper.{home_slug(demo)}"
 
 
 def test_screen_capture_probe_reads_the_helpers_grant(fake_helper) -> None:
@@ -359,27 +361,26 @@ def test_screen_capture_probe_keeps_unreachable_distinct_from_denied() -> None:
     assert "System Settings" not in status.diagnostic
 
 
-class _ColdHelper(PermissionsHelperClient):
-    """The first ping finds the helper unreachable, as when launchd has only just bootstrapped it."""
+def test_screen_capture_probe_waits_out_a_cold_helper(
+    fake_helper: Callable[..., Path],
+) -> None:
+    calls = 0
 
-    def __init__(self) -> None:
-        super().__init__("/unused.sock")
-        self.calls = 0
+    def raw(conn: socket.socket) -> None:
+        nonlocal calls
+        calls += 1
+        read_line(conn)
+        if calls == 1:
+            return
+        reply = {
+            "id": 1,
+            "ok": True,
+            "result": {"pong": True, "preflight_screen": True, "ax_trusted": True},
+        }
+        conn.sendall((json.dumps(reply) + "\n").encode())
 
-    def ping(self):  # pyright: ignore[reportIncompatibleMethodOverride]
-        self.calls += 1
-        if self.calls == 1:
-            raise PermissionsHelperError("permissions helper not reachable")
-        return {"pong": True, "preflight_screen": True, "ax_trusted": True}
-
-
-def test_screen_capture_probe_waits_out_a_cold_helper(monkeypatch: pytest.MonkeyPatch) -> None:
-    # launchd may have only just bootstrapped the helper, so one unreachable ping
-    # inside the settle window is a cold start rather than a dead daemon.
-    helper = _ColdHelper()
-    monkeypatch.setattr(client, "PROBE_RETRY_DELAY_S", 0.01)
-    status = helper.check_screen_capture(settle_s=2.0)
-    assert helper.calls == 2
+    status = PermissionsHelperClient(fake_helper(raw=raw)).check_screen_capture(settle_s=2.0)
+    assert calls == 2
     assert status.state is ScreenCaptureState.AVAILABLE
 
 
@@ -473,27 +474,28 @@ def test_panel_fill_runs_carry_the_cli_user_present_guard() -> None:
 
 
 def test_read_dr_accepts_legacy_stderr_stream(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     """codesign once emitted the DR line on stderr; the reader searches both."""
     import subprocess
+    from collections.abc import Sequence
 
     from services.desktop.permissions_helper import lifecycle
 
     app = tmp_path / "MeivaPermissionsHelper.app"
 
-    def run(cmd, **kwargs):
-        if list(cmd)[:3] == ["codesign", "-d", "-r-"]:  # pyright: ignore[reportUnknownArgumentType]
+    def run(cmd: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        argv = list(cmd)
+        if argv[:3] == ["codesign", "-d", "-r-"]:
             return subprocess.CompletedProcess(
-                cmd,  # pyright: ignore[reportUnknownArgumentType]
+                argv,
                 0,
                 b"",
-                f"# designated => {test_dr()}\n".encode(),
+                f"# designated => {sample_dr()}\n".encode(),
             )
-        raise AssertionError(f"unexpected call {cmd}")
+        raise AssertionError(f"unexpected call {argv}")
 
-    monkeypatch.setattr(lifecycle, "run_bounded", run)  # pyright: ignore[reportUnknownArgumentType]
-    assert lifecycle.read_dr(app) == test_dr()
+    assert lifecycle.read_dr(app, runner=run) == sample_dr()
 
 
 def test_entitlements_request_apple_events_for_spawned_children() -> None:
@@ -517,16 +519,16 @@ def test_entitlements_request_apple_events_for_spawned_children() -> None:
 
 
 def test_source_mtime_change_does_not_rebuild_identical_content(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
-    app = stage_bundle(monkeypatch, tmp_path, exe_present=True)
-    recorded = fake_tools(monkeypatch)
-    write_current_build_state(app, lifecycle.source_content_hash())
-    exe = app / "Contents" / "MacOS" / "MeivaPermissionsHelper"
+    bundle = stage_bundle(tmp_path, exe_present=True)
+    recorded, env = fake_tools(bundle)
+    write_current_build_state(bundle.app, bundle.source_hash())
+    exe = bundle.app / "Contents" / "MacOS" / "MeivaPermissionsHelper"
     newer = exe.stat().st_mtime + 60
-    os.utime(lifecycle.SOURCE, (newer, newer))
+    os.utime(bundle.sources.source, (newer, newer))
 
-    assert lifecycle.build_and_sign() == (app, False)
+    assert lifecycle.build_and_sign(env=env) == (bundle.app, False)
     assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))

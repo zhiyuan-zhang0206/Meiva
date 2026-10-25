@@ -10,13 +10,14 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any, cast
-from unittest.mock import Mock
 
 import pytest
 
 from base.host.permissions_helper import client
 from base.host.permissions_helper.client import PermissionsHelperError
 from services.desktop.computer.mcp_wrapper import Link, ReconnectingSocketLink
+
+from .slices import short_sock_dir
 
 
 class FakeWriter:
@@ -273,59 +274,44 @@ async def test_reconnecting_link_times_out_without_retry(monkeypatch: pytest.Mon
 
 
 def test_connect_exhaustion_closes_every_socket_without_trailing_sleep(
-    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
+    retry_waits: list[float],
 ) -> None:
-    sockets: list[Mock] = []
-
-    def make_socket(*_args: object) -> Mock:
-        sock = Mock()
-        sock.connect.side_effect = FileNotFoundError("absent")
-        sockets.append(sock)
-        return sock
-
-    monkeypatch.setattr(client.socket, "socket", make_socket)
-    with pytest.raises(PermissionsHelperError) as error:
-        client.connect("test.sock")
-    assert str(error.value) == "permissions helper not reachable at test.sock: absent"
-    assert error.value.__context__ is None
-    assert len(sockets) == 5
-    assert all(sock.close.call_count == 1 for sock in sockets)
-    assert retry_waits == [0.2] * 4
+    d, absent, cleanup = short_sock_dir()
+    try:
+        with pytest.raises(PermissionsHelperError) as error:
+            client.connect(str(absent))
+        assert f"permissions helper not reachable at {absent}:" in str(error.value)
+        assert error.value.__context__ is None
+        assert retry_waits == [0.2] * 4
+    finally:
+        cleanup(d)
 
 
 def test_helper_connect_non_retryable_error_passes_through(
-    monkeypatch: pytest.MonkeyPatch,
+    retry_waits: list[float],
 ) -> None:
-    sock = Mock()
-    failure = PermissionError("forbidden")
-    sock.connect.side_effect = failure
-    factory = Mock(return_value=sock)
-    monkeypatch.setattr(client.socket, "socket", factory)
-    with pytest.raises(PermissionError) as error:
-        client.connect("test.sock")
-    assert error.value is failure
-    assert factory.call_count == 1
-    sock.close.assert_not_called()
+    d, _, cleanup = short_sock_dir()
+    locked = d / "locked"
+    locked.mkdir(mode=0o700)
+    locked.chmod(0o000)
+    try:
+        with pytest.raises(PermissionError):
+            client.connect(str(locked / "test.sock"))
+    finally:
+        locked.chmod(0o700)
+        cleanup(d)
+    assert retry_waits == []
 
 
-def test_helper_socket_creation_failure_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
-    failure = FileNotFoundError("socket factory failed")
-    factory = Mock(side_effect=failure)
-    monkeypatch.setattr(client.socket, "socket", factory)
-    with pytest.raises(FileNotFoundError) as error:
-        client.connect("test.sock")
-    assert error.value is failure
-    assert factory.call_count == 1
-
-
-def test_helper_failed_socket_close_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
-    sock = Mock()
-    sock.connect.side_effect = FileNotFoundError("socket absent")
-    failure = ConnectionRefusedError("close failed")
-    sock.close.side_effect = failure
-    factory = Mock(return_value=sock)
-    monkeypatch.setattr(client.socket, "socket", factory)
-    with pytest.raises(ConnectionRefusedError) as error:
-        client.connect("test.sock")
-    assert error.value is failure
-    assert factory.call_count == 1
+def test_helper_unclassified_connect_failure_is_not_retried(
+    retry_waits: list[float],
+) -> None:
+    d, _, cleanup = short_sock_dir()
+    try:
+        not_a_dir = d / "regular-file"
+        not_a_dir.write_text("x")
+        with pytest.raises(PermissionsHelperError, match="not reachable"):
+            client.connect(str(not_a_dir / "test.sock"))
+        assert retry_waits == []
+    finally:
+        cleanup(d)

@@ -28,9 +28,10 @@ import stat
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Protocol, TypeGuard
 
 import psutil
 
@@ -47,6 +48,43 @@ _READ_TIMEOUT_S = 30.0
 _TIMED_OUT_RC = 124
 """Stand-in exit status for a read the bound killed (`timeout(1)`'s convention;
 the real launchd codes are far below this)."""
+
+
+class BoundedRunner(Protocol):
+    def __call__(
+        self,
+        cmd: Sequence[str],
+        /,
+        *,
+        timeout: float,
+        capture_output: bool = ...,
+    ) -> subprocess.CompletedProcess[bytes]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RetirementEnv:
+    home: Path | None = None
+    agents_dir: Path | None = None
+    platform: str | None = None
+    loaded: bool | None = None
+    pids: Sequence[int] | None = None
+    owner: OwnedProcess | None = None
+    runner: BoundedRunner | None = None
+
+
+_DEFAULT_RETIREMENT_ENV = RetirementEnv()
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _remaining_sleep(deadline: float) -> float:
+    return min(0.05, max(0.0, deadline - time.monotonic()))
 
 
 def helper_job_label(home: Path | None = None) -> str:
@@ -66,12 +104,12 @@ def helper_job_domain() -> str:
     return f"gui/{os.getuid()}"
 
 
-def helper_job_agents_dir() -> Path:
-    return Path.home() / "Library" / "LaunchAgents"
+def helper_job_agents_dir(agents_dir: Path | None = None) -> Path:
+    return Path.home() / "Library" / "LaunchAgents" if agents_dir is None else agents_dir
 
 
-def helper_job_plist_path(home: Path | None = None) -> Path:
-    return helper_job_agents_dir() / f"{helper_job_label(home)}.plist"
+def helper_job_plist_path(home: Path | None = None, *, agents_dir: Path | None = None) -> Path:
+    return helper_job_agents_dir(agents_dir) / f"{helper_job_label(home)}.plist"
 
 
 def helper_stop_intent(home: Path) -> bool:
@@ -104,9 +142,11 @@ def clear_helper_stop_intent(home: Path) -> None:
         os.close(fd)
 
 
-def retirement_query(target: str, deadline: float) -> str | None:
+def retirement_query(
+    target: str, deadline: float, *, runner: BoundedRunner | None = None
+) -> str | None:
     """Absence is one positive launchd result; all other failures are unknown."""
-    result = retirement_command(["print", target], deadline)
+    result = retirement_command(["print", target], deadline, runner=runner)
     if result.returncode == 113 and b"Could not find service" in result.stderr:
         return None
     if result.returncode:
@@ -114,20 +154,23 @@ def retirement_query(target: str, deadline: float) -> str | None:
     return result.stdout.decode()
 
 
-def retirement_command(args: list[str], deadline: float) -> subprocess.CompletedProcess[bytes]:
+def retirement_command(
+    args: list[str], deadline: float, *, runner: BoundedRunner | None = None
+) -> subprocess.CompletedProcess[bytes]:
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise TimeoutError("helper retirement deadline expired; registry must be retained")
-    return run_bounded(["launchctl", *args], timeout=remaining, capture_output=True)
+    run = run_bounded if runner is None else runner
+    return run(["launchctl", *args], timeout=remaining, capture_output=True)
 
 
-def helper_job_loaded() -> bool:
+def helper_job_loaded(home: Path | None = None, *, runner: BoundedRunner | None = None) -> bool:
     """Whether launchd holds this home's helper job; an unknown answer raises."""
-    target = f"{helper_job_domain()}/{helper_job_label()}"
-    return retirement_query(target, time.monotonic() + _READ_TIMEOUT_S) is not None
+    target = f"{helper_job_domain()}/{helper_job_label(home)}"
+    return retirement_query(target, time.monotonic() + _READ_TIMEOUT_S, runner=runner) is not None
 
 
-def require_retired_helper(executable: Path) -> None:
+def require_retired_helper(executable: Path, *, env: RetirementEnv | None = None) -> None:
     """Refuse replacing this home's installed helper executable while it may still run.
 
     The helper is meiva-root's parent, so its artifact is replaced only after
@@ -135,12 +178,14 @@ def require_retired_helper(executable: Path) -> None:
     job's plist is gone, and no live process runs ``executable``. An unknown
     launchd answer raises from ``retirement_query``; it never reads as absence.
     """
-    plist = helper_job_plist_path()
-    if helper_job_loaded():
-        blocker = f"launchd still has {helper_job_domain()}/{helper_job_label()} loaded"
+    cfg = env or RetirementEnv()
+    plist = helper_job_plist_path(cfg.home, agents_dir=cfg.agents_dir)
+    loaded = helper_job_loaded(cfg.home, runner=cfg.runner) if cfg.loaded is None else cfg.loaded
+    if loaded:
+        blocker = f"launchd still has {helper_job_domain()}/{helper_job_label(cfg.home)} loaded"
     elif plist.exists() or plist.is_symlink():
         blocker = f"its job definition {plist} is still registered"
-    elif pids := executable_pids(executable):
+    elif pids := (executable_pids(executable) if cfg.pids is None else list(cfg.pids)):
         blocker = f"pid {', '.join(map(str, pids))} still runs {executable}"
     else:
         return
@@ -170,16 +215,16 @@ def retirement_plist(path: Path, home: Path, socket_path: Path) -> tuple[bytes, 
     if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o022:
         raise RuntimeError(f"helper plist is not an owned immutable input: {path}")
     original = path.read_bytes()
-    data = cast("dict[str, object]", plistlib.loads(original))
-    environment = data["EnvironmentVariables"]
-    argv = data["ProgramArguments"]
-    if not isinstance(environment, dict) or not isinstance(argv, list):
+    raw: object = plistlib.loads(original)
+    if not _is_str_dict(raw):
         raise TypeError(f"helper plist has invalid launch inputs: {path}")
-    environment = cast("dict[str, object]", environment)
-    argv = cast("list[object]", argv)
+    environment = raw["EnvironmentVariables"]
+    argv = raw["ProgramArguments"]
+    if not _is_str_dict(environment) or not _is_object_list(argv):
+        raise TypeError(f"helper plist has invalid launch inputs: {path}")
     if (
-        data["Label"] != helper_job_label(home)
-        or data.get("KeepAlive") != {"SuccessfulExit": False}
+        raw["Label"] != helper_job_label(home)
+        or raw.get("KeepAlive") != {"SuccessfulExit": False}
         or environment.get("MEIVA_PERMISSIONS_HELPER_SOCKET") != str(socket_path)
         or environment.get("MEIVA_PERMISSIONS_HELPER_ROOT_SEED")
         != str(home / "run" / "meiva-root" / "seed.json")
@@ -235,13 +280,16 @@ def unregister_helper(
     connect: HelperAtSocket,
     timeout_s: float = 30.0,
     force: bool = False,
+    env: RetirementEnv | None = None,
 ) -> None:
     """Retire only this home's stopped helper; uncertainty retains its registry slot.
 
     The caller must first close root services and broker sessions. No foreign PID is signalled,
     no shared signed bundle is deleted, and a descendant cannot unload its ancestor.
     """
-    if sys.platform != "darwin":
+    cfg = env or RetirementEnv()
+    platform = sys.platform if cfg.platform is None else cfg.platform
+    if platform != "darwin":
         return
     if not home.is_absolute() or home.resolve() != home or not 0 < helper_port < 65536:
         raise ValueError("helper retirement requires a canonical home and registered port")
@@ -253,43 +301,60 @@ def unregister_helper(
     run_dir = home / "run" / "meiva-root"
     run_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     deadline = time.monotonic() + timeout_s
-    original = None if force else _request_helper_shutdown(home, helper_port, deadline, connect)
+    original = (
+        None if force else _request_helper_shutdown(home, helper_port, deadline, connect, env=cfg)
+    )
     lock_fd = acquire_instance_lock(run_dir)
     try:
         _unregister_stopped_helper(
-            home, helper_port, deadline, force=force, expected=original, connect=connect
+            home,
+            helper_port,
+            deadline,
+            force=force,
+            expected=original,
+            connect=connect,
+            env=cfg,
         )
     finally:
         release_instance_lock(lock_fd)
 
 
 def _request_helper_shutdown(
-    home: Path, port: int, deadline: float, connect: HelperAtSocket
+    home: Path,
+    port: int,
+    deadline: float,
+    connect: HelperAtSocket,
+    *,
+    env: RetirementEnv = _DEFAULT_RETIREMENT_ENV,
 ) -> bytes | None:
     target = f"{helper_job_domain()}/{helper_job_label(home)}"
-    state = retirement_query(target, deadline)
+    state = retirement_query(target, deadline, runner=env.runner)
     if state is None:
         return None
-    path = helper_job_plist_path(home)
+    path = helper_job_plist_path(home, agents_dir=env.agents_dir)
     socket_path = home / "run" / f"permissions-helper.{port}.sock"
     original, executable = retirement_plist(path, home, socket_path)
     if _job_pid(state) is None:
         _require_idle_job(state, home)
         return original
-    owner = retirement_owner(state, socket_path, executable, connect=connect)
+    owner = (
+        env.owner
+        if env.owner is not None
+        else retirement_owner(state, socket_path, executable, connect=connect)
+    )
     if path.is_symlink() or path.read_bytes() != original:
         raise RuntimeError("helper definition changed before shutdown")
     reply = connect(socket_path).shutdown_helper(home / "run" / "meiva-root")
     if reply != {"stopping": True, "pid": owner.pid, "run_dir": str(home / "run" / "meiva-root")}:
         raise RuntimeError("helper shutdown did not acknowledge exact-home native custody")
     wait_retirement_owner(owner, deadline)
-    while (latest := retirement_query(target, deadline)) is not None:
+    while (latest := retirement_query(target, deadline, runner=env.runner)) is not None:
         if _job_pid(latest) is None:
             _require_idle_job(latest, home)
             break
         if _job_pid(latest) != owner.pid:
             raise RuntimeError("helper relaunched after acknowledged shutdown; custody retained")
-        time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+        time.sleep(_remaining_sleep(deadline))
     return original
 
 
@@ -311,10 +376,11 @@ def _unregister_stopped_helper(
     force: bool,
     expected: bytes | None,
     connect: HelperAtSocket,
+    env: RetirementEnv = _DEFAULT_RETIREMENT_ENV,
 ) -> None:
     target = f"{helper_job_domain()}/{helper_job_label(home)}"
-    path = helper_job_plist_path(home)
-    state = retirement_query(target, deadline)
+    path = helper_job_plist_path(home, agents_dir=env.agents_dir)
+    state = retirement_query(target, deadline, runner=env.runner)
     socket_path = home / "run" / f"permissions-helper.{port}.sock"
     if state is None and not path.exists() and not path.is_symlink():
         _require_absent_socket(socket_path, deadline)
@@ -327,25 +393,29 @@ def _unregister_stopped_helper(
         # A socket still accepting connections contradicts that absence, even
         # when launchd no longer owns the listener. Never restart it to retire it.
         _require_absent_socket(socket_path, deadline)
-        if retirement_query(target, deadline) is not None:
+        if retirement_query(target, deadline, runner=env.runner) is not None:
             raise RuntimeError("helper job appeared during retirement; preserving its definition")
         _unlink_unchanged_plist(path, original)
         return
     if _job_pid(state) is not None:
         if not force:
             raise RuntimeError("helper retirement still has a native owner; custody retained")
-        owner = retirement_owner(state, socket_path, executable, connect=connect)
-        latest = retirement_query(target, deadline)
+        owner = (
+            env.owner
+            if env.owner is not None
+            else retirement_owner(state, socket_path, executable, connect=connect)
+        )
+        latest = retirement_query(target, deadline, runner=env.runner)
         latest_pid = _job_pid(latest)
         if path.is_symlink() or path.read_bytes() != original or latest_pid != owner.pid:
             raise RuntimeError("helper job changed before retirement")
         # Explicit force revokes native restart authority before any escalation.
-        _bootout_stopped_helper(target, deadline)
+        _bootout_stopped_helper(target, deadline, runner=env.runner)
         force_retirement_owner(owner, deadline)
     else:
         _require_idle_job(state, home)
         _require_absent_socket(socket_path, deadline)
-        _bootout_stopped_helper(target, deadline)
+        _bootout_stopped_helper(target, deadline, runner=env.runner)
     _unlink_unchanged_plist(path, original)
 
 
@@ -383,12 +453,14 @@ def wait_retirement_owner(owner: OwnedProcess, deadline: float) -> None:
         raise TimeoutError("helper shutdown did not complete; custody retained") from exc
 
 
-def _bootout_stopped_helper(target: str, deadline: float) -> None:
-    result = retirement_command(["bootout", target], deadline)
+def _bootout_stopped_helper(
+    target: str, deadline: float, *, runner: BoundedRunner | None = None
+) -> None:
+    result = retirement_command(["bootout", target], deadline, runner=runner)
     if result.returncode:
         raise RuntimeError(f"helper bootout failed; custody retained: {result.stderr!r}")
-    while retirement_query(target, deadline) is not None:
-        time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+    while retirement_query(target, deadline, runner=runner) is not None:
+        time.sleep(_remaining_sleep(deadline))
 
 
 def _require_absent_socket(path: Path, deadline: float) -> None:

@@ -6,11 +6,10 @@ import asyncio
 import json
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import pytest
 
-from base.agents.impersonation import manifest
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.permissions_helper.client import PermissionsHelperError
@@ -20,11 +19,10 @@ from base.paths import logs_dir
 
 from ... import mcp_daemon as daemon_mod
 from ...protocol import Response
-from ..slices import computer_use_config, short_sock_dir
+from ..slices import AuditLog, FakeOcr, computer_use_config, short_sock_dir
 from ..test_computer_mcp_daemon import (
     SHORT_SESSION,
     FakeHelper,
-    FakeOcr,
     call,
     computer_daemon,
     ok_result,
@@ -361,61 +359,58 @@ async def test_operator_force_release_without_identity(
 
 async def test_task_session_emit_failure_warns_but_action_succeeds(
     fake_helper: FakeHelper,
-    audit_log: list,
-    monkeypatch: pytest.MonkeyPatch,
+    audit_log: AuditLog,
     loguru_records: LogRecords,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
     """A failing session-envelope emit (contract mismatch, FK hiccup) must not
     fail the action nor stay silent — it warns (task #1136)."""
-    log: list[dict[str, Any]] = []
-
-    def _stage(_db: object, event: Any) -> None:
-        if event.event_name.startswith("computer_session_"):
-            # the envelope path is broken (unregistered name etc.)
-            raise ValueError(f"unknown event name {event.event_name!r}")
-        log.append(
-            {
-                "event_type": event.event_name,
-                "agent_id": event.agent_id,
-                "source": event.source,
-                "payload": event.attributes,
-            }
-        )  # pyright: ignore[reportUnknownMemberType]
-
-    monkeypatch.setattr(manifest, "emit_recorded_central_event", _stage)
-    d = computer_daemon(database_gate=database_gate, helper=fake_helper)
-    resp = await call(d, "click", {"x": 1, "y": 2, "task_id": 42})
-    assert resp["ok"] is True  # the action itself executed
-    assert any("task-session event failed" in w for w in loguru_records.messages("WARNING"))
-    # the computer_action row still landed (the envelope is auxiliary)
-    assert [e["event_type"] for e in log] == ["computer_action"]
+    db = Database.from_settings(gate=database_gate)
+    with db.write_transaction() as conn:
+        conn.execute(
+            "ALTER TABLE audit_events ADD CONSTRAINT reject_session_events "
+            "CHECK (event_name NOT LIKE 'computer_session_%')"
+        )
+    try:
+        d = computer_daemon(database_gate=database_gate, helper=fake_helper)
+        resp = await call(d, "click", {"x": 1, "y": 2, "task_id": 42})
+        assert resp["ok"] is True  # the action itself executed
+        assert any("task-session event failed" in w for w in loguru_records.messages("WARNING"))
+        # the computer_action row still landed (the envelope is auxiliary)
+        assert [e["event_type"] for e in audit_log] == ["computer_action"]
+    finally:
+        with db.write_transaction() as conn:
+            conn.execute("ALTER TABLE audit_events DROP CONSTRAINT IF EXISTS reject_session_events")
 
 
 async def test_run_raises_stream_limit_for_large_snapshots(
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
 ) -> None:
     d, sock, cleanup = short_sock_dir()
-    server_options: dict[str, Any] = {}
-
-    async def socket_not_in_use(_path: Path) -> bool:
-        return False
-
-    async def capture_server_options(*_args: Any, **kwargs: Any) -> None:
-        server_options.update(kwargs)
-        raise RuntimeError("server options captured")
-
-    monkeypatch.setattr(daemon_mod, "socket_in_use", socket_not_in_use)
-    monkeypatch.setattr(daemon_mod.asyncio, "start_unix_server", capture_server_options)
-
+    server = asyncio.create_task(
+        daemon_mod.run(sock=str(sock), database=lambda: database, helper=FakeHelper())
+    )
     try:
-        # The failure leaves run()'s TaskGroup, so it arrives in an exception group.
-        with pytest.RaisesGroup(pytest.RaisesExc(RuntimeError, match="server options captured")):
-            await daemon_mod.run(sock=str(sock), database=lambda: database, helper=FakeHelper())
-        assert server_options["limit"] == 64 * 1024 * 1024
+        while not sock.exists():
+            await asyncio.sleep(0.01)
+        reader, writer = await asyncio.open_unix_connection(str(sock))
+        try:
+            writer.write(
+                (json.dumps({"id": 1, "method": "ping", "pad": "x" * 100_000}) + "\n").encode()
+            )
+            await writer.drain()
+            raw = await reader.readline()
+            assert json.loads(raw) == {"id": 1, "ok": True, "result": "pong"}
+            assert daemon_mod.LINE_LIMIT == 64 * 1024 * 1024
+        finally:
+            writer.close()
+            with suppress(Exception):
+                await writer.wait_closed()
     finally:
+        server.cancel()
+        with suppress(asyncio.CancelledError):
+            await server
         cleanup(d)
 
 

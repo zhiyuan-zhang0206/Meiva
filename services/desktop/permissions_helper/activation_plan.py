@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Literal, TypeGuard
 
 __all__ = [
     "HELPER_PING_ATTEMPTS",
@@ -100,6 +100,10 @@ def helper_plist(
     }
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 # meiva:note
 # Whether a parsed LaunchAgent plist is a job under a label other than `label` that pins this
 # cluster's `socket`: it races our own job for the same socket. Other clusters' jobs pin their
@@ -108,10 +112,9 @@ def is_foreign_label_job(plist: Mapping[str, object], *, label: str, socket: str
     if plist.get("Label") == label:
         return False
     env = plist.get("EnvironmentVariables")
-    if not isinstance(env, dict):
+    if not _is_str_dict(env):
         return False
-    variables = cast("dict[str, object]", env)
-    return variables.get("MEIVA_PERMISSIONS_HELPER_SOCKET") == socket
+    return env.get("MEIVA_PERMISSIONS_HELPER_SOCKET") == socket
 
 
 # meiva:note

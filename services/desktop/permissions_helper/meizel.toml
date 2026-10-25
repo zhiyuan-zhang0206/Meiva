@@ -10,20 +10,8 @@ exports = ["launchd_job.py", "lifecycle.py", "onboarding.py", "signing_identity.
 "activation_plan.py" = "strict"
 "hardened_runtime.py" = "strict"
 
-[debt.ambient-read]
-"build_state.py#clock datetime.datetime.now" = 1
-"launchd_job.py#clock time.monotonic" = 2
-"launchd_job.py#home pathlib.Path.home" = 1
-"launchd_job.py#pid os.getpid" = 1
-"launchd_job.py#pid os.getuid" = 3
-"launchd_job.py#platform sys.platform" = 1
-"lifecycle.py#settings base.config.settings" = 1
-"onboarding.py#home pathlib.Path.home" = 1
-"onboarding.py#platform sys.platform" = 1
-"onboarding.py#random uuid.uuid4" = 2
-"signing_identity.py#random secrets.token_urlsafe" = 1
-
-[debt.type-cast]
-"activation_plan.py#cast is_foreign_label_job" = 1
-"build_state.py#cast read_build_state" = 1
-"launchd_job.py#cast retirement_plist" = 3
+[roots]
+"launchd_job.py" = ["home", "pid", "platform"]
+"lifecycle.py" = ["clock", "settings"]
+"onboarding.py" = ["home", "platform"]
+"signing_identity.py" = ["random"]

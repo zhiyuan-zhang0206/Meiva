@@ -23,13 +23,13 @@ from typing import Any, NamedTuple
 
 import pytest
 
-import base.paths as base_paths
 from base.host.permissions_helper import client
 from base.host.permissions_helper.client import (
     PermissionsHelperClient,
     PermissionsHelperError,
     UserAbortError,
 )
+from services.desktop.permissions_helper import launchd_job, lifecycle, signing_identity
 
 
 def read_line(conn: socket.socket) -> bytes:
@@ -165,12 +165,9 @@ def test_socket_path_keyed_on_port(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_permissions_helper_app_dir_is_stable_under_meiva_home(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
-    from base import paths
-
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "home"))
-    assert paths.permissions_helper_app_dir() == tmp_path / "home" / "helper"
+    assert lifecycle.build_directory(None, home=tmp_path / "home") == tmp_path / "home" / "helper"
 
 
 def test_method_name_mapping(fake_helper) -> None:
@@ -435,11 +432,26 @@ def parse_strings(path: Path) -> dict[str, str]:
 TEST_CDHASH = "0123456789abcdef0123456789abcdef01234567"
 
 
-def stage_bundle(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_present: bool, identity: bool = True
-) -> Path:
-    from services.desktop.permissions_helper import launchd_job, lifecycle
+@dataclass(frozen=True, slots=True)
+class StagedBundle:
+    app: Path
+    app_dir: Path
+    sources: lifecycle.HelperSources
+    retirement: launchd_job.RetirementEnv
 
+    def source_hash(self) -> str:
+        return lifecycle.source_content_hash(self.sources)
+
+    def build_env(self, runner: launchd_job.BoundedRunner | None = None) -> lifecycle.BuildEnv:
+        return lifecycle.BuildEnv(
+            app_dir=self.app_dir,
+            sources=self.sources,
+            retirement=self.retirement,
+            runner=runner,
+        )
+
+
+def stage_bundle(tmp_path: Path, *, exe_present: bool, identity: bool = True) -> StagedBundle:
     src = tmp_path / "main.swift"
     src.write_text("// swift")
     info = tmp_path / "Info.plist"
@@ -452,7 +464,6 @@ def stage_bundle(
         exe = app / "Contents" / "MacOS" / "MeivaPermissionsHelper"
         exe.parent.mkdir(parents=True)
         exe.write_bytes(b"\x00")  # written last, so its mtime is at least the sources'
-        monkeypatch.setattr(launchd_job, "helper_job_loaded", lambda: True)  # its home runs it
     locales = tmp_path / "locales"
     en_lproj = locales / "en.lproj"
     en_lproj.mkdir(parents=True)
@@ -460,17 +471,24 @@ def stage_bundle(
     zh_lproj = locales / "zh-Hans.lproj"
     zh_lproj.mkdir()
     (zh_lproj / "Localizable.strings").write_text('"panel.title" = "zh";')
-    monkeypatch.setattr(lifecycle, "SOURCE", src)
-    monkeypatch.setattr(lifecycle, "INFO_PLIST", info)
-    monkeypatch.setattr(lifecycle, "ENTITLEMENTS", entitlements)
-    monkeypatch.setattr(lifecycle, "LOCALES", locales)
-    monkeypatch.setattr(base_paths, "permissions_helper_app_dir", lambda: build)
+    sources = lifecycle.HelperSources(
+        source=src,
+        info_plist=info,
+        entitlements=entitlements,
+        locales=locales,
+    )
+    retirement = launchd_job.RetirementEnv(loaded=exe_present)
     if identity:
-        stage_signing_identity()
-    return app
+        stage_signing_identity(build)
+    return StagedBundle(
+        app=app,
+        app_dir=build,
+        sources=sources,
+        retirement=retirement,
+    )
 
 
-def test_dr() -> str:
+def sample_dr() -> str:
     return f'identifier "com.meiva.permissions-helper" and cdhash H"{TEST_CDHASH}"'
 
 
@@ -485,17 +503,16 @@ def certificate_dr() -> str:
 
 # meiva:note
 # The identity files a host has after `helper-signing.py provision` ran once.
-def stage_signing_identity() -> None:
-    from services.desktop.permissions_helper import signing_identity
-
-    signing_identity.keychain_path().parent.mkdir(parents=True, exist_ok=True)
-    signing_identity.keychain_path().write_bytes(b"keychain")
-    signing_identity.password_path().write_text("test-password\n")
+def stage_signing_identity(app_dir: Path | None = None) -> None:
+    signing_identity.keychain_path(app_dir).parent.mkdir(parents=True, exist_ok=True)
+    signing_identity.keychain_path(app_dir).write_bytes(b"keychain")
+    signing_identity.password_path(app_dir).write_text("test-password\n")
 
 
 def fake_identity_reply(
     cmd: list[str],
     *,
+    app_dir: Path | None = None,
     identity_name: str | None = None,
     search_list: Sequence[str] | None = None,
     rival: bool = False,
@@ -506,8 +523,6 @@ def fake_identity_reply(
     # `identity_name` overrides the name `find-identity` reports and `search_list`
     # the keychains it lists; both default to the staged identity being fully
     # usable.
-    from services.desktop.permissions_helper import signing_identity
-
     if Path(cmd[0]).name != "security":
         return None
     match cmd[1]:
@@ -516,7 +531,7 @@ def fake_identity_reply(
             text = ""
         case "find-identity":
             name = signing_identity.IDENTITY_NAME if identity_name is None else identity_name
-            ours = Path(cmd[-1]).resolve() == signing_identity.keychain_path().resolve()
+            ours = Path(cmd[-1]).resolve() == signing_identity.keychain_path(app_dir).resolve()
             text = (
                 f'  1) ABCDEF0123456789 "{name}" (CSSMERR_TP_NOT_TRUSTED)\n'
                 if ours or rival
@@ -524,7 +539,7 @@ def fake_identity_reply(
             )
         case "list-keychains":
             listed = (
-                (str(signing_identity.keychain_path()),)
+                (str(signing_identity.keychain_path(app_dir)),)
                 if search_list is None
                 else tuple(search_list)
             )
@@ -539,7 +554,7 @@ def write_current_build_state(app: Path, source_hash: str, *, dr: str | None = N
         json.dumps(
             {
                 "source_hash": source_hash,
-                "dr": dr or test_dr(),
+                "dr": dr or sample_dr(),
                 "signed_at": "2026-09-05T00:00:00+00:00",
             }
         )
@@ -561,6 +576,7 @@ class _FakeToolOutputs:
     verify_rc: int
     designated_requirement: str | None
     dr_streams: tuple[bytes, bytes] | None
+    app_dir: Path | None = None
     identity_name: str | None = None
     search_list: Sequence[str] | None = None
     rival: bool = False
@@ -568,7 +584,11 @@ class _FakeToolOutputs:
     def respond(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
         """The result of one tool invocation; unmatched commands succeed silently."""
         identity = fake_identity_reply(
-            cmd, identity_name=self.identity_name, search_list=self.search_list, rival=self.rival
+            cmd,
+            app_dir=self.app_dir,
+            identity_name=self.identity_name,
+            search_list=self.search_list,
+            rival=self.rival,
         )
         if identity is not None:
             return identity
@@ -585,7 +605,7 @@ class _FakeToolOutputs:
     def _designated_requirement(self, cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
         if self.dr_streams is not None:
             return subprocess.CompletedProcess(cmd, 0, *self.dr_streams)
-        dr = self.designated_requirement or test_dr()
+        dr = self.designated_requirement or sample_dr()
         # meiva:note
         # Real codesign on current macOS emits the DR line on stdout with a leading `# ` for an ad-hoc signature (stderr carries `Executable=...`); the reader accepts either stream.
         return subprocess.CompletedProcess(cmd, 0, f"# designated => {dr}\n".encode(), b"")
@@ -595,10 +615,8 @@ class _FakeToolOutputs:
 # Stand in for swiftc / codesign, recording every invocation.
 #
 # `hang` is an argv prefix whose call raises TimeoutExpired exactly as `run_bounded` does once it has killed the tree.
-#
-# This patches `run_bounded`, not `subprocess.run`: routing every call through it IS the invariant under test, so a call site that regressed to plain `subprocess.run` would reach the real tool and fail here rather than pass against a stub.
 def fake_tools(
-    monkeypatch: pytest.MonkeyPatch,
+    bundle: StagedBundle | None = None,
     *,
     sign_rc: int = 0,
     verify_rc: int = 0,
@@ -608,14 +626,13 @@ def fake_tools(
     identity_name: str | None = None,
     search_list: Sequence[str] | None = None,
     rival: bool = False,
-) -> list[_Call]:
-    from services.desktop.permissions_helper import lifecycle
-
+) -> tuple[list[_Call], lifecycle.BuildEnv]:
     outputs = _FakeToolOutputs(
         sign_rc=sign_rc,
         verify_rc=verify_rc,
         designated_requirement=designated_requirement,
         dr_streams=dr_streams,
+        app_dir=bundle.app_dir if bundle is not None else None,
         identity_name=identity_name,
         search_list=search_list,
         rival=rival,
@@ -631,8 +648,8 @@ def fake_tools(
             raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
         return outputs.respond(argv)
 
-    monkeypatch.setattr(lifecycle, "run_bounded", run)
-    return recorded
+    env = bundle.build_env(run) if bundle is not None else lifecycle.BuildEnv(runner=run)
+    return recorded, env
 
 
 def recorded_argvs(recorded: list[_Call]) -> list[list[str]]:
@@ -649,46 +666,30 @@ def sign_command(recorded: list[_Call]) -> list[str]:
 
 
 def install_env(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     loaded: bool,
     matching_plist: bool = True,
-) -> tuple[Path, list[list[str]], list[list[str]]]:
-    import subprocess
-
-    from services.desktop.permissions_helper import lifecycle
-
+) -> tuple[Path, list[list[str]], list[list[str]], lifecycle.InstallEnv]:
     app = tmp_path / "helper" / "MeivaPermissionsHelper.app"
     exe = app / "Contents" / "MacOS" / "MeivaPermissionsHelper"
     exe.parent.mkdir(parents=True)
     exe.write_bytes(b"signed helper")
     agents = tmp_path / "LaunchAgents"
+    agents.mkdir(parents=True, exist_ok=True)
     plist_path = agents / "com.meiva.permissions-helper.test.plist"
     log = tmp_path / "logs" / "permissions-helper.log"
     socket_path = tmp_path / "run" / "permissions-helper.sock"
-    monkeypatch.setattr(lifecycle.base.paths, "meiva_home", lambda: tmp_path)
-    monkeypatch.setattr(lifecycle, "refuse_foreign_label_jobs", lambda: None)
-    monkeypatch.setattr(lifecycle, "label", lambda: "com.meiva.permissions-helper.test")
-    monkeypatch.setattr(lifecycle, "launchd_domain", lambda: "gui/501")
-    monkeypatch.setattr(lifecycle, "plist_path", lambda: plist_path)
-    monkeypatch.setattr(lifecycle, "is_loaded", lambda: loaded)
-    monkeypatch.setattr(lifecycle, "logs_dir", lambda: log.parent)
-    monkeypatch.setattr(lifecycle, "helper_socket", lambda: socket_path)
     run_calls: list[list[str]] = []
     probe_calls: list[list[str]] = []
 
-    def run(cmd: list[str]) -> None:
-        run_calls.append(cmd)
+    def run(cmd: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        argv = list(cmd)
+        run_calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
 
-    def probe(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        probe_calls.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0, b"", b"")
-
-    monkeypatch.setattr(lifecycle, "run_tool", run)
-    monkeypatch.setattr(lifecycle, "run_readonly_query", probe)
     if matching_plist:
-        plist_path.parent.mkdir(parents=True)
+        plist_path.parent.mkdir(parents=True, exist_ok=True)
         plist_path.write_bytes(
             plistlib.dumps(
                 {
@@ -697,8 +698,7 @@ def install_env(
                     "EnvironmentVariables": {
                         "MEIVA_PERMISSIONS_HELPER_SOCKET": str(socket_path),
                         "MEIVA_PERMISSIONS_HELPER_ROOT_SEED": str(
-                            lifecycle.base.paths.root_run_dir(lifecycle.base.paths.meiva_home())
-                            / "seed.json"
+                            lifecycle.base.paths.root_run_dir(tmp_path) / "seed.json"
                         ),
                     },
                     "RunAtLoad": True,
@@ -708,7 +708,18 @@ def install_env(
                 }
             )
         )
-    return app, run_calls, probe_calls
+    env = lifecycle.InstallEnv(
+        home=tmp_path,
+        agents=agents,
+        label="com.meiva.permissions-helper.test",
+        domain="gui/501",
+        plist=plist_path,
+        loaded=loaded,
+        log_dir=log.parent,
+        socket=socket_path,
+        runner=run,
+    )
+    return app, run_calls, probe_calls, env
 
 
 def _skip_sleep(_seconds: float) -> None:
@@ -736,16 +747,9 @@ def write_agent_plist(
     return p
 
 
-def retire_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, port: int = 9223) -> Path:
-    """Point the retire machinery at a fake home: current socket, agents dir,
-    launchd domain."""
-    from services.desktop.permissions_helper import lifecycle
-
+def retire_env(tmp_path: Path, *, port: int = 9223) -> tuple[Path, Path]:
     agents = tmp_path / "LaunchAgents"
     agents.mkdir(parents=True)
     run = tmp_path / "run"
     run.mkdir(parents=True)
-    monkeypatch.setattr(lifecycle, "agents_dir", lambda: agents)
-    monkeypatch.setattr(lifecycle, "launchd_domain", lambda: "gui/501")
-    monkeypatch.setattr(lifecycle, "helper_socket", lambda: run / f"permissions-helper.{port}.sock")
-    return agents
+    return agents, run / f"permissions-helper.{port}.sock"

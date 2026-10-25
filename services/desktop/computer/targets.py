@@ -9,12 +9,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from math import isfinite
-from typing import Any, NotRequired, TypedDict, cast
+from typing import Any, NotRequired, TypedDict, TypeGuard
 
 from .errors import ComputerUseError
 
 
-def _integer(value: Any, name: str, *, positive: bool = False) -> int:
+def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _integer(value: object, name: str, *, positive: bool = False) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ComputerUseError(f"{name} must be an integer")
     if positive and value <= 0:
@@ -22,10 +26,13 @@ def _integer(value: Any, name: str, *, positive: bool = False) -> int:
     return value
 
 
-def _object(value: Any, name: str, keys: set[str]) -> dict[str, Any]:
-    if not isinstance(value, dict) or set(cast(dict[Any, Any], value)) != keys:
+def _object(value: object, name: str, keys: set[str]) -> dict[str, object]:
+    if not _is_object_dict(value):
         raise ComputerUseError(f"{name} must contain exactly {', '.join(sorted(keys))}")
-    return cast(dict[str, Any], value)
+    entries: dict[str, object] = {k: v for k, v in value.items() if isinstance(k, str)}
+    if len(entries) != len(value) or set(entries) != keys:
+        raise ComputerUseError(f"{name} must contain exactly {', '.join(sorted(keys))}")
+    return entries
 
 
 @dataclass(frozen=True)
@@ -38,13 +45,13 @@ class CaptureRegion:
     h: int
 
     @classmethod
-    def parse(cls, value: Any) -> CaptureRegion:
-        value = _object(value, "region", {"x", "y", "w", "h"})
+    def parse(cls, value: object) -> CaptureRegion:
+        parsed = _object(value, "region", {"x", "y", "w", "h"})
         return cls(
-            _integer(value["x"], "region.x"),
-            _integer(value["y"], "region.y"),
-            _integer(value["w"], "region.w", positive=True),
-            _integer(value["h"], "region.h", positive=True),
+            _integer(parsed["x"], "region.x"),
+            _integer(parsed["y"], "region.y"),
+            _integer(parsed["w"], "region.w", positive=True),
+            _integer(parsed["h"], "region.h", positive=True),
         )
 
 
@@ -56,10 +63,10 @@ class WindowTarget:
     window_id: int
 
     @classmethod
-    def parse(cls, value: Any) -> WindowTarget:
-        value = _object(value, "target", {"pid", "window_id"})
-        pid = _integer(value["pid"], "target.pid", positive=True)
-        window_id = _integer(value["window_id"], "target.window_id", positive=True)
+    def parse(cls, value: object) -> WindowTarget:
+        parsed = _object(value, "target", {"pid", "window_id"})
+        pid = _integer(parsed["pid"], "target.pid", positive=True)
+        window_id = _integer(parsed["window_id"], "target.window_id", positive=True)
         if pid > 2**31 - 1 or window_id > 2**32 - 1:
             raise ComputerUseError("target identifiers exceed the native range")
         return cls(pid, window_id)
@@ -93,17 +100,19 @@ class AppTarget:
         }
 
     @classmethod
-    def parse(cls, value: Any) -> AppTarget:
-        if not isinstance(value, dict):
+    def parse(cls, value: object) -> AppTarget:
+        if not _is_object_dict(value):
             raise ComputerUseError("app target must be an object")
-        value = cast(dict[str, Any], value)
-        if set(value) == {"pid"}:
-            pid = _integer(value["pid"], "app target.pid", positive=True)
+        entries: dict[str, object] = {k: v for k, v in value.items() if isinstance(k, str)}
+        if len(entries) != len(value):
+            raise ComputerUseError("app target must contain exactly pid or bundle_id")
+        if set(entries) == {"pid"}:
+            pid = _integer(entries["pid"], "app target.pid", positive=True)
             if pid > 2**31 - 1:
                 raise ComputerUseError("app target.pid exceeds the native range")
             return cls(pid=pid)
-        if set(value) == {"bundle_id"}:
-            bundle_id = value["bundle_id"]
+        if set(entries) == {"bundle_id"}:
+            bundle_id = entries["bundle_id"]
             if not isinstance(bundle_id, str) or not bundle_id.strip():
                 raise ComputerUseError("app target.bundle_id must be a nonempty string")
             return cls(bundle_id=bundle_id)
@@ -149,7 +158,7 @@ class ObservationFrame(TypedDict):
     target: NotRequired[TargetIdentity]
 
 
-def _number(value: Any, name: str) -> float:
+def _number(value: object, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ComputerUseError(f"{name} must be a finite number")
     try:
@@ -174,23 +183,26 @@ class CaptureFrame:
     target: WindowTarget | None = None
 
     @classmethod
-    def parse(cls, value: Any) -> CaptureFrame:
+    def parse(cls, value: object) -> CaptureFrame:
         required = {"coordinate_space", "origin", "scale", "pixels"}
-        if not isinstance(value, dict):
+        if not _is_object_dict(value):
             raise ComputerUseError("frame must be an object")
-        value = cast(dict[str, Any], value)
-        if not required <= set(value) <= required | {"target"}:
+        entries: dict[str, object] = {k: v for k, v in value.items() if isinstance(k, str)}
+        if len(entries) != len(value) or not required <= set(entries) <= required | {"target"}:
             raise ComputerUseError("frame needs coordinate_space, origin, scale and pixels")
+        raw_space = entries["coordinate_space"]
+        if not isinstance(raw_space, str):
+            raise ComputerUseError("unknown frame coordinate_space")
         try:
-            space = CoordinateSpace(value["coordinate_space"])
-        except (ValueError, TypeError):
+            space = CoordinateSpace(raw_space)
+        except ValueError:
             raise ComputerUseError("unknown frame coordinate_space") from None
-        origin = _object(value["origin"], "frame.origin", {"x", "y"})
-        pixels = _object(value["pixels"], "frame.pixels", {"width", "height"})
-        scale = _number(value["scale"], "frame.scale")
+        origin = _object(entries["origin"], "frame.origin", {"x", "y"})
+        pixels = _object(entries["pixels"], "frame.pixels", {"width", "height"})
+        scale = _number(entries["scale"], "frame.scale")
         if scale <= 0:
             raise ComputerUseError("frame.scale must be positive")
-        target = WindowTarget.parse(value["target"]) if "target" in value else None
+        target = WindowTarget.parse(entries["target"]) if "target" in entries else None
         if (space == CoordinateSpace.WINDOW_PIXELS) != (target is not None):
             raise ComputerUseError("only window_pixels frames require a target")
         return cls(
@@ -214,7 +226,7 @@ class CaptureFrame:
             frame["target"] = {"pid": self.target.pid, "window_id": self.target.window_id}
         return frame
 
-    def global_point(self, x: Any, y: Any) -> tuple[float, float]:
+    def global_point(self, x: object, y: object) -> tuple[float, float]:
         """Map a region-local pixel to shared-desktop logical points.
 
         A window screenshot is not a global HID input target. Refuse that

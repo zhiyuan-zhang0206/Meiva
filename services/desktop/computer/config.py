@@ -1,6 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol
+
+
+class DaemonSettingsLike(Protocol):
+    @property
+    def computer_use_lease_s(self) -> float: ...
+    @property
+    def computer_use_queue_timeout_s(self) -> float: ...
+    @property
+    def computer_use_session_idle_s(self) -> float: ...
+    @property
+    def computer_use_loop_stall_s(self) -> float: ...
+    @property
+    def computer_use_shutdown_drain_s(self) -> float: ...
 
 
 @dataclass(frozen=True)
@@ -10,6 +24,16 @@ class ComputerUseConfig:
     computer_use_session_idle_s: float
     computer_use_loop_stall_s: float
     computer_use_shutdown_drain_s: float
+
+
+def from_daemon_settings(source: DaemonSettingsLike) -> ComputerUseConfig:
+    return ComputerUseConfig(
+        computer_use_lease_s=float(source.computer_use_lease_s),
+        computer_use_queue_timeout_s=float(source.computer_use_queue_timeout_s),
+        computer_use_session_idle_s=float(source.computer_use_session_idle_s),
+        computer_use_loop_stall_s=float(source.computer_use_loop_stall_s),
+        computer_use_shutdown_drain_s=float(source.computer_use_shutdown_drain_s),
+    )
 
 
 # meiva:note

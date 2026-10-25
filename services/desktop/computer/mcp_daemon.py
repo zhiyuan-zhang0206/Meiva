@@ -60,6 +60,7 @@ import threading
 import time
 from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -68,7 +69,7 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.host.permissions_helper.client import PermissionsHelperClient, PermissionsHelperError
+from base.host.permissions_helper.client import PermissionsHelperError
 from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -78,18 +79,25 @@ from base.telemetry import audit_events, build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 
 from .ax_ids import AxSession
-from .config import ComputerUseConfig, beat_interval_s, effective_stall_s, loop_is_silent
-from .execute import TOOLS, execute_tool, mcp_result, priority
+from .config import (
+    ComputerUseConfig,
+    DaemonSettingsLike,
+    beat_interval_s,
+    effective_stall_s,
+    from_daemon_settings,
+    loop_is_silent,
+)
+from .execute import TOOLS, DesktopHelper, execute_tool, mcp_result, priority
 from .protocol import Request, Response
 from .session import ScreenSession
 from .task_sessions import TaskSessionTracker
 
 # A snapshot PNG can be multi-MB on one line; lift the stream buffer cap well
 # above StreamReader's 64KiB default (same limit as the browser daemon).
-_LINE_LIMIT = 64 * 1024 * 1024
+LINE_LIMIT = 64 * 1024 * 1024
 
 
-def _hide_badge(helper: PermissionsHelperClient) -> None:
+def _hide_badge(helper: DesktopHelper) -> None:
     """End the capture badge when the screen is handed over. The helper shows it, per input, on
     the window the input lands on, and ends it on its own; this only makes it prompt. It is
     display-only, so a failure is logged and never fails the release."""
@@ -181,15 +189,9 @@ def _audit_coords(tool: str, args: dict[str, Any], result: dict[str, Any] | None
     return None if describe is None else describe(args, result)
 
 
-def computer_use_config() -> ComputerUseConfig:
+def computer_use_config(daemon_settings: DaemonSettingsLike | None = None) -> ComputerUseConfig:
     """The composition root: the one place this package reads `settings`."""
-    return ComputerUseConfig(
-        computer_use_lease_s=settings.daemon.computer_use_lease_s,
-        computer_use_queue_timeout_s=settings.daemon.computer_use_queue_timeout_s,
-        computer_use_session_idle_s=settings.daemon.computer_use_session_idle_s,
-        computer_use_loop_stall_s=settings.daemon.computer_use_loop_stall_s,
-        computer_use_shutdown_drain_s=settings.daemon.computer_use_shutdown_drain_s,
-    )
+    return from_daemon_settings(settings.daemon if daemon_settings is None else daemon_settings)
 
 
 # ── loop-liveness watchdog ──────────────────────────────────────────────────
@@ -347,7 +349,7 @@ class ComputerMcpDaemon:
         db: Database,
         sock: str | None = None,
         *,
-        helper: PermissionsHelperClient,
+        helper: DesktopHelper,
     ) -> None:
         self._db = db
         self._helper = helper
@@ -462,7 +464,10 @@ class ComputerMcpDaemon:
         if tid is None:
             return
         try:
-            self._task_sessions.note(tid, agent_id, tool, self._emit_session_event)
+            for event_type, session_agent_id, payload in self._task_sessions.note(
+                tid, agent_id, tool, now=time.monotonic()
+            ):
+                self._emit_session_event(event_type, session_agent_id, payload)
         except Exception as e:  # auxiliary path, see below
             # The session envelope is auxiliary to the action
             # itself: never fail the action, but never stay
@@ -693,7 +698,7 @@ async def run(
     sock: str | None = None,
     *,
     database: Callable[[], Database],
-    helper: PermissionsHelperClient,
+    helper: DesktopHelper,
 ) -> None:
     config = computer_use_config()
     daemon = ComputerMcpDaemon(config, database(), sock, helper=helper)
@@ -713,7 +718,7 @@ async def run(
         server = await asyncio.start_unix_server(
             lambda r, w: tracked_client(daemon, clients, r, w),
             path=str(path),
-            limit=_LINE_LIMIT,
+            limit=LINE_LIMIT,
         )
         logger.info(f"[computer-mcp] listening on {path}")
         watchdog = guard_loop_liveness(asyncio.get_running_loop(), config.computer_use_loop_stall_s)
@@ -744,27 +749,45 @@ async def run(
             logger.info("[computer-mcp] shutting down")
 
 
+@dataclass(frozen=True)
+class DaemonEntry:
+    image: LoadedCommit
+    machine: ConfiguredMachineIdentity
+    gate: ProcessDbGate
+    direct_url: ClusterDirectUrl
+
+
+def prepare_entry(image: LoadedCommit, machine_config: ConfigBoot) -> DaemonEntry:
+    machine = ConfiguredMachineIdentity(machine_config)
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="computer-mcp")
+    return DaemonEntry(
+        image=image,
+        machine=machine,
+        gate=gate,
+        direct_url=ClusterDirectUrl(machine.host),
+    )
+
+
 def main() -> None:
     image = LoadedCommit.capture()
     machine_config = ConfigBoot()
     machine_config.boot()
-    machine = ConfiguredMachineIdentity(machine_config)
+    entry = prepare_entry(image, machine_config)
     process_home = meiva_home().resolve()
-    version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="computer-mcp")
 
     def database() -> Database:
         return Database.from_settings(
-            gate=gate,
-            direct_url=ClusterDirectUrl(machine.host),
+            gate=entry.gate,
+            direct_url=entry.direct_url,
         )
 
-    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
+    pipeline = build_pipeline(database=database, machine=entry.machine, home=process_home)
     init_gateway_process(
         name="computer-mcp",
         producer=lambda: pipeline,
-        machine_reader=machine.name,
-        image=image,
+        machine_reader=entry.machine.name,
+        image=entry.image,
     )
     asyncio.run(run(database=database, helper=helper_client()))
 

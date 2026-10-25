@@ -11,20 +11,20 @@ from typing import Any, cast
 import jsonschema
 import pytest
 
-from base.agents.impersonation import manifest
 from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
 from base.host.permissions_helper.client import PermissionsHelperClient
 
 from ..computer.config import ComputerUseConfig
 from ..computer.mcp_daemon import ComputerMcpDaemon
 from ..computer.protocol import Response
+from ..computer.tests.slices import AuditLog
 
 
 class Desktop:
-    def __init__(self, *, database_gate: ProcessDbGate, helper: PermissionsHelperClient) -> None:
+    def __init__(self, *, database: Database, helper: PermissionsHelperClient) -> None:
         self.requests: list[dict[str, Any]] = []
-        self.events: list[Any] = []
+        self.events = AuditLog(database)
+        self.events.clear()
         self.capable = True
         self.clipboard_capable = True
         self.clipboard: str | None = None
@@ -35,7 +35,7 @@ class Desktop:
         self.denied: str | None = None
         self.daemon = ComputerMcpDaemon(
             ComputerUseConfig(30, 0.01, 30, 60, 1),
-            Database.from_settings(gate=database_gate),
+            database,
             sock="/unused",
             helper=helper,
         )
@@ -186,17 +186,12 @@ class Desktop:
 
 
 @pytest.fixture
-def desktop(monkeypatch: pytest.MonkeyPatch, *, database_gate: ProcessDbGate) -> Iterator[Desktop]:
+def desktop(database: Database) -> Iterator[Desktop]:
     errors: list[BaseException] = []
     stopped = threading.Event()
     with tempfile.TemporaryDirectory(prefix="meiva-input-", dir="/tmp") as directory:
         path = Path(directory) / "helper.sock"
-        target = Desktop(database_gate=database_gate, helper=PermissionsHelperClient(path))
-
-        def record(_db: object, event: Any) -> None:
-            target.events.append(event)
-
-        monkeypatch.setattr(manifest, "emit_recorded_central_event", record)
+        target = Desktop(database=database, helper=PermissionsHelperClient(path))
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
             listener.bind(str(path))
             listener.listen(1)

@@ -6,9 +6,8 @@ from pathlib import Path
 from typing import Any
 
 import services.desktop.computer.ocr as ocr_mod
-from base.host.permissions_helper.client import PermissionsHelperClient
 from services.desktop.computer.errors import ComputerUseError
-from services.desktop.computer.screen import capture_screen, to_logical
+from services.desktop.computer.screen import DesktopHelper, capture_screen, to_logical
 
 
 def _ocr_screen(path: Path, ocr_cache: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -77,7 +76,7 @@ def match_ocr_boxes(items: list[dict[str, Any]], query: str, mode: str) -> list[
 
 
 def find_text_tool(
-    helper: PermissionsHelperClient,
+    helper: DesktopHelper,
     args: dict[str, Any],
     agent_id: int,
     ocr_cache: dict[str, Any] | None,
@@ -112,7 +111,7 @@ def find_text_tool(
 
 
 def click_text_tool(
-    helper: PermissionsHelperClient,
+    helper: DesktopHelper,
     args: dict[str, Any],
     agent_id: int,
     ocr_cache: dict[str, Any] | None,

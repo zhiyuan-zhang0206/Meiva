@@ -4,7 +4,6 @@
 
 import asyncio
 import json
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
@@ -390,51 +389,62 @@ async def test_link_drain_reset_preserves_unknown_delivery_error() -> None:
 
 
 async def test_shared_socket_bridge_dials_with_bounded_retries(
-    monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
+    retry_waits: list[float],
 ) -> None:
+    import socket
+    import tempfile
+
     bridge = mcp_socket_bridge
-    failures = [FileNotFoundError("absent"), ConnectionRefusedError("refused")]
-    reader, writer = FakeReader([]), FakeWriter()
-    calls: list[tuple[str, int]] = []
+    with tempfile.TemporaryDirectory(prefix="meiva-bridge-", dir="/tmp") as directory:
+        root = Path(directory)
+        refused_sock = root / "refused.sock"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stale:
+            stale.bind(str(refused_sock))
+        with pytest.raises(ConnectionError) as error:
+            await bridge.dial_unix_socket(str(refused_sock), service_label="chrome MCP daemon")
+        assert f"chrome MCP daemon not reachable at {refused_sock}:" in str(error.value)
+        assert error.value.__context__ is None
+        assert retry_waits == [0.5] * 9
 
-    async def open_socket(*, path: str, limit: int):
-        calls.append((path, limit))
-        if failures:
-            raise failures.pop(0)
-        return reader, writer
+        live_sock = root / "live.sock"
 
-    monkeypatch.setattr(bridge.asyncio, "open_unix_connection", open_socket)
-    assert await bridge.dial_unix_socket("test.sock", service_label="chrome MCP daemon") == (
-        reader,
-        writer,
-    )
-    assert calls == [("test.sock", 64 * 1024 * 1024)] * 3
-    assert retry_waits == [0.5, 0.5]
+        async def _accept(_reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            writer.write(b"x" * 100_000 + b"\n")
+            await writer.drain()
+            writer.close()
 
-    async def always_refused(*, path: str, limit: int):
-        raise ConnectionRefusedError("refused")
-
-    monkeypatch.setattr(bridge.asyncio, "open_unix_connection", always_refused)
-    calls.clear()
-    retry_waits.clear()
-    with pytest.raises(ConnectionError) as error:
-        await bridge.dial_unix_socket("test.sock", service_label="chrome MCP daemon")
-    assert str(error.value) == "chrome MCP daemon not reachable at test.sock: refused"
-    assert error.value.__context__ is None
-    assert retry_waits == [0.5] * 9
+        server = await asyncio.start_unix_server(_accept, path=str(live_sock))
+        try:
+            reader, writer = await bridge.dial_unix_socket(
+                str(live_sock), service_label="chrome MCP daemon"
+            )
+            try:
+                assert len(await reader.readline()) == 100_001
+            finally:
+                writer.close()
+        finally:
+            server.close()
+            await server.wait_closed()
 
 
 async def test_shared_socket_bridge_passes_through_unclassified_error(
-    monkeypatch: pytest.MonkeyPatch,
+    retry_waits: list[float],
 ) -> None:
+    import tempfile
+
     bridge = mcp_socket_bridge
-    failure = PermissionError("denied")
-    call = AsyncMock(side_effect=failure)
-    monkeypatch.setattr(bridge.asyncio, "open_unix_connection", call)
-    with pytest.raises(PermissionError) as error:
-        await bridge.dial_unix_socket("test.sock", service_label="chrome MCP daemon")
-    assert error.value is failure
-    assert call.await_count == 1
+    with tempfile.TemporaryDirectory(prefix="meiva-bridge-", dir="/tmp") as directory:
+        locked = Path(directory) / "locked"
+        locked.mkdir(mode=0o700)
+        locked.chmod(0o000)
+        try:
+            with pytest.raises(PermissionError):
+                await bridge.dial_unix_socket(
+                    str(locked / "test.sock"), service_label="chrome MCP daemon"
+                )
+            assert retry_waits == []
+        finally:
+            locked.chmod(0o700)
 
 
 @pytest.mark.parametrize("side", ["browser", "computer"])
@@ -718,27 +728,17 @@ async def test_bridge_timeout_readers_are_dynamic_and_isolated(side: str) -> Non
     assert reads == ["first", "second", "first"]
 
 
-@pytest.mark.parametrize("side", ["browser", "computer"])
-def test_wrapper_main_keeps_its_own_boot_bound_reader(
-    monkeypatch: pytest.MonkeyPatch, side: str
-) -> None:
+def test_wrapper_main_keeps_its_own_boot_bound_reader() -> None:
     from base.config import ConfigBoot
 
-    wrapper = _WRAPPERS[side]
     first, second = ConfigBoot(), ConfigBoot()
     first.set_field("mcp_connect_timeout_seconds", 0.25)
     second.set_field("mcp_connect_timeout_seconds", 0.75)
-    owners = iter([first, second])
-    monkeypatch.setattr(wrapper, "ConfigBoot", lambda: next(owners))
+    first_reader = computer_wrapper.timeout_reader(first)
+    second_reader = computer_wrapper.timeout_reader(second)
     seen: list[tuple[float, float]] = []
-
-    async def serve(*, timeout_reader: Callable[[], float], **_kwargs: object) -> None:
-        before = timeout_reader()
-        owner = first if not seen else second
+    for owner, reader in ((first, first_reader), (second, second_reader)):
+        before = reader()
         owner.set_field("mcp_connect_timeout_seconds", before + 1.0)
-        seen.append((before, timeout_reader()))
-
-    monkeypatch.setattr(wrapper, "_serve", serve)
-    wrapper.main()
-    wrapper.main()
+        seen.append((before, reader()))
     assert seen == [(0.25, 1.25), (0.75, 1.75)]

@@ -15,16 +15,12 @@ Config via env: MEIVA_COMPUTER_SESSION_IDLE_S (default 600).
 
 from __future__ import annotations
 
-import time
-from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
 DEFAULT_IDLE_S = 600.0
 
-# emit(event_type, agent_id, payload) — the daemon wires this to
-# `emit_recorded_central_event`; tests swap in a recorder.
-Emit = Callable[[str, int, dict[str, Any]], None]
+SessionEvent = tuple[str, int, dict[str, Any]]
 
 
 class _TaskSession:
@@ -45,50 +41,51 @@ class TaskSessionTracker:
         self._idle_s = idle_s
         self._sessions: dict[int, _TaskSession] = {}
 
-    def note(self, task_id: int, agent_id: int, tool: str, emit: Emit) -> None:
-        """Record one action for a task; emit start/end events as they happen.
-
-        Call after the action's computer_action row (the envelope describes
-        the same facts). `emit` must be cheap — it is called synchronously.
-        """
-        now = time.time()
-        self._sweep(now, emit)
+    def note(self, task_id: int, agent_id: int, tool: str, *, now: float) -> list[SessionEvent]:
+        events = self._sweep(now)
         sess = self._sessions.get(task_id)
         if sess is None:
             sess = _TaskSession(agent_id, now, tool)
             self._sessions[task_id] = sess
-            emit(
-                "computer_session_start",
-                agent_id,
-                {
-                    "task_id": task_id,
-                    "first_tool": tool,
-                    "first_action_at": _iso(now),
-                },
+            events.append(
+                (
+                    "computer_session_start",
+                    agent_id,
+                    {
+                        "task_id": task_id,
+                        "first_tool": tool,
+                        "first_action_at": _iso(now),
+                    },
+                )
             )
-            return
+            return events
         sess.last_action_at = now
         sess.action_count += 1
+        return events
 
-    def _sweep(self, now: float, emit: Emit) -> None:
+    def _sweep(self, now: float) -> list[SessionEvent]:
         expired = [
             task_id
             for task_id, sess in self._sessions.items()
             if now - sess.last_action_at > self._idle_s
         ]
+        events: list[SessionEvent] = []
         for task_id in expired:
             sess = self._sessions.pop(task_id)
-            emit(
-                "computer_session_end",
-                sess.agent_id,
-                {
-                    "task_id": task_id,
-                    "action_count": sess.action_count,
-                    "first_action_at": _iso(sess.first_action_at),
-                    "last_action_at": _iso(sess.last_action_at),
-                    "outcome": "idle_timeout",
-                },
+            events.append(
+                (
+                    "computer_session_end",
+                    sess.agent_id,
+                    {
+                        "task_id": task_id,
+                        "action_count": sess.action_count,
+                        "first_action_at": _iso(sess.first_action_at),
+                        "last_action_at": _iso(sess.last_action_at),
+                        "outcome": "idle_timeout",
+                    },
+                )
             )
+        return events
 
 
 def _iso(epoch: float) -> str:

@@ -19,32 +19,8 @@ exports = ["config.py", "execute.py", "input.py", "mcp_daemon.py", "mcp_wrapper.
 "errors.py" = "strict"
 "protocol.py" = "strict"
 "targets.py" = "strict"
+"task_sessions.py" = "strict"
 
 [roots]
 "mcp_daemon.py" = ["settings", "db"]
 "mcp_wrapper.py" = { kinds = ["environ", "settings"], why = "_agent_id() reads the ambient MEIVA_AGENT_ID to stamp computer-mcp requests; same identity channel, not Settings-managed; Service or operator process entry boots configuration before composing its resources" }
-
-[debt.ambient-read]
-"screen.py#clock datetime.datetime.now" = 1
-"task_sessions.py#clock time.time" = 1
-
-[debt.any-collaborator]
-"mcp_wrapper.py#any _serve._call_tool._ctx" = 1
-"mcp_wrapper.py#any _serve._list_tools._ctx" = 1
-"mcp_wrapper.py#any _serve._list_tools._params" = 1
-"protocol.py#any OkResponse.result" = 1
-"targets.py#any AppTarget.parse.value" = 1
-"targets.py#any CaptureFrame.global_point.x" = 1
-"targets.py#any CaptureFrame.global_point.y" = 1
-"targets.py#any CaptureFrame.parse.value" = 1
-"targets.py#any CaptureRegion.parse.value" = 1
-"targets.py#any WindowTarget.parse.value" = 1
-"targets.py#any _integer.value" = 1
-"targets.py#any _number.value" = 1
-"targets.py#any _object.value" = 1
-
-[debt.type-cast]
-"ax_tools.py#cast _args" = 1
-"targets.py#cast AppTarget.parse" = 1
-"targets.py#cast CaptureFrame.parse" = 1
-"targets.py#cast _object" = 2
