@@ -9,7 +9,9 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
+
+import psycopg
 
 from base.paths import repo_root
 
@@ -40,6 +42,14 @@ class BuiltinSchedule:
     command: str
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
+def _is_any_list(value: object) -> TypeGuard[list[Any]]:
+    return isinstance(value, list)
+
+
 def load_manifest(path: Path | None = None) -> list[BuiltinSchedule]:
     """Parse and validate the built-in schedules manifest.
 
@@ -50,21 +60,19 @@ def load_manifest(path: Path | None = None) -> list[BuiltinSchedule]:
     """
     manifest_path = path or MANIFEST_PATH
     with manifest_path.open() as f:
-        payload: Any = json.load(f)
-    if not isinstance(payload, dict):
+        payload: object = json.load(f)
+    if not _is_str_dict(payload):
         raise ManifestError(f"malformed manifest {manifest_path}: expected a JSON object")
-    raw = cast("dict[str, Any]", payload)
-    entries_raw = raw.get("builtin_schedules")
-    if not isinstance(entries_raw, list):
+    entries_raw = payload.get("builtin_schedules")
+    if not _is_any_list(entries_raw):
         raise ManifestError(
             f"malformed manifest {manifest_path}: expected {{builtin_schedules: [...]}}"
         )
-    entries = cast("list[Any]", entries_raw)
     schedules: list[BuiltinSchedule] = []
-    for item in entries:
-        if not isinstance(item, dict):
+    for item in entries_raw:
+        if not _is_str_dict(item):
             raise ManifestError(f"malformed manifest entry: {item!r} — expected an object")
-        entry = cast("dict[str, Any]", item)
+        entry = item
         name = entry.get("name")
         klass = entry.get("class")
         default_enabled = entry.get("default_enabled")
@@ -116,7 +124,9 @@ def _digest(script: str, command: str) -> str:
     return hashlib.sha256(f"{command}\0{script}".encode()).hexdigest()[:12]
 
 
-def provision_builtin_schedules(conn: Any, *, path: Path | None = None) -> ProvisionResult:
+def provision_builtin_schedules(
+    conn: psycopg.Connection[Any], *, path: Path | None = None
+) -> ProvisionResult:
     """Create the manifest schedules that are missing and resync the ones that drifted.
 
     Idempotent. A row whose ``name`` exists keeps its ``enabled`` state and

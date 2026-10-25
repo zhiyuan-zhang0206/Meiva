@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -51,14 +51,17 @@ _SELECT_RECENT = (
 _SELECT_LATEST = "SELECT COALESCE(MAX(id), 0) FROM notification_events"
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 def parse_overrides(value: object) -> dict[str, bool]:
     if value is None:
         return {}
-    if not isinstance(value, dict):
+    if not _is_object_dict(value):
         raise TypeError(f"{SETTINGS_KEY} must be a JSON object")
-    entries = cast("dict[str, object]", value)
     switches: dict[str, bool] = {}
-    for key, item in entries.items():
+    for key, item in value.items():
         if not isinstance(item, bool):
             raise TypeError(f"{SETTINGS_KEY}.{key} must be a bool")
         switches[key] = item

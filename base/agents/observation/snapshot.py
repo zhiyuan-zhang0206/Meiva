@@ -6,8 +6,9 @@ Directory cards and the live tree have their own bounded read contract in
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypeGuard
 from uuid import UUID
 
 import psycopg
@@ -186,25 +187,31 @@ class AgentSnapshot(BaseModel):
     harness_exit_at: datetime | None = None
 
 
+def _is_config_map(value: object) -> TypeGuard[Mapping[str, Any]]:
+    return isinstance(value, Mapping)
+
+
 # meiva:link base/agents/observation/docs/observation.meiva.okf.md
 def agent_supports_vision(
-    config_overlay: Any,
-    birth_config: Any,
+    config_overlay: object,
+    birth_config: object,
     *,
     catalog: ModelCatalog | None,
     default_model: str,
 ) -> bool | None:
-    from collections.abc import Mapping
-
     from base.config.agent_pins import resolve_agent_config_pins
     from base.lm.factory import model_supports_vision
 
-    for name, source in (("config_overlay", config_overlay), ("birth_config", birth_config)):
-        if source is not None:
-            if not isinstance(source, Mapping):
-                raise ValueError(f"{name} must be a configuration map")
-            if "llm_model" in source and not isinstance(source["llm_model"], str):
-                raise ValueError(f"{name}.llm_model must be a model name")
+    if config_overlay is not None:
+        if not _is_config_map(config_overlay):
+            raise ValueError("config_overlay must be a configuration map")
+        if "llm_model" in config_overlay and not isinstance(config_overlay["llm_model"], str):
+            raise ValueError("config_overlay.llm_model must be a model name")
+    if birth_config is not None:
+        if not _is_config_map(birth_config):
+            raise ValueError("birth_config must be a configuration map")
+        if "llm_model" in birth_config and not isinstance(birth_config["llm_model"], str):
+            raise ValueError("birth_config.llm_model must be a model name")
     pins = resolve_agent_config_pins(config_overlay, birth_config)
     if catalog is None:
         return None

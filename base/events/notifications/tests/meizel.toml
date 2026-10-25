@@ -1,2 +1,0 @@
-[debt.test-subclass-override]
-"test_outbox.py#subclass base.events.live.bus.EventBus.publish_best_effort_sync" = 1

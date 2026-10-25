@@ -16,7 +16,7 @@ import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 from base.host.proc import run_bounded
 from base.log import logger
@@ -179,12 +179,16 @@ def _cache_key(path: str) -> str:
     return hashlib.sha256(identity.encode()).hexdigest()
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 def _read_cache(target: Path) -> dict[str, object]:
     try:
         payload = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    return cast("dict[str, object]", payload) if isinstance(payload, dict) else {}
+    return payload if _is_object_dict(payload) else {}
 
 
 def _write_cache(target: Path, payload: dict[str, object]) -> None:
@@ -199,9 +203,9 @@ def _write_cache(target: Path, payload: dict[str, object]) -> None:
 
 
 def _from_cache(entry: object, *, now: dt.datetime) -> Probe | None:
-    if not isinstance(entry, dict):
+    if not _is_object_dict(entry):
         return None
-    record = cast("dict[str, object]", entry)
+    record = entry
     probed_at = record.get("probed_at")
     if not isinstance(probed_at, str):
         return None
@@ -215,10 +219,8 @@ def _from_cache(entry: object, *, now: dt.datetime) -> Probe | None:
     version = parse_version(version_text) if isinstance(version_text, str) else None
     flags = record.get("flags")
     known_flags: dict[str, bool] = {}
-    if isinstance(flags, dict):
-        known_flags = {
-            str(key): bool(value) for key, value in cast("dict[object, object]", flags).items()
-        }
+    if _is_object_dict(flags):
+        known_flags = {str(key): bool(value) for key, value in flags.items()}
     path = record.get("path")
     unknown_reason = record.get("unknown_reason")
     return Probe(

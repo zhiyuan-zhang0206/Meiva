@@ -9,7 +9,7 @@ or permanent-provider recovery authority.
 from __future__ import annotations
 
 import enum
-from typing import Any, NamedTuple, cast
+from typing import Any, NamedTuple, TypeGuard
 
 from langchain_core.exceptions import (
     ContextOverflowError,
@@ -312,13 +312,17 @@ def _sdk_fields(exc: BaseException) -> tuple[int | None, object]:
     return None, None
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 def _error_field(body: object, key: str) -> str | None:
-    if not isinstance(body, dict):
+    if not _is_str_dict(body):
         return None
-    fields = cast(dict[str, Any], body)
+    fields = body
     nested = fields.get("error")
-    if isinstance(nested, dict):
-        fields = cast(dict[str, Any], nested)
+    if _is_str_dict(nested):
+        fields = nested
     value = fields.get(key)
     return value if isinstance(value, str) and value else None
 

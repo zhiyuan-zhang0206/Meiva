@@ -76,7 +76,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from base.lm.pricing.catalog import (
     CostQuote,
@@ -110,7 +110,7 @@ __all__ = [
 
 def load_archive() -> dict[str, ModelPrice]:
     path = Path(__file__).with_name("pricing_catalog_archive.json")
-    raw = cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
+    raw: Any = json.loads(path.read_text(encoding="utf-8"))
     return parse_catalog(raw)
 
 
@@ -155,7 +155,7 @@ def plugin_model_price(
             raise ValueError(
                 f"provider plugin {plugin!r}: {model!r} price {name} must be finite and non-negative"
             )
-    periods_any = cast("Sequence[Any]", periods)
+    periods_any: Any = periods
     raw_periods: list[dict[str, Any]] = (
         [
             {
@@ -368,7 +368,8 @@ def tally_tokens(
         seen = True
         tok_in += meta["input_tokens"]
         tok_out += meta["output_tokens"]
-        details = cast(dict[str, int], meta.get("input_token_details") or {})
+        raw_details: Any = meta.get("input_token_details") or {}
+        details: dict[str, int] = raw_details
         tok_cached += sum(
             int(value or 0)
             for key, value in details.items()

@@ -8,18 +8,3 @@ exports = ["builtin_schedules.py", "completion_notices.py", "inputs.py", "watche
 
 [debt.ambient-read]
 "watcher.py#clock datetime.datetime.now" = 1
-
-[debt.any-collaborator]
-"builtin_schedules.py#any provision_builtin_schedules.conn" = 1
-"completion_notices.py#any delivery_required_for_agent.conn" = 1
-"completion_notices.py#any hourly_notice_recorded.conn" = 1
-"completion_notices.py#any mark_digest_delivered.conn" = 1
-"completion_notices.py#any pending_digests.conn" = 1
-"completion_notices.py#any policy_for_agent.conn" = 1
-"completion_notices.py#any prune_delivered_notices.conn" = 1
-"completion_notices.py#any record_hourly_notice.conn" = 1
-
-[debt.type-cast]
-"builtin_schedules.py#cast load_manifest" = 3
-"completion_notices.py#cast pending_digests" = 1
-"completion_notices.py#cast policy_for_agent" = 1

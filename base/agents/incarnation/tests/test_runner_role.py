@@ -14,7 +14,7 @@ birth's grants target existing tables.
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import LiteralString, cast
@@ -221,10 +221,16 @@ def test_fresh_install_dependency_drift_precedes_checkpoint_setup(
         with psycopg.connect(db_url, autocommit=True) as conn:
             conn.execute(_schema_sql())  # type: ignore[arg-type]
 
-        class DriftedSaver(PostgresCheckpointSchema):
+        class DriftedSaver:
             @property
-            def migrations(self) -> list[str]:
+            def migrations(self) -> Sequence[str]:
                 return [*PostgresSaver.MIGRATIONS, "SELECT 1"]
+
+            def setup(
+                self, *, base_admin_url: str, identity: str, expected_data_dir: Path | None
+            ) -> None:
+                del base_admin_url, identity, expected_data_dir
+                raise AssertionError("drifted schema must not run setup")
 
         with pytest.raises(CheckpointDependencyDriftError, match="Meiva timestamp migration"):
             ensure_checkpoint_schema(
@@ -255,7 +261,11 @@ def test_default_missing_schema_refuses_setup(
     with psycopg.connect(runner_db, autocommit=True) as conn:
         conn.execute("DROP TABLE checkpoint_migrations")
 
-    class RefusedSetup(PostgresCheckpointSchema):
+    class RefusedSetup:
+        @property
+        def migrations(self) -> Sequence[str]:
+            return PostgresSaver.MIGRATIONS
+
         def setup(
             self, *, base_admin_url: str, identity: str, expected_data_dir: Path | None
         ) -> None:
@@ -285,7 +295,11 @@ def test_new_database_setup_failure_is_dropped_then_retry_converges(
 
     assert provision_database(identity, base_admin_url=admin) is True
 
-    class FailedSetup(PostgresCheckpointSchema):
+    class FailedSetup:
+        @property
+        def migrations(self) -> Sequence[str]:
+            return PostgresSaver.MIGRATIONS
+
         def setup(
             self, *, base_admin_url: str, identity: str, expected_data_dir: Path | None
         ) -> None:
@@ -326,7 +340,11 @@ def test_current_checkpoint_schema_skips_setup(
 ) -> None:
     """Re-running install provisioning on a current schema performs no DDL."""
 
-    class RefusedSetup(PostgresCheckpointSchema):
+    class RefusedSetup:
+        @property
+        def migrations(self) -> Sequence[str]:
+            return PostgresSaver.MIGRATIONS
+
         def setup(
             self, *, base_admin_url: str, identity: str, expected_data_dir: Path | None
         ) -> None:
@@ -384,7 +402,11 @@ def test_existing_behind_schema_never_falls_back_to_setup(
     with psycopg.connect(runner_db, autocommit=True) as conn:
         conn.execute("DELETE FROM checkpoint_migrations WHERE v = 9")
 
-    class RefusedSetup(PostgresCheckpointSchema):
+    class RefusedSetup:
+        @property
+        def migrations(self) -> Sequence[str]:
+            return PostgresSaver.MIGRATIONS
+
         def setup(
             self, *, base_admin_url: str, identity: str, expected_data_dir: Path | None
         ) -> None:
@@ -406,7 +428,11 @@ def test_birth_retry_resumes_contiguous_prefix_after_setup_crash(
     with psycopg.connect(runner_db, autocommit=True) as conn:
         conn.execute("DELETE FROM checkpoint_migrations")
 
-    class FailedSetup(PostgresCheckpointSchema):
+    class FailedSetup:
+        @property
+        def migrations(self) -> Sequence[str]:
+            return PostgresSaver.MIGRATIONS
+
         def setup(
             self, *, base_admin_url: str, identity: str, expected_data_dir: Path | None
         ) -> None:
@@ -447,7 +473,11 @@ def test_birth_retry_refuses_non_prefix_checkpoint_state(
     with psycopg.connect(runner_db, autocommit=True) as conn:
         conn.execute("DELETE FROM checkpoint_migrations WHERE v = 4")
 
-    class RefusedSetup(PostgresCheckpointSchema):
+    class RefusedSetup:
+        @property
+        def migrations(self) -> Sequence[str]:
+            return PostgresSaver.MIGRATIONS
+
         def setup(
             self, *, base_admin_url: str, identity: str, expected_data_dir: Path | None
         ) -> None:

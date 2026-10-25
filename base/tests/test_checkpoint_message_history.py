@@ -287,8 +287,17 @@ def test_message_suffix_event_contract() -> None:
     }
 
 
+class _UnreadableSerde:
+    def dumps_typed(self, obj: Any) -> tuple[str, bytes]:
+        raise NotImplementedError
+
+    def loads_typed(self, data: tuple[str, bytes]) -> Any:
+        del data
+        raise ValueError("reset probe cannot decode")
+
+
 def test_reset_decode_failure_reports_history_read_error(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, loguru_records: list[Any]
+    db_conn: psycopg.Connection, loguru_records: list[Any]
 ) -> None:
     with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
         thread = str(uuid4())
@@ -296,13 +305,10 @@ def test_reset_decode_failure_reports_history_read_error(
         saver.put_writes(root, [("messages", [_message("unreadable")])], "write")
         target = _checkpoint(saver, root)
 
-        def fail_decode(_value: Any) -> Any:
-            raise ValueError("reset probe cannot decode")
-
-        monkeypatch.setattr(saver.serde, "loads_typed", fail_decode)
-        wrap_saver_reads_with_delta_reconstruction(cast(AsyncPostgresSaver, saver))
+        reader = PostgresSaver(saver.conn, serde=_UnreadableSerde())
+        wrap_saver_reads_with_delta_reconstruction(cast(AsyncPostgresSaver, reader))
         with pytest.raises(ValueError, match="reset probe cannot decode"):
-            saver.get_tuple(target)
+            reader.get_tuple(target)
         span = _history_events(loguru_records, thread)["delta_read_compat"]
         assert span["outcome"] == "error" and span["failed_phase"] == "history_read"
         assert span["error_type"] == "ValueError"

@@ -4,7 +4,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 __all__ = [
     "CostQuote",
@@ -192,13 +192,14 @@ def _parse_tiers(model: str, raw_tiers: list[dict[str, Any]]) -> tuple[_TokenTie
         upper = None if upper_raw is None else int(upper_raw)
         if lower != expected_min or (upper is not None and upper < lower):
             raise RuntimeError(f"pricing catalog has a gap or overlap in tiers for {model!r}")
+        raw_overrides: list[dict[str, Any]] = raw["utc_daily_overrides"]
         windows = tuple(
             _UtcDailyOverride(
                 start=_clock(item["start"]),
                 end=_clock(item["end"]),
                 rates=_rates(item["rates"]),
             )
-            for item in cast(list[dict[str, Any]], raw["utc_daily_overrides"])
+            for item in raw_overrides
         )
         _validate_windows(model, windows)
         tiers.append(
@@ -227,11 +228,12 @@ def _parse_periods(model: str, raw_periods: list[dict[str, Any]]) -> tuple[_Effe
             raise RuntimeError(f"pricing catalog must cover all history for {model!r}")
         if index > 0 and start != previous_until:
             raise RuntimeError(f"pricing catalog has a gap or overlap in periods for {model!r}")
+        raw_tiers: list[dict[str, Any]] = raw["tiers"]
         periods.append(
             _EffectivePeriod(
                 effective_from=start,
                 effective_until=end,
-                tiers=_parse_tiers(model, cast(list[dict[str, Any]], raw["tiers"])),
+                tiers=_parse_tiers(model, raw_tiers),
             )
         )
         previous_until = end
@@ -243,7 +245,7 @@ def _parse_periods(model: str, raw_periods: list[dict[str, Any]]) -> tuple[_Effe
 
 
 def parse_catalog(raw: Mapping[str, object]) -> dict[str, ModelPrice]:
-    raw_any = cast("Mapping[str, Any]", raw)
+    raw_any: Any = raw
     schema_version = raw_any["schema_version"]
     if (
         schema_version not in (1, 2)
@@ -256,14 +258,15 @@ def parse_catalog(raw: Mapping[str, object]) -> dict[str, ModelPrice]:
     raw_models = raw_any.get("models")
     if not isinstance(raw_models, dict) or not raw_models:
         raise RuntimeError("pricing catalog models must be a non-empty mapping")
+    models_map: dict[str, dict[str, Any]] = raw_any["models"]
     return {
         model: _parse_model_price(model, entry_raw, schema_version)
-        for model, entry_raw in cast(dict[str, dict[str, Any]], raw_any["models"]).items()
+        for model, entry_raw in models_map.items()
     }
 
 
 def _parse_model_price(model: str, entry_raw: dict[str, Any], schema_version: int) -> ModelPrice:
-    vendor = entry_raw.get("vendor")
+    vendor: Any = entry_raw.get("vendor")
     if schema_version == 2 and (not isinstance(vendor, str) or not vendor.strip()):
         raise RuntimeError(f"pricing catalog vendor must be a non-empty string for {model!r}")
     source_url = entry_raw["source_url"]
@@ -276,12 +279,13 @@ def _parse_model_price(model: str, entry_raw: dict[str, Any], schema_version: in
         raise RuntimeError(
             f"pricing catalog effective_time_note must be non-empty text for {model!r}"
         )
+    raw_periods: list[dict[str, Any]] = entry_raw["periods"]
     return ModelPrice(
-        vendor=cast(str | None, vendor),
+        vendor=vendor,
         source_url=source_url,
         source_checked_at=date.fromisoformat(entry_raw["source_checked_at"]),
         effective_time_note=effective_time_note,
-        periods=_parse_periods(model, cast(list[dict[str, Any]], entry_raw["periods"])),
+        periods=_parse_periods(model, raw_periods),
     )
 
 

@@ -121,18 +121,22 @@ def snapshot(probe: ChildProbe, pid: int | None) -> dict[int, str]:
     return probe.descendants(pid)
 
 
+def _monotonic() -> float:
+    return time.monotonic()
+
+
 async def wait_gone(
     probe: ChildProbe, pids: Iterable[int], *, timeout_seconds: float, poll_seconds: float
 ) -> tuple[bool, float]:
     watched = list(pids)
-    started = time.monotonic()
+    started = _monotonic()
     if not watched:
         return (True, 0.0)
     while True:
         if not any(probe.is_alive(pid) for pid in watched):
-            return (True, (time.monotonic() - started) * 1000.0)
-        if time.monotonic() - started >= timeout_seconds:
-            return (False, (time.monotonic() - started) * 1000.0)
+            return (True, (_monotonic() - started) * 1000.0)
+        if _monotonic() - started >= timeout_seconds:
+            return (False, (_monotonic() - started) * 1000.0)
         await asyncio.sleep(poll_seconds)
 
 

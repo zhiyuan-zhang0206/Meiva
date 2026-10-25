@@ -15,7 +15,7 @@ too: the same narrowing, one level up.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict
 
 if TYPE_CHECKING:
     # Annotation-only: this leaf sits on the provider-registration import path,
@@ -54,7 +54,8 @@ class ContentBlock(TypedDict, total=False):
 # walk reads typed fields. Identity at runtime — langchain already hands us the
 # str / dict blocks; this only attaches the `ContentBlock` shape to the dicts.
 def content_blocks(content: Sequence[object]) -> list[str | ContentBlock]:
-    return cast("list[str | ContentBlock]", content)
+    raw: Any = content
+    return raw
 
 
 # ── Typed accessors for the loosely-typed LangChain message members ──
@@ -68,14 +69,17 @@ def content_blocks(content: Sequence[object]) -> list[str | ContentBlock]:
 def message_content(msg: BaseMessage) -> str | list[str | dict[str, object]]:
     """`msg.content` with its content-list block dicts retyped `dict[str, Any]`."""
     # langchain types content-list blocks as bare dict, whose Unknown keys leak.
-    return cast("str | list[str | dict[str, object]]", msg.content)  # pyright: ignore[reportUnknownMemberType]
+    raw: Any = msg.content  # pyright: ignore[reportUnknownMemberType]
+    return raw
 
 
 def message_addl_kwargs(msg: BaseMessage) -> dict[str, object]:
     """`msg.additional_kwargs` as a plain `dict[str, Any]` (langchain types it bare)."""
-    return cast("dict[str, object]", msg.additional_kwargs)  # pyright: ignore[reportUnknownMemberType]
+    raw: Any = msg.additional_kwargs  # pyright: ignore[reportUnknownMemberType]
+    return raw
 
 
 def message_response_metadata(msg: BaseMessage) -> dict[str, object]:
     """`msg.response_metadata` as a plain `dict[str, Any]` (langchain types it bare)."""
-    return cast("dict[str, object]", msg.response_metadata)  # pyright: ignore[reportUnknownMemberType]
+    raw: Any = msg.response_metadata  # pyright: ignore[reportUnknownMemberType]
+    return raw

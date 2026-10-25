@@ -1,19 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime
-from zoneinfo import ZoneInfo
-
-import pytest
 
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
-
-
-def fix_zone(monkeypatch: pytest.MonkeyPatch, zone: ZoneInfo | None) -> None:
-
-    def fixed(_clock: Clock) -> ZoneInfo | None:
-        return zone
-
-    monkeypatch.setattr(Clock, "zone", fixed)
 
 
 # meiva:note

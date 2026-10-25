@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 Importance = Literal["low", "normal", "high"]
 IMPORTANCES: frozenset[str] = frozenset({"low", "normal", "high"})
@@ -75,14 +75,14 @@ def core_catalog() -> dict[str, NotificationCategory]:
 # the field names and the `<plugin>.` namespace rule may not be spelled twice.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
 def category_from_manifest(entry: Mapping[str, object], *, plugin: str) -> NotificationCategory:
-    raw = cast("Mapping[str, Any]", entry)
+    raw_entry: Any = entry
     category = NotificationCategory(
-        id=raw["id"],
-        label=raw["label"],
-        description=raw["description"],
-        importance=raw["importance"],
-        default_enabled=raw["defaultEnabled"],
-        dedupe_window_seconds=raw["dedupeWindowSeconds"],
+        id=raw_entry["id"],
+        label=raw_entry["label"],
+        description=raw_entry["description"],
+        importance=raw_entry["importance"],
+        default_enabled=raw_entry["defaultEnabled"],
+        dedupe_window_seconds=raw_entry["dedupeWindowSeconds"],
     )
     if not category.id.startswith(f"{plugin}."):
         raise ValueError(f"plugin {plugin!r} declared {category.id!r} outside its own namespace")

@@ -1,6 +1,6 @@
 """SDK admission and immutable receipt validation for launch retries."""
 
-from typing import cast
+from typing import TypeGuard
 from uuid import UUID
 
 from base.agents.context import MeivaContext
@@ -8,6 +8,10 @@ from base.api_contracts.idempotency import validate_idempotency_key
 from base.api_contracts.launch_retry import RetryLaunchAccepted, RetryLaunchRequest
 
 from . import transport
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 def validate_agent_id(agent_id: int, *, operation: str) -> None:
@@ -22,9 +26,9 @@ def get_launch_attempt(agent_id: int, *, context: MeivaContext) -> UUID:
     response = transport.get(f"/api/agents/{agent_id}", context=context)
     transport.raise_from_response(response)
     raw: object = response.json()
-    if not isinstance(raw, dict):
+    if not _is_object_dict(raw):
         raise TypeError("launch attempt observation is unavailable")
-    values = cast("dict[str, object]", raw)
+    values = raw
     attempt = values.get("last_launch_attempt_id")
     if not isinstance(attempt, str):
         raise TypeError("launch attempt observation is unavailable")
@@ -62,9 +66,9 @@ def retry_launch(
     )
     transport.raise_from_response(response)
     raw: object = response.json()
-    if not isinstance(raw, dict):
+    if not _is_object_dict(raw):
         raise TypeError("launch retry acceptance is unconfirmed")
-    values = cast("dict[str, object]", raw)
+    values = raw
     if (
         response.status_code != 200
         or type(values.get("agent_id")) is not int
