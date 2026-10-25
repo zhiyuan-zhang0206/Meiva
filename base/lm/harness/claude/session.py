@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from base.host.env.harness_binaries import resolve_harness_binary
 from base.host.env.registry import process_environment
@@ -32,6 +32,7 @@ from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import (
     ChildProbe,
     ProcessObservation,
+    SdkClient,
     client_pid,
     client_process,
     describe,
@@ -60,7 +61,29 @@ class MissingClaudeSdkError(RuntimeError):
     pass
 
 
-def _load_sdk() -> Any:
+class ClaudeClientProtocol(SdkClient, Protocol):
+    def connect(self) -> Awaitable[None]: ...
+    def disconnect(self) -> Awaitable[None]: ...
+    def query(self, prompt: str) -> Awaitable[None]: ...
+    def interrupt(self) -> Awaitable[None]: ...
+    def receive_messages(self) -> AsyncIterator[object]: ...
+
+
+class ClaudeSdkProtocol(Protocol):
+    @property
+    def ClaudeAgentOptions(self) -> Callable[..., Any]:  # noqa: N802
+        # meiva:note
+        # Property name matches the `ClaudeAgentOptions` class exported by `claude_agent_sdk`.
+        ...
+
+    @property
+    def ClaudeSDKClient(self) -> Callable[..., ClaudeClientProtocol]:  # noqa: N802
+        # meiva:note
+        # Property name matches the `ClaudeSDKClient` class exported by `claude_agent_sdk`.
+        ...
+
+
+def _load_sdk() -> ClaudeSdkProtocol:
     # meiva:note
     # The adapter extra is optional because the wheel bundles a ~240MB Claude Code
     # CLI that most machines never run. The import stays inside this function so
@@ -98,11 +121,11 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         environ: Mapping[str, str],
         agent_id: int | None = None,
         registry: SessionRegistry | None = None,
-        sdk: Any | None = None,
+        sdk: ClaudeSdkProtocol | None = None,
         probe: ChildProbe | None = None,
     ) -> None:
         super().__init__(config, agent_id=agent_id, registry=registry, probe=probe)
-        self._sdk: Any = sdk if sdk is not None else _load_sdk()
+        self._sdk: ClaudeSdkProtocol = sdk if sdk is not None else _load_sdk()
         self._environ = dict(environ)
         # meiva:note
         # The SDK resolves a bare `claude` with `shutil.which` against this process's own
@@ -115,7 +138,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             if sdk is not None
             else resolve_harness_binary("claude", path_env=self._environ.get("PATH"))
         )
-        self._client: Any | None = None
+        self._client: ClaudeClientProtocol | None = None
         self._cli_pid: int | None = None
         self._turn_steps_count = 0
 
@@ -206,7 +229,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             cli_alive=self._probe.is_alive(pid),
         )
 
-    def _build_options(self, resume: str | None) -> Any:
+    def _build_options(self, resume: str | None) -> object:
         # meiva:note
         # `cli_path` and `thinking` ride only when resolved/supported: Python's own
         # Claude Code SDK takes them, while a test double that models the older
@@ -252,7 +275,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             self._emit(SessionFaulted(turn_id=None, error=f"session stream failed: {exc}"))
             self._fail_active(exc)
 
-    async def _handle(self, message: Any) -> None:
+    async def _handle(self, message: object) -> None:
         name = type(message).__name__
         if name == "ResultMessage":
             self._handle_result(message)
@@ -280,7 +303,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
                 ticket.parts.append(event.text)
             self._emit(event)
 
-    def _handle_result(self, message: Any) -> None:
+    def _handle_result(self, message: object) -> None:
         ticket = self._active
         fields = parse_result(message)
         if ticket is None:
@@ -326,7 +349,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         )
         self._complete(ticket, outcome)
 
-    def _require_client(self) -> Any:
+    def _require_client(self) -> ClaudeClientProtocol:
         if self._client is None:
             raise SessionClosedError("session is not started")
         return self._client

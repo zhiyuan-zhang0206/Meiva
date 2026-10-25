@@ -36,6 +36,7 @@ from base.agents.history.hierarchy.generate import (
     GenerateError,
     GenParams,
     ModelCall,
+    ToolBindableLlm,
     invoke_agent_shaped,
 )
 from base.agents.history.hierarchy.group import GroupReplyError
@@ -107,7 +108,7 @@ class ChunkResult:
 
 
 def generate_chunk(
-    llm: Any,
+    llm: ToolBindableLlm,
     prefix: Sequence[BaseMessage],
     start_offset: int,
     *,
@@ -140,7 +141,7 @@ def generate_chunk(
     buffer: list[ChunkCall] = []
     rounds = 0
 
-    def ask(messages: list[Any], sent: str, kind: str) -> tuple[str, Any, int]:
+    def ask(messages: list[Any], sent: str, kind: str) -> tuple[str, BaseMessage | None, int]:
         """One `invoke_agent_shaped` request; its text, final response and that call's row index."""
         nonlocal rounds
         first = rounds

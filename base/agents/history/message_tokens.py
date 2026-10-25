@@ -42,7 +42,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Literal, cast
+from typing import Literal
 
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 
@@ -197,7 +197,8 @@ def _usage(msg: BaseMessage, key: str) -> int | None:
     """A positive `usage_metadata` count of an AIMessage, else None."""
     if not isinstance(msg, AIMessage) or msg.usage_metadata is None:
         return None
-    value = cast(dict[str, object], msg.usage_metadata).get(key)
+    metadata: Mapping[str, object] = msg.usage_metadata
+    value = metadata.get(key)
     return value if isinstance(value, int) and value > 0 else None
 
 
@@ -223,9 +224,11 @@ class _Anchor:
 def _candidates(body: Sequence[BaseMessage], closing: ClosingRequest | None) -> list[_Anchor]:
     found: list[_Anchor] = []
     for i, msg in enumerate(body):
+        if not isinstance(msg, AIMessage):
+            continue
         inp, out = _usage(msg, "input_tokens"), _usage(msg, "output_tokens")
         if inp is not None and out is not None:
-            found.append(_Anchor(i, inp, out, _model_name(cast(AIMessage, msg))))
+            found.append(_Anchor(i, inp, out, _model_name(msg)))
     if closing is not None and closing.input_tokens - closing.extra_tokens > 0:
         found.append(
             _Anchor(

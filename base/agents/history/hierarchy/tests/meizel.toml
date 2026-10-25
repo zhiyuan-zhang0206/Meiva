@@ -1,6 +1,0 @@
-[debt.first-party-patch]
-"test_chunk_generate.py#monkeypatch.setattr base.config.settings.general.message_timestamp_weekday" = 1
-"test_chunk_generate.py#monkeypatch.setattr base.config.settings.general.timezone" = 1
-"test_group.py#monkeypatch.setattr base.config.settings.general.message_timestamp_weekday" = 1
-"test_group.py#monkeypatch.setattr base.config.settings.general.timezone" = 1
-"test_hierarchy_units.py#monkeypatch.setattr base.agents.history.hierarchy.units.build_timeline_items" = 1

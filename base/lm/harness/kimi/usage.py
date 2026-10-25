@@ -4,7 +4,9 @@ import json
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
+
+type _Json = str | int | float | bool | dict[str, Any] | list[_Json] | None
 
 # meiva:note
 # ACP carries only an aggregate `usage_update` (`used`/`size` are context-window
@@ -139,19 +141,19 @@ def _parse(payload: bytes) -> tuple[StepUsage, ...]:
         if not line:
             continue
         try:
-            decoded = json.loads(line)
+            decoded: _Json = json.loads(line)
         except json.JSONDecodeError as exc:
             raise ValueError(f"session log line {number} is not JSON") from exc
         if not isinstance(decoded, dict):
             continue
-        event_type, data = _unwrap_event(cast("dict[str, Any]", decoded))
+        event_type, data = _unwrap_event(decoded)
         if event_type in _TURN_BOUNDARY_TYPES:
             current_turn += 1
             step_in_turn = 0
             continue
         if event_type not in _USAGE_EVENT_TYPES:
             continue
-        raw_usage = data.get("token_usage") or data.get("usage")
+        raw_usage: _Json = data.get("token_usage") or data.get("usage")
         if not isinstance(raw_usage, dict):
             continue
         if current_turn == 0:
@@ -160,7 +162,7 @@ def _parse(payload: bytes) -> tuple[StepUsage, ...]:
         steps.append(
             _step(
                 data,
-                cast("dict[str, Any]", raw_usage),
+                raw_usage,
                 default_turn=current_turn,
                 default_step=step_in_turn,
             )
@@ -169,11 +171,11 @@ def _parse(payload: bytes) -> tuple[StepUsage, ...]:
 
 
 def _unwrap_event(record: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
-    nested = record.get("message")
-    source = cast("dict[str, Any]", nested) if isinstance(nested, dict) else dict(record)
+    nested: _Json = record.get("message")
+    source = dict(nested) if isinstance(nested, dict) else dict(record)
     event_type = str(source.get("type") or "")
-    raw_data = source.get("data") or source.get("payload")
-    data = cast("dict[str, Any]", raw_data) if isinstance(raw_data, dict) else source
+    raw_data: _Json = source.get("data") or source.get("payload")
+    data = dict(raw_data) if isinstance(raw_data, dict) else source
     return event_type, data
 
 
@@ -220,7 +222,7 @@ def _first_int(mapping: Mapping[str, Any], *keys: str) -> int:
     return 0
 
 
-def _int(value: Any) -> int:
+def _int(value: object) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 

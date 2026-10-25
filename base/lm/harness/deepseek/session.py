@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import os
 import signal
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol
 
 from base.lm.harness.acp.transport import (
     AcpClosedError,
@@ -43,6 +42,7 @@ from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import (
     ChildProbe,
     ProcessObservation,
+    PsutilChildProbe,
     describe,
     snapshot,
     wait_gone,
@@ -72,6 +72,10 @@ CANCEL_POLL_SECONDS = 0.05
 _EVENT_STREAM_END = EVENT_STREAM_END
 
 
+class DeepSeekProbe(ChildProbe, Protocol):
+    def kill(self, pid: int, sig: int = 15) -> None: ...
+
+
 class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
     def __init__(
         self,
@@ -80,20 +84,19 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         environ: Mapping[str, str],
         agent_id: int | None = None,
         registry: SessionRegistry | None = None,
-        probe: ChildProbe | None = None,
+        probe: DeepSeekProbe | None = None,
         connect: Any | None = None,
-        kill: Callable[[int, int], None] | None = None,
-        prices: PriceBook | None = None,
     ) -> None:
+        resolved_probe: DeepSeekProbe = probe if probe is not None else PsutilChildProbe()
         super().__init__(
             config,
             agent_id=agent_id,
             registry=registry,
-            probe=probe,
+            probe=resolved_probe,
             totals=SessionTotals(),
         )
-        self._prices = prices
-        self._kill = kill or os.kill
+        self._deepseek_probe: DeepSeekProbe = resolved_probe
+        self._prices: PriceBook | None = config.prices
         self._environ = dict(environ)
         self._connect = connect or self.open_connection
         self._connection: AcpConnection | None = None
@@ -245,14 +248,14 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
             if child == self._agent_pid or not self._probe.is_alive(child):
                 continue
             with contextlib.suppress(ProcessLookupError, PermissionError):
-                self._kill(child, signal.SIGTERM)
+                self._deepseek_probe.kill(child, signal.SIGTERM)
             reaped.append(child)
         if reaped:
             await asyncio.sleep(CANCEL_POLL_SECONDS)
         for child in reaped:
             if self._probe.is_alive(child):
                 with contextlib.suppress(ProcessLookupError, PermissionError):
-                    self._kill(child, signal.SIGKILL)
+                    self._deepseek_probe.kill(child, signal.SIGKILL)
         return tuple(reaped)
 
     async def _sweep(self, *, reason: str) -> tuple[ProcessObservation, ...]:
@@ -340,10 +343,12 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         params = notification.params
         if params.get("sessionId") != self._session_id:
             return
-        raw_update = params.get("update")
+        raw_update: dict[str, Any] | list[Any] | str | int | float | bool | None = params.get(
+            "update"
+        )
         if not isinstance(raw_update, dict):
             return
-        update = cast("dict[str, Any]", raw_update)
+        update: dict[str, Any] = raw_update
         if update.get("sessionUpdate") == "usage_update":
             used, size = update.get("used"), update.get("size")
             self._context_used = used if isinstance(used, int) else self._context_used

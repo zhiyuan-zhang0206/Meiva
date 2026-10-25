@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
 
 import psutil
 
@@ -45,6 +46,9 @@ class PsutilChildProbe:
         except psutil.Error:
             return False
 
+    def kill(self, pid: int, sig: int = 15) -> None:
+        os.kill(pid, sig)
+
 
 def _command(process: psutil.Process) -> str:
     try:
@@ -74,21 +78,39 @@ class ExitStatus:
         return self._exit_code
 
 
-def client_transport(client: Any) -> Any | None:
+class SdkProcess(Protocol):
+    @property
+    def pid(self) -> int | None: ...
+
+    @property
+    def returncode(self) -> int | None: ...
+
+
+class SdkTransport(Protocol):
+    @property
+    def _process(self) -> SdkProcess | None: ...
+
+
+class SdkClient(Protocol):
+    @property
+    def _transport(self) -> object: ...
+
+
+def client_transport(client: SdkClient | None) -> SdkTransport | None:
     return getattr(client, "_transport", None)
 
 
-def client_process(client: Any) -> Any | None:
+def client_process(client: SdkClient | None) -> SdkProcess | None:
     return getattr(client_transport(client), "_process", None)
 
 
 # meiva:note
 # The child's exit status: None while it runs, or when there is no process.
-def process_returncode(process: Any) -> int | None:
+def process_returncode(process: SdkProcess | None) -> int | None:
     return None if process is None else getattr(process, "returncode", None)
 
 
-def client_pid(client: Any) -> int | None:
+def client_pid(client: SdkClient | None) -> int | None:
     pid = getattr(client_process(client), "pid", None)
     return pid if isinstance(pid, int) else None
 

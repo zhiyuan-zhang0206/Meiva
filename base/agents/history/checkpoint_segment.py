@@ -1,10 +1,11 @@
 # meiva:link base/agents/history/docs/range-read-contracts.meiva.okf.md
 from __future__ import annotations
 
-from typing import cast
+from collections.abc import Mapping
+from typing import Any
 
 from psycopg import Connection
-from psycopg.rows import DictRow, dict_row
+from psycopg.rows import dict_row
 
 from base.agents.history.checkpoint import CheckpointReadError, FullHistory, single_segment_history
 from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver
@@ -19,8 +20,9 @@ def read_checkpoint_segment(db: Database, agent_id: int, checkpoint_id: str) -> 
     serde = CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     pool = db.pool(autocommit=True, row_factory=dict_row)
     try:
-        with pool.connection() as conn:
-            saver = HistoryPostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
+        with pool.connection() as raw_conn:
+            conn: Connection[Any] = raw_conn
+            saver = HistoryPostgresSaver(conn=conn, serde=serde)
             value = saver.get_tuple(
                 {
                     "configurable": {
@@ -43,5 +45,6 @@ def read_checkpoint_segment(db: Database, agent_id: int, checkpoint_id: str) -> 
     if value is None:
         raise CheckpointReadError(f"checkpoint {checkpoint_id} missing for agent {agent_id}")
     history = single_segment_history(value.checkpoint["channel_values"].get("messages", []))
-    anchor = cast(dict[str, object], value.metadata).get(METADATA_KEY)
+    metadata: Mapping[str, object] = value.metadata
+    anchor = metadata.get(METADATA_KEY)
     return history._replace(segment_closings=(ClosingRequest.from_metadata(anchor),))

@@ -34,7 +34,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-from typing import Literal, cast
+from typing import Literal
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
@@ -42,7 +42,6 @@ from base.agents.history.timeline import TimelineItem, build_timeline_items
 from base.agents.messages.envelope import inbound_body
 from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.agents.messages.timestamp_policy import TimestampPolicy
-from base.lm.content import message_addl_kwargs
 
 UnitKind = Literal["work", "text", "inbound", "note"]
 
@@ -200,6 +199,14 @@ class _Divider:
             raise ValueError(f"message {idx} renders as an uncovered mix of kinds {sorted(kinds)}")
 
 
+def divide_timeline_items(items: Sequence[TimelineItem]) -> list[MessageUnit]:
+    divider = _Divider()
+    for idx, group in _by_message(items):
+        divider.message(idx, group)
+    divider.close_work()
+    return sorted(divider.units, key=lambda unit: unit.i0)
+
+
 def divide_units(
     messages: Sequence[BaseMessage], *, timeline_inputs: TimestampPolicy
 ) -> list[MessageUnit]:
@@ -209,11 +216,7 @@ def divide_units(
         ValueError: a message renders as a mix of item kinds no rule covers.
     """
     items, _ = build_timeline_items(messages, inputs=timeline_inputs)
-    divider = _Divider()
-    for idx, group in _by_message(items):
-        divider.message(idx, group)
-    divider.close_work()
-    return sorted(divider.units, key=lambda unit: unit.i0)
+    return divide_timeline_items(items)
 
 
 # Characters of an inbound / text unit's content in a catalog line, and of each part (reasoning,
@@ -383,10 +386,9 @@ def _thinking(msg: AIMessage) -> str:
 
 
 def _reasoning_ms(msg: AIMessage) -> int | None:
-    kwargs = message_addl_kwargs(msg)
-    by_block = kwargs.get("meiva_reasoning_ms_by_block")
+    by_block = read_meiva_kwargs(msg).get("meiva_reasoning_ms_by_block")
     if isinstance(by_block, dict) and by_block:
-        return sum(int(ms) for ms in cast("dict[str, int]", by_block).values())
+        return sum(int(ms) for ms in by_block.values())
     return None
 
 

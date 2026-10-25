@@ -89,14 +89,12 @@ async def start(
     )
     scripted_probe = probe if probe is not None else ScriptedProbe()
     session = DeepSeekSession(
-        config(tmp_path, **config_overrides),
+        config(tmp_path, prices=prices, **config_overrides),
         environ={},
         agent_id=agent_id,
         registry=registry,
         probe=scripted_probe,
         connect=lambda: connection,
-        kill=lambda pid, _signal_number: scripted_probe.kill(pid),
-        prices=prices,
     )
     await session.start(resume=resume, handoff=handoff)
     return Harness(session, connection, scripted_probe)

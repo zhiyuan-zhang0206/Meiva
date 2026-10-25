@@ -6,7 +6,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from base.log import logger
 
@@ -124,14 +124,16 @@ class RegistrationStore:
     def read(self, agent_id: int) -> HarnessRegistration | None:
         path = self.path(agent_id)
         try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
+            raw: dict[str, Any] | list[Any] | str | int | float | bool | None = json.loads(
+                path.read_text(encoding="utf-8")
+            )
         except FileNotFoundError:
             return None
         except json.JSONDecodeError as exc:
             raise ValueError(f"registration at {path} is not valid JSON") from exc
         if not isinstance(raw, dict):
             raise TypeError(f"registration at {path} is not an object")
-        payload = cast("dict[str, Any]", raw)
+        payload: dict[str, Any] = raw
         missing = _REQUIRED - set(payload)
         if missing:
             raise ValueError(f"registration at {path} misses {sorted(missing)}")

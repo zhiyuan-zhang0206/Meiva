@@ -7,7 +7,7 @@ import signal
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from base.lm.harness.acp.transport import (
     AcpClosedError,
@@ -345,10 +345,12 @@ class KimiSession(BaseHarnessSession[KimiConfig]):
         params = notification.params
         if params.get("sessionId") != self._session_id:
             return
-        raw_update = params.get("update")
+        raw_update: dict[str, Any] | list[Any] | str | int | float | bool | None = params.get(
+            "update"
+        )
         if not isinstance(raw_update, dict):
             return
-        update = cast("dict[str, Any]", raw_update)
+        update: dict[str, Any] = raw_update
         if update.get("sessionUpdate") == "usage_update":
             used, size = update.get("used"), update.get("size")
             self._context_used = used if isinstance(used, int) else self._context_used

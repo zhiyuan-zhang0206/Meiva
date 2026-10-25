@@ -131,22 +131,17 @@ def run_retry(
 
 
 def test_resolve_bash_requires_version_four_and_takes_the_first_match(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     """Selection logic of the skip's resolver: older candidates are rejected,
     the first >= 4 wins, and an all-old set resolves to None (the skip case)."""
     old = tmp_path / "bash-old"
-    old.write_text("")
+    old.write_text("#!/bin/sh\necho 3\n")
     old.chmod(0o700)
     new = tmp_path / "bash-new"
-    new.write_text("")
+    new.write_text("#!/bin/sh\necho 5\n")
     new.chmod(0o700)
 
-    def fake_run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        major = "3" if argv[0] == str(old) else "5"
-        return subprocess.CompletedProcess(argv, 0, stdout=f"{major}\n", stderr="")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
     assert _resolve_bash((str(old), str(new))) == str(new)
     assert _resolve_bash((str(old),)) is None
 

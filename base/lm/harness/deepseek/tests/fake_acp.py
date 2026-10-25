@@ -121,7 +121,8 @@ class ScriptedProbe:
     def reap(self, pid: int) -> None:
         self.alive.discard(pid)
 
-    def kill(self, pid: int) -> None:
+    def kill(self, pid: int, sig: int = 15) -> None:
+        del sig
         self.killed.append(pid)
         if pid not in self.stubborn:
             self.alive.discard(pid)
