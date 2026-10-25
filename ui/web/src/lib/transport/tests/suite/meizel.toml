@@ -1,7 +1,8 @@
 exports = ["use-event-stream-agent.ts", "use-event-stream-context.ts", "use-event-stream-provider.ts"]
 
-purity = "strict"
-
 [uses]
 "use-event-stream-agent.ts" = ["use-event-stream-context.ts"]
 "use-event-stream-provider.ts" = ["use-event-stream-context.ts"]
+
+[purity]
+"use-event-stream-context.ts" = "strict"

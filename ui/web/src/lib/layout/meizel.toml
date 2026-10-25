@@ -13,31 +13,9 @@ exports = ["breakpoint.ts", "compact-transition.ts", "content-toggle-store.ts", 
 "use-media-query.test.tsx" = ["use-media-query.ts"]
 
 [purity]
-"." = "strict-to-be"
 "compact-transition.ts" = "strict"
-"content-toggle-store.ts" = "strict"
 "layout.ts" = "strict"
 "panel-layout-storage.ts" = "strict"
 "scroll-memory.ts" = "strict"
 "sticky.ts" = "strict"
 "switch-budget.ts" = "strict"
-
-[debt.impure-call]
-"breakpoint.ts#useBreakpoint#useEffect" = 1
-"breakpoint.ts#useBreakpoint#useState" = 1
-"breakpoint.ts#useBreakpoint#window" = 1
-"use-client-ready.ts#schedulePump#setTimeout" = 1
-"use-client-ready.ts#useClientReady#useSyncExternalStore" = 1
-"use-client-ready.ts#useDeferredMount#cancelAnimationFrame" = 1
-"use-client-ready.ts#useDeferredMount#requestAnimationFrame" = 1
-"use-client-ready.ts#useDeferredMount#useEffect" = 1
-"use-client-ready.ts#useDeferredMount#useState" = 1
-"use-client-ready.ts#useDeferredMount#window" = 1
-"use-document-visible.ts#useDocumentVisible#document" = 1
-"use-document-visible.ts#useDocumentVisible#useEffect" = 1
-"use-document-visible.ts#useDocumentVisible#useState" = 1
-"use-media-query.ts#useMediaQuery#useSyncExternalStore" = 1
-"use-media-query.ts#useMediaQuery#window" = 1
-
-[debt.wide-exports]
-"meizel.toml#exports" = 1

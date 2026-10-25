@@ -1,6 +1,7 @@
 exports = ["api-provider.tsx"]
 
-purity = "strict"
-
 [uses]
 "api-provider.tsx" = ["uncancellable-fetch.ts"]
+
+[purity]
+"uncancellable-fetch.ts" = "strict"

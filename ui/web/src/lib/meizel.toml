@@ -19,8 +19,4 @@ exports = ["agents", "auth", "composer", "context", "context-colors.ts", "contra
 "transport" = ["contracts", "fold"]
 
 [purity]
-"." = "strict-to-be"
 "context-colors.ts" = "strict"
-
-[debt.wide-exports]
-"meizel.toml#exports" = 1

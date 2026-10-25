@@ -1,4 +1,4 @@
-import type { SseChannel } from "../transport/stream/sse-share";
+import type { SseChannel } from "../transport/stream/sse-plan";
 
 // meiva:note
 // Which logical channels ride the one merged `/api/stream` source, and the

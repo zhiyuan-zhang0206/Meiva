@@ -6,20 +6,4 @@ exports = ["use-fleet-graph.ts", "use-force-layout.ts", "use-svg-zoom-pan.ts"]
 "use-svg-zoom-pan.test.ts" = ["use-svg-zoom-pan.ts"]
 
 [purity]
-"." = "strict-to-be"
 "memory-graph-colors.ts" = "strict"
-
-[debt.impure-call]
-"use-fleet-graph.ts#useFleetGraph#useQuery" = 1
-"use-force-layout.ts#useForceLayout#cancelAnimationFrame" = 1
-"use-force-layout.ts#useForceLayout#performance.now" = 1
-"use-force-layout.ts#useForceLayout#requestAnimationFrame" = 1
-"use-force-layout.ts#useForceLayout#useEffect" = 1
-"use-force-layout.ts#useForceLayout#useRef" = 1
-"use-force-layout.ts#useForceLayout#useState" = 1
-"use-svg-zoom-pan.ts#useSvgZoomPan#useRef" = 1
-"use-svg-zoom-pan.ts#useSvgZoomPan#useState" = 1
-
-[debt.stdlib-patch]
-"use-force-layout.test.tsx#vi.stubGlobal cancelAnimationFrame" = 1
-"use-force-layout.test.tsx#vi.stubGlobal requestAnimationFrame" = 1

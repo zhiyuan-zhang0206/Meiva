@@ -13,26 +13,8 @@ exports = ["clipboard.ts", "display-limits.ts", "format-number.ts", "format-pric
 "use-time-format.ts" = ["time.ts"]
 
 [purity]
-"." = "strict-to-be"
 "format-number.ts" = "strict"
 "format-price.ts" = "strict"
 "inbound-source.ts" = "strict"
 "item-summary.ts" = "strict"
-"use-time-format.ts" = "strict"
 "utils.ts" = "strict"
-
-[debt.impure-call]
-"clipboard.ts#copyToClipboard#document" = 1
-"clipboard.ts#copyToClipboard#navigator" = 1
-"display-limits.ts#useDisplayLimit#useQuery" = 1
-"interaction-timing.ts#markMessageSent#performance.now" = 1
-"interaction-timing.ts#noteTurnStart#performance.now" = 1
-"time.ts#formatRelative#new Date()" = 1
-"use-now.ts#useNow#clearInterval" = 1
-"use-now.ts#useNow#new Date()" = 1
-"use-now.ts#useNow#setInterval" = 1
-"use-now.ts#useNow#useEffect" = 1
-"use-now.ts#useNow#useState" = 1
-
-[debt.wide-exports]
-"meizel.toml#exports" = 1

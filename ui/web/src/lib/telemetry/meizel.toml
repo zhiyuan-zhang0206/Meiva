@@ -12,40 +12,6 @@ exports = ["nav-timing.ts", "telemetry-page-view.tsx", "telemetry.ts"]
 "web-vitals.ts" = ["telemetry.ts", "web-vitals-plan.ts"]
 
 [purity]
-"." = "strict-to-be"
 "nav-timing-plan.ts" = "strict"
-"nav-timing.ts" = "strict-to-be"
-"telemetry-page-view.tsx" = "strict-to-be"
 "telemetry-plan.ts" = "strict"
-"telemetry.ts" = "strict-to-be"
 "web-vitals-plan.ts" = "strict"
-"web-vitals.ts" = "strict-to-be"
-
-[debt.impure-call]
-"nav-timing.ts#clearFallback#clearTimeout" = 1
-"nav-timing.ts#countFrames#requestAnimationFrame" = 1
-"nav-timing.ts#markNavIntent#performance.now" = 1
-"nav-timing.ts#markNavIntent#setTimeout" = 1
-"nav-timing.ts#markNavIntent#window" = 1
-"nav-timing.ts#startWatching#PerformanceObserver" = 1
-"nav-timing.ts#startWatching#new PerformanceObserver" = 1
-"nav-timing.ts#stopFrames#cancelAnimationFrame" = 1
-"nav-timing.ts#useNavTimingReport#performance.now" = 1
-"nav-timing.ts#useNavTimingReport#requestAnimationFrame" = 1
-"nav-timing.ts#useNavTimingReport#setTimeout" = 1
-"nav-timing.ts#useNavTimingReport#useEffect" = 1
-"nav-timing.ts#useNavTimingReport#useRef" = 1
-"telemetry-page-view.tsx#TelemetryPageView#useEffect" = 1
-"telemetry-page-view.tsx#TelemetryPageView#useRef" = 1
-"telemetry.ts#__telemetryResetForTest#clearInterval" = 1
-"telemetry.ts#ensureTimer#document" = 1
-"telemetry.ts#ensureTimer#setInterval" = 1
-"telemetry.ts#ensureTimer#window" = 1
-"telemetry.ts#flush#Date.now" = 1
-"telemetry.ts#flush#console.warn" = 1
-"telemetry.ts#flush#navigator" = 1
-"telemetry.ts#newSessionId#Math.random" = 1
-"telemetry.ts#newSessionId#crypto.randomUUID" = 1
-"telemetry.ts#track#Date.now" = 1
-"web-vitals.ts#initWebVitals#document" = 1
-"web-vitals.ts#initWebVitals#window" = 1

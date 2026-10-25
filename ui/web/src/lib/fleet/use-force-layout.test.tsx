@@ -8,7 +8,7 @@
 
 import { act, render } from "@testing-library/react";
 import { useEffect, useRef } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { useForceLayout, type ForceParams, type SimLink, type SimNode } from "./use-force-layout";
 
@@ -38,11 +38,19 @@ const LINKS: SimLink[] = Array.from({ length: N - 1 }, (_, i) => ({
 function Harness({
   prewarmTicks,
   onCommit,
+  requestAnimationFrame,
+  cancelAnimationFrame,
 }: {
   prewarmTicks?: number;
   onCommit: () => void;
+  requestAnimationFrame: (cb: FrameRequestCallback) => number;
+  cancelAnimationFrame: (id: number) => void;
 }) {
-  const { positions, layout } = useForceLayout(NODES, LINKS, PARAMS, { prewarmTicks });
+  const { positions, layout } = useForceLayout(NODES, LINKS, PARAMS, {
+    prewarmTicks,
+    requestAnimationFrame,
+    cancelAnimationFrame,
+  });
   const mounted = useRef(false);
   useEffect(() => {
     if (!mounted.current) {
@@ -54,22 +62,25 @@ function Harness({
   return <div data-testid="placed">{layout ? layout.placed.length : 0}</div>;
 }
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
 describe("useForceLayout warm-up (task #4008)", () => {
   it("settles in sparse rAF slices — commits stay far below the tick count", async () => {
     const rafCbs: FrameRequestCallback[] = [];
     let nextId = 0;
-    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+    const scheduleRaf = (cb: FrameRequestCallback): number => {
       rafCbs.push(cb);
       return ++nextId;
-    });
-    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    };
+    const cancelRaf = (): void => undefined;
 
     const onCommit = vi.fn();
-    const { getByTestId } = render(<Harness prewarmTicks={320} onCommit={onCommit} />);
+    const { getByTestId } = render(
+      <Harness
+        prewarmTicks={320}
+        onCommit={onCommit}
+        requestAnimationFrame={scheduleRaf}
+        cancelAnimationFrame={cancelRaf}
+      />,
+    );
 
     // The slice loop owns the simulation until it drains: no timer-driven
     // "tick" may fire before we pump. d3-timer captured the native rAF at

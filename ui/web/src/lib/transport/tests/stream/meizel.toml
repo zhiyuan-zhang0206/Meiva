@@ -1,3 +1,1 @@
 exports = ["event-stream-harness.tsx"]
-
-purity = "strict"

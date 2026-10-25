@@ -8,9 +8,6 @@ import {
 } from "./plans";
 import type { Http } from "./http";
 
-const wait = (milliseconds: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, milliseconds));
-
 export async function sendMessageWithReconciliation(
   http: Http,
   agentId: number,
@@ -39,7 +36,7 @@ export async function sendMessageWithReconciliation(
         break;
       }
       case "wait":
-        await wait(action.ms);
+        await http.wait(action.ms);
         step = nextDeliveryStep(step.state, { kind: "waited" });
         break;
       case "fail":

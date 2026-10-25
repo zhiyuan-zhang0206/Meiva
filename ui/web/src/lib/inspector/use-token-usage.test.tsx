@@ -5,19 +5,22 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ReactNode } from "react";
 
 import { apiWrapper } from "../transport/tests/api/api-provider";
 import { startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
 import { gatewayRig, type HttpRig } from "../transport/tests/api/api-provider";
+import {
+  AgentEventStreamContext,
+  type EventStreamContextValue,
+} from "../transport/useEventStream";
 import { useTokenUsage } from "./use-token-usage";
 import type { TokenUsageResponse } from "../contracts/types";
 
-// The hook subscribes to the shared per-agent SSE stream; a no-op is enough —
-// this test covers the REST snapshot refresh, not SSE folding (covered by the
-// timeline-store tests).
-vi.mock("../transport/useEventStream", () => ({ useAgentEventStream: () => undefined }));
+const noopAgentStream: EventStreamContextValue = {
+  subscribe: () => () => undefined,
+};
 
 function tokenFixture(agentId: number): TokenUsageResponse {
   return {
@@ -38,7 +41,11 @@ function wrapperFor(client: QueryClient) {
   const Gateway = apiWrapper(rig.api);
   return ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <Gateway>{children}</Gateway>
+      <Gateway>
+        <AgentEventStreamContext.Provider value={noopAgentStream}>
+          {children}
+        </AgentEventStreamContext.Provider>
+      </Gateway>
     </QueryClientProvider>
   );
 }

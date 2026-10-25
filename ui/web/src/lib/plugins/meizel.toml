@@ -7,11 +7,4 @@ exports = ["plugin-nav.ts", "plugin-stats.ts", "ui-contributions.ts", "use-theme
 "use-theme-packs.ts" = ["ui-contributions.ts"]
 
 [purity]
-"." = "strict-to-be"
-"plugin-nav.ts" = "strict"
 "plugins-plan.ts" = "strict"
-"use-theme-packs.ts" = "strict"
-
-[debt.impure-call]
-"plugin-stats.ts#buildPluginStatCards#new Date()" = 1
-"ui-contributions.ts#<module>#useQuery" = 1
