@@ -15,7 +15,7 @@ from base.api_contracts.config import (
     ResolvedConfigView,
     ResolvedFieldView,
 )
-from base.cluster.machine import MachineIdentity, MachineRole
+from base.cluster.machine import MachineIdentityReader, MachineRole
 from base.cluster.machines import MachineNotRegistered, list_agent_runners, lookup_role
 from base.config import runtime_config
 from base.config.admin.candidate import validate_env_patch_for_write
@@ -73,7 +73,7 @@ def _target_capabilities(
     target: str,
     db: Database,
     *,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> list[MachineRole]:
 
     if target == local_machine.name():
@@ -89,7 +89,7 @@ async def _dispatch_config_read(
     *,
     db: Database,
     authority: ConfigAuthority,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
     host: Host,
 ) -> ConfigReadResult:
 
@@ -137,7 +137,7 @@ async def _dispatch_config_audit_read(
     last: int,
     *,
     db: Database,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> ConfigAuditReadResult:
 
     try:
@@ -187,7 +187,7 @@ async def _dispatch_config_write(
     local: bool = False,
     actor: str | None = None,
     trace_id: str | None = None,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
     host: Host,
 ) -> ConfigWriteOpResult:
 
@@ -455,7 +455,7 @@ async def _put_local(
     has_cluster_patch: bool,
     actor: str | None,
     trace_id: str | None,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
     host: Host,
 ) -> tuple[ConfigWriteOpResult, list[str]]:
 

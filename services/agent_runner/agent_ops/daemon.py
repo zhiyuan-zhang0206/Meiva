@@ -32,8 +32,8 @@ from base.agents.context.clients import ClientSet
 from base.api_contracts.agent_contract import MeivaAgentError
 from base.api_contracts.launch_retry import LaunchReconcileRequest
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.transport_encryption import verify_transport_encryption_declaration
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
@@ -86,7 +86,7 @@ async def run_arm(
     authority: ConfigAuthority,
     database: Callable[[], Database],
     image: LoadedCommit,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
     host: Host,
 ) -> tuple[OpStatus, dict[str, object]]:
 
@@ -123,7 +123,7 @@ def _dispatch_in_thread(
     authority: ConfigAuthority,
     database: Callable[[], Database],
     image: LoadedCommit,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
     host: Host,
 ) -> tuple[OpStatus, dict[str, object]]:
 
@@ -151,7 +151,7 @@ async def dispatch(
     authority: ConfigAuthority,
     database: Callable[[], Database],
     image: LoadedCommit,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
     host: Host,
 ) -> tuple[OpStatus, dict[str, object]]:
 
@@ -236,7 +236,7 @@ async def dispatch_idempotent(
     authority: ConfigAuthority,
     database: Callable[[], Database],
     image: LoadedCommit,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
     host: Host,
     dedup_wait_attempts: int = DEDUP_WAIT_ATTEMPTS,
     dedup_wait_step_s: float = DEDUP_WAIT_STEP_S,
@@ -290,7 +290,7 @@ async def dispatch_idempotent_pass(
     authority: ConfigAuthority,
     database: Callable[[], Database],
     image: LoadedCommit,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
     host: Host,
     dedup_wait_attempts: int = DEDUP_WAIT_ATTEMPTS,
     dedup_wait_step_s: float = DEDUP_WAIT_STEP_S,
@@ -363,7 +363,7 @@ async def ops_route(
     authority: ConfigAuthority,
     database: Callable[[], Database],
     image: LoadedCommit,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
     host: Host,
 ) -> tuple[int, bytes, str]:
 
@@ -420,7 +420,7 @@ async def serve_ops_daemon(
     *,
     database: Callable[[], Database],
     image: LoadedCommit,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
     config: ConfigBoot,
     host: Host,
 ) -> None:
@@ -548,7 +548,7 @@ def main(*, argv: list[str] | None = None) -> None:
     config = ConfigBoot()
     config.boot()
     config.ensure_eager()
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="ops", exempt=False)
 

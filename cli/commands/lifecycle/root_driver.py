@@ -28,7 +28,7 @@ from typing import NamedTuple, assert_never, cast
 import psutil
 
 from base.cluster import session_name
-from base.cluster.machine import MachineIdentity, MachineRoles
+from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.deploy import start_trace
 from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS
 from base.host.atomic_io import write_text_atomic
@@ -145,7 +145,7 @@ def service_extra_env(spec: ServiceSpec, *, delivery: LaunchDelivery) -> dict[st
 # meiva:note
 # The capability/config-selected units this root owns, minus the explicit skips.
 def start_roster(
-    roles: MachineRoles, launch_skip: set[str], *, machine: MachineIdentity, host: Host
+    roles: MachineRoles, launch_skip: set[str], *, machine: MachineIdentityReader, host: Host
 ) -> tuple[ServiceSpec, ...]:
     from services.supervision.roster.spec import services_for_capabilities_annotated
 

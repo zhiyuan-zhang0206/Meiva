@@ -36,7 +36,7 @@ import urllib.request
 from collections.abc import Callable
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -132,7 +132,7 @@ def station_answers(url: str, *, token: str | None, open_url: UrlOpener) -> bool
 def main(*, process_config: ConfigBoot, open_url: UrlOpener) -> None:
     image = LoadedCommit.capture()
     process_config.boot()
-    machine = machine_from_boot(process_config)
+    machine = ConfiguredMachineIdentity(process_config)
     process_home = meiva_home().resolve()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="station")

@@ -36,8 +36,8 @@ from base import telemetry
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.clock import Clock
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
@@ -555,7 +555,7 @@ async def run(
     runtime: Path,
     database: Callable[[], Database],
     image: LoadedCommit,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     clock: Clock,
 ) -> None:
     """Start the daemon: healthz server -> write pidfile -> connect DB -> enter main loop."""
@@ -632,7 +632,7 @@ def main() -> None:
     image = LoadedCommit.capture()
     machine_config = ConfigBoot()
     machine_config.boot()
-    machine = machine_from_boot(machine_config)
+    machine = ConfiguredMachineIdentity(machine_config)
     process_home = meiva_home().resolve()
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(machine_config.view.data_plane.db_url)

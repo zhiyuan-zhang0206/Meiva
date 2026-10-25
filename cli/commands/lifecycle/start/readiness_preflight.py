@@ -35,7 +35,7 @@ import os
 import sys
 from pathlib import Path
 
-from base.cluster.machine import MachineIdentity, MachineRoles
+from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.host.private_storage import (
     private_file_problem,
@@ -74,7 +74,7 @@ def preflight_start_readiness(
     only_services: tuple[str, ...],
     disabled_services: tuple[str, ...],
     all_services: bool,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     host: Host,
     migrations_dir: Path = MIGRATIONS_DIR,
 ) -> int:
@@ -118,7 +118,7 @@ def _port_facts(
     only_services: tuple[str, ...],
     disabled_services: tuple[str, ...],
     all_services: bool,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     host: Host,
 ) -> PortFacts:
     import cli.commands._repo as _repo_commands
@@ -148,7 +148,7 @@ def _occupied(
     only_services: tuple[str, ...],
     disabled_services: tuple[str, ...],
     all_services: bool,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     host: Host,
 ) -> tuple[PortOccupant, ...]:
     from base.deploy.lifecycle.service_selection import resolve_selection

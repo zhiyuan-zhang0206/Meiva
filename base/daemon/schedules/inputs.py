@@ -4,7 +4,7 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import EventPipeline
@@ -19,7 +19,7 @@ class ScheduleInputs:
     database: Callable[[], Database]
     producer: Callable[[], EventPipeline]
     image: LoadedCommit
-    machine: MachineIdentity = field(kw_only=True)
+    machine: MachineIdentityReader = field(kw_only=True)
 
 
 # meiva:note

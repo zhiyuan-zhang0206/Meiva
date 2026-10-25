@@ -13,7 +13,7 @@ from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
 from base.clock import Timers
-from base.cluster.machine import MachineIdentity, MachineRole, MachineRoles
+from base.cluster.machine import MachineIdentityReader, MachineRole, MachineRoles
 from base.config import ConfigBoot
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
@@ -34,7 +34,7 @@ class ConvergeCtx:
     meiva_home: Path
     roles: MachineRoles | None  # None = unit not configured yet (fresh install)
     config: ConfigBoot
-    machine: MachineIdentity
+    machine: MachineIdentityReader
     database_factory: DatabaseFactory
     producer: Callable[[], EventPipeline]
     # The permissions-helper factory, or None on a platform that has no helper (Linux). None

@@ -10,8 +10,7 @@ from base.agents.context.clients import ClientSet
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.host.env.registry import child_env
 from base.lm.catalog.provider_keys import ProviderKeys
@@ -27,7 +26,6 @@ from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy
 __all__ = [
     "boot_process",
     "handoff_source",
-    "host_machine",
     "host_policy",
     "initialize_logging",
     "load_installation",
@@ -83,10 +81,6 @@ def pool_bounds(config: ConfigBoot) -> PoolBounds:
     )
 
 
-def host_machine(config: ConfigBoot) -> MachineIdentity:
-    return machine_from_boot(config)
-
-
 def load_installation(
     config: ConfigBoot,
     *,
@@ -123,7 +117,9 @@ def load_installation(
     return installation
 
 
-def initialize_logging(clients: ClientSet, machine: MachineIdentity, image: LoadedCommit) -> None:
+def initialize_logging(
+    clients: ClientSet, machine: MachineIdentityReader, image: LoadedCommit
+) -> None:
     try:
         init_gateway_process(
             name="agent_host",

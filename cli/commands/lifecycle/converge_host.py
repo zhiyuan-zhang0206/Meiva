@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import assert_never
 
 from base.agents.context.clients import DatabaseFactory
-from base.cluster.machine import MachineIdentity, MachineRoles
+from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.deploy.schema.migration_layout import untracked_migration_files
 from base.host.converge.accessibility import (
     clear_status as clear_accessibility_status,
@@ -647,7 +647,7 @@ def selected_service_names(
     only_services: tuple[str, ...],
     disabled_services: tuple[str, ...],
     all_services: bool,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     host: Host,
 ) -> frozenset[str]:
     # meiva:note

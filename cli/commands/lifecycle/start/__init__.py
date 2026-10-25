@@ -22,7 +22,7 @@ from typing import assert_never
 
 from base import cluster
 from base.cluster import session_name
-from base.cluster.machine import MachineIdentity, MachineRoles
+from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.deploy import start_trace
 from base.deploy.lifecycle import launch_failures, pause_markers, start_serving
 from base.deploy.lifecycle.service_selection import resolve_selection
@@ -195,7 +195,7 @@ def launch_roster(
     only_services: tuple[str, ...],
     disabled_services: tuple[str, ...],
     all_services: bool,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     host: Host,
 ) -> tuple[ServiceSpec, ...]:
     # meiva:note

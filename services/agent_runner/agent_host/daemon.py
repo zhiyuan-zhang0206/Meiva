@@ -66,7 +66,8 @@ from agent.llm import execute_code
 from agent.ownership.hosted import settle_running_rows_at_start
 from base.agents.context.clients import ClientSet
 from base.agents.observation.turn_progress import TurnProgress
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import (
@@ -102,7 +103,6 @@ from .host import AgentHost
 from .lifecycle.configuration import (
     boot_process,
     handoff_source,
-    host_machine,
     host_policy,
     initialize_logging,
     load_installation,
@@ -564,7 +564,7 @@ async def run(
     *,
     config: ConfigBoot,
     database: Callable[[], Database],
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     home: Path,
     clients: ClientSet | None = None,
     on_clients_owned: Callable[[], None] | None = None,
@@ -730,7 +730,7 @@ def main() -> None:
     config, home = boot_process()
     require_helper_parent_chain()
     assert_schema_current(config.view.data_plane.db_url)
-    machine = host_machine(config)
+    machine = ConfiguredMachineIdentity(config)
     version = CodeVersion(process_context.loaded_code_image())
     gate = ProcessDbGate(version=version.get, process="agent_host")
 

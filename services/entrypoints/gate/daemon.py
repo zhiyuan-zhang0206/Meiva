@@ -48,8 +48,8 @@ from typing import cast
 from urllib.parse import urlsplit
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, settings
 from base.db import Database
 from base.log import logger
@@ -435,7 +435,7 @@ def stop_pipeline(
 # application name carries this process's code version, and reads its connection settings from
 # the process's own configuration.
 def gate_database(
-    *, image: LoadedCommit, machine: MachineIdentity, config: ConfigBoot
+    *, image: LoadedCommit, machine: MachineIdentityReader, config: ConfigBoot
 ) -> Callable[[], Database]:
     from base.db.code_version_gate import ProcessDbGate
     from base.db.config import db_config_from_boot
@@ -454,7 +454,7 @@ def gate_database(
 # meiva:note
 # Read the facts the launch plan needs from the process's configuration. This is the only place
 # the gate reads its settings.
-def read_facts(config: ConfigBoot, machine: MachineIdentity) -> GateFacts:
+def read_facts(config: ConfigBoot, machine: MachineIdentityReader) -> GateFacts:
     services = config.view.services
     entry = _entry_port_of(services.frontend_healthcheck_url)
     return GateFacts(
@@ -498,7 +498,7 @@ def main(argv: Sequence[str], *, process_config: ConfigBoot) -> None:
 
     image = LoadedCommit.capture()
     process_config.boot()
-    machine = machine_from_boot(process_config)
+    machine = ConfiguredMachineIdentity(process_config)
     pipeline = build_pipeline(
         database=gate_database(image=image, machine=machine, config=process_config),
         machine=machine,

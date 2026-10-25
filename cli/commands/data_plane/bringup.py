@@ -36,7 +36,7 @@ from base.cluster.checkpoint_schema import PostgresCheckpointSchema
 from base.cluster.dataplane import pg_admin, pooler
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.cluster.derive import runner_db_url_projection
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.host.db_authority import delivery as db_delivery_files
 from base.host.db_authority import ledger, model
@@ -106,7 +106,7 @@ def ensure_gateway_data_plane(
     macos: bool,
     retained_children: list[subprocess.Popen[bytes]] | None,
     database_factory: DatabaseFactory,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
 ) -> int:
     if retained_children is None and not config.is_remote:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")

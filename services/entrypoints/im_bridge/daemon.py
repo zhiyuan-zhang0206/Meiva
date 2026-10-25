@@ -27,7 +27,8 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import GatewayAccess, daemon_acceptance, gateway_auth_headers
-from base.cluster.machine.boot import gateway_access_from_boot, machine_from_boot
+from base.cluster.machine.boot import gateway_access_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import Liveness, start_health_server, stop_health_server
@@ -503,7 +504,7 @@ def main() -> None:
     image = LoadedCommit.capture()
     machine_config = ConfigBoot()
     machine_config.boot()
-    machine = machine_from_boot(machine_config)
+    machine = ConfiguredMachineIdentity(machine_config)
     process_home = meiva_home().resolve()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="im_bridge")

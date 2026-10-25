@@ -1,17 +1,18 @@
-"""The plugin scaffold hook — how a plugin owns its own host-side state.
-
-A plugin opts in by shipping `setup.py` beside `plugin.py` with a required
-`scaffold(*, machine: MachineIdentity)`. The explicit `meiva memory init` command runs it for every enabled
-plugin, so runtime memory state is never touched by converge or startup.
-
-`setup.py` is loaded on its own, NOT through `plugin.py`: plugin modules import
-the agent runtime (hooks, graph, the SDK namespace), none of which exists in a
-CLI process. Keeping the scaffold in a separate module is what lets the explicit
-CLI command call it at all — and it means a scaffold may depend on `base` only.
-
-It lives beside `skills_sync.py` because both load plugin-owned host setup
-without importing the agent runtime.
-"""
+# meiva:note
+# The plugin scaffold hook — how a plugin owns its own host-side state.
+#
+# A plugin opts in by shipping `setup.py` beside `plugin.py` with a required
+# `scaffold(*, machine: MachineIdentityReader)`. The explicit `meiva memory init` command runs it for every enabled
+# plugin, so runtime memory state is never touched by converge or startup.
+#
+# `setup.py` is loaded on its own, NOT through `plugin.py`: plugin modules import
+# the agent runtime (hooks, graph, the SDK namespace), none of which exists in a
+# CLI process. Keeping the scaffold in a separate module is what lets the explicit
+# CLI command call it at all — and it means a scaffold may depend on `base` only.
+#
+# It lives beside `skills_sync.py` because both load plugin-owned host setup
+# without importing the agent runtime.
+# meiva:link docs/conventions/extensions/plugin-spec-v2.md
 
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 
 
 @dataclass(frozen=True)
@@ -31,7 +32,7 @@ class ScaffoldResult:
     ran: list[str]
 
 
-def run_plugin_scaffolds(*, machine: MachineIdentity) -> ScaffoldResult:
+def run_plugin_scaffolds(*, machine: MachineIdentityReader) -> ScaffoldResult:
     """Call `scaffold(machine=machine)` on every enabled plugin that defines one.
 
     Loading a plugin's `setup.py` is fail-soft (user ruling 2026-09-11): a file

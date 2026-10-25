@@ -16,7 +16,7 @@ from base.agents.upload_delivery.paths import (
 )
 from base.clock import ClockConfig
 from base.clock.configuration import clock_config_from_boot
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.host.env.health_ports import health_port
 from base.paths import gateway_memory_dir
@@ -247,7 +247,7 @@ def gateway_config_from_boot(config: ConfigBoot) -> GatewayConfig:
     gateway = view.gateway
     services = view.services
     gateway_url: str = gateway.gateway_url
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     explicit_secure: bool | None = gateway.session_cookie_secure
     allowed_origins = tuple(
         cors_allowed_origins(

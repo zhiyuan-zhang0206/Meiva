@@ -37,7 +37,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.packages.extensions.install_registry import IGNORED_NAMES, tree_hash
 from base.packages.extensions.registry import ExtensionKind
 from base.packages.skills import scan
@@ -236,7 +236,7 @@ def register_in_cluster(
     source: str | None,
     ref: str | None,
     gateway: ExtensionGateway,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
 ) -> None:
     from ._pkg_source import looks_like_local_path
 
@@ -261,7 +261,7 @@ def install(
     update_mode: str | None = None,
     check_every: int | None = None,
     gateway: ExtensionGateway,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
 ) -> list[tuple[Path, str]]:
     """Copy every package into the skills load dir and register it; return the
     installed `(destination, scan report)` pairs in the order given.

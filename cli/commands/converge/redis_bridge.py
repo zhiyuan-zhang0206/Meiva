@@ -18,7 +18,7 @@ from base.cluster.dataplane.redis_bridge import (
     RedisBridgeUnconfiguredError,
     redis_bridge_endpoint,
 )
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.host.net.url_secret import url_with_host
 from base.host.system.hostport import Host
@@ -153,7 +153,7 @@ def ping_redis(url: str) -> str | None:
 # The relay exists only on macOS with a declared non-loopback address and a local data plane;
 # anywhere else the status says it is not required, without reading the machine's identity.
 def probe_bridge_on(
-    platform: str, home: Path, *, machine: MachineIdentity, config: ConfigBoot
+    platform: str, home: Path, *, machine: MachineIdentityReader, config: ConfigBoot
 ) -> RedisBridgeStatus:
     try:
         bridge = redis_bridge_endpoint(
@@ -177,12 +177,12 @@ def probe_bridge_on(
 # meiva:note
 # The status of the relay of `home`, on the platform of `host`.
 def probe_redis_bridge(
-    home: Path, *, host: Host, machine: MachineIdentity, config: ConfigBoot
+    home: Path, *, host: Host, machine: MachineIdentityReader, config: ConfigBoot
 ) -> RedisBridgeStatus:
     return probe_bridge_on(host.platform.system, home, machine=machine, config=config)
 
 
 def print_redis_bridge_status(
-    home: Path, *, host: Host, machine: MachineIdentity, config: ConfigBoot
+    home: Path, *, host: Host, machine: MachineIdentityReader, config: ConfigBoot
 ) -> None:
     print(status_line(probe_redis_bridge(home, host=host, machine=machine, config=config)))

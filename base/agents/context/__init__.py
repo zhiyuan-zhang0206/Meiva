@@ -137,7 +137,9 @@ class MeivaContext:
     def require_machine(self) -> MachineIdentityReader:
         """Read this root's machine owner; partial contexts fail without a fallback."""
         if self.machine is None:
-            raise RuntimeError("this MeivaContext carries no MachineIdentity (ctx.machine is None)")
+            raise RuntimeError(
+                "this MeivaContext carries no MachineIdentityReader (ctx.machine is None)"
+            )
         return self.machine
 
     def require_clock(self) -> Clock:

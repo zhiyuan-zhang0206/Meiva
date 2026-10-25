@@ -27,7 +27,7 @@ from base.agents.upload_delivery.models import (
 )
 from base.agents.upload_delivery.paths import agent_upload_dir
 from base.api_contracts.agent_contract import AgentNotFound
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.events.live.bus import EventBus
 from gateway.http.middleware.stopping import is_stopping
@@ -47,7 +47,7 @@ class UploadRecovery:
         db: Database,
         bus: EventBus,
         *,
-        machine: MachineIdentity,
+        machine: MachineIdentityReader,
         home: Path,
         claim_seconds: float,
     ) -> None:

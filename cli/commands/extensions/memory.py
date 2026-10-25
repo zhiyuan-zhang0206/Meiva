@@ -6,7 +6,7 @@ import httpx
 
 from base.cluster.machine import (
     GatewayAccess,
-    MachineIdentity,
+    MachineIdentityReader,
     gateway_api_base,
     gateway_auth_headers,
 )
@@ -28,7 +28,7 @@ _TIMEOUT_S = 30.0
 #
 # Memory repository branch validation belongs to this operator-requested provisioning path,
 # never to converge or service startup.
-def cmd_memory_init(*, machine: MachineIdentity) -> int:
+def cmd_memory_init(*, machine: MachineIdentityReader) -> int:
     print("initializing memory resources...")
     try:
         result = run_plugin_scaffolds(machine=machine)

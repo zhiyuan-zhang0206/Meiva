@@ -22,7 +22,7 @@ from typing import Protocol
 from psycopg_pool import ConnectionPool
 
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.daemon.schedules.completion_notices import (
@@ -70,7 +70,7 @@ async def flush_once(
     bus: EventBus,
     *,
     now: datetime | None = None,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
 ) -> int:
     """Deliver each completed hour, then mark its persisted event rows.
 
@@ -121,7 +121,7 @@ class CompletionDigestRound:
     pool: ConnectionPool
     db: Database
     bus: EventBus
-    machine: MachineIdentity
+    machine: MachineIdentityReader
     clock: Clock
     config: DigestConfig
 

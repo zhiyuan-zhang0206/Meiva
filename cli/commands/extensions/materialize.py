@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 
 
 def materialize_cluster_extensions(*, database_factory: DatabaseFactory, skills_root: Path) -> None:
@@ -72,7 +72,7 @@ def materialize_cluster_extensions(*, database_factory: DatabaseFactory, skills_
 
 
 def adopt_local_extensions(
-    *, database_factory: DatabaseFactory, machine: MachineIdentity, skills_root: Path
+    *, database_factory: DatabaseFactory, machine: MachineIdentityReader, skills_root: Path
 ) -> None:
     """Upload this machine's pre-registry skill installs into the cluster.
 
