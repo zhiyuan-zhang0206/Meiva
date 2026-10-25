@@ -1,5 +1,7 @@
-exports = ["fake_agent.py", "support.py"]
+exports = ["eof_process.py", "fake_agent.py", "support.py"]
 
 [uses]
+"eof_process.py" = ["eof_child.py"]
+"test_close.py" = ["eof_process.py"]
 "support.py" = ["fake_agent.py"]
 "test_transport.py" = ["support.py"]

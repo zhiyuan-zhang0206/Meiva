@@ -122,7 +122,7 @@ async def test_close_ends_the_child_process() -> None:
     pid = connection.pid
     assert pid is not None
     await connection.close()
-    await asyncio.sleep(0.05)
+    assert connection.returncode is not None
     with pytest.raises(OSError):
         os.kill(pid, 0)
 
