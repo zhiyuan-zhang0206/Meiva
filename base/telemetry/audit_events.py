@@ -125,7 +125,7 @@ _INSERT_AUDIT_EVENT = (
 )
 
 
-def audit_event_uid(event: telemetry.Event) -> int:
+def audit_event_uid(event: telemetry.Event, *, stream_id: int | None = None) -> int:
     """The event's stream surrogate id as the signed 64-bit `audit_events.event_uid`.
 
     The id is the one the JSONL mirror and Loki already carry for the same
@@ -133,7 +133,13 @@ def audit_event_uid(event: telemetry.Event) -> int:
     line and its nanosecond timestamp). Postgres has no unsigned bigint, so
     values from 2**63 up wrap to the negative half; the mapping is a bijection.
     """
-    uid = telemetry.event_id(telemetry.event_line(event), int(event.ts.timestamp() * 1_000_000_000))
+    uid = (
+        stream_id
+        if stream_id is not None
+        else telemetry.event_id(
+            telemetry.event_line(event), int(event.ts.timestamp() * 1_000_000_000)
+        )
+    )
     return uid - (1 << 64) if uid >= 1 << 63 else uid
 
 

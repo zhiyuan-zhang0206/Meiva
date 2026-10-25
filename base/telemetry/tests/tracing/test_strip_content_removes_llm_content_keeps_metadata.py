@@ -3,32 +3,25 @@
 from __future__ import annotations
 
 import os
+import socket
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from base import config
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.paths import traces_dir
-from base.telemetry import trace_mirror
-from base.telemetry import tracing as tracing_mod
 from base.telemetry.otlp.trace_readiness import TraceReadiness
-from base.telemetry.tests.otlp.identity_inputs import ignore_arguments, machine_identity
-from base.telemetry.tests.test_tracing import collector_up as collector_up
+from base.telemetry.tests.otlp.identity_inputs import machine_identity
 from base.telemetry.tests.test_tracing import (
-    fixed_disk_usage,
+    CollectorStubServer,
     otlp_with_attrs,
     trace_config,
-    under_watermark,
     wait_init_resolved,
     warned_fields,
 )
-from base.telemetry.tests.test_tracing import (
-    production_process_by_default as production_process_by_default,
-)
+from base.telemetry.tests.test_tracing import collector_up as collector_up
 from base.telemetry.tests.test_tracing import (
     reset_trace_workers as reset_trace_workers,
 )
@@ -137,27 +130,16 @@ def test_strip_content_removes_event_attributes_too():
     assert ev_keys == {"gen_ai.usage.input_tokens"}
 
 
-def test_exporter_posts_stripped_line(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_exporter_posts_stripped_line(collector_up: CollectorStubServer) -> None:
     """OtlpJsonHttpSpanExporter strips content attributes before the POST —
     stripped here, content never reaches the sidecar, the mirror or Tempo
     (defensive layer 2)."""
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
-    posts: list[bytes] = []
-
-    class _Resp:
-        def raise_for_status(self):
-            pass
-
-    monkeypatch.setattr(
-        "httpx.post",
-        lambda _url, *, content, headers, timeout: posts.append(content) or _Resp(),  # noqa: ARG005 — signature must match httpx.post  # pyright: ignore[reportUnknownArgumentType]
-    )
-
     provider = TracerProvider()
     provider.add_span_processor(
-        SimpleSpanProcessor(OtlpJsonHttpSpanExporter("http://127.0.0.1:4318", strip_content=True))
+        SimpleSpanProcessor(OtlpJsonHttpSpanExporter(collector_up.endpoint, strip_content=True))
     )
     tracer = provider.get_tracer("meiva.session")
     with tracer.start_as_current_span("meiva-agent-7") as root:
@@ -165,6 +147,7 @@ def test_exporter_posts_stripped_line(monkeypatch: pytest.MonkeyPatch, tmp_path:
         root.set_attribute("gen_ai.task.input", "secret prompt")
         root.set_attribute("traceloop.association.properties.agent_id", "7")
     provider.shutdown()
+    posts = [body for _url, body, _headers in collector_up.posts]
     wire = b"".join(posts)
     assert b"secret prompt" not in wire  # content stripped before the wire
     from google.protobuf.json_format import MessageToDict
@@ -182,36 +165,25 @@ def test_exporter_posts_stripped_line(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert "traceloop.association.properties.agent_id" in keys  # metadata survives
 
 
-def test_exporter_strip_opt_out_keeps_content(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_exporter_strip_opt_out_keeps_content(collector_up: CollectorStubServer) -> None:
     """trace_strip_content=False opts the wire back into full content
     (benchmarks that genuinely want prompts in Tempo/mirror)."""
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
-    posts: list[bytes] = []
-
-    class _Resp:
-        def raise_for_status(self):
-            pass
-
-    monkeypatch.setattr(
-        "httpx.post",
-        lambda _url, *, content, headers, timeout: posts.append(content) or _Resp(),  # noqa: ARG005 — signature must match httpx.post  # pyright: ignore[reportUnknownArgumentType]
-    )
-
     provider = TracerProvider()
     provider.add_span_processor(
-        SimpleSpanProcessor(OtlpJsonHttpSpanExporter("http://127.0.0.1:4318", strip_content=False))
+        SimpleSpanProcessor(OtlpJsonHttpSpanExporter(collector_up.endpoint, strip_content=False))
     )
     tracer = provider.get_tracer("meiva.session")
     with tracer.start_as_current_span("root"):
         pass
     provider.shutdown()
 
-    assert posts
+    assert collector_up.posts
 
 
-def test_enforce_dir_cap_deletes_oldest_first(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_enforce_dir_cap_deletes_oldest_first(tmp_path: Path) -> None:
     """enforce_dir_cap deletes oldest files until the directory fits the cap."""
     from base.telemetry.tracing import enforce_dir_cap
 
@@ -228,7 +200,7 @@ def test_enforce_dir_cap_deletes_oldest_first(monkeypatch: pytest.MonkeyPatch, t
     ]
 
 
-def test_enforce_dir_cap_noop_when_under_cap(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_enforce_dir_cap_noop_when_under_cap(tmp_path: Path) -> None:
     """Under the cap nothing is deleted; non-positive cap disables entirely."""
     from base.telemetry.tracing import enforce_dir_cap
 
@@ -239,7 +211,7 @@ def test_enforce_dir_cap_noop_when_under_cap(monkeypatch: pytest.MonkeyPatch, tm
     assert len(list(tmp_path.glob("spans*.jsonl"))) == 1
 
 
-def test_enforce_dir_cap_active_file_sorts_last(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_enforce_dir_cap_active_file_sorts_last(tmp_path: Path) -> None:
     """The ACTIVE spans.jsonl (no day stamp) sorts last — the cap prune never
     deletes the file the collector is appending to."""
     from base.telemetry.tracing import enforce_dir_cap
@@ -257,53 +229,36 @@ def test_enforce_dir_cap_active_file_sorts_last(monkeypatch: pytest.MonkeyPatch,
     )
 
 
-def test_disk_watermark_exceeded(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_disk_watermark_exceeded(tmp_path: Path) -> None:
     """disk_watermark_exceeded compares the data-disk usage fraction against
     the watermark; >= 1.0 disables the guard."""
     from base.telemetry.tracing import disk_watermark_exceeded
 
-    monkeypatch.setattr(
-        trace_mirror.shutil,
-        "disk_usage",
-        lambda _p: SimpleNamespace(used=50 * 4096, total=1000 * 4096, free=950 * 4096),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    assert disk_watermark_exceeded(0.9, traces_dir=tmp_path) is False
-    assert disk_watermark_exceeded(0.01, traces_dir=tmp_path) is True
-    assert disk_watermark_exceeded(1.0, traces_dir=tmp_path) is False  # guard disabled
-    assert disk_watermark_exceeded(2.0, traces_dir=tmp_path) is False
+    sample_usage = (50 / 1000, 950 * 4096)
+    assert disk_watermark_exceeded(0.9, traces_dir=tmp_path, usage=sample_usage) is False
+    assert disk_watermark_exceeded(0.01, traces_dir=tmp_path, usage=sample_usage) is True
+    assert disk_watermark_exceeded(1.0, traces_dir=tmp_path, usage=sample_usage) is False
+    assert disk_watermark_exceeded(2.0, traces_dir=tmp_path, usage=sample_usage) is False
 
 
 def test_initialize_relief_pass_runs_when_disk_over_watermark(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
-):
+) -> None:
     """The bounded-disk pass (gzip / retention / cap) runs BEFORE the
     watermark guard: an over-watermark disk still gets its relief pass — the
     stale segment is pruned, the gzip and cap legs are invoked, and recording
     itself is skipped (auto-degrade, watermark guard)."""
-    from base.telemetry.tracing import initialize_tracing
-
-    # Disk OVER the watermark: recording must be skipped...
-    monkeypatch.setattr(tracing_mod, "disk_usage", fixed_disk_usage(0.99, 10 * 1024**3))
-    mirror = traces_dir(tmp_path)
+    home = tmp_path / ".meiva"
+    home.mkdir()
+    mirror = traces_dir(home)
     mirror.mkdir()
     old = mirror / "spans-2020-01-01T00-00-00.000-size.jsonl"
     old.write_text("{}\n", encoding="utf-8")
-    # Spy on the gzip and cap legs (the prune leg is exercised for real): all
-    # three must be reached before the watermark guard returns. The cap spy
-    # records the setting it was invoked with.
-    gzip_calls: list[int] = []
-    cap_calls: list[int] = []
+    recent_older = mirror / "spans-2099-01-01T00-00-00.000-size.jsonl"
+    recent_newer = mirror / "spans-2099-01-02T00-00-00.000-size.jsonl"
+    recent_older.write_bytes(os.urandom(700 * 1024))
+    recent_newer.write_bytes(os.urandom(700 * 1024))
 
-    def _spy_gzip(**_kw: object) -> int:
-        gzip_calls.append(1)
-        return 0
-
-    def _spy_cap(max_mb: int, **_kw: object) -> int:
-        cap_calls.append(max_mb)
-        return 0
-
-    monkeypatch.setattr(tracing_mod, "gzip_old_mirror", _spy_gzip)
-    monkeypatch.setattr(tracing_mod, "enforce_dir_cap", _spy_cap)
     init_calls: list[dict[str, object]] = []
     monkeypatch.setattr(
         "traceloop.sdk.Traceloop.init",
@@ -312,38 +267,50 @@ def test_initialize_relief_pass_runs_when_disk_over_watermark(
 
     initialize_tracing(
         machine=machine_identity(),
-        home=tmp_path,
-        config=trace_config(enabled=True, strip_content=True, retention_days=14, max_dir_mb=2048),
+        home=home,
+        config=trace_config(
+            enabled=True,
+            strip_content=True,
+            retention_days=14,
+            max_dir_mb=1,
+            disk_watermark=0.9,
+            gzip_grace_seconds=-1,
+        ),
         readiness=trace_readiness,
+        disk_stats=(0.99, 10 * 1024**3),
     )
 
-    # ...but the relief pass still ran: the stale segment is pruned, the gzip
-    # and cap legs were invoked, and recording itself was skipped.
+    # meiva:note
+    # The relief pass ran: `old` was pruned, `recent_older` and `recent_newer`
+    # were gzipped, `recent_older.gz` was removed by the 1 MB cap, and
+    # recording itself was skipped due to the disk watermark.
     assert not old.exists()
-    assert gzip_calls == [1]
-    assert cap_calls == [2048]  # the cap leg ran, with the configured cap
+    assert not recent_older.exists()
+    assert not (mirror / f"{recent_older.name}.gz").exists()
+    assert (mirror / f"{recent_newer.name}.gz").exists()
     assert init_calls == []
 
 
 def test_initialize_sets_trace_content_false(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
-):
+) -> None:
     """initialize_tracing forces TRACELOOP_TRACE_CONTENT=false before
     Traceloop.init when strip_content is on."""
-    under_watermark(monkeypatch)
-    calls: list[dict] = []
+    home = tmp_path / ".meiva"
+    home.mkdir()
+    calls: list[dict[str, Any]] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     initialize_tracing(
         machine=machine_identity(),
-        home=tmp_path,
+        home=home,
         config=trace_config(enabled=True, strip_content=True),
         readiness=trace_readiness,
     )
     wait_init_resolved(trace_readiness=trace_readiness)
 
     assert os.environ["TRACELOOP_TRACE_CONTENT"] == "false"
-    assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert len(calls) == 1
 
 
 def test_initialize_skips_when_collector_unreachable(
@@ -352,31 +319,23 @@ def test_initialize_skips_when_collector_unreachable(
     loguru_records: LogRecords,
     *,
     trace_readiness: TraceReadiness,
-):
+) -> None:
     """Local collector not answering at init -> recording stays off, no
     Traceloop.init, and a warning event carries the endpoint (the same
     init-time tradeoff the events exporter makes)."""
-    monkeypatch.setattr(
-        tracing_mod,
-        "endpoint_reachable",
-        lambda _e: False,  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(
-        config.settings.observability,
-        "telemetry_otlp_endpoint",
-        "http://127.0.0.1:4318",
-    )
-    under_watermark(monkeypatch)
-    # This test exercises the skip contract, not the daemon retry loop (that
-    # is test_collector_unreachable_retries_once_until_init_succeeds); without
-    # the stub the daemon retry thread (300s sleep) leaks across tests.
-    monkeypatch.setattr(tracing_mod, "start_collector_retry", ignore_arguments)
-    calls: list[dict] = []
+    home = tmp_path / ".meiva"
+    home.mkdir()
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    endpoint = f"http://127.0.0.1:{port}"
+
+    calls: list[dict[str, Any]] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     initialize_tracing(
         machine=machine_identity(),
-        home=tmp_path,
-        config=trace_config(enabled=True),
+        home=home,
+        config=trace_config(enabled=True, endpoint=endpoint),
         readiness=trace_readiness,
     )
 
@@ -385,7 +344,7 @@ def test_initialize_skips_when_collector_unreachable(
     warned = warned_fields(loguru_records)
     assert warned
     assert warned[0].get("action") == "recording_disabled_collector_unreachable"
-    assert warned[0].get("endpoint") == "http://127.0.0.1:4318"
+    assert warned[0].get("endpoint") == endpoint
 
 
 def test_initialize_skips_when_disk_over_watermark(
@@ -394,17 +353,19 @@ def test_initialize_skips_when_disk_over_watermark(
     loguru_records: LogRecords,
     *,
     trace_readiness: TraceReadiness,
-):
+) -> None:
     """Disk over watermark: recording stays off, no Traceloop.init, and a
     warning telemetry event is emitted carrying the measured numbers."""
-    monkeypatch.setattr(tracing_mod, "disk_usage", fixed_disk_usage(0.951, 2 * 1024**3))
-    calls: list[dict] = []
+    home = tmp_path / ".meiva"
+    home.mkdir()
+    calls: list[dict[str, Any]] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     initialize_tracing(
         machine=machine_identity(),
-        home=tmp_path,
-        config=trace_config(enabled=True),
+        home=home,
+        config=trace_config(enabled=True, disk_watermark=0.9),
         readiness=trace_readiness,
+        disk_stats=(0.951, 2 * 1024**3),
     )
 
     assert calls == []
@@ -418,28 +379,18 @@ def test_initialize_skips_when_disk_over_watermark(
     assert attrs.get("free_gb") == 2.0
 
 
-def test_enforce_dir_cap_survives_peer_prune(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_enforce_dir_cap_survives_peer_prune(tmp_path: Path) -> None:
     """A file vanishing between glob and stat — a peer agent pruning the shared
     traces dir concurrently — must not raise out of the boot path (audit
     2026-08-08 P1: two bare p.stat() calls killed an agent start with
     FileNotFoundError)."""
-    from pathlib import Path
-
     from base.telemetry.tracing import enforce_dir_cap
 
-    for day in ("2026-01-01", "2026-01-02", "2026-01-03"):
-        (tmp_path / f"spans-{day}T00-00-00.000-size.jsonl").write_bytes(b"x" * (1024 * 1024))
+    (tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl").write_bytes(b"x" * (1024 * 1024))
+    vanished = tmp_path / "spans-2026-01-02T00-00-00.000-size.jsonl"
+    vanished.symlink_to(tmp_path / "vanished-peer-segment")
+    (tmp_path / "spans-2026-01-03T00-00-00.000-size.jsonl").write_bytes(b"x" * (1024 * 1024))
 
-    real_stat = Path.stat
-    calls = {"n": 0}
-
-    def flaky_stat(self):
-        calls["n"] += 1
-        if calls["n"] == 2:  # the middle file is gone by the time we stat it
-            raise FileNotFoundError
-        return real_stat(self)  # pyright: ignore[reportUnknownArgumentType]
-
-    monkeypatch.setattr(Path, "stat", flaky_stat)  # pyright: ignore[reportUnknownArgumentType]
     removed = enforce_dir_cap(max_mb=1, traces_dir=tmp_path)  # must not raise
     assert removed == 1
     remaining = sorted(p.name for p in tmp_path.glob("spans*.jsonl"))

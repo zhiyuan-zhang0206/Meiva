@@ -37,38 +37,25 @@ from collections.abc import Callable
 
 from base.telemetry.delivery.receipts import Event
 from base.telemetry.delivery.reporting import failure_isolated
+from base.telemetry.otlp.plans import (
+    CHILD_DEFER_MAX_AGE_DEFAULT_S,
+    parse_defer_flag,
+    parse_defer_seconds,
+)
 
 _CHILD_DEFER_ENV = "MEIVA_TELEMETRY_OTLP_CHILD_DEFER"
 _CHILD_DEFER_MAX_AGE_ENV = "MEIVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S"
-# Fallback when the env value is absent/unparseable/non-positive — mirrors the
-# declared field default (locked by
-# base/telemetry/tests/otlp/test_telemetry_otlp_child_defer.py::test_env_defaults_locked_to_settings_fields).
-CHILD_DEFER_MAX_AGE_DEFAULT_S = 60.0
-_TRUE_SPELLINGS = frozenset({"1", "true", "yes", "on"})
-_FALSE_SPELLINGS = frozenset({"0", "false", "no", "off"})
 
 
 def _env_flag(name: str, *, default: bool) -> bool:
     """Tristate env read: explicit true/false spellings win; anything else
     (absent, empty, unrecognized) falls back to `default`."""
-    raw = os.environ.get(name, "").strip().lower()
-    if raw in _TRUE_SPELLINGS:
-        return True
-    if raw in _FALSE_SPELLINGS:
-        return False
-    return default
+    return parse_defer_flag(os.environ.get(name), default=default)
 
 
 def _env_seconds(name: str, default: float) -> float:
     """Positive-float env read; absent/unparseable/non-positive -> default."""
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = float(raw)
-    except ValueError:
-        return default
-    return value if value > 0 else default
+    return parse_defer_seconds(os.environ.get(name), default)
 
 
 class ChildDeferral:
@@ -89,11 +76,14 @@ class ChildDeferral:
         bring_up: Callable[[], bool],
         record_metrics: Callable[[Event], None],
         export_live: Callable[[list[Event]], None],
+        enabled: bool | None = None,
     ) -> None:
         self._queue = queue
         self._bring_up = bring_up
         self._record_metrics = record_metrics
         self._export_live = export_live
+        self._enabled_override = enabled
+        self._max_age_override: float | None = None
         self._lock = threading.Lock()
         self._clock_lock = threading.Lock()
         self.active = False
@@ -103,12 +93,28 @@ class ChildDeferral:
         self.completion_idle = threading.Event()
         self.completion_idle.set()
 
-    def arm(self) -> None:
+    def arm(
+        self,
+        *,
+        enabled: bool | None = None,
+        max_age_s: float | None = None,
+    ) -> None:
         """Arm deferred export; no-op when MEIVA_TELEMETRY_OTLP_CHILD_DEFER is
         off (the documented revert switch)."""
+        if max_age_s is not None:
+            self._max_age_override = max_age_s
         if self.active or self._stopped.is_set():
             return
-        if not _env_flag(_CHILD_DEFER_ENV, default=True):
+        resolved_enabled = (
+            enabled
+            if enabled is not None
+            else (
+                self._enabled_override
+                if self._enabled_override is not None
+                else _env_flag(_CHILD_DEFER_ENV, default=True)
+            )
+        )
+        if not resolved_enabled:
             return
         with self._lock:
             if not self._stopped.is_set():
@@ -190,7 +196,11 @@ class ChildDeferral:
             if self._clock_started or self._stopped.is_set():
                 return
             self._clock_started = True
-            age_s = _env_seconds(_CHILD_DEFER_MAX_AGE_ENV, CHILD_DEFER_MAX_AGE_DEFAULT_S)
+            age_s = (
+                self._max_age_override
+                if self._max_age_override is not None and self._max_age_override > 0
+                else _env_seconds(_CHILD_DEFER_MAX_AGE_ENV, CHILD_DEFER_MAX_AGE_DEFAULT_S)
+            )
             timer = threading.Timer(age_s, self.complete, args=("age",))
             timer.daemon = True
             self._clock = timer

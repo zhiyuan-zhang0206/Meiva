@@ -22,7 +22,11 @@ from base.telemetry.delivery.state import process_state
 
 
 def write_batch(
-    events: list[Event], *, database: Callable[[], Any], export: Callable[[list[Event]], None]
+    events: list[Event],
+    *,
+    database: Callable[[], Any],
+    export: Callable[[list[Event]], None],
+    target_dir: Path | None = None,
 ) -> None:
     """Mirror first, then the telemetry_events record, the compact metric projection
     and OTLP export.
@@ -33,7 +37,7 @@ def write_batch(
     """
     if not events:
         return
-    append_jsonl(events)
+    append_jsonl(events, target_dir=target_dir)
     with failure_isolated("telemetry_events store"):
         from base.telemetry.event_store import store_events
 
@@ -53,6 +57,7 @@ def build_pipeline(
     machine: MachineIdentityReader,
     home: Path,
     flush_interval_s: float = 0.5,
+    target_dir: Path | None = None,
 ) -> EventPipeline:
     """Own the writer and lazy exporter with the root's database and machine.
 
@@ -69,7 +74,10 @@ def build_pipeline(
     explicit = endpoint_override_is_explicit("MEIVA_TELEMETRY_OTLP_ENDPOINT", process_environment())
     return ExportingEventPipeline(
         writer=lambda events, exporter: write_batch(
-            events, database=database, export=exporter.export_batch
+            events,
+            database=database,
+            export=exporter.export_batch,
+            target_dir=target_dir,
         ),
         export_allowed=lambda: observability_export_allowed(
             machine, home=home, endpoint_explicit=explicit

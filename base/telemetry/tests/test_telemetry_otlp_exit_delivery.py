@@ -68,33 +68,7 @@ def otlp_receiver() -> Any:
     server.server_close()
 
 
-# The child: arm the pipeline, bring the OTLP providers up while alive
-# (`sync()`), then emit the tail record and return — the exit drain is the
-# only thing left that can carry it.
-_CHILD = """
-from functools import partial
-from base import telemetry
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.native_process.code_version import CodeVersion
-from base.native_process.loaded_commit import LoadedCommit
-from base.config import ConfigBoot
-from base.cluster.machine.configured import ConfiguredMachineIdentity
-from base.paths import meiva_home
-
-MARKER = {marker!r}
-
-image = LoadedCommit.capture()
-version = CodeVersion(image)
-gate = ProcessDbGate(process="exit-seam-probe", version=version.get)
-config = ConfigBoot()
-config.read_process_environment()
-pipeline = telemetry.build_pipeline(database=partial(Database.from_settings, gate=gate), machine=ConfiguredMachineIdentity(config), home=meiva_home())
-telemetry.init_telemetry(process="exit-seam-probe", pipeline=pipeline)
-telemetry.emit("log", "log", attributes={{"seq": "early", "marker": MARKER}})
-telemetry.sync()
-telemetry.emit("log", "log", attributes={{"seq": "tail", "marker": MARKER}})
-"""
+_CHILD_SCRIPT = Path(__file__).with_name("_otlp_exit_delivery_child.py")
 
 
 # The external CLI's `exec` command runs the caller's code inside this same
@@ -161,11 +135,12 @@ def test_tail_record_of_a_short_lived_process_reaches_the_receiver(
         }
     )
     env.pop("MEIVA_LOG_DIR", None)
+    # meiva:note
     # Fixed argv, sys.executable is trusted. -I keeps the parent's PYTHON*
     # environment out; `import base` resolves through the checkout's
     # editable install.
-    proc = subprocess.run(  # noqa: S603 — fixed argv: our own interpreter, inline program
-        [sys.executable, "-I", "-X", "utf8", "-c", _CHILD.format(marker=marker)],
+    proc = subprocess.run(  # noqa: S603
+        [sys.executable, "-I", "-X", "utf8", str(_CHILD_SCRIPT), marker],
         capture_output=True,
         text=True,
         env=env,

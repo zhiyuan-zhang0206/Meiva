@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
-import httpx
 import pytest
 
 from base.log.tests.log_records import loguru_records as loguru_records
@@ -13,16 +13,12 @@ from base.telemetry.otlp.trace_readiness import TraceReadiness
 from base.telemetry.tests.capture.trace_process import run_trace_scenario
 from base.telemetry.tests.otlp.identity_inputs import machine_identity
 from base.telemetry.tests.test_tracing import (
-    capture_otlp_json_posts,
+    CollectorStubServer,
     trace_config,
-    under_watermark,
     wait_init_resolved,
 )
 from base.telemetry.tests.test_tracing import (
     collector_up as collector_up,
-)
-from base.telemetry.tests.test_tracing import (
-    production_process_by_default as production_process_by_default,
 )
 from base.telemetry.tests.test_tracing import (
     reset_trace_workers as reset_trace_workers,
@@ -45,7 +41,8 @@ def test_arm_thread_base_exception_marks_attempt_spent(
     # is_alive() guard (the QA #1060 corner: with `except Exception` only, a
     # dead arm thread carrying no flag left one-attempt-per-process bypassable).
     #
-    under_watermark(monkeypatch)
+    home = tmp_path / ".meiva"
+    home.mkdir()
     calls: list[int] = []
 
     def _exit_sdk(**_kw: object) -> None:
@@ -56,7 +53,7 @@ def test_arm_thread_base_exception_marks_attempt_spent(
 
     initialize_tracing(
         machine=machine_identity(),
-        home=tmp_path,
+        home=home,
         config=trace_config(enabled=True),
         readiness=trace_readiness,
     )
@@ -67,7 +64,7 @@ def test_arm_thread_base_exception_marks_attempt_spent(
 
     initialize_tracing(
         machine=machine_identity(),
-        home=tmp_path,
+        home=home,
         config=trace_config(enabled=True),
         readiness=trace_readiness,
     )  # must be a no-op: the attempt was spent
@@ -82,7 +79,7 @@ def test_readiness_returns_without_waiting_when_no_arm_was_admitted(tmp_path: Pa
     run_trace_scenario(tmp_path, "no-admission", lifecycle=True)
 
 
-def test_otlp_exporter_posts_protobuf(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_otlp_exporter_posts_protobuf(collector_up: CollectorStubServer) -> None:
     """Each export() batch becomes one OTLP ExportTraceServiceRequest POSTed
     to <endpoint>/v1/traces with Content-Type application/x-protobuf (the wire
     format the collector's OTLP receiver accepts — its JSON receiver rejects
@@ -90,9 +87,7 @@ def test_otlp_exporter_posts_protobuf(monkeypatch: pytest.MonkeyPatch, tmp_path:
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
-    posts = capture_otlp_json_posts(monkeypatch)
-
-    exporter = OtlpJsonHttpSpanExporter("http://127.0.0.1:4318", strip_content=True)
+    exporter = OtlpJsonHttpSpanExporter(collector_up.endpoint, strip_content=True)
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
     tracer = provider.get_tracer("meiva.session")
@@ -102,9 +97,10 @@ def test_otlp_exporter_posts_protobuf(monkeypatch: pytest.MonkeyPatch, tmp_path:
             pass
     provider.shutdown()
 
-    assert len(posts) >= 1  # pyright: ignore[reportUnknownArgumentType]  # at least one export batch
+    posts = collector_up.posts
+    assert len(posts) >= 1
     url, _body, headers = posts[0]
-    assert url == "http://127.0.0.1:4318/v1/traces"
+    assert url == f"{collector_up.endpoint}/v1/traces"
     assert headers["Content-Type"] == "application/x-protobuf"
 
     # The body is the OTLP ExportTraceServiceRequest protobuf; it must parse
@@ -121,71 +117,50 @@ def test_otlp_exporter_posts_protobuf(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
 
 def test_otlp_exporter_timeout_is_bounded_and_returns_failure(
-    monkeypatch: pytest.MonkeyPatch,
+    collector_up: CollectorStubServer,
 ) -> None:
     """A collector timeout costs one bounded POST and never escapes the exporter."""
-    timeouts: list[float] = []
-
-    def _timeout(_url: str, *, content: bytes, headers: dict[str, str], timeout: float):
-        del content, headers
-        timeouts.append(timeout)
-        raise httpx.ReadTimeout("collector stalled")
-
-    monkeypatch.setattr("httpx.post", _timeout)
-    exporter = OtlpJsonHttpSpanExporter("http://127.0.0.1:4318", strip_content=True)
-
-    assert exporter.export([]) is tracing_mod.SpanExportResult.FAILURE
-    assert timeouts == [tracing_mod.TRACE_EXPORT_TIMEOUT_S]
-    assert 0 < tracing_mod.TRACE_EXPORT_TIMEOUT_S <= 5.0
+    block = threading.Event()
+    collector_up.block_event = block
+    exporter = OtlpJsonHttpSpanExporter(collector_up.endpoint, strip_content=True, timeout_s=0.05)
+    try:
+        assert exporter.export([]) is tracing_mod.SpanExportResult.FAILURE
+        assert 0 < tracing_mod.TRACE_EXPORT_TIMEOUT_S <= 5.0
+    finally:
+        block.set()
+        collector_up.block_event = None
 
 
 def test_otlp_exporter_circuit_drops_during_cooldown_then_recovers(
-    monkeypatch: pytest.MonkeyPatch,
+    collector_up: CollectorStubServer,
 ) -> None:
     """Consecutive failures open the circuit; one post-cooldown probe closes it."""
-    clock = {"now": 100.0}
-    posts = 0
+    collector_up.status_sequence = [503] * tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD
+    exporter = OtlpJsonHttpSpanExporter(collector_up.endpoint, strip_content=True)
 
-    class _Resp:
-        def raise_for_status(self) -> None:
-            return None
-
-    def _post(_url: str, *, content: bytes, headers: dict[str, str], timeout: float):
-        nonlocal posts
-        del content, headers, timeout
-        posts += 1
-        if posts <= tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD:
-            raise httpx.ConnectError("collector unavailable")
-        return _Resp()
-
-    monkeypatch.setattr(tracing_mod.time, "monotonic", lambda: clock["now"])
-    monkeypatch.setattr("httpx.post", _post)
-    exporter = OtlpJsonHttpSpanExporter("http://127.0.0.1:4318", strip_content=True)
-
+    now = 100.0
     for _ in range(tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD):
-        assert exporter.export([]) is tracing_mod.SpanExportResult.FAILURE
-    assert posts == tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD
+        assert exporter.export([], now=now) is tracing_mod.SpanExportResult.FAILURE
+    assert len(collector_up.posts) == tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD
 
-    assert exporter.export([]) is tracing_mod.SpanExportResult.FAILURE
-    assert posts == tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD
+    assert exporter.export([], now=now) is tracing_mod.SpanExportResult.FAILURE
+    assert len(collector_up.posts) == tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD
     assert exporter._dropped_batches == 1
 
-    clock["now"] += tracing_mod.TRACE_EXPORT_COOLDOWN_S
-    assert exporter.export([]) is tracing_mod.SpanExportResult.SUCCESS
-    assert posts == tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD + 1
+    now += tracing_mod.TRACE_EXPORT_COOLDOWN_S
+    assert exporter.export([], now=now) is tracing_mod.SpanExportResult.SUCCESS
+    assert len(collector_up.posts) == tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD + 1
     assert exporter._consecutive_failures == 0
 
-    assert exporter.export([]) is tracing_mod.SpanExportResult.SUCCESS
-    assert posts == tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD + 2
+    assert exporter.export([], now=now) is tracing_mod.SpanExportResult.SUCCESS
+    assert len(collector_up.posts) == tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD + 2
 
 
 def test_turn_span_exports_root_at_start_not_at_end(tmp_path: Path) -> None:
     run_trace_scenario(tmp_path, "root")
 
 
-def test_prune_old_mirror_removes_stale_keeps_recent(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_prune_old_mirror_removes_stale_keeps_recent(tmp_path: Path) -> None:
     """prune_old_mirror deletes the collector's rotated `spans-<ISO>-size.jsonl`
     files older than retention_days, keeps recent ones, and never touches the
     unstamped ACTIVE `spans.jsonl` or non-mirror files."""
@@ -252,9 +227,7 @@ def test_mirror_sort_key_orders_suffixed_rotated_and_cut_files(
     assert keys == sorted(keys)
 
 
-def test_prune_old_mirror_removes_stale_suffixed_and_gz(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_prune_old_mirror_removes_stale_suffixed_and_gz(tmp_path: Path) -> None:
     """prune_old_mirror deletes stale files regardless of the rotation
     naming era — timberjack-suffixed (`-size`), manual cuts, and gzipped
     segments — and keeps the ACTIVE `spans.jsonl` untouched."""
@@ -277,9 +250,7 @@ def test_prune_old_mirror_removes_stale_suffixed_and_gz(
     assert active.exists()
 
 
-def test_enforce_dir_cap_counts_suffixed_and_gz_keeps_active(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_enforce_dir_cap_counts_suffixed_and_gz_keeps_active(tmp_path: Path) -> None:
     """The cap prune counts suffixed rotated and gzipped files toward the
     directory size and deletes oldest-first, and never deletes the ACTIVE
     `spans.jsonl` even when every other file carries an unrecognized-era
@@ -299,9 +270,7 @@ def test_enforce_dir_cap_counts_suffixed_and_gz_keeps_active(
     assert remaining == ["spans-2026-01-02T00-00-00.000-time.jsonl.gz", "spans.jsonl"]
 
 
-def test_gzip_old_mirror_compresses_rotated_keeps_active(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_gzip_old_mirror_compresses_rotated_keeps_active(tmp_path: Path) -> None:
     """gzip_old_mirror compresses every non-active mirror file (rotated,
     suffixed, cut) to `.jsonl.gz` with lossless content, leaves the
     ACTIVE `spans.jsonl` alone, and is idempotent on re-run."""
@@ -333,9 +302,7 @@ def test_gzip_old_mirror_compresses_rotated_keeps_active(
     assert gzip_old_mirror(grace_seconds=-1, traces_dir=tmp_path) == 0
 
 
-def test_gzip_old_mirror_skips_recently_written_files(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_gzip_old_mirror_skips_recently_written_files(tmp_path: Path) -> None:
     """A file written within the grace window is skipped (a freshly cut
     active file may still be appended by the collector until its next size
     rotation); the next pass with no grace compresses it."""
@@ -359,9 +326,7 @@ def test_gzip_old_mirror_skips_recently_written_files(
     assert not fresh.exists()
 
 
-def test_prune_old_mirror_disabled_when_nonpositive(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_prune_old_mirror_disabled_when_nonpositive(tmp_path: Path) -> None:
     """retention_days <= 0 disables pruning entirely."""
     from base.telemetry.tracing import prune_old_mirror
 
