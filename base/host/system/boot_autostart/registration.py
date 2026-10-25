@@ -33,7 +33,7 @@ def _autostart_plist_path() -> Path:
 def register_macos(*, services: frozenset[str], host: Host) -> int:
     # meiva:note
     # Write (or update) the autostart LaunchAgent plist. Idempotent: rewrites
-    # only when the content changed, and never bootstraps (see module docstring).
+    # only when the content changed, and never bootstraps (see base/host/docs/boot-autostart.meiva.okf.md).
     plist_path = _autostart_plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
     meiva = meiva_binary_path(host=host)
@@ -100,7 +100,7 @@ def register_autostart(*, services: frozenset[str], enabled: bool, host: Host) -
     # empty selection is refused: it would start nothing at boot, and an existing
     # boot job is never removed implicitly (`meiva cluster destroy` retires it).
     # Idempotent. On macOS the plist is written but not loaded into the running
-    # session (see module docstring); it takes effect on the next reboot.
+    # session (see base/host/docs/boot-autostart.meiva.okf.md); it takes effect on the next reboot.
     # A no-op when ``enabled`` is off (the test suite) or when this
     # process's home is not the default home (``owns_os_jobs``).
     #
