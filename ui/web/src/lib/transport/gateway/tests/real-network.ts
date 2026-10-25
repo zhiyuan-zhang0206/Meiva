@@ -7,12 +7,10 @@ interface RealNetwork {
 
 function captured(): RealNetwork {
   const value: unknown = Reflect.get(globalThis, REAL_NETWORK_KEY);
-  if (typeof value === "object" && value !== null) {
-    return value as RealNetwork;
+  if (typeof value !== "object" || value === null) {
+    throw new Error("the test setup file did not capture the platform's network before installing its guards");
   }
-  const fetchFn = Reflect.get(globalThis, "fetch");
-  const xhr = Reflect.get(globalThis, "XMLHttpRequest");
-  return Object.freeze({ fetch: fetchFn, XMLHttpRequest: xhr });
+  return value as RealNetwork;
 }
 
 // meiva:note

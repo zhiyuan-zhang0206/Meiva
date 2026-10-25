@@ -7,42 +7,25 @@
 // @vitest-environment happy-dom
 
 import { act, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useDeferredMount, type DeferredMountScheduler } from "./use-client-ready";
-
-const idle: (() => void)[] = [];
-
-const testScheduler: DeferredMountScheduler = {
-  requestFrame: (cb) => {
-    cb(0);
-    return 1;
-  },
-  cancelFrame: () => undefined,
-  scheduleIdle: (cb) => {
-    idle.push(cb);
-  },
-};
+import { useDeferredMount } from "./use-client-ready";
 
 function Probe({ id }: { id: string }) {
-  const mounted = useDeferredMount(testScheduler);
+  const mounted = useDeferredMount();
   return mounted ? <span data-testid={id}>{id}</span> : null;
-}
-
-async function slice() {
-  await act(async () => {
-    const next = idle.shift();
-    next?.();
-    await Promise.resolve();
-  });
 }
 
 describe("useDeferredMount", () => {
   beforeEach(() => {
-    idle.length = 0;
+    vi.useFakeTimers();
   });
 
-  it("releases one waiting subtree per idle slice", async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("releases one waiting subtree per idle slice", () => {
     render(
       <>
         <Probe id="first" />
@@ -50,12 +33,23 @@ describe("useDeferredMount", () => {
       </>,
     );
 
-    expect(idle).toHaveLength(1);
-    await slice();
+    expect(screen.queryByTestId("first")).toBeNull();
+    expect(screen.queryByTestId("second")).toBeNull();
+
+    act(() => {
+      vi.advanceTimersToNextTimer();
+    });
+    expect(screen.queryByTestId("first")).toBeNull();
+
+    act(() => {
+      vi.advanceTimersToNextTimer();
+    });
     expect(screen.queryByTestId("first")).toBeTruthy();
     expect(screen.queryByTestId("second")).toBeNull();
 
-    await slice();
+    act(() => {
+      vi.advanceTimersToNextTimer();
+    });
     expect(screen.queryByTestId("second")).toBeTruthy();
   });
 });

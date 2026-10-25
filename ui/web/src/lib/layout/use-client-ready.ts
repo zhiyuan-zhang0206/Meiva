@@ -8,12 +8,6 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 
-export interface DeferredMountScheduler {
-  requestFrame: (cb: FrameRequestCallback) => number;
-  cancelFrame: (id: number) => void;
-  scheduleIdle: (cb: () => void) => void;
-}
-
 /** Nothing ever changes — the "store" is the client's own existence. */
 const never = () => () => {
   // No subscription to release.
@@ -54,41 +48,34 @@ export const DEFERRED_MOUNT_SLICE_TIMEOUT_MS = 50;
 const waiting: (() => void)[] = [];
 const pumpState = { scheduled: false };
 
-function releaseOne(scheduleSlice: (cb: () => void) => void): void {
+function releaseOne(): void {
   pumpState.scheduled = false;
   const next = waiting.shift();
   if (next === undefined) return;
   next();
-  armPump(scheduleSlice);
+  schedulePump();
 }
 
-function schedulePump(cb: () => void): void {
+function schedulePump(): void {
+  if (pumpState.scheduled || waiting.length === 0) return;
+  pumpState.scheduled = true;
   if (typeof requestIdleCallback === "function") {
-    requestIdleCallback(cb, { timeout: DEFERRED_MOUNT_SLICE_TIMEOUT_MS });
+    requestIdleCallback(releaseOne, { timeout: DEFERRED_MOUNT_SLICE_TIMEOUT_MS });
   } else {
-    setTimeout(cb, 0);
+    setTimeout(releaseOne, 0);
   }
 }
 
-function armPump(scheduleSlice: (cb: () => void) => void): void {
-  if (pumpState.scheduled || waiting.length === 0) return;
-  pumpState.scheduled = true;
-  scheduleSlice(() => releaseOne(scheduleSlice));
-}
-
-function enqueueMount(
-  release: () => void,
-  scheduleSlice: (cb: () => void) => void,
-): () => void {
+function enqueueMount(release: () => void): () => void {
   waiting.push(release);
-  armPump(scheduleSlice);
+  schedulePump();
   return () => {
     const at = waiting.indexOf(release);
     if (at >= 0) waiting.splice(at, 1);
   };
 }
 
-export function useDeferredMount(scheduler?: DeferredMountScheduler): boolean {
+export function useDeferredMount(): boolean {
   const [mounted, setMounted] = useState(() =>
     typeof window !== "undefined" && window.location.hash.length > 1,
   );
@@ -98,17 +85,14 @@ export function useDeferredMount(scheduler?: DeferredMountScheduler): boolean {
     const mount = () => {
       if (!cancelled) setMounted(true);
     };
-    const reqFrame = scheduler?.requestFrame ?? requestAnimationFrame;
-    const cancelFrame = scheduler?.cancelFrame ?? cancelAnimationFrame;
-    const scheduleSlice = scheduler?.scheduleIdle ?? schedulePump;
-    const frame = reqFrame(() => {
-      if (!cancelled) drop = enqueueMount(mount, scheduleSlice);
+    const frame = requestAnimationFrame(() => {
+      if (!cancelled) drop = enqueueMount(mount);
     });
     return () => {
       cancelled = true;
-      cancelFrame(frame);
+      cancelAnimationFrame(frame);
       drop?.();
     };
-  }, [scheduler]);
+  }, []);
   return mounted;
 }

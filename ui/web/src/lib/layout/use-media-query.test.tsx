@@ -13,55 +13,38 @@ import { act, cleanup, render } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { useMediaQuery, type MediaQueryListLike } from "./use-media-query";
+import { useMediaQuery } from "./use-media-query";
 
-type Listener = () => void;
+const initialInnerWidth = window.innerWidth;
 
-const mediaState = {
-  matches: false,
-  listeners: new Set<Listener>(),
-};
-
-function fakeMatchMedia(_query: string): MediaQueryListLike {
-  return {
-    matches: mediaState.matches,
-    addEventListener: (_type: "change", listener: Listener) => {
-      mediaState.listeners.add(listener);
-    },
-    removeEventListener: (_type: "change", listener: Listener) => {
-      mediaState.listeners.delete(listener);
-    },
-  };
+function resizeViewport(width: number): void {
+  window.innerWidth = width;
+  window.dispatchEvent(new Event("resize"));
 }
 
 beforeEach(() => {
-  mediaState.matches = false;
-  mediaState.listeners = new Set();
+  resizeViewport(390);
 });
 
 afterEach(() => {
   cleanup();
+  resizeViewport(initialInnerWidth);
 });
 
 function Probe() {
-  return (
-    <span data-testid="value">
-      {String(useMediaQuery("(min-width: 768px)", fakeMatchMedia))}
-    </span>
-  );
+  return <span data-testid="value">{String(useMediaQuery("(min-width: 768px)"))}</span>;
 }
 
 describe("useMediaQuery", () => {
   it("answers the server snapshot (false) during SSR", () => {
-    mediaState.matches = true; // the "server" has no viewport; the snapshot wins
+    resizeViewport(1024); // the "server" has no viewport; the snapshot wins
     expect(renderToString(<Probe />)).toContain(">false<");
   });
 
   it("reads the live match on the first client render", () => {
-    mediaState.matches = true;
+    resizeViewport(1024);
     const { getByTestId } = render(<Probe />);
     expect(getByTestId("value").textContent).toBe("true");
-    expect(mediaState.listeners.size).toBe(1); // subscribed
   });
 
   it("follows change events", () => {
@@ -69,8 +52,7 @@ describe("useMediaQuery", () => {
     expect(getByTestId("value").textContent).toBe("false");
 
     act(() => {
-      mediaState.matches = true;
-      for (const listener of mediaState.listeners) listener();
+      resizeViewport(1024);
     });
     expect(getByTestId("value").textContent).toBe("true");
   });
