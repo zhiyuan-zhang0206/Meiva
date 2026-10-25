@@ -1,51 +1,40 @@
 from __future__ import annotations
 
-import threading
-import urllib.request
 from pathlib import Path
-from unittest.mock import MagicMock
 
-import psycopg
 import pytest
-import redis
 
-from base.host.atomic_io import AtomicWriter
-from base.native_process.os_platform import LockTimeoutError
 from base.paths import meiva_home
+from base.paths.tests.homes import point_home
 from base.sessions.pty import allocation_freeze
 from cli import main as cli_main
 
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "home"))
+    point_home(monkeypatch, tmp_path / "home")
 
 
 def test_operator_round_trip_needs_no_gateway_or_data_plane(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-
-    owner = threading.current_thread()
-
-    def _offline(*_args: object, **_kwargs: object) -> object:
-        if threading.current_thread() is not owner:
-            return MagicMock()
-        raise AssertionError("PTY allocation commands must not use the gateway or data plane")
-
-    monkeypatch.setattr(psycopg, "connect", _offline)
-    monkeypatch.setattr(redis.Redis, "execute_command", _offline)
-    monkeypatch.setattr(urllib.request, "urlopen", _offline)
-    monkeypatch.delenv("MEIVA_CONFIG_FETCH", raising=False)
+    home = meiva_home()
+    (home / ".env").write_text(
+        "MEIVA_DB_URL=postgresql://127.0.0.1:1/meiva?connect_timeout=1\n"
+        "MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n"
+        "MEIVA_GATEWAY_URL=http://127.0.0.1:1\n",
+        encoding="utf-8",
+    )
 
     assert (
         cli_main.main(["pty", "freeze", "--holder", "operator-1818", "--reason", "offline cleanup"])
         == 0
     )
-    frozen = allocation_freeze.read(home=meiva_home())
+    frozen = allocation_freeze.read(home=home)
     assert frozen.generation is not None
     assert cli_main.main(["pty", "status"]) == 0
     assert cli_main.main(["pty", "resume", frozen.generation]) == 0
-    assert allocation_freeze.read(home=meiva_home()).status == "inactive"
+    assert allocation_freeze.read(home=home).status == "inactive"
     assert "status=frozen" in capsys.readouterr().out
 
 
@@ -73,15 +62,10 @@ def test_cli_status_surfaces_corrupt_marker_as_fail_closed(
 
 
 def test_cli_resume_reports_allocation_lock_timeout(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    def _locked(_generation: str, *, home: Path, writer: AtomicWriter) -> bool:
-        assert home == meiva_home()
-        _ = writer
-        raise LockTimeoutError("allocation lock remained held")
-
-    monkeypatch.setattr(allocation_freeze, "resume", _locked)
+    lock = allocation_freeze.lock_path(meiva_home())
+    lock.mkdir(parents=True)
 
     assert cli_main.main(["pty", "resume", "owned-generation"]) == 1
-    assert "allocation lock remained held" in capsys.readouterr().err
+    assert str(lock) in capsys.readouterr().err

@@ -22,14 +22,13 @@ import argparse
 import os
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, MutableMapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
 from base.host.env.bootstrap import BootstrapFetchError
-from base.host.env.dotenv_boot import LAUNCHER_PROFILE_ENV_KEY
 from base.native_process.os_platform import (
     LockTimeoutError,
     ensure_line_buffered_stdio,
@@ -38,7 +37,15 @@ from base.native_process.os_platform import (
 # Only the settings-free parser composition entry is imported here. Domain
 # adapters lazy-import runtime commands when their bound handler is dispatched.
 from cli import parsers
-from cli.startup.log_sinks import cli_log_name
+from cli.startup.entry_plan import (
+    LITE_VERBS,
+    needs_stop_probe,
+    needs_transport_key,
+    normalize_profile_env,
+    select_lite_api_token,
+    uses_lite_config,
+)
+from cli.startup.log_sinks import pre_dispatch_log_sink
 from cli.startup.settings_failure import settings_failure_text
 
 if TYPE_CHECKING:
@@ -49,8 +56,13 @@ __all__ = [
     "ProducerFactory",
     "bind_entry_facts",
     "bind_init_inputs",
+    "deliver_lite_api_token",
+    "dispatch_parsed",
     "entry",
     "main",
+    "normalize_process_profile",
+    "opt_into_lite_config",
+    "parse_command_args",
     "print_settings_load_failure",
     "run_command",
 ]
@@ -61,34 +73,7 @@ type ProducerFactory = Callable[
     [OperatorDatabaseFactory, MachineIdentityReader, Path], OperatorEventPipeline
 ]
 
-# Settings-lite verbs — they must construct Settings while the gateway is down
-# (stop and status must remain available for recovery inspection), so
-# `cli.main` opts them out of the gateway config fetch that every other process
-# performs at Settings build. The fetch decision itself is role-derived
-# (base.host.env.bootstrap.config_source_is_local; MEIVA_CONFIG_SOURCE is gone).
-_LITE_VERBS = frozenset(
-    {
-        "stop",
-        # `restart` is deliberately NOT here: its preflight registers this
-        # machine in the central DB and its start leg needs the cluster config
-        # regardless, so on a pure runner a lite restart could only ever hit
-        # the never-dialed placeholder DB URL (PlaceholderDbUrlError). With the gateway down, restart now fails at
-        # the fetch with the actionable BootstrapFetchError — `stop` stays lite
-        # and remains the recovery verb.
-        "status",
-        "pty",
-        "cluster",
-        "agents",
-        "config",
-        "schedules",
-        "logs",
-        "mcp",
-        "memory",
-        "plugins",
-        "skill",
-        "permissions",
-    }
-)
+_LITE_VERBS = LITE_VERBS
 
 
 # meiva:note
@@ -117,24 +102,30 @@ def normalize_process_profile() -> None:
     (#4334). The record is never cleared: a nested CLI overwrites it only when
     it carries a fresh live marker of its own.
     """
-    launcher_profile = os.environ.pop("MEIVA_PROCESS_PROFILE", None)
-    if launcher_profile:
-        os.environ[LAUNCHER_PROFILE_ENV_KEY] = launcher_profile
+    normalize_profile_env(os.environ)
+
+
+# meiva:note
+# Verbs that must run without the config fetch build settings-lite instead.
+# `base.sessions.env_forwarding` does not forward this var, so processes a
+# lite verb spawns never inherit the opt-out.
+def opt_into_lite_config(
+    args_in: Sequence[str], *, environ: MutableMapping[str, str], home: Path
+) -> None:
+    from cli.preflight import unit_already_stopped
+
+    stopped = unit_already_stopped(home) if needs_stop_probe(args_in) else False
+    if uses_lite_config(args_in, unit_stopped=stopped):
+        environ.setdefault("MEIVA_CONFIG_FETCH", "skip")
+        deliver_lite_api_token(environ, home=home)
 
 
 def _opt_into_lite_config(args_in: list[str]) -> None:
-    """Verbs that must run without the config fetch build settings-lite instead."""
-    # base.sessions.env_forwarding does not forward this var, so processes a
-    # lite verb spawns never inherit the opt-out.
-    from cli.preflight import unit_already_stopped
+    from base.paths.home import resolve_meiva_home
 
-    if (
-        args_in
-        and args_in[0] in _LITE_VERBS
-        and (args_in[0] != "stop" or "--force" in args_in or unit_already_stopped())
-    ):
-        os.environ.setdefault("MEIVA_CONFIG_FETCH", "skip")
-        _deliver_lite_api_token()
+    if not args_in or args_in[0] not in _LITE_VERBS:
+        return
+    opt_into_lite_config(args_in, environ=os.environ, home=resolve_meiva_home())
 
 
 # meiva:note
@@ -149,13 +140,15 @@ def bind_init_inputs(args: argparse.Namespace) -> None:
     from base import cluster
     from cli.startup.service_path import CallerHost
 
-    table = cast("dict[str, int]", cluster.new_home_ports())
+    table = cluster.new_home_ports()
     args.caller_host = CallerHost(
         service_path=os.environ.get("MEIVA_SERVICE_PATH"),
         path=os.environ.get("PATH", ""),
         virtual_env=os.environ.get("VIRTUAL_ENV"),
         prefix_venv=sys.prefix if sys.prefix != sys.base_prefix else None,
-        occupied_ports=frozenset(port for port in table.values() if not cluster.port_free(port)),
+        occupied_ports=frozenset(
+            port for port in table.values() if isinstance(port, int) and not cluster.port_free(port)
+        ),
         transport_key=args.transport_key,
     )
     if args.ssl_cert_file is not None:
@@ -170,8 +163,8 @@ def bind_init_inputs(args: argparse.Namespace) -> None:
 # The key leaves the process environment before any step runs, so no child process any of those
 # steps spawns inherits it; the verb receives it as `args.transport_key`. Every other verb
 # leaves the variable alone.
-def _take_transport_key(args_in: list[str]) -> str | None:
-    if args_in[:1] != ["init"] and args_in[:3] != ["cluster", "db-authority", "install-unit"]:
+def _take_transport_key(args_in: Sequence[str]) -> str | None:
+    if not needs_transport_key(args_in):
         return None
     from base.host.db_authority.unit import CAPABILITY_KEY_ENV
 
@@ -182,43 +175,140 @@ def _take_transport_key(args_in: list[str]) -> str | None:
 # Hand the verb what only the process entry can read: the site `init` and `start` act on (the
 # home and the checkout whose CLI runs) and the transport key of a capability bundle.
 def bind_entry_facts(
-    args: argparse.Namespace, args_in: list[str], *, home: Path, checkout: Path
+    args: argparse.Namespace, args_in: Sequence[str], *, home: Path, checkout: Path
 ) -> None:
     transport_key = _take_transport_key(args_in)
     if transport_key is not None:
         args.transport_key = transport_key
-    if args_in[:1] in (["init"], ["start"]):
+    if tuple(args_in[:1]) in (("init",), ("start",)):
         from cli.start_runtime import HomeSite
 
         args.site = HomeSite(home, checkout)
 
 
-def _deliver_lite_api_token() -> None:
-    """Give an operator's lite CLI the runner token from its installed capability.
-
-    Full runner boot consumes the same capability before fetching gateway config.
-    Lite verbs skip that boot pass, so they need its API token alone. A launcher
-    descendant must keep its delivered authority boundary, even when a token is
-    missing; no source leaves the existing bearer behavior in place.
-    """
+# meiva:note
+# Give an operator's lite CLI the runner token from its installed capability.
+#
+# Full runner boot consumes the same capability before fetching gateway config.
+# Lite verbs skip that boot pass, so they need its API token alone. A launcher
+# descendant must keep its delivered authority boundary, even when a token is
+# missing; no source leaves the existing bearer behavior in place.
+def deliver_lite_api_token(environ: MutableMapping[str, str], *, home: Path) -> None:
     from base.host.env.bootstrap import config_source_is_local, launcher_context
-    from base.host.env.dotenv_file import process_env_file, read_env_aliases
+    from base.host.env.dotenv_file import read_env_aliases
     from base.host.net.auth import API_TOKEN_ENV
-    from base.paths.home import resolve_meiva_home
 
-    if os.environ.get(API_TOKEN_ENV) or launcher_context(os.environ) is not None:
-        return
-    if config_source_is_local(os.environ, env_file=read_env_aliases(process_env_file())):
+    resolved = home.resolve()
+    local_source = config_source_is_local(environ, env_file=read_env_aliases(resolved / ".env"))
+    if (
+        select_lite_api_token(
+            explicit_bearer=environ.get(API_TOKEN_ENV),
+            has_launcher_context=launcher_context(environ) is not None,
+            local_config_source=local_source,
+            capability_bearer="probe",
+        )
+        is None
+    ):
         return
 
     from base.host.db_authority.model import AuthorityRefusedError
     from base.host.db_authority.unit import consume_unit
 
     try:
-        capability = consume_unit(resolve_meiva_home().resolve())
+        capability = consume_unit(resolved)
     except (AuthorityRefusedError, OSError, ValueError):
         return
-    os.environ[API_TOKEN_ENV] = capability.api.token
+    token = select_lite_api_token(
+        explicit_bearer=environ.get(API_TOKEN_ENV),
+        has_launcher_context=launcher_context(environ) is not None,
+        local_config_source=local_source,
+        capability_bearer=capability.api.token,
+    )
+    if token is not None:
+        environ[API_TOKEN_ENV] = token
+
+
+# meiva:note
+# Parse `args_in` into an `argparse.Namespace` with its `retained_children` list bound.
+def parse_command_args(
+    args_in: list[str],
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None = None,
+) -> argparse.Namespace:
+    return parsers.parse_args(
+        args_in, retained_children=[] if retained_children is None else retained_children
+    )
+
+
+# meiva:note
+# Execute an already-parsed CLI namespace against an explicit `declared` home and `checkout`.
+def dispatch_parsed(
+    args: argparse.Namespace,
+    args_in: Sequence[str],
+    *,
+    declared: Path,
+    checkout: Path,
+    producer_factory: ProducerFactory,
+    open_database: OpenDatabase,
+) -> int:
+    home = declared.resolve()
+    bind_entry_facts(args, args_in, home=home, checkout=checkout)
+    if tuple(args_in[:1]) == ("init",):
+        bind_init_inputs(args)
+        return args.func(args)
+    if tuple(args_in[:1]) == ("start",):
+        from cli.start_identity import require_initialized
+
+        try:
+            require_initialized(args.site.home)
+        except (ValueError, TypeError, RuntimeError, OSError) as exc:
+            print(f"meiva start: {exc}", file=sys.stderr)
+            return 1
+    from base.cluster.machine import MachineRoleInvalid
+    from base.paths.private_dir import ensure_private_dir
+    from cli.database import operator_database_factory
+    from cli.database.runtime import CommandRuntime
+
+    # meiva:note
+    # The one place the operator's home is created (owner-only, a symlinked home refused); the
+    # runtime built next only holds the path.
+    ensure_private_dir(declared)
+    command = CommandRuntime.create(home)
+    args.runtime = command
+    database_factory = operator_database_factory(
+        local_host=command.machine.host,
+        open_database=open_database,
+    )
+    args.database_factory = database_factory
+    producer = producer_factory(database_factory, command.machine, command.home)
+    args.producer = producer
+    try:
+        sink = pre_dispatch_log_sink(args_in)
+        if sink is not None:
+            producer.initialize_logging(sink)
+        return args.func(args)
+    except LockTimeoutError as exc:
+        print(
+            f"meiva: another local lifecycle operation is active; retry after it finishes: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+    except ValidationError as exc:
+        return print_settings_load_failure(exc)
+    except (BootstrapFetchError, MachineRoleInvalid) as exc:
+        print(f"✗ meiva: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        # meiva:note
+        # A quiet verb's first batch can otherwise reach OTLP only in atexit,
+        # after concurrent.futures has stopped accepting SDK resource probes.
+        # Drain while the interpreter is alive; the emitter still owns shutdown.
+        # No pipeline means no work, so settings-free/no-event verbs stay lazy.
+        from base import telemetry
+
+        with telemetry.failure_isolated("CLI telemetry drain"):
+            telemetry.sync(timeout=5.0)
+        producer.close_command(primary=sys.exception())
 
 
 def main(
@@ -274,10 +364,7 @@ def run_command(
     if rc is not None:
         return rc
     _opt_into_lite_config(args_in)
-
-    args = parsers.parse_args(
-        args_in, retained_children=[] if retained_children is None else retained_children
-    )
+    args = parse_command_args(args_in, retained_children=retained_children)
     # meiva:note
     # The home this command acts on is read here, once, behind the gate above. `declared` is the
     # path as the environment spells it (a symlinked home is refused when it is created); `home`
@@ -286,64 +373,14 @@ def run_command(
     from base.paths.home import resolve_meiva_home
 
     declared = resolve_meiva_home()
-    home = declared.resolve()
-    bind_entry_facts(args, args_in, home=home, checkout=checkout)
-    if args_in[:1] == ["init"]:
-        bind_init_inputs(args)
-        return args.func(args)
-    if args_in[:1] == ["start"]:
-        from cli.start_identity import require_initialized
-
-        try:
-            require_initialized(args.site.home)
-        except (ValueError, TypeError, RuntimeError, OSError) as exc:
-            print(f"meiva start: {exc}", file=sys.stderr)
-            return 1
-    from base.cluster.machine import MachineRoleInvalid
-    from base.paths.private_dir import ensure_private_dir
-    from cli.database import operator_database_factory
-    from cli.database.runtime import CommandRuntime
-
-    # meiva:note
-    # The one place the operator's home is created (owner-only, a symlinked home refused); the
-    # runtime built next only holds the path.
-    ensure_private_dir(declared)
-    command = CommandRuntime.create(home)
-    args.runtime = command
-    database_factory = operator_database_factory(
-        local_host=command.machine.host,
+    return dispatch_parsed(
+        args,
+        args_in,
+        declared=declared,
+        checkout=checkout,
+        producer_factory=producer_factory,
         open_database=open_database,
     )
-    args.database_factory = database_factory
-    producer = producer_factory(database_factory, command.machine, command.home)
-    args.producer = producer
-    try:
-        if args_in[:1] not in (["init"], ["start"]):  # these two open their own, after admission
-            sink = cli_log_name(args_in)
-            if sink is not None:
-                producer.initialize_logging(sink)
-        return args.func(args)
-    except LockTimeoutError as exc:
-        print(
-            f"meiva: another local lifecycle operation is active; retry after it finishes: {exc}",
-            file=sys.stderr,
-        )
-        return 1
-    except ValidationError as exc:
-        return print_settings_load_failure(exc)
-    except (BootstrapFetchError, MachineRoleInvalid) as exc:
-        print(f"✗ meiva: {exc}", file=sys.stderr)
-        return 1
-    finally:
-        # A quiet verb's first batch can otherwise reach OTLP only in atexit,
-        # after concurrent.futures has stopped accepting SDK resource probes.
-        # Drain while the interpreter is alive; the emitter still owns shutdown.
-        # No pipeline means no work, so settings-free/no-event verbs stay lazy.
-        from base import telemetry
-
-        with telemetry.failure_isolated("CLI telemetry drain"):
-            telemetry.sync(timeout=5.0)
-        producer.close_command(primary=sys.exception())
 
 
 def entry() -> int:

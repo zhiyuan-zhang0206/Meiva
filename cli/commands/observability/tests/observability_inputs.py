@@ -70,6 +70,7 @@ _DEFAULTS = ObservabilityConfig(
     lgtm_grafana_port=3003,
     trace_retention_days=3,
     otel_collector_metrics_port=8888,
+    lgtm_storage_dir="",
 )
 
 

@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import time
 from collections.abc import Callable, Generator
-from typing import Any
+from dataclasses import replace
 
 import psycopg
 import pytest
@@ -16,6 +16,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import MIN_REFRESH_INTERVAL_S, ProcessDbGate
+from base.db.config import DbConfig, db_config_from_settings
 from base.deploy.tests.containers import postgres
 from base.deploy.tests.pgbouncer import (
     SECRET,
@@ -24,11 +25,16 @@ from base.deploy.tests.pgbouncer import (
     pgbouncer_in_front,
 )
 from base.events.live.bus import EventBus
+from cli.database import OperatorDatabaseFactory
 from tests.path_scoped.cli_tests import operator_database as operator_database
 
 pytestmark = pytest.mark.skipif(
     not pgbouncer_available(), reason="pgbouncer not installed (brew/apt install pgbouncer)"
 )
+
+
+def _pooled_config(pooled: str) -> DbConfig:
+    return replace(db_config_from_settings(), db_url=pooled)
 
 
 def test_scram_client_auth_and_pooled_select(
@@ -99,20 +105,16 @@ def _insert_agent(pg_url: str) -> int:
 
 def test_write_transaction_overrides_a_read_only_default_on_connect(
     postgres_access: None,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    from base import config
-
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
         _read_only_default_pooler(pg_url, pool_size=1) as pooled,
     ):
-        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        with Database.from_settings(gate=database_gate).write_transaction() as conn:
+        with Database(_pooled_config(pooled), gate=database_gate).write_transaction() as conn:
             conn.execute(
                 "INSERT INTO machine_units (machine_name, home) VALUES (%s, '/h1')",
                 (machine_identity.name(),),
@@ -125,20 +127,18 @@ def test_write_transaction_overrides_a_read_only_default_on_connect(
 
 def test_schedule_provision_overrides_a_read_only_default(
     postgres_access: None,
-    monkeypatch: pytest.MonkeyPatch,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     *,
     machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    from base import config
     from cli.commands.management.schedules import cmd_schedules_provision
 
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
         _read_only_default_pooler(pg_url) as pooled,
     ):
-        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
+        operator_database.adopt_login(pooled)
         assert cmd_schedules_provision(database_factory=operator_database) == 0
 
         with psycopg.connect(pg_url) as verify:
@@ -147,7 +147,6 @@ def test_schedule_provision_overrides_a_read_only_default(
 
 
 def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     *,
@@ -155,7 +154,6 @@ def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
     machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    from base import config
     from base.db import pool
     from services.upkeep.ttl_reaper.shells import delete_shell_row
 
@@ -163,7 +161,6 @@ def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
         _read_only_default_pooler(pg_url) as pooled,
     ):
-        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
         agent_id = _insert_agent(pg_url)
         with _direct_writer(pg_url) as setup:
             setup.execute(
@@ -171,7 +168,12 @@ def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
                 "VALUES (%s, %s, now())",
                 (agent_id, 7),
             )
-        db_pool = pool(min_size=1, max_size=2, gate=database_gate)
+        db_pool = pool(
+            min_size=1,
+            max_size=2,
+            config=_pooled_config(pooled),
+            gate=database_gate,
+        )
         try:
             delete_shell_row(db_pool, database, event_bus, agent_id, 7, notice=None)
         finally:
@@ -256,27 +258,20 @@ def test_async_write_transaction_overrides_a_read_only_default(
 
 def test_plain_autocommit_write_still_fails_under_a_read_only_default(
     postgres_access: None,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
     *,
     machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    from base import config
     from base.db import connect
 
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
         _read_only_default_pooler(pg_url, pool_size=1) as pooled,
+        connect(autocommit=True, config=_pooled_config(pooled), gate=database_gate) as conn,
+        pytest.raises(psycopg.errors.ReadOnlySqlTransaction),
     ):
-        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        with (
-            connect(autocommit=True, gate=database_gate) as conn,
-            pytest.raises(psycopg.errors.ReadOnlySqlTransaction),
-        ):
-            conn.execute(
-                "UPDATE deployment_state SET min_code_version = min_code_version WHERE id = 1"
-            )
+        conn.execute("UPDATE deployment_state SET min_code_version = min_code_version WHERE id = 1")
 
 
 def test_pooler_isolates_one_clients_read_only_posture_from_another(
@@ -323,47 +318,40 @@ def test_connect_query_bounds_pooled_backends_at_birth(
 
 def test_base_connect_applies_statement_timeout_on_pooled_dial(
     postgres_access: None,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    from base import config
-
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
         pgbouncer_in_front(pg_url) as pooled,
     ):
-        dp = config.settings.data_plane
-        monkeypatch.setattr(dp, "db_url", pooled)
-
         import base.db
 
-        with base.db.connect(gate=database_gate) as conn:
+        with base.db.connect(config=_pooled_config(pooled), gate=database_gate) as conn:
             assert _statement_timeout(conn) == "1min"
 
 
 def test_base_pool_applies_statement_timeout_on_pooled_dial(
     postgres_access: None,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    from base import config
-
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
         pgbouncer_in_front(pg_url) as pooled,
     ):
-        dp = config.settings.data_plane
-        monkeypatch.setattr(dp, "db_url", pooled)
-
         import base.db
 
-        pool = base.db.pool(min_size=1, max_size=2, gate=database_gate)
+        pool = base.db.pool(
+            min_size=1,
+            max_size=2,
+            config=_pooled_config(pooled),
+            gate=database_gate,
+        )
         try:
             with pool.connection() as conn:
                 assert _statement_timeout(conn) == "1min"
@@ -431,21 +419,23 @@ def _poison_backend(pooled: str) -> None:
 
 def test_pooled_borrow_scrubs_a_poisoned_backend(
     postgres_access: None,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
     import base.db as base_db
-    from base import config
 
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
         pgbouncer_in_front(pg_url, pool_size=1) as pooled,
     ):
-        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        pool = base_db.pool(min_size=1, max_size=1, gate=database_gate)
+        pool = base_db.pool(
+            min_size=1,
+            max_size=1,
+            config=_pooled_config(pooled),
+            gate=database_gate,
+        )
         try:
             with pool.connection() as conn:
                 conn.execute("SELECT 1")
@@ -462,7 +452,6 @@ def test_pooled_borrow_scrubs_a_poisoned_backend(
 
 
 def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
-    monkeypatch: pytest.MonkeyPatch,
     publish_wake: Callable[[int, str], bool],
     *,
     database_gate: ProcessDbGate,
@@ -470,7 +459,6 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
     throwaway_config: ThrowawayConfig,
 ) -> None:
     import base.db as base_db
-    from base import config
     from base.agents.inbox.chat_delivery import insert_chat_inbound_once
     from gateway.schedules.router import update_blocking
 
@@ -478,8 +466,6 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
         pgbouncer_in_front(pg_url, pool_size=1) as pooled,
     ):
-        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-
         with psycopg.connect(pg_url, autocommit=True) as admin:
             row = admin.execute(
                 "INSERT INTO agents (label) VALUES ('poison-probe-agent') RETURNING id"
@@ -493,7 +479,12 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
             ).fetchone()
             assert row is not None
             schedule_id: int = row[0]
-        pool = base_db.pool(min_size=1, max_size=1, gate=database_gate)
+        pool = base_db.pool(
+            min_size=1,
+            max_size=1,
+            config=_pooled_config(pooled),
+            gate=database_gate,
+        )
         try:
             with pool.connection() as conn:
                 conn.execute("SELECT 1")
@@ -522,14 +513,12 @@ def test_pooled_dial_names_its_process_and_code_version_and_keeps_the_ceiling(
     machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    from base import config
     from base.telemetry import process_name
 
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
         pgbouncer_in_front(pg_url) as pooled,
     ):
-        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
         owner = ProcessDbGate(version=lambda: 4321, process=process_name())
         owner.observe_minimum(0)
         assert owner.min_read_due() is False
@@ -539,7 +528,7 @@ def test_pooled_dial_names_its_process_and_code_version_and_keeps_the_ceiling(
             with monkeypatch.context() as clock:
                 clock.setattr(time, "monotonic", lambda: monotonic() + MIN_REFRESH_INTERVAL_S)
                 assert owner.min_read_due() is True
-                with Database.from_settings(gate=owner).connect() as conn:
+                with Database(_pooled_config(pooled), gate=owner).connect() as conn:
                     assert owner.min_read_due() is False
                     assert _statement_timeout(conn) == "1min"
                     with psycopg.connect(admin_console_url(pooled), autocommit=True) as console:

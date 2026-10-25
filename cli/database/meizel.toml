@@ -9,15 +9,3 @@ exports = ["lifecycle_audit.py", "runtime.py", "tests"]
 [debt.ambient-read]
 "runtime.py#environ os.environ" = 1
 "runtime.py#home pathlib.Path.home" = 1
-
-[debt.any-collaborator]
-"__init__.py#any OperatorDatabaseFactory.__call__.return" = 1
-"__init__.py#any OperatorDatabaseFactory._admission_gate.return" = 1
-"__init__.py#any OperatorDatabaseFactory._config.return" = 1
-"__init__.py#any OperatorDatabaseFactory._open.config" = 1
-"__init__.py#any OperatorDatabaseFactory._open.return" = 1
-"__init__.py#any OperatorDatabaseFactory.for_url.return" = 1
-"__init__.py#any open_operator_database.config" = 1
-"__init__.py#any open_operator_database.direct_url" = 1
-"__init__.py#any open_operator_database.gate" = 1
-"__init__.py#any open_operator_database.return" = 1

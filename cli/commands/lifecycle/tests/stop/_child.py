@@ -23,14 +23,20 @@ def _exit_cleanly(_signum: int, _frame: FrameType | None) -> None:
 
 
 def session(term: str, hangup: str, armed: str) -> None:
-    if term == "ignore":
+    if term == "default":
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    elif term == "ignore":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
     elif term == "exit":
         signal.signal(signal.SIGTERM, _exit_cleanly)
-    elif term != "default":
+    else:
         raise ValueError("invalid fixture SIGTERM behavior")
-    if hangup == "ignore":
+    if hangup == "default":
+        signal.signal(signal.SIGHUP, signal.SIG_DFL)
+    elif hangup == "ignore":
         signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    else:
+        raise ValueError("invalid fixture SIGHUP behavior")
     if armed:
         subprocess.Popen([sys.executable, "-u", __file__, "armed-child", armed])
     print("ready", flush=True)
