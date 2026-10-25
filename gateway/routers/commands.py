@@ -22,7 +22,10 @@ _log = logging.getLogger(__name__)
 _AGENT_SKILL_VIEW_TIMEOUT_S = 3.0
 
 
-def _local_commands(request: Request) -> list[CommandItem]:
+_HARNESS_FORBIDDEN_COMMANDS: frozenset[str] = frozenset({"compact"})
+
+
+def _local_commands(request: Request, *, harness: str = "meiva") -> list[CommandItem]:
     """The gateway-local catalog: the unscoped view and the availability fallback."""
     discovered = request.app.state.command_catalog.discover()
     return [
@@ -32,15 +35,21 @@ def _local_commands(request: Request) -> list[CommandItem]:
             instruction_hint=c["instruction_hint"],
         )
         for c in discovered
+        if harness == "meiva" or c["name"] not in _HARNESS_FORBIDDEN_COMMANDS
     ]
 
 
-def _agent_machine(request: Request, agent_id: int) -> str | None:
-    """Machine recorded for an agent, or None when the row is absent."""
+# meiva:note
+# (machine, harness) recorded for an agent, or (None, 'meiva') when the row is absent.
+def _agent_machine_and_harness(request: Request, agent_id: int) -> tuple[str | None, str]:
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
+        cur.execute("SELECT machine, harness FROM agents_meta WHERE id = %s", (agent_id,))
         row = cur.fetchone()
-    return str(row[0]) if row is not None and row[0] is not None else None
+    if row is None:
+        return None, "meiva"
+    machine = str(row[0]) if row[0] is not None else None
+    harness = str(row[1]) if len(row) > 1 and row[1] is not None else "meiva"
+    return machine, harness
 
 
 @router.get("/api/commands")
@@ -54,10 +63,10 @@ async def get_commands(request: Request, agent_id: int | None = None) -> list[Co
     if agent_id is None:
         return _local_commands(request)
 
-    machine = await asyncio.to_thread(_agent_machine, request, agent_id)
+    machine, harness = await asyncio.to_thread(_agent_machine_and_harness, request, agent_id)
     if machine is None:
         _log.warning("commands: agent %s has no agents_meta row; using local fallback", agent_id)
-        return _local_commands(request)
+        return _local_commands(request, harness=harness)
     try:
         result = await cluster_rpc.dispatch_to_machine(
             request.app.state.db,
@@ -73,5 +82,9 @@ async def get_commands(request: Request, agent_id: int | None = None) -> list[Co
             machine,
             exc,
         )
-        return _local_commands(request)
-    return [CommandItem.model_validate(command) for command in result["commands"]]
+        return _local_commands(request, harness=harness)
+    return [
+        CommandItem.model_validate(command)
+        for command in result["commands"]
+        if harness == "meiva" or command.get("name") not in _HARNESS_FORBIDDEN_COMMANDS
+    ]

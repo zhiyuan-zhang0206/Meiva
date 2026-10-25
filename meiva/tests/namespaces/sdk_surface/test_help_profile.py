@@ -126,6 +126,32 @@ def test_current_is_empty_without_an_agent_context() -> None:
     assert ModelHelpProfile.current() == ModelHelpProfile()
 
 
+def test_external_harness_profile_hides_attach_compact_and_restart_in_self(
+    model_catalog: Any,
+) -> None:
+    import meiva
+    from base.api_contracts.agent_contract import Harness
+    from meiva.sdk_surface.help import HARNESS_HIDDEN_SELF_MEMBERS
+
+    first_model = sorted(model_catalog.models)[0]
+    profile = ModelHelpProfile.for_model(
+        first_model, catalog=model_catalog, harness=Harness.CLAUDE_CODE
+    )
+    assert profile.hidden_members >= HARNESS_HIDDEN_SELF_MEMBERS
+
+    self_help = _render_text(meiva.self, profile=profile)
+    assert "def terminate(" in self_help
+    assert "def pause_heartbeat(" in self_help
+    assert "AGENT_ID" in self_help
+    assert "MACHINE_SPEC" in self_help
+    assert "def compact(" not in self_help
+    assert "def restart(" not in self_help
+    assert "def attach(" not in self_help
+
+    overview_help = _render_text(meiva, profile=profile)
+    assert "Your own runtime: AGENT_ID, MACHINE_SPEC, pause_heartbeat, terminate." in overview_help
+
+
 def _declared_styles(repo_root: Path) -> set[str]:
     styles: set[str] = set()
     for root in (repo_root / "meiva", repo_root / "meiva_builtins/plugins"):

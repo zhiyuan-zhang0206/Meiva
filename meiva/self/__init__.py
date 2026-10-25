@@ -7,8 +7,17 @@ from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 from meiva import boot, files
 from meiva.sdk_surface import attachment_transport, process_context
 from meiva.sdk_surface import settings as _settings
+from meiva.sdk_surface.help import HARNESS_HIDDEN_SELF_MEMBERS as HARNESS_HIDDEN_SELF_MEMBERS
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 from meiva.self import plans
+
+HARNESS_SELF_MEMBERS: tuple[str, ...] = (
+    "AGENT_ID",
+    "MACHINE_SPEC",
+    "MachineSpec",
+    "pause_heartbeat",
+    "terminate",
+)
 
 # Deliberately NOT in __all_for_meiva__ (importable, but out of the rendered SDK
 # docs): AgentRestart / AgentTermination are framework control-flow exceptions
@@ -92,6 +101,36 @@ def __getattr__(name: str) -> object:
 # caller actually accesses InvalidConfigOverlay.
 
 
+def _assert_native_self_action(action: str, cur: Any = None) -> None:
+    from meiva.sdk_surface import agent_identity
+    from meiva.sdk_surface.pure.caller.identity_plan import native_harness_refusal
+
+    ctx = process_context.ambient_context()
+    if ctx is not None and ctx.harness.value != "meiva":
+        refused = native_harness_refusal(ctx.harness.value, action)
+        if refused is not None:
+            raise RuntimeError(refused)
+    if (
+        ctx is not None
+        and ctx.sdk_capture is not None
+        and getattr(ctx.sdk_capture, "handle", None) is not None
+    ):
+        reg = getattr(ctx.sdk_capture, "_registration", None)
+        harness_name = str(getattr(reg, "harness", None) or "external")
+        refused = native_harness_refusal(harness_name, action)
+        if refused is not None:
+            raise RuntimeError(refused)
+    if cur is not None:
+        agent_id = agent_identity.agent_id()
+        if agent_id is not None:
+            cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (agent_id,))
+            row = cur.fetchone()
+            if row is not None and row[0] != "meiva":
+                refused = native_harness_refusal(str(row[0]), action)
+                if refused is not None:
+                    raise RuntimeError(refused)
+
+
 def attach(path: str | Path, *, label: str | None = None) -> None:
     """Register a local media file for your next turn.
 
@@ -102,6 +141,7 @@ def attach(path: str | Path, *, label: str | None = None) -> None:
     with an error naming the allowed set. Attach at most 8 files and 48 MiB per
     turn, with a 20 MiB limit per file. Raises an error outside an agent turn.
     """
+    _assert_native_self_action("attach")
     attachment_transport.register(path, label=label, base=files.workspace_base())
 
 
@@ -132,6 +172,7 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
     config_overlay = coerce_typed(config_overlay, "config_overlay", dict, allow_none=True)
     from meiva.sdk_surface import agent_identity
 
+    _assert_native_self_action("restart")
     agent_identity.assert_self_action("restart")
     if config_overlay:
         from base.packages.plugins.config_registration import validate_config_overlay
@@ -169,6 +210,7 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
     agent_id = agent_identity.require_agent_id()
     with process_context.current_context().sql.cursor() as cur, cur.connection.transaction():
         cur.execute("SET TRANSACTION READ WRITE")
+        _assert_native_self_action("restart", cur)
         if config_overlay:
             from base.agents.model.model_config import validate_restart_model_config
 
@@ -256,6 +298,7 @@ def compact(summary: str) -> NoReturn:
     summary = coerce_str(summary, "summary")
     from meiva.sdk_surface import agent_identity
 
+    _assert_native_self_action("compact")
     agent_identity.assert_self_action("compact")
     from base import telemetry
     from base.telemetry.audit_events import prepare_event_log, record_audit
@@ -263,6 +306,7 @@ def compact(summary: str) -> NoReturn:
     # The inbound and its audit fact commit together.
     db = process_context.current_context().sql
     with db.transaction(), db.cursor() as cur:
+        _assert_native_self_action("compact", cur)
         _run(cur, (plans.compact_statement(agent_identity.require_agent_id(), summary),))
         compact_event = record_audit(
             cur.connection,

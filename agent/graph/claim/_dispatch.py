@@ -34,6 +34,7 @@ from base.agents.messages.injection_scan import scan_inbound_content
 from base.agents.messages.kwargs import MeivaMsgType
 from base.agents.messages.lifecycle_text import by_who
 from base.agents.messages.security_finding import SecurityFindingEntry
+from base.api_contracts.agent_contract import Harness
 from base.events.live.projection import Cancelled, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
@@ -193,6 +194,13 @@ async def _handle_compact_summary(
     st: BatchState,
 ) -> None:
     """COMPACT_SUMMARY: agent-authored summary — used directly, no LLM run."""
+    if ctx.harness is not Harness.MEIVA:
+        logger.bind(agent_id=agent_id, harness=ctx.harness.value).warning(
+            "dropping compact_summary for external harness {harness!r}: "
+            "compaction is only supported on the native meiva harness",
+            harness=ctx.harness.value,
+        )
+        return
     _close_superseded_compact(ctx, agent_id, st)
     st.compact_payload = (item.content, MeivaMsgType.COMPACT_SUMMARY.value, None)
 
@@ -211,6 +219,13 @@ async def _handle_compact_request(
     user-issued /compact (fresh agent), not a fault — consumed as a logged
     no-op.
     """
+    if ctx.harness is not Harness.MEIVA:
+        logger.bind(agent_id=agent_id, harness=ctx.harness.value).warning(
+            "dropping compact_request for external harness {harness!r}: "
+            "compaction is only supported on the native meiva harness",
+            harness=ctx.harness.value,
+        )
+        return
     assert ctx.llm is not None, "_handle_compact_request requires ctx.llm"  # noqa: S101
     if not conversation_messages(state.messages):
         logger.info(
@@ -348,6 +363,14 @@ async def handle_restart(
     item: ClaimedInbound,
     st: BatchState,
 ) -> None:
+    if ctx.harness is not Harness.MEIVA and item.source != "system:restart":
+        logger.bind(agent_id=item.agent_id, harness=ctx.harness.value).warning(
+            "dropping restart from {source!r} for external harness {harness!r}: "
+            "restart is only supported on the native meiva harness",
+            source=item.source,
+            harness=ctx.harness.value,
+        )
+        return
     st.next_goto = END
     st.restart_requested = True
     st.restart_preserves_idle = _turn_was_idle(state, item)

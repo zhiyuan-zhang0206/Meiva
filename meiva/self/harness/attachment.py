@@ -34,6 +34,7 @@ import psutil
 from base.agents.context import MeivaContext
 from base.agents.context.external_attachment import ExternalAttachment
 from base.agents.context.identity import AgentIdentity, ExternalLease
+from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
@@ -179,10 +180,17 @@ class HarnessAttachment(ExternalAttachment):
         own = (None if bound is None else bound.identity) or AgentIdentity(
             agent_id=None, owns_loop=True
         )
+        base_ctx = bound or self._new_context()
+        harness_val = (
+            Harness(self._registration.harness)
+            if self._registration.harness in set(Harness)
+            else base_ctx.harness
+        )
         process_context.bind_context(
             dataclasses.replace(
-                bound or self._new_context(),
+                base_ctx,
                 identity=dataclasses.replace(own, lease=borrowed),
+                harness=harness_val,
                 sdk_capture=self,
             )
         )

@@ -57,16 +57,11 @@ Harness is a property of the agent, not of a run, so nothing may change it:
 
 ## The fork rule
 
-A fork continues its source's identity, so it runs the source's harness. Omitting
-`harness` on a fork inherits it; naming the source's own value is accepted; naming
-a different one raises `ForkHarnessMismatch` (`fork_harness_mismatch`, HTTP 400)
-and rolls the birth back. The comparison happens inside the birth transaction, so
-a caller that bypassed the gateway's request validation still cannot fork across
-harnesses. Spawning a new agent is the supported way onto another harness.
-
-A source with no launcher is refused by the same boundary: `HarnessNotLaunchable`
-names the source agent and its harness rather than copying a value no launcher can
-start.
+Forking (`fork_from`) is supported **only on the native `meiva` harness** — external
+harnesses own their CLI session on disk and cannot be cloned. Forking a non-`meiva`
+source or requesting a non-`meiva` harness on a fork raises `ForkHarnessMismatch`
+(`fork_harness_mismatch`, HTTP 400) in prechecks and the birth transaction, rolling
+the birth back. A source with no launcher raises `HarnessNotLaunchable`.
 
 ## No launcher, no birth
 

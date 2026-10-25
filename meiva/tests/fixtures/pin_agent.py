@@ -10,6 +10,7 @@ import meiva
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.identity import AgentIdentity, ExternalLease
+from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentity
@@ -55,6 +56,7 @@ def pin_agent(
     clock_factory: Callable[[], Clock] | None = None,
     clients: ClientSet | None = None,
     machine: MachineIdentity | None = None,
+    harness: Harness = Harness.MEIVA,
 ) -> None:
     bound = getattr(meiva, "context", None)
     process_context.bind_context(
@@ -62,6 +64,7 @@ def pin_agent(
             identity=AgentIdentity(
                 agent_id=agent_id, owns_loop=owns_loop, actor=actor, lease=lease
             ),
+            harness=harness,
             original_incarnation=incarnation,
             machine=machine if machine is not None else (None if bound is None else bound.machine),
             clients=clients

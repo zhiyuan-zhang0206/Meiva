@@ -151,3 +151,50 @@ async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
     )
 
     assert cmd.goto != END
+
+
+async def test_claim_drops_compact_and_user_restart_for_external_harness(
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentity,
+):
+    from dataclasses import replace
+
+    from langchain_core.messages import HumanMessage
+
+    from base.api_contracts.agent_contract import Harness
+
+    tid = spawn_agent(
+        harness="claude_code",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    runtime = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
+    ext_ctx = replace(runtime.context, harness=Harness.CLAUDE_CODE)
+    initial_state = AgentState(
+        messages=[SystemMessage(content="handoff"), HumanMessage(content="hi")],
+        harness_cursor=2,
+    )
+
+    compact_batch = [
+        ClaimedInbound(id=101, agent_id=tid, content="", kind="compact_request", source="user"),
+        ClaimedInbound(id=102, agent_id=tid, content="sum", kind="compact_summary", source="self"),
+    ]
+    cmd_compact = await settle_claimed_batch(ext_ctx, initial_state, tid, compact_batch)
+    assert "harness_cursor" not in (cmd_compact.update or {})
+
+    restart_batch = [
+        ClaimedInbound(id=103, agent_id=tid, content="", kind="restart", source="user"),
+    ]
+    cmd_restart = await settle_claimed_batch(ext_ctx, initial_state, tid, restart_batch)
+    assert cmd_restart.goto != END
+    update = cmd_restart.update
+    assert update is not None
+    assert update.get("restart_requested") is False

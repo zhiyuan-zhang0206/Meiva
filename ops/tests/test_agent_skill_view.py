@@ -63,14 +63,17 @@ def _checkpoint_cwd(conn: psycopg.Connection, agent_id: int, cwd: Path) -> None:
     )
 
 
-def _agent(conn: psycopg.Connection, cwd: Path | None, wanted: list[str]) -> int:
+def _agent(
+    conn: psycopg.Connection, cwd: Path | None, wanted: list[str], *, harness: str = "meiva"
+) -> int:
     agent_id = create_agent(conn)
     conn.execute(
-        "INSERT INTO agents_meta (id, status, config_overlay, birth_config) VALUES (%s, 'running', %s, %s)",
+        "INSERT INTO agents_meta (id, status, config_overlay, birth_config, harness) VALUES (%s, 'running', %s, %s, %s)",
         (
             agent_id,
             Jsonb({"skills_to_inject_into_system_prompt": wanted}),
             Jsonb({"skills_to_inject_into_system_prompt": ["birth-skill"]}),
+            harness,
         ),
     )
     if cwd is not None:
@@ -92,10 +95,11 @@ def test_agent_skill_view_inputs_read_checkpointed_cwd_and_pinned_narrowing(
 ) -> None:
     agent_id = _agent(db_conn, tmp_path, ["overlay-skill"])
 
-    cwd, wanted = cluster.agent_skill_view_inputs(skill_pool, agent_id)
+    cwd, wanted, harness = cluster.agent_skill_view_inputs(skill_pool, agent_id)
 
     assert cwd == tmp_path
     assert wanted == ["overlay-skill"]
+    assert harness == "meiva"
 
 
 def test_agent_skill_view_missing_row_is_load_dir_only(
@@ -210,3 +214,13 @@ def test_agent_skill_view_without_machine_mcp_config_returns_empty_names(
     view = cluster.agent_skill_view_op(agent_id, skill_pool)
 
     assert view.mcp_names == []
+
+
+def test_agent_skill_view_excludes_compact_for_external_harness(
+    db_conn: psycopg.Connection, skill_pool: ConnectionPool, load_dir: Path
+) -> None:
+    agent_id = _agent(db_conn, None, ["*"], harness="claude_code")
+
+    view = cluster.agent_skill_view_op(agent_id, skill_pool)
+
+    assert [command.name for command in view.commands] == ["load-skill", "recap"]

@@ -9,10 +9,11 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from psycopg_pool import ConnectionPool, PoolTimeout
 from pydantic import BaseModel, Field
 
+from base.agents.birth.harness import coerce_harness
 from base.agents.impersonation import ImpersonationError
 from base.agents.impersonation.maintenance import force_expire_impersonation
 from base.agents.inbox.compact import insert_compact_request_inbound
-from base.api_contracts.agent_contract import AgentNotFound, AgentStatus
+from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, Harness
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
@@ -193,6 +194,22 @@ async def post_agent_resurrect(
     return ResurrectAgentResponse.model_validate(forwarded)
 
 
+def _assert_restart_native_blocking(pool: ConnectionPool, agent_id: int) -> None:
+    with pool.connection() as conn:
+        row = conn.execute("SELECT harness FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
+    if row is None:
+        raise AgentNotFound(f"agent {agent_id} does not exist")
+    harness = coerce_harness(row[0])
+    if harness is not Harness.MEIVA:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Restart is not supported for external harness '{harness.value}'; "
+                f"use terminate and resurrect instead."
+            ),
+        )
+
+
 @router.post(
     "/api/agents/{agent_id}/restart",
     description="Enqueue native restart on the agent's home runner.\n\nThe current turn reaches claim, returns normally and flushes its checkpoint.\nThe host then applies the exact command and releases the incarnation for\nnew admission, retaining agent ID and context. Terminated agents require\nresurrection; restart returns already_terminated for them.",
@@ -203,6 +220,7 @@ async def post_agent_restart(
     body: RestartAgentRequest = Body(default_factory=RestartAgentRequest),  # noqa: B008
 ) -> RestartAgentResponse:
 
+    await asyncio.to_thread(_assert_restart_native_blocking, request.app.state.db_pool, agent_id)
     if body.config_overlay:
         from base.packages.plugins.config_registration import validate_config_overlay
         from base.packages.plugins.plugin_errors import InvalidConfigOverlay
@@ -263,9 +281,20 @@ def _request_compaction_blocking(
     pool: ConnectionPool, db: Database, bus: EventBus, agent_id: int
 ) -> CompactAgentResponse:
     with pool.connection() as conn:
-        row = conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
+        row = conn.execute(
+            "SELECT status, harness FROM agents_meta WHERE id=%s", (agent_id,)
+        ).fetchone()
         if row is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
+        harness = coerce_harness(row[1])
+        if harness is not Harness.MEIVA:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Compaction is not supported for external harness '{harness.value}'; "
+                    f"the external CLI owns its own context window."
+                ),
+            )
         if row[0] == AgentStatus.TERMINATED:
             raise HTTPException(status_code=409, detail=f"agent {agent_id} is terminated")
         inbound_id = insert_compact_request_inbound(conn, agent_id, database=db, bus=bus)

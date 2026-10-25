@@ -129,12 +129,21 @@ def render_expanded_reference(
     model: str,
     catalog: ModelCatalog,
     report: bool,
+    extra_hidden_members: frozenset[str] = frozenset(),
 ) -> str:
     import meiva
     from meiva.sdk_surface.help import ModelHelpProfile
     from meiva.sdk_surface.help import render as render_help
 
-    profile = ModelHelpProfile.for_model(model, catalog=catalog)
+    base_profile = ModelHelpProfile.for_model(model, catalog=catalog)
+    profile = (
+        ModelHelpProfile(
+            hidden_members=base_profile.hidden_members | extra_hidden_members,
+            doc_style=base_profile.doc_style,
+        )
+        if extra_hidden_members
+        else base_profile
+    )
 
     logger = logging.getLogger(__name__)
     pieces: list[str] = []

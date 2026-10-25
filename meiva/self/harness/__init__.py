@@ -10,6 +10,16 @@ from meiva.sdk_surface import process_context
 __all_for_meiva__ = ["attach"]
 
 HANDLE_ENV = "MEIVA_HARNESS_HANDLE"
+HARNESS_ENV = "MEIVA_HARNESS"
+
+
+def ambient_harness_env() -> str | None:
+    """Return a non-native harness name from the process environment, if set."""
+    raw = os.environ.get(HARNESS_ENV, "").strip()
+    if raw and raw != "meiva":
+        return raw
+    return None
+
 
 _REGISTRATION_NAMES = frozenset({"HarnessRegistration", "RegistrationError", "handle_digest"})
 _STORE_NAMES = frozenset({"FileRegistrationStore", "default_store", "new_handle"})

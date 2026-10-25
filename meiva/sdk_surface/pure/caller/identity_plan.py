@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 from base.agents.context.identity import AgentIdentity
 
+HARNESS_FORBIDDEN_SELF_ACTIONS: frozenset[str] = frozenset({"attach", "compact", "restart"})
+
 
 @dataclass(frozen=True, slots=True)
 class CallerFacts:
@@ -19,6 +21,7 @@ class CallerFacts:
     actor: str | None
     owns_loop: bool
     has_lease: bool
+    harness: str = "meiva"
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,7 +37,7 @@ class ActorDecision:
     recheck_load_failure: bool = False
 
 
-def caller_facts(identity: AgentIdentity | None) -> CallerFacts | None:
+def caller_facts(identity: AgentIdentity | None, *, harness: str = "meiva") -> CallerFacts | None:
     if identity is None:
         return None
     return CallerFacts(
@@ -42,6 +45,7 @@ def caller_facts(identity: AgentIdentity | None) -> CallerFacts | None:
         actor=identity.actor,
         owns_loop=bool(identity.owns_loop),
         has_lease=identity.lease is not None,
+        harness=harness,
     )
 
 
@@ -76,12 +80,26 @@ def actor_after_external(facts: ActorFacts, external_source: str | None) -> Acto
     return ActorDecision(f"agent:{identity.agent_id}")
 
 
-def self_action_refusal(identity: CallerFacts | None, action: str) -> str | None:
-    if identity is not None and not identity.owns_loop:
+def native_harness_refusal(harness: str, action: str) -> str | None:
+    if action in HARNESS_FORBIDDEN_SELF_ACTIONS and harness and harness != "meiva":
         return (
-            f"meiva.self.{action}() can only be called from inside an agent process, "
-            f"not from a background script launched by one"
+            f"meiva.self.{action}() is only supported on the native 'meiva' harness "
+            f"(current harness: {harness!r}); the external harness CLI owns its own "
+            f"context window and turn loop"
         )
+    return None
+
+
+def self_action_refusal(identity: CallerFacts | None, action: str) -> str | None:
+    if identity is not None:
+        refused = native_harness_refusal(identity.harness, action)
+        if refused is not None:
+            return refused
+        if not identity.owns_loop:
+            return (
+                f"meiva.self.{action}() can only be called from inside an agent process, "
+                f"not from a background script launched by one"
+            )
     if identity is None or identity.agent_id is None:
         return (
             f"meiva.self.{action}() needs an established agent identity; this process "
