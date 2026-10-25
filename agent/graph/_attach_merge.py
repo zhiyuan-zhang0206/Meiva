@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import stat
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from agent.state import AttachEntry, AttachState
 from base.lm.attach.constants import ATTACH_MAX_FILE_BYTES, ATTACH_MEDIA_MIME
@@ -44,13 +44,16 @@ def merge_attachments(pending: AttachState, entries: list[dict[str, Any]] | None
     return pending.model_copy(update={"pending": merged})
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 def _validated_attachment(entry: object) -> AttachEntry | None:
-    if not isinstance(entry, dict):
+    if not _is_object_dict(entry):
         logger.warning("dropping exec attachment with non-dict entry")
         return None
-    raw_entry = cast("dict[str, Any]", entry)
-    path = raw_entry.get("path")
-    label = raw_entry.get("label")
+    path = entry.get("path")
+    label = entry.get("label")
     if not isinstance(path, str) or not isinstance(label, str | None):
         logger.warning("dropping exec attachment with invalid path or label")
         return None

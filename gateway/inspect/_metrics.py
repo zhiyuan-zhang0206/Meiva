@@ -406,10 +406,10 @@ def _throughput_and_activity(
 def _turn_evidence(
     *,
     historical: bool,
-    turns: Any,
-    observed: Any,
-    distribution: Any,
-    precision: Any,
+    turns: dict[date, dict[str, Any]],
+    observed: dict[date, dict[str, Any]],
+    distribution: list[tuple[float, int]],
+    precision: str,
     durations_known: bool,
 ) -> MetricEvidence:
     """The turn counters' evidence block: availability, precision and any retained archive source."""

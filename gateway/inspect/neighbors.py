@@ -25,6 +25,8 @@ import math
 from datetime import UTC, datetime
 from typing import Any
 
+from psycopg_pool import ConnectionPool
+
 from base.events.reads import audit_rows
 from base.events.reads.audit_rows import LINEAGE_EVENT_NAMES
 
@@ -32,7 +34,7 @@ from base.events.reads.audit_rows import LINEAGE_EVENT_NAMES
 _TIE_READ_STATEMENT_TIMEOUT_MS = 8_000
 
 
-def _fetch_edge_counts(pool: Any) -> list[tuple[int, int, str, int, datetime]]:
+def _fetch_edge_counts(pool: ConnectionPool[Any]) -> list[tuple[int, int, str, int, datetime]]:
     """Per-edge `(agent, target, event_name, count, last_seen)` from the audit record."""
     with pool.connection() as conn:
         conn.execute(f"SET LOCAL statement_timeout = {_TIE_READ_STATEMENT_TIMEOUT_MS}")
@@ -67,7 +69,9 @@ def _weights(
     return weights
 
 
-def _fetch_born_spawner_parents(pool: Any, *, root: int) -> dict[int, dict[int, float]]:
+def _fetch_born_spawner_parents(
+    pool: ConnectionPool[Any], *, root: int
+) -> dict[int, dict[int, float]]:
     """The immutable birth chain above ``root`` as child -> parent edges.
 
     Each child has at most one born_spawner parent, so every edge carries the
@@ -177,7 +181,9 @@ def _walk(
     return ranked[:limit]
 
 
-def born_chain(pool: Any, *, root: int, gamma: float = 0.5) -> list[tuple[int, int, float]]:
+def born_chain(
+    pool: ConnectionPool[Any], *, root: int, gamma: float = 0.5
+) -> list[tuple[int, int, float]]:
     """The immutable birth-parent chain above `root` — (agent_id, depth, score)
     rows, nearest ancestor first.
 
@@ -194,7 +200,7 @@ def compute(
     root: int,
     max_depth: int,
     limit: int,
-    db_pool: Any,
+    db_pool: ConnectionPool[Any],
     k: float = 0.5,
     gamma: float = 0.5,
 ) -> tuple[list[tuple[int, int, float]], list[tuple[int, int, float]]]:

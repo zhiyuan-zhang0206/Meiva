@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import TypeGuard
 
 from base.events.notifications.catalog import (
     CORE_CATEGORIES,
@@ -12,6 +12,14 @@ from base.events.notifications.catalog import (
 )
 from base.packages.plugins import enable_config
 from base.packages.plugins.manifest import load_manifest
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 # meiva:note
@@ -29,7 +37,12 @@ def categories_from_manifests(
         if name not in enabled:
             continue
         manifest = load_manifest(installed[name])
-        declared = cast(list[dict[str, Any]], manifest.contributions.get("notifications") or [])
+        raw_notifications = manifest.contributions.get("notifications")
+        declared = (
+            [item for item in raw_notifications if _is_str_object_dict(item)]
+            if _is_object_list(raw_notifications)
+            else []
+        )
         groups.append([category_from_manifest(item, plugin=name) for item in declared])
     return merge_catalog(groups)
 

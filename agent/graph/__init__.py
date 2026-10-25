@@ -45,7 +45,7 @@
 # meiva:link agent/graph/docs/graph.meiva.okf.md
 
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     # Real signatures for static checkers: `__getattr__` alone types the names
@@ -84,7 +84,7 @@ __all__ = [
 _init_complete = False
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> object:
     """PEP 562 lazy re-export of the submodule API (`__all__`): each branch imports
     its submodule on first access, so the import stays static and the node set
     stays out of importers that never touch these names."""

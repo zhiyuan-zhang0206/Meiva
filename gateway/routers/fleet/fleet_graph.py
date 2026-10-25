@@ -27,6 +27,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, LiteralString, NamedTuple
 
 from fastapi import APIRouter, Query, Request
+from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 from redis.exceptions import RedisError
 
@@ -75,7 +76,7 @@ def _read_cached_graph(bus: EventBus, key: str) -> FleetGraphResponse | None:
 # meiva:note
 # Cache a successful graph while reporting heartbeat health separately.
 def _finalize_graph_response(
-    pool: Any,
+    pool: ConnectionPool[Any],
     *,
     bus: EventBus,
     staleness: TelemetryStaleness,
@@ -148,7 +149,7 @@ def _edges_from(
 # Edges connect two live endpoints unless terminated agents are included; the
 # live set is the node set just read.
 def _fetch_pg_graph(
-    pool: Any,
+    pool: ConnectionPool[Any],
     *,
     not_terminated: LiteralString,
     include_terminated: bool,

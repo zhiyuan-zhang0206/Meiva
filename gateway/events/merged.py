@@ -11,17 +11,23 @@ import logging
 import math
 import time
 from collections.abc import AsyncGenerator, Sequence
-from typing import Any, Literal
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import TypeAdapter, ValidationError
+from redis.asyncio.client import PubSub
 
 from base import telemetry
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, GLOBAL_ROLES
-from base.events.live.redis_client import retry_auth_failures_async
-from gateway.events.sse import REDIS_ACL_ERRORS, REDIS_IO_ERRORS, close_pubsub
+from base.events.live.redis_client import AuthRetryAsyncRedis, retry_auth_failures_async
+from gateway.events.sse import (
+    REDIS_ACL_ERRORS,
+    REDIS_IO_ERRORS,
+    close_pubsub,
+    get_pubsub_message,
+)
 from gateway.events.sse_frames import SseCadence, parse_agent_ids, sse_frame, warm_frame
 from gateway.http.config import gateway_config
 from gateway.http.middleware import runtime_metrics, stopping
@@ -132,7 +138,7 @@ class ChannelQueue:
         return n
 
 
-PubsubPair = tuple[Any, Any]
+PubsubPair = tuple[PubSub, AuthRetryAsyncRedis]
 
 
 def _report_drops(queue: ChannelQueue, n: int) -> None:
@@ -158,9 +164,12 @@ def subscribe_errors(served: Sequence[Channel], exc: BaseException) -> dict[Chan
     return dict.fromkeys(served, message)
 
 
+# meiva:note
+# Open an async Redis pubsub client pair for the merged SSE stream.
+# meiva:link gateway/events/docs/sse/sse.meiva.okf.md
 def open_pubsub(bus: EventBus) -> PubsubPair:
-    client: Any = bus.open_async_redis()
-    pubsub: Any = client.pubsub()
+    client = bus.open_async_redis()
+    pubsub = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
     return pubsub, client
 
 
@@ -193,7 +202,7 @@ def _route(
 
 
 async def _drain(
-    pubsub: Any,
+    pubsub: PubSub,
     request: Request,
     flush_interval: float,
     queues: dict[Channel, ChannelQueue],
@@ -207,12 +216,7 @@ async def _drain(
         if remaining <= 0:
             break
         poll = min(remaining, 0.1)
-        msg = await retry_auth_failures_async(
-            lambda poll=poll: pubsub.get_message(
-                ignore_subscribe_messages=True,
-                timeout=poll,
-            )
-        )
+        msg = await retry_auth_failures_async(lambda poll=poll: get_pubsub_message(pubsub, poll))
         if msg is None:
             break
         payload = msg["data"]
@@ -237,7 +241,7 @@ def plan_sources(bus_channel: str, channels: Sequence[Channel]) -> list[tuple[st
 
 
 async def attach_sources(
-    bus: EventBus, pubsub: Any, channels: Sequence[Channel]
+    bus: EventBus, pubsub: PubSub, channels: Sequence[Channel]
 ) -> tuple[list[tuple[str, list[Channel]]], dict[Channel, str]]:
     sources = plan_sources(bus.channel, channels)
     errors: dict[Channel, str] = {}
@@ -274,8 +278,8 @@ def flush_frames(
 # client abort still closes the pubsub socket; `stopping` ends a gateway handover.
 # meiva:link gateway/events/docs/sse/sse.meiva.okf.md
 async def _finish(
-    pubsub: Any,
-    client: Any,
+    pubsub: PubSub,
+    client: AuthRetryAsyncRedis,
     sources: Sequence[tuple[str, list[Channel]]],
     queues: dict[Channel, ChannelQueue],
     opened: float,

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
@@ -34,6 +34,10 @@ from .prompt.skill_selection import indexed_skill_identifiers
 from .prompt.system_prompt import build_harness_system_prompt, build_system_prompt
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _cluster_facts(ctx: MeivaContext) -> tuple[ClusterFact, ...]:
     if ctx.ops_pool is None or ctx.identity is None:
         machine = machine_clause(ctx)
@@ -52,8 +56,8 @@ def _cluster_facts(ctx: MeivaContext) -> tuple[ClusterFact, ...]:
         return (ClusterFact(machine, "agent-runner"),) if machine else ()
     facts: list[ClusterFact] = []
     for name, role, description in rows:
-        if isinstance(role, list):
-            role_str = ", ".join(str(r) for r in cast(list[object], role)) or "host"
+        if _is_object_list(role):
+            role_str = ", ".join(str(r) for r in role) or "host"
         else:
             role_str = str(role or "host")
         desc = f"{role_str} ({description})" if description else role_str

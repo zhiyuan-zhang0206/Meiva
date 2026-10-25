@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any, Literal, cast
+from typing import Any, Literal, TypeGuard
 
 import httpx
 from fastapi import FastAPI, Request
-from mcp.server.mcpserver import Context
+from mcp.server.mcpserver import Context, MCPServer
+from starlette.types import Receive, Scope, Send
 
 from base.api_contracts.idempotency import keyed_headers
 from base.api_contracts.mcp_tool_contract import server_instructions, tool_description
@@ -19,6 +20,10 @@ _FORWARDED_HEADERS = ("authorization", "cookie", "host", "origin")
 _API_BASE_URL = "http://mcp-forward.invalid"
 _SPAWNER = "mcp"
 _MESSAGE_SOURCE = "user"
+
+
+def _is_str_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
 
 
 async def _call_api(
@@ -52,15 +57,15 @@ async def _call_api(
         )
     if response.is_error:
         raise ToolError(response.text)
-    return cast(dict[str, Any], response.json())
+    payload: object = response.json()
+    if not _is_str_any_dict(payload):
+        raise TypeError("expected JSON object from gateway API")
+    return payload
 
 
-def _register_tools(server: object, app: FastAPI) -> None:
-    from mcp.server.mcpserver import MCPServer
+def _register_tools(server: MCPServer, app: FastAPI) -> None:
 
-    typed_server = cast(MCPServer, server)
-
-    @typed_server.tool(description=tool_description("list_agents"))
+    @server.tool(description=tool_description("list_agents"))
     async def list_agents(
         ctx: Context,
         scope: Literal["live", "terminated", "all"] | None = None,
@@ -71,15 +76,15 @@ def _register_tools(server: object, app: FastAPI) -> None:
         params = {"scope": scope, "query": query, "before_id": before_id, "limit": limit}
         return await _call_api(app, ctx, "GET", "/api/agents", params=params)
 
-    @typed_server.tool(description=tool_description("get_agent"))
+    @server.tool(description=tool_description("get_agent"))
     async def get_agent(agent_id: int, ctx: Context) -> dict[str, Any]:
         return await _call_api(app, ctx, "GET", f"/api/agents/{agent_id}")
 
-    @typed_server.tool(description=tool_description("cluster_status"))
+    @server.tool(description=tool_description("cluster_status"))
     async def cluster_status(ctx: Context) -> dict[str, Any]:
         return await _call_api(app, ctx, "GET", "/api/cluster/status")
 
-    @typed_server.tool(description=tool_description("spawn_agent_guarded_v1"))
+    @server.tool(description=tool_description("spawn_agent_guarded_v1"))
     async def spawn_agent_guarded_v1(
         prompt: str,
         idempotency_key: str,
@@ -107,7 +112,7 @@ def _register_tools(server: object, app: FastAPI) -> None:
             headers=keyed_headers(idempotency_key),
         )
 
-    @typed_server.tool(description=tool_description("send_message"))
+    @server.tool(description=tool_description("send_message"))
     async def send_message(
         agent_id: int,
         content: str,
@@ -125,13 +130,13 @@ def _register_tools(server: object, app: FastAPI) -> None:
             headers=None if idempotency_key is None else keyed_headers(idempotency_key),
         )
 
-    @typed_server.tool(description=tool_description("get_messages"))
+    @server.tool(description=tool_description("get_messages"))
     async def get_messages(agent_id: int, ctx: Context, limit: int | None = None) -> dict[str, Any]:
         return await _call_api(
             app, ctx, "GET", f"/api/agents/{agent_id}/messages", params={"limit": limit}
         )
 
-    @typed_server.tool(description=tool_description("terminate_agent"))
+    @server.tool(description=tool_description("terminate_agent"))
     async def terminate_agent(
         agent_id: int,
         ctx: Context,
@@ -150,7 +155,6 @@ def _register_tools(server: object, app: FastAPI) -> None:
 
 # meiva:link gateway/mcp_server/docs/mcp-endpoint/model-capability-failures.meiva.okf.md
 def build_manager(app: FastAPI):  # noqa: ANN201
-    from mcp.server.mcpserver import MCPServer
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
     server = MCPServer("meiva", instructions=server_instructions())
@@ -160,9 +164,9 @@ def build_manager(app: FastAPI):  # noqa: ANN201
     return manager
 
 
-def mcp_gateway(app: FastAPI) -> Callable[..., Awaitable[None]]:
+def mcp_gateway(app: FastAPI) -> Callable[[Scope, Receive, Send], Awaitable[None]]:
 
-    async def _gateway(scope: dict[str, Any], receive: Any, send: Any) -> None:
+    async def _gateway(scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             return
         manager = getattr(app.state, "mcp_manager", None)

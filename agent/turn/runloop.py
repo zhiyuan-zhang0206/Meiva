@@ -1,7 +1,7 @@
 """Shared graph invocation configuration and recoverable turn-error reporting."""
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
@@ -176,7 +176,7 @@ async def _record_permanent_reject_outcome(
             vendor=_model_vendor(ctx),
             status=exc.status,
             reason=reason,
-            occurred_at=occurred_at if occurred_at is not None else datetime.now(UTC),
+            occurred_at=occurred_at if occurred_at is not None else ctx.require_clock().now(),
         )
     except Exception:
         logger.opt(exception=True).warning(
@@ -205,13 +205,15 @@ async def _open_breaker(
     exc: FatalProviderError,
     reason: str,
     *,
+    occurred_at: datetime | None,
     emit_reports: bool,
 ) -> CircuitState:
     """Open the heartbeat circuit breaker for `reason`, with its log line and audit event."""
+    now = occurred_at if occurred_at is not None else ctx.require_clock().now()
     state = CircuitState(
         open=True,
         reason=reason,
-        opened_at=datetime.now(UTC).isoformat(),
+        opened_at=now.isoformat(),
     )
     logger.warning(
         "heartbeat circuit breaker OPEN — reason={reason} status={status}",
@@ -271,7 +273,7 @@ async def _apply_provider_failure(
         )
         return
     input_update["circuit"] = await _open_breaker(
-        ctx, agent_id, exc, reason, emit_reports=emit_reports
+        ctx, agent_id, exc, reason, occurred_at=occurred_at, emit_reports=emit_reports
     )
 
 

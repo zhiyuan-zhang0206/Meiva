@@ -15,7 +15,7 @@ import traceback
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, Protocol, TypeGuard
 
 from agent.execution.delivery_plan import (
     delivers_telemetry,
@@ -49,7 +49,7 @@ class _FieldSetter(Protocol):
 
 
 class _Sdk(Protocol):
-    state: Any
+    state: object
     state_update: dict[str, Any]
 
     def ensure_plugins_loaded(
@@ -103,6 +103,10 @@ def _arm_watchdog(timeout_s: float) -> None:
     timer.start()
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
 def pop_overlay_env() -> tuple[dict[str, object] | None, dict[str, object] | None]:
     import json as _json
 
@@ -114,10 +118,10 @@ def pop_overlay_env() -> tuple[dict[str, object] | None, dict[str, object] | Non
         if not raw:
             maps[env_name] = None
             continue
-        value = _json.loads(raw)
-        if not isinstance(value, dict):
+        value: object = _json.loads(raw)
+        if not _is_object_dict(value):
             raise TypeError(f"{env_name} must be a JSON object, got {type(value).__name__}")
-        maps[env_name] = cast(dict[str, object], value)
+        maps[env_name] = {str(k): v for k, v in value.items()}
     return (
         maps[AGENT_BIRTH_CONFIG_ENV],
         maps[AGENT_CONFIG_OVERLAY_ENV],
@@ -223,11 +227,11 @@ class _LazyStateSlot:
         object.__setattr__(self, "_real", real)
         meiva.state = real
 
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name: str) -> object:
         self.materialize()
         return getattr(object.__getattribute__(self, "_real"), name)
 
-    def __setattr__(self, name: str, value: Any) -> None:
+    def __setattr__(self, name: str, value: object) -> None:
         self.materialize()
         setattr(object.__getattribute__(self, "_real"), name, value)
 
@@ -295,13 +299,13 @@ def run_code(code: str, payload: ResultPayload) -> None:
     from meiva.sdk_surface.installation import installed
 
     register_agent_source(code)
-    builtins_source = (
-        cast(dict[str, Any], __builtins__)
-        if isinstance(__builtins__, dict)
-        else cast(dict[str, Any], vars(__builtins__))
-    )
+    import builtins
 
-    builtins_map = dict(builtins_source)
+    builtins_map: dict[str, Any] = (
+        {str(k): v for k, v in __builtins__.items()}
+        if _is_object_dict(__builtins__)
+        else dict(vars(builtins))
+    )
     original_help = builtins_map["help"]
     builtins_map["help"] = HelpRouter(original_help)
     fresh_globals: dict[str, Any] = {
@@ -450,7 +454,7 @@ def run_child(
 
     apply_plugin_overlay(birth, overlay)
 
-    def read_agent_default(_domain: str, field: str) -> Any:
+    def read_agent_default(_domain: str, field: str) -> object:
         return sdk_settings.config_authority().service_field_value(field)
 
     if framework_overlay_applied:

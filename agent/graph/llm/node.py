@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import UTC, datetime
-from typing import Any, Literal, NoReturn, cast
+from datetime import datetime
+from typing import Any, Literal, NoReturn, TypeGuard
 
 from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.runnables import RunnableConfig
@@ -75,9 +75,10 @@ def _finalize_turn_observability(
     model: str,
     *,
     catalog: ModelCatalog,
+    now: datetime,
 ) -> None:
     kw = read_meiva_kwargs(final_msg)
-    kw["meiva_created_at"] = datetime.now(UTC).isoformat()
+    kw["meiva_created_at"] = now.isoformat()
     reasoning_ms_by_block = handler.reasoning_ms_by_block
     if reasoning_ms_by_block:
         kw["meiva_reasoning_ms_by_block"] = {
@@ -237,14 +238,21 @@ async def llm_attempt(
             return result
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 def _is_silent_idle(final_msg: AIMessage) -> bool:
     if final_msg.tool_calls or final_msg.text:
         return False
     output_tokens = (final_msg.usage_metadata or {}).get("output_tokens", 0)
-    _content: Any = final_msg.content
-    has_thinking_block = isinstance(_content, list) and any(
-        isinstance(b, dict) and cast(dict[str, Any], b).get("type") == "thinking"
-        for b in content_blocks(cast(list[Any], _content))
+    _content: object = final_msg.content
+    has_thinking_block = _is_object_list(_content) and any(
+        isinstance(b, dict) and b.get("type") == "thinking" for b in content_blocks(_content)
     )
     return (
         has_thinking_block
@@ -373,6 +381,7 @@ async def _llm_node_impl(
         handler,
         ctx.require_agent().brain.llm_model,
         catalog=ctx.require_catalog(),
+        now=ctx.require_clock().now(),
     )
 
     cut_update = await due_chunk_update(
@@ -394,8 +403,10 @@ async def _llm_node_impl(
         cap=ctx.require_agent().read("lm", "llm_silent_idle_max_output_tokens"),
     )
     if silent_idle_cmd is not None:
+        raw_update: object = silent_idle_cmd.update
+        silent_update = raw_update if _is_str_any_dict(raw_update) else {}
         return Command[LlmGoto](
-            update={**cast("dict[str, Any]", silent_idle_cmd.update), **cut_update},
+            update={**silent_update, **cut_update},
             goto=silent_idle_cmd.goto,
         )
 

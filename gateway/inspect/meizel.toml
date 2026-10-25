@@ -23,22 +23,3 @@ exports = ["neighbors.py", "okf_graph.py", "router.py", "schemas.py"]
 "_plugin_metrics.py#clock datetime.datetime.now" = 1
 "neighbors.py#clock datetime.datetime.now" = 1
 "router.py#clock datetime.datetime.now" = 1
-
-[debt.any-collaborator]
-"_live.py#any InspectDbRows.last_active_at" = 1
-"_live.py#any InspectDbRows.last_heartbeat_at" = 1
-"_live.py#any InspectDbRows.last_probe_at" = 1
-"_live.py#any InspectDbRows.paused_until" = 1
-"_live.py#any InspectDbRows.spawned_at" = 1
-"_metrics.py#any _turn_evidence.distribution" = 1
-"_metrics.py#any _turn_evidence.observed" = 1
-"_metrics.py#any _turn_evidence.precision" = 1
-"_metrics.py#any _turn_evidence.turns" = 1
-"_plugin_metrics.py#any _as_float.value" = 1
-"neighbors.py#any _fetch_born_spawner_parents.pool" = 1
-"neighbors.py#any _fetch_edge_counts.pool" = 1
-"neighbors.py#any born_chain.pool" = 1
-"neighbors.py#any compute.db_pool" = 1
-
-[debt.type-cast]
-"_plugin_metrics.py#cast _execute_metric" = 1

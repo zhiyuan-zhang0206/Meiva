@@ -54,7 +54,7 @@
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_core.messages.modifier import RemoveMessage
@@ -103,9 +103,11 @@ def unpaired_tool_calls(messages: Sequence[AnyMessage]) -> list[tuple[int, list[
     return list(reversed(out))
 
 
+# meiva:note
+# Whether this ToolMessage is the recovery marker, not a real result.
+# meiva:link agent/hooks/docs/hooks.meiva.okf.md
 def _is_synthetic_tool_result(message: ToolMessage) -> bool:
-    """Whether this ToolMessage is the recovery marker, not a real result."""
-    content = cast(Any, message).content
+    content: object = message.content  # pyright: ignore[reportUnknownMemberType]
     return isinstance(content, str) and content == INTERRUPTED_TOOL_RESULT
 
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Literal, cast
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
@@ -69,6 +69,9 @@ def _assert_machine_known(target: str, pool: ConnectionPool, *, local_machine_na
             raise HTTPException(status_code=404, detail=f"unknown machine: {target!r}")
 
 
+# meiva:note
+# Resolve the target machine's declared role set from local identity or registry rows.
+# meiva:link gateway/routers/configuration/docs/configuration.meiva.okf.md
 def _target_capabilities(
     target: str,
     db: Database,
@@ -77,9 +80,9 @@ def _target_capabilities(
 ) -> list[MachineRole]:
 
     if target == local_machine.name():
-        return cast("list[MachineRole]", sorted(local_machine.role()))
+        return sorted(local_machine.role())  # pyright: ignore[reportReturnType]
     try:
-        return cast("list[MachineRole]", lookup_role(db, target))
+        return list(lookup_role(db, target))  # pyright: ignore[reportReturnType]
     except MachineNotRegistered:
         return []
 
@@ -389,6 +392,9 @@ async def get_config_audit(
     return ConfigAuditView(records=records[:effective_last])
 
 
+# meiva:note
+# Resolve every per-model-defaultable setting for one model via explain_setting.
+# meiva:link gateway/routers/configuration/docs/configuration.meiva.okf.md
 @router.get(
     "/api/config/resolved",
     description='Resolve every per-model-defaultable setting for one model — read-only.\n\nAnswers "what will an agent on this model actually run with, and which layer\ndecided that": shared default < per-model default (both code, in\n`base/lm/registry.py`) < explicit `.env` value. `explain_setting` does the\nlayering — the same function the runtime resolves through, so this view\ncannot drift from the value an agent gets.\n\nThe explicit layer is each field\'s `current_value` from the config metadata,\ni.e. read fresh from `.env` rather than the gateway\'s boot-time settings —\nmatching what the config panel shows and what the next agent process boots\nwith (every tunable here is `restart_required="agent"`).\n\nMachine-independent by construction: every tunable is cluster-scope, so\nthere is no `?machine=` here. The per-agent overlay — the one layer above\nexplicit — is per process and invisible from the cluster; `per_agent` marks\nwhich fields a spawn/restart overlay may still override.',
@@ -418,9 +424,7 @@ def get_resolved_config(request: Request, model: str | None = None) -> ResolvedC
                 choices=meta.choices,
                 group=meta.group,
                 effective_value=resolved.value,
-                source=cast(
-                    "Literal['explicit', 'model-default', 'shared-default']", resolved.source
-                ),
+                source=resolved.source,  # pyright: ignore[reportArgumentType]
                 explicit_value=resolved.explicit_value,
                 model_default=resolved.model_default,
                 shared_default=resolved.shared_default,

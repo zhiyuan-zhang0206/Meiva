@@ -496,7 +496,7 @@ def _establish_spawned_relay(
     antigravity_endpoint_file = None
     if session["relay_provider"] == "antigravity":
         try:
-            resolve_antigravity_endpoint(session["relay_thread_id"])
+            resolve_antigravity_endpoint(session["relay_thread_id"], environment={})
         except (OSError, RuntimeError, ValueError) as exc:
             return _roll_back_relay_failure(
                 db, bus, session, incarnation, endpoint_unusable_reason(str(exc))

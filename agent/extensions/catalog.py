@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import TypeGuard
 
 from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.lm.provider_api import DecisionProviderContribution, ProviderContribution
@@ -210,7 +210,7 @@ class _SourceText:
         return self._text
 
 
-def _unquoted(annotation: Any) -> Any:
+def _unquoted(annotation: object) -> object:
     return _SourceText(annotation) if isinstance(annotation, str) else annotation
 
 
@@ -354,6 +354,10 @@ def declared_vs_registered(view: PluginView) -> tuple[DiffEntry, ...]:
     return tuple(entries)
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 # meiva:link agent/extensions/docs/catalog.meiva.okf.md
 def _declared_identifiers(manifest: PluginManifest, key: str) -> set[str]:
     declared = manifest.contributions.get(key)
@@ -361,9 +365,9 @@ def _declared_identifiers(manifest: PluginManifest, key: str) -> set[str]:
         return set()
     if key == "config":
         return {"<declared>"}
-    if not isinstance(declared, list):
+    if not _is_object_list(declared):
         raise TypeError(f"contributions.{key} must be a validated list")
-    return {str(item) for item in cast(list[object], declared)}
+    return {str(item) for item in declared}
 
 
 def _registered_identifiers(view: PluginView, surface: Surface) -> set[str]:

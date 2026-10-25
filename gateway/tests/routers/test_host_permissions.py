@@ -10,7 +10,6 @@ from base.host.permissions_helper.grants import gate
 from base.host.permissions_helper.grants.catalog import PING_KEYS, PREFLIGHT_SERVICES, Grant
 from base.host.permissions_helper.grants.probe import ProbeResult
 from gateway.routers import host_permissions
-from services.desktop.permissions_helper.onboarding import GateService
 
 NOW = datetime(2026, 10, 17, 10, 0, tzinfo=UTC)
 
@@ -30,7 +29,7 @@ def _report(**overrides: Grant) -> gate.GateReport:
     )
 
 
-class FakeGate(GateService):
+class FakeGate:
     def __init__(self, report: gate.GateReport) -> None:
         self._report = report
         self.requested = 0

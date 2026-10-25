@@ -1,6 +1,5 @@
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import psycopg
@@ -17,6 +16,7 @@ from agent.impersonation_handoff import (
     resume_note_pending,
     start_update,
 )
+from agent.state import BaseAgentState
 from agent.tests.impersonation.lease_support import (
     Cluster,
     checkpoint_inserts_failing,
@@ -237,10 +237,10 @@ def test_a_note_stamp_follows_the_policy_it_is_given() -> None:
 
 def test_resume_note_pending_tracks_the_trailing_end_note() -> None:
     note = HumanMessage(content="session ended", id="impersonation-handoff:7:0")
-    state = SimpleNamespace(impersonation_handoff_id="7:0", messages=[note])
+    state = BaseAgentState(impersonation_handoff_id="7:0", messages=[note])
     assert resume_note_pending(state)
     state.messages.append(HumanMessage(content="next task", id="m-next"))
     assert not resume_note_pending(state)
     state.impersonation_handoff_id = None
     assert not resume_note_pending(state)
-    assert not resume_note_pending(SimpleNamespace(impersonation_handoff_id="9:0", messages=[]))
+    assert not resume_note_pending(BaseAgentState(impersonation_handoff_id="9:0", messages=[]))

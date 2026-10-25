@@ -180,7 +180,7 @@ async def settle_claimed_batch(
         # meiva:note
         # The claim that takes the restart has read the mark; it describes one interrupt.
         update["interrupted_by_restart"] = False
-    return Command[ClaimGoto](update=update, goto=route_target(ctx, outcome.command.goto))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportArgumentType]
+    return Command[ClaimGoto](update=update, goto=route_target(ctx, outcome.command.goto))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType, reportArgumentType, reportCallIssue]
 
 
 async def claim_node(

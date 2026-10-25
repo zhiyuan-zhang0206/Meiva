@@ -5,10 +5,9 @@ Extracted from agent/graph/claim/node.py (Phase 2 display isolation).
 
 from __future__ import annotations
 
-from typing import Any
-
 from langchain_core.messages import BaseMessage
 
+from agent.state import BaseAgentState
 from base.agents.context import MeivaContext
 from base.agents.history.timeline import build_timeline_items, tail_window
 from base.events.live.projection import InboundCommitted, TimelineSnapshot
@@ -30,7 +29,7 @@ async def publish_inbound_committed(
 
 def publish_end_timeline_snapshot(
     ctx: MeivaContext,
-    state: Any,  # AgentState (lazy import to avoid circular)
+    state: BaseAgentState,
     agent_id: int,
     new_msgs: list[BaseMessage],
 ) -> None:

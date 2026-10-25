@@ -29,7 +29,7 @@ import re
 from collections.abc import Collection, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, LiteralString, cast
+from typing import Any
 
 import psycopg
 from fastapi import HTTPException
@@ -186,11 +186,11 @@ def translate_macros(sql: str, *, logql: bool = False) -> str:
     return sql.replace("$__interval_ms", _MACRO_INTERVAL_MS).replace("$__interval", _MACRO_INTERVAL)
 
 
-def _as_float(value: Any) -> float | None:
+def _as_float(value: object) -> float | None:
     """DB value -> float for the JSON response; None when it is NULL or
     non-numeric (the metric's query decided to emit something else — the panel
     renders it as missing rather than crash)."""
-    if value is None:
+    if value is None or not isinstance(value, int | float | str):
         return None
     try:
         return float(value)
@@ -198,18 +198,15 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
+# meiva:note
+# Run one rendered query and fold the rows into a PluginMetricResult.
+# The query is the rendered + re-validated template (see render_metric_query) —
+# a str that psycopg's typing only accepts as LiteralString; injection safety
+# was established by validate_metric_sql, not by psycopg.
+# meiva:link gateway/inspect/docs/inspect.meiva.okf.md
 def _execute_metric(
     conn: Connection[Any], cur: Cursor, spec: MetricSpec, query: str
 ) -> PluginMetricResult:
-    """Run one rendered query and fold the rows into a PluginMetricResult.
-
-    `panel` picks the payload shape: stat -> `value` (first row, first column);
-    timeseries / barchart -> `series` (rows as (bucket ts, value), capped at
-    _MAX_METRIC_ROWS). The query runs inside a savepoint (`conn.transaction()`
-    nests as one when the outer transaction is open), so a failing query rolls
-    back only its own savepoint — a whitelist-valid template that fails at
-    runtime (e.g. a missing column) lands in the result's `error` field
-    without poisoning the sibling metrics' queries in the same transaction."""
     base = PluginMetricResult(
         name=spec.name,
         title=render_title(spec),
@@ -222,11 +219,7 @@ def _execute_metric(
         return _execute_metric_logql(conn, spec, query)
     try:
         with conn.transaction():
-            # The query is the rendered + re-validated template (see
-            # render_metric_query) — a str that psycopg's typing only accepts
-            # as LiteralString; the cast documents that the injection safety
-            # was established by validate_metric_sql, not by psycopg.
-            cur.execute(cast(LiteralString, query))
+            cur.execute(query)  # pyright: ignore[reportArgumentType, reportCallIssue]
             rows = cur.fetchmany(_MAX_METRIC_ROWS + 1)
     except psycopg.Error as exc:
         return base.model_copy(update={"error": f"query failed: {exc}"})

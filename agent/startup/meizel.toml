@@ -7,11 +7,3 @@
 
 [debt.ambient-read]
 "__init__.py#random uuid.uuid4" = 1
-
-[debt.any-collaborator]
-"__init__.py#any wrap_saver_writes_with_loud_failure._logged_aput.args" = 1
-"__init__.py#any wrap_saver_writes_with_loud_failure._logged_aput.kwargs" = 1
-"__init__.py#any wrap_saver_writes_with_loud_failure._logged_aput.return" = 1
-"__init__.py#any wrap_saver_writes_with_loud_failure._logged_aput_writes.args" = 1
-"__init__.py#any wrap_saver_writes_with_loud_failure._logged_aput_writes.kwargs" = 1
-"__init__.py#any wrap_saver_writes_with_loud_failure._logged_aput_writes.return" = 1

@@ -21,30 +21,19 @@ blocks immediately after") and would also trip the dangling-tool_use repair hook
 
 from __future__ import annotations
 
-from typing import Any, cast
-
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
 
 
+# meiva:note
+# Merge the plugin's in-memory system notes into the exec's messages delta.
+# The exec node defers notes until all tool results commit, preserving
+# tool_use -> tool_result adjacency.
+# meiva:link agent/graph/exec/docs/exec-notes.meiva.okf.md
 def merge_exec_notes(
     state_messages_update: list[AnyMessage],
     plugin_messages: list[AnyMessage] | None,
 ) -> list[AnyMessage]:
-    """Merge the plugin's in-memory system notes into the exec's messages delta.
-
-    The exec node defers notes until all tool results commit, preserving
-    tool_use -> tool_result adjacency (see module docstring).
-
-    Args:
-        state_messages_update: this call's exec-result ToolMessage, or notes
-            already deferred in `pending_exec_notes` by earlier calls.
-        plugin_messages: messages the plugin wrote to the base `messages`
-            channel this turn (context-file notes), or None.
-    """
     if plugin_messages is not None:
-        state_messages_update = cast(
-            list[AnyMessage],
-            add_messages(cast(Any, state_messages_update), cast(Any, plugin_messages)),
-        )
+        state_messages_update = add_messages(state_messages_update, plugin_messages)  # pyright: ignore[reportArgumentType, reportAssignmentType]
     return state_messages_update

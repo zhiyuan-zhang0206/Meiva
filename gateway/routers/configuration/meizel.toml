@@ -6,7 +6,3 @@ exports = ["default_model.py", "runtime.py"]
 
 [purity]
 "write_plan.py" = "strict"
-
-[debt.type-cast]
-"runtime.py#cast _target_capabilities" = 2
-"runtime.py#cast get_resolved_config" = 1

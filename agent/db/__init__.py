@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from time import monotonic
-from typing import Any, NamedTuple, TypeVar, cast
+from typing import Any, NamedTuple, TypeVar
 from weakref import WeakKeyDictionary
 
 import psycopg
@@ -54,14 +54,21 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
     """
 
     def __init__(
-        self, *args: Any, pool_name: str, slow_acquire_warn_seconds: float, **kwargs: Any
+        self,
+        conninfo: str = "",
+        *,
+        pool_name: str,
+        slow_acquire_warn_seconds: float,
+        **kwargs: object,
     ) -> None:
-        self._pool_name = pool_name
-        self._slow_acquire_warn_seconds = slow_acquire_warn_seconds
+        # meiva:note
         # The borrow in flight on each task of THIS pool: `_getconn_unchecked` and
         # `_check_connection` run inside that task and add their share to its span.
+        # meiva:link agent/db/docs/db.meiva.okf.md
+        self._pool_name = pool_name
+        self._slow_acquire_warn_seconds = slow_acquire_warn_seconds
         self._borrow_spans: WeakKeyDictionary[asyncio.Task[Any], _BorrowSpan] = WeakKeyDictionary()
-        super().__init__(*args, **kwargs)
+        super().__init__(conninfo, **kwargs)  # pyright: ignore[reportArgumentType]
 
     def _acquire_stats(self) -> dict[str, int]:
         """Stable diagnostic fields across psycopg-pool versions and states."""
@@ -230,7 +237,7 @@ async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
         row = await cur.fetchone()
         if row is None:
             return None
-        ancestor_id = cast(int, row[0])
+        ancestor_id = int(row[0])
         await cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
             "VALUES (%s, %s, 'system_note', 'system', %s::jsonb) RETURNING id",
@@ -239,7 +246,7 @@ async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
         inbound_row = await cur.fetchone()
         if inbound_row is None:
             raise RuntimeError("expected inbound row after fatal provider ancestor report insert")
-        inbound_id = cast(int, inbound_row[0])
+        inbound_id = int(inbound_row[0])
     await asyncio.to_thread(publish_inbound_wake, db, bus, ancestor_id, str(inbound_id))
     return ancestor_id
 

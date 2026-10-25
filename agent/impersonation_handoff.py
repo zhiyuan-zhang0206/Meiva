@@ -1,9 +1,9 @@
 """Durable native checkpoint receipts for automatic session endings."""
 
 import asyncio
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Collection
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
@@ -39,10 +39,12 @@ AgentGraph = CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, Ba
 
 async def flush_checkpoint(checkpointer: object, agent_id: int) -> None:
     """Flush the optional buffered saver without probing dynamic attributes."""
-    attributes = getattr(checkpointer, "__dict__", {})
-    if "_meiva_nstep_flush" in attributes:
-        flush = cast(Callable[[str], Awaitable[None]], attributes["_meiva_nstep_flush"])
-        await flush(str(agent_id))
+    attributes: dict[str, object] = getattr(checkpointer, "__dict__", {})
+    flush = attributes.get("_meiva_nstep_flush")
+    if callable(flush):
+        pending = flush(str(agent_id))
+        if isinstance(pending, Awaitable):
+            await pending
 
 
 # meiva:note
@@ -112,7 +114,7 @@ async def ensure_start_marker(
     await flush_graph_checkpoint(graph, session["agent_id"])
 
 
-def resume_note_pending(state: Any) -> bool:
+def resume_note_pending(state: BaseAgentState) -> bool:
     """Whether the newest message is an end-of-session note awaiting its first turn.
 
     `deliver_handoff` appends the note as the first resumed input. It is a system

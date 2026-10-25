@@ -10,5 +10,4 @@ exports = ["compact.py", "framework.py", "node.py", "tests"]
 "__init__.py" = "strict"
 
 [debt.ambient-read]
-"capabilities.py#clock datetime.datetime.now" = 1
-"compact.py#clock datetime.datetime.now" = 4
+"compact.py#clock datetime.datetime.now" = 1
