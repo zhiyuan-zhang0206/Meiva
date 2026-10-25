@@ -302,11 +302,11 @@ class ForkConfigChangeNotAllowed(ForkError, MeivaAgentError):  # noqa: N818 — 
 
 
 # meiva:note
-# A fork may not change the harness it runs on: it continues the source agent's
-# identity, so it runs the same harness. Asking for a different one is refused
-# here rather than silently accepted or merely warned about.
+# A fork may not change the harness it runs on or fork an external harness: it
+# continues a native meiva agent's identity. Asking to fork an external harness
+# or onto an external harness is refused here rather than silently accepted.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
-class ForkHarnessMismatch(ForkError, MeivaAgentError):  # noqa: N818
+class ForkHarnessMismatch(ForkError, MeivaAgentError, ValueError):  # noqa: N818
     reason = ErrorReason.FORK_HARNESS_MISMATCH
     http_status = 400
 

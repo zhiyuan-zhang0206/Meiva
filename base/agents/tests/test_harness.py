@@ -360,6 +360,30 @@ def test_fork_harness_mismatch_is_a_fork_error() -> None:
 
     assert issubclass(ForkHarnessMismatch, ForkError)
     assert issubclass(ForkHarnessMismatch, MeivaAgentError)
+    assert issubclass(ForkHarnessMismatch, ValueError)
+
+
+class _ForkSourceCursor:
+    def __init__(self, harness: str) -> None:
+        self._harness = harness
+
+    def execute(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
+    def fetchone(self) -> tuple[str]:
+        return (self._harness,)
+
+
+def test_resolve_birth_harness_refuses_forking_an_external_harness_source() -> None:
+    cur = cast("psycopg.Cursor[Any]", _ForkSourceCursor("claude_code"))
+    with pytest.raises(ForkHarnessMismatch, match="only supported on the native 'meiva' harness"):
+        resolve_birth_harness(cur, None, 17)
+
+
+def test_resolve_birth_harness_refuses_forking_onto_an_external_harness() -> None:
+    cur = cast("psycopg.Cursor[Any]", _ForkSourceCursor("meiva"))
+    with pytest.raises(ForkHarnessMismatch, match="cannot fork agent 17 onto harness 'codex'"):
+        resolve_birth_harness(cur, Harness.CODEX, 17)
 
 
 class _UnreadCursor:

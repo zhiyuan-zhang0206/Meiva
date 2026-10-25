@@ -35,6 +35,7 @@ from base.agents.context.identity import AgentIdentity
 from base.agents.messages.external_caller import external_caller
 from base.agents.sdk import call_policy
 from base.agents.sdk.call_policy import SamplingPolicyOwner
+from base.api_contracts.agent_contract import Harness
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
@@ -250,8 +251,11 @@ def launched_context(*, env: Mapping[str, str], config: ConfigBoot) -> MeivaCont
     if not config.prepared:
         config.read_process_environment()
     machine = machine_from_boot(config)
+    raw_harness = env.get("MEIVA_HARNESS", "").strip()
+    harness = Harness(raw_harness) if raw_harness in set(Harness) else Harness.MEIVA
     return MeivaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=False),
+        harness=harness,
         clients=derived_clients(config, machine),
         machine=machine,
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),

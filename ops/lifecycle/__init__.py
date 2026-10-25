@@ -454,10 +454,15 @@ def restart_blocking(
 
     with write_transaction(db_pool) as conn:
         row = conn.execute(
-            "SELECT status FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,)
+            "SELECT status, harness FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,)
         ).fetchone()
         if row is None:
             raise RuntimeError(f"agent {agent_id} does not exist")
+        if row[1] != "meiva":
+            raise ValueError(
+                f"Restart is not supported for external harness '{row[1]}'; "
+                f"use terminate and resurrect instead."
+            )
         if row[0] == "terminated":
             return None
         payload: dict[str, object] | None = None

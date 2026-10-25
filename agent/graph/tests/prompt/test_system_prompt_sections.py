@@ -721,3 +721,17 @@ def test_long_running_operation_without_fleet():
     assert "end your own process" in prompt
     assert "required response time" in prompt
     assert "preserving required verification" in prompt
+
+
+def test_harness_sdk_expand_section_exposes_only_terminate_pause_heartbeat_and_identity() -> None:
+    from agent.graph.prompt.system_prompt import harness_sdk_expand_section
+
+    rendered = harness_sdk_expand_section(_inputs(agent__sdk_expand_in_system_prompt=[]))
+    assert "## meiva.self" in rendered
+    assert "def terminate() -> NoReturn:" in rendered
+    assert "def pause_heartbeat(" in rendered
+    assert "AGENT_ID: int" in rendered
+    assert "MACHINE_SPEC: MachineSpec" in rendered
+    assert "def compact(summary: str)" not in rendered
+    assert "def restart(config_overlay:" not in rendered
+    assert "def attach(" not in rendered

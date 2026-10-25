@@ -82,6 +82,18 @@ def test_spawn_refuses_an_unknown_harness_before_the_request(no_gateway_http: No
         agents.spawn(harness="claude-code", machine="test-machine", idempotency_key="intent")
 
 
+def test_fork_refuses_an_external_harness_before_the_request(no_gateway_http: None) -> None:
+    with pytest.raises(
+        agents.ForkHarnessMismatch, match="only supported on the native 'meiva' harness"
+    ):
+        agents.spawn(
+            fork_from=7,
+            harness="claude_code",
+            machine="test-machine",
+            idempotency_key="intent",
+        )
+
+
 def test_harness_availability_reports_every_harness() -> None:
     rows = agents.harness_availability()
     assert [row.harness for row in rows] == list(agents.Harness)

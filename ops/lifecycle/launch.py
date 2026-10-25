@@ -7,7 +7,7 @@ import asyncio
 
 from psycopg_pool import ConnectionPool
 
-from base.agents.birth.harness import LAUNCHABLE_HARNESSES
+from base.agents.birth.harness import LAUNCHABLE_HARNESSES, resolve_birth_harness
 from base.agents.birth.spawn import latest_checkpoint_id
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.api_contracts.agent_contract import ForkSourceEmpty
@@ -97,6 +97,7 @@ def spawn_prechecks_blocking(
     fork_checkpoint: str | None = None
     if body.fork_from is not None:
         with db_pool.connection() as conn, conn.cursor() as cur:
+            resolve_birth_harness(cur, body.harness, body.fork_from)
             fork_checkpoint = latest_checkpoint_id(cur, body.fork_from)
         if fork_checkpoint is None:
             raise ForkSourceEmpty(

@@ -83,11 +83,25 @@ class TestSpawnHarness:
         self, db_conn: psycopg.Connection
     ) -> None:
         with gateway_test_client() as client:
-            source = _spawn(client, {"harness": "antigravity"})
+            source = _spawn(client, {"harness": "meiva"})
             _checkpoint(db_conn, source)
             fork = _spawn(client, {"fork_from": source})
-        assert _harness(db_conn, source) == "antigravity"
-        assert _harness(db_conn, fork) == "antigravity"
+        assert _harness(db_conn, source) == "meiva"
+        assert _harness(db_conn, fork) == "meiva"
+
+    def test_fork_of_an_external_harness_is_rejected_through_http(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        with gateway_test_client() as client:
+            source = _spawn(client, {"harness": "antigravity"})
+            _checkpoint(db_conn, source)
+            before = _agent_count(db_conn)
+            response = spawn_via_http(client, {"spawner": "user", "fork_from": source})
+        assert response.status_code == 400
+        body = response.json()
+        assert body["reason"] == "fork_harness_mismatch"
+        assert "only supported on the native 'meiva' harness" in body["detail"]
+        assert _agent_count(db_conn) == before
 
     def test_fork_naming_another_harness_is_rejected(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
@@ -104,7 +118,7 @@ class TestSpawnHarness:
 
     def test_fork_naming_its_own_harness_is_not_refused(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
-            source = _spawn(client, {"harness": "antigravity"})
+            source = _spawn(client, {"harness": "meiva"})
             _checkpoint(db_conn, source)
-            fork = _spawn(client, {"fork_from": source, "harness": "antigravity"})
-        assert _harness(db_conn, fork) == "antigravity"
+            fork = _spawn(client, {"fork_from": source, "harness": "meiva"})
+        assert _harness(db_conn, fork) == "meiva"
