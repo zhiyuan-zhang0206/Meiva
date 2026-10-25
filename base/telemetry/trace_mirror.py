@@ -256,12 +256,17 @@ def disk_usage(*, traces_dir: Path) -> tuple[float, int] | None:
     return usage.used / usage.total, usage.free
 
 
-def disk_watermark_exceeded(watermark: float, *, traces_dir: Path) -> bool:
+def disk_watermark_exceeded(
+    watermark: float,
+    *,
+    traces_dir: Path,
+    usage: tuple[float, int] | None = None,
+) -> bool:
     """True when the data disk's usage fraction exceeds the watermark.
 
     `watermark >= 1.0` disables the guard (the fraction can never exceed 1.0).
     """
     if watermark >= 1.0:
         return False
-    usage = disk_usage(traces_dir=traces_dir)
-    return usage is not None and usage[0] > watermark
+    measured = disk_usage(traces_dir=traces_dir) if usage is None else usage
+    return measured is not None and measured[0] > watermark

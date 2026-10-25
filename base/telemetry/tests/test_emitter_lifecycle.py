@@ -7,12 +7,13 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from base import telemetry
 from base.host import proc
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.telemetry.delivery import reporting
 
 CHILD = Path(__file__).with_name("_emitter_lifecycle_child.py")
@@ -89,7 +90,7 @@ def test_full_queue_stop_is_finite_and_closes_admission() -> None:
     assert pipe.stop(timeout=0).status is telemetry.DrainStatus.COMPLETED
 
 
-def test_sync_deadline_covers_marker_admission_and_write(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sync_deadline_covers_marker_admission_and_write() -> None:
     entered, release = threading.Event(), threading.Event()
 
     def writer(batch: list[telemetry.Event]) -> None:
@@ -107,14 +108,14 @@ def test_sync_deadline_covers_marker_admission_and_write(monkeypatch: pytest.Mon
         )
         assert time.monotonic() - started < 0.5
 
-        def forbid_thread(*args: Any, **kwargs: Any) -> None:
-            raise AssertionError("sync started another writer")
-
-        monkeypatch.setattr(threading, "Thread", forbid_thread)
+        original_thread = pipe._thread
+        before_threads = set(threading.enumerate())
         pipe._queue.get_nowait()
         assert pipe.sync(timeout=0.03) == telemetry.DrainResult(
             telemetry.DrainStatus.UNFINISHED, telemetry.DrainPhase.DRAIN
         )
+        assert pipe._thread is original_thread
+        assert set(threading.enumerate()) == before_threads
     finally:
         release.set()
         pipe.stop(timeout=1)
@@ -154,25 +155,23 @@ def test_concurrent_sync_receipts_wait_for_their_own_fifo_batch() -> None:
 @pytest.mark.parametrize("failure", [RuntimeError("writer defect"), SystemExit("writer exit")])
 def test_worker_failure_reports_immediately_and_never_acknowledges(
     failure: BaseException,
-    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: LogRecords,
 ) -> None:
-    reports: list[BaseException] = []
-
-    def report(message: str, **extra: Any) -> None:
-        if "exc" in extra:
-            reports.append(extra["exc"])
-
     def writer(batch: list[telemetry.Event]) -> None:
         raise failure
 
-    monkeypatch.setattr(reporting, "report_no_pipeline", report)
     pipe = telemetry.EventPipeline(writer=writer, batch_size=100, flush_interval_s=60)
     pipe.enqueue(event(1))
     with pytest.raises(type(failure)) as observed:
         pipe.sync(timeout=1)
     assert observed.value is failure
     assert pipe._finished.wait(1)
-    assert reports == [failure]
+    reported_excs = [
+        r["exception"].value
+        for r in loguru_records
+        if r.get("exception") is not None and r["exception"].value is not None
+    ]
+    assert reported_excs == [failure]
     pipe.enqueue(event(2))
     assert pipe.dropped == 1
     with pytest.raises(type(failure)) as stopped:
@@ -182,15 +181,8 @@ def test_worker_failure_reports_immediately_and_never_acknowledges(
 
 
 def test_explicit_sink_isolation_preserves_successful_barrier(
-    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: LogRecords,
 ) -> None:
-    reports: list[str] = []
-
-    def report(sink: str, _exc: BaseException) -> None:
-        reports.append(sink)
-
-    monkeypatch.setattr(reporting, "report_sink_failure", report)
-
     def writer(batch: list[telemetry.Event]) -> None:
         with reporting.failure_isolated("documented exporter"):
             raise RuntimeError("optional sink failure")
@@ -199,7 +191,7 @@ def test_explicit_sink_isolation_preserves_successful_barrier(
     try:
         pipe.enqueue(event(1))
         assert pipe.sync(timeout=1).status is telemetry.DrainStatus.COMPLETED
-        assert reports == ["documented exporter"]
+        assert any("documented exporter" in msg for msg in loguru_records.messages())
     finally:
         assert pipe.stop(timeout=1).status is telemetry.DrainStatus.COMPLETED
 

@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pytest
 
-from base import config
 from base.cluster import derive
 from base.cluster.machine import MachineNameMissing, MachineRoleInvalid
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -14,22 +13,16 @@ from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.tests.otlp.identity_inputs import machine_identity
 
 
-def _production_label(_home: Path | None = None) -> str:
-    return ".meiva"
-
-
 @pytest.mark.parametrize(
     ("name", "cluster", "expected"),
     [("runner", ".meiva", True), ("runner", "other", False), ("", ".meiva", False)],
 )
 def test_production_identity_requires_name_and_production_home(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: str, cluster: str, expected: bool
+    tmp_path: Path, name: str, cluster: str, expected: bool
 ) -> None:
-    def label(_home: Path) -> str:
-        return cluster
-
-    monkeypatch.setattr(derive, "home_label", label)
-    assert derive.production_identity(machine_identity(name=name), home=tmp_path) is expected
+    home = tmp_path / cluster
+    home.mkdir()
+    assert derive.production_identity(machine_identity(name=name), home=home) is expected
 
 
 @pytest.mark.parametrize(
@@ -44,19 +37,19 @@ def test_production_identity_requires_name_and_production_home(
     ],
 )
 def test_export_gate_roles_marker_and_override(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     roles: frozenset[str] | None,
     marker: bool,
     override: bool,
     expected: bool,
 ) -> None:
-    monkeypatch.setattr(derive, "home_label", _production_label)
+    home = tmp_path / ".meiva"
+    home.mkdir()
     if marker:
-        (tmp_path / "lgtm-host").touch()
+        (home / "lgtm-host").touch()
     assert (
         telemetry_otlp.observability_export_allowed(
-            machine_identity(roles=roles), home=tmp_path, endpoint_explicit=override
+            machine_identity(roles=roles), home=home, endpoint_explicit=override
         )
         is expected
     )
@@ -82,37 +75,30 @@ def test_explicit_endpoint_does_not_read_machine(
         machine.name()
 
 
-def test_missing_role_preserves_runner_bootstrap_gate(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_missing_role_preserves_runner_bootstrap_gate(tmp_path: Path) -> None:
+    home = tmp_path / ".meiva"
+    home.mkdir()
     machine = machine_identity(roles=None)
-    monkeypatch.setattr(derive, "home_label", _production_label)
-    assert telemetry_otlp.observability_export_allowed(
-        machine, home=tmp_path, endpoint_explicit=False
-    )
+    assert telemetry_otlp.observability_export_allowed(machine, home=home, endpoint_explicit=False)
 
 
 @pytest.mark.parametrize("operation", ["gateway", "station", "export"])
 def test_invalid_roles_propagate_outside_transport_isolation(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operation: str
+    tmp_path: Path, operation: str
 ) -> None:
+    home = tmp_path / ".meiva"
+    home.mkdir()
     machine = InvalidRoleIdentity(machine_identity())
-    monkeypatch.setattr(derive, "home_label", _production_label)
     with pytest.raises(MachineRoleInvalid, match="fixed test fault"):
         if operation == "gateway":
-            observability.gateway_observability_home(machine, home=tmp_path)
+            observability.gateway_observability_home(machine, home=home)
         elif operation == "station":
-            observability.home_is_observability_station(
-                tmp_path, machine=machine, unit_home=tmp_path
-            )
+            observability.home_is_observability_station(home, machine=machine, unit_home=home)
         else:
-            telemetry_otlp.observability_export_allowed(
-                machine, home=tmp_path, endpoint_explicit=False
-            )
+            telemetry_otlp.observability_export_allowed(machine, home=home, endpoint_explicit=False)
 
 
-def test_each_backend_freezes_only_its_own_eligibility(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
+def test_each_backend_freezes_only_its_own_eligibility() -> None:
     decision = False
     calls: list[bool] = []
 
@@ -120,38 +106,36 @@ def test_each_backend_freezes_only_its_own_eligibility(monkeypatch: pytest.Monke
         calls.append(decision)
         return decision
 
-    first = telemetry_otlp.OtlpBackend(export_allowed=read)
+    first = telemetry_otlp.OtlpBackend(export_allowed=read, enabled=lambda: True)
     assert first._enabled() is False
     decision = True
     assert first._enabled() is False
-    second = telemetry_otlp.OtlpBackend(export_allowed=read)
+    second = telemetry_otlp.OtlpBackend(export_allowed=read, enabled=lambda: True)
     assert second._enabled() is True
     assert calls == [False, True]
 
 
 @pytest.mark.parametrize("error", [MachineRoleInvalid, RuntimeError])
 def test_backend_does_not_cache_identity_defects_as_disabled(
-    monkeypatch: pytest.MonkeyPatch, error: type[Exception]
+    error: type[Exception],
 ) -> None:
-    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
-
     def invalid() -> bool:
         raise error("bad identity")
 
-    backend = telemetry_otlp.OtlpBackend(export_allowed=invalid)
+    backend = telemetry_otlp.OtlpBackend(export_allowed=invalid, enabled=lambda: True)
     with pytest.raises(error, match="bad identity"):
         backend.warmup()
     assert backend._export_decision is None
     assert backend._worker is None
 
 
-def test_disabled_backend_does_not_read_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", False)
-
+def test_disabled_backend_does_not_read_identity() -> None:
     def reject() -> bool:
         raise MachineNameMissing("identity remains cold")
 
-    assert telemetry_otlp.OtlpBackend(export_allowed=reject)._enabled() is False
+    assert (
+        telemetry_otlp.OtlpBackend(export_allowed=reject, enabled=lambda: False)._enabled() is False
+    )
 
 
 # meiva:note

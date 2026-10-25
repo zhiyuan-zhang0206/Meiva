@@ -29,10 +29,9 @@ import pytest
 from opentelemetry import trace as otel_trace
 from opentelemetry.trace import NonRecordingSpan, SpanContext
 
-from base import cluster, paths, telemetry
+from base import cluster, telemetry
 from base.db import Database
 from base.telemetry import emitter, observability
-from base.telemetry.delivery import mirror
 from base.telemetry.tests.otlp.identity_inputs import machine_identity
 
 _AGENT = 8901
@@ -195,23 +194,11 @@ def test_explicit_machine_reader_defect_propagates() -> None:
         telemetry.prepare_event("log", "log", machine_reader=invalid)
 
 
-def test_cluster_label_falls_back_without_raising(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cluster_label_falls_back_without_raising(tmp_path: Path) -> None:
     home = tmp_path / ".meiva-preview"
-
-    def fail_label(_home: Any) -> str:
-        raise RuntimeError("label unavailable")
-
-    def fallback_slug(_home: Any) -> str:
-        return "meiva-preview-fallback"
-
-    monkeypatch.setattr(cluster, "home_label", fail_label)
-    monkeypatch.setattr(cluster, "home_slug", fallback_slug)
-    assert observability.cluster_label(home) == "meiva-preview-fallback"
-
-    monkeypatch.setattr(cluster, "home_slug", fail_label)
-    assert observability.cluster_label(home) == ".unknown"
+    assert observability.cluster_label(home) == ".meiva-preview"
+    assert observability.cluster_label(Path("/")) == cluster.home_slug(Path("/"))
+    assert observability.cluster_label(Path("~nonexistent_meiva_user_xyz")) == ".unknown"
 
 
 def test_category_for_kind_mapping() -> None:
@@ -237,9 +224,8 @@ def test_jsonl_mirror_holds_every_event() -> None:
 
 
 def test_the_mirror_holds_every_event_in_one_file_and_no_filtered_copy(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(paths, "logs_dir", lambda: tmp_path)
     now = datetime.now(UTC)
     event_names = ["llm_usage", "turn_end", "exec", "exec_failed", "exec_timeout", "fork"]
     events = [
@@ -260,7 +246,7 @@ def test_the_mirror_holds_every_event_in_one_file_and_no_filtered_copy(
         for event_name in event_names
     ]
 
-    telemetry.append_jsonl(events)
+    telemetry.append_jsonl(events, target_dir=tmp_path)
 
     day = now.strftime("%Y%m%d")
     full_rows = [
@@ -271,10 +257,8 @@ def test_the_mirror_holds_every_event_in_one_file_and_no_filtered_copy(
 
 
 def test_jsonl_mirror_prunes_by_the_full_retention_and_sweeps_retired_rollup_leftovers(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(paths, "logs_dir", lambda: tmp_path)
-    monkeypatch.setattr(mirror, "JSONL_RETENTION_DAYS", 2)
     today = datetime.now(UTC)
     full_old = tmp_path / f"events-{today - timedelta(days=3):%Y%m%d}.jsonl"
     full_kept = tmp_path / f"events-{today - timedelta(days=2):%Y%m%d}.jsonl"
@@ -284,7 +268,7 @@ def test_jsonl_mirror_prunes_by_the_full_retention_and_sweeps_retired_rollup_lef
     for path in (full_old, full_kept, rollup_old, rollup_kept, malformed):
         path.write_text("{}\n", encoding="utf-8")
 
-    telemetry.prune_jsonl_mirror()
+    telemetry.prune_jsonl_mirror(target_dir=tmp_path, retention_days=2)
 
     assert not full_old.exists()
     assert full_kept.exists()

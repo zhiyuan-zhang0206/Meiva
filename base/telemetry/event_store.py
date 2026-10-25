@@ -143,7 +143,19 @@ def _open_pool(db: Database) -> Any:
     return _pool
 
 
-def store_events(db: Database, events: Sequence[Event]) -> None:
+# meiva:note
+# Compute the monotonic retry deadline after ``consecutive_failures``.
+def next_backoff_deadline(
+    now: float,
+    consecutive_failures: int,
+    *,
+    first_s: float = _BACKOFF_FIRST_S,
+    max_s: float = _BACKOFF_MAX_S,
+) -> float:
+    return now + min(first_s * 2 ** (consecutive_failures - 1), max_s)
+
+
+def store_events(db: Database, events: Sequence[Event], *, now: float | None = None) -> None:
     """Emitter sink: append a batch's persisted telemetry and log events to `telemetry_events`.
 
     Never raises: the drain thread must survive a database that does not answer.
@@ -156,13 +168,14 @@ def store_events(db: Database, events: Sequence[Event]) -> None:
     ]
     if not records:
         return
+    current_time = time.monotonic() if now is None else now
     with _lock:
-        if _disabled or time.monotonic() < retry_at:
+        if _disabled or current_time < retry_at:
             return
         try:
             write(db, records)
         except Exception as exc:
-            _failed(exc, len(records))
+            _failed(exc, len(records), now=current_time)
         else:
             failures = 0
 
@@ -182,7 +195,7 @@ def write(db: Database, records: list[dict[str, Any]]) -> None:
     _ensured_month = month
 
 
-def _failed(exc: Exception, rows: int) -> None:
+def _failed(exc: Exception, rows: int, *, now: float | None = None) -> None:
     global _disabled, failures, retry_at  # noqa: PLW0603
     from base.db.connections import NoDatabaseAuthorityError, PlaceholderDbUrlError
 
@@ -194,7 +207,8 @@ def _failed(exc: Exception, rows: int) -> None:
         )
         return
     failures += 1
-    retry_at = time.monotonic() + min(_BACKOFF_FIRST_S * 2 ** (failures - 1), _BACKOFF_MAX_S)
+    current_time = time.monotonic() if now is None else now
+    retry_at = next_backoff_deadline(current_time, failures)
     if failures == 1 or failures % _REPORT_EVERY == 0:
         report_no_pipeline(
             "[telemetry-events] {rows} event(s) did not land in telemetry_events "

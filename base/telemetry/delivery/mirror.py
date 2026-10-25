@@ -6,6 +6,7 @@ import contextlib
 import json
 from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
+from pathlib import Path
 from typing import Any
 
 from base.telemetry.delivery.receipts import Event
@@ -30,7 +31,18 @@ def event_row(event: Event) -> dict[str, Any]:
     return {**body, "id": event_id(body_str, ts_ns)}
 
 
-def prune_jsonl_mirror() -> None:
+# meiva:note
+# Return whether a day-stamped mirror filename is older than ``cutoff`` (YYYYMMDD).
+def is_expired_mirror_filename(filename: str, *, cutoff: str) -> bool:
+    day = filename.removeprefix("events-").split(".", 1)[0]
+    return len(day) == 8 and day.isdigit() and day < cutoff
+
+
+def prune_jsonl_mirror(
+    *,
+    target_dir: Path | None = None,
+    retention_days: int = JSONL_RETENTION_DAYS,
+) -> None:
     """Delete day-stamped mirror files older than their retention tier.
 
     Runs once per day (guarded by the `jsonl_day` stamp). The mirror is the
@@ -39,19 +51,19 @@ def prune_jsonl_mirror() -> None:
     footprint."""
     from base.paths import logs_dir
 
-    cutoff = (datetime.now(UTC) - timedelta(days=JSONL_RETENTION_DAYS)).strftime("%Y%m%d")
+    resolved_dir = logs_dir() if target_dir is None else target_dir
+    cutoff = (datetime.now(UTC) - timedelta(days=retention_days)).strftime("%Y%m%d")
     # `.rollup.jsonl` is the retired filtered tier; leftovers age out with the full mirror.
     for path in (
-        *logs_dir().glob("events-????????.jsonl"),
-        *logs_dir().glob("events-????????.rollup.jsonl"),
+        *resolved_dir.glob("events-????????.jsonl"),
+        *resolved_dir.glob("events-????????.rollup.jsonl"),
     ):
-        day = path.name.removeprefix("events-").split(".", 1)[0]
-        if day.isdigit() and day < cutoff:
+        if is_expired_mirror_filename(path.name, cutoff=cutoff):
             with contextlib.suppress(OSError):
                 path.unlink()
 
 
-def append_jsonl(events: list[Event]) -> None:
+def append_jsonl(events: list[Event], *, target_dir: Path | None = None) -> None:
     """Append the batch to today's mirror file, one JSON line per event.
 
     Each row carries the stable surrogate ``id`` derived from its id-free body
@@ -66,13 +78,14 @@ def append_jsonl(events: list[Event]) -> None:
     from interleaving."""
     from base.paths import logs_dir
 
+    resolved_dir = logs_dir() if target_dir is None else target_dir
     day = datetime.now(UTC).strftime("%Y%m%d")
     try:
         lines = [
             json.dumps(event_row(e), default=str, separators=(",", ":"), ensure_ascii=False) + "\n"
             for e in events
         ]
-        path = logs_dir() / f"events-{day}.jsonl"
+        path = resolved_dir / f"events-{day}.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
             f.write("".join(lines))
@@ -93,7 +106,7 @@ def append_jsonl(events: list[Event]) -> None:
         if process_state["jsonl_day"] != day:
             process_state["jsonl_day"] = day
             with failure_isolated("jsonl mirror prune"):
-                prune_jsonl_mirror()
+                prune_jsonl_mirror(target_dir=resolved_dir)
 
 
 # ── drain-thread failure visibility ─────────────────────────────────────────

@@ -1,5 +1,2 @@
 [uses]
 "test_log_init_idempotent.py" = ["_log_init_child.py", "_process_logging_child.py"]
-
-[debt.first-party-patch]
-"test_event_pipeline_adapter.py#assignment base.telemetry.process_logging.log_info_sample_counter" = 3
