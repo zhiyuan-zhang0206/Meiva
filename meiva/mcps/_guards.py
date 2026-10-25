@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import os
 import socket
 from contextlib import suppress
 from pathlib import Path
@@ -59,13 +58,13 @@ def process_facts(proc: psutil.Process) -> ProcessFacts | None:
 
 # meiva:note
 # Kill every OTHER mcp-daemon process belonging to the unit named by `root` (its project root) and `home` (its `MEIVA_HOME`), and return how many died. A fresh bind must be the only listener; ghosts from earlier respawn storms are reaped first. Only a process whose argv IS the daemon launch qualifies (see `is_daemon_cmdline`): the session backend's `bash -lc` wrapper is never reaped, since killing it would orphan the live daemon and fake a dead session (#1199).
-def reap_stale_daemons(*, root: str, home: str) -> int:
+def reap_stale_daemons(*, root: str, home: str, me: int) -> int:
     seen: dict[int, tuple[ProcessFacts, psutil.Process]] = {}
     for proc in psutil.process_iter():
         facts = process_facts(proc)
         if facts is not None:
             seen[facts.pid] = (facts, proc)
-    pids = stale_daemon_pids((f for f, _ in seen.values()), me=os.getpid(), home=home, root=root)
+    pids = stale_daemon_pids((f for f, _ in seen.values()), me=me, home=home, root=root)
     reaped = 0
     for pid in pids:
         try:

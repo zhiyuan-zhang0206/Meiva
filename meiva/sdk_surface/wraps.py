@@ -63,10 +63,10 @@ from __future__ import annotations
 
 import functools
 import inspect
-from collections.abc import Awaitable, Callable, Generator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from types import ModuleType
-from typing import Any, cast
+from typing import Any
 
 from . import meiva_module
 from .installation import SLOT, Loading, WrapAdded, WrapLayer, installed, slot
@@ -102,7 +102,7 @@ def _record_activation(target: str, plugin: str, inner_calls: int) -> None:
     import keeps this leaf free of an `meiva -> shared` load-order dependency; the emit path
     itself swallows its own failures."""
     try:
-        from base.packages.plugins import activation
+        from base.packages.plugins.activation import record as record_activation
         from meiva.sdk_surface import settings as _settings
 
         model = _settings.agent_setting("llm_model")
@@ -115,7 +115,7 @@ def _record_activation(target: str, plugin: str, inner_calls: int) -> None:
             plugin,
         )
         return
-    activation.record(plugin, "sdkWraps", target, detail=f"inner_calls={inner_calls}", model=model)
+    record_activation(plugin, "sdkWraps", target, detail=f"inner_calls={inner_calls}", model=model)
 
 
 # meiva:note
@@ -137,7 +137,7 @@ def _locate(target: str, root: ModuleType) -> tuple[Any, str]:
     return obj, segments[-1]
 
 
-def _target_member(parent: Any, attr: str, target: str) -> Any:
+def _target_member(parent: object, attr: str, target: str) -> object:
     """Read a declared target without mistaking a descriptor's error for absence."""
     missing = object()
     if inspect.getattr_static(parent, attr, missing) is missing:
@@ -237,7 +237,7 @@ def apply_wrap(
         calls = [0]
 
         @functools.wraps(current)
-        def counted(*inner_args: Any, **inner_kwargs: Any) -> Any:
+        def counted(*inner_args: object, **inner_kwargs: object) -> object:
             calls[0] += 1
             return current(*inner_args, **inner_kwargs)
 
@@ -247,15 +247,16 @@ def apply_wrap(
             if calls[0] != 1:
                 _record_activation(target, plugin, calls[0])
 
-    def chained(*args: Any, **kwargs: Any) -> Any:
+    def chained(*args: object, **kwargs: object) -> object:
         with invocation() as inner:
             return wrapper(inner, *args, **kwargs)
 
     if inspect.iscoroutinefunction(current) or inspect.iscoroutinefunction(wrapper):
 
-        async def async_chained(*args: Any, **kwargs: Any) -> Any:
+        async def async_chained(*args: object, **kwargs: object) -> object:
             with invocation() as inner:
-                return await cast(Awaitable[object], wrapper(inner, *args, **kwargs))
+                awaitable: Any = wrapper(inner, *args, **kwargs)
+                return await awaitable
 
         chained = async_chained
 

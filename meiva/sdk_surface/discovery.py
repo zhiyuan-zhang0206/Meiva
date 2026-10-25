@@ -12,7 +12,7 @@ import ast as _ast
 import inspect
 from dataclasses import dataclass
 from types import ModuleType, SimpleNamespace
-from typing import Any, ForwardRef, cast
+from typing import Any, ForwardRef
 
 from .pure.const import (
     is_container as is_container,
@@ -64,7 +64,7 @@ def children(
     return []
 
 
-def _child_group_rank(child: Any) -> int:
+def _child_group_rank(child: object) -> int:
     """Stub layout group, mirroring Python source convention: imports
     (submodules) first, then constants, then classes, then functions."""
     if inspect.ismodule(child) or isinstance(child, SimpleNamespace):
@@ -99,9 +99,9 @@ def _static_agent_surface(container: object) -> list[str] | None:
         return None
     if isinstance(surface, property):
         surface = getattr(container, "__all_for_meiva__", None)
+    items: Any = surface
     if not isinstance(surface, list):
         return None
-    items = cast(list[object], surface)
     return [n for n in items if isinstance(n, str) and not n.startswith("_")]
 
 
@@ -276,7 +276,7 @@ def _class_children(cls: type) -> list[tuple[str, object]]:
     return result
 
 
-def _annotation_field(name: str, ann: Any) -> tuple[str, Constant]:
+def _annotation_field(name: str, ann: object) -> tuple[str, Constant]:
     """A declared field as a `Constant` child. `inspect.get_annotations`
     returns only the class's own annotations, in definition order. Under
     `from __future__ import annotations` they are strings; otherwise real
@@ -291,7 +291,7 @@ def _annotation_field(name: str, ann: Any) -> tuple[str, Constant]:
     return (name, Constant(type_str=type_str, doc=""))
 
 
-def _method_children(cls: type) -> list[tuple[str, Any]]:
+def _method_children(cls: type) -> list[tuple[str, object]]:
     """Methods / nested classes of a class, in sorted name order."""
     members = vars(cls)
     return [

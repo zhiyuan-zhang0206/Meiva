@@ -38,7 +38,7 @@ import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import ModuleType, SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.agents.sdk.capture import SdkCaptureOwner
@@ -102,6 +102,12 @@ def _caller(
     )
 
 
+def _telemetry_runners() -> tuple[Callable[..., Any], Callable[..., Any]]:
+    from base.agents.sdk.telemetry import run_metered, run_metered_async
+
+    return run_metered, run_metered_async
+
+
 def make_recorder[F: Callable[..., object]](
     original: F,
     fq: str,
@@ -112,9 +118,8 @@ def make_recorder[F: Callable[..., object]](
     tally / emit logic lives in ``base.agents.sdk.telemetry.run_metered``)."""
 
     @functools.wraps(original)
-    def recorder(*args: Any, **kwargs: Any) -> Any:
-        from base.agents.sdk.telemetry import run_metered
-
+    def recorder(*args: object, **kwargs: object) -> object:
+        run_metered, _ = _telemetry_runners()
         identity, tally, capture_owner, call_producer, machine_reader = _caller(clients)
         return run_metered(
             fq,
@@ -132,11 +137,10 @@ def make_recorder[F: Callable[..., object]](
     if inspect.iscoroutinefunction(original):
 
         @functools.wraps(original)
-        async def async_recorder(*args: Any, **kwargs: Any) -> Any:
-            from base.agents.sdk import telemetry as sdk_usage_telemetry
-
+        async def async_recorder(*args: object, **kwargs: object) -> object:
+            _, run_metered_async = _telemetry_runners()
             identity, tally, capture_owner, call_producer, machine_reader = _caller(clients)
-            return await sdk_usage_telemetry.run_metered_async(
+            return await run_metered_async(
                 fq,
                 original,
                 args,
@@ -149,9 +153,11 @@ def make_recorder[F: Callable[..., object]](
                 machine_reader=machine_reader,
             )
 
-        return cast("F", _recorder(async_recorder, sampling))
+        wrapped_async: Any = _recorder(async_recorder, sampling)
+        return wrapped_async
 
-    return cast("F", _recorder(recorder, sampling))
+    wrapped_sync: Any = _recorder(recorder, sampling)
+    return wrapped_sync
 
 
 # meiva.mcps exposes its tools dynamically (the servers come from configuration), so the namespace
@@ -170,9 +176,8 @@ def make_mcp_recorder[F: Callable[..., object]](
     """Recorder for the MCP call funnel — derives the fq from the runtime args."""
 
     @functools.wraps(original)
-    def recorder(source: Any, server: str, tool: str, *args: Any, **kwargs: Any) -> Any:
-        from base.agents.sdk.telemetry import run_metered
-
+    def recorder(source: object, server: str, tool: str, *args: object, **kwargs: object) -> object:
+        run_metered, _ = _telemetry_runners()
         identity, tally, capture_owner, call_producer, machine_reader = _caller(clients)
         return run_metered(
             f"mcps.{server}.{tool}",
@@ -187,7 +192,8 @@ def make_mcp_recorder[F: Callable[..., object]](
             machine_reader=machine_reader,
         )
 
-    return cast("F", _recorder(recorder, sampling))
+    wrapped_mcp: Any = _recorder(recorder, sampling)
+    return wrapped_mcp
 
 
 # meiva:note
@@ -201,7 +207,7 @@ def _instrument_targets(root: object) -> list[tuple[object, str, str]]:
     targets: list[tuple[object, str, str]] = []
     seen: set[int] = set()
 
-    def walk(container: Any, prefix: str) -> None:
+    def walk(container: object, prefix: str) -> None:
         if id(container) in seen:
             return
         seen.add(id(container))

@@ -17,14 +17,23 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, assert_never, cast
+from typing import Any, assert_never
 from uuid import uuid4
 
-from base.agents import impersonation as control
 from base.agents.context import MeivaContext
-from base.agents.context.clients import DatabaseFactory
+from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.external_attachment import ExternalAttachment
 from base.agents.context.identity import AgentIdentity, ExternalLease
+from base.agents.impersonation import merge_plugin_delta, require_active
+from base.agents.impersonation.manifest import (
+    LocalCaptureGate,
+    LocalParticipant,
+    begin_local_participant_close,
+    capture_local_event,
+    close_local_participant_admission,
+    open_local_participant,
+    seal_local_participant,
+)
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.config.agent_pins import resolve_agent_config_pins
@@ -74,22 +83,25 @@ class _Codec:
     def __init__(self, attachment: Attachment) -> None:
         self._attachment = attachment
 
-    def load_snapshot(self, agent_id: int) -> Any:
+    def load_snapshot(
+        self, agent_id: int
+    ) -> tuple[object, Mapping[str, Any] | None, Mapping[str, Any] | None]:
         return plugin_state_codec().load_snapshot(agent_id, database=self._attachment._database())
 
-    def plugin_state_schema(self, state: Any) -> Any:
+    def plugin_state_schema(self, state: object) -> object:
         del state
         return plugin_state_codec().plugin_state_schema
 
     def encode_plugin_delta(
         self, update: Mapping[str, Any], state_cls: type[Any]
     ) -> dict[str, str]:
-        return cast("dict[str, str]", plugin_state_codec().encode_plugin_delta(update, state_cls))
+        encoded: Any = plugin_state_codec().encode_plugin_delta(update, state_cls)
+        return encoded
 
-    def decode_plugin_delta(self, encoded: dict[str, str], state_cls: type[Any]) -> Any:
+    def decode_plugin_delta(self, encoded: dict[str, str], state_cls: type[Any]) -> dict[str, Any]:
         return plugin_state_codec().decode_plugin_delta(encoded, state_cls)
 
-    def apply_plugin_delta(self, state: Any, delta: Any) -> None:
+    def apply_plugin_delta(self, state: object, delta: Mapping[str, Any]) -> None:
         plugin_state_codec().apply_plugin_delta(state, delta)
 
 
@@ -114,7 +126,7 @@ class _LeaseIdentity:
 
     def merge_delta(self, encoded: dict[str, str], *, expected_version: int) -> int:
         attachment = self._attachment
-        control.merge_plugin_delta(
+        merge_plugin_delta(
             attachment._database(),
             attachment.lease_id,
             encoded,
@@ -151,12 +163,12 @@ class Attachment(ExternalAttachment):
     def _prepare(self) -> None:
         boot = self._boot
         target = self._target
-        if target.session_id is not None:
+        if target.session_id is not None and target.agent_id is not None:
             from base.agents.impersonation.sessions import private_id
 
             self.lease_id = private_id(
                 self._database(),
-                cast(int, target.agent_id),
+                target.agent_id,
                 target.session_id,
                 local_machine=self._machine.name(),
             )
@@ -178,8 +190,8 @@ class Attachment(ExternalAttachment):
             case _:
                 assert_never(boot)
 
-    def _applied_version(self, state: Any, lease: Mapping[str, Any]) -> int:
-        receipt = state.impersonation_applied
+    def _applied_version(self, state: object, lease: Mapping[str, Any]) -> int:
+        receipt: Mapping[str, Any] = getattr(state, "impersonation_applied", {})
         return applied_version(
             lease["applied_version"],
             receipt.get("lease_id"),
@@ -200,11 +212,11 @@ class Attachment(ExternalAttachment):
             ),
         )
 
-    def _set_state(self, state: Any) -> None:
+    def _set_state(self, state: object) -> None:
         process_context.set_state(state)
         process_context.set_state_update({})
 
-    def _state_update(self) -> Any:
+    def _state_update(self) -> object:
         return process_context.get_state_update()
 
     def _clear_state_update(self) -> None:
@@ -239,15 +251,12 @@ class Attachment(ExternalAttachment):
             case _:
                 assert_never(boot)
 
-    def capture_local_event(self, event: Any) -> Any:
-        from base.agents.impersonation.manifest import capture_local_event
-
-        return capture_local_event(event, gate=self._event_gate)
+    def capture_local_event(self, event: object) -> object:
+        payload: Any = event
+        return capture_local_event(payload, gate=self._event_gate)
 
     def _lease(self) -> dict[str, Any]:
-        return control.require_active(
-            self._database(), self.lease_id, local_machine=self._machine.name()
-        )
+        return require_active(self._database(), self.lease_id, local_machine=self._machine.name())
 
     def _validate(self) -> int:
         if self._closed:
@@ -255,17 +264,12 @@ class Attachment(ExternalAttachment):
         require_held_version(self._lease()["delta_version"], self._version)
         return self.agent_id
 
-    def _telemetry_clients(self) -> Any:
+    def _telemetry_clients(self) -> ClientSet | None:
         if self._prior_context is not None:
             return self._prior_context.clients
         return self._own_clients
 
     def _open_event_participant(self) -> None:
-        from base.agents.impersonation.manifest import (
-            LocalCaptureGate,
-            LocalParticipant,
-            open_local_participant,
-        )
         from base.agents.impersonation.status import is_log_native
 
         source_key = participant_source_key(
@@ -297,23 +301,16 @@ class Attachment(ExternalAttachment):
                     raise RuntimeError(
                         "the attachment holds no configuration owner for its seal wait"
                     )
-                return cast(
-                    float,
-                    self._seal_authority.service_field_value(
-                        "impersonation_event_seal_wait_seconds"
-                    ),
+                raw_wait: Any = self._seal_authority.service_field_value(
+                    "impersonation_event_seal_wait_seconds"
                 )
+                return float(raw_wait)
             case _:
                 assert_never(boot)
 
     def _seal_event_participant(self) -> None:
         if self._event_gate is None:
             return
-        from base.agents.impersonation.manifest import (
-            close_local_participant_admission,
-            seal_local_participant,
-        )
-
         drained = close_local_participant_admission(
             self._event_gate, timeout=self._seal_wait_seconds()
         )
@@ -325,8 +322,6 @@ class Attachment(ExternalAttachment):
             with self._call_lock:
                 self._closing = True
             return
-        from base.agents.impersonation.manifest import begin_local_participant_close
-
         begin_local_participant_close(
             self._event_gate,
             lambda: setattr(self, "_closing", True),

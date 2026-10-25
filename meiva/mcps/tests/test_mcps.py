@@ -1,7 +1,6 @@
 # meiva:note
 # meiva.mcps unit tests: config parsing, namespace dispatch, tool invocation and the disk cache. Tool calls run over a real stub daemon socket (`stub_daemon.py`); the machine config lives in the test's own home, next to whatever the repo bundles.
 import json
-import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -317,7 +316,7 @@ def test_read_cache_returns_none_on_bad_json(tmp_path: Path) -> None:
 def test_read_cache_returns_none_when_expired(tmp_path: Path) -> None:
     """cached_at=0 → age ≈ now → exceeds 24h TTL, considered expired."""
     _write_cache_file(tmp_path, {"tools": [], "cached_at": 0})
-    assert _disk_cache(tmp_path).read("srv") is None
+    assert _disk_cache(tmp_path).read("srv", now=100000.0) is None
 
 
 def test_read_cache_returns_none_when_the_file_is_not_an_object(tmp_path: Path) -> None:
@@ -327,7 +326,7 @@ def test_read_cache_returns_none_when_the_file_is_not_an_object(tmp_path: Path) 
 
 def test_read_cache_fills_defaults_for_missing_fields(tmp_path: Path) -> None:
     """tool entry missing description / input_schema → fill defaults with empty str / empty dict."""
-    _write_cache_file(tmp_path, {"tools": [{"name": "t1"}], "cached_at": time.time()})
+    _write_cache_file(tmp_path, {"tools": [{"name": "t1"}], "cached_at": 0.0})
     assert _disk_cache(tmp_path).read("srv") == [
         {"name": "t1", "description": "", "input_schema": {}}
     ]
