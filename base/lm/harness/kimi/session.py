@@ -72,6 +72,10 @@ CANCEL_POLL_SECONDS = 0.05
 _EVENT_STREAM_END = EVENT_STREAM_END
 
 
+def _perf_counter() -> float:
+    return time.perf_counter()
+
+
 class KimiSession(BaseHarnessSession[KimiConfig]):
     def __init__(
         self,
@@ -216,13 +220,13 @@ class KimiSession(BaseHarnessSession[KimiConfig]):
         spawned = {
             child: command for child, command in observed.items() if child not in self._baseline
         }
-        started = time.perf_counter()
+        started = _perf_counter()
         if self._session_id is not None:
             await connection.notify("session/cancel", {"sessionId": self._session_id})
         settle_deadline = self._monotonic() + self.config.cancel_settle_seconds
         while ticket is not None and not ticket.settled and self._monotonic() < settle_deadline:
             await asyncio.sleep(CANCEL_POLL_SECONDS)
-        cancel_ms = (time.perf_counter() - started) * 1000.0
+        cancel_ms = (_perf_counter() - started) * 1000.0
         reaped = await self._reap(spawned)
         gone, waited_ms = await wait_gone(
             self._probe,

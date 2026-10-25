@@ -14,8 +14,8 @@ import asyncio
 import random
 import socket
 import time
-from collections.abc import Awaitable, Callable
-from typing import Any, cast
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Any, TypeGuard
 
 import redis as _redis_sync
 import redis.asyncio as aredis
@@ -58,6 +58,10 @@ RESILIENCE_KWARGS: dict[str, Any] = {
 }
 
 
+def _is_keepalive_options(value: object) -> TypeGuard[Mapping[int, int]]:
+    return isinstance(value, Mapping)
+
+
 class PinnedIPv4Connection(_redis_sync.Connection):
     """`redis.Connection` whose `_connect` bypasses `getaddrinfo` for an
     IPv4-literal host, connecting directly over `AF_INET`.
@@ -80,13 +84,9 @@ class PinnedIPv4Connection(_redis_sync.Connection):
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             if self.socket_keepalive:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                # redis.Connection types this `Mapping[int, int|bytes] | object |
-                # None` (its own __init__ docstring) -- the bare `object` member is
-                # never the runtime value (it's coalesced to `{}` at assignment;
-                # see redis/connection.py), so narrow it here for pyright.
-                keepalive_options = cast("dict[int, int]", self.socket_keepalive_options)
-                for k, v in keepalive_options.items():
-                    sock.setsockopt(socket.IPPROTO_TCP, k, v)
+                if _is_keepalive_options(self.socket_keepalive_options):
+                    for k, v in self.socket_keepalive_options.items():
+                        sock.setsockopt(socket.IPPROTO_TCP, k, v)
             sock.settimeout(self.socket_connect_timeout)
             sock.connect((self.host, self.port))
             sock.settimeout(self.socket_timeout)
@@ -244,14 +244,12 @@ class AuthRetryAsyncRedis(aredis.Redis):
 
     _auth_retry_policy: AuthRetryPolicy = DEFAULT_AUTH_RETRY_POLICY
 
-    async def execute_command(self, *args: Any, auth_retry: bool = True, **options: Any) -> Any:
-        async def _execute() -> Any:
-            return await cast(
-                Awaitable[Any],
-                aredis.Redis.execute_command(  # pyright: ignore[reportUnknownMemberType]
-                    self, *args, **options
-                ),
-            )
+    async def execute_command(
+        self, *args: object, auth_retry: bool = True, **options: object
+    ) -> Any:
+        async def _execute() -> object:
+            cls_any: Any = aredis.Redis
+            return await cls_any.execute_command(self, *args, **options)
 
         return (
             await retry_auth_failures_async(_execute, policy=self._auth_retry_policy)
@@ -265,14 +263,10 @@ class AuthRetrySyncRedis(_redis_sync.Redis):
 
     _auth_retry_policy: AuthRetryPolicy = DEFAULT_AUTH_RETRY_POLICY
 
-    def execute_command(self, *args: Any, auth_retry: bool = True, **options: Any) -> Any:
-        def _execute() -> Any:
-            return cast(
-                Any,
-                _redis_sync.Redis.execute_command(  # pyright: ignore[reportUnknownMemberType]
-                    self, *args, **options
-                ),
-            )
+    def execute_command(self, *args: object, auth_retry: bool = True, **options: object) -> Any:
+        def _execute() -> object:
+            cls_any: Any = _redis_sync.Redis
+            return cls_any.execute_command(self, *args, **options)
 
         return (
             retry_auth_failures_sync(_execute, policy=self._auth_retry_policy)
@@ -293,15 +287,13 @@ def open_async_redis(
     client because they own a socket per subscription, while ordinary commands
     still receive the same ACL-transition retry policy.
     """
-    client = cast(
-        AuthRetryAsyncRedis,
-        AuthRetryAsyncRedis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
-            redis_url,
-            decode_responses=decode_responses,
-            connection_class=TransportAwareAsyncConnection,
-            **RESILIENCE_KWARGS,
-        ),
+    raw_client: Any = AuthRetryAsyncRedis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
+        redis_url,
+        decode_responses=decode_responses,
+        connection_class=TransportAwareAsyncConnection,
+        **RESILIENCE_KWARGS,
     )
+    client: AuthRetryAsyncRedis = raw_client
     client._auth_retry_policy = auth_retry_policy
     return client
 
@@ -430,14 +422,12 @@ def open_sync_redis(
     auth_retry_policy: AuthRetryPolicy = DEFAULT_AUTH_RETRY_POLICY,
 ) -> AuthRetrySyncRedis:
     """A new synchronous client on `redis_url` with the cluster's resilience settings."""
-    client = cast(
-        AuthRetrySyncRedis,
-        AuthRetrySyncRedis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
-            redis_url,
-            decode_responses=decode_responses,
-            connection_class=PinnedIPv4Connection,
-            **RESILIENCE_KWARGS,
-        ),
+    raw_client: Any = AuthRetrySyncRedis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
+        redis_url,
+        decode_responses=decode_responses,
+        connection_class=PinnedIPv4Connection,
+        **RESILIENCE_KWARGS,
     )
+    client: AuthRetrySyncRedis = raw_client
     client._auth_retry_policy = auth_retry_policy
     return client

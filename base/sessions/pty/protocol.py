@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import socket
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 # A request line this long is garbage, not a session op. `new` carries a full
 # environment and is the largest legitimate request.
@@ -53,9 +53,13 @@ def read_line(conn: socket.socket, limit: int = MAX_REQUEST_BYTES) -> bytes | No
             raise ValueError(f"line exceeds {limit} bytes")
 
 
+def _is_json_object(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 def decode_object(line: bytes) -> dict[str, Any]:
     """Parse one line into a JSON object (ValueError/TypeError on anything else)."""
     value = json.loads(line.decode("utf-8"))
-    if not isinstance(value, dict):
+    if not _is_json_object(value):
         raise TypeError("message is not a JSON object")
-    return cast("dict[str, Any]", value)
+    return value

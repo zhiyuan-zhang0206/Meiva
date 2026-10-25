@@ -22,7 +22,7 @@ import uuid
 from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Never, cast
+from typing import Literal, Never, TypeGuard
 
 from base.host.atomic_io import AtomicWriter
 from base.native_process.os_platform import file_lock
@@ -76,10 +76,14 @@ def _timestamp(value: object) -> dt.datetime:
     return parsed.astimezone(dt.UTC)
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 def _parse(raw_value: object) -> PtyAllocationFreeze:
-    if not isinstance(raw_value, dict):
+    if not _is_object_dict(raw_value):
         _invalid("marker root must be an object")
-    raw = cast("dict[str, object]", raw_value)
+    raw = raw_value
     if raw.get("schema_version") != SCHEMA_VERSION:
         _invalid(f"unknown schema_version {raw.get('schema_version')!r}")
     state = raw.get("state")

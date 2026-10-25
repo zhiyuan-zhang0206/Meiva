@@ -18,7 +18,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from base.sessions.pty import protocol
 from base.sessions.pty.closure import Outcome
@@ -99,16 +99,24 @@ class KillVerdict:
     survivors: tuple[int, ...] = ()
 
 
+def _monotonic() -> float:
+    return time.monotonic()
+
+
+def _is_json_object(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 def _connect(wait_s: float, socket_path: Path) -> socket.socket:
     path = str(socket_path)
-    deadline = time.monotonic() + wait_s
+    deadline = _monotonic() + wait_s
     while True:
         conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             conn.connect(path)
         except (FileNotFoundError, ConnectionRefusedError) as exc:
             conn.close()
-            if time.monotonic() >= deadline:
+            if _monotonic() >= deadline:
                 raise ServiceDownError(f"no pty-sessions service is listening at {path}") from exc
             time.sleep(_CONNECT_RETRY_S)
         except OSError:
@@ -135,7 +143,7 @@ def request(
     socket_path: Path,
     timeout: float = REQUEST_TIMEOUT_S,
     wait: float = 0.0,
-    **fields: Any,
+    **fields: object,
 ) -> dict[str, Any]:
     req_id = uuid.uuid4().hex
     conn = _connect(wait, socket_path)
@@ -161,7 +169,7 @@ def request(
     if not response.get("ok"):
         raise ServiceError(int(response.get("code") or protocol.ERROR), str(response.get("error")))
     data = response.get("data")
-    return cast("dict[str, Any]", data) if isinstance(data, dict) else {}
+    return data if _is_json_object(data) else {}
 
 
 def has_session(name: str, *, socket_path: Path) -> bool:
@@ -176,7 +184,8 @@ def has_session(name: str, *, socket_path: Path) -> bool:
 # meiva:link base/sessions/pty/docs/pty_sessions/host-generation.meiva.okf.md
 def host_generation(*, socket_path: Path) -> str | None:
     try:
-        return cast("str | None", request("ping", socket_path=socket_path).get("host_generation"))
+        gen = request("ping", socket_path=socket_path).get("host_generation")
+        return gen if isinstance(gen, str) else None
     except ServiceDownError:
         return None
 

@@ -19,8 +19,7 @@ import pytest
 from psycopg.types.json import Jsonb
 
 import base.telemetry.alerts as base_alerts
-from base.config import get_field, set_field, settings
-from base.config.domains.general import GeneralSettings
+from base.config import ensure_eager, get_field, set_field, settings
 from base.telemetry.alerts import (
     copy,
     display_language,
@@ -167,30 +166,40 @@ def test_format_local_empty_for_none() -> None:
     assert format_local(None) == ""
 
 
-def test_format_local_renders_cluster_zone(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_format_local_renders_cluster_zone() -> None:
     """User ruling 2026-08-27: the IM alert timestamp follows the cluster's
     MEIVA_TIMEZONE (one cluster clock), not the host OS zone — a runner whose
     OS zone differs must not show a different wall clock from every other
     surface."""
 
-    monkeypatch.setattr(
-        settings, "general", GeneralSettings.model_construct(timezone="Asia/Shanghai")
-    )
-    ts = datetime.datetime(2026, 1, 3, 9, 5, tzinfo=datetime.UTC)
-    text = format_local(ts)
+    ensure_eager()
+    old_timezone = get_field("timezone")
+    had_timezone = "timezone" in settings.general.model_fields_set
+    set_field("timezone", "Asia/Shanghai")
+    try:
+        ts = datetime.datetime(2026, 1, 3, 9, 5, tzinfo=datetime.UTC)
+        text = format_local(ts)
+    finally:
+        set_field("timezone", old_timezone)
+        if not had_timezone:
+            settings.general.model_fields_set.discard("timezone")
     assert text == "2026-01-03 17:05 CST"
 
 
-def test_format_local_host_zone_without_authoritative_value(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_format_local_host_zone_without_authoritative_value() -> None:
     """Settings-lite (gateway down) has no authoritative cluster timezone:
     the timestamp degrades to the host zone — the documented lite behavior —
     and must still carry year + a zone token."""
 
-    monkeypatch.setattr(settings, "general", GeneralSettings.model_construct())
-    ts = datetime.datetime(2026, 1, 3, 9, 5, tzinfo=datetime.UTC)
-    text = format_local(ts)
+    ensure_eager()
+    had_timezone = "timezone" in settings.general.model_fields_set
+    settings.general.model_fields_set.discard("timezone")
+    try:
+        ts = datetime.datetime(2026, 1, 3, 9, 5, tzinfo=datetime.UTC)
+        text = format_local(ts)
+    finally:
+        if had_timezone:
+            settings.general.model_fields_set.add("timezone")
     assert text.startswith("2026-01-03 ")
     assert text.split(" ")[-1] != ""
 

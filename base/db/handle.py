@@ -12,9 +12,8 @@ class only binds one `DbConfig` to them.
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import Any
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
@@ -74,7 +73,8 @@ class Database:
         row_factory: object = None,
     ) -> ConnectionPool:
         """`base.db.pool()` on this handle's config."""
-        return connections.pool(
+        return connections.pool_with_config(
+            self._config,
             min_size=min_size,
             max_size=max_size,
             direct=direct,
@@ -82,27 +82,26 @@ class Database:
             check_connections=check_connections,
             autocommit=autocommit,
             row_factory=row_factory,
-            config=self._config,
             gate=self._gate,
             direct_url=self._direct_url,
         )
 
     def async_pool(
         self,
-        pool_class: type[AsyncConnectionPool[psycopg.AsyncConnection]],
+        pool_class: Callable[..., AsyncConnectionPool[psycopg.AsyncConnection]],
         *,
         min_size: int,
         max_size: int,
         timeout: float,
-        **pool_kwargs: Any,
+        **pool_kwargs: object,
     ) -> AsyncConnectionPool[psycopg.AsyncConnection]:
         """`base.db.async_pool()` on this handle's config."""
-        return connections.async_pool(
+        return connections.async_pool_with_config(
             pool_class,
+            self._config,
             min_size=min_size,
             max_size=max_size,
             timeout=timeout,
-            config=self._config,
             gate=self._gate,
             **pool_kwargs,
         )

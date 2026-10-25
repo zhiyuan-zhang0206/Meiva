@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 
 import psutil
 import pytest
@@ -34,10 +35,17 @@ def assert_clean(argv: list[str], *, label: str) -> None:
 
 
 @pytest.fixture
-def secret_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def secret_env() -> Iterator[None]:
     """The live env a daemon launcher forwards. Replaced wholesale — the
     forwarders read `os.environ` by nature (see no_os_environ's allowlist)."""
-    monkeypatch.setattr(os, "environ", dict(SECRET_ENV))
+    saved = dict(os.environ)
+    os.environ.clear()
+    os.environ.update(SECRET_ENV)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
 
 
 @pytest.fixture

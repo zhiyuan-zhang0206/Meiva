@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Final, LiteralString, cast
+from typing import Final, LiteralString
 
 from psycopg_pool import AsyncConnectionPool
 
@@ -48,7 +48,7 @@ async def record_permanent_reject_turn(
         row = await cur.fetchone()
     if row is None:
         raise RuntimeError(f"agent {agent_id} disappeared while recording a permanent rejection")
-    return cast(int, row[0])
+    return int(row[0])
 
 
 async def halt_automatic_recovery(pool: AsyncConnectionPool, agent_id: int) -> bool:

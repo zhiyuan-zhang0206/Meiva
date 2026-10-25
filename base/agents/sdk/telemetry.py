@@ -141,11 +141,11 @@ def _measure(
                     primary.add_note(note)
 
 
-def run_metered(
+def run_metered[ResultT](
     fn: str,
-    original: Callable[..., Any],
-    args: Any,
-    kwargs: Any,
+    original: Callable[..., ResultT],
+    args: tuple[Any, ...],
+    kwargs: Mapping[str, Any],
     *,
     identity: Mapping[str, Any],
     sampling_owner: SamplingPolicyOwner,
@@ -153,17 +153,17 @@ def run_metered(
     capture_owner: SdkCaptureOwner | None = None,
     producer: Callable[[], Any] | None = None,
     machine_reader: Callable[[], str] | None = None,
-) -> Any:
+) -> ResultT:
     """Validate each public entry before execution and retain its call-local snapshots."""
     with _measure(fn, identity, tally, capture_owner, sampling_owner, producer, machine_reader):
         return original(*args, **kwargs)
 
 
-async def run_metered_async(
+async def run_metered_async[ResultT](
     fn: str,
-    original: Callable[..., Awaitable[Any]],
-    args: Any,
-    kwargs: Any,
+    original: Callable[..., Awaitable[ResultT]],
+    args: tuple[Any, ...],
+    kwargs: Mapping[str, Any],
     *,
     identity: Mapping[str, Any],
     sampling_owner: SamplingPolicyOwner,
@@ -171,7 +171,7 @@ async def run_metered_async(
     capture_owner: SdkCaptureOwner | None = None,
     producer: Callable[[], Any] | None = None,
     machine_reader: Callable[[], str] | None = None,
-) -> Any:
+) -> ResultT:
     """Validate when awaited, preserving cancellation and the call's own admission."""
     with _measure(fn, identity, tally, capture_owner, sampling_owner, producer, machine_reader):
         return await original(*args, **kwargs)

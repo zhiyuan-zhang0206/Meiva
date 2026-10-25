@@ -11,6 +11,3 @@ exports = ["job_wait.py", "process_groups.py", "pty_jobs.py", "pty_reaper.py", "
 
 [debt.env-patch]
 "secret_argv.py#monkeypatch.setenv os.environ" = 1
-
-[debt.stdlib-patch]
-"secret_argv.py#monkeypatch.setattr os.environ" = 1

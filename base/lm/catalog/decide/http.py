@@ -8,7 +8,7 @@ surfaces as ``DecisionRequestError`` after exactly one request.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import cast
+from typing import Any, TypeGuard
 
 from base.lm.catalog.decide.types import (
     DecisionBuildContext,
@@ -19,6 +19,10 @@ from base.lm.catalog.decide.types import (
 _ERROR_BODY_CHARS = 300
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 # meiva:note
 # POST ``payload`` as JSON with a bearer key; return the decoded JSON object.
 async def post_json(
@@ -26,7 +30,8 @@ async def post_json(
 ) -> dict[str, object]:
     import httpx  # deferred: the provider contract loads on the exec-child boot path
 
-    transport = cast("httpx.AsyncBaseTransport | None", ctx.transport)
+    raw_transport: Any = ctx.transport
+    transport: httpx.AsyncBaseTransport | None = raw_transport
     try:
         async with httpx.AsyncClient(transport=transport, timeout=ctx.timeout) as client:
             response = await client.post(
@@ -42,9 +47,9 @@ async def post_json(
             f"{response.text[:_ERROR_BODY_CHARS]}"
         )
     try:
-        body = response.json()
+        body: object = response.json()
     except ValueError as exc:
         raise DecisionResponseError(f"{ctx.model}: response from {url} is not JSON") from exc
-    if not isinstance(body, dict):
+    if not _is_str_dict(body):
         raise DecisionResponseError(f"{ctx.model}: response from {url} is not a JSON object")
-    return cast(dict[str, object], body)
+    return body

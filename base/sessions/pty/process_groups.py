@@ -64,13 +64,17 @@ def signal(
             ) from exc
 
 
+def _monotonic() -> float:
+    return time.monotonic()
+
+
 def wait(identities: Iterable[OwnedProcess], timeout_s: float) -> tuple[OwnedProcess, ...]:
     """Poll only known identities until they exit or the bounded wait ends."""
     known = tuple(dict.fromkeys(identities))
-    deadline = time.monotonic() + timeout_s
+    deadline = _monotonic() + timeout_s
     while True:
         remaining = tuple(identity for identity in known if live(identity))
-        left = deadline - time.monotonic()
+        left = deadline - _monotonic()
         if not remaining or left <= 0:
             return remaining
         time.sleep(min(0.02, left))
