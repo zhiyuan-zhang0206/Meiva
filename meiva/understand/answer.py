@@ -13,7 +13,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from base.host.env.agent_slices import ModelOverrides
 from base.lm import factory
@@ -36,7 +36,7 @@ from meiva.sdk_surface.pure.media.finding_plan import (
 from meiva.understand import calls, outputs
 from meiva.understand.calls import MediaSettings, ModelCall
 from meiva.understand.errors import UnderstandError
-from meiva.understand.plans import Plan
+from meiva.understand.plans import Plan, TargetSpec
 
 __all__ = [
     "OVERFLOW_DIRNAME",
@@ -100,12 +100,12 @@ def run(plan: Plan, deps: UnderstandDeps, delivery: FindingDelivery) -> list[str
         answered = gather(
             asyncio.run(
                 run_batch(
-                    plan.targets,
+                    list(plan.targets),
                     lambda t: _understand_one(
                         deps,
-                        prompt=cast(str, t["prompt"]),
-                        text=cast(str | None, t.get("text")),
-                        paths=cast(list[str | Path] | None, t.get("paths")),
+                        prompt=t.prompt,
+                        text=t.text,
+                        paths=t.paths,
                         effort=plan.effort,
                     ),
                     plan.max_concurrent,
@@ -141,7 +141,7 @@ def _understand_one(
     *,
     prompt: str,
     text: str | None,
-    paths: list[str | Path] | None,
+    paths: tuple[str | Path, ...] | None,
     effort: str | ReasoningEffort,
 ) -> Scanned[str]:
     if text is not None:
@@ -199,7 +199,10 @@ def _read_part(deps: UnderstandDeps, path: str | Path) -> Scanned[tuple[dict[str
 # the files read so far ride with the answer, and with the failure when reading or answering
 # fails.
 def _understand_paths(
-    deps: UnderstandDeps, paths: list[str | Path], prompt: str, effort: str | ReasoningEffort
+    deps: UnderstandDeps,
+    paths: tuple[str | Path, ...],
+    prompt: str,
+    effort: str | ReasoningEffort,
 ) -> Scanned[str]:
     parts: list[Any] = []
     mimes: list[str] = []
@@ -224,14 +227,16 @@ def _understand_paths(
 # Save one target's result under `.exec_output/` of the agent workspace. Saving runs after the
 # batch returned, in input order, so the timestamped filenames cannot interleave and the saved
 # files sort the way the batch was submitted.
-def _save_result(deps: UnderstandDeps, target: dict[str, str | list[str]], result: str) -> None:
-    prompt = cast(str, target["prompt"])
-    paths = cast("list[str] | None", target.get("paths"))
+def _save_result(deps: UnderstandDeps, target: TargetSpec, result: str) -> None:
     site = deps.output
     if site is None:
         return
+    path_strs = [str(p) for p in target.paths] if target.paths is not None else None
     saved = outputs.output_file(
-        prompt, result, outputs.result_source(paths), datetime.now(site.zone)
+        target.prompt,
+        result,
+        outputs.result_source(path_strs),
+        datetime.now(site.zone),
     )
     site.directory.mkdir(parents=True, exist_ok=True)
     (site.directory / saved.name).write_text(saved.content, encoding="utf-8")

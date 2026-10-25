@@ -4,23 +4,11 @@ exports = ["skill_index.py", "skill_proxies.py"]
 "__init__.py" = ["skill_index.py", "skill_proxies.py"]
 
 [purity]
-"." = "strict-to-be"
 "skill_index.py" = "strict"
 "skill_proxies.py" = "strict"
 
-[debt.ambient-read]
-"__init__.py#home pathlib.Path.home" = 1
+[roots]
+"__init__.py" = { kinds = ["home"], why = "_consume_skill_body reads Path.home() to tilde-shorten the skill directory header in rendered skill docstrings" }
 
 [debt.any-collaborator]
 "skill_proxies.py#any LazySkillDoc.__getattribute__.return" = 1
-
-[debt.impure-call]
-"__init__.py#Path.read_text" = 1
-
-[debt.impure-edge]
-"__init__.py#base/packages/extensions/install_registry.py" = 1
-"__init__.py#base/paths/__init__.py" = 1
-"__init__.py#base/telemetry/audit_events.py" = 1
-
-[debt.type-cast]
-"__init__.py#cast _note_skill_read" = 1

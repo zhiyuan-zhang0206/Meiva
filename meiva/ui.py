@@ -10,16 +10,21 @@ import math as _math
 import os as _os
 import re as _re
 import socket as _socket
-import time as _time
 import urllib.request as _urlopen
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
+from base.clock import SYSTEM_TIMERS
 from base.log import logger
 from meiva import boot, gateway_client
 from meiva.sdk_surface import agent_identity, process_context
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
+
+
+def _is_str_dict(val: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(val, dict)
+
 
 _NAME_RE = _re.compile(r"^[a-zA-Z0-9_-]+$")
 
@@ -204,11 +209,11 @@ class PageHost:
 
     def wait_until_serving(self, port: int) -> bool:
         """Poll until the page server answers on (host, port) or the ready timeout passes."""
-        deadline = _time.monotonic() + self.ready_timeout_s
-        while _time.monotonic() < deadline:
+        deadline = SYSTEM_TIMERS.monotonic() + self.ready_timeout_s
+        while SYSTEM_TIMERS.monotonic() < deadline:
             if self._page_is_serving(port):
                 return True
-            _time.sleep(0.2)
+            SYSTEM_TIMERS.sleep(0.2)
         return False
 
     def register(
@@ -341,9 +346,9 @@ def _error_detail(exc: Exception) -> str | None:
         parsed = response.json()
     except ValueError:  # the error body is not JSON
         return None
-    if not isinstance(parsed, dict):
+    if not _is_str_dict(parsed):
         return None
-    detail: object = cast(dict[str, Any], parsed).get("detail")
+    detail = parsed.get("detail")
     return detail if isinstance(detail, str) else None
 
 

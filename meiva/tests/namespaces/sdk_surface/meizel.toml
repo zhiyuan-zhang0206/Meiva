@@ -3,20 +3,6 @@
 
 [uses]
 "test_install.py" = ["child_install_disabled.py"]
+"test_log_agent_attribution.py" = ["child_gateway_boot.py"]
 "test_process_clients.py" = ["child_gateway_credentials.py"]
 "test_sampling_atexit.py" = ["child_sampling_atexit.py", "child_sampling_atexit_uninstalled.py"]
-
-[debt.first-party-patch]
-"test_impersonation_capture_rebinding.py#monkeypatch.setattr base.agents.impersonation.manifest.append_source_event" = 1
-"test_log_agent_attribution.py#monkeypatch.setattr base.log.process.init_done" = 2
-"test_log_agent_attribution.py#patch.object base.log.process.add_file_sink" = 2
-"test_log_agent_attribution.py#patch.object base.log.process.install_stdlib_intercept" = 2
-"test_log_agent_attribution.py#patch.object base.log.process.logger.add" = 2
-"test_log_agent_attribution.py#patch.object base.log.process.logger.configure" = 1
-"test_log_agent_attribution.py#patch.object base.log.process.logger.info" = 2
-"test_log_agent_attribution.py#patch.object base.native_process.loaded_commit.capture_commit" = 1
-"test_log_agent_attribution.py#patch.object base.telemetry.process_logging.add_event_sink" = 2
-
-[debt.test-subclass-override]
-"test_install.py#subclass base.packages.plugin_config_images.DiskPluginConfigImages.owner" = 1
-"test_install.py#subclass base.packages.plugin_config_images.PluginConfigOwner.read" = 1

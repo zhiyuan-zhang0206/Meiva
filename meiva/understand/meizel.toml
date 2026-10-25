@@ -12,10 +12,5 @@ exports = ["answer.py", "calls.py", "errors.py", "outputs.py", "plans.py", "wiri
 "outputs.py" = "strict"
 "plans.py" = "strict"
 
-[debt.ambient-read]
-"answer.py#clock datetime.datetime.now" = 1
-
-[debt.type-cast]
-"answer.py#cast _save_result" = 2
-"answer.py#cast run.<lambda>" = 3
-"plans.py#cast normalize" = 4
+[roots]
+"answer.py" = { kinds = ["clock"], why = "_save_result stamps each saved .exec_output/ file with the current wall-clock timestamp in the site's timezone when writing batch results" }

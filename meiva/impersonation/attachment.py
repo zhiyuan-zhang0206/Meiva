@@ -50,7 +50,6 @@ from meiva.boot import (
     borrow_external_process,
     initialize_external,
     own_external_process,
-    plugin_state_codec,
 )
 from meiva.impersonation.admission import (
     LeaseTarget,
@@ -88,23 +87,32 @@ class _Codec:
     def load_snapshot(
         self, agent_id: int
     ) -> tuple[BaseAgentState, Mapping[str, Any] | None, Mapping[str, Any] | None]:
-        return plugin_state_codec().load_snapshot(agent_id, database=self._attachment._database())
+        from base.agents.context.external_attachment import plugin_state_codec
+
+        return plugin_state_codec.load_snapshot(agent_id, database=self._attachment._database())
 
     def plugin_state_schema(self, state: BaseAgentState) -> object:
+        from base.agents.context.external_attachment import plugin_state_codec
+
         del state
-        return plugin_state_codec().plugin_state_schema
+        return plugin_state_codec.plugin_state_schema
 
     def encode_plugin_delta(
         self, update: Mapping[str, Any], state_cls: type[Any]
     ) -> dict[str, str]:
-        encoded: Any = plugin_state_codec().encode_plugin_delta(update, state_cls)
-        return encoded
+        from base.agents.context.external_attachment import plugin_state_codec
+
+        return plugin_state_codec.encode_plugin_delta(dict(update), state_cls)
 
     def decode_plugin_delta(self, encoded: dict[str, str], state_cls: type[Any]) -> dict[str, Any]:
-        return plugin_state_codec().decode_plugin_delta(encoded, state_cls)
+        from base.agents.context.external_attachment import plugin_state_codec
+
+        return plugin_state_codec.decode_plugin_delta(encoded, state_cls)
 
     def apply_plugin_delta(self, state: BaseAgentState, delta: Mapping[str, Any]) -> None:
-        plugin_state_codec().apply_plugin_delta(state, delta)
+        from base.agents.context.external_attachment import plugin_state_codec
+
+        plugin_state_codec.apply_plugin_delta(state, dict(delta))
 
 
 class _LeaseIdentity:
@@ -179,10 +187,12 @@ class Attachment(ExternalAttachment):
         self.session_id = int(lease["session_id"])
         self._version = int(lease["delta_version"])
         self._bind_borrowed_context()
+        from base.agents.context.external_attachment import plugin_state_codec
+
         initialize_external(
             process_context.current_context(),
             boot,
-            validate_state=plugin_state_codec().plugin_state_schema,
+            validate_state=plugin_state_codec.plugin_state_schema,
         )
         match boot:
             case OwnedBoot():

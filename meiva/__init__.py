@@ -26,6 +26,7 @@ if "_LOADED_IMAGE" not in globals():
 # external API while removing the "must mutate settings before import"
 # invariant.
 from base.agents.context import MeivaContext
+from base.agents.context.clients import LazyConnection as _LazyConnection
 from base.cluster.machine import MachineIdentityReader as _MachineIdentityReader
 from base.config import ConfigBoot
 from base.packages.plugins.loading import StateGate
@@ -86,7 +87,7 @@ class _SdkModule(_ModuleType):
         return process_context.get_state()
 
     @state.setter
-    def state(self, value: Any) -> None:
+    def state(self, value: object) -> None:
         process_context.set_state(value)
 
     @property
@@ -94,7 +95,7 @@ class _SdkModule(_ModuleType):
         return process_context.get_state_update()
 
     @state_update.setter
-    def state_update(self, value: Any) -> None:
+    def state_update(self, value: object) -> None:
         process_context.set_state_update(value)
 
     @property
@@ -122,11 +123,11 @@ class _SdkModule(_ModuleType):
         process_context.unbind_context()
 
     @property
-    def DB(self) -> Any:  # noqa: N802 — the SDK's name for the SQL connection
+    def DB(self) -> _LazyConnection:  # noqa: N802 — the SDK's name for the SQL connection
         return self.context.sql
 
     @property
-    def REDIS(self) -> Any:  # noqa: N802 — the SDK's name for the Redis client
+    def REDIS(self) -> _LazyConnection:  # noqa: N802 — the SDK's name for the Redis client
         return self.context.redis
 
     def __dir__(self) -> list[str]:
@@ -350,7 +351,7 @@ if (
     ensure_plugins_loaded()
 
 
-def attach(handle: str | None = None) -> Any:
+def attach(handle: str | None = None) -> object:
     """Bind this external process to the Meiva agent identity it was started as.
 
     Call it with no argument: the handle comes from `MEIVA_HARNESS_HANDLE`, which the

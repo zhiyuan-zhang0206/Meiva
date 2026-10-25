@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, cast
+from typing import TypeGuard
 
 from pydantic import SecretStr
 
@@ -20,6 +20,14 @@ __all__ = [
     "deepseek_search_hits",
     "deepseek_search_request",
 ]
+
+
+def _is_object_list(val: object) -> TypeGuard[list[object]]:
+    return isinstance(val, list)
+
+
+def _is_str_dict(val: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(val, dict)
 
 
 def _key(api_key: SecretStr | None, error_type: type[WebError]) -> str:
@@ -63,7 +71,8 @@ def deepseek_search_request(config: DeepSeekSearchConfig, query: str, count: int
 # The hits of a DeepSeek answer: one list, `kind` always `web`, the summary standing in for an
 # empty snippet.
 def deepseek_search_hits(data: dict[str, object]) -> list[Hit]:
-    results = cast("list[dict[str, Any]]", data.get("results") or [])
+    raw_results = data.get("results")
+    results = raw_results if _is_object_list(raw_results) else []
     return [
         Hit(
             title=str(item.get("title") or ""),
@@ -72,6 +81,7 @@ def deepseek_search_hits(data: dict[str, object]) -> list[Hit]:
             kind="web",
         )
         for item in results
+        if _is_str_dict(item)
     ]
 
 
@@ -90,9 +100,10 @@ def deepseek_fetch_request(config: DeepSeekFetchConfig, url: str) -> HttpRequest
 # Raises:
 #     FetchError: the answer has no page content.
 def deepseek_page(data: dict[str, object], url: str, max_chars: int) -> Page:
-    content = cast(str, data.get("content") or "")
+    raw_content = data.get("content")
+    content = raw_content if isinstance(raw_content, str) else ""
     if not content:
         raise FetchError(f"DeepSeek Fetch returned no page content for {url}")
-    return Page(
-        cast(str, data.get("title") or ""), url, content[:max_chars], len(content) > max_chars
-    )
+    raw_title = data.get("title")
+    title = raw_title if isinstance(raw_title, str) else ""
+    return Page(title, url, content[:max_chars], len(content) > max_chars)

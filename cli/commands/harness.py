@@ -63,6 +63,6 @@ def _exec(
 
 
 def _default_opener() -> AttachmentOpener:
-    from meiva.self.harness import open_attachment
+    from meiva.self.harness.attachment import open_attachment
 
     return open_attachment

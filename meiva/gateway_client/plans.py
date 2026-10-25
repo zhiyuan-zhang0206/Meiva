@@ -11,9 +11,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Any, Literal, TypeGuard
 
 from base.api_contracts.idempotency import validate_idempotency_key
+
+
+def _is_str_dict(val: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(val, dict)
+
 
 __all__ = [
     "SEND_TIMEOUT_SECONDS",
@@ -90,12 +95,14 @@ def spawn_request(intent: SpawnIntent, idempotency_key: str) -> Request:
 
 
 def spawn_receipt(data: Mapping[str, object]) -> SpawnReceipt:
-    agent_id = int(cast("int | str", data["id"]))
+    raw_id = data["id"]
+    if not isinstance(raw_id, (int, str)) or isinstance(raw_id, bool):
+        raise TypeError(f"spawn id must be int or str, got {type(raw_id).__name__}")
+    agent_id = int(raw_id)
     normalized = data.get("config_normalized")
-    if not normalized:
+    if not _is_str_dict(normalized) or not normalized:
         return SpawnReceipt(agent_id, None)
-    values = cast("dict[str, object]", normalized)
-    return SpawnReceipt(agent_id, (values.get("requested"), values.get("resolved")))
+    return SpawnReceipt(agent_id, (normalized.get("requested"), normalized.get("resolved")))
 
 
 def message_request(

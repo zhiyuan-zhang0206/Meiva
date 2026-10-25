@@ -9,9 +9,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import pytest
 from pydantic import SecretStr
@@ -219,45 +217,108 @@ def test_the_deps_follow_the_configuration_owner_they_are_built_from(tmp_path: P
     ]
 
 
-@dataclass(frozen=True, slots=True)
-class _RecordingAuthority(ConfigAuthority):
-    reads: list[str] = field(default_factory=list[str])
+def test_search_deps_reads_only_search_fields(tmp_path: Path) -> None:
+    search_web = {
+        "web_search_provider": "deepseek",
+        "brave_api_key": "brave-key",
+        "web_brave_search_endpoint": "https://brave.example/search",
+        "web_search_timeout_seconds": 14.0,
+        "web_max_search_results": 7,
+        "web_deepseek_search_endpoint": "https://deepseek.example/search",
+        "web_deepseek_max_results": 19,
+        "web_deepseek_qps": 3.5,
+    }
+    first = Settings(
+        profile=None,
+        lm={"deepseek_api_key": "ds-key", "llm_invoke_timeout_seconds": 30.0},
+        web={
+            **search_web,
+            "web_fetch_reader": "jina",
+            "jina_api_key": "jina-1",
+            "web_jina_reader_base": "https://jina-1.example/",
+            "web_deepseek_fetch_endpoint": "https://ds-1.example/fetch",
+            "web_fetch_timeout_seconds": 20.0,
+            "web_fetch_model": "model-1",
+            "web_fetch_reasoning": "low",
+            "web_fetch_injection_check_enabled": True,
+        },
+    )
+    second = Settings(
+        profile=None,
+        lm={"deepseek_api_key": "ds-key", "llm_invoke_timeout_seconds": 95.0},
+        web={
+            **search_web,
+            "web_fetch_reader": "deepseek",
+            "jina_api_key": "jina-2",
+            "web_jina_reader_base": "https://jina-2.example/",
+            "web_deepseek_fetch_endpoint": "https://ds-2.example/fetch",
+            "web_fetch_timeout_seconds": 80.0,
+            "web_fetch_model": "model-2",
+            "web_fetch_reasoning": "high",
+            "web_fetch_injection_check_enabled": False,
+        },
+    )
 
-    def service_field_value(self, name: str) -> Any:
-        self.reads.append(name)
-        return ConfigAuthority.service_field_value(self, name)
+    deps_first = wiring.search_deps_for(ConfigAuthority(first, first, tmp_path / "first.env"))
+    deps_second = wiring.search_deps_for(ConfigAuthority(second, second, tmp_path / "second.env"))
+
+    assert deps_first == deps_second
+    assert deps_first.provider == "deepseek"
+    assert deps_first.brave.api_key is not None
+    assert deps_first.brave.api_key.get_secret_value() == "brave-key"
+    assert deps_first.brave.endpoint == "https://brave.example/search"
+    assert deps_first.brave.timeout_s == 14.0
+    assert deps_first.brave.max_count == 7
+    assert deps_first.deepseek.api_key is not None
+    assert deps_first.deepseek.api_key.get_secret_value() == "ds-key"
+    assert deps_first.deepseek.endpoint == "https://deepseek.example/search"
+    assert deps_first.deepseek.max_count == 19
+    assert deps_first.deepseek.qps == 3.5
 
 
-def _recording(base: ConfigAuthority) -> _RecordingAuthority:
-    return _RecordingAuthority(base.runtime, base.all_domains, base.env_path)
-
-
-def test_search_deps_reads_only_search_fields(config_authority: ConfigAuthority) -> None:
-    authority = _recording(config_authority)
-
-    wiring.search_deps_for(authority)
-
-    assert sorted(authority.reads) == [
-        "brave_api_key",
-        "deepseek_api_key",
-        "web_brave_search_endpoint",
-        "web_deepseek_max_results",
-        "web_deepseek_qps",
-        "web_deepseek_search_endpoint",
-        "web_max_search_results",
-        "web_search_provider",
-        "web_search_timeout_seconds",
-    ]
-
-
-def test_fetch_deps_read_no_brave_fields(
-    config_authority: ConfigAuthority, web_harness: WebHarness
-) -> None:
-    authority = _recording(config_authority)
+def test_fetch_deps_read_no_brave_fields(tmp_path: Path, web_harness: WebHarness) -> None:
+    fetch_web = {
+        "jina_api_key": "jina-key",
+        "web_fetch_model": "custom-fetch-model",
+    }
+    first = Settings(
+        profile=None,
+        web={
+            **fetch_web,
+            "web_search_provider": "brave",
+            "brave_api_key": "brave-1",
+            "web_brave_search_endpoint": "https://brave-1.example/search",
+            "web_search_timeout_seconds": 11.0,
+            "web_max_search_results": 3,
+            "web_deepseek_search_endpoint": "https://ds-1.example/search",
+            "web_deepseek_max_results": 10,
+        },
+    )
+    second = Settings(
+        profile=None,
+        web={
+            **fetch_web,
+            "web_search_provider": "deepseek",
+            "brave_api_key": "brave-2",
+            "web_brave_search_endpoint": "https://brave-2.example/search",
+            "web_search_timeout_seconds": 44.0,
+            "web_max_search_results": 18,
+            "web_deepseek_search_endpoint": "https://ds-2.example/search",
+            "web_deepseek_max_results": 40,
+        },
+    )
     model = web_harness.fetch_deps.fetch_model
 
-    wiring.fetch_deps_for(
-        authority,
+    deps_first = wiring.fetch_deps_for(
+        ConfigAuthority(first, first, tmp_path / "first.env"),
+        catalog=model.catalog,
+        keys=model.keys,
+        overrides=model.overrides,
+        delivery_active=False,
+        agent_id=None,
+    )
+    deps_second = wiring.fetch_deps_for(
+        ConfigAuthority(second, second, tmp_path / "second.env"),
         catalog=model.catalog,
         keys=model.keys,
         overrides=model.overrides,
@@ -265,14 +326,10 @@ def test_fetch_deps_read_no_brave_fields(
         agent_id=None,
     )
 
-    assert sorted(authority.reads) == sorted(set(authority.reads))
-    assert not {
-        "brave_api_key",
-        "web_brave_search_endpoint",
-        "web_search_timeout_seconds",
-        "web_max_search_results",
-    } & set(authority.reads)
-    assert {"jina_api_key", "web_fetch_model"} <= set(authority.reads)
+    assert deps_first == deps_second
+    assert deps_first.jina.api_key is not None
+    assert deps_first.jina.api_key.get_secret_value() == "jina-key"
+    assert deps_first.fetch_model.model == "custom-fetch-model"
 
 
 @pytest.mark.usefixtures("sdk_model_owner")

@@ -30,6 +30,7 @@ def session_environment(
     env = dict(host.forwarded)
     if not activate_venv:
         env.pop("VIRTUAL_ENV", None)
+    env.setdefault("TERM", "xterm-256color")
     env[AGENT_ID_ENV] = str(agent_id)
     if overrides:
         env.update(overrides)
