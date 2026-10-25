@@ -1,16 +1,19 @@
 ---
 type: doc
 title: Delivery watchdog
-description: Observe stalled pending delivery and retire stale inputs without dispatching work.
+description: Observe stalled pending delivery, wake a stranded terminated owner, retire stale inputs.
 tags: []
 ---
 
 # Delivery watchdog
 
 One gateway scan loop observes stalled pending messages and retires stale
-inputs without re-publishing wakes or restarting agents. The agent host owns
-ordinary pending-input polling; Redis wakes are latency hints and can be lost.
-Queue claims still serialize input acceptance.
+inputs without re-publishing wakes or restarting agents. A second loop runs the
+stranded-wake fallback: it retries the delivery path's own wake for a terminated
+owner whose pending work no live consumer could claim, throttled per owner and
+bounded by the dead-letter age. The agent host owns ordinary pending-input
+polling; Redis wakes are latency hints and can be lost. Queue claims still
+serialize input acceptance.
 
 `MEIVA_DELIVERY_WATCHDOG_ENABLED` controls the daemon; its thirty-second default
 scan interval is an observation cadence, not a recovery deadline. `/healthz`
@@ -19,7 +22,8 @@ a row stays pending, but does not survive a restart. Alert-layer rules own
 cross-restart debounce. Old dispatch/poison and dedup table rows are left in
 place; the runtime no longer reads or writes them.
 
-Entry points are `services/wake/delivery_watchdog/daemon.py` and
+Entry points are `services/wake/delivery_watchdog/daemon.py`,
+`services/wake/delivery_watchdog/stranded_wake.py` and
 `services/wake/delivery_watchdog/dead_letter.py`. See
 [[services/docs/gateway_side/delivery_watchdog/jobs/jobs.meiva.okf.md]] and
 [[agent/db/docs/db.meiva.okf.md]].

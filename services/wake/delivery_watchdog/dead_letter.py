@@ -66,15 +66,15 @@ def dead_letter_stale_pending_resurrects(pool: ConnectionPool, threshold_s: floa
         return cur.rowcount
 
 
+# meiva:note
+# Retire lifecycle notices and task assignments whose terminated owner cannot
+# claim them, past the same recovery age. Chats are deliberately not swept here:
+# they stay pending for the delivery wake and the watchdog's stranded-wake
+# fallback (`stranded_wake.py`), which retires them on this same clock. Internal
+# assignment notes keep their `delivery_result` failure evidence instead of
+# disappearing, and an impersonation termination notice belongs to the next
+# resurrection's native history, so its explicit marker preserves it at any age.
 def dead_letter_stale_pending_terminated(pool: ConnectionPool, threshold_s: float) -> int:
-    """Complete stale lifecycle notices whose terminated owner cannot claim them.
-
-    Post-termination chats remain pending for the G4 resurrect-retry path; one-shot lifecycle notices and task assignments past the same recovery age
-    limit are dead-lettered. Internal assignment notes retain delivery_result
-    failure evidence rather than disappearing.
-    Impersonation termination notices belong to the next resurrection's native
-    history, so their explicit marker preserves them regardless of age.
-    """
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE inbound_messages m SET status = 'done', claimed_at = now(), "

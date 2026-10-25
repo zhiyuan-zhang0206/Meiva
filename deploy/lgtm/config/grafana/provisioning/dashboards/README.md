@@ -89,7 +89,7 @@ the same reason: the instant queries return one frame per day series, and
 without the join the table falls back to a per-series frame picker instead
 of one row per day.
 
-The dashboard now has 103 panel entries (92 panels + 11 row headers): core
+The dashboard now has 104 panel entries (93 panels + 11 row headers): core
 ids remain below 1000 (the four new stat tiles are 44–47), plugin ids are
 >= 1000 (the three plugin rows are 1001 / 1004 / 1007; their panels are
 1002–1013), host/data-plane panels are 2101–2112, the cost-analysis panels are

@@ -8,7 +8,10 @@ from psycopg import sql
 
 from base import telemetry
 from base.agents.impersonation.wake import publish_inbound_wake
-from base.agents.incarnation.lifecycle_commands import supersede_lifecycle_for_resurrect
+from base.agents.incarnation.lifecycle_commands import (
+    TRIGGER_AFTER_KILL_COMMAND,
+    supersede_lifecycle_for_resurrect,
+)
 from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_kind
 from base.api_contracts.agent_contract import (
     AgentNotFound,
@@ -36,9 +39,11 @@ RESURRECTION_ROW: LiteralString = (
 # Run the one final resurrection CAS with a fully static SQL shape.
 #
 # The row leaves unowned: the next admission mints a fresh runtime generation.
-# A trigger inbound must be pending, newer than the termination and newer than
-# every terminate command of the agent, so work queued before a kill (a force
-# on an already terminated agent changes no status) cannot reverse it.
+# A trigger inbound must be pending and pass the shared kill-command fence
+# (`TRIGGER_AFTER_KILL_COMMAND`): newer than every terminate command of the owner,
+# and either newer than the death or belonging to a death a command ended. That
+# fence carries the case this CAS used to refuse — work that lands while the owner
+# is still shutting down.
 def transition_terminated_to_unclaimed_idling(
     cur: psycopg.Cursor,
     agent_id: int,
@@ -60,11 +65,12 @@ def transition_terminated_to_unclaimed_idling(
                 "  SELECT 1 FROM inbound_messages m "
                 "  WHERE m.id = %s AND m.agent_id = agents_meta.id "
                 "    AND m.status = 'pending' AND m.kind = %s "
-                "    AND m.created_at > agents_meta.status_changed_at "
-                "    AND m.id > COALESCE((SELECT max(t.id) FROM inbound_messages t "
-                "        WHERE t.agent_id = agents_meta.id AND t.kind = 'terminate'), 0)"
+                "    AND {}"
                 ") RETURNING status_changed_at"
-            ).format(sql.SQL("TRUE" if trigger_inbound_kind == "chat" else RECOVERY_BREAKER_CLEAR)),
+            ).format(
+                sql.SQL("TRUE" if trigger_inbound_kind == "chat" else RECOVERY_BREAKER_CLEAR),
+                sql.SQL(TRIGGER_AFTER_KILL_COMMAND),
+            ),
             (
                 AgentStatus.IDLING,
                 agent_id,

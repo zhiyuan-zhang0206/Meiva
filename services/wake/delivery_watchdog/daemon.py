@@ -14,6 +14,7 @@ from base import telemetry
 from base.agents.incarnation.lifecycle_commands import SYSTEM_NOTICE_SOURCE
 from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, settings
 from base.daemon import round_loop
@@ -24,6 +25,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.events.live.bus import EventBus
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -43,6 +45,12 @@ from services.wake.delivery_watchdog.dead_letter import (
 from services.wake.delivery_watchdog.dead_letter import (
     dead_letter_stale_pending_terminated as dead_letter_stale_pending_terminated,
 )
+from services.wake.delivery_watchdog.stranded_wake import (
+    stranded_wake_round as stranded_wake_round,
+)
+from services.wake.delivery_watchdog.stranded_wake import (
+    wake_stranded as wake_stranded,
+)
 
 _log = logging.getLogger("services.wake.delivery_watchdog.daemon")
 
@@ -60,8 +68,15 @@ def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
 # interval and `round_loop.sleep_with_progress` beats during that wait; the ceiling
 # only has to exceed one beat step, not the whole interval.
 _SCAN_LIVENESS_TIMEOUT_S = 60.0
-# The observer issues one database operation at a time.
-_POOL_MAX_SIZE = 1
+# meiva:note
+# Slack over one stranded-wake round: database work, the claim statement and the
+# loop's own bookkeeping around the launch RPCs.
+_STRANDED_WAKE_ROUND_MARGIN_S = 60.0
+
+# meiva:note
+# One connection per resident loop: the pool is shared by the scan and the wake
+# loop, and a single connection lets either starve the other while it holds one.
+_POOL_MAX_SIZE = 2
 
 
 # meiva:note
@@ -262,12 +277,57 @@ async def scan_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
         )
 
 
+# meiva:note
+# Staleness ceiling of the stranded-wake loop, derived rather than guessed: one
+# round runs up to `max_per_round` wakes back to back, and one wake makes at most
+# two cluster dispatches, each bounded by the RPC client's own timeout and retry
+# budget (`worst_case_dispatch_seconds`). A hardcoded ceiling would declare the
+# loop stalled as soon as an operator raised either knob.
+def stranded_wake_liveness_timeout_s() -> float:
+    from ops.cluster.rpc import rpc_config_from_settings
+    from ops.cluster.rpc_plans import worst_case_dispatch_seconds
+
+    per_wake = 2 * worst_case_dispatch_seconds(rpc_config_from_settings())
+    per_round = max(settings.daemon.delivery_watchdog_stranded_wake_max_per_round, 1)
+    return per_wake * per_round + _STRANDED_WAKE_ROUND_MARGIN_S
+
+
+# meiva:note
+# The delivery fallback as a resident loop of its own: a slow home-machine launch
+# RPC delays this job only, never the stall scan. `run_rounds` skips a round while
+# the database is unreachable and ends the process on any other unexpected
+# exception, which the supervisor restarts.
+async def stranded_wake_loop(
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    machine: MachineIdentityReader,
+    progress: LoopProgress,
+) -> None:
+    async def one_round() -> None:
+        await stranded_wake_round(
+            pool,
+            db,
+            bus,
+            machine.name(),
+            age_bound_s=settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds,
+            cooldown_s=settings.daemon.delivery_watchdog_stranded_wake_cooldown_seconds,
+            max_per_round=settings.daemon.delivery_watchdog_stranded_wake_max_per_round,
+            wake=wake_stranded,
+        )
+
+    await round_loop.run_rounds(
+        "stranded wake", progress, settings.daemon.delivery_watchdog_interval_seconds, one_round
+    )
+
+
 async def run(
     *,
     process_config: ConfigBoot,
     runtime: Path,
     database: Callable[[], Database],
     image: LoadedCommit,
+    machine: MachineIdentityReader,
 ) -> None:
     """Start the daemon: pidfile -> healthz server -> connect DB -> loops."""
     if _is_running(process_config, runtime=runtime):
@@ -287,12 +347,25 @@ async def run(
     )
     _log.info("[delivery] healthz listening on :%s", endpoint.health_port)
 
-    # The scan borrows one connection for each short statement batch.
     db = database()
     pool = db.pool(max_size=_POOL_MAX_SIZE)
+    bus = EventBus.from_settings()
     try:
-        scan = liveness.register("scan", _SCAN_LIVENESS_TIMEOUT_S)
-        await scan_loop(pool, scan)
+        # meiva:note
+        # One TaskGroup owns both resident loops, each with its own progress tracker so
+        # a slow sibling cannot mask a stalled one; a loop that raises cancels its
+        # sibling and ends the process, and the supervisor restarts it.
+        async with asyncio.TaskGroup() as loops:
+            loops.create_task(scan_loop(pool, liveness.register("scan", _SCAN_LIVENESS_TIMEOUT_S)))
+            loops.create_task(
+                stranded_wake_loop(
+                    pool,
+                    db,
+                    bus,
+                    machine,
+                    liveness.register("stranded_wake", stranded_wake_liveness_timeout_s()),
+                )
+            )
     finally:
         pool.close()
         await stop_health_server(health)
@@ -343,6 +416,7 @@ def main() -> None:
                 runtime=process_home / "run",
                 database=database,
                 image=image,
+                machine=machine,
             )
         )
     except KeyboardInterrupt:
