@@ -31,7 +31,7 @@ meiva logs retention --dry-run
 meiva logs retention
 MEIVA_LOG_RETENTION_DAYS=21 meiva logs retention --dry-run
 meiva logs retention --older-than 21
-meiva logs retention --family-days agent=15,shell=7,gateway=30,ops=30,watchdog=30,snapshot=7,other=3 --dry-run
+meiva logs retention --family-days agent=15,shell=7,gateway=30,ops=30,watchdog=30,snapshot=7,other=15 --dry-run
 ```
 
 The age is a positive integer number of days. `--older-than` and
@@ -42,7 +42,9 @@ agent-main, `meiva-agent-*` service stdout, `agent_host` (the per-turn agent
 runtime), and their archives 15 days; named PTY shell transcript/host files and
 computer-use snapshots 7 days; `gateway*`, `ops*`, `meiva-root` / `root` (the root
 supervisor's own log), and `*-watchdog` / `*_watchdog` service files and rotations
-30 days; all other service and native archives 3 days. The rotation shape also admits underscores, so
+30 days; all other service and native archives 15 days (the catch-all is a safety
+net, not a short leash: a service that lands there is a mapping todo, and the daily
+run now names it). The rotation shape also admits underscores, so
 `delivery_watchdog` is in the watchdog family. Supply only the family values
 that differ; omitted values retain that baseline. In a mapping, `default=N`
 aliases `other=N` for the catch-all service family.
