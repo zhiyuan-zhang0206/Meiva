@@ -1,336 +1,168 @@
-"""`base/deploy/git/memory_repo.py` status + pool-bootstrap tests: the cluster-zone
-display of last_fetch, and the no-remote split-runner bootstrap from a gateway bundle
-with its failure paths; split from base/deploy/git/tests/test_memory_repo.py (task #4922)."""
+# meiva:note
+# Explicit checkout status and real HTTP/Git pool bootstrap contracts.
+# meiva:link base/deploy/git/tests/docs/memory-repo-tests.meiva.okf.md
 
 from __future__ import annotations
 
-import subprocess
+import datetime as dt
+import os
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.tests.gateway_stubs import (
-    gateway_api_base_raises,
-    gateway_api_base_stub,
-    gateway_auth_headers_stub,
-)
-from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
+from base.cluster.machine import GatewayAccess, GatewayApiTokenMissing
 from base.deploy.git import memory_repo
+from base.deploy.git.tests.memory_checkouts import commit_note, make_bundle
+from base.deploy.git.tests.memory_checkouts import memory_checkout as memory_checkout
+from base.deploy.git.tests.pool_server import PoolResponse, pool_server
 
 
-def test_status_last_fetch_renders_cluster_zone(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """RepoStatus.last_fetch is a display timestamp: it renders in the cluster
-    timezone (user ruling 2026-08-27), never the host OS zone."""
-
-    import datetime as dt
-
-    general = type(settings.general).model_construct(timezone="Asia/Shanghai")
-    monkeypatch.setattr(settings, "general", general)
-    monkeypatch.setattr(memory_repo, "is_initialized", lambda: True)
-    monkeypatch.setattr(memory_repo, "memory_dir", lambda: tmp_path)
-
-    def _fake_run_git(*args: str, **kwargs: object) -> str:
-        argv = list(args)
-        if argv[:2] == ["rev-parse", "--abbrev-ref"]:
-            return "machine-main"
-        if argv[:2] == ["status", "--porcelain"]:
-            return ""
-        if argv == ["rev-list", "--count", "HEAD"]:
-            return "3"
-        if argv[:3] == ["rev-list", "--left-right", "--count"]:
-            return "1\t0"
-        raise AssertionError(f"unexpected git call: {argv}")
-
-    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
-    fetch_head = tmp_path / ".git" / "FETCH_HEAD"
-    fetch_head.parent.mkdir(parents=True)
+def test_status_last_fetch_renders_cluster_zone(memory_checkout: tuple[Path, Path]) -> None:
+    _, root = memory_checkout
+    fetch_head = root / ".git" / "FETCH_HEAD"
     fetch_head.write_text("dummy\n")
-    # A fixed mtime far from the assertion moment: 2026-01-03 09:05 UTC.
     fixed = dt.datetime(2026, 1, 3, 9, 5, tzinfo=dt.UTC).timestamp()
-    import os
-
     os.utime(fetch_head, (fixed, fixed))
-
-    status = memory_repo.status()
+    status = memory_repo.status(root=root, track_branch="main", zone=ZoneInfo("Asia/Shanghai"))
     assert status.last_fetch == "2026-01-03T17:05:00+08:00"
+    assert status.branch == "main"
+    assert status.is_clean
+    assert status.local_commits_on_branch == 2
+    assert status.ahead_of_main == status.behind_main == 0
 
 
-# ── gateway pool bootstrap (no-remote split runner) ──
+def test_status_missing_tracking_reference_and_fetch_head(tmp_path: Path) -> None:
+    memory_repo.init_local_repo("machine-runner", tmp_path)
+    (tmp_path / "untracked.md").write_text("dirty")
+    status = memory_repo.status(root=tmp_path, track_branch="missing", zone=dt.UTC)
+    assert status.branch == "machine-runner"
+    assert not status.is_clean
+    assert status.local_commits_on_branch == 1
+    assert status.ahead_of_main == status.behind_main == 0
+    assert status.last_fetch == "never"
 
 
-def test_init_split_runner_without_remote_bootstraps_from_gateway(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    """A fresh split agent-runner with no memory remote fetches the shared pool
-    from the gateway instead of silently birthing a stub local repo
-    (2026-08-27 company-mini incident)."""
-    machine_identity.set(role="agent-runner", name="test-host-2")
-    monkeypatch.setattr(memory_repo, "is_initialized", lambda: False)
-    monkeypatch.setattr(
-        memory_repo,
-        "memory_remote",
-        lambda: (_ for _ in ()).throw(memory_repo.MemoryRemoteMissing("test")),
+def test_status_uninitialized_does_not_create_checkout(tmp_path: Path) -> None:
+    root = tmp_path / "absent"
+    with pytest.raises(memory_repo.MemoryRepoUninitialized, match=str(root)):
+        memory_repo.status(root=root, track_branch="main", zone=dt.UTC)
+    assert not root.exists()
+
+
+_POOL_CREDENTIAL = "pool-test-only"
+
+
+def access(url: str) -> GatewayAccess:
+    return GatewayAccess(
+        gateway_url=url,
+        cluster_secret=_POOL_CREDENTIAL,
+        remote_plane=False,
+        machine_token=None,
+        launcher_profile=None,
+        gateway_home=True,
     )
 
-    bootstrapped: list[object] = []
 
-    def _fake_bootstrap(*, machine: MachineIdentity) -> None:
-        assert machine is machine_identity
-        bootstrapped.append(True)
-
-    local_inits: list[tuple[str, Path]] = []
-
-    def _fake_local_init(branch: str, cwd: Path) -> None:
-        local_inits.append((branch, cwd))
-
-    monkeypatch.setattr(memory_repo, "bootstrap_from_gateway", _fake_bootstrap)
-    monkeypatch.setattr(memory_repo, "init_local_repo", _fake_local_init)
-
-    memory_repo.init(machine=machine_identity)
-
-    assert bootstrapped == [True]
-    assert local_inits == []
-
-
-def test_init_split_runner_bootstrap_failure_raises_loud(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    """When the gateway fetch fails, a split runner fails loudly with guidance —
-    never a silent stub pool."""
-    machine_identity.set(role="agent-runner", name="test-host-2")
-    monkeypatch.setattr(memory_repo, "is_initialized", lambda: False)
-    monkeypatch.setattr(
-        memory_repo,
-        "memory_remote",
-        lambda: (_ for _ in ()).throw(memory_repo.MemoryRemoteMissing("test")),
-    )
-
-    def _failing_bootstrap(*, machine: MachineIdentity) -> None:
-        assert machine is machine_identity
-        raise memory_repo.MemoryPoolBootstrapFailed("GET http://gw/api/memory/pool -> HTTP 502")
-
-    monkeypatch.setattr(memory_repo, "bootstrap_from_gateway", _failing_bootstrap)
-
-    with pytest.raises(memory_repo.MemoryRemoteMissing, match="gateway pool snapshot"):
-        memory_repo.init(machine=machine_identity)
+def test_bootstrap_from_gateway_clones_bundle_as_machine_branch(tmp_path: Path) -> None:
+    head, bundle = make_bundle(tmp_path / "src")
+    target = tmp_path / "selected" / "memory"
+    target.mkdir(parents=True)
+    (target / "pre-init-leftover").write_text("discard")
+    response = PoolResponse(bundle, head=head)
+    with pool_server(response) as url:
+        memory_repo.bootstrap_from_gateway(
+            target=target, branch="machine-test-host-2", access=access(url)
+        )
+    assert response.path == "/api/memory/pool"
+    assert response.headers["Authorization"] == f"Bearer {_POOL_CREDENTIAL}"
+    assert (target / "MEMORY.md").read_text() == "# shared index\n"
+    assert (target / "health" / "a.md").read_text() == "note"
+    assert (target / ".git").is_dir()
+    assert not (target / "pre-init-leftover").exists()
+    assert memory_repo.run_git("branch", "--show-current", cwd=target) == "machine-test-host-2"
+    assert memory_repo.run_git("remote", cwd=target) == ""
+    assert memory_repo.run_git("rev-parse", "HEAD", cwd=target) == head
+    assert not list(target.parent.glob(".memory-bootstrap-*"))
 
 
-def test_init_combined_unit_without_remote_still_local_inits(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    """A gateway-capable unit with no remote keeps the silent local init — on
-    first boot its own gateway half is not serving yet, so there is nothing to
-    fetch from (single-box fresh install path preserved)."""
-    machine_identity.set(role="gateway,agent-runner", name="test-host")
-    monkeypatch.setattr(memory_repo, "is_initialized", lambda: False)
-    monkeypatch.setattr(
-        memory_repo,
-        "memory_remote",
-        lambda: (_ for _ in ()).throw(memory_repo.MemoryRemoteMissing("test")),
-    )
-
-    bootstrapped: list[object] = []
-
-    def _fake_bootstrap(*, machine: MachineIdentity) -> None:
-        assert machine is machine_identity
-        bootstrapped.append(True)
-
-    local_inits: list[tuple[str, Path]] = []
-
-    def _fake_local_init(branch: str, cwd: Path) -> None:
-        local_inits.append((branch, cwd))
-
-    monkeypatch.setattr(memory_repo, "bootstrap_from_gateway", _fake_bootstrap)
-    monkeypatch.setattr(memory_repo, "init_local_repo", _fake_local_init)
-
-    memory_repo.init(machine=machine_identity)
-
-    assert bootstrapped == []
-    assert [b for b, _ in local_inits] == ["machine-test-host"]
-
-
-def _make_real_bundle(source: Path) -> tuple[str, bytes]:
-    """Build a real git repo at `source` with a note tree and return
-    (head sha, bundle bytes) — the exact wire shape the gateway serves."""
-    source.mkdir(parents=True, exist_ok=True)
-    (source / "MEMORY.md").write_text("# shared index\n")
-    (source / "health").mkdir()
-    (source / "health" / "a.md").write_text("note")
-    for cmd in (
-        ["git", "init", "-q", "-b", "main"],
-        ["git", "-c", "user.email=a@b", "-c", "user.name=t", "add", "-A"],
-        ["git", "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-q", "-m", "base"],
+def test_bootstrap_from_gateway_head_mismatch_fails_loud(tmp_path: Path) -> None:
+    _, bundle = make_bundle(tmp_path / "src")
+    target = tmp_path / "selected" / "memory"
+    target.mkdir(parents=True)
+    leftover = target / "pre-init-leftover"
+    leftover.write_text("retain until a valid checkout is ready")
+    with (
+        pool_server(PoolResponse(bundle, head="deadbeefdeadbeef")) as url,
+        pytest.raises(memory_repo.MemoryPoolBootstrapFailed, match="does not match"),
     ):
-        subprocess.run(cmd, cwd=source, check=True, capture_output=True)  # noqa: S603
-    head = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=source, check=True, capture_output=True, text=True
-    ).stdout.strip()
-    bundle = source.parent / "pool.bundle"
-    subprocess.run(  # noqa: S603
-        ["git", "bundle", "create", str(bundle), "HEAD"],
-        cwd=source,
-        check=True,
-        capture_output=True,
-    )
-    return head, bundle.read_bytes()
+        memory_repo.bootstrap_from_gateway(
+            target=target, branch="machine-runner", access=access(url)
+        )
+    assert leftover.read_text() == "retain until a valid checkout is ready"
+    assert not (target / ".git").exists()
+    assert not list(target.parent.glob(".memory-bootstrap-*"))
 
 
-def test_bootstrap_from_gateway_clones_bundle_as_machine_branch(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    """bootstrap_from_gateway clones the gateway-served git bundle into the pool
-    dir on the machine branch — a true descendant of main, with the junk
-    bundle-path origin removed (real git end to end)."""
-    from base.paths import memory_dir as _md
-
-    head, bundle_bytes = _make_real_bundle(tmp_path / "src")
-
-    captured: dict[str, object] = {}
-
-    def _fake_download(url: str, headers: dict[str, str]) -> tuple[str | None, bytes]:
-        captured["url"] = url
-        captured["headers"] = headers
-        return head, bundle_bytes
-
-    monkeypatch.setattr(memory_repo, "download_pool_snapshot", _fake_download)
-
-    import base.cluster.machine as _machine
-
-    monkeypatch.setattr(
-        _machine, "gateway_api_base", gateway_api_base_stub("http://gw.example:8000")
-    )
-    monkeypatch.setattr(
-        _machine,
-        "gateway_auth_headers",
-        gateway_auth_headers_stub({"Authorization": "Bearer s3cret"}),
-    )
-
-    machine_identity.set(role="agent-runner", name="test-host-2")
-    memory_repo.bootstrap_from_gateway(machine=machine_identity)
-
-    assert captured["url"] == "http://gw.example:8000/api/memory/pool"
-    assert captured["headers"] == {"Authorization": "Bearer s3cret"}
-    pool = _md()
-    assert (pool / "MEMORY.md").read_text() == "# shared index\n"
-    assert (pool / "health" / "a.md").read_text() == "note"
-    assert (pool / ".git").is_dir()
-    branch = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        cwd=pool,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    assert branch == "machine-test-host-2"
-    remotes = subprocess.run(
-        ["git", "remote"], cwd=pool, check=True, capture_output=True, text=True
-    ).stdout.strip()
-    assert remotes == ""
-    pool_head = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=pool, check=True, capture_output=True, text=True
-    ).stdout.strip()
-    assert pool_head == head
+def test_bootstrap_from_gateway_non_200_fails_loud(tmp_path: Path) -> None:
+    target = tmp_path / "memory"
+    with (
+        pool_server(PoolResponse(b"unavailable", status=502)) as url,
+        pytest.raises(memory_repo.MemoryPoolBootstrapFailed, match="HTTP 502"),
+    ):
+        memory_repo.bootstrap_from_gateway(
+            target=target, branch="machine-runner", access=access(url)
+        )
+    assert not target.exists()
 
 
-def test_bootstrap_from_gateway_head_mismatch_fails_loud(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    """When the bundle's HEAD is not the advertised X-Pool-Head, bootstrap fails
-    loud instead of installing a torn snapshot."""
-    _head, bundle_bytes = _make_real_bundle(tmp_path / "src")
-
-    def _fake_download(url: str, headers: dict[str, str]) -> tuple[str | None, bytes]:
-        return "deadbeefdeadbeef", bundle_bytes
-
-    monkeypatch.setattr(memory_repo, "download_pool_snapshot", _fake_download)
-
-    import base.cluster.machine as _machine
-
-    monkeypatch.setattr(
-        _machine, "gateway_api_base", gateway_api_base_stub("http://gw.example:8000")
-    )
-
-    machine_identity.set(role="agent-runner", name="test-host-2")
-    with pytest.raises(memory_repo.MemoryPoolBootstrapFailed, match="does not match"):
-        memory_repo.bootstrap_from_gateway(machine=machine_identity)
-
-
-def test_bootstrap_from_gateway_non_200_fails_loud(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    """A non-200 gateway answer surfaces as MemoryPoolBootstrapFailed with the
-    status in the message — the guided failure, not a raw traceback."""
-
-    def _failing_download(url: str, headers: dict[str, str]) -> tuple[str | None, bytes]:
-        raise memory_repo.MemoryPoolBootstrapFailed("GET http://gw/api/memory/pool -> HTTP 502")
-
-    monkeypatch.setattr(memory_repo, "download_pool_snapshot", _failing_download)
-
-    import base.cluster.machine as _machine
-
-    monkeypatch.setattr(_machine, "gateway_api_base", gateway_api_base_stub("http://gw"))
-    machine_identity.set(role="agent-runner", name="test-host-2")
-    with pytest.raises(memory_repo.MemoryPoolBootstrapFailed, match="HTTP 502"):
-        memory_repo.bootstrap_from_gateway(machine=machine_identity)
-
-
-def test_bootstrap_from_gateway_missing_gateway_url_fails_loud(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    """A runner with no gateway URL configured fails with guidance, not the
-    raw GatewayApiBaseMissing traceback."""
-    import base.cluster.machine as _machine
-
-    monkeypatch.setattr(
-        _machine,
-        "gateway_api_base",
-        gateway_api_base_raises(
-            _machine.GatewayApiBaseMissing("gateway_url unset — `meiva start` writes it")
-        ),
-    )
-    machine_identity.set(role="agent-runner", name="test-host-2")
+def test_bootstrap_from_gateway_missing_gateway_url_fails_loud(tmp_path: Path) -> None:
+    target = tmp_path / "memory"
     with pytest.raises(memory_repo.MemoryPoolBootstrapFailed, match="gateway URL unavailable"):
-        memory_repo.bootstrap_from_gateway(machine=machine_identity)
+        memory_repo.bootstrap_from_gateway(
+            target=target, branch="machine-runner", access=access("")
+        )
+    assert not target.exists()
 
 
-def test_bootstrap_from_gateway_corrupt_bundle_fails_loud(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    """A body that is not a valid git bundle fails at clone time and is wrapped
-    into MemoryPoolBootstrapFailed (real git clone of junk bytes)."""
+def test_bootstrap_from_gateway_corrupt_bundle_fails_loud(tmp_path: Path) -> None:
+    target = tmp_path / "selected" / "memory"
+    with (
+        pool_server(PoolResponse(b"this is not a git bundle")) as url,
+        pytest.raises(memory_repo.MemoryPoolBootstrapFailed, match="git clone from bundle failed"),
+    ):
+        memory_repo.bootstrap_from_gateway(
+            target=target, branch="machine-runner", access=access(url)
+        )
+    assert not target.exists()
+    assert not list(target.parent.glob(".memory-bootstrap-*"))
 
-    def _junk_download(url: str, headers: dict[str, str]) -> tuple[str | None, bytes]:
-        return None, b"this is not a git bundle"
 
-    monkeypatch.setattr(memory_repo, "download_pool_snapshot", _junk_download)
+def test_status_compares_the_supplied_tracking_branch(memory_checkout: tuple[Path, Path]) -> None:
+    source, root = memory_checkout
+    memory_repo.run_git("checkout", "-b", "tracked", cwd=source)
+    commit_note(source, "remote tracked change")
+    memory_repo.run_git("push", "origin", "tracked", cwd=source)
+    commit_note(root, "local unpublished change")
+    memory_repo.run_git("fetch", "origin", "tracked", cwd=root)
+    status = memory_repo.status(root=root, track_branch="tracked", zone=dt.UTC)
+    assert status.branch == "main"
+    assert status.ahead_of_main == status.behind_main == 1
+    assert status.is_clean
+    assert status.local_commits_on_branch == 3
 
-    import base.cluster.machine as _machine
 
-    monkeypatch.setattr(
-        _machine, "gateway_api_base", gateway_api_base_stub("http://gw.example:8000")
+def test_bootstrap_missing_credential_is_not_reclassified(tmp_path: Path) -> None:
+    no_credential = GatewayAccess(
+        gateway_url="http://127.0.0.1:1",
+        cluster_secret="",
+        remote_plane=False,
+        machine_token=None,
+        launcher_profile=None,
+        gateway_home=True,
     )
-    machine_identity.set(role="agent-runner", name="test-host-2")
-    with pytest.raises(memory_repo.MemoryPoolBootstrapFailed, match="git clone from bundle failed"):
-        memory_repo.bootstrap_from_gateway(machine=machine_identity)
+    with pytest.raises(GatewayApiTokenMissing):
+        memory_repo.bootstrap_from_gateway(
+            target=tmp_path / "memory", branch="machine-runner", access=no_credential
+        )
+    assert not (tmp_path / "memory").exists()
