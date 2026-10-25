@@ -6,9 +6,8 @@ exports = ["direct_url.py", "pg_admin.py", "pg_foreground.py", "pg_runtime.py", 
 "pg_throwaway_base.py" = ["pg_plan.py"]
 "pg_tools.py" = ["pg_foreground.py", "pg_plan.py", "pg_stall_watchdog.py", "pg_throwaway_base.py", "runtime_binaries.py"]
 "pooler.py" = ["pg_tools.py"]
-"runtime_binaries.py" = ["pg_plan.py"]
 "tests" = ["direct_url.py", "pg_foreground.py", "pg_plan.py", "pg_runtime.py", "pg_stall_watchdog.py", "pg_throwaway_base.py", "pg_tools.py", "pooler.py", "redis_bridge.py", "runtime_binaries.py", "walg_binary.py"]
-"walg_binary.py" = ["pg_plan.py", "runtime_binaries.py"]
+"walg_binary.py" = ["runtime_binaries.py"]
 
 [purity]
 "__init__.py" = "strict"

@@ -26,41 +26,6 @@ DAEMON_ENV_PASS_THROUGH: tuple[str, ...] = (
     "SYSTEMROOT",
 )
 
-PG_VERSION = "17.11.0"
-PG_ARTIFACTS: dict[str, tuple[str, str]] = {
-    "darwin": (
-        "embedded-postgres-binaries-darwin-arm64v8",
-        "a1c2786acb0c398f9b2d76806fc52f5dc8b222cbc8e9383a9b9702084daaf3a5",
-    ),
-    "linux-x86_64": (
-        "embedded-postgres-binaries-linux-amd64",
-        "0dd7b72b6f335b8ecfb355fa24c5781e8a93edd09880bb77eb52ebbf29b3e96d",
-    ),
-}
-
-PGVECTOR_VERSION = "0.8.7"
-PGVECTOR_SQL = f"vector--{PGVECTOR_VERSION}.sql"
-PGVECTOR_ARTIFACTS: dict[str, tuple[str, str]] = {
-    "linux-x86_64": (
-        "https://apt.postgresql.org/pub/repos/apt/pool/main/p/pgvector/"
-        "postgresql-17-pgvector_0.8.7-1.pgdg12+1_amd64.deb",
-        "acb5569b6a5bb71d5968205a4da15911ff3b2a15a57a2a9d765560882f53e3ea",
-    ),
-    "darwin-arm64": (
-        "https://ghcr.io/v2/homebrew/core/pgvector/blobs/"
-        "sha256:326bc17440a773b75b054d83d7905b46b370b1a1b6543fff077186b5a632253b",
-        "326bc17440a773b75b054d83d7905b46b370b1a1b6543fff077186b5a632253b",
-    ),
-}
-
-WALG_VERSION = "v3.0.9"
-WALG_ARTIFACTS: dict[str, tuple[str, str]] = {
-    "linux-x86_64": (
-        "wal-g-pg-24.04-amd64",
-        "8015836f246a978f27b31a2462eac7765312558ae5b11ac033322b555abf9e22",
-    ),
-}
-
 
 def build_pg_shm_args(*, macos: bool, mmap_ok_on_macos: bool = PG_SHM_MMAP_OK_ON_MACOS) -> str:
     if macos and not mmap_ok_on_macos:
