@@ -1,3 +1,4 @@
+import os
 from collections.abc import Callable
 from dataclasses import fields
 from typing import Any
@@ -13,9 +14,9 @@ def snapshot_process_config() -> ConfigBoot:
         domain: set(getattr(settings, domain).model_fields_set)
         for domain in {field_domain(name) for name in values}
     }
-    owner = ConfigBoot()
-    owner.read_process_environment()
+    owner = ConfigBoot(environment=dict(os.environ))
     model = owner.ensure_eager()
+    owner.environment = None
     owner.env_boot = authority
     model.env_boot = authority
     for name, value in values.items():
