@@ -20,9 +20,11 @@ import json
 import secrets
 import sys
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
+from typing import Self, cast
 
 import redis
 from dotenv import dotenv_values
@@ -41,7 +43,6 @@ from base.paths import meiva_home
 from ops.env_audit import EnvWriteAudit
 
 _TOKEN_BYTES = 32
-_SCOPES = frozenset({"admin", "runner", "both"})
 _GATEWAY_CONTEXT_ERROR = (
     "data-plane secret rotation must run on the gateway host in a gateway context, not from "
     "an agent shell. Run:\n"
@@ -50,12 +51,61 @@ _GATEWAY_CONTEXT_ERROR = (
 )
 
 
+class RotationScope(StrEnum):
+    ADMIN = "admin"
+    RUNNER = "runner"
+    BOTH = "both"
+
+    @classmethod
+    def parse(cls, raw: str) -> Self:
+        try:
+            return cls(raw)
+        except ValueError:
+            raise ValueError("unsupported rotation scope") from None
+
+
+class RotationPhase(StrEnum):
+    MINTED = "minted"
+    ADMIN = "admin"
+    RUNNER = "runner"
+    VERIFIED = "verified"
+    ENV_WRITTEN = "env_written"
+
+    @classmethod
+    def parse(cls, raw: str) -> Self:
+        try:
+            return cls(raw)
+        except ValueError:
+            raise ValueError("unsupported rotation phase") from None
+
+
+def _journal_text(record: dict[str, object], name: str) -> str:
+    value = record[name]
+    if not isinstance(value, str) or not value:
+        raise RuntimeError(f"invalid Redis rotation journal field: {name}")
+    return value
+
+
+def _journal_port(record: dict[str, object]) -> int:
+    port = record["redis_port"]
+    if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+        raise RuntimeError("invalid Redis rotation journal field: redis_port")
+    return port
+
+
+def _journal_stamp(record: dict[str, object]) -> str:
+    stamp = _journal_text(record, "started_at")
+    if "/" in stamp or "\0" in stamp:
+        raise RuntimeError("invalid Redis rotation journal field: started_at")
+    return stamp
+
+
 @dataclass
 class RotationState:
     """All mutable values needed to resume safely. Kept in a 0600 file because
     it includes both the old and replacement Redis passwords."""
 
-    scope: str
+    scope: RotationScope
     old_redis_admin_password: str = field(repr=False)
     new_redis_admin_password: str = field(repr=False)
     old_redis_password: str = field(repr=False)
@@ -64,7 +114,7 @@ class RotationState:
     redis_host: str
     redis_user: str
     started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
-    phase: str = "minted"
+    phase: RotationPhase = RotationPhase.MINTED
 
     def path(self) -> Path:
         stamp = self.started_at.replace(":", "").replace("+00:00", "Z")
@@ -78,23 +128,45 @@ class RotationState:
         path.chmod(0o600)
         return path
 
+    # meiva:note
+    # Saved journals always contain every dataclass field. Defaults belong to a fresh
+    # rotation, never to a truncated resume record. Validate before plan output or effects;
+    # diagnostics name only canonical fields, since the record contains passwords.
     @classmethod
     def load(cls, path: Path) -> RotationState:
         try:
-            return cls(**json.loads(path.read_text()))
-        except TypeError as exc:
+            raw: object = json.loads(path.read_text())
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise RuntimeError("invalid Redis rotation journal JSON") from None
+        record = cast("dict[str, object]", raw) if isinstance(raw, dict) else {}
+        if set(record) != {item.name for item in fields(cls)}:
             raise RuntimeError(
                 f"{path} is not a Redis-only rotation journal (Postgres credentials no "
                 "longer rotate here); start a new rotation"
-            ) from exc
+            )
+        try:
+            return cls(
+                scope=RotationScope.parse(_journal_text(record, "scope")),
+                old_redis_admin_password=_journal_text(record, "old_redis_admin_password"),
+                new_redis_admin_password=_journal_text(record, "new_redis_admin_password"),
+                old_redis_password=_journal_text(record, "old_redis_password"),
+                new_redis_password=_journal_text(record, "new_redis_password"),
+                redis_port=_journal_port(record),
+                redis_host=_journal_text(record, "redis_host"),
+                redis_user=_journal_text(record, "redis_user"),
+                started_at=_journal_stamp(record),
+                phase=RotationPhase.parse(_journal_text(record, "phase")),
+            )
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from None
 
     @property
     def rotates_admin(self) -> bool:
-        return self.scope in {"admin", "both"}
+        return self.scope in {RotationScope.ADMIN, RotationScope.BOTH}
 
     @property
     def rotates_runner(self) -> bool:
-        return self.scope in {"runner", "both"}
+        return self.scope in {RotationScope.RUNNER, RotationScope.BOTH}
 
     @property
     def redis_admin_password(self) -> str:
@@ -116,9 +188,8 @@ def _require_gateway_context() -> None:
         raise RuntimeError(_GATEWAY_CONTEXT_ERROR)
 
 
-def build_state(scope: str = "both") -> RotationState:
-    if scope not in _SCOPES:
-        raise ValueError(f"unsupported scope {scope!r}")
+def build_state(scope: str = RotationScope.BOTH) -> RotationState:
+    selected = RotationScope.parse(scope)
     _require_gateway_context()
     record = get_record(meiva_home())
     if record is None:
@@ -132,11 +203,15 @@ def build_state(scope: str = "both") -> RotationState:
             "authenticated and no conversion exists; re-birth it as a new home"
         )
     return RotationState(
-        scope=scope,
+        scope=selected,
         old_redis_admin_password=old_admin,
-        new_redis_admin_password=mint_secret() if scope in {"admin", "both"} else old_admin,
+        new_redis_admin_password=mint_secret()
+        if selected in {RotationScope.ADMIN, RotationScope.BOTH}
+        else old_admin,
         old_redis_password=old_runtime,
-        new_redis_password=mint_secret() if scope in {"runner", "both"} else old_runtime,
+        new_redis_password=mint_secret()
+        if selected in {RotationScope.RUNNER, RotationScope.BOTH}
+        else old_runtime,
         redis_port=record.ports["redis"],
         redis_host=url_host(settings.data_plane.redis_url),
         redis_user=redis_identity(settings.data_plane.redis_url),
@@ -246,7 +321,9 @@ def write_env(state: RotationState) -> None:
     )
 
 
-def _run_phase(state: RotationState, phase: str, fn: Callable[[RotationState], None]) -> None:
+def _run_phase(
+    state: RotationState, phase: RotationPhase, fn: Callable[[RotationState], None]
+) -> None:
     print(f"-> {phase}")
     fn(state)
     state.phase = phase
@@ -276,7 +353,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     parser = argparse.ArgumentParser(description="Rotate the Redis data-plane credentials.")
-    parser.add_argument("--scope", choices=sorted(_SCOPES), default="both")
+    parser.add_argument(
+        "--scope",
+        choices=sorted(scope.value for scope in RotationScope),
+        default=RotationScope.BOTH.value,
+    )
     parser.add_argument("--execute", action="store_true", help="perform the rotation")
     parser.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
     parser.add_argument("--resume", metavar="STATE_FILE", help="resume a saved rotation")
@@ -302,13 +383,13 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     try:
-        _run_phase(state, "admin", apply_admin)
-        _run_phase(state, "runner", apply_runner)
-        _run_phase(state, "verified", verify)
-        _run_phase(state, "env_written", write_env)
+        _run_phase(state, RotationPhase.ADMIN, apply_admin)
+        _run_phase(state, RotationPhase.RUNNER, apply_runner)
+        _run_phase(state, RotationPhase.VERIFIED, verify)
+        _run_phase(state, RotationPhase.ENV_WRITTEN, write_env)
     except Exception as exc:
         state_path = state.save()
-        print(f"\n✗ rotation failed at {state.phase!r}: {exc}", file=sys.stderr)
+        print(f"\n✗ rotation failed at {state.phase.value!r}: {exc}", file=sys.stderr)
         print(f"  resume with --execute --resume {state_path}", file=sys.stderr)
         return 1
 

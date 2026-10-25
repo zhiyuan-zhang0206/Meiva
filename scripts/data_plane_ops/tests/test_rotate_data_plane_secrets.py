@@ -20,7 +20,7 @@ _NEW_REDIS_RUNTIME = "new-redis-runtime"
 _ENV = f"MEIVA_REDIS_ADMIN_PASSWORD={_OLD_REDIS_ADMIN}\nMEIVA_REDIS_PASSWORD={_OLD_REDIS_RUNTIME}\n"
 
 
-def _state(scope: str = "both") -> rotate.RotationState:
+def _state(scope: rotate.RotationScope = rotate.RotationScope.BOTH) -> rotate.RotationState:
     return rotate.RotationState(
         scope=scope,
         old_redis_admin_password=_OLD_REDIS_ADMIN,
@@ -104,7 +104,7 @@ def test_main_reports_an_agent_context_guard_cleanly(
 
 
 def test_admin_scope_changes_the_redis_default_user_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    state = _state("admin")
+    state = _state(rotate.RotationScope.ADMIN)
     redis_commands: list[tuple[str, ...]] = []
 
     class _Redis:
@@ -136,7 +136,7 @@ def test_admin_scope_changes_the_redis_default_user_only(monkeypatch: pytest.Mon
 def test_runner_scope_rotates_the_acl_user_of_the_redis_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    state = _state("runner")
+    state = _state(rotate.RotationScope.RUNNER)
     acl_calls: list[tuple[str, dict[str, object]]] = []
 
     def _working_redis_admin_password(_state: rotate.RotationState) -> str:
@@ -167,7 +167,7 @@ def test_write_env_syncs_the_redis_url_with_the_active_passwords(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _patch_gateway_home(monkeypatch, tmp_path)
-    state = _state("runner")
+    state = _state(rotate.RotationScope.RUNNER)
     writes: list[dict[str, str]] = []
 
     def _upsert_env(_path: Path, values: dict[str, str], *, audit: object = None) -> None:
