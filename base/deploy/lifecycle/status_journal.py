@@ -29,12 +29,24 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 import psutil
 
 from base.log import logger
 from base.paths import run_dir
+
+
+def _current_pid() -> int:
+    return os.getpid()
+
+
+def _is_obj_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
 
 
 @dataclass
@@ -134,7 +146,7 @@ def begin(home: Path, operation: str, *, deadline: float | None = None) -> bool:
             home,
             LifecycleOp(
                 operation=operation,
-                pid=os.getpid(),
+                pid=_current_pid(),
                 started_at=time.monotonic(),
                 deadline=deadline,
                 phases=op.phases,
@@ -148,7 +160,7 @@ def begin(home: Path, operation: str, *, deadline: float | None = None) -> bool:
         home,
         LifecycleOp(
             operation=operation,
-            pid=os.getpid(),
+            pid=_current_pid(),
             started_at=time.monotonic(),
             deadline=deadline,
         ),
@@ -169,7 +181,7 @@ def phase(home: Path, name: str) -> Generator[None, None, None]:
     if op is None:
         op = LifecycleOp(
             operation="unknown",
-            pid=os.getpid(),
+            pid=_current_pid(),
             started_at=time.monotonic(),
             deadline=None,
         )
@@ -213,18 +225,17 @@ def finish(
 def _parse_phases(raw_phases: object) -> list[LifecyclePhase]:
     """The well-formed phase entries of a journal's `phases` field; malformed ones are skipped."""
     phases: list[LifecyclePhase] = []
-    if not isinstance(raw_phases, list):
+    if not _is_obj_list(raw_phases):
         return phases
-    for raw in cast("list[object]", raw_phases):
-        if not isinstance(raw, dict):
+    for raw in raw_phases:
+        if not _is_str_dict(raw):
             continue
-        entry = cast("dict[str, object]", raw)
-        name = entry.get("name")
+        name = raw.get("name")
         if not isinstance(name, str):
             continue
-        started = entry.get("started_at", 0.0)
-        finished = entry.get("finished_at")
-        ok = entry.get("ok")
+        started = raw.get("started_at", 0.0)
+        finished = raw.get("finished_at")
+        ok = raw.get("ok")
         phases.append(
             LifecyclePhase(
                 name=name,
@@ -238,12 +249,11 @@ def _parse_phases(raw_phases: object) -> list[LifecyclePhase]:
 
 def _parse_resumed_from(raw_resumed: object) -> ResumedFrom | None:
     """The `resumed_from` record, or None when absent or not fully typed."""
-    if not isinstance(raw_resumed, dict):
+    if not _is_str_dict(raw_resumed):
         return None
-    entry = cast("dict[str, object]", raw_resumed)
-    prev_pid = entry.get("pid")
-    prev_operation = entry.get("operation")
-    prev_started = entry.get("started_at")
+    prev_pid = raw_resumed.get("pid")
+    prev_operation = raw_resumed.get("operation")
+    prev_started = raw_resumed.get("started_at")
     if (
         isinstance(prev_pid, int)
         and isinstance(prev_operation, str)
@@ -259,30 +269,29 @@ def read(home: Path) -> LifecycleOp | None:
         raw = json.loads(journal_path(home).read_text())
     except (OSError, ValueError):
         return None
-    if not isinstance(raw, dict):
+    if not _is_str_dict(raw):
         return None
-    data = cast("dict[str, Any]", raw)
-    if not isinstance(data.get("operation"), str):
+    if not isinstance(raw.get("operation"), str):
         return None
-    phases = _parse_phases(data.get("phases", []))
+    phases = _parse_phases(raw.get("phases", []))
     try:
-        pid = int(data["pid"])
-        started_at = float(data.get("started_at", 0.0))
-        deadline = None if data.get("deadline") is None else float(data["deadline"])
+        pid = int(raw["pid"])
+        started_at = float(raw.get("started_at", 0.0))
+        deadline = None if raw.get("deadline") is None else float(raw["deadline"])
     except (KeyError, TypeError, ValueError):
         # A parseable-but-wrong-shape journal (missing identity fields, bad
         # types) is as unreadable as a corrupt one: readers on the
         # stop/restart path must see "absent", never a raise.
         return None
-    resumed_from = _parse_resumed_from(data.get("resumed_from"))
+    resumed_from = _parse_resumed_from(raw.get("resumed_from"))
     return LifecycleOp(
-        operation=data["operation"],
+        operation=raw["operation"],
         pid=pid,
         started_at=started_at,
         deadline=deadline,
         phases=phases,
-        complete=bool(data.get("complete", False)),
-        result=data.get("result"),
+        complete=bool(raw.get("complete", False)),
+        result=raw.get("result"),
         resumed_from=resumed_from,
     )
 

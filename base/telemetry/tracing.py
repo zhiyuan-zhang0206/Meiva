@@ -14,11 +14,10 @@ import time
 from collections.abc import Callable, Generator, Sequence
 from functools import wraps
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import httpx
 from opentelemetry.sdk.trace import ReadableSpan
-from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
 from base.cluster.machine import MachineIdentityReader
@@ -774,7 +773,8 @@ def claim_idle_wait_span() -> Generator[None, None, None]:
     # runtime object is the SDK span the callback handler started, and the
     # prefix check is the fail-safe that keeps us from ending the enclosing
     # workflow/root span when the node instrumentor is not attached.
-    if not cast(SdkSpan, current).name.startswith(_NODE_SPAN_PREFIX):
+    span_name = getattr(current, "name", "")
+    if not isinstance(span_name, str) or not span_name.startswith(_NODE_SPAN_PREFIX):
         yield
         return
     current.end()

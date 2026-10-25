@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, TypeGuard
 from urllib.parse import urlsplit
 
 import psycopg
@@ -375,9 +375,13 @@ def frontend_base_url() -> str:
     return f"{gw.scheme or 'http'}://{host}:{port}"
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, str]]:
+    return isinstance(value, dict)
+
+
 def _summary(alert: dict[str, Any]) -> str:
     raw = alert.get("annotations")
-    annotations: dict[str, str] = cast("dict[str, str]", raw) if isinstance(raw, dict) else {}
+    annotations: dict[str, str] = raw if _is_str_dict(raw) else {}
     return str(annotations.get("summary") or annotations.get("description") or "")
 
 
@@ -466,7 +470,7 @@ def notify_group_text(alerts: list[dict[str, Any]], lang: str | None = None) -> 
 def _group_head(alerts: list[dict[str, Any]], lang: str) -> str:
     """The grouped message's head: highest severity, the alertname and the count."""
 
-    labels_of = [cast("dict[str, str]", a.get("labels") or {}) for a in alerts]
+    labels_of = [raw if _is_str_dict(raw := a.get("labels")) else {} for a in alerts]
     severity = max((parse_severity(lab) for lab in labels_of), key=_SEVERITY_RANK.__getitem__)
     resolved = normalize_status(str(alerts[0].get("status") or "")) == "resolved"
     head = ALERT_HEAD[lang]["resolved" if resolved else "firing"].format(

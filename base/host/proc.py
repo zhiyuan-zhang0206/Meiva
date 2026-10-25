@@ -198,7 +198,8 @@ def request_stop(pid: int) -> None:
 
 def wait_owned(members: list[OwnedProcess], timeout: float) -> list[OwnedProcess]:
     """Bounded native exit observation; a permission gap remains a survivor."""
-    deadline = time.monotonic() + timeout
+    clock = time.monotonic
+    deadline = clock() + timeout
     while True:
         alive: list[OwnedProcess] = []
         for identity in members:
@@ -207,7 +208,7 @@ def wait_owned(members: list[OwnedProcess], timeout: float) -> list[OwnedProcess
                     alive.append(identity)
             except (psutil.AccessDenied, OSError):
                 alive.append(identity)
-        remaining = deadline - time.monotonic()
+        remaining = deadline - clock()
         if not alive or remaining <= 0:
             return alive
         members = alive

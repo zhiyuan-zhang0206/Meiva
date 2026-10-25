@@ -109,13 +109,17 @@ def _detail(result: ProbeResult, item: PermissionItem) -> str:
     return ""
 
 
+def _checked_at(now: datetime | None) -> datetime:
+    return datetime.now(UTC) if now is None else now
+
+
 # meiva:note
 # A host state is computed from the probe of the same call. The record under $MEIVA_HOME stores the last observation and the user's deferral flag; it is written from a probe and never read as evidence, so a cached 'granted' can neither hide a revoked grant nor invent one.
 # meiva:link base/host/permissions_helper/grants/docs/grants.meiva.okf.md
 def evaluate(
     result: ProbeResult, *, deferred: bool = False, now: datetime | None = None
 ) -> GateReport:
-    checked_at = now or datetime.now(UTC)
+    checked_at = _checked_at(now)
     if not result.helper_reachable:
         items = tuple(ItemStatus(item, Grant.UNKNOWN, "helper unreachable") for item in CATALOG)
         return GateReport(
@@ -150,7 +154,7 @@ def evaluate(
 def not_applicable(now: datetime | None = None) -> GateReport:
     return GateReport(
         state=GateState.NOT_APPLICABLE,
-        checked_at=now or datetime.now(UTC),
+        checked_at=_checked_at(now),
         items=(),
         diagnostic="There are no macOS authorizations to check on this host.",
         supports_request=False,
@@ -225,7 +229,7 @@ def mark_deferred(*, now: datetime | None = None, path: Path | None = None) -> O
     record = read_record(path)
     if record is None:
         record = OnboardingRecord(
-            checked_at=now or datetime.now(UTC),
+            checked_at=_checked_at(now),
             state=GateState.DEFERRED,
             deferred=True,
             grants={},

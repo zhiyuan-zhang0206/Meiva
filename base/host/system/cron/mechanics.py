@@ -9,9 +9,10 @@ from typing import TextIO
 
 from loguru import logger
 
+from base.host.env.harness_binaries import resolve_user_home
 from base.host.system.hostport import Host
 from base.host.system.job_readings import read_launchd_path, read_meiva_binary
-from base.host.system.job_values import cron_environment, launchd_environment
+from base.host.system.job_values import cron_environment, launchd_environment, plist_path
 from base.native_process.os_platform import crontab_lock
 from base.paths import meiva_home
 
@@ -291,6 +292,10 @@ def cron_env_prefix() -> str:
     return cron_environment(Path(job_home()))
 
 
+def user_plist_path(label: str, *, user_home: Path | None = None) -> Path:
+    return plist_path(label, user_home=resolve_user_home(user_home))
+
+
 def launchd_path_env(
     *,
     host: Host,
@@ -312,7 +317,7 @@ def launchd_path_env(
     # needed, so this is not cosmetic.
 
     binary = meiva_binary_path(host=host) if meiva_binary is None else meiva_binary
-    home = Path.home() if user_home is None else user_home
+    home = resolve_user_home(user_home)
     return read_launchd_path(binary, user_home=home, host=host)
 
 

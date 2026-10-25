@@ -48,7 +48,7 @@ from base.host.env.process_profile import (
     ProcessProfile,
     parse_process_profile,
 )
-from base.paths.home import home_from_env, resolve_meiva_home
+from base.paths.home import default_home, home_from_env, resolve_meiva_home
 
 # `MEIVA_CONFIG_BOOT=eager` — the operator's instant rollback to the eager boot.
 BOOT_MODE_ENV = "MEIVA_CONFIG_BOOT"
@@ -75,9 +75,18 @@ BUILD_WAIT_TIMEOUT_SECONDS = 30.0
 _LITE_REDIS_URL = "redis://config-lite@127.0.0.1:1/0"
 
 
+class EagerSettings(Protocol):
+    @property
+    def profile(self) -> str | None: ...
+
+    env_boot: EnvBootResult
+
+    def has_domain(self, name: str) -> bool: ...
+
+
 class _InstalledBundle(Protocol):
     @property
-    def settings(self) -> object: ...
+    def settings(self) -> EagerSettings: ...
 
     @property
     def exports(self) -> Mapping[str, object]: ...
@@ -116,7 +125,7 @@ class _DomainView:
         object.__setattr__(self, "_owner", owner)
         object.__setattr__(self, "_domain", domain)
 
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name: str) -> object:
         domain = self._domain
         if self._owner.mode == _FULL:
             return getattr(getattr(self._owner._current_settings(), domain), name)
@@ -309,7 +318,7 @@ class ConfigBoot:
         self.settings: Any = None
         self.wait_timeout_seconds: float | None = wait_timeout_seconds
 
-    def _current_settings(self) -> Any:
+    def _current_settings(self) -> EagerSettings:
         return self.settings
 
     # meiva:note
@@ -326,7 +335,7 @@ class ConfigBoot:
         from base.host.env.dotenv_file import env_file_path, read_env_aliases
 
         env = self.process_environment()
-        home = home_from_env(env, user_home=Path.home())
+        home = home_from_env(env, user_home=default_home().parent)
         return launch_facts(env, env_file=read_env_aliases(env_file_path(home)))
 
     def _apply_cluster_timezone(self) -> None:
@@ -360,11 +369,11 @@ class ConfigBoot:
             self.environment = environment
             self.profile = parsed_profile
             self.env_boot = read_database_delivery(
-                environment, home=home_from_env(environment, user_home=Path.home())
+                environment, home=home_from_env(environment, user_home=default_home().parent)
             )
             self.prepared = True
 
-    def complete_read_model(self) -> Any:
+    def complete_read_model(self) -> EagerSettings:
         """Build the SDK's complete read surface from this same delivery."""
         from base.config._full import Settings, build
 
@@ -376,10 +385,12 @@ class ConfigBoot:
         """Refresh only this owner's data-plane slice at the existing call point."""
         if self.environment is not None:
             raise RuntimeError("a read-only configuration owner cannot redeliver the data plane")
-        from base.config._full import refresh_data_plane_settings
+        from base.config._full import Settings, refresh_data_plane_settings
 
         self.upgrade("refresh_data_plane_settings()")
-        refresh_data_plane_settings(self._current_settings())
+        current = self._current_settings()
+        if isinstance(current, Settings):
+            refresh_data_plane_settings(current)
 
     def resolve(self, name: str) -> object:
         """Resolve one `LITE_FIELDS` entry: pending override > env > default."""
@@ -515,7 +526,7 @@ class ConfigBoot:
         else:
             _plant_placeholders(target_env)
 
-    def upgrade(self, reason: str) -> Any:
+    def upgrade(self, reason: str) -> EagerSettings:
         """Build this owner's eager chain once.
 
         Under the upgrade lock: prepare if not yet prepared, build the full state
@@ -600,7 +611,7 @@ class ConfigBoot:
         self.upgrade(reason)
         return True
 
-    def ensure_eager(self) -> Any:
+    def ensure_eager(self) -> EagerSettings:
         """Construct the full config chain now, at this point in the process.
 
         The explicit full-validation entry point for processes that must fail fast
@@ -674,7 +685,7 @@ class _LegacyConfigBoot(ConfigBoot):
         self._facade = namespace
         self._apply_timezone = apply_timezone
 
-    def _current_settings(self) -> Any:
+    def _current_settings(self) -> EagerSettings:
         return self._facade["settings"]
 
     def _apply_cluster_timezone(self) -> None:

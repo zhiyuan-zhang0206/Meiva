@@ -26,6 +26,7 @@ from base.host.db_authority.ledger import (
     Encrypt,
     authority_dir,
     locked,
+    new_secret_token,
     publish_exclusive,
     read_private,
     read_secret,
@@ -80,13 +81,11 @@ def ensure_pooler_admin(home: Path, *, encrypt: Encrypt) -> PoolerAdmin:
     Birth calls this; an existing credential is kept, never rotated, so a
     retry reuses the value the running pooler already holds.
     """
-    import secrets
-
     with locked(home):
         path = pooler_admin_path(home)
         if path.exists():
             return _parse_pooler_admin(read_private(path))
-        password = secrets.token_urlsafe(32)
+        password = new_secret_token()
         admin = PoolerAdmin(password=password, verifier=encrypt(POOLER_ADMIN, password))
         publish_exclusive(path, (admin.model_dump_json() + "\n").encode())
         return _parse_pooler_admin(read_private(path))

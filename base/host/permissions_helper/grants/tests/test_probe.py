@@ -7,8 +7,8 @@ from typing import Any
 import pytest
 
 from base.host.permissions_helper.client import (
-    PermissionsHelperClient,
     PermissionsHelperError,
+    RequestGrantsResult,
     SpawnResult,
 )
 from base.host.permissions_helper.grants import probe
@@ -20,7 +20,7 @@ from base.host.permissions_helper.grants.catalog import (
 )
 
 
-class FakeHelper(PermissionsHelperClient):
+class FakeHelper:
     def __init__(
         self,
         *,
@@ -29,21 +29,20 @@ class FakeHelper(PermissionsHelperClient):
         ax: bool = True,
         request_capable: bool = True,
     ) -> None:
-        super().__init__("/unused.sock")
         self._codes = codes
         self._screen = screen
         self._ax = ax
         self._request_capable = request_capable
         self.spawned: list[list[str]] = []
 
-    def ping(self) -> Any:
+    def ping(self) -> dict[str, object]:
         return {
             "preflight_screen": self._screen,
             "ax_trusted": self._ax,
             "request_grants_v1": self._request_capable,
         }
 
-    def request_grants(self) -> Any:
+    def request_grants(self) -> RequestGrantsResult:
         return {"screen_recording": self._screen, "accessibility": self._ax}
 
     def spawn_process(
@@ -63,11 +62,22 @@ class FakeHelper(PermissionsHelperClient):
         return {"pid": 4242, "reused": False}
 
 
-class DeadHelper(PermissionsHelperClient):
-    def __init__(self) -> None:
-        super().__init__("/unused.sock")
+class DeadHelper:
+    def ping(self) -> dict[str, object]:
+        raise PermissionsHelperError("socket refused the connection")
 
-    def ping(self) -> Any:
+    def request_grants(self) -> RequestGrantsResult:
+        raise PermissionsHelperError("socket refused the connection")
+
+    def spawn_process(
+        self,
+        name: str,
+        argv: list[str],
+        env: dict[str, str],
+        cwd: str,
+        stdout: str,
+        stderr: str,
+    ) -> SpawnResult:
         raise PermissionsHelperError("socket refused the connection")
 
 

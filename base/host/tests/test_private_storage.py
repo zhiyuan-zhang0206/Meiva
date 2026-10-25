@@ -61,7 +61,8 @@ def test_converge_skips_foreign_nodes(request: pytest.FixtureRequest, tmp_path: 
     foreign_dir.chmod(0o500)
     cap = _Captured(request.addfinalizer)
 
-    def _foreign(stat_result: os.stat_result) -> bool:
+    def _foreign(stat_result: os.stat_result, *, euid: int | None = None) -> bool:
+        _ = euid
         return stat_result.st_mode & 0o777 in (0o400, 0o500)
 
     with patch.object(private_storage, "is_foreign_owned", side_effect=_foreign):
@@ -194,9 +195,7 @@ def test_private_write_cleans_up_temp_file_when_replace_fails(
     assert list(tmp_path.glob(".*.tmp")) == []
 
 
-def test_converge_skips_foreign_owned_root(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_converge_skips_foreign_owned_root(request: pytest.FixtureRequest, tmp_path: Path) -> None:
     root = tmp_path / "private"
     root.mkdir()
     root.chmod(0o755)
@@ -205,12 +204,7 @@ def test_converge_skips_foreign_owned_root(
     child.chmod(0o644)
     cap = _Captured(request.addfinalizer)
 
-    def _foreign(_stat_result: os.stat_result) -> bool:
-        return True
-
-    monkeypatch.setattr(private_storage, "is_foreign_owned", _foreign)
-
-    assert private_storage.converge_private_tree(root) == root
+    assert private_storage.converge_private_tree(root, euid=os.geteuid() + 1) == root
 
     assert _mode(root) == 0o755
     assert _mode(child) == 0o644

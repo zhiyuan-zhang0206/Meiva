@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import ctypes
 import os
-import sys
 from functools import cache
+
+from base.native_process.os_platform import is_linux
 
 
 def require_pidfd_support(*, platform: str, has_symbols: bool) -> None:
@@ -22,7 +23,7 @@ def require_pidfd_support(*, platform: str, has_symbols: bool) -> None:
 
 @cache
 def pidfd_libc() -> ctypes.CDLL:
-    platform = sys.platform
+    platform = "linux" if is_linux() else "other"
     require_pidfd_support(platform=platform, has_symbols=True)
     libc = ctypes.CDLL(None, use_errno=True)
     require_pidfd_support(

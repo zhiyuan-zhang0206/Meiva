@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
-import sys
 from pathlib import Path
 from uuid import UUID
+
+from base.native_process.os_platform import is_linux, is_macos
 
 
 def pid_starttime_ticks(pid: int) -> int | None:
@@ -45,10 +46,10 @@ def native_boot_id() -> str | None:
     # Missing or malformed POSIX evidence refuses; it is never a legacy default.
     # Read afresh on every call: both sources are cheap, so no process holds a copy.
     #
-    if sys.platform == "linux":
+    if is_linux():
         value = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
-    elif sys.platform == "darwin":
+    elif is_macos():
         value = _darwin_boot_session_uuid()
     else:
-        raise RuntimeError(f"unsupported native boot identity platform: {sys.platform}")
+        raise RuntimeError("unsupported native boot identity platform")
     return str(UUID(value))

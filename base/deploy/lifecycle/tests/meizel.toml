@@ -3,16 +3,10 @@ exports = ["serving_entrypoint.py", "serving_root.py"]
 [uses]
 "conftest.py" = ["serving_root.py"]
 "test_pause_markers.py" = ["pause_lock_child.py"]
-"test_start_serving.py" = ["serving_entrypoint.py"]
+"test_start_serving.py" = ["serving_entrypoint.py", "serving_root.py"]
 "test_status_journal.py" = ["reaped_child.py"]
 
 [debt.first-party-patch]
 "serving_entrypoint.py#assignment base.deploy.lifecycle.start_serving.is_serving" = 1
 "serving_entrypoint.py#assignment base.deploy.lifecycle.start_serving.recovery_permitted" = 1
 "serving_root.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.observe_root" = 1
-"test_start_serving.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.is_serving" = 1
-"test_start_serving.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.observe_root" = 2
-"test_start_serving.py#monkeypatch.setattr base.deploy.lifecycle.start_serving.recovery_permitted" = 1
-
-[debt.unresolved-patch]
-"test_marker_commit.py#monkeypatch.setattr module._fsync_parent" = 1

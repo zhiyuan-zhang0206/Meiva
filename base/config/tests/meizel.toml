@@ -5,12 +5,6 @@ exports = ["api_keys.py", "config_authority.py", "configuration.py", "served_gat
 "test_config_boot_owner.py" = ["_boot_owner_child.py"]
 "test_slice_defaults.py" = ["configuration.py"]
 
-[debt.env-patch]
-"test_config_boot_owner.py#patch.dict os.environ" = 1
-
 [debt.first-party-patch]
 "_boot_lite_child.py#assignment base.config._full.build" = 8
-"api_keys.py#monkeypatch.setattr base.config.settings.lm" = 1
-"served_gateway_home.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_config_boot_owner.py#monkeypatch.setattr base.config._full.build" = 2
-"test_config_boot_owner.py#monkeypatch.setattr base.config.settings" = 1

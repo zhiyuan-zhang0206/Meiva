@@ -18,19 +18,6 @@ exports = ["plans.py", "telemetry_otlp.py", "telemetry_otlp_defer.py", "telemetr
 "telemetry_otlp_defer.py" = { kinds = ["environ"], why = "the exec-child OTLP deferral knobs (MEIVA_TELEMETRY_OTLP_CHILD_DEFER[_MAX_AGE_S]) are read from the raw env on the child arm path — reading them through Settings would import the settings singleton + full config chain the deferral exists to keep out of the child's life (task #3816 M4b); same presence-style class as base/telemetry/observability.py" }
 
 [debt.ambient-read]
-"telemetry_otlp.py#settings base.config.settings" = 2
+"telemetry_otlp.py#settings base.config.settings" = 1
 "telemetry_otlp_logs.py#clock time.time_ns" = 1
 "telemetry_otlp_metrics.py#random uuid.uuid4" = 1
-
-[debt.any-collaborator]
-"telemetry_otlp.py#any OtlpBackend._instrument.return" = 1
-"telemetry_otlp.py#any _emit_backend_event.attributes" = 1
-"telemetry_otlp.py#any metrics_resource.return" = 1
-"telemetry_otlp_gauges.py#any observable_gauge_callback.gauge_lock" = 1
-"telemetry_otlp_gauges.py#any observable_gauge_callback.observe._options" = 1
-"telemetry_otlp_gauges.py#any observable_gauge_callback.return" = 1
-"telemetry_otlp_gauges.py#any record_gauge.gauge_lock" = 1
-"telemetry_otlp_logs.py#any emit_log_record.logs" = 1
-"telemetry_otlp_metrics.py#any EventDimensionResourceExporter.__init__.exporter" = 1
-"telemetry_otlp_metrics.py#any EventDimensionResourceExporter.export.return" = 1
-"telemetry_otlp_metrics.py#any metrics_resource.return" = 1

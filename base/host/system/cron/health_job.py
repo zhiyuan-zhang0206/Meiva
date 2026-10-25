@@ -19,8 +19,7 @@ _CRON_MARKER = "# meiva-health-probe"
 def _launchd_plist_path(user_home: Path | None = None) -> Path:
     # meiva:note
     # Path to the health probe's launchd plist.
-    base = Path.home() if user_home is None else user_home
-    return base / "Library" / "LaunchAgents" / f"{health_content.LABEL}.plist"
+    return mechanics.user_plist_path(health_content.LABEL, user_home=user_home)
 
 
 def _own_probe_job_of(

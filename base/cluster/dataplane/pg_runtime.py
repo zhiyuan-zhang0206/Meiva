@@ -6,7 +6,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -14,6 +13,7 @@ from base.cluster.dataplane import runtime_binaries
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.host.net.ports import UrlOpener
 from base.host.system.backend import get_backend
+from base.native_process.os_platform import is_macos
 
 
 def installed_server(
@@ -71,8 +71,8 @@ def _verify_installed_runtime(
         raise RuntimeError(f"PostgreSQL pg_config does not describe {bindir}")
     extension = Path(_output(config, "--sharedir")) / "extension"
     library = Path(_output(config, "--pkglibdir"))
-    plat = platform_name if platform_name is not None else sys.platform
-    suffix = ".dylib" if plat == "darwin" else ".so"
+    on_macos = is_macos() if platform_name is None else platform_name == "darwin"
+    suffix = ".dylib" if on_macos else ".so"
     if not (library / f"vector{suffix}").is_file() or not _has_vector_install_script(extension):
         raise RuntimeError(f"Install pgvector for the PostgreSQL 17 runtime at {bindir}")
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from langchain_anthropic import ChatAnthropic
 
-from base.config import settings
+from base.config import get_field, set_field
 from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
@@ -244,22 +244,24 @@ class TestProviderConstruction:
         assert str(m.openai_api_base) == "https://dashscope.aliyuncs.com/compatible-mode/v1"
         assert m.stream_usage is True
 
-    def test_qwen_honors_the_configured_base_url(
-        self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
-    ) -> None:
+    def test_qwen_honors_the_configured_base_url(self, *, model_catalog: ModelCatalog) -> None:
         workspace = "https://ws-example.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
-        monkeypatch.setattr(settings.lm, "dashscope_base_url", workspace)
-        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
+        previous = get_field("dashscope_base_url")
+        set_field("dashscope_base_url", workspace)
+        try:
+            from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
-        m = build_chat_model(
-            "qwen3.8-max",
-            catalog=model_catalog,
-            keys=ProviderKeys({"DASHSCOPE_API_KEY": "sk-qwen"}),
-            llm_override="",
-            overrides=model_overrides(),
-        )
-        assert isinstance(m, ReasoningContentChatModel)
-        assert str(m.openai_api_base) == workspace
+            m = build_chat_model(
+                "qwen3.8-max",
+                catalog=model_catalog,
+                keys=ProviderKeys({"DASHSCOPE_API_KEY": "qwen-test-token"}),
+                llm_override="",
+                overrides=model_overrides(),
+            )
+            assert isinstance(m, ReasoningContentChatModel)
+            assert str(m.openai_api_base) == workspace
+        finally:
+            set_field("dashscope_base_url", previous)
 
     def test_qwen_requests_stream_usage(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog

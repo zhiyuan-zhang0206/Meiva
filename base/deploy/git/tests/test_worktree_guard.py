@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -51,9 +50,7 @@ def test_no_service_means_no_pty_session_and_the_home_is_not_created(tmp_path: P
 def test_live_process_cwd_anchor_reported(tmp_path: Path) -> None:
     target = tmp_path / "worktrees" / "wt-under-test"
     target.mkdir(parents=True)
-    child = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)"], cwd=target, start_new_session=True
-    )
+    child = subprocess.Popen(["sleep", "30"], cwd=target, start_new_session=True)
     try:
         time.sleep(0.5)
         hits = find_live_anchors(target, run=tmp_path / "nope")
@@ -92,9 +89,7 @@ def test_case_alias_spelling_finds_anchors(
     hits = find_live_anchors(alias, run=unit_home / "run")
     assert any("pty session" in h for h in hits), hits
 
-    sleeper = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)"], cwd=target, start_new_session=True
-    )
+    sleeper = subprocess.Popen(["sleep", "30"], cwd=target, start_new_session=True)
     try:
         time.sleep(0.5)
         hits = find_live_anchors(alias, run=tmp_path / "nope")

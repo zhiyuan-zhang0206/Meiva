@@ -16,7 +16,7 @@ import hashlib
 import shlex
 from collections.abc import Mapping
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 from urllib.parse import urlsplit, urlunsplit
 
 from base.cluster.machine import MachineIdentityReader, MachineNameMissing
@@ -282,6 +282,10 @@ def inbound_channel(agent_id: int, events_channel: str) -> str:
     return f"{redis_channel_prefix(events_channel)}:inbound:{agent_id}"
 
 
+def _is_port_map(value: object) -> TypeGuard[dict[str, int]]:
+    return isinstance(value, dict)
+
+
 def derive_env(
     rec: ClusterRecord,
     *,
@@ -348,9 +352,10 @@ def derive_env(
         "MEIVA_EVENTS_CHANNEL": "meiva:events",
     }
     # The health-port services are a subset of the closed ClusterPorts keys.
-    by_service = cast("dict[str, int]", p)
+    if not _is_port_map(p):
+        raise TypeError("ClusterPorts must be a dict")
     for svc, var in health_port_env_aliases().items():
-        env[var] = str(by_service[svc])
+        env[var] = str(p[svc])
     return env
 
 

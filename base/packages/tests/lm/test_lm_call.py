@@ -316,14 +316,20 @@ def _no_jitter(delay: float) -> float:
     return delay
 
 
+def _capture_retry_sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    sleeps: list[float] = []
+    monkeypatch.setattr("time.sleep", sleeps.append)
+    monkeypatch.setattr(call, "jittered", _no_jitter)
+    return sleeps
+
+
 def test_invoke_text_retries_transient_then_succeeds(
     monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
 ) -> None:
     """A TRANSIENT provider failure (transport class) is retried when
     `retry_attempts` allows, and a later success returns normally."""
 
-    monkeypatch.setattr("time.sleep", lambda _: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(call, "jittered", _no_jitter)
+    _capture_retry_sleeps(monkeypatch)
     calls = {"n": 0}
 
     class _Flaky:
@@ -352,8 +358,7 @@ def test_invoke_text_retry_exhausted_raises_error_type(
     """A failure that persists past the retry budget raises the caller's
     error type with the attempt count in the message."""
 
-    monkeypatch.setattr("time.sleep", lambda _: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(call, "jittered", _no_jitter)
+    _capture_retry_sleeps(monkeypatch)
 
     class _Always:
         def invoke(self, messages: list[Any]) -> Any:
@@ -377,9 +382,7 @@ def test_invoke_text_retry_uses_exponential_backoff(
     """Retry waits double per attempt (base 2 → 4 → 8…) capped at
     retry_max_delay_seconds, plus jitter; the base itself is not re-added."""
 
-    sleeps: list[float] = []
-    monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr(call, "jittered", _no_jitter)
+    sleeps = _capture_retry_sleeps(monkeypatch)
 
     class _Always:
         def invoke(self, messages: list[Any]) -> Any:
@@ -404,9 +407,7 @@ def test_invoke_text_retry_backoff_capped(
 ) -> None:
     """The exponential sequence stops growing at retry_max_delay_seconds."""
 
-    sleeps: list[float] = []
-    monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr(call, "jittered", _no_jitter)
+    sleeps = _capture_retry_sleeps(monkeypatch)
 
     class _Always:
         def invoke(self, messages: list[Any]) -> Any:
@@ -447,9 +448,7 @@ def test_invoke_text_retry_respects_retry_after(
 ) -> None:
     """A provider Retry-After header longer than the backoff wins (capped at
     120s), plus jitter — mirroring the SDKs' own header reading at our layer."""
-    sleeps: list[float] = []
-    monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr(call, "jittered", _no_jitter)
+    sleeps = _capture_retry_sleeps(monkeypatch)
 
     with pytest.raises(ValueError, match="429"):
         invoke_text(
@@ -470,9 +469,7 @@ def test_invoke_text_retry_after_capped_at_120(
 ) -> None:
     """A Retry-After above 120s is ignored (treated as absent) — the backoff
     sequence applies instead."""
-    sleeps: list[float] = []
-    monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr(call, "jittered", _no_jitter)
+    sleeps = _capture_retry_sleeps(monkeypatch)
 
     with pytest.raises(ValueError, match="429"):
         invoke_text(
@@ -491,9 +488,7 @@ def test_invoke_text_retry_after_ms_header(
     monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
 ) -> None:
     """`retry-after-ms` (the SDKs' non-standard precision header) is honored."""
-    sleeps: list[float] = []
-    monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr(call, "jittered", _no_jitter)
+    sleeps = _capture_retry_sleeps(monkeypatch)
 
     with pytest.raises(ValueError, match="429"):
         invoke_text(

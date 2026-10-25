@@ -7,6 +7,10 @@ from collections.abc import Callable
 from typing import Any
 
 
+def _hostname() -> str:
+    return socket.gethostname()
+
+
 def resolve_machine(name_reader: Callable[[], str] | None = None) -> str:
     """Resolve this event's machine dimension from its explicit owner reader.
     Ordinary diagnostics without a reader use the hostname so a row always
@@ -19,9 +23,9 @@ def resolve_machine(name_reader: Callable[[], str] | None = None) -> str:
     from base.cluster.machine import MachineNameMissing
 
     try:
-        return name_reader() if name_reader is not None else socket.gethostname()
+        return name_reader() if name_reader is not None else _hostname()
     except MachineNameMissing:
-        return socket.gethostname()
+        return _hostname()
 
 
 # ── pipeline state (per-process singleton) ────────────────────────────────────

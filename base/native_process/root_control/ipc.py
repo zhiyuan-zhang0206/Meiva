@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from enum import StrEnum
-from typing import NotRequired, TypedDict, cast
+from typing import NotRequired, TypedDict, TypeGuard
 
 # One message is one line; the cap bounds how much a peer can make us buffer.
 MAX_MESSAGE_BYTES = 64 * 1024
@@ -130,10 +130,18 @@ def parse_request(raw: bytes) -> RequestPayload:
     return request
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _resource_request(name_raw: object, payload: object) -> RequestPayload:
     if not isinstance(name_raw, str) or not name_raw:
         raise ProtocolError("resource requires a non-empty 'name'")
-    if not isinstance(payload, dict):
+    if not _is_object_dict(payload):
         raise ProtocolError("resource requires an object 'payload'")
     return {"verb": Verb.RESOURCE, "name": name_raw, "payload": payload}
 
@@ -165,9 +173,9 @@ def _parse_caller(raw: object, verb: str) -> CallerPayload | None:
         return None
     if verb not in STATE_VERBS:
         raise ProtocolError(f"verb {verb!r} takes no 'caller'")
-    if not isinstance(raw, dict):
+    if not _is_object_dict(raw):
         raise ProtocolError("'caller' must be an object")
-    values = cast("dict[str, object]", raw)
+    values = raw
     unknown = set(values) - _CALLER_FIELDS
     if unknown:
         raise ProtocolError(f"unknown caller field(s): {sorted(unknown)}")
@@ -207,10 +215,14 @@ def _optional_text(value: object, field: str) -> str | None:
 
 
 def _texts(value: object, field: str) -> list[str]:
-    items = cast("list[object]", value) if isinstance(value, list) else None
-    if items is None or not all(isinstance(item, str) for item in items):
+    if not _is_object_list(value):
         raise ProtocolError(f"caller {field!r} must be a list of strings")
-    return cast("list[str]", items)
+    items: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ProtocolError(f"caller {field!r} must be a list of strings")
+        items.append(item)
+    return items
 
 
 def parse_response(raw: bytes) -> ResponsePayload:
@@ -243,18 +255,18 @@ def parse_status_response(raw: bytes) -> ResponsePayload:
     if not response["ok"]:
         return response
     body = response.get("result")
-    if not isinstance(body, dict):
+    if not _is_object_dict(body):
         raise ProtocolError("root status omitted its unit roster")
-    rows = cast("dict[str, object]", body).get("units")
-    if not isinstance(rows, list):
+    rows = body.get("units")
+    if not _is_object_list(rows):
         raise ProtocolError("root status omitted its unit roster")
-    for item in cast("list[object]", rows):
-        if not isinstance(item, dict):
+    for item in rows:
+        if not _is_object_dict(item):
             raise ProtocolError("root status contains an invalid unit")
-        row = cast("dict[str, object]", item)
-        if not isinstance(row.get("id"), str) or not row["id"]:
+        unit_id = item.get("id")
+        if not isinstance(unit_id, str) or not unit_id:
             raise ProtocolError("root status contains an invalid unit id")
-        state = row.get("state")
+        state = item.get("state")
         if not isinstance(state, str):
             raise ProtocolError("root status must carry a string unit state")
         try:
@@ -284,6 +296,6 @@ def _decode_object(raw: bytes) -> dict[str, object]:
         value = json.loads(decoded)
     except json.JSONDecodeError as exc:
         raise ProtocolError(f"message is not valid JSON: {exc}") from exc
-    if not isinstance(value, dict):
+    if not _is_object_dict(value):
         raise ProtocolError("message must be a JSON object")
-    return cast("dict[str, object]", value)
+    return value

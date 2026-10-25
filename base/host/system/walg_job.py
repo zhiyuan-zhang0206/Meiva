@@ -31,7 +31,7 @@ from base.host.system.job_values import JobPaths, JobRoots, plist_path
 
 
 def launchd_plist_path(*, user_home: Path | None = None) -> Path:
-    return plist_path(content.LABEL, user_home=Path.home() if user_home is None else user_home)
+    return mechanics.user_plist_path(content.LABEL, user_home=user_home)
 
 
 def register_macos(*, backup_hour: int, roots: JobRoots, host: Host) -> int:

@@ -8,21 +8,15 @@ from base.deploy.git import memory_repo
 from base.deploy.git.tests.pool_server import PoolResponse, pool_server
 
 
-def test_download_pool_snapshot_streams_and_enforces_cap_midstream(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(memory_repo, "POOL_SNAPSHOT_MAX_BYTES", 16)
+def test_download_pool_snapshot_streams_and_enforces_cap_midstream() -> None:
     with (
         pool_server(PoolResponse(b"", chunks=(b"x" * 8, b"x" * 8, b"x" * 8))) as url,
         pytest.raises(memory_repo.MemoryPoolBootstrapFailed, match="exceeds"),
     ):
-        memory_repo.download_pool_snapshot(f"{url}/api/memory/pool", {})
+        memory_repo.download_pool_snapshot(f"{url}/api/memory/pool", {}, max_bytes=16)
 
 
-def test_download_pool_snapshot_declared_oversize_rejected_before_body(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(memory_repo, "POOL_SNAPSHOT_MAX_BYTES", 16)
+def test_download_pool_snapshot_declared_oversize_rejected_before_body() -> None:
     # meiva:note
     # A body read would fail because the declared bytes are not sent. The cap error
     # instead of a transport error proves rejection precedes response iteration.
@@ -30,7 +24,7 @@ def test_download_pool_snapshot_declared_oversize_rejected_before_body(
         pool_server(PoolResponse(b"", declared_length="999999999")) as url,
         pytest.raises(memory_repo.MemoryPoolBootstrapFailed, match="declared"),
     ):
-        memory_repo.download_pool_snapshot(f"{url}/api/memory/pool", {})
+        memory_repo.download_pool_snapshot(f"{url}/api/memory/pool", {}, max_bytes=16)
 
 
 def test_download_pool_snapshot_transport_error_wrapped() -> None:

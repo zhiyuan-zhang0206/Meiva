@@ -105,33 +105,18 @@ class TestPinnedDialNeverResolves:
         assert resp.status_code == 200
 
 
-class TestHostnameTargetsStayMonkeypatchable:
-    """A non-literal URL must fall through to the real module-level
-    httpx.get/post/put — the property existing tests across the repo rely on
-    when they `monkeypatch.setattr("httpx.get", ...)` a gateway call site
-    that now goes through base.host.net.http_dial instead of httpx directly."""
+class TestHostnameTargetsUseStandardResolution:
+    def test_get_resolves_hostname(self, echo_server: str) -> None:
+        resp = dial_get(f"{echo_server.replace('127.0.0.1', 'localhost')}/", timeout=3)
+        assert resp.status_code == 200
+        assert resp.content == b"ok"
 
-    def test_get_delegates_to_httpx_get(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        calls: list[str] = []
-
-        def fake_get(url: str, **_kw: object) -> str:
-            calls.append(url)
-            return "stub-response"
-
-        monkeypatch.setattr(httpx, "get", fake_get)
-        assert dial_get("http://gw.example.com/api/health", timeout=3) == "stub-response"
-        assert calls == ["http://gw.example.com/api/health"]
-
-    def test_post_delegates_to_httpx_post(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        calls: list[str] = []
-
-        def fake_post(url: str, **_kw: object) -> str:
-            calls.append(url)
-            return "stub-response"
-
-        monkeypatch.setattr(httpx, "post", fake_post)
-        assert dial_post("http://gw.example.com/api/agents", timeout=3) == "stub-response"
-        assert calls == ["http://gw.example.com/api/agents"]
+    def test_post_resolves_hostname(self, echo_server: str) -> None:
+        resp = dial_post(
+            f"{echo_server.replace('127.0.0.1', 'localhost')}/", json={"a": 1}, timeout=3
+        )
+        assert resp.status_code == 200
+        assert resp.content == b"ok"
 
 
 class TestExceptionMapping:

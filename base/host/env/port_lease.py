@@ -76,13 +76,17 @@ BAND_FIRST = 21_000
 BAND_LAST = 32_767
 
 
+def _own_pid() -> int:
+    return os.getpid()
+
+
 # meiva:note
 # `count` distinct ports no live holder on this host has leased.
 def lease_ports(count: int) -> list[int]:
     if count < 1:
         raise ValueError(f"lease_ports needs a positive count, not {count}")
     root = _root()
-    path = root / f"lease-{os.getpid()}.json"
+    path = root / f"lease-{_own_pid()}.json"
     with _host_lock(root):
         _hold(path)
         picked = _pick(count, _live_ports(root))
@@ -93,7 +97,7 @@ def lease_ports(count: int) -> list[int]:
 # meiva:note
 # The numbers this process holds, oldest first (diagnostics and tests).
 def leased_ports() -> list[int]:
-    return _ports_of(_root() / f"lease-{os.getpid()}.json")
+    return _ports_of(_root() / f"lease-{_own_pid()}.json")
 
 
 # meiva:note
@@ -137,7 +141,7 @@ def _root() -> Path:
 def ensure_registry(root: Path) -> Path:
     try:
         root.mkdir(mode=0o700, exist_ok=True)
-        probe = root / f".probe-{secrets.token_hex(4)}"
+        probe = root / f".probe-{_own_pid()}"
         probe.write_bytes(b"")
         probe.unlink()
     except OSError as exc:
@@ -206,7 +210,8 @@ def _hold(path: Path) -> None:
 def _holders(root: Path) -> dict[int, list[int]]:
     import fcntl
 
-    own = f"lease-{os.getpid()}.json"
+    own_pid = _own_pid()
+    own = f"lease-{own_pid}.json"
     holders: dict[int, list[int]] = {}
     for path in sorted(root.glob("lease-*.json")):
         try:
@@ -215,7 +220,7 @@ def _holders(root: Path) -> dict[int, list[int]]:
             continue
         try:
             if path.name == own:
-                holders[os.getpid()] = _ports_from(fd)
+                holders[own_pid] = _ports_from(fd)
                 continue
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -277,7 +282,7 @@ def _body(fd: int) -> dict[str, object]:
 # meiva:note
 # Write this holder's numbers into its lease file. Caller holds the host lock.
 def _publish(path: Path, ports: list[int]) -> None:
-    body = json.dumps({"pid": os.getpid(), "ports": ports}).encode()
+    body = json.dumps({"pid": _own_pid(), "ports": ports}).encode()
     fd = os.open(path, os.O_WRONLY | os.O_CREAT, 0o600)
     try:
         os.write(fd, body)

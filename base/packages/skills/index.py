@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -143,6 +144,22 @@ def _stat_or_none(path: Path) -> os.stat_result | None:
         return None
 
 
+def _regular_file_stat(
+    path: Path, stat_of: Callable[[Path], os.stat_result | None]
+) -> os.stat_result | None:
+    try:
+        st = stat_of(path)
+    except OSError:
+        return None
+    return st if st is not None and stat.S_ISREG(st.st_mode) else None
+
+
+def _folders_in(root: Path) -> list[Path] | None:
+    if not root.is_dir():
+        return None
+    return [root, *(p for p in root.rglob("*") if p.is_dir())]
+
+
 def _skill_file(
     folder: Path, root: Path, stat_of: Callable[[Path], os.stat_result | None]
 ) -> SkillFile | None:
@@ -150,8 +167,8 @@ def _skill_file(
     rel = folder.relative_to(root).parts
     skill_md = folder / "SKILL.md"
     index_md = folder / "INDEX.md"
-    s_stat = stat_of(skill_md) if skill_md.is_file() else None
-    i_stat = stat_of(index_md) if index_md.is_file() else None
+    s_stat = _regular_file_stat(skill_md, stat_of)
+    i_stat = _regular_file_stat(index_md, stat_of)
     if s_stat is None and i_stat is None:
         return None
     name = description = content_hash = error = index_text = None
@@ -189,9 +206,9 @@ def _scan_root(
     just skill-bearing ones) so `SkillIndex._fresh` can detect a new skill
     folder appearing anywhere under the root.
     """
-    if not root.is_dir():
+    folders = _folders_in(root)
+    if folders is None:
         return (), ()
-    folders = [root, *(p for p in root.rglob("*") if p.is_dir())]
     folder_stats: list[tuple[tuple[str, ...], int]] = []
     for folder in sorted(folders):
         stat = stat_of(folder)
@@ -275,15 +292,15 @@ class SkillIndex:
         mtime and size. A new SKILL.md anywhere (folder mtime), an edit (file
         mtime/size), or a delete (folder set) each read as stale."""
         for root, saved in zip(self.roots, self.root_folders, strict=True):
-            if not root.is_dir():
+            folders = _folders_in(root)
+            if folders is None:
                 return False
-            folders = [root, *(p for p in root.rglob("*") if p.is_dir())]
             stats: list[tuple[tuple[str, ...], int]] = []
             for folder in sorted(folders):
-                stat = _stat_or_none(folder)
-                if stat is None:
+                st = _stat_or_none(folder)
+                if st is None:
                     return False
-                stats.append((folder.relative_to(root).parts, stat.st_mtime_ns))
+                stats.append((folder.relative_to(root).parts, st.st_mtime_ns))
             if tuple(stats) != saved:
                 return False
         for e in self.entries:
@@ -293,9 +310,8 @@ class SkillIndex:
             ):
                 if path is None:
                     continue
-                try:
-                    st = path.stat()
-                except OSError:
+                st = _stat_or_none(path)
+                if st is None:
                     return False
                 if st.st_mtime_ns != mtime or st.st_size != size:
                     return False

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as day_time
-from typing import Any, Literal, LiteralString, cast
+from typing import Any, Literal
 
 import psycopg
 
@@ -63,13 +63,15 @@ GROUP BY agent_id"""
 _EPOCH = datetime(2000, 1, 1, tzinfo=UTC)
 
 
-def event_rows(conn: Any, tails: dict[int, datetime], until: datetime | None) -> list[_Row]:
+def event_rows(
+    conn: psycopg.Connection[Any], tails: dict[int, datetime], until: datetime | None
+) -> list[_Row]:
     """The `llm_usage` rows of `telemetry_events` from each agent's tail start to `until`."""
     if not tails:
         return []
     agent_ids = sorted(tails)
     rows = conn.execute(
-        cast(LiteralString, _EVENT_SQL),
+        _EVENT_SQL.encode(),
         (agent_ids, [tails[a] for a in agent_ids], until or datetime.now(tz=UTC)),
     ).fetchall()
     return [
@@ -88,7 +90,9 @@ def event_rows(conn: Any, tails: dict[int, datetime], until: datetime | None) ->
     ]
 
 
-def ledger_rows(conn: Any, agent_ids: list[int]) -> tuple[list[_Row], dict[int, datetime]]:
+def ledger_rows(
+    conn: psycopg.Connection[Any], agent_ids: list[int]
+) -> tuple[list[_Row], dict[int, datetime]]:
     """Ledger rows (folded totals + the days after the watermark) and each agent's live-tail start:
     the midnight after its newest ledger day, the midnight after the watermark for an agent whose
     ledger is folded entirely, and the beginning for an agent with no ledger row."""
@@ -98,7 +102,7 @@ def ledger_rows(conn: Any, agent_ids: list[int]) -> tuple[list[_Row], dict[int, 
     tails: dict[int, datetime] = dict.fromkeys(agent_ids, _EPOCH)
     folded_tail = datetime.combine(through + timedelta(days=1), day_time.min, tzinfo=UTC)
     for sql, params in ((_TOTAL_SQL, (agent_ids,)), (_LEDGER_SQL, (agent_ids, through))):
-        for row in conn.execute(sql, params).fetchall():
+        for row in conn.execute(sql.encode(), params).fetchall():
             aid = int(row[0])
             rows.append(
                 (

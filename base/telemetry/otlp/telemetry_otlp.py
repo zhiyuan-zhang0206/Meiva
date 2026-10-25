@@ -58,7 +58,7 @@ import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from base.cluster.derive import production_identity
 from base.cluster.machine import MachineIdentityReader
@@ -95,6 +95,7 @@ from base.telemetry.otlp.telemetry_otlp_metrics import (
     EventDimensionResourceExporter as EventDimensionResourceExporter,
 )
 from base.telemetry.otlp.telemetry_otlp_metrics import (
+    MetricsResource,
     build_providers,
     strip_unit_suffix,
     unit_for,
@@ -216,7 +217,7 @@ def endpoint_reachable(endpoint: str) -> bool:
         return False
 
 
-def _emit_backend_event(event_name: str, **attributes: Any) -> None:
+def _emit_backend_event(event_name: str, **attributes: object) -> None:
     """Emit init status into the unified stream; never affect backend setup.
 
     When the collector is unavailable, the event reaches the JSONL mirror even
@@ -224,6 +225,20 @@ def _emit_backend_event(event_name: str, **attributes: Any) -> None:
     """
     with failure_isolated("otlp init-status event"):
         emit("telemetry", event_name, attributes=attributes)
+
+
+def _observability_settings() -> tuple[bool, str]:
+    from base.config import settings
+
+    return (
+        bool(settings.observability.telemetry_otlp_enabled),
+        settings.observability.telemetry_otlp_endpoint,
+    )
+
+
+class _Instrument(Protocol):
+    add: Callable[..., Any]
+    record: Callable[..., Any]
 
 
 class OtlpBackend:
@@ -473,9 +488,8 @@ class OtlpBackend:
         if self._enabled_flag is not None:
             return self._enabled_flag()
         try:
-            from base.config import settings
-
-            return bool(settings.observability.telemetry_otlp_enabled)
+            enabled, _endpoint = _observability_settings()
+            return enabled
         except Exception as exc:
             report_sink_failure("otlp enabled-flag read", exc)
             return False
@@ -554,9 +568,7 @@ class OtlpBackend:
                 worker.logs, worker.metrics = self._providers
             else:
                 if endpoint is None:
-                    from base.config import settings
-
-                    endpoint = settings.observability.telemetry_otlp_endpoint
+                    _enabled, endpoint = _observability_settings()
                 if not self._endpoint_reachable(endpoint):
                     self._init_failed_at = time.monotonic()
                     self._report(
@@ -688,14 +700,14 @@ class OtlpBackend:
             allowed_keys=payload_keys(event.event_name),
         )
 
-    def _instrument(self, event_name: str, field: str, kind: str) -> Any:
+    def _instrument(self, event_name: str, field: str, kind: str) -> _Instrument | None:
         """Lazily create (and cache) the instrument for one (event, field).
 
         Returns None (and reports) on a creation conflict — e.g. two event/
         field pairs collapsing onto one metric name with different kinds —
         so one bad pair sheds only its own metrics, never the batch."""
         key = (event_name, field)
-        inst = self._instruments.get(key)
+        inst: Any = self._instruments.get(key)
         if inst is not None:
             return inst
         name = f"meiva_{event_name}_{strip_unit_suffix(field)}"
@@ -763,5 +775,5 @@ def default_exporter(*, export_allowed: Callable[[], bool]) -> OtlpBackend:
 
 # meiva:note
 # Build the metric resource for ``home`` (or the active cluster home).
-def metrics_resource(*, home: Path | None = None) -> Any:
+def metrics_resource(*, home: Path | None = None) -> MetricsResource:
     return telemetry_otlp_metrics.metrics_resource(home=home)

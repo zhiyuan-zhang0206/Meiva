@@ -9,7 +9,7 @@ host lists what another home owns.
 from __future__ import annotations
 
 import socket
-from typing import TypedDict, cast
+from typing import TypedDict, TypeGuard
 
 from base.host.env.port_table import FIXED_PORTS
 
@@ -56,10 +56,17 @@ def port_free(port: int) -> bool:
             return False
 
 
+def _is_cluster_ports(ports: dict[str, int]) -> TypeGuard[ClusterPorts]:
+    return ports.keys() == FIXED_PORTS.keys()
+
+
 def new_home_ports() -> ClusterPorts:
     """The ports a newly born home records: the fixed table.
 
     The one place birth takes its ports from, so the test session can hand a
     test home ports of its own instead (`tests/fixtures/guards.py`)."""
     # FIXED_PORTS' keys ARE the ClusterPorts service names (locked by a test).
-    return cast("ClusterPorts", dict(FIXED_PORTS))
+    ports = dict(FIXED_PORTS)
+    if not _is_cluster_ports(ports):
+        raise RuntimeError("FIXED_PORTS keys do not match ClusterPorts")
+    return ports

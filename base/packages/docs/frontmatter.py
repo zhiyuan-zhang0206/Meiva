@@ -21,9 +21,13 @@ ignore the rest.
 
 from __future__ import annotations
 
-from typing import cast
+from typing import TypeGuard
 
 import yaml
+
+
+def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 class FrontmatterError(ValueError):
@@ -84,15 +88,15 @@ def parse_frontmatter(content: str) -> tuple[dict[str, str], str]:
     fm_text, body = split
 
     try:
-        parsed = yaml.safe_load(fm_text)
+        parsed: object = yaml.safe_load(fm_text)
     except yaml.YAMLError as e:
         raise FrontmatterError(f"invalid YAML in frontmatter: {e}") from e
 
-    if not isinstance(parsed, dict):
+    if not _is_str_object_dict(parsed):
         raise FrontmatterError(f"frontmatter must be key: value pairs, got {type(parsed).__name__}")
 
     fields: dict[str, str] = {}
-    for key, value in cast("dict[str, object]", parsed).items():
+    for key, value in parsed.items():
         key_str = str(key)
         if value is None:
             fields[key_str] = ""
@@ -122,9 +126,9 @@ def parse_frontmatter_typed(content: str) -> tuple[dict[str, object], str] | Non
         return None
     fm_text, body = split
     try:
-        parsed = yaml.safe_load(fm_text)
+        parsed: object = yaml.safe_load(fm_text)
     except yaml.YAMLError:
         return None
-    if not isinstance(parsed, dict):
+    if not _is_str_object_dict(parsed):
         return None
-    return cast("dict[str, object]", parsed), body
+    return parsed, body

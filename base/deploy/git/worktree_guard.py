@@ -29,13 +29,17 @@ from __future__ import annotations
 import contextlib
 import os
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 import psutil
 
 from base.paths.home import resolve_meiva_home
 from base.sessions.pty import client
 from base.sessions.pty.paths import service_socket_path
+
+
+def _is_obj_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
 
 
 def _same_dir(candidate: Path, target: Path) -> bool:
@@ -163,7 +167,12 @@ def _process_anchors(target: Path, *, fold: bool) -> list[str]:
             continue
         cwd = proc.info["cwd"]
         exe = proc.info["exe"]
-        cmdline: list[str] = cast("list[str]", proc.info["cmdline"]) or []
+        raw_cmdline = proc.info["cmdline"]
+        cmdline = (
+            [tok for tok in raw_cmdline if isinstance(tok, str)]
+            if _is_obj_list(raw_cmdline)
+            else []
+        )
         if (
             _under(cwd, target, fold=fold)
             or _under(exe, target, fold=fold)

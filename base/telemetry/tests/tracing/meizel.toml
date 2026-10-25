@@ -1,3 +1,0 @@
-[debt.third-party-patch]
-"test_arm_thread_base_exception_marks_attempt_spent.py#monkeypatch.setattr traceloop.sdk.Traceloop.init" = 1
-"test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr traceloop.sdk.Traceloop.init" = 4

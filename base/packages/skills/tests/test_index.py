@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -161,22 +160,16 @@ class TestBuild:
 class TestCached:
     def test_cached_returns_same_index_without_rescan(self, tmp_path: Path) -> None:
         _write(tmp_path, "a/SKILL.md", _GOOD)
-        calls = 0
-
-        class _CountingIndex(SkillIndex):
-            # meiva:note
-            # The index under test, with its scan counted rather than patched.
-            @classmethod
-            def build(cls, roots: list[Path] | tuple[Path, ...], **kwargs: Any) -> SkillIndex:
-                nonlocal calls
-                calls += 1
-                return super().build(roots, **kwargs)
-
-        _CountingIndex.clear_cache()
-        first = _CountingIndex.cached([tmp_path])
-        second = _CountingIndex.cached([tmp_path])
+        SkillIndex.clear_cache()
+        first = SkillIndex.cached([tmp_path])
+        skill_path = tmp_path / "a/SKILL.md"
+        skill_path.chmod(0)
+        try:
+            second = SkillIndex.cached([tmp_path])
+        finally:
+            skill_path.chmod(0o644)
         assert first is second
-        assert calls == 1
+        assert second.entries[0].error is None
 
     def test_cached_invalidates_on_edit(self, tmp_path: Path) -> None:
         _write(tmp_path, "a/SKILL.md", _GOOD)

@@ -23,13 +23,10 @@ import hashlib
 import json
 import os
 import re
-import secrets
 import stat
-import uuid
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
 
 from pydantic import ValidationError
 
@@ -47,10 +44,11 @@ from base.host.db_authority.model import (
     SecretRoles,
     VerifiedGeneration,
 )
-from base.host.private_storage import write_private_bytes
+from base.host.net.auth import new_session_id
+from base.host.private_storage import create_private_bytes, write_private_bytes
 from base.host.verified_file import RegularFileReadError, regular_bytes
 from base.native_process.os_platform import file_lock
-from base.paths.private_dir import ensure_private_dir
+from base.paths.private_dir import ensure_private_dir, is_foreign_owned
 
 _MAX_FILE_BYTES = 256 * 1024
 _SECRET_FILE = "0.json"  # noqa: S105 — a file name, not a credential
@@ -85,7 +83,7 @@ def _require_private(path: Path, info: os.stat_result, *, directory: bool) -> No
     kind_ok = stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)
     if stat.S_ISLNK(info.st_mode) or not kind_ok:
         raise LedgerRefusedError(f"database authority path {path} is not a real private node")
-    if info.st_mode & 0o077 or info.st_uid != os.geteuid():
+    if info.st_mode & 0o077 or is_foreign_owned(info):
         raise LedgerRefusedError(f"database authority path {path} is not owner-only")
 
 
@@ -171,36 +169,17 @@ def write(home: Path, ledger: Ledger) -> None:
     write_private_bytes(ledger_path(home), _encode(ledger))
 
 
-def replace_ledger_fields(ledger: Ledger, **updates: Any) -> Ledger:
+def replace_ledger_fields(ledger: Ledger, **updates: object) -> Ledger:
     return Ledger.model_validate({**dict(ledger), **updates})
-
-
-def _fsync_dir(directory: Path) -> None:
-    fd = os.open(directory, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
 
 
 def publish_exclusive(path: Path, data: bytes) -> None:
     """Publish ``data`` at ``path`` complete or not at all; never overwrite."""
-    directory = ensure_private_dir(path.parent)
-    temporary = directory / f".{path.name}.{uuid.uuid4().hex}.tmp"
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "wb") as stream:
-            fd = -1
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.link(temporary, path)
-    finally:
-        if fd != -1:
-            os.close(fd)
-        temporary.unlink(missing_ok=True)
-    _fsync_dir(directory)
+    create_private_bytes(path, data)
+
+
+def new_secret_token() -> str:
+    return new_session_id()
 
 
 def create_ledger(home: Path, *, owner: str, groups: Groups) -> Ledger:
@@ -224,9 +203,9 @@ def create_ledger(home: Path, *, owner: str, groups: Groups) -> Ledger:
 def _new_secret(home: Path, encrypt: Encrypt) -> GenerationSecret:
     roles: dict[str, RoleSecret] = {}
     for cls, name in zip(CLASSES, GENERATION_NAMES, strict=True):
-        password = secrets.token_urlsafe(32)
+        password = new_secret_token()
         roles[cls] = RoleSecret(name=name, password=password, verifier=encrypt(name, password))
-    api = ApiTokens(gateway=secrets.token_urlsafe(32), runner=secrets.token_urlsafe(32))
+    api = ApiTokens(gateway=new_secret_token(), runner=new_secret_token())
     return GenerationSecret(number=0, home=str(home), roles=SecretRoles(**roles), api=api)
 
 
