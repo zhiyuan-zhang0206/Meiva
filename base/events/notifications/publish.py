@@ -4,13 +4,12 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol
 
 import psycopg
 from psycopg_pool import ConnectionPool
 
 from base.db.transaction import write_transaction
-from base.events.live.bus import EventBus
 from base.events.live.projection import NotificationEmitted
 from base.events.notifications.catalog import NotificationCategory, core_catalog
 from base.events.notifications.policy import decide
@@ -176,6 +175,17 @@ def _emitted(
     )
 
 
+class SyncPublisher(Protocol):
+    def publish_best_effort_sync(
+        self,
+        payload: str,
+        *,
+        channel: str | None = None,
+        decode_responses: bool = True,
+        context: str = "",
+    ) -> int | None: ...
+
+
 # meiva:note
 # Announcing is one step with two outcomes: the transport accepted the live event
 # and the row is marked `announced_at`, or the publish failed (the transport
@@ -184,7 +194,7 @@ def _emitted(
 # at-least-once push the client already deduplicates on `notification_id` — and is
 # never a lost one.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-def announce_sync(pool: ConnectionPool, bus: EventBus | None, notification_id: int) -> bool:
+def announce_sync(pool: ConnectionPool, bus: SyncPublisher | None, notification_id: int) -> bool:
     if bus is None:
         return False
     row = unannounced_sync(pool, notification_id)

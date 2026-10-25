@@ -5,7 +5,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, LiteralString, cast
+from typing import Any, LiteralString
 from urllib.parse import urlsplit
 
 import psycopg
@@ -161,17 +161,32 @@ PG_POOLED_BASELINE_RESTORE_SQL: tuple[LiteralString, LiteralString] = (
 # value). Read lazily because this module is on the exec child's boot path
 # (task #3621); `budget_seconds` overrides the configured value for one
 # restore.
+_DIGITS: dict[str, LiteralString] = {
+    "0": "0",
+    "1": "1",
+    "2": "2",
+    "3": "3",
+    "4": "4",
+    "5": "5",
+    "6": "6",
+    "7": "7",
+    "8": "8",
+    "9": "9",
+}
+
+
 def restore_budget_statement(budget_seconds: float | None = None) -> tuple[LiteralString, int]:
     from base.config import settings
 
     if budget_seconds is None:
         budget_seconds = settings.data_plane.db_pool_restore_timeout_seconds
     budget_ms = max(1, int(budget_seconds * 1000))
+    ms_lit: LiteralString = "".join(_DIGITS[ch] for ch in str(budget_ms))
     reset = PG_POOLED_BASELINE_RESTORE_SQL[0]
-    statement = (
-        f"{reset}; SET statement_timeout = {budget_ms}; SET LOCAL transaction_timeout = {budget_ms}"
+    statement: LiteralString = (
+        f"{reset}; SET statement_timeout = {ms_lit}; SET LOCAL transaction_timeout = {ms_lit}"
     )
-    return cast(LiteralString, statement), budget_ms
+    return statement, budget_ms
 
 
 # The second statement on the borrow that also reads the cluster's minimum code
@@ -510,7 +525,7 @@ def connect(
     """
     from base.config.domains.storage.data_plane import sslmode_for_url
 
-    cfg = config or db_config_from_settings()
+    cfg = config if config is not None else db_config_from_settings()
     url = guard_db_url(
         _dial_url(cfg, direct=direct, direct_url=direct_url),
         refusal=cfg.db_authority_refusal,
@@ -586,6 +601,54 @@ def _transport_kwargs(url: str, *, unbounded: bool) -> dict[str, Any]:
     return PG_KEEPALIVE_KWARGS if unbounded else statement_kwargs(url)
 
 
+def pool_with_config(
+    config: DbConfig,
+    *,
+    min_size: int | None = None,
+    max_size: int | None = None,
+    direct: bool = False,
+    timeout: float = DEFAULT_POOL_TIMEOUT_S,
+    check_connections: bool = False,
+    autocommit: bool = False,
+    row_factory: object = None,
+    gate: ProcessDbGate,
+    direct_url: DirectUrlResolver | None = None,
+) -> ConnectionPool:
+    from base.config.domains.storage.data_plane import resolved_pool_size, sslmode_for_url
+
+    url = guard_db_url(
+        _dial_url(config, direct=direct, direct_url=direct_url), refusal=config.db_authority_refusal
+    )
+    min_size, max_size = resolved_pool_size(
+        min_size, max_size, config.db_pool_min_size, config.db_pool_max_size
+    )
+    sslmode = sslmode_for_url(url, config.db_sslmode)
+    connection_kwargs: dict[str, Any] = {
+        "prepare_threshold": None,
+        **({"sslmode": sslmode} if sslmode else {}),
+        **({} if direct else {"application_name": gate.application_name()}),
+        **statement_kwargs(url),
+    }
+    if autocommit:
+        connection_kwargs["autocommit"] = True
+    if row_factory is not None:
+        connection_kwargs["row_factory"] = row_factory
+    restore = partial(restore_pooled_session, gate=gate)
+    check = (
+        restore if not direct else (ConnectionPool.check_connection if check_connections else None)
+    )
+    return ConnectionPool(
+        url,
+        min_size=min_size,
+        max_size=max_size,
+        open=True,
+        timeout=timeout,
+        kwargs=connection_kwargs,
+        configure=restore if not direct else None,
+        check=check,
+    )
+
+
 def pool(
     *,
     min_size: int | None = None,
@@ -636,67 +699,62 @@ def pool(
             the resolved db_url is a credential-free endpoint this process was
             given no login for (see `guard_db_url`).
     """
-    from base.config.domains.storage.data_plane import resolved_pool_size, sslmode_for_url
-
-    cfg = config or db_config_from_settings()
-    url = guard_db_url(
-        _dial_url(cfg, direct=direct, direct_url=direct_url),
-        refusal=cfg.db_authority_refusal,
-    )
-    min_size, max_size = resolved_pool_size(
-        min_size, max_size, cfg.db_pool_min_size, cfg.db_pool_max_size
-    )
-    sslmode = sslmode_for_url(url, cfg.db_sslmode)
-    connection_kwargs: dict[str, Any] = {
-        "prepare_threshold": None,
-        **({"sslmode": sslmode} if sslmode else {}),
-        **({} if direct else {"application_name": gate.application_name()}),
-        **statement_kwargs(url),
-    }
-    if autocommit:
-        connection_kwargs["autocommit"] = True
-    if row_factory is not None:
-        connection_kwargs["row_factory"] = row_factory
-    restore = partial(restore_pooled_session, gate=gate)
-    return ConnectionPool(
-        url,
+    cfg = config if config is not None else db_config_from_settings()
+    return pool_with_config(
+        cfg,
         min_size=min_size,
         max_size=max_size,
-        open=True,
+        direct=direct,
         timeout=timeout,
-        kwargs=connection_kwargs,
-        # A pooled pool's backends are shared, never reset by pgbouncer, and
-        # handed to any borrower — so both hooks restore the baseline session
-        # (RESET ALL + statement ceiling): `configure` at backend creation,
-        # `check` on EVERY borrow. The borrow-time restore is the load-bearing
-        # half: it scrubs the backend the borrower is about to use (pgbouncer
-        # prefers handing a client the backend it used last), so a backend
-        # polluted by another client's session-level SET cannot fail this
-        # borrower's writes (2026-09-02 P0: message/schedule-stop 500s). It
-        # doubles as the checkout-time dead-connection check (a dead connection
-        # raises and psycopg_pool discards + replaces it — Task #1027's
-        # eviction, now implicit for pooled pools), at the cost of two
-        # statements per checkout. Direct pools own their backends exclusively:
-        # no scrub needed, the ceiling already arrived via `options`, and the
-        # optional `check_connections` flag keeps its Task #1027 meaning.
-        configure=restore if not direct else None,
-        check=(
-            restore
-            if not direct
-            else (ConnectionPool.check_connection if check_connections else None)
-        ),
+        check_connections=check_connections,
+        autocommit=autocommit,
+        row_factory=row_factory,
+        gate=gate,
+        direct_url=direct_url,
+    )
+
+
+def async_pool_with_config(
+    pool_class: Callable[..., AsyncConnectionPool[psycopg.AsyncConnection]],
+    config: DbConfig,
+    *,
+    min_size: int,
+    max_size: int,
+    timeout: float,
+    gate: ProcessDbGate,
+    **pool_kwargs: object,
+) -> AsyncConnectionPool[psycopg.AsyncConnection]:
+    from base.config.domains.storage.data_plane import sslmode_for_url
+
+    sslmode = sslmode_for_url(config.db_url, config.db_sslmode)
+    kwargs = {
+        "autocommit": True,
+        "prepare_threshold": None,
+        **({"sslmode": sslmode} if sslmode else {}),
+        "application_name": gate.application_name(),
+        **PG_KEEPALIVE_KWARGS,
+    }
+    return pool_class(
+        guard_db_url(config.db_url, refusal=config.db_authority_refusal),
+        min_size=min_size,
+        max_size=max_size,
+        timeout=timeout,
+        open=False,
+        kwargs=kwargs,
+        check=partial(restore_pooled_session_async, gate=gate),
+        **pool_kwargs,
     )
 
 
 def async_pool(
-    pool_class: type[AsyncConnectionPool[psycopg.AsyncConnection]],
+    pool_class: Callable[..., AsyncConnectionPool[psycopg.AsyncConnection]],
     *,
     min_size: int,
     max_size: int,
     timeout: float,
     config: DbConfig | None = None,
     gate: ProcessDbGate,
-    **pool_kwargs: Any,
+    **pool_kwargs: object,
 ) -> AsyncConnectionPool[psycopg.AsyncConnection]:
     """An unopened async pool on the cluster's access URL (the agent host's pools).
 
@@ -719,23 +777,13 @@ def async_pool(
             the resolved db_url is a credential-free endpoint this process was
             given no login for (see `guard_db_url`).
     """
-    from base.config.domains.storage.data_plane import sslmode_for_url
-
-    cfg = config or db_config_from_settings()
-    sslmode = sslmode_for_url(cfg.db_url, cfg.db_sslmode)
-    return pool_class(
-        guard_db_url(cfg.db_url, refusal=cfg.db_authority_refusal),
+    cfg = config if config is not None else db_config_from_settings()
+    return async_pool_with_config(
+        pool_class,
+        cfg,
         min_size=min_size,
         max_size=max_size,
         timeout=timeout,
-        open=False,
-        kwargs={
-            "autocommit": True,
-            "prepare_threshold": None,
-            **({"sslmode": sslmode} if sslmode else {}),
-            "application_name": gate.application_name(),
-            **PG_KEEPALIVE_KWARGS,
-        },
-        check=partial(restore_pooled_session_async, gate=gate),
+        gate=gate,
         **pool_kwargs,
     )

@@ -365,14 +365,17 @@ def normalize_overlay_llm_model(
     return requested, resolved
 
 
+SettingValue = bool | int | float | str | None
+
+
 @dataclass(frozen=True)
 class ResolvedSetting:
     setting: str
     value: Any
     source: str
-    shared_default: Any
-    model_default: bool | int | float | str | None
-    explicit_value: bool | int | float | str | None
+    shared_default: SettingValue
+    model_default: SettingValue
+    explicit_value: SettingValue
 
 
 def tuning_field_names() -> tuple[str, ...]:
@@ -382,9 +385,9 @@ def tuning_field_names() -> tuple[str, ...]:
 def explain_setting(
     setting: str, *, model: str, explicit: Any, models: Mapping[str, ModelSpec]
 ) -> ResolvedSetting:
-    floor = getattr(DEFAULT_TUNING, setting)
+    floor: SettingValue = getattr(DEFAULT_TUNING, setting)
     spec = models.get(model)
-    tuned = getattr(spec.tuning, setting) if spec is not None else None
+    tuned: SettingValue = getattr(spec.tuning, setting) if spec is not None else None
     if explicit is not None:
         return ResolvedSetting(setting, explicit, "explicit", floor, tuned, explicit)
     if tuned is not None:

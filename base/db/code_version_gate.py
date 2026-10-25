@@ -33,7 +33,7 @@ from __future__ import annotations
 import sys
 import time
 from collections.abc import Callable
-from typing import Any, NoReturn, Protocol, cast
+from typing import NoReturn, Protocol
 
 import psycopg
 
@@ -55,7 +55,8 @@ _REFUSAL = (
 
 def has_log_sink() -> bool:
     """Whether loguru has a handler, i.e. whether a record written now goes anywhere."""
-    return bool(cast(Any, logger)._core.handlers)  # private `_core`, as `base.log` reads it
+    core = getattr(logger, "_core", None)
+    return bool(getattr(core, "handlers", None))
 
 
 def _refuse(version: int, minimum: int, *, process: str) -> NoReturn:

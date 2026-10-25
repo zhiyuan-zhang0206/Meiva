@@ -10,4 +10,3 @@ exports = ["__init__.py", "config.py", "session.py", "usage.py"]
 
 [debt.ambient-read]
 "config.py#home pathlib.Path.home" = 1
-"session.py#clock time.perf_counter" = 2

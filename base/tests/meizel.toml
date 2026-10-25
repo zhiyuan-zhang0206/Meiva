@@ -1,10 +1,1 @@
 exports = ["impersonation"]
-
-[debt.env-patch]
-"test_url_secret.py#monkeypatch.setenv os.environ.MEIVA_PROCESS_PROFILE" = 6
-
-[debt.first-party-patch]
-"test_alerts.py#monkeypatch.setattr base.config.settings.general" = 2
-
-[debt.unresolved-patch]
-"test_checkpoint_message_history.py#monkeypatch.setattr saver.serde.loads_typed" = 1

@@ -32,7 +32,7 @@ which the server requires echoed back).
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 from langchain_core.messages import AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk
@@ -75,5 +75,6 @@ class ReasoningContentChatModel(ChatOpenAI):
             blocks.append({"type": "text", "text": text, "index": 1})
         # ContentBlock is invariant against langchain's list[str | dict] content
         # slot; the blocks above are shape-checked, the cast only re-widens.
-        msg.content = cast("list[str | dict[str, Any]]", blocks)
+        raw_blocks: Any = blocks
+        msg.content = raw_blocks
         return gen

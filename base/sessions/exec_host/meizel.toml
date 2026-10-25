@@ -9,6 +9,3 @@ exports = ["child_environment.py", "paths.py", "protocol.py", "tests"]
 
 [debt.ambient-read]
 "paths.py#pid os.getuid" = 1
-
-[debt.type-cast]
-"protocol.py#cast decode_object" = 1

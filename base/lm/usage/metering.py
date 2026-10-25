@@ -16,7 +16,7 @@ from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler, BaseCallbackManager, Callbacks
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import LLMResult
 
 from base.lm.catalog import ModelCatalog
@@ -53,11 +53,11 @@ class LlmUsageMeter(BaseCallbackHandler):
 
     def on_chat_model_start(
         self,
-        serialized: Any,  # noqa: ARG002
-        messages: Any,  # noqa: ARG002
+        serialized: dict[str, Any],  # noqa: ARG002
+        messages: list[list[BaseMessage]],  # noqa: ARG002
         *,
         run_id: UUID,
-        **kwargs: Any,  # noqa: ARG002
+        **kwargs: object,  # noqa: ARG002
     ) -> None:
         # meiva:note
         # The call start, kept per run id so `on_llm_end` reports `latency_ms` for the one
@@ -71,7 +71,7 @@ class LlmUsageMeter(BaseCallbackHandler):
         response: LLMResult,
         *,
         run_id: UUID,
-        **kwargs: Any,  # noqa: ARG002
+        **kwargs: object,  # noqa: ARG002
     ) -> None:
         # meiva:note
         # One completed call can return several generations (batch / generate); each one that

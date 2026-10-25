@@ -1,24 +1,39 @@
 from __future__ import annotations
 
+import os
+from collections.abc import Iterator
+
 import pytest
 
 from base.db.test_db_guard import assert_test_db_url
 
 
-def test_main_cluster_db_always_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MEIVA_TEST_DB", raising=False)
+@pytest.fixture(autouse=True)
+def _restore_test_db_env() -> Iterator[None]:
+    saved = os.environ.get("MEIVA_TEST_DB")
+    try:
+        yield
+    finally:
+        if saved is None:
+            os.environ.pop("MEIVA_TEST_DB", None)
+        else:
+            os.environ["MEIVA_TEST_DB"] = saved
+
+
+def test_main_cluster_db_always_refused() -> None:
+    os.environ.pop("MEIVA_TEST_DB", None)
     with pytest.raises(RuntimeError, match="production database"):
         assert_test_db_url(
             "postgresql://meiva_main:***@10.0.0.2:6433/meiva_main",
             context="test",
         )
-    monkeypatch.setenv("MEIVA_TEST_DB", "1")
+    os.environ["MEIVA_TEST_DB"] = "1"
     with pytest.raises(RuntimeError, match="production database"):
         assert_test_db_url("postgresql://meiva_main@127.0.0.1:6433/meiva_main", context="test")
 
 
-def test_main_cluster_hostname_always_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MEIVA_TEST_DB", "1")
+def test_main_cluster_hostname_always_refused() -> None:
+    os.environ["MEIVA_TEST_DB"] = "1"
     with pytest.raises(RuntimeError, match="production database"):
         assert_test_db_url(
             "postgresql://x@meiva_main-gw.example.internal:6433/somedb",
@@ -26,16 +41,16 @@ def test_main_cluster_hostname_always_refused(monkeypatch: pytest.MonkeyPatch) -
         )
 
 
-def test_fresh_birth_name_needs_marker(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MEIVA_TEST_DB", raising=False)
+def test_fresh_birth_name_needs_marker() -> None:
+    os.environ.pop("MEIVA_TEST_DB", None)
     with pytest.raises(RuntimeError, match="MEIVA_TEST_DB"):
         assert_test_db_url("postgresql://meiva@127.0.0.1:5433/meiva", context="test")
-    monkeypatch.setenv("MEIVA_TEST_DB", "1")
+    os.environ["MEIVA_TEST_DB"] = "1"
     assert assert_test_db_url("postgresql://meiva@127.0.0.1:5433/meiva", context="test") is None
 
 
-def test_throwaway_names_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MEIVA_TEST_DB", raising=False)
+def test_throwaway_names_allowed() -> None:
+    os.environ.pop("MEIVA_TEST_DB", None)
     assert (
         assert_test_db_url("postgresql://meiva@127.0.0.1:54321/meiva_citest", context="test")
         is None
@@ -46,19 +61,19 @@ def test_throwaway_names_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_unprovisioned_sentinel_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MEIVA_TEST_DB", raising=False)
+def test_unprovisioned_sentinel_allowed() -> None:
+    os.environ.pop("MEIVA_TEST_DB", None)
     assert (
         assert_test_db_url("postgresql://unprovisioned@127.0.0.1:1/unprovisioned", context="test")
         is None
     )
 
 
-def test_unknown_name_needs_marker(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MEIVA_TEST_DB", raising=False)
+def test_unknown_name_needs_marker() -> None:
+    os.environ.pop("MEIVA_TEST_DB", None)
     with pytest.raises(RuntimeError, match="MEIVA_TEST_DB"):
         assert_test_db_url("postgresql://u@127.0.0.1:5433/mydb", context="test")
-    monkeypatch.setenv("MEIVA_TEST_DB", "1")
+    os.environ["MEIVA_TEST_DB"] = "1"
     assert assert_test_db_url("postgresql://u@127.0.0.1:5433/mydb", context="test") is None
 
 

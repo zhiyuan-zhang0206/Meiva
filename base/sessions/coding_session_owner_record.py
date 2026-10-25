@@ -16,7 +16,7 @@ import uuid
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal, Never, cast, get_args
+from typing import Literal, Never, TypeGuard
 
 from base.host.atomic_io import AtomicWriter
 
@@ -37,7 +37,15 @@ class CodingSessionStatus(StrEnum):
 PersistedStatus = Literal[
     CodingSessionStatus.LAUNCHING, CodingSessionStatus.ACTIVE, CodingSessionStatus.TERMINAL
 ]
-PERSISTED_STATUSES = cast(tuple[PersistedStatus, ...], tuple(get_args(PersistedStatus)))
+PERSISTED_STATUSES: tuple[PersistedStatus, ...] = (
+    CodingSessionStatus.LAUNCHING,
+    CodingSessionStatus.ACTIVE,
+    CodingSessionStatus.TERMINAL,
+)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 class InvalidCodingSessionOwnerError(RuntimeError):
@@ -308,9 +316,9 @@ def _parse_terminal_metadata(
 
 
 def _parse(key: CodingSessionKey, value: object) -> CodingSessionOwner:
-    if not isinstance(value, dict):
+    if not _is_object_dict(value):
         _invalid("owner root must be an object")
-    raw = cast("dict[str, object]", value)
+    raw = value
     if raw.get("schema_version") != SCHEMA_VERSION:
         _invalid(f"unknown schema_version {raw.get('schema_version')!r}")
     if raw.get("cluster") != key.cluster or raw.get("workspace") != key.workspace:

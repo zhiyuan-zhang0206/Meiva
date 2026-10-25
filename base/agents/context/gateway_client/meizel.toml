@@ -10,10 +10,3 @@ exports = ["launch_retry.py", "memory_search.py", "transport.py"]
 
 [debt.ambient-read]
 "transport.py#random uuid.uuid4" = 2
-
-[debt.type-cast]
-"launch_retry.py#cast get_launch_attempt" = 1
-"launch_retry.py#cast retry_launch" = 1
-"transport.py#cast _wire_reason" = 1
-"transport.py#cast get" = 1
-"transport.py#cast post" = 1
