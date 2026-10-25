@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
-from typing import cast
+from typing import TypeGuard
 
 import pytest
 
@@ -36,6 +36,22 @@ def synthetic_decision_allowlists() -> Iterator[None]:
         decisions.DECISIONS.update(saved)
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_list(value: object) -> TypeGuard[list[str]]:
+    return _is_object_list(value) and all(isinstance(item, str) for item in value)
+
+
 def listed_allowances(files: Mapping[str, str]) -> str:
     """A policy listing every `[loads]` and `[external]` site the given manifests declare."""
     external: dict[str, str] = {}
@@ -50,12 +66,13 @@ def listed_allowances(files: Mapping[str, str]) -> str:
             continue  # a malformed manifest is the test's subject, not an allowance
         external_table: object = document.get("external", {})
         loads_table: object = document.get("loads", {})
-        if not isinstance(external_table, dict) or not isinstance(loads_table, dict):
+        if not _is_table(external_table) or not _is_table(loads_table):
             continue
-        for name, reason in cast("dict[str, object]", external_table).items():
+        for name, reason in external_table.items():
             external[f"{directory}/{name}" if directory else name] = str(reason)
-        for name, targets in cast("dict[str, list[str]]", loads_table).items():
-            loads[f"{directory}/{name}" if directory else name] = tuple(targets)
+        for name, targets in loads_table.items():
+            if _is_str_list(targets):
+                loads[f"{directory}/{name}" if directory else name] = tuple(targets)
     return render_policy(external, loads)
 
 

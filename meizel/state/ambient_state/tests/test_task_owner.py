@@ -4,7 +4,7 @@ import ast
 import asyncio
 from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 import pytest
 
@@ -263,7 +263,10 @@ class _Service(Protocol):
 def _service(source: str, report: Callable[[BaseException, asyncio.Task[None]], None]) -> _Service:
     namespace: dict[str, Any] = {}
     exec(compile(source, "owned-task-example.py", "exec"), namespace)
-    return cast(_Service, namespace["Service"](report))
+    cls = namespace["Service"]
+    assert isinstance(cls, type)
+    instance: _Service = cls(report)
+    return instance
 
 
 @pytest.mark.asyncio

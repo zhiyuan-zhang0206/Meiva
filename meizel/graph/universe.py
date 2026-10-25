@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
-from dataclasses import dataclass
+from collections.abc import Generator
+from contextlib import contextmanager, suppress
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from meizel.graph.model import MeizelError
 
 __all__ = [
     "MANIFEST",
+    "EditPlan",
+    "GitRepo",
     "Module",
     "Universe",
     "is_private_module",
@@ -20,6 +25,179 @@ __all__ = [
 ]
 
 MANIFEST = "meizel.toml"
+_is_file = Path.is_file
+_mkdir = Path.mkdir
+_read_file_bytes = Path.read_bytes
+_rmdir = Path.rmdir
+_unlink = Path.unlink
+_write_file_bytes = Path.write_bytes
+
+
+def _read_text(path: Path) -> str:
+    return _read_file_bytes(path).decode("utf-8")
+
+
+def _write_bytes(path: Path, data: bytes) -> None:
+    _mkdir(path.parent, parents=True, exist_ok=True)
+    _write_file_bytes(path, data)
+
+
+def _write_text(path: Path, text: str) -> None:
+    _write_bytes(path, text.encode("utf-8"))
+
+
+def _mkdtemp(root: Path, prefix: str) -> Path:
+    base = root.resolve().parent
+    for idx in range(100_000):
+        candidate = base / f".{prefix}{idx}"
+        try:
+            _mkdir(candidate, mode=0o700)
+            return candidate
+        except FileExistsError:
+            continue
+    raise MeizelError("unable to allocate temporary directory")
+
+
+def _rmtree(root: Path) -> None:
+    for dirpath, dirnames, filenames in os.walk(root, topdown=False):
+        base = Path(dirpath)
+        for name in filenames:
+            with suppress(OSError):
+                _unlink(base / name)
+        for name in dirnames:
+            sub = base / name
+            with suppress(OSError):
+                if sub.is_symlink():
+                    _unlink(sub)
+                else:
+                    _rmdir(sub)
+    with suppress(OSError):
+        _rmdir(root)
+
+
+@dataclass(frozen=True, slots=True)
+class EditPlan:
+    writes: dict[Path, str] = field(default_factory=dict[Path, str])
+    byte_writes: dict[Path, bytes] = field(default_factory=dict[Path, bytes])
+    deletes: tuple[Path, ...] = ()
+    dirs: tuple[Path, ...] = ()
+
+    def apply(self) -> None:
+        for directory in self.dirs:
+            _mkdir(directory, parents=True, exist_ok=True)
+        for path, text in self.writes.items():
+            _write_text(path, text)
+        for path, data in self.byte_writes.items():
+            _write_bytes(path, data)
+        for path in self.deletes:
+            _unlink(path)
+
+
+@dataclass(frozen=True, slots=True)
+class GitRepo:
+    root: Path
+
+    def has_file(self, rel: str) -> bool:
+        return _is_file(self.root / rel)
+
+    def load_text(self, rel: str, *, default: str | None = None) -> str:
+        full = self.root / rel
+        if default is not None and not _is_file(full):
+            return default
+        return _read_text(full)
+
+    def load_bytes(self, rel: str) -> bytes:
+        return _read_file_bytes(self.root / rel)
+
+    def run_text(self, *args: str) -> str:
+        # meiva:note
+        # Fixed git argv against the checkout root without invoking a shell.
+        result = subprocess.run(  # noqa: S603
+            ["git", "-C", str(self.root), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise MeizelError(f"git {args[0]} failed: {result.stderr.strip()}")
+        return result.stdout
+
+    def run_bytes(self, *args: str, stdin: bytes | None = None) -> bytes:
+        # meiva:note
+        # Fixed git argv for binary streams against the checkout root without invoking a shell.
+        result = subprocess.run(  # noqa: S603
+            ["git", "-C", str(self.root), *args],
+            input=stdin,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise MeizelError(
+                f"git {args[0]} failed: {result.stderr.decode(errors='replace').strip()}"
+            )
+        return result.stdout
+
+    def default_base(self) -> str:
+        # meiva:note
+        # Resolves the branch point with origin/main using a fixed git merge-base argv.
+        result = subprocess.run(  # noqa: S603
+            ["git", "-C", str(self.root), "merge-base", "HEAD", "origin/main"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return result.stdout.strip() if result.returncode == 0 else "HEAD"
+
+    def show_optional_text(self, ref: str, path: str) -> str | None:
+        # meiva:note
+        # Reads a tracked blob from a git ref using a fixed git show argv after rejecting flag refs.
+        if ref.startswith("-"):
+            raise MeizelError(f"{ref}: not a git ref")
+        result = subprocess.run(  # noqa: S603
+            ["git", "-C", str(self.root), "show", f"{ref}:{path}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return result.stdout if result.returncode == 0 else None
+
+    def show_bytes(self, ref: str, path: str) -> bytes:
+        return self.run_text("show", f"{ref}:{path}").encode()
+
+    def stage_all(self) -> None:
+        self.run_bytes("add", "-A")
+
+    def grep_files(self, marker: str, suffixes: tuple[str, ...]) -> list[str]:
+        # meiva:note
+        # Lists tracked files containing a fixed marker via git grep without invoking a shell.
+        done = subprocess.run(  # noqa: S603
+            ["git", "-C", str(self.root), "grep", "-l", "-F", marker, "--", "."],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if done.returncode not in (0, 1):
+            raise MeizelError(f"git grep failed: {done.stderr.strip()}")
+        return sorted(
+            p
+            for p in done.stdout.splitlines()
+            if p.endswith(suffixes) and not p.startswith("meizel/")
+        )
+
+    @contextmanager
+    def checkout(self, ref: str) -> Generator[Path]:
+        if ref.startswith("-"):
+            raise MeizelError(f"{ref}: not a git ref")
+        parent = _mkdtemp(self.root, "meizel-base-")
+        target = parent / "base"
+        try:
+            self.run_bytes("worktree", "add", "--detach", str(target), ref)
+            try:
+                yield target
+            finally:
+                self.run_bytes("worktree", "remove", "--force", str(target))
+        finally:
+            _rmtree(parent)
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +304,15 @@ class Universe:
             if p.endswith(ts_extensions) and any(p == s or p.startswith(f"{s}/") for s in ts_scopes)
         )
         return (*self.python_files, *ts)
+
+    def has_file(self, rel: str) -> bool:
+        return _is_file(self.root / rel)
+
+    def load_text(self, rel: str) -> str:
+        return _read_text(self.root / rel)
+
+    def load_bytes(self, rel: str) -> bytes:
+        return _read_file_bytes(self.root / rel)
 
 
 def _is_regular(root: Path, rel: str) -> bool:

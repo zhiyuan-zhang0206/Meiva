@@ -4,7 +4,7 @@ import ast
 import pathlib
 import threading
 from collections.abc import Callable
-from typing import Protocol, cast
+from typing import Any, Protocol
 
 import pytest
 
@@ -125,10 +125,17 @@ class _Service(Protocol):
 Factory = Callable[[Callable[[threading.Event], None], Callable[[BaseException], None]], _Service]
 
 
+def _load_service_class(source: str, filename: str) -> Factory:
+    namespace: dict[str, Any] = {}
+    exec(compile(source, filename, "exec"), namespace)
+    cls = namespace["Service"]
+    assert isinstance(cls, type)
+    factory: Factory = cls
+    return factory
+
+
 def _service_class() -> Factory:
-    namespace: dict[str, object] = {}
-    exec(compile(SOURCE, "owned-thread-example.py", "exec"), namespace)
-    return cast(Factory, namespace["Service"])
+    return _load_service_class(SOURCE, "owned-thread-example.py")
 
 
 def test_real_owner_stops_and_observes_normal_completion() -> None:
@@ -201,9 +208,7 @@ def test_restart_requires_visible_stop_admission_fence(tmp_path: pathlib.Path) -
         + spawn,
     )
     assert _sites(guarded, tmp_path)
-    namespace: dict[str, object] = {}
-    exec(compile(guarded, "restart-example.py", "exec"), namespace)
-    service_class = cast(Factory, namespace["Service"])
+    service_class = _load_service_class(guarded, "restart-example.py")
 
     def work(stop: threading.Event) -> None:
         stop.wait(1)
@@ -260,9 +265,7 @@ def test_finally_can_erase_an_actual_failure_so_its_source_is_rejected(
         "            self._error = None\n            self._finished.set()",
     )
     assert _sites(source, tmp_path)
-    namespace: dict[str, object] = {}
-    exec(compile(source, "lost-error.py", "exec"), namespace)
-    service_class = cast(Factory, namespace["Service"])
+    service_class = _load_service_class(source, "lost-error.py")
     failure = RuntimeError("original worker bug")
     reported: list[BaseException] = []
 
@@ -286,9 +289,7 @@ def test_stop_only_fence_can_overwrite_a_live_thread_and_is_rejected(
         + "\n"
     )
     assert _sites(source, tmp_path)
-    namespace: dict[str, object] = {}
-    exec(compile(source, "overwritten-live-handle.py", "exec"), namespace)
-    service_class = cast(Factory, namespace["Service"])
+    service_class = _load_service_class(source, "overwritten-live-handle.py")
     admitted = [threading.Event(), threading.Event()]
     entries: list[threading.Thread] = []
     lock = threading.Lock()

@@ -17,13 +17,8 @@ moved in the same change shows up as a new key and fails: move files in their ow
 
 from __future__ import annotations
 
-import shutil
-import subprocess
-import tempfile
 import tomllib
 from collections import Counter
-from collections.abc import Generator
-from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import TypeGuard
@@ -39,7 +34,7 @@ from meizel.contracts.manifest import Manifest, Root, load_manifests, manifest_p
 from meizel.contracts.manifest_text import set_scope
 from meizel.contracts.sync import prepare_policy_snapshot, prune
 from meizel.graph.model import AmbientKind, Code, MeizelError
-from meizel.graph.universe import Universe, load_universe, parent_of
+from meizel.graph.universe import EditPlan, GitRepo, Universe, load_universe, parent_of
 from meizel.language.scan import invalidate_policy_caches
 
 __all__ = ["RuleDiff", "purity_changed", "rule_diff"]
@@ -131,35 +126,6 @@ def _excess(tree: Baselines, found: Baselines) -> list[tuple[str, str, str, int,
     return out
 
 
-@contextmanager
-def _checkout(root: Path, ref: str) -> Generator[Path]:
-    """A throwaway tracked checkout of `ref`, apart from the repository being judged."""
-    if ref.startswith("-"):
-        raise MeizelError(f"{ref}: not a git ref")
-    parent = Path(tempfile.mkdtemp(prefix="meizel-base-"))
-    target = parent / "base"
-    try:
-        _git(root, "worktree", "add", "--detach", str(target), ref)
-        try:
-            yield target
-        finally:
-            _git(root, "worktree", "remove", "--force", str(target))
-    finally:
-        shutil.rmtree(parent, ignore_errors=True)
-
-
-def _git(root: Path, *args: str) -> None:
-    result = subprocess.run(  # noqa: S603 - fixed argv
-        ["git", "-C", str(root), *args], capture_output=True, check=False
-    )
-    if result.returncode != 0:
-        raise MeizelError(f"git {args[0]} failed: {result.stderr.decode(errors='replace').strip()}")
-
-
-def _stage(root: Path) -> None:
-    _git(root, "add", "-A")
-
-
 def _refuse_unreadable(analysis: Analysis, ref: str) -> None:
     unreadable = [d for d in analysis.diagnostics if d.code in _UNREADABLE]
     if unreadable:
@@ -173,14 +139,15 @@ def _refuse_unreadable(analysis: Analysis, ref: str) -> None:
 def regenerated(base_root: Path, ref: str, jobs: int | None) -> Baselines:
     """The baseline this checker would write for the checkout at `base_root`."""
     _refuse_unreadable(analyze(base_root, jobs=jobs), ref)
+    repo = GitRepo(base_root)
     prune(base_root, jobs)
     prune_debt(base_root, jobs)
     declare(base_root, [""], jobs)
-    _stage(base_root)  # the checker reads tracked files only, and these commands create manifests
+    repo.stage_all()  # the checker reads tracked files only, and these commands create manifests
     record(base_root, [""], jobs)
-    _stage(base_root)
+    repo.stage_all()
     record(base_root, [""], jobs)
-    _stage(base_root)
+    repo.stage_all()
     prune_debt(base_root, jobs)
     return read_baselines(load_universe(base_root))
 
@@ -217,13 +184,7 @@ def _strict_to_be_targets(text: str) -> set[str]:
 # meiva:note
 # Reads a tracked manifest blob from a git ref using a fixed git show argv without invoking a shell.
 def _base_text(root: Path, ref: str, path: str) -> str:
-    result = subprocess.run(  # noqa: S603
-        ["git", "-C", str(root), "show", f"{ref}:{path}"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return result.stdout if result.returncode == 0 else ""
+    return GitRepo(root).show_optional_text(ref, path) or ""
 
 
 def purity_changed(root: Path, ref: str) -> bool:
@@ -350,17 +311,20 @@ def _ambient_snapshot(
 
 
 def _sync_rule_files(root: Path, ref: str, base_root: Path) -> set[str]:
+    src_repo = GitRepo(root)
+    dst_repo = GitRepo(base_root)
+    byte_writes: dict[Path, bytes] = {}
+    deletes: list[Path] = []
     copied: set[str] = set()
     for rel in changed_under(root, ref, [":(glob)meizel/**", "meizel.policy.toml"]):
-        src = root / rel
         dst = base_root / rel
-        if src.is_file():
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(src, dst)
+        if src_repo.has_file(rel):
+            byte_writes[dst] = src_repo.load_bytes(rel)
             if Path(rel).name == "meizel.toml":
                 copied.add(rel)
-        elif dst.is_file():
-            dst.unlink()
+        elif dst_repo.has_file(rel):
+            deletes.append(dst)
+    EditPlan(byte_writes=byte_writes, deletes=tuple(deletes)).apply()
     return copied
 
 
@@ -396,9 +360,11 @@ def _sync_purity_scope(
     tree_manifests, _ = load_manifests(load_universe(root))
     copied = _sync_rule_files(root, ref, base_root)
     invalidate_policy_caches()
-    _stage(base_root)
+    base_repo = GitRepo(base_root)
+    base_repo.stage_all()
     base_universe = load_universe(base_root)
     known = base_universe.files | base_universe.dirs
+    writes: dict[Path, str] = {}
     for directory in sorted(tree_manifests.keys() | original.keys()):
         manifest = tree_manifests.get(directory)
         baseline = original.get(directory, Manifest(directory))
@@ -408,17 +374,18 @@ def _sync_purity_scope(
             continue
         if directory and directory not in base_universe.dirs:
             continue
-        target = base_root / manifest_path(directory)
-        old_text = target.read_text(encoding="utf-8") if target.is_file() else ""
+        rel = manifest_path(directory)
+        old_text = base_repo.load_text(rel, default="")
         new_text = _scope_text(old_text, manifest, baseline, known)
         if new_text != old_text:
-            target.write_text(new_text, encoding="utf-8")
-    _stage(base_root)
+            writes[base_root / rel] = new_text
+    EditPlan(writes=writes).apply()
+    base_repo.stage_all()
 
 
 def rule_diff(root: Path, ref: str, base: Counter[str], jobs: int | None = None) -> RuleDiff:
     """Compare the tree at `root` with `ref`, given the per-code debt the base records (`base`)."""
-    with _checkout(root, ref) as checkout:
+    with GitRepo(root).checkout(ref) as checkout:
         historical = prepare_policy_snapshot(checkout)
         _refuse_unreadable(analyze(checkout, jobs=jobs), ref)
         universe = load_universe(checkout)
