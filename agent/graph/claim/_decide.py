@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import cast
+from typing import TypeGuard
 
 from langchain_core.messages import AnyMessage, BaseMessage, RemoveMessage
 from langgraph.types import Command
@@ -69,6 +68,10 @@ def _cancel_outcome(ctx: MeivaContext, agent_id: int, st: BatchState) -> _Outcom
     )
 
 
+def _is_any_message(msg: BaseMessage) -> TypeGuard[AnyMessage]:
+    return not isinstance(msg, RemoveMessage)
+
+
 # meiva:link agent/graph/docs/context-window/replacement.meiva.okf.md
 async def _compact_outcome(
     ctx: MeivaContext, state: _state.AgentState, agent_id: int, st: BatchState
@@ -104,18 +107,19 @@ async def _compact_outcome(
         st.committed_chat_ids = []
     await finalize_claimed_inbounds(ctx.ops_pool, agent_id, incarnation=ctx.original_incarnation)
     halted = st.restart_preserves_idle and not st.committed_chat_ids
+    now = ctx.require_clock().now()
     dump_path = dump_history(
         state.messages,
         workspace_dir(agent_id),
         ctx.require_agent().history_dump,
-        now=datetime.now(UTC),
+        now=now,
     )
     if dump_path is not None:
-        st.new_msgs.append(history_dump_note(dump_path, created_at=datetime.now(UTC)))
-    extra_msgs = [cast(AnyMessage, m) for m in st.new_msgs if not isinstance(m, RemoveMessage)]
+        st.new_msgs.append(history_dump_note(dump_path, created_at=now))
+    extra_msgs = [m for m in st.new_msgs if _is_any_message(m)]
     summary_kwargs: dict[str, str] = {
         "meiva_msg_type": compact_kind,
-        "meiva_created_at": datetime.now(UTC).isoformat(),
+        "meiva_created_at": now.isoformat(),
     }
     if compact_run_id is not None:
         summary_kwargs["meiva_compact_id"] = compact_run_id

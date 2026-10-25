@@ -9,7 +9,7 @@ image upload as a native base64 block the model decodes.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from langchain_core.messages import HumanMessage
 
@@ -22,6 +22,14 @@ from base.agents.messages.security_finding import SecurityFindingEntry
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.upload_delivery.paths import UploadClient, fetch_upload_b64
 from base.log import logger
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
 
 
 def build_chat_inbound(
@@ -59,7 +67,7 @@ def build_chat_inbound(
     # meiva:link agent/messages/docs/message-format.meiva.okf.md
     scan_src = f"inbound.chat:{item.source}"
     raw_blocks = item.payload.get("content_blocks") if item.payload else None
-    if not isinstance(raw_blocks, list):
+    if not _is_object_list(raw_blocks):
         raw = expand_command(item.content)
         finding = scan_inbound_content(raw, source=scan_src, enabled=read_security_enabled())
         head = inbound_head(item.source, created_at=item.created_at, inputs=envelope_inputs)
@@ -71,9 +79,11 @@ def build_chat_inbound(
             created_at=item.created_at,
         )
         return message, finding
-    blocks = cast("list[dict[str, Any]]", raw_blocks)
+    blocks: list[dict[str, Any]] = [
+        {str(k): v for k, v in b.items()} for b in raw_blocks if _is_object_dict(b)
+    ]
 
-    text = "\n".join(b["text"] for b in blocks if b.get("type") == "text")
+    text = "\n".join(str(b["text"]) for b in blocks if b.get("type") == "text")
     raw_text = expand_command(text)
     finding = scan_inbound_content(raw_text, source=scan_src, enabled=read_security_enabled())
     head = inbound_head(item.source, created_at=item.created_at, inputs=envelope_inputs)

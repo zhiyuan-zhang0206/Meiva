@@ -8,7 +8,8 @@ import asyncio
 import os
 import select
 import subprocess
-import time
+
+from base.clock import SYSTEM_TIMERS
 
 from ._stream import StreamingTextIO
 
@@ -68,20 +69,20 @@ class ExecOutputPipe:
 
     async def finish(self, timeout: float) -> None:
         """Pump the bounded tail; a retained writer remains explicitly unresolved."""
-        deadline = time.monotonic() + timeout
+        deadline = SYSTEM_TIMERS.monotonic() + timeout
         self.pump()
         while not self.closed:
             self.pump()
-            if self.closed or time.monotonic() >= deadline:
+            if self.closed or SYSTEM_TIMERS.monotonic() >= deadline:
                 return
-            await asyncio.sleep(min(0.01, max(0, deadline - time.monotonic())))
+            await asyncio.sleep(min(0.01, max(0, deadline - SYSTEM_TIMERS.monotonic())))
 
     def finish_now(self, timeout: float) -> None:
         """Bounded synchronous tail for Runner-wide cancellation of async owners."""
-        deadline = time.monotonic() + timeout
+        deadline = SYSTEM_TIMERS.monotonic() + timeout
         self.pump()
         while not self.closed:
             self.pump()
-            if self.closed or time.monotonic() >= deadline:
+            if self.closed or SYSTEM_TIMERS.monotonic() >= deadline:
                 return
-            select.select([self.stdout], [], [], max(0, deadline - time.monotonic()))
+            select.select([self.stdout], [], [], max(0, deadline - SYSTEM_TIMERS.monotonic()))

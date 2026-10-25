@@ -369,16 +369,17 @@ async def auto_compact_for_llm(
     if publisher is not None:
         publisher.emit(CompactDone(agent_id=agent_id).model_dump_json())
 
+    now = runtime.context.require_clock().now()
     dump_path = dump_history(
         state.messages,
         workspace_dir(agent_id),
         runtime.context.require_agent().history_dump,
-        now=datetime.now(UTC),
+        now=now,
     )
     summary_kwargs: dict[str, Any] = {
         "additional_kwargs": {
             "meiva_msg_type": MeivaMsgType.COMPACT_SUMMARY.value,
-            "meiva_created_at": datetime.now(UTC).isoformat(),
+            "meiva_created_at": now.isoformat(),
         },
     }
     if compact_run_id is not None:
@@ -387,9 +388,7 @@ async def auto_compact_for_llm(
         summary,
         resume=CLAIM,
         extra_msgs=(
-            [history_dump_note(dump_path, created_at=datetime.now(UTC))]
-            if dump_path is not None
-            else None
+            [history_dump_note(dump_path, created_at=now)] if dump_path is not None else None
         ),
         summary_kwargs=summary_kwargs,
     )

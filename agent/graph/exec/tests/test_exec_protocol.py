@@ -18,10 +18,10 @@ import stat
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from agent.execution.protocol import (
     MAX_ENVELOPE_BYTES,
@@ -88,6 +88,18 @@ def test_typed_blob_aimessage_exact_round_trip() -> None:
     assert back.model_dump() == msg.model_dump()
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_message_list(value: object) -> TypeGuard[list[BaseMessage]]:
+    return _is_object_list(value) and all(isinstance(item, BaseMessage) for item in value)
+
+
+def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 def test_typed_blob_tool_and_human_messages_exact_round_trip() -> None:
     """ToolMessage additional_kwargs (meiva_msg_type) and a plain HumanMessage
     survive unchanged."""
@@ -98,6 +110,7 @@ def test_typed_blob_tool_and_human_messages_exact_round_trip() -> None:
         HumanMessage(content="hi"),
     ]
     back = loads_typed(dumps_typed(msgs))
+    assert _is_message_list(back)
     assert [type(m) for m in back] == [type(m) for m in msgs]
     assert [m.model_dump() for m in back] == [m.model_dump() for m in msgs]
 
@@ -106,6 +119,7 @@ def test_typed_blob_set_round_trip() -> None:
     """A custom plugin reducer delta can be a `set` — the codec must keep the
     type (the LangGraph reducer would break on a list)."""
     back = loads_typed(dumps_typed({"seen": {"a", "b"}}))
+    assert _is_str_object_dict(back)
     assert back == {"seen": {"a", "b"}}
     assert isinstance(back["seen"], set)
 

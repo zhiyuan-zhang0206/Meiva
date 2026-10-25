@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal, LiteralString, cast, overload
+from typing import Any, Literal, overload
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from psycopg import Cursor
@@ -346,6 +346,11 @@ def _validate_patch_title(cur: Cursor[Any], task_id: int, title: str | None) -> 
             )
 
 
+# meiva:note
+# Commit the task and its owner-change inbounds in the same transaction.
+# The route awaits task-note delivery after this function returns, so no
+# network or process wake can roll back the owner assignment.
+# meiva:link gateway/routers/docs/routers.meiva.okf.md
 def patch_task_blocking(
     pool: ConnectionPool[Any],
     task_id: int,
@@ -353,11 +358,6 @@ def patch_task_blocking(
     operation_key: str,
     operation_path: str | None = None,
 ) -> tuple[TaskRow, list[TaskNoteReceipt]]:
-    """Commit the task and its owner-change inbounds in the same transaction.
-
-    The route awaits task-note delivery after this function returns, so no
-    network or process wake can roll back the owner assignment.
-    """
     path = operation_path if operation_path is not None else f"/api/tasks/{task_id}"
     request_body = body.model_dump(mode="json", exclude_unset=True)
     with write_transaction(pool) as conn, conn.cursor() as cur:
@@ -404,20 +404,17 @@ def patch_task_blocking(
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
         _validate_patch_title(cur, task_id, body.title)
-        cur.execute(
-            cast(
-                LiteralString,
-                f"WITH updated AS ( "  # noqa: S608
-                f"    UPDATE agent_tasks AS t SET {', '.join(sets)}, updated_at = now() "
-                f"    WHERE t.id = %s "
-                f"    RETURNING {_TASK_COLS} "
-                f") "
-                f"SELECT u.*, a.label AS owner_label "
-                f"FROM updated u "
-                f"LEFT JOIN agents a ON u.owner = a.id",
-            ),
-            (*params, task_id),
+        update_sql = (
+            f"WITH updated AS ( "  # noqa: S608
+            f"    UPDATE agent_tasks AS t SET {', '.join(sets)}, updated_at = now() "
+            f"    WHERE t.id = %s "
+            f"    RETURNING {_TASK_COLS} "
+            f") "
+            f"SELECT u.*, a.label AS owner_label "
+            f"FROM updated u "
+            f"LEFT JOIN agents a ON u.owner = a.id"
         )
+        cur.execute(update_sql, (*params, task_id))  # pyright: ignore[reportArgumentType, reportCallIssue]
         row = cur.fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found.")

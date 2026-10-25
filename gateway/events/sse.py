@@ -25,17 +25,18 @@ gets the same ``{role, agent_id, content, ...}`` shape.
 
 import logging
 import time
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from typing import Any
 
 import redis
 from fastapi import Request
 from pydantic import TypeAdapter, ValidationError
+from redis.asyncio.client import PubSub
 from redis.exceptions import AuthenticationError, NoPermissionError
 
 from base.events.live.bus import EventBus
-from base.events.live.projection import EVENT_ADAPTER, Error
-from base.events.live.redis_client import retry_auth_failures_async
+from base.events.live.projection import EVENT_ADAPTER, Error, Event
+from base.events.live.redis_client import AuthRetryAsyncRedis, retry_auth_failures_async
 from gateway.events.sse_frames import (
     HEARTBEAT_FRAME,
     SseCadence,
@@ -67,7 +68,7 @@ def _error_payload(agent_id: int, exc: Exception) -> str:
 
 
 def _matches_filter(
-    event: Any, agent_id: int, *, broadcast: bool, role_filter: frozenset[str] | None
+    event: Event, agent_id: int, *, broadcast: bool, role_filter: frozenset[str] | None
 ) -> bool:
     return (broadcast or event.agent_id == agent_id) and (
         not role_filter or event.role in role_filter
@@ -75,7 +76,7 @@ def _matches_filter(
 
 
 async def _subscribe_error_frame(
-    pubsub: Any, channel: str, agent_id: int, *, batched: bool = False
+    pubsub: PubSub, channel: str, agent_id: int, *, batched: bool = False
 ) -> bytes | None:
     """Return a wire-shaped error after a failed subscribe, else None."""
     try:
@@ -88,14 +89,33 @@ async def _subscribe_error_frame(
 
 
 # meiva:note
+# Poll one non-subscribe message from the Redis pubsub handle with a bounded timeout.
+# meiva:link gateway/events/docs/sse/sse.meiva.okf.md
+async def get_pubsub_message(pubsub: PubSub, timeout: float) -> Mapping[str, object] | None:
+    return await pubsub.get_message(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        ignore_subscribe_messages=True,
+        timeout=timeout,
+    )
+
+
+# meiva:note
 # Each cleanup step is independently suppressed + logged so one failure does not
 # swallow another; `channels` accepts the whole subscription set of one pubsub
 # connection, which the merged stream subscribes to both of its sources on.
 # meiva:link gateway/events/docs/sse/sse.meiva.okf.md
-async def close_pubsub(pubsub: Any, client: Any, channels: str | Sequence[str]) -> None:
+async def close_pubsub(
+    pubsub: PubSub, client: AuthRetryAsyncRedis, channels: str | Sequence[str]
+) -> None:
     names = (channels,) if isinstance(channels, str) else tuple(channels)
+
+    async def _unsubscribe() -> None:
+        # meiva:note
+        # Unsubscribe all channels on the pubsub socket before closing it.
+        # meiva:link gateway/events/docs/sse/sse.meiva.okf.md
+        await pubsub.unsubscribe(*names)  # pyright: ignore[reportUnknownMemberType]
+
     for step, coro_fn in (
-        ("unsubscribe", lambda: pubsub.unsubscribe(*names)),  # pyright: ignore[reportUnknownMemberType]
+        ("unsubscribe", _unsubscribe),
         ("pubsub.aclose", pubsub.aclose),
         ("client.aclose", client.aclose),
     ):
@@ -238,7 +258,7 @@ async def event_stream(
 
 
 async def _drain_redis_messages(
-    pubsub: Any,
+    pubsub: PubSub,
     request: Request,
     flush_interval: float,
     *,
@@ -270,12 +290,7 @@ async def _drain_redis_messages(
         if remaining <= 0:
             break
         poll = min(remaining, 0.1)
-        msg = await retry_auth_failures_async(
-            lambda poll=poll: pubsub.get_message(  # pyright: ignore[reportUnknownMemberType]
-                ignore_subscribe_messages=True,
-                timeout=poll,
-            )
-        )
+        msg = await retry_auth_failures_async(lambda poll=poll: get_pubsub_message(pubsub, poll))
         if msg is None:
             break
         raw = msg["data"]

@@ -26,12 +26,5 @@ exports = ["node.py", "output.py", "process.py", "tests"]
 
 [debt.ambient-read]
 "_crop.py#random uuid.uuid4" = 1
-"_output_pipe.py#clock time.monotonic" = 3
-"_subprocess.py#clock time.monotonic" = 4
-"node.py#clock datetime.datetime.now" = 4
 "process.py#cwd pathlib.Path.cwd" = 1
 "process.py#home pathlib.Path.home" = 1
-
-[debt.type-cast]
-"_notes.py#cast merge_exec_notes" = 3
-"_remote.py#cast _completion_from_response" = 1

@@ -14,7 +14,6 @@ reads the graph state it is handed.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
@@ -51,7 +50,7 @@ class _DeliverSecurityFindingsHook(Hook):
                 len(findings),
             )
             return {"security_findings": Overwrite([])}
-        now = datetime.now(UTC)
+        now = _runtime.context.require_clock().now()
         return {
             "messages": [
                 security_note_message(source=f.source, triggers=f.triggers, created_at=now)

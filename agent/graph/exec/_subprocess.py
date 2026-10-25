@@ -20,7 +20,6 @@ import asyncio
 import contextlib
 import signal
 import subprocess
-import time
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +33,7 @@ from agent.execution.protocol import (
     write_request,
 )
 from base.agents.context import MeivaContext
+from base.clock import SYSTEM_TIMERS
 from base.deploy.release import editable_install
 from base.log import logger
 from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
@@ -135,13 +135,13 @@ async def _poll_child(
     timeout: float,
     reader: ExecOutputPipe,
 ) -> tuple[bool, bool]:
-    started = time.monotonic()
+    started = SYSTEM_TIMERS.monotonic()
     deadline = started + timeout
     last_activity = started
     while not _leader_exited(leader):
         reader.pump()
         pending = stream.take_pending() if chunk_publisher is not None else ""
-        now = time.monotonic()
+        now = SYSTEM_TIMERS.monotonic()
         plan = plan_poll(
             pending=bool(pending),
             now=now,
@@ -168,9 +168,9 @@ async def _poll_child(
 # meiva:note
 # Give a signalled leader its grace window to exit on its own.
 async def _await_leader_exit(domain: ExecProcessDomain, leader: psutil.Process) -> None:
-    deadline = time.monotonic() + KILL_GRACE_S
+    deadline = SYSTEM_TIMERS.monotonic() + KILL_GRACE_S
     while not _leader_exited(leader):
-        if time.monotonic() >= deadline:
+        if SYSTEM_TIMERS.monotonic() >= deadline:
             logger.warning(
                 "[{label}] exec child {pid} survived the {grace}s grace period — "
                 "hard-stopping its process group (native-stuck code or swallowed signal)",

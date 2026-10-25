@@ -15,7 +15,7 @@ import asyncio
 import contextlib
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from base.sessions.exec_host import protocol
 from base.sessions.exec_host.paths import service_socket_path
@@ -53,6 +53,10 @@ def _spawn_error(message: dict[str, Any]) -> ExecCrashed:
     return ExecCrashed(output=output, exc=OSError(raw_error))
 
 
+def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 def _completion_from_response(
     message: dict[str, Any],
     stream: StreamingTextIO,
@@ -65,10 +69,11 @@ def _completion_from_response(
         if pending:
             chunk_publisher.publish(pending)
     raw_data = message.get("data")
-    data = cast("dict[str, Any]", raw_data) if isinstance(raw_data, dict) else {}
-    raw_rc = data.get("returncode")
+    if not _is_str_object_dict(raw_data):
+        return None, False, False
+    raw_rc = raw_data.get("returncode")
     returncode = raw_rc if isinstance(raw_rc, int) and not isinstance(raw_rc, bool) else None
-    return returncode, bool(data.get("cancelled")), bool(data.get("timed_out"))
+    return returncode, bool(raw_data.get("cancelled")), bool(raw_data.get("timed_out"))
 
 
 async def _read_next_frame(reader: asyncio.StreamReader, timeout_s: float) -> dict[str, Any] | None:

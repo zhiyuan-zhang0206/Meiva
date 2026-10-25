@@ -11,7 +11,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, TypeGuard
 
 from agent.execution.result_kind import RESULT_KINDS, ResultKind
 from base.host.atomic_io import write_bytes_atomic
@@ -29,23 +29,28 @@ _NO_AGENT_DIRNAME = "_no_agent_"
 
 # meiva:note
 # Lazily build the typed-blob serializer using the same msgpack allowlist as the checkpointer.
-def _serde() -> Any:
+def dumps_typed(obj: object) -> tuple[str, bytes]:
     from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
     from agent.state import checkpoint_msgpack_allowlist
     from base.packages.plugins.loading.registry import loaded_state_classes
 
-    return JsonPlusSerializer(
+    serde = JsonPlusSerializer(
         allowed_msgpack_modules=checkpoint_msgpack_allowlist(loaded_state_classes())
     )
+    return serde.dumps_typed(obj)
 
 
-def dumps_typed(obj: Any) -> tuple[str, bytes]:
-    return _serde().dumps_typed(obj)
+def loads_typed(data: tuple[str, bytes]) -> object:
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
+    from agent.state import checkpoint_msgpack_allowlist
+    from base.packages.plugins.loading.registry import loaded_state_classes
 
-def loads_typed(data: tuple[str, bytes]) -> Any:
-    return _serde().loads_typed(data)
+    serde = JsonPlusSerializer(
+        allowed_msgpack_modules=checkpoint_msgpack_allowlist(loaded_state_classes())
+    )
+    return serde.loads_typed(data)
 
 
 @dataclass
@@ -59,7 +64,8 @@ class RequestPayload:
 
     @property
     def agent_id(self) -> int | None:
-        return cast("int | None", self.context["identity"]["agent_id"])
+        raw = self.context["identity"]["agent_id"]
+        return int(raw) if raw is not None else None
 
     def materialize_state(self) -> dict[str, Any] | None:
         if self.state_raw is None:
@@ -176,9 +182,12 @@ def read_request(path: Path) -> RequestPayload:
         incarnation = RuntimeIncarnation(
             int(envelope["agent_id"]), UUID(identity["generation"]), UUID(identity["owner"])
         )
+    raw_context: object = envelope["context"]
+    if not _is_object_dict(raw_context):
+        raise TypeError("exec request envelope context must be a dict")
     payload = RequestPayload(
         code=str(envelope["code"]),
-        context=cast("dict[str, Any]", envelope["context"]),
+        context={str(k): v for k, v in raw_context.items()},
         timeout_s=float(envelope["timeout_s"]),
         state=None,
         incarnation=incarnation,
@@ -211,35 +220,53 @@ def write_result(path: Path, payload: ResultPayload) -> None:
     _log_envelope_transfer("result", "write", path, started_at)
 
 
+def _is_result_kind(value: object) -> TypeGuard[ResultKind]:
+    return isinstance(value, str) and value in RESULT_KINDS
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def read_result(path: Path) -> ResultPayload:
     started_at = time.perf_counter()
     envelope = _read_json(path)
     if envelope.get("v") != RESULT_VERSION:
         raise ValueError(f"exec result envelope version {envelope.get('v')!r} != {RESULT_VERSION}")
     kind_raw = envelope.get("kind")
-    if kind_raw not in RESULT_KINDS:
+    if not _is_result_kind(kind_raw):
         raise ValueError(f"exec result envelope has unknown kind {kind_raw!r}")
-    kind = cast(ResultKind, kind_raw)
-    state_update = None
+    state_update: dict[str, Any] | None = None
     if envelope.get("update_b64") is not None:
-        state_update = loads_typed(
+        decoded = loads_typed(
             (str(envelope["update_tag"]), base64.b64decode(envelope["update_b64"]))
         )
-    if state_update is not None and not isinstance(state_update, dict):
-        raise ValueError(
-            f"exec result update blob decoded to {type(state_update).__name__}, expected dict"
-        )
+        if not _is_object_dict(decoded):
+            raise ValueError(
+                f"exec result update blob decoded to {type(decoded).__name__}, expected dict"
+            )
+        state_update = {str(k): v for k, v in decoded.items()}
     code_reached = envelope.get("code_reached")
+    raw_sdk_calls: object = envelope.get("sdk_calls")
+    sdk_calls: list[dict[str, Any]] | None = (
+        [{str(k): v for k, v in item.items()} for item in raw_sdk_calls if _is_object_dict(item)]
+        if _is_object_list(raw_sdk_calls)
+        else None
+    )
     payload = ResultPayload(
-        kind=kind,
+        kind=kind_raw,
         lifecycle_type=envelope.get("lifecycle_type"),
         exc_type=envelope.get("exc_type"),
         exc_msg=envelope.get("exc_msg"),
         full_traceback=envelope.get("full_traceback"),
         code_reached=(code_reached if isinstance(code_reached, bool) else None),
-        state_update=cast("dict[str, Any] | None", state_update),
+        state_update=state_update,
         state_update_error=envelope.get("state_update_error"),
-        sdk_calls=cast("list[dict[str, Any]] | None", envelope.get("sdk_calls")),
+        sdk_calls=sdk_calls,
     )
     _log_envelope_transfer("result", "read", path, started_at)
     return payload
@@ -276,7 +303,7 @@ def _read_json(path: Path) -> dict[str, Any]:
             "ceiling — this state snapshot or result delta is over the exec envelope limit; "
             "compact the conversation"
         )
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
+    data: object = json.loads(path.read_text(encoding="utf-8"))
+    if not _is_object_dict(data):
         raise TypeError(f"exec envelope {path} is {type(data).__name__}, expected object")
-    return cast(dict[str, Any], data)
+    return {str(k): v for k, v in data.items()}

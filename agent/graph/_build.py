@@ -23,7 +23,7 @@
 # meiva:link agent/graph/docs/graph.meiva.okf.md
 
 
-from typing import Any, cast
+from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -189,7 +189,7 @@ def build_graph(
         ),
         input_schema=state_cls,
     )
-    g.add_node(HARNESS_TURN, cast("Any", harness_turn_node), input_schema=state_cls)  # pyright: ignore[reportUnknownMemberType]
+    g.add_node(HARNESS_TURN, harness_turn_node, input_schema=state_cls)  # pyright: ignore[reportArgumentType, reportCallIssue, reportUnknownMemberType]
     g.add_edge(START, AFTER_INIT)
     if checkpointer is None:
         checkpointer = MemorySaver()

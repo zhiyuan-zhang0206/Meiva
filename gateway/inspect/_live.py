@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, NamedTuple
 
 from fastapi import HTTPException
@@ -24,14 +25,14 @@ class InspectDbRows(NamedTuple):
 
     machine: str
     status: AgentStatus
-    last_active_at: Any
-    last_heartbeat_at: Any
-    spawned_at: Any
-    paused_until: Any
+    last_active_at: datetime
+    last_heartbeat_at: datetime | None
+    spawned_at: datetime
+    paused_until: datetime | None
     pending_inbound: bool
     config_overlay: dict[str, Any]
     liveness_state: LivenessState
-    last_probe_at: Any
+    last_probe_at: datetime | None
     observation: AgentObservation
 
 

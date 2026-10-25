@@ -27,7 +27,6 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Collection
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -182,6 +181,6 @@ async def passive_memory_recall(
     note = system_note_message(
         content=render_note_text(picked),
         tag=NoteTag.MEMORY,
-        created_at=datetime.now(UTC),
+        created_at=context.require_clock().now(),
     )
     return PassiveRecall(note=note, paths={item.path for item in picked})

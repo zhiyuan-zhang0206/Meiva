@@ -30,7 +30,6 @@ this hook from destroying the compaction it rides along with.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
@@ -120,7 +119,7 @@ class _NewlyInstalledSkillsHook(Hook):
                 system_note_message(
                     content=new_skills_note_text(drift.added),
                     tag=NoteTag.NEW_SKILLS,
-                    created_at=datetime.now(UTC),
+                    created_at=runtime.context.require_clock().now(),
                 )
             ],
             "capabilities": CapabilitiesState(indexed=drift.identifiers),

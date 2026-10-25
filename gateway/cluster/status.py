@@ -19,7 +19,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
 import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -57,7 +57,6 @@ from gateway.cluster.roster.snapshots import read_all, readroster_rows
 from gateway.cluster.schemas import (
     ClusterPanel,
     PluginStat,
-    PluginStatStatus,
     ServiceItem,
     ServicesStatus,
     StatsDashboard,
@@ -165,21 +164,19 @@ def _compute_stats_dashboard(
     )
 
 
+# meiva:note
+# The runtime values behind plugin-declared statistics cards, for the response.
+# Not windowed: a plugin value is a point in time (`PluginStat`), and the console
+# joins these rows against `contributions.ui.stats` declarations by `(plugin, id)`.
+# meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
 def _plugin_stat_rows(pool: ConnectionPool[Any]) -> list[PluginStat]:
-    """The runtime values behind plugin-declared statistics cards, for the response.
-
-    Not windowed: a plugin value is a point in time (`PluginStat`), and the
-    console joins these rows against the `contributions.ui.stats`
-    declarations by `(plugin, id)` — a declared card with no row here renders
-    as an explicit empty state.
-    """
     return [
         PluginStat(
             plugin=row.plugin,
             id=row.id,
             value=row.value,
             detail=row.detail,
-            status=cast(PluginStatStatus, row.status),
+            status=row.status,  # pyright: ignore[reportArgumentType]
             updated_at=row.updated_at,
             updated_by=row.updated_by,
         )

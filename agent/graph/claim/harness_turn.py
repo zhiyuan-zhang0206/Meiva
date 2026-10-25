@@ -5,7 +5,7 @@ import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
 from datetime import datetime
-from typing import Any, Literal, cast
+from typing import Any, Literal, TypeGuard
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolCall, ToolMessage
 from langchain_core.runnables import RunnableConfig
@@ -47,6 +47,7 @@ from base.events.live.projection import (
     TimelineSnapshot,
 )
 from base.events.live.publisher import AgentEventPublisher
+from base.lm.catalog import ModelCatalog
 from base.lm.content import message_content
 from base.lm.harness import (
     AssistantText,
@@ -132,10 +133,7 @@ def turn_key(messages: Sequence[BaseMessage], *, cursor: int = 0) -> str:
 
 
 def _first_str(mapping: Mapping[str, Any], *keys: str) -> str | None:
-    return next(
-        (val for k in keys if isinstance(val := mapping.get(k), str) and val),
-        None,
-    )
+    return next((val for k in keys if isinstance(val := mapping.get(k), str) and val), None)
 
 
 def _format_write_tool_use(tool_input: Mapping[str, Any]) -> str:
@@ -163,22 +161,30 @@ def format_tool_use(name: str, tool_input: Mapping[str, Any]) -> str:
     if name == "patch" and (rendered := _format_patch_tool_use(tool_input)):
         return rendered
     if name in {"Write", "write_file", "write_to_file"} and (
-        rendered := _format_write_tool_use(tool_input)
+        r := _format_write_tool_use(tool_input)
     ):
-        return rendered
+        return r
     if name in {"Edit", "edit_file", "replace_file_content"} and (
-        rendered := _format_edit_tool_use(tool_input)
+        r := _format_edit_tool_use(tool_input)
     ):
-        return rendered
+        return r
     return json.dumps(dict(tool_input), ensure_ascii=False, indent=2) if tool_input else name
 
 
-def _format_patch_change(raw_entry: Any) -> str | None:
-    if not isinstance(raw_entry, Mapping) or not (
-        path := _first_str(cast("Mapping[str, Any]", raw_entry), "path")
-    ):
+def _is_object_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
+    return isinstance(value, Mapping)
+
+
+def _is_object_sequence(value: object) -> TypeGuard[Sequence[object]]:
+    return isinstance(value, Sequence) and not isinstance(value, str | bytes)
+
+
+def _format_patch_change(raw_entry: object) -> str | None:
+    if not _is_object_mapping(raw_entry):
         return None
-    entry = cast("Mapping[str, Any]", raw_entry)
+    entry: dict[str, Any] = {str(k): v for k, v in raw_entry.items()}
+    if not (path := _first_str(entry, "path")):
+        return None
     header = f"# {kind}: {path}" if (kind := _first_str(entry, "kind")) else f"# {path}"
     diff = entry.get("diff")
     return f"{header}\n{diff.rstrip()}" if isinstance(diff, str) and diff.strip() else header
@@ -186,15 +192,13 @@ def _format_patch_change(raw_entry: Any) -> str | None:
 
 def _format_patch_tool_use(tool_input: Mapping[str, Any]) -> str:
     changes = tool_input.get("changes")
-    if isinstance(changes, list) and changes:
-        blocks = [
-            r for raw in cast("list[Any]", changes) if (r := _format_patch_change(raw)) is not None
-        ]
+    if _is_object_sequence(changes) and changes:
+        blocks = [r for raw in changes if (r := _format_patch_change(raw)) is not None]
         if blocks:
             return "\n\n".join(blocks)
-    paths = cast("list[Any]", p) if isinstance(p := tool_input.get("paths"), list) else []
-    if paths and all(isinstance(x, str) for x in paths):
-        return "\n".join(cast("list[str]", paths))
+    raw_paths = tool_input.get("paths")
+    if _is_object_sequence(raw_paths) and raw_paths and all(isinstance(x, str) for x in raw_paths):
+        return "\n".join(x for x in raw_paths if isinstance(x, str))
     return ""
 
 
@@ -481,11 +485,13 @@ class HarnessTurnProjector:
             self._publisher.emit(LLMDone(agent_id=self._agent_id).model_dump_json())
             partial = list(self._messages)
         if pre_messages or partial:
-            halt["messages"] = [
-                *pre_messages,
-                *partial,
-                *cast("list[BaseMessage]", halt.get("messages", [])),
-            ]
+            raw_halt = halt.get("messages")
+            halt_msgs = (
+                [m for m in raw_halt if isinstance(m, BaseMessage)]
+                if _is_object_sequence(raw_halt)
+                else []
+            )
+            halt["messages"] = [*pre_messages, *partial, *halt_msgs]
         if partial:
             halt["harness_cursor"] = effective_len + len(partial)
         return halt
@@ -522,8 +528,8 @@ async def _run_pre_turn_hooks(
         if not result:
             continue
         for key, value in result.items():
-            if key == "messages":
-                pre_messages.extend(cast("Sequence[BaseMessage]", value))
+            if key == "messages" and _is_object_sequence(value):
+                pre_messages.extend(m for m in value if isinstance(m, BaseMessage))
             elif key != "goto":
                 hook_updates[key] = value
     return pre_messages, hook_updates
@@ -737,7 +743,7 @@ async def interrupt_engine(agent_id: int, bridge: TurnEngine) -> None:
 # tokens is not logged at all: an all-zero row would read as a free call rather than
 # as a provider that said nothing.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
-def _resolve_pricing_model(raw_model: str, catalog: Any) -> str:
+def _resolve_pricing_model(raw_model: str, catalog: ModelCatalog) -> str:
     candidate = raw_model.removesuffix("[1m]")
     for suffix in ("", "-high", "-medium", "-low", "-minimal"):
         if candidate.endswith(suffix) and (s := candidate.removesuffix(suffix)) in catalog.prices:
@@ -746,14 +752,11 @@ def _resolve_pricing_model(raw_model: str, catalog: Any) -> str:
 
 
 def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: HarnessTurn) -> None:
-    if turn.replayed:
-        return
     usage = turn.usage
-    if usage.input_tokens == 0 and usage.output_tokens == 0:
+    if turn.replayed or (usage.input_tokens == 0 and usage.output_tokens == 0):
         return
-    raw_model = model or ctx.require_agent().brain.llm_model
     catalog = ctx.require_catalog()
-    pricing_model = _resolve_pricing_model(raw_model, catalog)
+    pricing_model = _resolve_pricing_model(model or ctx.require_agent().brain.llm_model, catalog)
     entries = (
         [(step, 1) for step in turn.steps if step.input_tokens > 0 or step.output_tokens > 0]
         if turn.steps

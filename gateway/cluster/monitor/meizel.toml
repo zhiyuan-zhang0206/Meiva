@@ -10,7 +10,3 @@ exports = ["alert_classes.py", "ops_monitor.py", "ops_series.py", "stats_events.
 
 [debt.any-collaborator]
 "ops_series.py#any _Window.fill.default" = 1
-
-[debt.type-cast]
-"alert_classes.py#cast read_alert_classes" = 2
-"ops_series.py#cast _execute" = 1

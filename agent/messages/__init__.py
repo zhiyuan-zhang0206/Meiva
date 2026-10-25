@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
 from langchain_core.messages import (
     HumanMessage,
@@ -113,9 +113,12 @@ def inbound_message(
         kwargs["meiva_image_urls"] = image_urls
     # langchain types content as str | list[str | dict]; our block list is a
     # subset it accepts at runtime (a leading text block + native image blocks).
+    normalized_content: str | list[str | dict[str, Any]] = (
+        content if isinstance(content, str) else [dict(item) for item in content]
+    )
     return HumanMessage(
         id=message_id,
-        content=cast("str | list[str | dict[str, Any]]", content),
+        content=normalized_content,
         additional_kwargs=_stamp_created_at(_stamp_picked_up(kwargs), created_at),
     )
 
@@ -187,9 +190,11 @@ def attach_message(
     line (the timeline reads that pairing structurally via
     ``base/agents/history/timeline._attach_image_captions``).
     """
-    content_blocks = blocks or [{"type": "text", "text": text}]
+    content_blocks: list[str | dict[str, Any]] = (
+        [dict(block) for block in blocks] if blocks else [{"type": "text", "text": text}]
+    )
     return HumanMessage(
-        content=cast("str | list[str | dict[str, Any]]", content_blocks),
+        content=content_blocks,
         additional_kwargs=_stamp_created_at(
             _stamp_picked_up({"meiva_msg_type": MeivaMsgType.ATTACH.value}), created_at
         ),

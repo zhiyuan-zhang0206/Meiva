@@ -8,9 +8,21 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from langchain_core.messages import AIMessage, ToolCall
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return _is_object_dict(value) and all(isinstance(k, str) for k in value)
 
 
 def code_from_args(args: object, *, source: str) -> str:
@@ -18,9 +30,9 @@ def code_from_args(args: object, *, source: str) -> str:
     dict or `code` is present but not a string; returns "" only when `code` is
     absent. The single strict extractor the exec path and the llm-node
     log line share, so both fail loud on a malformed tool call the same way."""
-    if not isinstance(args, dict):
+    if not _is_str_dict(args):
         raise TypeError(f"{source}.args must be dict, got {type(args).__name__}")
-    code = cast(dict[str, Any], args).get("code")
+    code = args.get("code")
     if code is None:
         return ""
     if not isinstance(code, str):
@@ -44,11 +56,9 @@ def _call_from_content(block: dict[str, Any]) -> ToolCall:
     args = block.get("input")
     if not args and block.get("partial_json"):
         args = json.loads(block["partial_json"])
-    if not isinstance(args, dict):
+    if not _is_str_dict(args):
         raise TypeError(f"content tool_use {block['id']!r}.input must be dict")
-    return ToolCall(
-        name=block["name"], args=cast(dict[str, Any], args), id=block["id"], type="tool_call"
-    )
+    return ToolCall(name=block["name"], args=args, id=block["id"], type="tool_call")
 
 
 def normalize_tool_calls(message: AIMessage) -> AIMessage | None:
@@ -60,12 +70,11 @@ def normalize_tool_calls(message: AIMessage) -> AIMessage | None:
     native = {call["id"]: call for call in message.tool_calls}
     calls: list[ToolCall] = []
     seen: set[str | None] = set()
-    content: Any = message.content
-    if isinstance(content, list):
-        for block in cast(list[Any], content):
-            if not isinstance(block, dict) or cast(dict[str, Any], block).get("type") != "tool_use":
+    content: object = message.content
+    if _is_object_list(content):
+        for block in content:
+            if not _is_str_dict(block) or block.get("type") != "tool_use":
                 continue
-            block = cast(dict[str, Any], block)
             call_id = block["id"]
             if call_id in seen:
                 raise ValueError(f"Duplicate tool_call id: {call_id!r}")
@@ -88,15 +97,15 @@ def replace_execute_code(message: AIMessage, tool_call_id: str | None, code: str
     call = calls[index]
     calls[index] = {**call, "args": {**call["args"], "code": code}}
     content: Any = message.content
-    if isinstance(content, list):
+    if _is_object_list(content):
         blocks: list[Any] = []
-        for block in cast(list[Any], content):
+        for block in content:
             if (
-                isinstance(block, dict)
-                and cast(dict[str, Any], block).get("type") == "tool_use"
+                _is_str_dict(block)
+                and block.get("type") == "tool_use"
                 and block["id"] == tool_call_id
             ):
-                updated = {**cast(dict[str, Any], block), "input": calls[index]["args"]}
+                updated = {**block, "input": calls[index]["args"]}
                 if "partial_json" in updated:
                     updated["partial_json"] = json.dumps(calls[index]["args"], ensure_ascii=False)
                 blocks.append(updated)

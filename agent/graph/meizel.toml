@@ -19,17 +19,3 @@ exports = ["claim", "exec", "hooks", "interrupt", "llm", "llm_errors.py", "node_
 
 [debt.ambient-read]
 "_attach_drain.py#clock datetime.datetime.now" = 1
-
-[debt.any-collaborator]
-"__init__.py#any __getattr__.return" = 1
-
-[debt.type-cast]
-"_attach_merge.py#cast _validated_attachment" = 1
-"_build.py#cast build_graph" = 1
-"_callbacks.py#cast RedisStreamHandler._process_content" = 1
-"_callbacks.py#cast RedisStreamHandler._publish_code_increment" = 1
-"_init_context.py#cast _cluster_facts" = 1
-"tool_calls.py#cast _call_from_content" = 1
-"tool_calls.py#cast code_from_args" = 1
-"tool_calls.py#cast normalize_tool_calls" = 3
-"tool_calls.py#cast replace_execute_code" = 3

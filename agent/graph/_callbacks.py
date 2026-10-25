@@ -44,7 +44,7 @@ Redis. `process_chunk` / `finish` are therefore synchronous.
 """
 
 import json
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from langchain_core.messages import AIMessageChunk
 from langchain_core.messages.tool import ToolCallChunk
@@ -63,6 +63,10 @@ from base.events.live.projection import (
 )
 from base.events.live.publisher import AgentEventPublisher
 from base.lm.reasoning import to_canonical_reasoning
+
+
+def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 class RedisStreamHandler:
@@ -326,15 +330,15 @@ class RedisStreamHandler:
                 self._publish_chat_delta(0, content)
             return
         for block in content:
-            if not isinstance(block, dict):
+            if not _is_str_object_dict(block):
                 continue
-            d = cast(dict[str, Any], block)
-            block_idx = d.get("index", 0) or 0
-            btype = d.get("type")
+            raw_idx = block.get("index", 0)
+            block_idx = raw_idx if isinstance(raw_idx, int) and not isinstance(raw_idx, bool) else 0
+            btype = block.get("type")
             if btype == "text":
                 self._content_block_indices.add(block_idx)
-                text = d.get("text") or ""
-                if text:
+                text = block.get("text")
+                if isinstance(text, str) and text:
                     self._publish_chat_delta(block_idx, text)
             elif btype == "thinking":
                 # signature_delta also produces type=thinking but only carries
@@ -344,8 +348,8 @@ class RedisStreamHandler:
                 # content-block offset (it shares its thinking block's index, so
                 # the set dedupes).
                 self._content_block_indices.add(block_idx)
-                thinking = d.get("thinking") or ""
-                if thinking:
+                thinking = block.get("thinking")
+                if isinstance(thinking, str) and thinking:
                     self._publish_reasoning_delta(block_idx, thinking, now)
 
     def _publish_chat_delta(self, block_idx: int, frag: str) -> None:
@@ -426,12 +430,12 @@ class RedisStreamHandler:
         if not buf:
             return
         try:
-            partial = parse_partial_json(buf)
+            partial: object = parse_partial_json(buf)
         except json.JSONDecodeError:
             return
-        if not isinstance(partial, dict):
+        if not _is_str_object_dict(partial):
             return
-        code_so_far = cast(dict[str, Any], partial).get("code")
+        code_so_far = partial.get("code")
         if not isinstance(code_so_far, str):
             return
         published = self._code_published.get(block_idx, 0)
