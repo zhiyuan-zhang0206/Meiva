@@ -41,6 +41,13 @@ class AppServerTransport(Protocol):
     @property
     def pid(self) -> int | None: ...
 
+    # meiva:note
+    # The CLI child's exit status in three states: None while it runs or when no child
+    # was started, 0 normal, non-zero abnormal. The session records it on close, after
+    # the process has been reaped (task #5616).
+    @property
+    def returncode(self) -> int | None: ...
+
     def on_notification(self, handler: NotificationHandler | None) -> None: ...
 
     def on_request(self, handler: RequestHandler | None) -> None: ...
@@ -110,6 +117,14 @@ class StdioAppServer:
     @property
     def pid(self) -> int | None:
         return self._process.pid if self._process is not None else None
+
+    # meiva:note
+    # The exit status of the CLI child, same three states as everywhere else: None
+    # while it runs or when no child was ever started, 0 normal, non-zero abnormal.
+    # The session records it on close, after this process has been reaped.
+    @property
+    def returncode(self) -> int | None:
+        return None if self._process is None else self._process.returncode
 
     @property
     def closed(self) -> bool:

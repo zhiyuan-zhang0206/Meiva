@@ -29,6 +29,7 @@ from base.lm.harness.codex.transport import (
     as_object,
     as_text,
 )
+from base.lm.harness.codex.types import SessionTotals, TurnOutcome
 from base.lm.harness.events import (
     AssistantText,
     BridgeEvent,
@@ -44,6 +45,7 @@ from base.lm.harness.events import (
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import (
     ChildProbe,
+    ExitStatus,
     ProcessObservation,
     PsutilChildProbe,
     describe,
@@ -82,43 +84,6 @@ class InboundQueueFullError(RuntimeError):
 
 class SessionClosedError(RuntimeError):
     pass
-
-
-@dataclass(frozen=True, slots=True)
-class SessionTotals:
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cache_creation_input_tokens: int = 0
-    cache_read_input_tokens: int = 0
-    cost_usd: float = 0.0
-    turns: int = 0
-
-    def with_turn(self, usage: Usage, cost_usd: float | None) -> SessionTotals:
-        return SessionTotals(
-            input_tokens=self.input_tokens + usage.input_tokens,
-            output_tokens=self.output_tokens + usage.output_tokens,
-            cache_creation_input_tokens=(
-                self.cache_creation_input_tokens + usage.cache_creation_input_tokens
-            ),
-            cache_read_input_tokens=self.cache_read_input_tokens + usage.cache_read_input_tokens,
-            cost_usd=self.cost_usd + (cost_usd or 0.0),
-            turns=self.turns + 1,
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class TurnOutcome:
-    turn_id: str
-    text: str
-    subtype: str
-    is_error: bool
-    interrupted: bool
-    stop_reason: str | None
-    usage: Usage
-    cost_usd: float | None
-    permission_denials: tuple[str, ...]
-    num_turns: int = 1
-    steps: tuple[Usage, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,7 +137,7 @@ class TurnTicket:
         self._future.exception()
 
 
-class CodexSession:
+class CodexSession(ExitStatus):
     def __init__(
         self,
         config: CodexConfig,
@@ -193,6 +158,9 @@ class CodexSession:
             environ=session_env(environ, api_key_mode=config.api_key_mode),
             request_timeout=config.startup_timeout_seconds,
         )
+        # meiva:note
+        # The CLI child's exit status once this session closed it (three states: None
+        # while running/never observed, 0 normal, non-zero abnormal). Task #5616.
         self._events: asyncio.Queue[Any] = asyncio.Queue()
         self._pending: deque[TurnTicket] = deque()
         self._completed: OrderedDict[str, TurnOutcome] = OrderedDict()
@@ -258,6 +226,7 @@ class CodexSession:
             self.config.cancel_settle_seconds,
             agent_id=self.agent_id,
         )
+        self._exit_code = self._transport.returncode
         self._emit(SessionClosed(turn_id=None, reason=reason))
         self._events.put_nowait(_EVENT_STREAM_END)
 

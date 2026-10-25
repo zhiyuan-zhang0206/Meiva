@@ -18,6 +18,7 @@ const detail: Required<WireAgentRow> = {
   liveness_state: "unknown", last_probe_at: "2026-09-01T00:00:00Z",
   availability, observation: null, notices_awaiting_response: [],
   unread_notice_count: 2, heartbeat_paused_until: null,
+  harness_exit_code: null, harness_exit_at: null,
 };
 const wireCard: Required<WireAgentCard> = {
   agent_id: 9, spawner: "user", harness: "meiva", fork_source_agent_id: null, status: "running",
@@ -27,6 +28,7 @@ const wireCard: Required<WireAgentCard> = {
   availability, observation: { runtime_owner: "unknown" }, awaiting_response_count: 3,
   highest_notice_priority: "P2", unread_notice_count: 2, heartbeat_paused_until: null,
   open_impersonation_session_id: null, open_impersonation_status: null,
+  harness_exit_code: null, harness_exit_at: null,
 };
 function card(overrides: Partial<WireAgentCard>): Required<WireAgentCard> {
   return { ...wireCard, ...overrides };

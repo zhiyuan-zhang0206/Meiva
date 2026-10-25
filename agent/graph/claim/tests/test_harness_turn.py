@@ -66,6 +66,7 @@ class FakeEngine:
     ) -> None:
         self.harness = Harness.CLAUDE_CODE
         self.model = "claude-sonnet-5-5"
+        self.exit_code: int | None = None
         self.submitted: list[tuple[str, str]] = []
         self.interrupts = 0
         self.closed = False

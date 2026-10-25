@@ -149,6 +149,14 @@ class AgentRow:
     last_active_at: datetime
     last_inbound_at: datetime
     heartbeat_paused_until: datetime | None
+    # meiva:note
+    # How this agent's external harness session ended (task #5616). None means
+    # "still running, or never recorded" — including every built-in meiva agent,
+    # which has no CLI child at all; it never means "exited cleanly". 0 = the child
+    # exited normally, non-zero = it exited abnormally. `harness_exit_at` is when that
+    # status was read (the session's retirement, after the child was reaped).
+    harness_exit_code: int | None = None
+    harness_exit_at: datetime | None = None
 
     def __str__(self) -> str:
         label_part = f"{self.label} " if self.label else ""
@@ -412,6 +420,10 @@ def _row_from_dict(data: dict[str, Any]) -> AgentRow:
             datetime.fromisoformat(data["heartbeat_paused_until"])
             if data.get("heartbeat_paused_until")
             else None
+        ),
+        harness_exit_code=data.get("harness_exit_code"),
+        harness_exit_at=(
+            datetime.fromisoformat(data["harness_exit_at"]) if data.get("harness_exit_at") else None
         ),
     )
 

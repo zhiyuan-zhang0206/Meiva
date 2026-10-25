@@ -31,9 +31,14 @@ class FakeAppServer:
         pid: int | None = CODEX_PID,
         resume_fails: bool = False,
         resume_cwd: str = "workspace",
+        returncode: int | None = None,
     ) -> None:
         self.thread_id = thread_id
         self._pid = pid
+        # meiva:note
+        # The exit status the session records on close (task #5616). A fake server has
+        # no child process, so None unless a test asks for a specific one.
+        self._returncode = returncode
         self.probe: _Reapable | None = None
         self.resume_fails = resume_fails
         self.resume_cwd = resume_cwd
@@ -50,6 +55,10 @@ class FakeAppServer:
     @property
     def pid(self) -> int | None:
         return self._pid
+
+    @property
+    def returncode(self) -> int | None:
+        return self._returncode
 
     def on_notification(self, handler: NotificationHandler | None) -> None:
         self._notification_handler = handler

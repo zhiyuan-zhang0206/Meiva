@@ -45,6 +45,7 @@ from base.lm.harness.events import (
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import (
     ChildProbe,
+    ExitStatus,
     ProcessObservation,
     PsutilChildProbe,
     describe,
@@ -85,7 +86,7 @@ class SessionClosedError(RuntimeError):
     pass
 
 
-class DeepSeekSession:
+class DeepSeekSession(ExitStatus):
     def __init__(
         self,
         config: BridgeConfig,
@@ -111,6 +112,9 @@ class DeepSeekSession:
         self._completed: OrderedDict[str, TurnOutcome] = OrderedDict()
         self._active: TurnTicket | None = None
         self._connection: AcpConnection | None = None
+        # meiva:note
+        # The CLI child's exit status once this session closed it (three states:
+        # None while running/never observed, 0 normal, non-zero abnormal). Task #5616.
         self._reader: asyncio.Task[None] | None = None
         self._totals = SessionTotals()
         self._session_id: str | None = None
@@ -199,6 +203,9 @@ class DeepSeekSession:
             await connection.close(reason=reason)
         await self._close_tasks()
         self._residue = await self._sweep(reason="session closed")
+        # meiva:note
+        # `connection.close()` above waited for the child, so this is final.
+        self._exit_code = connection.returncode if connection is not None else None
         self._emit(SessionClosed(turn_id=None, reason=reason))
         self._events.put_nowait(_EVENT_STREAM_END)
 

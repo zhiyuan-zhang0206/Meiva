@@ -71,7 +71,8 @@ _FULL_COLS = (
     "AND n.created_at > now() - interval '30 days') AS unread_notice_count"
     ", a.config_overlay, mp.last_probe_at, "
     "mp.agent_host_online, a.last_admission_at, "
-    "a.last_launch_failure_reason, a.last_launch_failure_at, a.birth_config, a.last_launch_attempt_id, a.harness"
+    "a.last_launch_failure_reason, a.last_launch_failure_at, a.birth_config, a.last_launch_attempt_id, a.harness, "
+    "a.harness_exit_code, a.harness_exit_at"
 )
 _FROM = (
     "FROM agents_meta a "
@@ -176,6 +177,13 @@ class AgentSnapshot(BaseModel):
     notices_awaiting_response: list[OpenNotice]
     unread_notice_count: int
     heartbeat_paused_until: datetime | None
+    # meiva:note
+    # How the agent's external harness session ended (task #5616): None while it runs
+    # or when nothing was ever recorded — the built-in meiva loop has no CLI child and
+    # records nothing, so None there means "not applicable", never "exited cleanly";
+    # 0 = the child exited normally; non-zero = it exited abnormally.
+    harness_exit_code: int | None = None
+    harness_exit_at: datetime | None = None
 
 
 # meiva:link base/agents/observation/docs/observation.meiva.okf.md

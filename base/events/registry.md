@@ -230,6 +230,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `harness_close_residue` | closing an external harness session left processes running after the settle window | anomaly | harness, agent_id, remaining, waited_ms | — | events | — |
 | `harness_close_failed` | closing an external harness session raised | anomaly | — | — | events | — |
 | `harness_close_failures` | external harness session closes raised while the agent host was running | anomaly | — | — | events | — |
+| `harness_exit_record_failed` | a harness session closed cleanly but its child exit status could not be written; the agent row keeps what it had and NULL still means never observed | anomaly | — | — | events | — |
 | `harness_usage_log_failed` | an external harness turn finished but its usage could not be priced; the reply stands and the accounting row for that turn is missing | anomaly | — | — | events | — |
 | `harness_registration_unreadable` | a harness registration row could not be read during the sweep and is left in place | anomaly | — | — | events | — |
 | `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, cache_write_5m, cache_write_1h, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, price_write_5m, price_write_1h, unpriced, usage_kind, attribution, source | — | events | ✓ |
