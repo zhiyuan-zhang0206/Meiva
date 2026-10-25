@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from functools import partial
 from pathlib import Path
@@ -11,8 +12,9 @@ import psycopg
 import pytest
 
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
 from base.deploy.lifecycle import home_lifecycle_locks
-from base.native_process.code_version import CodeVersion
+from base.native_process.code_version import CodeVersionError
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import LockTimeoutError
 from base.native_process.root_control.instance_lock import (
@@ -95,11 +97,75 @@ def test_lifecycle_lock_prevents_a_competing_edit(
         )
 
 
+def _git(source: Path, *args: str) -> str:
+    # meiva:note
+    # Fixed Git operations only touch a test-owned repository; hooks and signing stay off.
+    result = subprocess.run(  # noqa: S603
+        [
+            "git",
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            *args,
+        ],
+        cwd=source,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
+    )
+    return result.stdout.strip()
+
+
+def _captured_image(source: Path, known: bool) -> LoadedCommit:
+    source.mkdir()
+    if known:
+        _git(source, "init", "--initial-branch=main")
+        _git(source, "commit", "--allow-empty", "-m", "loaded A")
+    image = LoadedCommit.capture(source_root=source)
+    assert (image.sha is not None) is known
+    if not known:
+        _git(source, "init", "--initial-branch=main")
+    _git(source, "commit", "--allow-empty", "-m", "later B")
+    assert image.sha != _git(source, "rev-parse", "HEAD")
+    return image
+
+
+def _assert_image_gate(gate: ProcessDbGate, image: LoadedCommit) -> None:
+    if image.sha is None:
+        with pytest.raises(CodeVersionError, match="loaded commit"):
+            gate.application_name()
+        return
+    git_dir = image.source_root / ".git"
+    parked = image.source_root.parent / "installed-git-parked"
+    git_dir.rename(parked)
+    try:
+        with pytest.raises(CodeVersionError, match="failed"):
+            gate.application_name()
+    finally:
+        parked.rename(git_dir)
+    assert gate.application_name().endswith(":v1")
+    assert gate.min_read_due()
+    git_dir.rename(parked)
+    try:
+        assert gate.application_name().endswith(":v1")
+        gate.observe_minimum(1)
+        assert not gate.min_read_due()
+    finally:
+        parked.rename(git_dir)
+
+
+@pytest.mark.parametrize("known", [True, False], ids=["captured", "unknown"])
 def test_copied_adapter_binds_the_installed_source_image(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, known: bool
 ) -> None:
     source = tmp_path / "installed-source"
-    image = LoadedCommit(source_root=source, sha="installed-code")
+    image = _captured_image(source, known)
     captures: list[Path] = []
     borrowed_gates: list[object] = []
     db = MagicMock(spec=Database)
@@ -116,13 +182,8 @@ def test_copied_adapter_binds_the_installed_source_image(
         assert home == tmp_path
         assert installed_source == source
 
-    def version(owner: CodeVersion) -> int:
-        assert owner.loaded is image
-        return 37
-
     monkeypatch.setattr(repair, "load_installed_runtime", installed)
     monkeypatch.setattr(LoadedCommit, "capture", capture)
-    monkeypatch.setattr(CodeVersion, "get", version)
     monkeypatch.setattr(Database, "from_settings", from_settings)
 
     def replace_script(*_args: object) -> str:
@@ -141,14 +202,9 @@ def test_copied_adapter_binds_the_installed_source_image(
     )
     assert captures == [source]
     assert len(borrowed_gates) == 1
-    from base.db.code_version_gate import ProcessDbGate
-
     gate = borrowed_gates[0]
     assert isinstance(gate, ProcessDbGate)
-    assert gate.application_name().endswith(":v37")
-    assert gate.min_read_due()
-    gate.observe_minimum(37)
-    assert not gate.min_read_due()
+    _assert_image_gate(gate, image)
 
 
 def test_wrong_home_source_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
