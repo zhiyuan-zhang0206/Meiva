@@ -551,7 +551,7 @@ def load_checkpoint_messages_by_trace(
 
 
 async def attach_trace_to_checkpoint(
-    pool: AsyncConnectionPool[Any],
+    pool: AsyncConnectionPool[Any] | None,
     thread_id: str,
     checkpoint_id: str,
     trace_id: str,
@@ -563,6 +563,8 @@ async def attach_trace_to_checkpoint(
     at the end of the turn whose OTel trace this trace_id belongs to.
     Failure-tolerant: a missed stamp only loses one turn's content link.
     """
+    if pool is None:
+        return
     try:
         async with async_write_transaction(pool) as conn, conn.cursor() as cur:
             await cur.execute(
