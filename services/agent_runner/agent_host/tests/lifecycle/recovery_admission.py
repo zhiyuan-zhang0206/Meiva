@@ -11,7 +11,7 @@ from agent.ownership.hosted import admit_hosted_runtime
 from base.agents.birth.spawn import create_agent_row
 from base.agents.context import MeivaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -26,7 +26,7 @@ async def admit(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> RuntimeIncarnation:
     agent, _, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),

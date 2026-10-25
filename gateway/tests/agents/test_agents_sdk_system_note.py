@@ -6,7 +6,7 @@ import psycopg
 import pytest
 
 import meiva
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -25,7 +25,7 @@ class TestSendSystemNote:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """send_system_note posts a kind='system_note' inbound (agent source +
         task note tag) — never a peer chat row."""
@@ -64,7 +64,7 @@ class TestSendSystemNote:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         pin_agent(
             spawn_agent(
@@ -104,7 +104,7 @@ class TestSendSystemNote:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """A note with resurrect=True (task assignment) reaches a terminated
         agent — auto-resurrect is the gateway delivery detail, the SDK just
@@ -136,7 +136,7 @@ class TestSendSystemNote:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """Same trailing-comma class as send_message — a one-element tuple
         unwraps to the note text instead of 422ing the gateway."""
@@ -166,7 +166,7 @@ class TestSendSystemNote:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """A multi-element tuple is a coding mistake — TypeError, never joined."""
         pin_agent(
@@ -188,7 +188,7 @@ class TestSendSystemNote:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         pin_agent(
             spawn_agent(

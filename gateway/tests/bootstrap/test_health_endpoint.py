@@ -4,7 +4,7 @@ from typing import Never
 
 from psycopg_pool import PoolTimeout
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.paths import meiva_home
 from gateway.cluster.process_boot import LOADED_IMAGE
@@ -22,7 +22,9 @@ def test_health_payload_names_the_service_that_answered() -> None:
     assert _health()["name"] == "gateway"
 
 
-def test_health_payload_carries_the_full_identity_set(*, machine_identity: MachineIdentity) -> None:
+def test_health_payload_carries_the_full_identity_set(
+    *, machine_identity: MachineIdentityReader
+) -> None:
     payload = _health()
     assert isinstance(payload.pop("started_at"), float)
     assert payload.pop("sha") == LOADED_IMAGE.sha
@@ -50,7 +52,7 @@ def test_health_process_birth_is_stable_between_requests() -> None:
 
 
 def test_health_control_pool_timeout_returns_degraded_with_identity(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     class _TimedOutPool:
         def connection(self) -> Never:

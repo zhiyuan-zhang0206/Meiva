@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 import base.packages.plugins.enable_config as pc
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.system.tests.fake_commands import fake_host
 from services.supervision.roster import composition, service_spec, spec
@@ -252,7 +252,7 @@ def test_failed_gate_never_produces_a_start_or_status_roster(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict],
     diagnostic: bool,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     def broken_gate() -> str | None:
         raise RuntimeError("broken gate")

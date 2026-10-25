@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.system.tests.fake_commands import fake_host
 from services.supervision.roster import spec
 
 
 def test_plugin_gate_flows_through_annotation(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentityReader
 ) -> None:
     from base.packages.plugins.config_registration import disk_image_path
     from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig

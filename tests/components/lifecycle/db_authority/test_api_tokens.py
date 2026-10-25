@@ -25,10 +25,11 @@ from starlette.requests import Request
 from base.cluster.machine import (
     GatewayAccess,
     GatewayApiTokenMissing,
-    MachineIdentity,
+    MachineIdentityReader,
     MachineRole,
     gateway_auth_headers,
 )
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import settings
 from base.daemon.http_transport import start_daemon_http
 from base.host.db_authority import api, delivery, ledger, model, unit
@@ -134,7 +135,7 @@ def test_cluster_credential_names_the_verifying_credential(gateway: Path) -> Non
 
 
 def test_gateway_api_admits_the_active_generation_and_the_human_secret(
-    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentity
+    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentityReader
 ) -> None:
     before = _tokens(gateway).api
     with anonymous_gateway_client(machine=machine_identity) as client:
@@ -152,7 +153,7 @@ def test_a_blank_human_secret_admits_only_the_active_generation(
     gateway_data_plane: None,
     gateway: Path,
     monkeypatch: pytest.MonkeyPatch,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
     tokens = _tokens(gateway).api
@@ -163,7 +164,7 @@ def test_a_blank_human_secret_admits_only_the_active_generation(
 
 
 def test_bootstrap_serves_a_runner_token_but_never_the_human_secret(
-    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentity
+    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentityReader
 ) -> None:
     runner = _tokens(gateway).api.runner
     with anonymous_gateway_client(machine=machine_identity) as client:
@@ -181,7 +182,7 @@ def _login(client: TestClient, password: str) -> int:
 
 
 def test_login_admits_the_active_runner_token_for_the_managed_browser(
-    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentity
+    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentityReader
 ) -> None:
     tokens = _tokens(gateway).api
     with anonymous_gateway_client(machine=machine_identity) as client:
@@ -193,7 +194,7 @@ def test_login_admits_the_active_runner_token_for_the_managed_browser(
 
 
 def test_only_the_human_secret_issues_a_login_ticket(
-    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentity
+    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentityReader
 ) -> None:
     """A write generation's tokens, and a managed-browser session one of them
     minted, cannot issue a browser login ticket: the ticket would open a session
@@ -225,7 +226,7 @@ def test_a_human_minted_session_dies_with_the_rotated_secret(
     gateway_data_plane: None,
     gateway: Path,
     monkeypatch: pytest.MonkeyPatch,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """A browser logged in with the human secret stays authenticated while the secret
     holds, but not past a rotation of the secret itself: the restarted gateway admits
@@ -239,7 +240,7 @@ def test_a_human_minted_session_dies_with_the_rotated_secret(
 
 
 def test_a_session_cookie_names_its_credential_only_through_a_keyed_mac(
-    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentity
+    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentityReader
 ) -> None:
     """The cookie travels to the browser, so the mint in it must not let its
     holder brute-force the human secret offline: it is an HMAC under the
@@ -264,7 +265,7 @@ def test_a_session_cookie_names_its_credential_only_through_a_keyed_mac(
 
 
 def test_a_session_records_which_credential_minted_it(
-    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentity
+    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentityReader
 ) -> None:
     """Inbound provenance tells a machine-minted browser session from a human one."""
     runner = _tokens(gateway).api.runner
@@ -285,7 +286,7 @@ def test_a_session_records_which_credential_minted_it(
 
 
 def test_the_sessions_list_shows_only_sessions_that_authenticate(
-    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentity
+    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentityReader
 ) -> None:
     """`/api/auth/sessions` lists what the session check would still admit: an id
     without a mint (the pre-mint format) never appears."""
@@ -311,7 +312,7 @@ def test_a_machine_token_cannot_choose_the_human_secret(
     gateway_data_plane: None,
     gateway: Path,
     monkeypatch: pytest.MonkeyPatch,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """A runner token authenticates the administrator, but it must not turn a
     generation-bound admission into a human bearer of its choosing."""
@@ -410,7 +411,7 @@ def test_gateway_home_ops_fails_closed_while_no_generation_is_active(gateway: Pa
     [("localhost", "127.0.0.1"), ("10.0.0.5", "0.0.0.0")],  # noqa: S104
 )
 def test_ops_bind_follows_the_declared_reachable_address(
-    reachable: str, bind: str, machine_identity: MachineIdentity
+    reachable: str, bind: str, machine_identity: ConfiguredMachineIdentity
 ) -> None:
     """The bearer is required either way; only a declared reachable address
     (`MEIVA_MACHINE_HOST`) opens /ops beyond loopback, as it always has for a
@@ -622,7 +623,7 @@ def test_changed_ledger_refusal_is_not_hidden_by_warm_acceptance(gateway: Path) 
 
 
 def test_gateway_lifespans_own_independent_machine_acceptance_caches(
-    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentity
+    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentityReader
 ) -> None:
     with anonymous_gateway_client(machine=machine_identity) as first_client:
         first: api.AcceptanceCache = first_client.app.state.machine_token_acceptance

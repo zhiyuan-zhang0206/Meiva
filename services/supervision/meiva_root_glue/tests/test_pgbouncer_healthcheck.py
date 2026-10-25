@@ -15,7 +15,7 @@ import pytest
 from base import cluster
 from base.cluster import ClusterPorts
 from base.cluster.dataplane import pooler as base_pooler
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.cluster.record import ClusterRecord
 from base.host.db_authority import delivery
@@ -32,7 +32,7 @@ def test_pooler_protocol_requires_both_authenticated_listeners(
     public: bool,
     expected: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.cluster import ownership
     from services.supervision.meiva_root_glue import diagnostic_probes
@@ -59,7 +59,7 @@ def test_pooler_protocol_requires_both_authenticated_listeners(
         assert (port, password) == (6432, admin.password)
         return loopback
 
-    def _fake_public_listener_reachable(*_a: object, machine: MachineIdentity) -> bool:
+    def _fake_public_listener_reachable(*_a: object, machine: MachineIdentityReader) -> bool:
         assert machine is machine_identity
         return public
 
@@ -71,7 +71,7 @@ def test_pooler_protocol_requires_both_authenticated_listeners(
 
 
 def test_unknown_pooler_record_is_unavailable(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentityReader
 ) -> None:
     def _fake_get_record(_home: Path) -> ClusterRecord | None:
         return None

@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 import meiva.skills as skills_mod
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.plugins import (
     cmd_plugins_disable,
@@ -132,7 +132,7 @@ def _install(
     ref: str | None,
     path: str | None,
     *,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     accept_risk: bool = False,
 ) -> int:
     return cmd_plugins_install(
@@ -156,7 +156,7 @@ def test_install_skill_records_and_surfaces(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_skill_repo(tmp_path, "demo")
     assert _install(url, None, None, machine=command_machine) == 0
@@ -175,7 +175,7 @@ def test_install_disabled_skill_hidden_from_scanner(
     unit_home: Path,
     tmp_path: Path,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_skill_repo(tmp_path, "demo")
     _install(url, None, None, machine=command_machine)
@@ -190,7 +190,7 @@ def test_install_rejects_duplicate(
     unit_home: Path,
     tmp_path: Path,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_skill_repo(tmp_path, "demo")
     assert _install(url, None, None, machine=command_machine) == 0
@@ -202,7 +202,7 @@ def test_install_rejects_unrecognized(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_plugin_repo(tmp_path)
     assert _install(url, None, None, machine=command_machine) == 1
@@ -215,7 +215,7 @@ def test_install_bare_mcp_package_signposts_mcp_install(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     """A standalone MCP package (bare .mcp.json) points the user at `meiva mcp install`."""
     repo = tmp_path / "mcp-src"
@@ -239,7 +239,7 @@ def test_uninstall_removes_dir_and_entry(
     unit_home: Path,
     tmp_path: Path,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_skill_repo(tmp_path, "demo")
     _install(url, None, None, machine=command_machine)
@@ -258,7 +258,7 @@ def test_installed_lists_entries(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     assert cmd_plugins_installed() == 0
     assert "(none)" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -272,7 +272,7 @@ def test_upgrade_refetches(
     unit_home: Path,
     tmp_path: Path,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_skill_repo(tmp_path, "demo", description="v1")
     _install(url, None, None, machine=command_machine)
@@ -291,7 +291,7 @@ def test_install_claude_code_plugin_from_subdir_surfaces_skill(
     unit_home: Path,
     tmp_path: Path,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path)
     assert _install(url, None, "plugins/pr-toolkit", machine=command_machine) == 0
@@ -316,7 +316,7 @@ def test_install_claude_code_plugin_without_anything_refused(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path, agents=False, mcp=False, skills=False)
     assert _install(url, None, "plugins/pr-toolkit", machine=command_machine) == 1
@@ -329,7 +329,7 @@ def test_install_claude_code_plugin_skills_only_surfaces(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     # superpowers shape: a Claude Code plugin shipping skills/ but no agents/ or .mcp.json
     url = _make_claude_code_plugin_repo(tmp_path, agents=False, mcp=False, skills=True)
@@ -354,7 +354,7 @@ def test_upgrade_claude_code_plugin_skills_only(
     unit_home: Path,
     tmp_path: Path,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path, agents=False, mcp=False, skills=True)
     _install(url, None, "plugins/pr-toolkit", machine=command_machine)
@@ -377,7 +377,7 @@ def test_install_claude_code_plugin_reports_contributions(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path, agents=True, mcp=True)
     assert _install(url, None, "plugins/pr-toolkit", machine=command_machine) == 0
@@ -395,7 +395,7 @@ def test_install_claude_code_plugin_with_bundled_mcp(
     unit_home: Path,
     tmp_path: Path,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     from meiva.mcps.config import load_mcp_config
 
@@ -413,7 +413,7 @@ def test_install_claude_code_plugin_mcp_only(
     unit_home: Path,
     tmp_path: Path,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     from meiva.mcps.config import load_mcp_config
 
@@ -434,7 +434,7 @@ def test_install_claude_code_plugin_commands_surface(
     unit_home: Path,
     tmp_path: Path,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     from base.packages.composer_commands import CommandCatalog
     from meiva import skills
@@ -458,7 +458,7 @@ def test_uninstall_claude_code_plugin_removes_plugin_dir(
     unit_home: Path,
     tmp_path: Path,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path)
     _install(url, None, "plugins/pr-toolkit", machine=command_machine)
@@ -471,7 +471,7 @@ def test_upgrade_claude_code_plugin_rematerializes(
     unit_home: Path,
     tmp_path: Path,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path)
     _install(url, None, "plugins/pr-toolkit", machine=command_machine)
@@ -502,7 +502,7 @@ def test_install_failure_mid_materialize_leaves_nothing(
     unit_home: Path,
     tmp_path: Path,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     """A failure while the plugin tree is being written must not leave a
     half-installed plugin behind: neither the final dir nor the staging dir
@@ -523,7 +523,7 @@ def test_upgrade_failure_keeps_previous_version(
     unit_home: Path,
     tmp_path: Path,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     """An upgrade whose new materialization fails must leave the previous
     complete version in place — never a missing or half-installed plugin —
@@ -576,7 +576,7 @@ def test_install_refuses_dot_prefixed_plugin_name(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     """A manifest name starting with '.' is reserved for atomic-install
     staging/backup dirs — installing under it would be silently invisible to
@@ -604,7 +604,7 @@ def test_install_sweeps_stale_backup_residue(
     unit_home: Path,
     tmp_path: Path,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     """QA N4: install sweeps .name.backup-* / .name.staging left by an
     earlier hard-killed upgrade — filtering hides residue, this removes it."""
@@ -627,7 +627,7 @@ def test_uninstall_sweeps_stale_backup_residue(
     unit_home: Path,
     tmp_path: Path,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     """QA N4: uninstall removes dot-prefixed residue for the plugin too."""
     url = _make_claude_code_plugin_repo(tmp_path)

@@ -12,7 +12,7 @@ from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -100,7 +100,7 @@ async def test_new_install_accepts_atomically_and_worker_sends_frozen_target_but
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     state_dir: Path,
 ) -> None:
     core, adapter = make_core(pool, state_dir)
@@ -140,7 +140,7 @@ async def test_two_connections_reverse_commit_do_not_skip_late_lower_id(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     state_dir: Path,
 ) -> None:
     core, adapter = make_core(pool, state_dir)
@@ -182,7 +182,7 @@ async def test_first_initialization_retains_existing_history_only(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     state_dir: Path,
 ) -> None:
     with pool.connection() as conn:
@@ -242,7 +242,7 @@ async def test_filtered_decision_commits_without_owner_and_does_not_later_replay
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     state_dir: Path,
 ) -> None:
     core, adapter = make_core(pool, state_dir)
@@ -278,7 +278,7 @@ async def test_no_owner_holds_without_fake_receipt_then_accepts_when_available(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     state_dir: Path,
 ) -> None:
     core, adapter = make_core(pool, state_dir)
@@ -313,7 +313,7 @@ async def test_acceptance_rollback_then_lost_response_converge_without_inline_se
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     core, adapter = make_core(pool, state_dir)
     core.notice_bridge.poll_store.initialize_notice_poll()
@@ -359,7 +359,7 @@ async def test_concurrent_normal_acceptances_freeze_first_target_without_duplica
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     state_dir: Path,
 ) -> None:
     core, adapter = make_core(pool, state_dir)
@@ -408,7 +408,7 @@ async def test_historical_fyi_is_filtered_while_a_question_reaches_the_chat(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     state_dir: Path,
 ) -> None:
     core, adapter = make_core(pool, state_dir)
@@ -447,7 +447,7 @@ async def test_a_switched_off_category_does_not_reclassify_an_fyi(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     state_dir: Path,
 ) -> None:
     core, adapter = make_core(pool, state_dir)
@@ -486,7 +486,7 @@ async def test_a_switched_off_needs_input_category_silences_decisions(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     state_dir: Path,
 ) -> None:
     core, adapter = make_core(pool, state_dir)

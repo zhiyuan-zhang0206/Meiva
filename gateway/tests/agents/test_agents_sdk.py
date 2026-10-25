@@ -16,7 +16,7 @@ import pytest
 
 import meiva
 from base.api_contracts.agent_contract import ShellSessionKillTiming
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -48,7 +48,7 @@ class TestSpawn:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         pin_agent(
             spawn_agent(
@@ -74,7 +74,7 @@ class TestSpawn:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """meiva.agents.spawn() without prompt — only starts lifecycle, no inbound posted."""
         pin_agent(
@@ -96,7 +96,7 @@ class TestSpawn:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """spawn(prompt=...) together INSERT chat inbound (source='agent:{meiva.self.AGENT_ID}')."""
         pin_agent(
@@ -118,7 +118,7 @@ class TestSpawn:
         db_conn: psycopg.Connection,
         self_agent: int,
         *,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """When machine omitted, SDK defaults to local machine (meiva.self.MACHINE_SPEC), gateway receives explicit target, no longer falls back to gateway's own machine."""
         child_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
@@ -185,7 +185,7 @@ class TestSpawnFork:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """meiva.agents.spawn(fork_from=N) internally resolves latest checkpoint
         (done by gateway, SDK unaware of ckpt id)."""
@@ -224,7 +224,7 @@ class TestSpawnFork:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """fork_from source has no checkpoint → ForkSourceEmpty.
 
@@ -251,7 +251,7 @@ class TestSpawnFork:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """meiva.agents.spawn(prompt=..., fork_from=source) first posts fork identity inbound
         (kind='fork', source=f"agent:{source}"), then prompt's chat inbound —
@@ -292,7 +292,7 @@ class TestTerminate:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         pin_agent(
             spawn_agent(
@@ -322,7 +322,7 @@ class TestTerminate:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """On a live peer the graceful terminate records the kill for its exit."""
         pin_agent(
@@ -348,7 +348,7 @@ class TestTerminate:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """`open_tasks` rides the SDK result: the agent's open tasks (newest
         first), truncated to five rows plus `more`; done/cancelled excluded."""

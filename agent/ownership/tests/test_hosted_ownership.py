@@ -13,7 +13,7 @@ from agent.ownership.hosted import (
     stamp_turn_fatal,
 )
 from agent.ownership.tests.ownership_support import BusTap
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -351,7 +351,7 @@ async def test_replacement_admission_submits_the_interrupted_lease_notice_once(
     aops_pool: AsyncConnectionPool,
     database: Database,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     # meiva:note
     # A restart is what ends the takeover, so the replacement host owes the notice:

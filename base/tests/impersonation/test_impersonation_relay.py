@@ -12,7 +12,7 @@ from base.agents.impersonation import wake
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.inbox.insert import insert_inbound_message
 from base.api_contracts.caller_identity import CallerIdentity
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -34,7 +34,7 @@ def test_request_requires_a_relay_binding(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=machine_identity.name())
@@ -110,7 +110,7 @@ def test_claude_request_mints_a_scoped_relay_credential(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     owner = create_native_owner(db_conn, local_machine=machine_identity.name())
     lease = request_controller(
@@ -147,7 +147,7 @@ def test_request_validates_and_records_the_batch_window(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=machine_identity.name())
@@ -208,7 +208,7 @@ def test_codex_request_defers_relay_credential_to_activation(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     owner = create_native_owner(db_conn, local_machine=machine_identity.name())
     lease = request_controller(
@@ -232,7 +232,7 @@ def test_accept_without_relay_binding_fails_loudly(
     database: Database,
     event_bus: EventBus,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     # A legacy-shape lease (created before the relay binding existed) has all
     # relay fields NULL; accepting it must fail loudly, never guess an endpoint.
@@ -265,7 +265,7 @@ def test_provision_relay_only_for_the_accepting_incarnation(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=machine_identity.name())
@@ -309,7 +309,7 @@ def test_provision_relay_mints_one_credential_and_refuses_a_second(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -350,7 +350,7 @@ def test_relay_inbox_uses_the_scoped_credential_only(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=machine_identity.name())
@@ -391,7 +391,7 @@ def test_relay_heartbeat_beats_while_open_and_stops_at_terminal(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=machine_identity.name())
@@ -447,7 +447,7 @@ def test_fail_acceptance_rolls_back_with_reason_and_native_note(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=machine_identity.name())
@@ -486,7 +486,7 @@ def test_fail_acceptance_requires_an_accepted_lease(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=machine_identity.name())
@@ -519,7 +519,7 @@ def test_record_relay_failure_is_rate_limited(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     owner = create_native_owner(db_conn, local_machine=machine_identity.name())
     lease = accept_controller(
@@ -539,7 +539,7 @@ def test_abort_lease_stops_the_takeover_and_keeps_the_request_reason(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     owner = create_native_owner(db_conn, local_machine=machine_identity.name())
     lease = accept_controller(
@@ -573,7 +573,7 @@ def test_abort_lease_leaves_the_automatic_end_note_to_the_resume_chain(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """An automatic takeover's end note belongs to the resume chain
     (deliver_handoff), never to the abort transaction itself (task #3998)."""
@@ -625,7 +625,7 @@ def test_relay_liveness_alert_logs_only_for_stale_active_leases(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     loguru_records: LogRecords,
 ) -> None:
     owner = create_native_owner(db_conn, local_machine=machine_identity.name())

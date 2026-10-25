@@ -7,7 +7,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
@@ -34,7 +34,7 @@ def _page(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     name: str,
 ) -> int:
     agent_id = spawn_agent(
@@ -59,7 +59,7 @@ def test_an_absent_session_service_defers_the_page_instead_of_closing_it(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id = _page(
         db_conn,
@@ -103,7 +103,7 @@ def test_one_pass_attempts_each_deferred_page_once(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agents = [
         _page(
@@ -143,7 +143,7 @@ def test_a_refused_creation_still_closes_the_page(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     redis_url: str,
 ) -> None:
     agent_id = _page(

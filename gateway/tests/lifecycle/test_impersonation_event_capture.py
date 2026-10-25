@@ -39,7 +39,7 @@ from base.agents.tests.capture_inputs import lease as lease
 from base.agents.tests.capture_inputs import owner as owner
 from base.cluster.authority.event_grants import grant_event_log_runner_access
 from base.cluster.authority.tests.runner_logins import grant_runner_login
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.config.tests.config_authority import config_authority as config_authority
@@ -78,7 +78,7 @@ def test_central_events_belong_to_the_asserted_actor_not_the_recipient(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     recipient = create_capture_owner(db_conn, local_machine=local_machine)
@@ -111,7 +111,7 @@ def test_a_label_the_agent_sets_while_borrowed_lands_in_its_lease_log(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from gateway.tests.auth.gateway_config import gateway_test_client
 
@@ -140,7 +140,7 @@ def test_a_service_owned_central_event_is_recorded_in_both_logs_and_emitted(
     database: Database,
     emitted_events: EmittedEvents,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     recipient = create_capture_owner(db_conn, local_machine=machine_identity.name())
     event = _send_event(owner.agent_id, recipient.agent_id)
@@ -162,7 +162,7 @@ def test_a_central_event_that_cannot_be_recorded_is_never_emitted(
     database: Database,
     emitted_events: EmittedEvents,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     recipient = create_capture_owner(db_conn, local_machine=machine_identity.name())
     with (
@@ -181,7 +181,7 @@ def test_protocol_less_history_keeps_unknown_event_coverage(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     legacy = legacy_session(db_conn, owner, local_machine=local_machine)
@@ -278,7 +278,7 @@ def test_a_direct_audit_event_after_close_refuses_and_fails_the_source(
     event_bus: EventBus,
     database_gate: ProcessDbGate,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     participant = open_capture(lease, owner.agent_id, "closed-direct", database_gate=database_gate)
@@ -313,7 +313,7 @@ def test_a_transient_failure_stays_sticky_until_the_failed_source_persists(
     database: Database,
     database_gate: ProcessDbGate,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """A failed writer cannot turn a lost event into a seal."""
     local_machine = machine_identity.name()
@@ -411,7 +411,7 @@ def test_a_runner_failure_is_recorded_once_the_narrow_lock_is_available(
     restricted_source: LocalParticipant,
     database: Database,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     participant = restricted_source
@@ -442,7 +442,7 @@ def test_a_runner_completes_a_log_whose_source_seals_after_the_lease_ended(
     database: Database,
     event_bus: EventBus,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     participant = restricted_source

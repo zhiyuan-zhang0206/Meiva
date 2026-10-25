@@ -9,7 +9,7 @@ import pytest
 
 import meiva
 from base import telemetry
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.paths import meiva_home
@@ -21,7 +21,7 @@ pytestmark = [
 
 @pytest.fixture
 def event_pipeline(
-    database: Database, machine_identity: MachineIdentity
+    database: Database, machine_identity: MachineIdentityReader
 ) -> Iterator[telemetry.EventPipeline]:
     """Own the process writer used by the operation and its mirror barrier."""
     pipeline = telemetry.build_pipeline(

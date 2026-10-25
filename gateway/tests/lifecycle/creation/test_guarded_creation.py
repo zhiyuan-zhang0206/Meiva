@@ -9,7 +9,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.agents.creation import scoped_creation_key
 from gateway.http.auth.request_principal import AuthPrincipal, principal_key
@@ -36,7 +36,9 @@ def runner(
 
 
 @pytest.fixture
-def client(runner: RunnerOps, *, machine_identity: MachineIdentity) -> Generator[GatewayTestClient]:
+def client(
+    runner: RunnerOps, *, machine_identity: MachineIdentityReader
+) -> Generator[GatewayTestClient]:
     with gateway_test_client(
         cluster_secret=SECRET,
         headers={"Authorization": f"Bearer {SECRET}"},

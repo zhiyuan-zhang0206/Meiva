@@ -19,7 +19,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.tests.configuration import snapshot_process_config
 from base.host.system.tests.fake_commands import fake_host
@@ -40,7 +40,7 @@ def _running(*names: str) -> set[asyncio.Task[Any]]:
 
 
 async def test_overlapping_lifespans_join_their_original_flushers(
-    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentityReader
 ) -> None:
     del db_conn
     with gateway_test_process(machine=machine_identity) as process:
@@ -65,7 +65,7 @@ async def test_overlapping_lifespans_join_their_original_flushers(
 
 
 async def test_process_ownership_borrowed_vs_owned_controls_client_close_count(
-    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentityReader
 ) -> None:
     del db_conn
     with gateway_test_process(machine=machine_identity) as borrowed_process:
@@ -92,7 +92,7 @@ async def test_process_ownership_borrowed_vs_owned_controls_client_close_count(
 # A home that is not an absolute path cannot hold the unit's `.env`: start-up fails after
 # the owned process built its event writer, and that writer is closed on the way out.
 async def test_owned_process_startup_failure_closes_its_clients_and_raises_the_failure(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     process = GatewayProcess(
         home=Path("relative-home"),
@@ -108,7 +108,7 @@ async def test_owned_process_startup_failure_closes_its_clients_and_raises_the_f
     assert process.clients.exports_deferred() is None
 
 
-def test_invalid_process_ownership_rejected(*, machine_identity: MachineIdentity) -> None:
+def test_invalid_process_ownership_rejected(*, machine_identity: MachineIdentityReader) -> None:
     boot = snapshot_process_config()
     process = GatewayProcess(
         home=meiva_home(),
@@ -131,7 +131,7 @@ def test_invalid_process_ownership_rejected(*, machine_identity: MachineIdentity
 # Each background task finishes while both pools are still open, and every resource the
 # lifespan acquired is closed once the cancelled lifespan has unwound.
 async def test_cancelled_lifespan_stops_its_tasks_before_the_pools_close(
-    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentityReader
 ) -> None:
     del db_conn
     with gateway_test_process(machine=machine_identity) as process:
@@ -170,7 +170,7 @@ async def test_cancelled_lifespan_stops_its_tasks_before_the_pools_close(
 
 
 async def test_background_tasks_finish_before_the_pools_close_on_a_normal_exit(
-    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentityReader
 ) -> None:
     del db_conn
     with gateway_test_process(machine=machine_identity) as process:
@@ -190,7 +190,7 @@ async def test_background_tasks_finish_before_the_pools_close_on_a_normal_exit(
 # inspection cache was registered: the memory-search gate is built from a limit no semaphore
 # accepts. The error is the one the caller sees, and every resource acquired before it is closed.
 async def test_a_start_up_failure_after_the_pools_opened_closes_everything_acquired(
-    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentityReader
 ) -> None:
     del db_conn
     with gateway_test_process(
@@ -215,7 +215,7 @@ async def test_a_start_up_failure_after_the_pools_opened_closes_everything_acqui
 # background task running: the tasks end first, while both pools are still open, then the pools
 # and clients close, and the failure is the error the caller sees.
 async def test_a_failure_while_serving_ends_the_tasks_before_closing_the_pools(
-    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentityReader
 ) -> None:
     del db_conn
     failure = RuntimeError("serving failed")
@@ -247,7 +247,7 @@ async def test_a_failure_while_serving_ends_the_tasks_before_closing_the_pools(
 # borrows a connection, signals, runs for a while, then borrows another one; that second borrow
 # fails if the pool closed while the query was away.
 async def test_an_inspection_query_in_flight_finishes_before_the_data_pool_closes(
-    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentityReader
 ) -> None:
     del db_conn
     running = threading.Event()

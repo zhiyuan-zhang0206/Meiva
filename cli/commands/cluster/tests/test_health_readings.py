@@ -16,7 +16,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from base.cluster.machine import GatewayApiBaseMissing, MachineIdentity, roles_from_flags
+from base.cluster.machine import GatewayApiBaseMissing
 from base.db import Database
 from base.host.net.tests.local_http import closed_port_url
 from base.paths import root_manifests_path
@@ -255,17 +255,15 @@ def test_a_corrupt_manifest_is_an_unreadable_record_not_a_crash(tmp_path: Path) 
 def test_services_of_a_host_whose_role_is_unresolved_cannot_be_certified(
     probe_command: CommandRuntime,
 ) -> None:
-    unresolved = MachineIdentity(
-        name=lambda: "unit-test-machine",
-        role=lambda: roles_from_flags(
-            serve_gateway=False, serve_agent_runner=False, serve_observability_station=False
-        ),
-        host=lambda: "localhost",
-        description=lambda: None,
-    )
-    command = dataclasses.replace(probe_command, machine=unresolved)
+    probe_command.config.set_field("machine_serve_gateway", False)
+    probe_command.config.set_field("machine_serve_agent_runner", False)
+    probe_command.config.set_field("machine_serve_observability_station", False)
+    probe_command.machine.reset()
+    probe_command.machine.set(name="unit-test-machine", host="localhost", description=None)
 
-    assert read_service_failures(command, Launched(frozenset())) == ("service roster unavailable",)
+    assert read_service_failures(probe_command, Launched(frozenset())) == (
+        "service roster unavailable",
+    )
 
 
 def test_services_of_a_unit_no_start_has_launched_cannot_be_certified(

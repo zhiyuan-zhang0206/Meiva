@@ -10,7 +10,7 @@ from redis.client import PubSub
 
 from base.agents.birth.spawn import create_agent_row
 from base.cluster import inbound_channel
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -28,7 +28,7 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
     db_conn: psycopg.Connection,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id, birth_config, inbound_id, attempt = create_agent_row(
         database,

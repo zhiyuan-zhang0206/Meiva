@@ -25,7 +25,7 @@ from base.agents.context import MeivaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -79,7 +79,7 @@ class FailingReads:
 
 @pytest.fixture
 def event_pipeline(
-    database: Database, machine_identity: MachineIdentity, unit_home: Path
+    database: Database, machine_identity: MachineIdentityReader, unit_home: Path
 ) -> Iterator[telemetry.EventPipeline]:
     """Own the process writer used by the host operation and mirror barrier."""
     pipeline = telemetry.build_pipeline(

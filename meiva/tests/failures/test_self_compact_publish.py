@@ -10,7 +10,7 @@ from base.agents.context.clients import ClientSet
 from base.agents.lifecycle import SystemHalt
 from base.agents.tests.units import spawn_agent
 from base.cluster import inbound_channel
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -37,7 +37,7 @@ def test_compact_survives_publish_failure(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id = spawn_agent(
         catalog=model_catalog,
@@ -74,7 +74,7 @@ def test_compact_records_its_audit_fact_with_the_summary_inbound(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id = spawn_agent(
         catalog=model_catalog,
@@ -107,7 +107,7 @@ def test_compact_whose_audit_fact_cannot_be_recorded_commits_no_summary(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id = spawn_agent(
         catalog=model_catalog,

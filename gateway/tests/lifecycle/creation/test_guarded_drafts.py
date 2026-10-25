@@ -8,7 +8,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.http.auth.request_principal import AuthPrincipal, principal_key
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
@@ -198,7 +198,7 @@ def test_deliberate_retry_rotates_pointer_but_draft_replays_original_attempt(
     runner: RunnerOps,
     db_conn: psycopg.Connection,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.agents.birth.creation_identity import find_creation
     from ops.lifecycle.launch import validate_launch_row

@@ -18,7 +18,7 @@ from psycopg_pool import ConnectionPool
 import base.db
 from base.agents.tests.units import spawn_agent
 from base.clock import SYSTEM_TIMERS
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
@@ -121,7 +121,7 @@ def test_only_open_show_pages_of_this_host_are_selected(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent = spawn_agent(
         spawner="user",
@@ -152,7 +152,7 @@ async def test_a_dead_show_page_is_closed_and_its_owner_told_once(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent = spawn_agent(
         spawner="user",
@@ -181,7 +181,7 @@ async def test_a_live_show_page_and_a_dead_serve_page_are_left_alone(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """A live show() server is kept; a serve() page is the daemon's own to relaunch,
     so a dead one is neither probed nor closed here."""
@@ -211,7 +211,7 @@ async def test_the_loop_scans_at_once_then_paces(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent = spawn_agent(
         spawner="user",
@@ -250,7 +250,7 @@ def _healthz(port: int) -> dict[str, Any]:
 
 
 async def _serve(
-    database: Database, config: ConfigBoot, runtime: Path, machine: MachineIdentity
+    database: Database, config: ConfigBoot, runtime: Path, machine: MachineIdentityReader
 ) -> None:
     await daemon.run(
         process_config=config,
@@ -272,7 +272,7 @@ async def _loops_reported(port: int) -> list[str]:
 async def test_each_loop_gets_its_own_progress_tracker(
     database: Database,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     process_config: ConfigBoot,
     tmp_path: Path,
 ) -> None:
@@ -296,7 +296,7 @@ async def test_a_crashing_reconcile_loop_cancels_its_sibling_and_ends_the_servic
     database: Database,
     db_conn: psycopg.Connection,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     process_config: ConfigBoot,
     tmp_path: Path,
 ) -> None:
@@ -323,7 +323,7 @@ async def test_a_crashing_dead_page_loop_cancels_its_sibling_and_ends_the_servic
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     process_config: ConfigBoot,
     redis_url: str,
     tmp_path: Path,

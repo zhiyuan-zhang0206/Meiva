@@ -4,7 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -28,7 +28,7 @@ def events_maintenance_config(
 
 
 def events_maintenance_db(
-    process_config: ConfigBoot, *, local_machine: MachineIdentity
+    process_config: ConfigBoot, *, local_machine: MachineIdentityReader
 ) -> Database:
     version = CodeVersion(LoadedCommit.capture())
     gate = ProcessDbGate(version=version.get, process="events_maintenance_test")

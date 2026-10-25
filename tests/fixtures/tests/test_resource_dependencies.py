@@ -46,8 +46,8 @@ def drained_tail(provisioned_db):
 def tail_pipeline(database, process_config):
     from pathlib import Path
     from base import telemetry
-    from base.cluster.machine.boot import machine_from_boot
-    machine = machine_from_boot(process_config)
+    from base.cluster.machine.configured import ConfiguredMachineIdentity
+    machine = ConfiguredMachineIdentity(process_config)
     pipeline = telemetry.build_pipeline(
         database=lambda: database, machine=machine, home=Path(os.environ["MEIVA_HOME"])
     )

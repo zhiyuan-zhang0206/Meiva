@@ -22,7 +22,7 @@ from base.agents.impersonation.status import ImpersonationStatus
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.inbox.insert import insert_inbound_message
 from base.api_contracts.caller_identity import CallerIdentity
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
@@ -52,7 +52,7 @@ type LeaseAt = Callable[[ImpersonationStatus], ActiveSession]
 # A new native agent on this machine, idle and owning its runtime: the kind of agent a
 # takeover may be requested for.
 def new_agent(
-    db_conn: psycopg.Connection, machine: MachineIdentity
+    db_conn: psycopg.Connection, machine: MachineIdentityReader
 ) -> tuple[int, RuntimeIncarnation]:
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
@@ -79,7 +79,7 @@ def _seed(
     database: Database,
     event_bus: EventBus,
     authority: ConfigAuthority,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
 ) -> ActiveSession:
     (unit_home / ".env").write_text(
         f"MEIVA_IMPERSONATION_ACK_WINDOW_SECONDS={window}\n"
@@ -142,7 +142,7 @@ def active(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> ActiveSession:
     """An active lease whose ACK window and delivery budget are the test's (180 s, 2 by default)."""
     window, attempts = getattr(request, "param", (180, 2))
@@ -161,7 +161,7 @@ def active(
 
 @pytest.fixture
 def idle_agent(
-    db_conn: psycopg.Connection, event_bus: EventBus, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, event_bus: EventBus, *, machine_identity: MachineIdentityReader
 ) -> tuple[int, RuntimeIncarnation]:
     """A new idle native agent on this machine, with no lease; the cluster's Redis is running."""
     del event_bus
@@ -176,7 +176,7 @@ def lease_at(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> LeaseAt:
     """Seed a lease for a new agent at the requested, accepted or active stage."""
 

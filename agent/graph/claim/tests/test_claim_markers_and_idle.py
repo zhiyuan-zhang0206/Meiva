@@ -5,7 +5,7 @@ from agent.graph.claim.tests.claim_support import make_runtime, thread_config
 from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.state import AgentState
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -53,7 +53,7 @@ async def test_claim_node_idle_enter_publishes_full_window_snapshot(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     from langchain_core.messages import SystemMessage
 

@@ -8,7 +8,7 @@ import pytest
 from base.agents.context.identity import ExternalLease
 from base.api_contracts.agent_contract import GatewayUnavailable
 from base.api_contracts.idempotency import keyed_headers
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.agents.task_assignment import router as assignments
@@ -65,7 +65,7 @@ def test_real_sdk_response_loss_keeps_exact_body_path_key_and_pair(
 
 
 def test_unavailable_atomic_route_refuses_without_separate_spawn(
-    body: dict[str, Any], *, machine_identity: MachineIdentity
+    body: dict[str, Any], *, machine_identity: MachineIdentityReader
 ) -> None:
     with gateway_test_client(
         cluster_secret=SECRET,

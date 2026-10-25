@@ -9,7 +9,8 @@ import pytest
 
 from agent import process_boot
 from base.agents.context.clients import ClientSet
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineFacts, MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
 from base.db import Database
@@ -49,7 +50,7 @@ async def test_host_release_runs_and_first_original_failure_remains_primary(
     model_catalog: ModelCatalog,
     native_failure: bool,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(name="test-box")
     writer_error = TypeError("original event writer failed")
@@ -178,7 +179,7 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
         pass
 
     def initialize_process_scope(
-        *, machine: MachineIdentity, home: Path, trace: TraceConfig
+        *, machine: MachineIdentityReader, home: Path, trace: TraceConfig
     ) -> None:
         assert home == unit_home
 
@@ -199,11 +200,11 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
     monkeypatch.setattr(daemon, "remove_pidfile", remove_pidfile)
     monkeypatch.setattr(process_boot, "init_process_scope", initialize_process_scope)
     monkeypatch.setattr(process_boot, "land_cluster_extensions", no_op)
-    machine = MachineIdentity(
-        name=lambda: "test-box",
-        role=lambda: frozenset({"agent-runner"}),
-        host=lambda: "localhost",
-        description=lambda: "test host",
+    machine = MachineFacts.of(
+        name="test-box",
+        role=frozenset({"agent-runner"}),
+        host="localhost",
+        description="test host",
     )
     config = ConfigBoot()
     config.read_process_environment()

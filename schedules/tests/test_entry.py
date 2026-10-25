@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 import meiva
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
@@ -93,7 +93,7 @@ def test_database_sessions_name_the_image_loaded_not_the_checkout_now(
 
 def test_runner_inputs_are_borrowed_without_rebuilding_or_closing(
     database: Database,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     emitted_events: EmittedEvents,
 ) -> None:
     pipeline = emitted_events.producer()

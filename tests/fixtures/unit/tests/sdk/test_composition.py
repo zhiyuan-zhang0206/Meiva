@@ -4,7 +4,7 @@ import pytest
 
 import meiva
 from base.agents.context import MeivaContext
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from meiva.tests.fixtures.pin_agent import pin_agent
 
@@ -13,7 +13,7 @@ def test_sdk_context_uses_the_prepared_owner_with_a_bare_home(
     unit_home: Path,
     process_config: ConfigBoot,
     sdk_environment: MeivaContext,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     assert list(unit_home.iterdir()) == []
     assert meiva.context is sdk_environment

@@ -20,7 +20,7 @@ import pytest
 from base.cluster import ownership, port_preflight
 from base.cluster import postgres as pg
 from base.cluster.dataplane.pg_admin import pg_admin_url
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.native_process.ownership import OwnedProcess
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
@@ -34,7 +34,10 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
 def _start(
-    cluster: NativeCluster, machine: MachineIdentity, *, tuning: StartTuning = PRODUCTION_TUNING
+    cluster: NativeCluster,
+    machine: MachineIdentityReader,
+    *,
+    tuning: StartTuning = PRODUCTION_TUNING,
 ) -> int:
     return instance.start_pg(
         cluster.plane,
@@ -56,7 +59,7 @@ def _assert_pg_birth(cluster: NativeCluster) -> tuple[OwnedProcess, bytes]:
 
 
 def _assert_warm_repeat(
-    cluster: NativeCluster, machine: MachineIdentity, first: OwnedProcess, persisted: bytes
+    cluster: NativeCluster, machine: MachineIdentityReader, first: OwnedProcess, persisted: bytes
 ) -> None:
     assert _start(cluster, machine) == 0
     repeated = ownership.postgres(cluster.pg_data)
@@ -65,7 +68,7 @@ def _assert_warm_repeat(
 
 
 def test_a_foreign_listener_on_the_postgres_port_refuses_before_hba_or_initdb(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     with socket.socket() as held:
         held.bind(("127.0.0.1", native_cluster.pg_port))
@@ -82,7 +85,7 @@ def test_a_foreign_listener_on_the_postgres_port_refuses_before_hba_or_initdb(
 # The ordinary producer supplies all custody; no test-only receipt adoption.
 def test_real_owned_postgres_resume_and_fast_stop(
     native_cluster: NativeCluster,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     home, port = native_cluster.home, native_cluster.pg_port
@@ -136,7 +139,7 @@ def test_real_owned_postgres_resume_and_fast_stop(
 
 
 def test_a_pgdata_symlink_cannot_adopt_another_homes_receipt(
-    native_cluster: NativeCluster, command_machine: MachineIdentity, tmp_path: Path
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader, tmp_path: Path
 ) -> None:
     foreign = tmp_path / "foreign" / "pg"
     foreign.mkdir(parents=True)
@@ -153,7 +156,7 @@ def test_a_pgdata_symlink_cannot_adopt_another_homes_receipt(
 
 
 def test_a_stopped_postmaster_cannot_pass_warm_readiness(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     assert _start(native_cluster, command_machine) == 0
     owner, before = _assert_pg_birth(native_cluster)
@@ -178,7 +181,7 @@ def test_a_stopped_postmaster_cannot_pass_warm_readiness(
 # The first start is cut off after the postmaster was launched and captured but before the server
 # answered. A later start admits that very process rather than launching another.
 def test_a_start_that_gave_up_before_the_server_answered_completes_the_same_postmaster(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     with pytest.raises(RuntimeError, match="did not become ready"):
         _start(

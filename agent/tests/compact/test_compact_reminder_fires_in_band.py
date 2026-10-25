@@ -36,7 +36,7 @@ from agent.tests.test_compact import meiva_compact_loaded as meiva_compact_loade
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
@@ -228,7 +228,7 @@ async def test_compact_summary_preserves_agent_continuity(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     tid = spawn_agent(
         catalog=model_catalog,
@@ -266,7 +266,7 @@ async def test_compact_summary_replaces_whole_history_no_tail(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     tid = spawn_agent(
         catalog=model_catalog,
@@ -303,7 +303,7 @@ async def test_compact_summary_emits_compact_done(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     tid = spawn_agent(
         catalog=model_catalog,
@@ -363,7 +363,7 @@ async def test_consecutive_compacts_both_processed(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     tid = spawn_agent(
         catalog=model_catalog,
@@ -407,7 +407,7 @@ async def test_compact_with_empty_state_injects_system_message_and_summary(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     tid = spawn_agent(
         catalog=model_catalog,
@@ -436,7 +436,7 @@ async def test_compact_with_super_long_summary_in_claim(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     tid = spawn_agent(
         catalog=model_catalog,

@@ -9,7 +9,7 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents import impersonation as leases
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -58,7 +58,7 @@ def active_lease(
 
 @pytest.fixture
 def event_pipeline(
-    database: Database, machine_identity: MachineIdentity, unit_home: Path
+    database: Database, machine_identity: MachineIdentityReader, unit_home: Path
 ) -> Iterator[telemetry.EventPipeline]:
     """Own the process writer used by the service operation and mirror barrier."""
     pipeline = telemetry.build_pipeline(
@@ -104,7 +104,7 @@ def test_active_clock_does_not_depend_on_native_turns(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     lease = active_lease(
         db_conn,
@@ -127,7 +127,7 @@ def test_activation_starts_the_clock(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     lease = active_lease(
         db_conn,
@@ -152,7 +152,7 @@ def test_pause_then_normal_cadence(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     lease = active_lease(
         db_conn,
@@ -197,7 +197,7 @@ def test_external_work_is_not_a_failed_native_turn(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     lease = active_lease(
         db_conn,
@@ -228,7 +228,7 @@ def test_expired_active_lease_does_not_receive_checkin(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     lease = active_lease(
         db_conn,
@@ -253,7 +253,7 @@ def test_sdk_attachment_can_pause_heartbeat(
     model_installation: Installation,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     import meiva
     from base.agents.context.external_attachment import plugin_state_codec
@@ -294,7 +294,7 @@ def test_heartbeat_history_survives_ack_including_activation_backlog(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     owner = create_native_owner(db_conn, local_machine=machine_identity.name())
     send_heartbeat_checkin(pool, database, event_bus, owner.agent_id, 7)
@@ -362,7 +362,7 @@ def test_the_handoff_recheck_selects_only_the_crash_marked_row_that_owes_a_recei
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     def _idle(*, status: str = "idling") -> int:
         agent_id = make_idle(
@@ -416,7 +416,7 @@ def test_the_handoff_recheck_ends_with_the_grace_and_respects_a_pause(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     def _owed(*, marker_s_ago: float) -> int:
         agent_id = make_idle(

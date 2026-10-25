@@ -7,13 +7,13 @@ from pathlib import Path
 import psycopg
 
 from base import db, paths
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.db.code_version_gate import ProcessDbGate
 from base.packages.extensions import adopt as adopt
 from base.packages.extensions import install_registry
 from base.packages.extensions import registry as reg
 
-_AsMachine = Callable[[Path], AbstractContextManager[MachineIdentity]]
+_AsMachine = Callable[[Path], AbstractContextManager[MachineIdentityReader]]
 
 _SKILL_MD = """---
 name: {name}

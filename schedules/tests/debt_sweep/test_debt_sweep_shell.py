@@ -22,7 +22,7 @@ import psycopg
 import pytest
 
 from base.agents.context import MeivaContext
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from base.host.proc import run_bounded
@@ -176,7 +176,7 @@ def test_a_failed_sweep_wakes_the_p0_lead_and_the_claim_stays(
     sdk_environment: MeivaContext,
     db_conn: psycopg.Connection,
     database: Database,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     emitted_events: EmittedEvents,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -217,7 +217,7 @@ def test_a_failed_sweep_wakes_the_p0_lead_and_the_claim_stays(
 def test_a_p0_lead_that_cannot_be_reached_is_an_error_not_a_silent_failure(
     sdk_environment: MeivaContext,
     database: Database,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     emitted_events: EmittedEvents,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

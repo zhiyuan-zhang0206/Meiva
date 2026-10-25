@@ -30,7 +30,7 @@ from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
@@ -102,7 +102,7 @@ async def test_flagged_chat_note_rides_right_behind_its_message(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """The note names where the flagged inbound came from and what matched, and
     carries no message body; nothing is left in process state."""
@@ -134,7 +134,7 @@ async def test_flagged_system_note_inbound_note_rides_behind_it(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """A peer-authored system-note inbound (a task note) is scanned like chat."""
     agent_id = spawn_agent(
@@ -170,7 +170,7 @@ async def test_each_flagged_message_in_a_batch_gets_its_own_note(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """One batch of three chats: a note behind each flagged message, none behind
     the clean one, in batch order."""
@@ -215,7 +215,7 @@ async def test_unflagged_inbound_gets_no_note(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id = spawn_agent(
         catalog=model_catalog,
@@ -242,7 +242,7 @@ async def test_compact_batch_defers_the_flagged_chat_together_with_its_note(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """A chat sharing a batch with a compaction is deferred and re-delivered in
     the fresh context: its note goes with it, and is raised once when the chat is

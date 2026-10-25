@@ -14,7 +14,7 @@ from starlette.datastructures import State
 
 from base.agents.upload_delivery import source
 from base.agents.upload_delivery.models import CopyProof, ReceiveRequest
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -104,7 +104,7 @@ def test_source_ready_lost_commit_ack_recovers(
 
 
 def _request_and_proof(
-    client: GatewayTestClient, agent: int, machine_identity: MachineIdentity
+    client: GatewayTestClient, agent: int, machine_identity: MachineIdentityReader
 ) -> tuple[ReceiveRequest, CopyProof]:
     request = request_for(
         client.app.state.db_pool,
@@ -132,7 +132,7 @@ def test_inbound_transaction_rollback_recovers(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     request, proof = _request_and_proof(client, agent, machine_identity)
@@ -153,7 +153,7 @@ def test_inbound_lost_commit_ack_recovers(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     request, proof = _request_and_proof(client, agent, machine_identity)
@@ -174,7 +174,7 @@ def test_explicit_native_request_and_proof_versions_fail_fast(
     version: object,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     request = request_for(
@@ -218,7 +218,7 @@ def test_explicit_native_request_and_proof_versions_fail_fast(
 def _receiver_op(
     client: GatewayTestClient,
     authority: ConfigAuthority,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     *,
     lose_first_response: bool = False,
 ):
@@ -254,7 +254,7 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
     tmp_path: Path,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     source_unit = receiver.current_unit(local_machine=machine_identity.name())
@@ -322,7 +322,7 @@ async def test_unknown_remote_kind_holds(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     unit = receiver.current_unit(local_machine=machine_identity.name())
@@ -348,7 +348,7 @@ def _receive_twice_after_failure(
     client: GatewayTestClient,
     db_conn: psycopg.Connection[Any],
     request: ReceiveRequest,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
 ) -> None:
     proof = receiver.receive(client.app.state.db_pool, request, local_machine=machine.name())
     assert proof == receiver.receive(
@@ -363,7 +363,7 @@ def test_receiver_ready_commit_failure_recovers_without_second_copy(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     request = request_for(
@@ -386,7 +386,7 @@ def test_receiver_ready_lost_commit_ack_recovers_without_second_copy(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     request = request_for(
@@ -404,7 +404,7 @@ def test_concurrent_receivers_and_inbound_acceptance_one_identity(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     from concurrent.futures import ThreadPoolExecutor
 
@@ -442,7 +442,7 @@ def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_rea
     monkeypatch: pytest.MonkeyPatch,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     request = request_for(
@@ -509,7 +509,7 @@ def test_single_connection_receiver_releases_pool_across_http(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     request = request_for(
@@ -570,7 +570,7 @@ async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
     monkeypatch: pytest.MonkeyPatch,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     unit = receiver.current_unit(local_machine=machine_identity.name())

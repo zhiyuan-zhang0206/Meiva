@@ -8,7 +8,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.http.model_catalog import CatalogLoadFailure
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
@@ -32,7 +32,9 @@ def runner(
 
 
 @pytest.fixture
-def client(runner: RunnerOps, *, machine_identity: MachineIdentity) -> Generator[GatewayTestClient]:
+def client(
+    runner: RunnerOps, *, machine_identity: MachineIdentityReader
+) -> Generator[GatewayTestClient]:
     with gateway_test_client(
         cluster_secret=SECRET,
         headers={"Authorization": f"Bearer {SECRET}"},

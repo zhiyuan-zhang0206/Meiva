@@ -5,7 +5,7 @@ from base.agents.birth.spawn import create_agent_row
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.inbound import InboundKind
 from base.api_contracts.agent_contract import AgentStatus
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -21,7 +21,7 @@ async def test_permanent_reject_blocks_heartbeat_but_fresh_chat_can_try_again(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent = terminated(
         db_conn,
@@ -84,7 +84,7 @@ def terminated(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> int:
     agent, *_ = create_agent_row(
         Database.from_settings(gate=database_gate),
@@ -110,7 +110,7 @@ async def test_idling_owner_blocks_background_wake_until_new_chat(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.agents.recovery.breaker import admit_pending_wake
 

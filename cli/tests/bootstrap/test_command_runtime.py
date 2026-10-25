@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.host.proc import run_bounded
 from base.paths import repo_root
 from base.sessions.helperproc import helper_for
@@ -64,7 +64,7 @@ def test_reset_reloads_only_this_invocations_identity(
 
 
 def test_narrow_machine_fixture_borrows_the_invocation_owner(
-    command_runtime: CommandRuntime, command_machine: MachineIdentity
+    command_runtime: CommandRuntime, command_machine: MachineIdentityReader
 ) -> None:
     assert command_machine is command_runtime.machine
 

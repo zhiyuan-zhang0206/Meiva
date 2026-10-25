@@ -14,7 +14,7 @@ from typing import Any, cast
 import pytest
 
 from base import telemetry
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.paths import logs_dir
 from base.telemetry import process_logging as slog
@@ -24,7 +24,7 @@ _AGENT = 8901
 
 @pytest.fixture
 def logging_pipeline(
-    database: Database, machine_identity: MachineIdentity, unit_home: Path
+    database: Database, machine_identity: MachineIdentityReader, unit_home: Path
 ) -> Iterator[None]:
     """The adapter test explicitly owns its native writer for its whole record."""
     pipeline = telemetry.build_pipeline(
@@ -70,7 +70,7 @@ def _rec(extra: dict[str, Any]) -> Any:
 
 
 def test_add_event_sink_registers_at_most_once(
-    database: Database, machine_identity: MachineIdentity, unit_home: Path
+    database: Database, machine_identity: MachineIdentityReader, unit_home: Path
 ) -> None:
     """Two `add_event_sink` calls (exec_child's env + request init paths)
     must not double-register the adapter: one loguru record lands exactly one

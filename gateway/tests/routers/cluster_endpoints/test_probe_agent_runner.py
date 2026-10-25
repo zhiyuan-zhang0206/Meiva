@@ -11,7 +11,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from gateway.cluster import status as status_router
@@ -61,7 +61,7 @@ async def test_a_missing_registered_url_is_offline_without_a_dial(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with runner_ops(db_conn, "runner-a", {"status_probe": completed(_status())}):
         row = await status_router.probe_agent_runner(
@@ -80,7 +80,7 @@ async def test_a_blackhole_stays_inside_the_single_total_budget(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     release = threading.Event()
 
@@ -110,7 +110,7 @@ async def test_an_unreachable_runner_is_offline_and_threads_the_row_through(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     stopped = datetime(2026, 5, 25, tzinfo=UTC)
     with runner_ops(db_conn, "runner-a", {"status_probe": refused(404, "gone")}) as runner:
@@ -136,7 +136,7 @@ async def test_a_reachable_runner_reports_its_own_paused_verdict_and_head_sha(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     answer = completed(_status(paused=True, head_sha="def5678"))
     with runner_ops(db_conn, "runner-a", {"status_probe": answer}) as runner:
@@ -161,7 +161,7 @@ async def test_a_malformed_response_is_online_unknown(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     # meiva:note
     # Missing the required serve_gateway / serve_agent_runner fields.

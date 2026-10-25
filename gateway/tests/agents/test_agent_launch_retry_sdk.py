@@ -6,7 +6,7 @@ import psycopg
 import pytest
 
 import meiva
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -19,7 +19,7 @@ def test_retry_launch_requires_observed_operation_identity(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id = spawn_agent(
         config_authority=config_authority,

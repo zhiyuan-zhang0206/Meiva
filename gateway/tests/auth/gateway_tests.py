@@ -10,7 +10,7 @@ from typing import cast
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.config.tests.api_keys import mock_api_keys as mock_api_keys
 from base.db import Database
@@ -48,7 +48,7 @@ def gateway_local_runner(
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
 ) -> Generator[RunnerOps]:

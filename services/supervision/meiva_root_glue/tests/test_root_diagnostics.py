@@ -13,7 +13,8 @@ import pytest
 
 from base import telemetry
 from base.agents.context.clients import ClientSet
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.daemon.health import DaemonProbe, ProbeVerdict
 from base.db import Database
@@ -349,7 +350,7 @@ class _Health(HealthMonitor):
 
 
 async def test_tick_requires_both_rounds_and_does_not_mean_healthy(
-    events: _Events, *, machine_identity: MachineIdentity
+    events: _Events, *, machine_identity: MachineIdentityReader
 ) -> None:
     health = _Health()
     diagnostics = DiagnosticMonitor([Diagnostic("failed", lambda: DaemonProbe.down("failed"))])
@@ -375,7 +376,7 @@ async def test_tick_requires_both_rounds_and_does_not_mean_healthy(
 
 
 async def test_expectation_precedes_first_sample_and_is_retired_on_stop(
-    events: _Events, *, machine_identity: MachineIdentity
+    events: _Events, *, machine_identity: MachineIdentityReader
 ) -> None:
     async with asyncio.TaskGroup() as tasks:
         health = _Health()
@@ -408,7 +409,7 @@ async def test_root_logging_owns_only_the_started_pipeline(
     tmp_path: Path,
     events: _Events,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     image = LoadedCommit(source_root=tmp_path, sha=sha)
     made: list[EventPipeline] = []
@@ -447,7 +448,7 @@ async def test_root_logging_owns_only_the_started_pipeline(
 
 
 async def test_logging_startup_error_stops_its_constructed_writer(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     made: list[EventPipeline] = []
     error = ValueError("root logging failed after constructing its writer")
@@ -480,7 +481,7 @@ async def test_logging_startup_error_stops_its_constructed_writer(
 
 
 def test_helper_diagnostics_are_macos_only(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: ConfiguredMachineIdentity
 ) -> None:
     monkeypatch.setattr(probes, "is_macos", lambda: False)
     machine_identity.set(role="agent-runner")
@@ -599,7 +600,7 @@ def test_each_root_roster_owns_its_helper_episode_reporter(
     monkeypatch: pytest.MonkeyPatch,
     events: _Events,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     monkeypatch.setattr(probes, "is_macos", lambda: True)
     machine_identity.set(role="agent-runner")

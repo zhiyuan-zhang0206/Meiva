@@ -6,7 +6,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -40,7 +40,7 @@ class TestSelectIdleAgents:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,
@@ -63,7 +63,7 @@ class TestSelectIdleAgents:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,
@@ -84,7 +84,7 @@ class TestSelectIdleAgents:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,
@@ -106,7 +106,7 @@ class TestSelectIdleAgents:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,
@@ -136,7 +136,7 @@ class TestSelectIdleAgents:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,
@@ -158,7 +158,7 @@ class TestSelectIdleAgents:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,
@@ -180,7 +180,7 @@ class TestSelectIdleAgents:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,
@@ -209,7 +209,7 @@ class TestSelectIdleAgents:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,
@@ -231,7 +231,7 @@ class TestSelectIdleAgents:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,
@@ -259,7 +259,7 @@ class TestSelectIdleAgents:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,
@@ -281,7 +281,7 @@ class TestSelectIdleAgents:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,
@@ -304,7 +304,7 @@ class TestSelectIdleAgents:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         open_window = make_idle(
             db_conn,
@@ -339,7 +339,7 @@ class TestSelectIdleAgents:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,
@@ -361,7 +361,7 @@ class TestSelectIdleAgents:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,
@@ -385,7 +385,7 @@ class TestIdleClockCountsRealActivityOnly:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,
@@ -407,7 +407,7 @@ class TestIdleClockCountsRealActivityOnly:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,
@@ -431,7 +431,7 @@ class TestIdleClockCountsRealActivityOnly:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,
@@ -465,7 +465,7 @@ class TestWakeupStormFlattening:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         span, threshold = 100.0, 300.0
         aid = make_idle(
@@ -503,7 +503,7 @@ class TestWakeupStormFlattening:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,
@@ -527,7 +527,7 @@ class TestWakeupStormFlattening:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         a_old = make_idle(
             db_conn,

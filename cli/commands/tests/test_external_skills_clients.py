@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
 from base.telemetry import EventPipeline
@@ -59,7 +59,7 @@ def _ctx(
     *,
     operator_database: Callable[[], Any],
     producer: Callable[[], EventPipeline],
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ):
     return skill_ctx(
         repo,
@@ -77,7 +77,7 @@ def _run(
     *,
     operator_database: Callable[[], Any],
     producer: Callable[[], EventPipeline],
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     bridge.converge_external_agent_skill(
         _ctx(
@@ -109,7 +109,7 @@ def test_every_present_client_receives_both_skills(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = _repo(tmp_path)
     home = _home(tmp_path)
@@ -148,7 +148,7 @@ def test_absent_homes_and_absent_programs_leave_no_directory(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = _repo(tmp_path)
     home = _home(tmp_path)
@@ -171,7 +171,7 @@ def test_installed_program_without_home_publishes_and_creates_only_that_home(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = _repo(tmp_path)
     home = _home(tmp_path)
@@ -197,7 +197,7 @@ def test_program_only_presence_creates_a_nested_home_with_its_parents(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = _repo(tmp_path)
     home = _home(tmp_path)
@@ -222,7 +222,7 @@ def test_second_converge_is_byte_and_timestamp_idempotent_for_new_clients(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = _repo(tmp_path)
     home = _home(tmp_path)
@@ -265,7 +265,7 @@ def test_unmanaged_target_in_one_client_is_preserved_and_its_other_skill_still_p
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = _repo(tmp_path)
     home = _home(tmp_path)
@@ -303,7 +303,7 @@ def test_generation_shaped_residue_in_a_new_client_is_never_adopted(
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = _repo(tmp_path)
     home = _home(tmp_path)

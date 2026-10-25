@@ -43,12 +43,12 @@ def provisioned_db(
         pytest.fail("Static tests cannot request Postgres; use the native test environment.")
     from langgraph.checkpoint.postgres import PostgresSaver
 
-    from base.cluster.machine.boot import machine_from_boot
+    from base.cluster.machine.configured import ConfiguredMachineIdentity
     from base.db.test_db_guard import assert_test_db_url
     from base.deploy.tests.containers import postgres
 
     database_version.get()
-    machine = machine_from_boot(process_config)
+    machine = ConfiguredMachineIdentity(process_config)
     with postgres(config=throwaway_config, machine_name=machine.name, watch_stalls=False) as url:
         assert_test_db_url(url, context="provisioned_db")
         process_config.set_field("db_url", url)

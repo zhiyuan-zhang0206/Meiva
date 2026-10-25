@@ -12,9 +12,10 @@ from base.agents.context import MeivaContext
 from base.cluster.machine import (
     GatewayAccess,
     GatewayApiTokenMissing,
-    MachineIdentity,
+    MachineIdentityReader,
     gateway_bearer,
 )
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
 from base.host.env.process_profile import ProcessProfile
@@ -24,7 +25,7 @@ from meiva.sdk_surface import process_context
 
 
 @pytest.fixture(autouse=True)
-def client_config(machine_identity: MachineIdentity) -> Iterator[ConfigBoot]:
+def client_config(machine_identity: MachineIdentityReader) -> Iterator[ConfigBoot]:
     """Each test builds the gateway client itself: a context with a clean `ClientSet`."""
     config = snapshot_process_config()
     context = MeivaContext(
@@ -44,7 +45,7 @@ def client_config(machine_identity: MachineIdentity) -> Iterator[ConfigBoot]:
 
 
 def test_gateway_client_base_url_is_gateway_url(
-    client_config: ConfigBoot, machine_identity: MachineIdentity
+    client_config: ConfigBoot, machine_identity: ConfiguredMachineIdentity
 ) -> None:
     machine_identity.set(role="agent-runner")
     client_config.set_field("gateway_url", "https://cp.example.com")

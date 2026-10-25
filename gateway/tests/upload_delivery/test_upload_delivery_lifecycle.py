@@ -16,7 +16,7 @@ import pytest
 from base.agents.upload_delivery import source, storage
 from base.agents.upload_delivery.models import UploadDeliveryConflictError
 from base.cluster import inbound_channel
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.events.live.bus import EventBus
 from base.telemetry.tests.capture.event_capture import capturing_events
@@ -47,7 +47,7 @@ def test_hard_death_native_temp_not_double_charged_or_cleaned(
     db_conn: psycopg.Connection[Any],
     tmp_path: Path,
     stage: str,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     # meiva:note
@@ -98,7 +98,7 @@ def test_hold_is_not_automatically_unsealed_by_late_copy_proof(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     request = request_for(
@@ -128,7 +128,7 @@ def test_unusable_native_directory_never_accepts_inbound(
     db_conn: psycopg.Connection[Any],
     directory: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     from pydantic import ValidationError
 
@@ -149,7 +149,7 @@ def test_unusable_native_directory_never_accepts_inbound(
 
 @pytest.mark.asyncio
 async def test_shutdown_drains_native_future_after_cancelled_http_wait(
-    uploaded_agent: tuple[GatewayTestClient, int], *, machine_identity: MachineIdentity
+    uploaded_agent: tuple[GatewayTestClient, int], *, machine_identity: MachineIdentityReader
 ):
     client, _agent = uploaded_agent
     recovery = recovery_for(client, machine_identity)
@@ -207,7 +207,7 @@ def _inbound_wakes(bus: EventBus, agent: int) -> Generator[Callable[[], list[str
 
 @pytest.mark.asyncio
 async def test_accepted_upload_wakes_once(
-    uploaded_agent: tuple[GatewayTestClient, int], *, machine_identity: MachineIdentity
+    uploaded_agent: tuple[GatewayTestClient, int], *, machine_identity: MachineIdentityReader
 ):
     client, agent = uploaded_agent
     batch_id = post(client, agent).json()["batch_id"]
@@ -236,7 +236,7 @@ async def test_accepted_upload_wakes_once(
 
 @pytest.mark.asyncio
 async def test_a_lost_wake_is_not_repeated(
-    uploaded_agent: tuple[GatewayTestClient, int], *, machine_identity: MachineIdentity
+    uploaded_agent: tuple[GatewayTestClient, int], *, machine_identity: MachineIdentityReader
 ):
     client, agent = uploaded_agent
     batch_id = post(client, agent).json()["batch_id"]
@@ -268,7 +268,7 @@ async def test_failed_copies_hold_after_the_attempt_budget_and_alert_once(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     unit = source.current_unit(local_machine=machine_identity.name())
@@ -311,7 +311,7 @@ async def test_a_stopped_recovery_skips_new_copy_and_db_round(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     request = request_for(
@@ -335,7 +335,7 @@ async def test_a_stopped_recovery_skips_new_copy_and_db_round(
 
 @pytest.mark.asyncio
 async def test_cancelled_shutdown_wait_still_drains_actual_native_writer(
-    uploaded_agent: tuple[GatewayTestClient, int], *, machine_identity: MachineIdentity
+    uploaded_agent: tuple[GatewayTestClient, int], *, machine_identity: MachineIdentityReader
 ):
     client, _agent = uploaded_agent
     recovery = recovery_for(client, machine_identity)
@@ -369,7 +369,7 @@ def test_actual_gateway_lifespan_recovers_one_chat_without_ops_process(
     db_conn: psycopg.Connection[Any],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     import time
 
@@ -411,7 +411,7 @@ def test_actual_gateway_lifespan_recovers_one_chat_without_ops_process(
 
 
 def test_overlapping_gateway_lifespans_stop_their_original_upload_workers(
-    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentityReader
 ) -> None:
     # Both existing HTTP fixture consumers run overlapping gateway lifespans.
     # Each lifespan must drain its own TaskGroup while sharing a borrowed process.

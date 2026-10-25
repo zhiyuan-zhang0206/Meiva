@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.deploy.git import memory_repo
 from base.deploy.git.tests.memory_checkouts import commit_note
@@ -15,20 +15,20 @@ from base.paths import gateway_memory_dir
 from base.paths.tests.homes import default_home as default_home
 
 
-def test_branch_name_gateway_tracks_main(*, machine_identity: MachineIdentity) -> None:
+def test_branch_name_gateway_tracks_main(*, machine_identity: ConfiguredMachineIdentity) -> None:
     machine_identity.set(role="gateway", name="cloud")
     assert memory_repo.branch_name(machine=machine_identity) == "main"
 
 
 def test_branch_name_agent_runner_authors_machine_branch(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: ConfiguredMachineIdentity
 ) -> None:
     machine_identity.set(role="agent-runner", name="test-host-2")
     assert memory_repo.branch_name(machine=machine_identity) == "machine-test-host-2"
 
 
 def test_branch_name_combined_unit_returns_machine_branch(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: ConfiguredMachineIdentity
 ) -> None:
     machine_identity.set(role="gateway,agent-runner", name="test-host")
     assert memory_repo.branch_name(machine=machine_identity) == "machine-test-host"
@@ -61,7 +61,7 @@ def test_pull_main_rejects_divergence(memory_checkout: tuple[Path, Path]) -> Non
 
 
 def test_gateway_memory_dir_combined_uses_subdirectory(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: ConfiguredMachineIdentity
 ) -> None:
     from base.paths import meiva_home
 
@@ -76,7 +76,7 @@ def test_gateway_memory_dir_combined_uses_subdirectory(
 
 
 def test_gateway_memory_dir_gateway_only_equals_memory_dir(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: ConfiguredMachineIdentity
 ) -> None:
     from base.paths import meiva_home, memory_dir
 

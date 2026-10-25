@@ -6,7 +6,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -24,7 +24,7 @@ async def test_successor_admission_ends_an_active_lease_without_restoring_the_pr
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from agent.ownership.hosted import admit_hosted_runtime
     from base.agents import impersonation as leases

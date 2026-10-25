@@ -8,7 +8,7 @@ from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from base.agents.birth.creation_identity import creation_request_hash, find_creation
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.http.auth.request_principal import AuthPrincipal, principal_key
 from gateway.tests.auth.gateway_config import GatewayTestClient
@@ -119,7 +119,7 @@ def test_original_key_cannot_dispatch_deliberate_replacement_attempt(
     runner: RunnerOps,
     db_conn: psycopg.Connection,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from ops.lifecycle.launch import validate_launch_row
 

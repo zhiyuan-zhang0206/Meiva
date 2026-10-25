@@ -29,7 +29,7 @@ from base.agents.context.clients import ClientSet
 from base.agents.context.external_attachment.plugin_state_codec import encode_plugin_delta
 from base.agents.impersonation import history
 from base.agents.inbox.insert import insert_inbound_message
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -52,7 +52,7 @@ async def test_takeover_inbox_release_and_resume(
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     scope = hosted_resources
     config_authority.env_path.write_text(
@@ -182,7 +182,7 @@ async def test_a_lost_database_receipt_does_not_apply_the_plugin_delta_twice(
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
@@ -266,7 +266,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
@@ -374,7 +374,7 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     graph, saver, ctx, config, _reset, owner, requested, calls = await prepare_graph(
         db_conn,
@@ -435,7 +435,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     graph, saver, ctx, config, reset, owner, requested, calls = await prepare_graph(
         db_conn,
@@ -537,7 +537,7 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     graph, saver, ctx, config, reset, owner, requested, _calls = await prepare_graph(
         db_conn,

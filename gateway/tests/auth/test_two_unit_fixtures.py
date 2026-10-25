@@ -5,20 +5,20 @@ from typing import cast
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 
 
 def test_gateway_unit_is_gateway(
-    gateway_unit: TestClient, machine_identity: MachineIdentity
+    gateway_unit: TestClient, machine_identity: MachineIdentityReader
 ) -> None:
     assert machine_identity.role() == frozenset({"gateway"})
     assert cast(FastAPI, gateway_unit.app).state.machine is machine_identity
     assert isinstance(gateway_unit, TestClient)
 
 
-def test_runner_unit_is_agent_runner(runner_unit: MachineIdentity) -> None:
+def test_runner_unit_is_agent_runner(runner_unit: MachineIdentityReader) -> None:
     assert runner_unit.role() == frozenset({"agent-runner"})
 
 
-def test_role_restored_after_gateway_unit(machine_identity: MachineIdentity) -> None:
+def test_role_restored_after_gateway_unit(machine_identity: MachineIdentityReader) -> None:
     assert machine_identity.role() == frozenset({"agent-runner"})

@@ -6,7 +6,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent import impersonation
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -23,7 +23,7 @@ async def test_control_claim_leaves_cancel_for_external_or_resumed_native(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from agent.db import claim_inbound_batch
     from base.agents.tests.units import spawn_agent
@@ -67,7 +67,7 @@ async def test_control_claim_reclaims_a_predecessors_claimed_command(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
 
     from agent.db import claim_inbound_batch
@@ -126,7 +126,7 @@ async def test_control_claim_preserves_unaccepted_intent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from agent.db import claim_inbound_batch
     from base.agents.tests.units import spawn_agent

@@ -22,7 +22,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database, create_agent
 from base.native_process.loaded_commit import LoadedCommit
@@ -186,7 +186,7 @@ def test_a_runner_reports_its_agents_shells_daemons_and_resources(
     db_conn: psycopg.Connection,
     pty_service: object,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(name="runner-a", role=_RUNNER)
     _insert_agents(db_conn, ("runner-a", "running"), ("runner-a", "idling"))
@@ -225,7 +225,7 @@ def test_a_gateway_probes_no_agent_host_and_counts_no_agents(
     db_conn: psycopg.Connection,
     unit_home: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(name="gateway-a", role=frozenset({"gateway"}))
     _insert_agents(db_conn, ("gateway-a", "running"))
@@ -248,7 +248,7 @@ def test_a_runner_whose_agent_host_left_no_live_pid_reads_offline(
     database: Database,
     unit_home: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(name="runner-a", role=_RUNNER)
 
@@ -265,7 +265,7 @@ def test_a_snapshot_with_an_unreachable_database_still_answers_but_claims_no_rea
     database: Database,
     unit_home: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(name="runner-a", role=_RUNNER)
     pool.close()

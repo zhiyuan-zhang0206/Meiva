@@ -6,7 +6,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.deploy.schema.migration_layout import MIGRATIONS_DIR
@@ -72,7 +72,7 @@ def test_apply_pending_nothing_when_baselined(
     db_conn: psycopg.Connection,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     _ = db_conn
     init_repo(tmp_path)
@@ -92,7 +92,7 @@ def test_apply_pending_applies_post_baseline(
     db_conn: psycopg.Connection,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     _ = db_conn
     hour = tmp_path / "2999/12/31/23"
@@ -133,7 +133,7 @@ def test_untracked_migration_is_skipped_and_warned(
     tmp_path: Path,
     loguru_records: list[dict[str, Any]],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     _ = db_conn
     (tmp_path / f"{SYN}.sql").write_text("CREATE TABLE syn_ok_t (id int);")
@@ -185,7 +185,7 @@ def test_apply_multi_statement_migration_over_prepared_conn(
     db_conn: None,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     (tmp_path / f"{SYN}.sql").write_text(
         "CREATE TABLE mstest_t (id int, note text);\nINSERT INTO mstest_t (id, note) VALUES (1, 'ok');"

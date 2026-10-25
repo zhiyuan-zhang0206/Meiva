@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from base import config
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.domains.storage.data_plane import self_machine_host
 from base.host.net.auth import bearer_header
@@ -30,7 +30,7 @@ def _auth() -> dict[str, str]:
 
 @pytest.mark.usefixtures("served_gateway_home")
 def test_bootstrap_returns_config_with_secret(
-    db_conn, *, machine_identity: MachineIdentity
+    db_conn, *, machine_identity: MachineIdentityReader
 ) -> None:
     with gateway_test_client(
         machine=machine_identity, fields={"cluster_secret": _SECRET}
@@ -55,7 +55,9 @@ def test_bootstrap_returns_config_with_secret(
 
 
 @pytest.mark.usefixtures("served_gateway_home")
-def test_bootstrap_carries_no_cluster_name(db_conn, *, machine_identity: MachineIdentity) -> None:
+def test_bootstrap_carries_no_cluster_name(
+    db_conn, *, machine_identity: MachineIdentityReader
+) -> None:
     """Path-only identity: no name travels in the payload — a runner's cluster
     identity is the gateway URL + secret; the db/role identifiers ride inside
     the connection URLs as data."""
@@ -67,7 +69,9 @@ def test_bootstrap_carries_no_cluster_name(db_conn, *, machine_identity: Machine
     assert "MEIVA_CLUSTER" not in resp.json()
 
 
-def test_bootstrap_rejects_missing_secret(db_conn, *, machine_identity: MachineIdentity) -> None:
+def test_bootstrap_rejects_missing_secret(
+    db_conn, *, machine_identity: MachineIdentityReader
+) -> None:
     """No bearer -> 401 (reachability is not trust)."""
     with gateway_test_client(
         machine=machine_identity, fields={"cluster_secret": _SECRET}
@@ -76,7 +80,9 @@ def test_bootstrap_rejects_missing_secret(db_conn, *, machine_identity: MachineI
     assert resp.status_code == 401
 
 
-def test_bootstrap_rejects_wrong_secret(db_conn, *, machine_identity: MachineIdentity) -> None:
+def test_bootstrap_rejects_wrong_secret(
+    db_conn, *, machine_identity: MachineIdentityReader
+) -> None:
     with gateway_test_client(
         machine=machine_identity, fields={"cluster_secret": _SECRET}
     ) as client:
@@ -86,7 +92,7 @@ def test_bootstrap_rejects_wrong_secret(db_conn, *, machine_identity: MachineIde
 
 @pytest.mark.usefixtures("served_gateway_home")
 def test_bootstrap_rejects_every_caller_when_secret_unset(
-    db_conn, *, machine_identity: MachineIdentity
+    db_conn, *, machine_identity: MachineIdentityReader
 ) -> None:
     """A blank secret opens nothing: there is no no-credential posture to serve."""
     with gateway_test_client(machine=machine_identity, fields={"cluster_secret": ""}) as client:
@@ -98,7 +104,7 @@ def test_old_role_runner_request_gets_no_database_login(
     db_conn,
     served_gateway_home: Any,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """Regression: a runner still on the retired exchange asks `?role=runner`
     with the bearer. It receives the credential-free endpoint, never the active
@@ -119,7 +125,7 @@ def test_old_role_runner_request_gets_no_database_login(
 
 
 def test_bootstrap_without_a_database_endpoint_refused(
-    db_conn, tmp_path: Path, *, machine_identity: MachineIdentity
+    db_conn, tmp_path: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     """A gateway config snapshot without MEIVA_DB_URL is a 400, never a guess."""
     (tmp_path / ".env").write_text("MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n")
@@ -132,7 +138,7 @@ def test_bootstrap_without_a_database_endpoint_refused(
 
 
 def test_bootstrap_strips_a_remote_managed_planes_provider_password(
-    db_conn, tmp_path: Path, *, machine_identity: MachineIdentity
+    db_conn, tmp_path: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     """A remote-managed plane's gateway `.env` holds the provider's owner URL,
     password included (a local plane's holds the credential-free endpoint, so it

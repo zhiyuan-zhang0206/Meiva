@@ -39,7 +39,7 @@ from base.agents.observation.relay_supervision import RelaySupervision
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster import inbound_channel
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults, snapshot_process_config
 from base.db import Database, create_agent
@@ -81,7 +81,7 @@ __all__ = [
 
 
 @pytest.fixture
-def handoff_clients(machine_identity: MachineIdentity) -> Iterator[ClientSet]:
+def handoff_clients(machine_identity: MachineIdentityReader) -> Iterator[ClientSet]:
     clients = derived_clients(snapshot_process_config(), machine_identity)
     try:
         yield clients
@@ -94,7 +94,7 @@ def handoff_timestamps() -> TimestampSource:
     return TimestampSource(clock=clock, timestamps_enabled=False)
 
 
-def takeover_host(tmp_path: Path, machine: MachineIdentity) -> TakeoverHost:
+def takeover_host(tmp_path: Path, machine: MachineIdentityReader) -> TakeoverHost:
     return TakeoverHost(
         local_machine=machine.name(),
         workspaces_root=tmp_path / "workspaces",
@@ -165,7 +165,7 @@ async def prepare_graph(
     config_authority: ConfigAuthority,
     clients: ClientSet,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> tuple[
     Any,
     HistoryAsyncPostgresSaver,
@@ -264,7 +264,7 @@ def deliver_peers_and_ack_first(
     requested: dict[str, Any],
     agent_id: int,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> int:
     first_peer = insert_inbound_message(
         db_conn,
@@ -305,7 +305,7 @@ def end_external_session(
     requested: dict[str, Any],
     finish: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     if finish == "release":
         leases.release(
@@ -343,7 +343,7 @@ def executor_acks_says_and_releases(
     requested: dict[str, Any],
     inbound_id: int,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.agents.impersonation import history as history
 

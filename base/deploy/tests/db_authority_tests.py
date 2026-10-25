@@ -42,8 +42,8 @@ from psycopg import sql
 from base.cluster.authority import ensure_groups, mint_generation
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.cluster.dataplane.pg_tools import pg_start_env, pg_tool, throwaway_postgres
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import apply_pending_migrations
@@ -106,7 +106,7 @@ def _restart(data_dir: Path) -> None:
     )
 
 
-def _build_template(tcp: str, *, machine: MachineIdentity) -> None:
+def _build_template(tcp: str, *, machine: MachineIdentityReader) -> None:
     with psycopg.connect(f"{tcp}/{_TEMPLATE}", autocommit=True) as conn:
         conn.execute(sql.SQL("SET ROLE {}").format(sql.Identifier(OWNER)))
         conn.execute(_SCHEMA.read_text())  # type: ignore[arg-type]
@@ -156,7 +156,7 @@ def _authority_instance(process_config: ConfigBoot) -> Iterator[Instance]:
             )
         data_dir = Path(data_row[0])
         _restart(data_dir)
-        _build_template(tcp, machine=machine_from_boot(process_config))
+        _build_template(tcp, machine=ConfiguredMachineIdentity(process_config))
         with psycopg.connect(f"{tcp}/postgres", autocommit=True) as conn:
             conn.execute("DROP DATABASE meiva_citest")
             conn.execute("DROP ROLE meiva_citest")

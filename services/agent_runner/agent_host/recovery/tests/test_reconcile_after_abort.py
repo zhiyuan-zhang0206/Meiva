@@ -9,7 +9,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.startup import consume_claimed_inbounds
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
@@ -59,7 +59,7 @@ async def test_settled_abort_consumes_every_claimed_row(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     incarnation = await _admit(
         aops_pool,
@@ -91,7 +91,7 @@ async def test_boot_consume_after_the_abort_pass_changes_nothing(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     incarnation = await _admit(
         aops_pool,
@@ -123,7 +123,7 @@ async def test_no_claimed_rows_is_silent(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     incarnation = await _admit(
         aops_pool,
@@ -145,7 +145,7 @@ async def test_next_claim_does_not_re_deliver_any_interrupted_row(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     incarnation = await _admit(
         aops_pool,
@@ -176,7 +176,7 @@ async def test_cold_build_consumes_claims_without_reading_checkpoint_history(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     incarnation = await _admit(
         aops_pool,

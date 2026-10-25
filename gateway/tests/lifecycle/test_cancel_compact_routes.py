@@ -6,7 +6,7 @@ from __future__ import annotations
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import MachineIdentitySetter
 from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 from gateway.tests.support.runner_ops.ops_stub import RunnerOps
@@ -15,7 +15,7 @@ from gateway.tests.support.runner_ops.ops_stub import RunnerOps
 @pytest.fixture
 def _local_machine(
     set_machine_identity: MachineIdentitySetter, gateway_local_runner: RunnerOps
-) -> MachineIdentity:
+) -> MachineIdentityReader:
     return set_machine_identity(role="agent-runner")
 
 
@@ -27,13 +27,13 @@ def _set_agent(db_conn: psycopg.Connection, agent_id: int, *, machine: str, stat
     db_conn.commit()
 
 
-def test_cancel_of_an_unknown_agent_is_404(_local_machine: MachineIdentity) -> None:
+def test_cancel_of_an_unknown_agent_is_404(_local_machine: MachineIdentityReader) -> None:
     with gateway_test_client(machine=_local_machine) as client:
         assert client.post("/api/agents/987654/cancel").status_code == 404
 
 
 def test_compact_queues_one_request_for_the_agents_next_turn(
-    _local_machine: MachineIdentity,
+    _local_machine: MachineIdentityReader,
     gateway_local_runner: RunnerOps,
     db_conn: psycopg.Connection,
 ) -> None:
@@ -49,7 +49,7 @@ def test_compact_queues_one_request_for_the_agents_next_turn(
 
 
 def test_compact_refuses_a_terminated_agent_and_queues_nothing(
-    _local_machine: MachineIdentity,
+    _local_machine: MachineIdentityReader,
     gateway_local_runner: RunnerOps,
     db_conn: psycopg.Connection,
 ) -> None:
@@ -64,13 +64,13 @@ def test_compact_refuses_a_terminated_agent_and_queues_nothing(
     ).fetchone() == (0,)
 
 
-def test_compact_of_an_unknown_agent_is_404(_local_machine: MachineIdentity) -> None:
+def test_compact_of_an_unknown_agent_is_404(_local_machine: MachineIdentityReader) -> None:
     with gateway_test_client(machine=_local_machine) as client:
         assert client.post("/api/agents/987654/compact").status_code == 404
 
 
 def test_compact_refuses_an_external_harness_agent_with_400(
-    _local_machine: MachineIdentity,
+    _local_machine: MachineIdentityReader,
     gateway_local_runner: RunnerOps,
     db_conn: psycopg.Connection,
 ) -> None:
@@ -90,7 +90,7 @@ def test_compact_refuses_an_external_harness_agent_with_400(
 
 
 def test_restart_refuses_an_external_harness_agent_with_400(
-    _local_machine: MachineIdentity,
+    _local_machine: MachineIdentityReader,
     gateway_local_runner: RunnerOps,
     db_conn: psycopg.Connection,
 ) -> None:

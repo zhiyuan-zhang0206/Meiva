@@ -3,7 +3,7 @@ from pathlib import Path
 import psycopg
 
 from base.api_contracts.idempotency import keyed_headers
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.daemon.schedules.completion_notices import (
@@ -18,7 +18,7 @@ UPLOAD_HEADERS = {"Idempotency-Key": "silent-upload", "Idempotency-Scope": "prin
 
 
 def _seed_agent(
-    db_conn: psycopg.Connection, status: str = "idling", *, local_machine: MachineIdentity
+    db_conn: psycopg.Connection, status: str = "idling", *, local_machine: MachineIdentityReader
 ) -> int:
     with db_conn.cursor() as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
@@ -43,7 +43,7 @@ def _pending_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, st
 
 
 def test_post_message_inserts_chat_pending(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     tid = _seed_agent(db_conn, local_machine=machine_identity)
     with gateway_test_client(machine=machine_identity) as client:
@@ -59,7 +59,7 @@ def test_hourly_completion_policy_buffers_every_notice(
     db_conn: psycopg.Connection,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     tid = _seed_agent(db_conn, local_machine=machine_identity)
     with db_conn.cursor() as cur:
@@ -101,7 +101,7 @@ def test_hourly_completion_policy_buffers_every_notice(
 
 
 def test_default_completion_policy_preserves_every_completion(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     tid = _seed_agent(db_conn, local_machine=machine_identity)
     with gateway_test_client(machine=machine_identity) as client:
@@ -118,7 +118,7 @@ def test_default_completion_policy_preserves_every_completion(
 
 
 def test_post_message_empty_content_422(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     tid = _seed_agent(db_conn, local_machine=machine_identity)
     with gateway_test_client(machine=machine_identity) as client:
@@ -128,7 +128,7 @@ def test_post_message_empty_content_422(
 
 
 def test_post_message_large_content_is_accepted(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     tid = _seed_agent(db_conn, local_machine=machine_identity)
     content = "a" * 100_000
@@ -141,7 +141,7 @@ def test_post_message_large_content_is_accepted(
 
 
 def test_post_message_content_at_one_mib_is_accepted(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     tid = _seed_agent(db_conn, local_machine=machine_identity)
     content = "a" * 1_048_576
@@ -154,7 +154,7 @@ def test_post_message_content_at_one_mib_is_accepted(
 
 
 def test_post_message_content_over_one_mib_is_413(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     tid = _seed_agent(db_conn, local_machine=machine_identity)
     content = "é" * 524_289
@@ -170,7 +170,7 @@ def test_post_message_content_over_one_mib_is_413(
 
 
 def test_post_message_block_list_over_one_mib_is_413(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     tid = _seed_agent(db_conn, local_machine=machine_identity)
     blocks = [{"type": "text", "text": "a" * 1_100_000}]
@@ -184,7 +184,7 @@ def test_post_message_block_list_over_one_mib_is_413(
 
 
 def test_reconcile_rejects_over_limit_after_timeout(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     tid = _seed_agent(db_conn, local_machine=machine_identity)
     content = "é" * 524_289
@@ -206,7 +206,7 @@ def test_post_message_404_when_agent_missing(db_conn: psycopg.Connection) -> Non
 
 
 def test_post_message_terminated_agent_allows_insert(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     tid = _seed_agent(db_conn, status="terminated", local_machine=machine_identity)
     db_conn.execute(
@@ -225,7 +225,7 @@ def test_post_message_terminated_agent_allows_insert(
 
 
 def test_post_message_command_chain_is_one_inbound(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     tid = _seed_agent(db_conn, local_machine=machine_identity)
     with gateway_test_client(machine=machine_identity) as client:
@@ -238,7 +238,7 @@ def test_post_message_command_chain_is_one_inbound(
 
 
 def test_post_message_does_not_inspect_the_command_chain(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     tid = _seed_agent(db_conn, local_machine=machine_identity)
     with gateway_test_client(machine=machine_identity) as client:
@@ -251,7 +251,7 @@ def test_post_message_does_not_inspect_the_command_chain(
 
 
 def test_post_message_invalid_source_422(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     tid = _seed_agent(db_conn, local_machine=machine_identity)
     with gateway_test_client(machine=machine_identity) as client:
@@ -262,7 +262,10 @@ def test_post_message_invalid_source_422(
 
 
 def _seed_vision_agent(
-    db_conn: psycopg.Connection, model: str = "claude-opus-4-8", *, local_machine: MachineIdentity
+    db_conn: psycopg.Connection,
+    model: str = "claude-opus-4-8",
+    *,
+    local_machine: MachineIdentityReader,
 ) -> int:
     tid = _seed_agent(db_conn, local_machine=local_machine)
     with db_conn.cursor() as cur:
@@ -287,7 +290,7 @@ def _payload_row(conn: psycopg.Connection, agent_id: int) -> tuple[str, dict | N
 
 class TestMultimodalMessage:
     def test_image_to_non_vision_model_422(
-        self, db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+        self, db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
     ) -> None:
         tid = _seed_vision_agent(db_conn, model="glm-5.3", local_machine=machine_identity)
         with gateway_test_client(machine=machine_identity) as client:
@@ -313,7 +316,7 @@ class TestMultimodalMessage:
         db_conn: psycopg.Connection,
         tmp_path: Path,
         *,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         tid = _seed_vision_agent(db_conn, local_machine=machine_identity)
         with gateway_test_client(
@@ -356,7 +359,7 @@ class TestMultimodalMessage:
         add_models: AddModels,
         model_catalog: ModelCatalog,
         *,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         from dataclasses import replace
 
@@ -408,7 +411,7 @@ class TestMultimodalMessage:
         db_conn: psycopg.Connection,
         tmp_path: Path,
         *,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         tid = _seed_vision_agent(db_conn, local_machine=machine_identity)
         with gateway_test_client(
@@ -436,7 +439,7 @@ class TestMultimodalMessage:
         db_conn: psycopg.Connection,
         tmp_path: Path,
         *,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         tid = _seed_vision_agent(db_conn, local_machine=machine_identity)
         with gateway_test_client(
@@ -459,7 +462,7 @@ class TestMultimodalMessage:
         assert _pending_rows(db_conn, tid) == []
 
     def test_plain_string_still_works(
-        self, db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+        self, db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
     ) -> None:
         tid = _seed_agent(db_conn, local_machine=machine_identity)
         with gateway_test_client(machine=machine_identity) as client:

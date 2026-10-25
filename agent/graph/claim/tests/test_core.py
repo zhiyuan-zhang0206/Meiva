@@ -20,7 +20,7 @@ import pytest
 import meiva
 from base import telemetry
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import set_field, settings
 from base.config.service_read import ConfigAuthority
@@ -37,7 +37,7 @@ from meiva.tests.fixtures.pin_agent import pin_agent
 
 @pytest.fixture
 def event_pipeline(
-    database: Database, machine_identity: MachineIdentity
+    database: Database, machine_identity: MachineIdentityReader
 ) -> Iterator[telemetry.EventPipeline]:
     """Own the process writer used by the operation and its mirror barrier."""
     pipeline = telemetry.build_pipeline(
@@ -110,7 +110,7 @@ class TestTerminate:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """terminate self-inserts a kind='terminate' source='self' into its own agent.
         source='self' lets the claim dispatch produce the "by yourself" marker (distinguishing from external
@@ -138,7 +138,7 @@ class TestRestart:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """restart self-inserts a kind='restart' source='self' into its own agent.
         The restarter daemon will handle the respawn (this test only verifies the SDK-side write is correct)."""
@@ -162,7 +162,7 @@ class TestRestart:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """`meiva.self.restart(config_overlay={...})` (PR-E) — payload JSONB holds config_overlay.
 
@@ -204,7 +204,7 @@ class TestRestart:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         pin_agent(
             spawn_agent(
@@ -254,7 +254,7 @@ class TestRestart:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """Non-per_agent field → InvalidConfigOverlay; does **not** deliver inbound, process does not exit."""
         pin_agent(
@@ -285,7 +285,7 @@ class TestRestart:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """A model typo is rejected before either persistent restart side effect."""
         pin_agent(
@@ -334,7 +334,7 @@ class TestRestart:
         config_authority: ConfigAuthority,
         model_installation: Installation,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """A registered-but-withdrawn model passes the membership check but is
         settled to its registered fallback before persistence (task #4306): the
@@ -392,7 +392,7 @@ class TestPauseHeartbeat:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """pause_heartbeat updates the window, records the pause trail, and
         emits the heartbeat_paused event used by the inspector's Last Pause."""
@@ -459,7 +459,7 @@ class TestPauseHeartbeat:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
         emitted_events: EmittedEvents,
     ) -> None:
         """Invalid duration must not write or emit a heartbeat pause event."""
@@ -493,7 +493,7 @@ class TestPauseHeartbeat:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """The configured cluster limit accepts its inclusive upper boundary."""
         original_limit = settings.agent.heartbeat_pause_max_seconds
@@ -530,7 +530,7 @@ class TestPauseHeartbeat:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """The effective per-agent overlay limit is read when the SDK is called."""
         original_limit = settings.agent.heartbeat_pause_max_seconds

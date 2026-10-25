@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager, suppress
 from typing import Any
 from uuid import UUID
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
@@ -34,7 +34,7 @@ SLOW = 30.0
 CSRF = "recorded-csrf"
 
 
-def relay_lease(lease: dict[str, Any], machine: MachineIdentity) -> RelayLease:
+def relay_lease(lease: dict[str, Any], machine: MachineIdentityReader) -> RelayLease:
     return RelayLease(
         agent_id=lease["agent_id"],
         lease_id=UUID(lease["id"]),

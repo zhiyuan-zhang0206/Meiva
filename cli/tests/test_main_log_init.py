@@ -33,7 +33,7 @@ from base.agents.context.clients import DatabaseFactory
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster import postgres
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
@@ -236,13 +236,17 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
 
     pipeline = MagicMock(spec=telemetry.EventPipeline)
     factories: list[DatabaseFactory] = []
-    machines: list[MachineIdentity] = []
+    machines: list[MachineIdentityReader] = []
     readers: list[Callable[[], str]] = []
     homes: list[Path] = []
     inputs: list[object] = []
 
     def build(
-        *, database: DatabaseFactory, machine: MachineIdentity, home: Path, flush_interval_s: float
+        *,
+        database: DatabaseFactory,
+        machine: MachineIdentityReader,
+        home: Path,
+        flush_interval_s: float,
     ) -> telemetry.EventPipeline:
         factories.append(database)
         machines.append(machine)
@@ -367,7 +371,7 @@ def _cold_report(
 
 
 def operator_producer(
-    database_factory: OperatorDatabaseFactory, machine: MachineIdentity, home: Path
+    database_factory: OperatorDatabaseFactory, machine: MachineIdentityReader, home: Path
 ) -> OperatorEventPipeline:
     """The producer the entry builds for a command: the operator pipeline over its factory."""
     return operator_event_pipeline(database_factory, machine=machine, home=home)
@@ -401,7 +405,11 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
         return open_operator_database(config, gate, direct_url)
 
     def build(
-        *, database: DatabaseFactory, machine: MachineIdentity, home: Path, flush_interval_s: float
+        *,
+        database: DatabaseFactory,
+        machine: MachineIdentityReader,
+        home: Path,
+        flush_interval_s: float,
     ) -> telemetry.EventPipeline:
         factories.append(database)
 

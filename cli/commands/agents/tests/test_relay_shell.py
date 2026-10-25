@@ -17,7 +17,7 @@ from base.agents.impersonation import relay as lease_relay
 from base.agents.impersonation.host_transport import AntigravityServer
 from base.agents.impersonation.status import ImpersonationStatus
 from base.agents.inbox.insert import insert_inbound_message
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -56,7 +56,7 @@ async def test_a_claude_relay_pushes_the_briefing_then_the_batch_and_stops_at_re
     event_bus: EventBus,
     redis_url: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, mid = active
     printed = Printed()
@@ -99,7 +99,7 @@ async def test_active_expiry_notifies_loss_of_control(
     event_bus: EventBus,
     redis_url: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, _ = active
     printed = Printed()
@@ -133,7 +133,7 @@ async def test_expired_lease_notifies_host_without_subscribing_or_extending(
     event_bus: EventBus,
     redis_url: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, _ = active
     printed = Printed()
@@ -162,7 +162,7 @@ async def test_a_released_lease_stops_the_relay_without_saying_anything(
     event_bus: EventBus,
     redis_url: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, _ = active
     printed = Printed()
@@ -185,7 +185,7 @@ async def test_new_message_under_an_outstanding_batch_is_pushed_as_a_new_batch(
     event_bus: EventBus,
     redis_url: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, first = active
     printed = Printed()
@@ -225,7 +225,7 @@ async def test_native_catchup_recovers_message_with_no_redis_publish(
     event_bus: EventBus,
     redis_url: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, first = active
     printed = Printed()
@@ -258,7 +258,7 @@ async def test_release_during_debounce_prevents_delivery(
     event_bus: EventBus,
     redis_url: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, mid = active
     printed = Printed()
@@ -286,7 +286,7 @@ async def test_waits_for_native_consent_then_delivers_start_and_inbox(
     event_bus: EventBus,
     redis_url: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, owner, mid = lease_at(ImpersonationStatus.ACCEPTED)
     printed = Printed()
@@ -317,7 +317,7 @@ async def test_waiting_controller_is_told_terminal_outcome(
     event_bus: EventBus,
     redis_url: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, owner, _ = lease_at(ImpersonationStatus.ACCEPTED)
     printed = Printed()
@@ -353,7 +353,7 @@ async def test_a_codex_refusal_stops_the_relay_and_keeps_the_inbox(
     event_bus: EventBus,
     redis_url: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, mid = active
     with short_socket_path() as socket_path, codex_app_server(socket_path, [False]) as host:
@@ -381,7 +381,7 @@ async def test_a_codex_relay_steers_the_thread_with_literal_text(
     event_bus: EventBus,
     redis_url: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, _ = active
     literal = "Meiva push with literal $(no-shell) and `no-shell`"
@@ -413,7 +413,7 @@ async def test_an_antigravity_relay_posts_send_agent_message_with_the_recorded_c
     event_bus: EventBus,
     redis_url: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, mid = active
     with antigravity_server() as host:
@@ -446,7 +446,7 @@ async def test_an_antigravity_relay_whose_server_is_gone_fails_the_briefing_loud
     event_bus: EventBus,
     redis_url: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, _ = active
     gone = AntigravityServer(address=f"127.0.0.1:{unused_tcp_port}", csrf_token=CSRF)

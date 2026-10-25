@@ -16,7 +16,7 @@ from psycopg.types.json import Jsonb
 
 import gateway.cluster.status as status_mod
 from base.api_contracts.status import MachineStatus
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from gateway.cluster.roster.liveness_snapshot import Snapshot
@@ -81,7 +81,7 @@ def _snap(
 
 def _gather(
     database: Database,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     home: Path,
     rows: list[RosterRowSpec],
     snaps: dict[str, Snapshot] | None,
@@ -104,7 +104,7 @@ def test_a_fresh_reachable_snapshot_renders_online_with_its_age(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with runner_ops(
         db_conn, "runner-a", {"status_probe": completed(_status("runner-a"))}
@@ -128,7 +128,7 @@ def test_one_dropped_probe_keeps_the_last_status_and_its_age(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with runner_ops(
         db_conn, "runner-a", {"status_probe": completed(_status("runner-a"))}
@@ -151,7 +151,7 @@ def test_a_machine_that_failed_its_passes_renders_offline(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with runner_ops(
         db_conn, "runner-a", {"status_probe": completed(_status("runner-a"))}
@@ -172,7 +172,7 @@ def test_a_reachable_answer_that_is_not_a_cluster_status_is_online_unknown(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with runner_ops(
         db_conn, "runner-a", {"status_probe": completed(_status("runner-a"))}
@@ -195,7 +195,7 @@ def test_a_snapshot_answered_by_another_host_renders_identity_mismatch(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with runner_ops(
         db_conn, "runner-a", {"status_probe": completed(_status("runner-a"))}
@@ -216,7 +216,7 @@ def test_a_snapshot_body_that_is_not_a_cluster_status_renders_online_unknown(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with runner_ops(
         db_conn, "runner-a", {"status_probe": completed(_status("runner-a"))}
@@ -240,7 +240,7 @@ def test_a_machine_without_a_fresh_snapshot_is_dialed(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """The degraded fallback for a heartbeat service that is not running."""
 
@@ -276,7 +276,7 @@ def test_a_fresh_read_dials_every_runner_whatever_the_snapshot_says(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     def reply(name: str) -> dict[str, Responder]:
         return {"status_probe": completed(_status(name))}
@@ -299,7 +299,7 @@ def test_the_gateway_remembers_no_failure_between_reads(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """A host that fails a dial is dialed again by the next fresh read: there is no
     failure memory and no recovery thread in the gateway."""
@@ -317,7 +317,7 @@ def test_a_fresh_read_of_blackhole_hosts_is_bounded_by_one_dial_budget(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """The dials run in parallel under one per-dial deadline, so five hosts that
     never answer cost about one budget, not five."""
@@ -365,7 +365,7 @@ def test_the_roster_endpoint_reads_the_snapshot_and_fresh_dials(
     gateway_data_plane: None,
     db_conn: psycopg.Connection,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     db_conn.execute("TRUNCATE machines")
     db_conn.commit()
@@ -390,7 +390,7 @@ def test_the_machines_endpoint_follows_the_same_two_modes(
     gateway_data_plane: None,
     db_conn: psycopg.Connection,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     db_conn.execute("TRUNCATE machines")
     db_conn.commit()

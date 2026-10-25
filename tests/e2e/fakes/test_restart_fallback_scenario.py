@@ -4,7 +4,7 @@ import psycopg
 import pytest
 
 from base.agents.birth.spawn import create_agent_row
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.config.tests.config_authority import config_authority as config_authority
@@ -26,7 +26,7 @@ def test_consumed_restart_selects_successor_script_without_claiming_completion(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id, _birth, _prompt_id, _attempt_id = create_agent_row(
         database,
@@ -67,7 +67,7 @@ def test_pending_request_does_not_select_post_request_script(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id, _birth, _prompt_id, _attempt_id = create_agent_row(
         database,

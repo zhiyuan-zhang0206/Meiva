@@ -9,7 +9,7 @@ from typing import Any, cast
 
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.native_process.os_platform import file_lock
 from base.telemetry import EventPipeline
@@ -50,7 +50,7 @@ def test_source_change_after_snapshot_does_not_mix_generations(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
@@ -91,7 +91,7 @@ def test_linked_target_is_preserved_without_following(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     skill_source(repo)
@@ -131,7 +131,7 @@ def test_late_edit_between_check_and_claim_is_restored_not_overwritten(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
@@ -183,7 +183,7 @@ def test_target_appearing_after_claim_is_not_replaced(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
@@ -222,7 +222,7 @@ def test_late_previous_destination_during_claim_is_not_replaced_or_owned(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
@@ -267,7 +267,7 @@ def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
@@ -320,7 +320,7 @@ def test_late_target_during_activation_restore_is_not_replaced_or_disowned(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
@@ -366,7 +366,7 @@ def test_preexisting_generation_sibling_is_preserved_without_false_ownership(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
@@ -406,7 +406,7 @@ def test_concurrent_converges_serialize_on_the_clients_lock(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
@@ -445,7 +445,7 @@ def test_marker_spoof_without_external_ledger_is_unmanaged(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     skill_source(repo, "repo operator\n")
@@ -488,7 +488,7 @@ def test_permission_only_modification_is_a_conflict(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
@@ -518,7 +518,7 @@ def test_source_modes_are_materialized_and_recorded(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
@@ -556,7 +556,7 @@ def test_external_filesystem_failure_is_label_only_and_fail_soft(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     skill_source(repo)
@@ -592,7 +592,7 @@ def test_cleanup_failure_after_activation_is_retried_without_rollback(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
@@ -637,7 +637,7 @@ def test_interrupted_post_activation_commit_is_reported_and_not_resumed(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
@@ -680,7 +680,7 @@ def test_partial_stage_copy_remains_tracked_until_cleanup_finishes(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     skill_source(repo)
@@ -723,7 +723,7 @@ def test_late_target_keeps_stage_and_previous_in_transaction_state(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)

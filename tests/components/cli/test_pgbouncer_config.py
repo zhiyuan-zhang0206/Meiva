@@ -16,7 +16,8 @@ import pytest
 
 from base.cluster.dataplane import direct_url
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.db import Database, DbConfig, connections
@@ -24,7 +25,7 @@ from base.db.code_version_gate import ProcessDbGate
 from cli.commands.data_plane import pgbouncer
 
 
-def _shape(machine: MachineIdentity, db_name: str) -> pgbouncer.PoolerShape:
+def _shape(machine: MachineIdentityReader, db_name: str) -> pgbouncer.PoolerShape:
     return pgbouncer.PoolerShape(
         pg_port=5433,
         listen_port=6433,
@@ -95,7 +96,7 @@ def _assert_quiet_connection_logs_and_userlist_only_console(ini: str) -> None:
 
 
 def test_render_ini_is_transaction_scram_and_socket_server(
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     ini = pgbouncer.render_ini(_shape(machine_identity, "meiva_main"))
     _assert_transaction_pooling_with_scram_clients(ini)
@@ -106,7 +107,7 @@ def test_render_ini_is_transaction_scram_and_socket_server(
 
 
 def test_render_ini_authenticates_and_binds_loopback_on_a_single_box(
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     """The internal data plane always authenticates, and a box that declares no
     reachable address (`MEIVA_MACHINE_HOST` unset) binds loopback alone."""
@@ -118,14 +119,16 @@ def test_render_ini_authenticates_and_binds_loopback_on_a_single_box(
 
 
 def test_render_ini_adds_only_the_declared_reachable_address(
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(host="10.0.0.5")
     ini = pgbouncer.render_ini(_shape(machine_identity, "meiva"))
     assert "listen_addr = 127.0.0.1, 10.0.0.5" in ini.splitlines()
 
 
-def test_render_ini_binds_loopback_never_all_interfaces(machine_identity: MachineIdentity) -> None:
+def test_render_ini_binds_loopback_never_all_interfaces(
+    machine_identity: MachineIdentityReader,
+) -> None:
     ini = pgbouncer.render_ini(_shape(machine_identity, "meiva_main"))
     listen = next(ln for ln in ini.splitlines() if ln.startswith("listen_addr ="))
     assert "127.0.0.1" in listen

@@ -3,7 +3,8 @@ from collections.abc import Callable, Iterator
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.tests.configuration import snapshot_process_config
 from base.packages.tests.lm.providers.provider_plugin_support import (
@@ -20,7 +21,7 @@ def failed_provider_agent(
     provider_plugin: Callable[..., None],
     gateway_local_runner: RunnerOps,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> Iterator[tuple[GatewayTestClient, int]]:
     boot = snapshot_process_config()
     boot.set_field("mcp_endpoint_enabled", True)
@@ -69,7 +70,7 @@ def test_provider_failure_keeps_mcp_recovery_tools(
     failed_provider_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     client, agent_id = failed_provider_agent
     sent = tool_result(

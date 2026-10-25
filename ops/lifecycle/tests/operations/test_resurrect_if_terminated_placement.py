@@ -22,7 +22,8 @@ from psycopg_pool import ConnectionPool
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.inbound import InboundKind, WakeTriggerKind
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, DbConfig
@@ -60,7 +61,7 @@ class Waitings:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         self._conn = conn
         self._database = database
@@ -104,7 +105,7 @@ def waitings(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> Waitings:
     return Waitings(
         db_conn,
@@ -196,7 +197,7 @@ class TestPlacement:
         db_pool: ConnectionPool,
         model_catalog: ModelCatalog,
         waitings: Waitings,
-        machine_identity: MachineIdentity,
+        machine_identity: ConfiguredMachineIdentity,
     ) -> None:
         machine_identity.set(name="gateway-host")
         waiting = waitings.make(home="runner-a")
@@ -234,7 +235,7 @@ class TestPlacement:
         database: Database,
         event_bus: EventBus,
         waitings: Waitings,
-        machine_identity: MachineIdentity,
+        machine_identity: ConfiguredMachineIdentity,
     ) -> None:
         machine_identity.set(name="home-a")
         waiting = waitings.make(home="home-a")
@@ -263,7 +264,7 @@ class TestPlacement:
         database: Database,
         event_bus: EventBus,
         waitings: Waitings,
-        machine_identity: MachineIdentity,
+        machine_identity: ConfiguredMachineIdentity,
     ) -> None:
         machine_identity.set(name="gateway-host")
         waiting = waitings.make(home="runner-a")
@@ -293,7 +294,7 @@ class TestPlacement:
         database: Database,
         event_bus: EventBus,
         waitings: Waitings,
-        machine_identity: MachineIdentity,
+        machine_identity: ConfiguredMachineIdentity,
         loguru_records: LogRecords,
     ) -> None:
         machine_identity.set(name="gateway-host")
@@ -323,7 +324,7 @@ class TestPlacement:
         database: Database,
         event_bus: EventBus,
         waitings: Waitings,
-        machine_identity: MachineIdentity,
+        machine_identity: ConfiguredMachineIdentity,
         loguru_records: LogRecords,
     ) -> None:
         machine_identity.set(name="home-a")
@@ -400,7 +401,7 @@ class TestGates:
         database: Database,
         event_bus: EventBus,
         waitings: Waitings,
-        machine_identity: MachineIdentity,
+        machine_identity: ConfiguredMachineIdentity,
     ) -> None:
         machine_identity.set(name="gateway-host")
         waiting = waitings.make(home="runner-a", status="running")
@@ -425,7 +426,7 @@ class TestGates:
         database: Database,
         event_bus: EventBus,
         waitings: Waitings,
-        machine_identity: MachineIdentity,
+        machine_identity: ConfiguredMachineIdentity,
     ) -> None:
         machine_identity.set(name="gateway-host")
         waiting = waitings.make(home="runner-a", kind="heartbeat", source="system")
@@ -456,7 +457,7 @@ class TestGates:
         database: Database,
         event_bus: EventBus,
         waitings: Waitings,
-        machine_identity: MachineIdentity,
+        machine_identity: ConfiguredMachineIdentity,
     ) -> None:
         machine_identity.set(name="gateway-host")
         waiting = waitings.make(home="runner-a", source="system")
@@ -486,7 +487,7 @@ class TestGates:
         db_pool: ConnectionPool,
         model_catalog: ModelCatalog,
         waitings: Waitings,
-        machine_identity: MachineIdentity,
+        machine_identity: ConfiguredMachineIdentity,
     ) -> None:
         machine_identity.set(name="gateway-host")
         waiting = waitings.make(home="runner-a")
@@ -518,7 +519,7 @@ class TestGates:
         self,
         database: Database,
         event_bus: EventBus,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         with pytest.raises(AgentNotFound):
             await lifecycle.resurrect_if_terminated(
@@ -536,7 +537,7 @@ class TestGates:
         database: Database,
         event_bus: EventBus,
         waitings: Waitings,
-        machine_identity: MachineIdentity,
+        machine_identity: ConfiguredMachineIdentity,
     ) -> None:
         machine_identity.set(name="gateway-host")
         waiting = waitings.make(home="runner-a", kind="restart", source="user")

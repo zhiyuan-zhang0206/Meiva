@@ -12,7 +12,7 @@ import psycopg
 
 import tests.fixtures.env_bootstrap  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import refresh_data_plane_settings, settings
 from base.config.tests.configuration import snapshot_process_config
 from base.deploy.tests.containers import postgres
@@ -20,7 +20,7 @@ from base.deploy.tests.containers import postgres
 scratch = Path(sys.argv[1])
 assert settings.data_plane.pg_throwaway_base == str(scratch)
 process_config = snapshot_process_config()
-machine = machine_from_boot(process_config)
+machine = ConfiguredMachineIdentity(process_config)
 refresh_data_plane_settings()
 assert settings.data_plane.pg_throwaway_base == str(scratch)
 

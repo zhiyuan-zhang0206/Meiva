@@ -7,7 +7,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import consume_claimed_inbounds
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -36,7 +36,7 @@ async def test_replaced_incarnation_writes_nothing(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     incarnation = await admit(
         aops_pool,
@@ -64,7 +64,7 @@ async def test_settlement_pass_swallows_a_replaced_incarnation(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     incarnation = await admit(
         aops_pool,

@@ -21,7 +21,7 @@ import pytest
 import yaml
 
 from base.agents.context.clients import DatabaseFactory
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.deploy.release import collector_artifact
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.paths import otel_collector_dir
@@ -93,7 +93,7 @@ class MirrorOpener:
 @dataclass(frozen=True)
 class CollectorUnit:
     home: Path
-    machine: MachineIdentity
+    machine: ConfiguredMachineIdentity
     runtime: CommandRuntime
     open_url: UrlOpener
 

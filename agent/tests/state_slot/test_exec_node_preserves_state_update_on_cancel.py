@@ -19,7 +19,7 @@ from agent.state import BaseAgentState
 from agent.tests.test_state_slot import ai_message_with_code, make_runtime_and_config
 from agent.tests.test_state_slot import reset_state_slot as reset_state_slot
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -45,7 +45,7 @@ async def test_exec_node_preserves_state_update_on_cancel(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     class _State(BaseAgentState):
         plugin__progress: str = ""

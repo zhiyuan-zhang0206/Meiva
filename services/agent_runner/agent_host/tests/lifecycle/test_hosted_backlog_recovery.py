@@ -10,7 +10,7 @@ from langchain_core.messages import AIMessage
 from psycopg_pool import AsyncConnectionPool
 
 from agent.state import AgentState
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -41,7 +41,7 @@ async def test_pending_scan_classifies_lifecycle_work_and_impersonation(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     incarnation = await _admit(
         aops_pool,
@@ -97,7 +97,7 @@ async def test_old_pending_scan_never_cancels_a_running_turn(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     incarnation = await _admit(
         aops_pool,
@@ -177,7 +177,7 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     incarnation = await _admit(
         aops_pool,

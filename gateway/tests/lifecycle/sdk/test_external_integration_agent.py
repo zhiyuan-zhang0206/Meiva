@@ -23,7 +23,7 @@ from base.agents.impersonation import history
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.api_contracts.caller_identity import CallerIdentity
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
@@ -51,7 +51,7 @@ def native_checkpoint(
     request: pytest.FixtureRequest,
     model_installation: Installation,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]]:
     registry = ExtensionRegistry(
         (("integration", PluginContributions(state=(IntegrationPlugin,))),)
@@ -122,7 +122,7 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     event_bus: EventBus,
     config_authority: ConfigAuthority,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     owner, handle = native_checkpoint
     agent_id = owner.agent_id
@@ -202,7 +202,7 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
     event_bus: EventBus,
     config_authority: ConfigAuthority,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     owner, _ = native_checkpoint
     peer_id = create_agent(db_conn)
@@ -267,7 +267,7 @@ def test_attachment_send_message_is_recorded_in_the_lease_log_and_completes(
     event_bus: EventBus,
     config_authority: ConfigAuthority,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     owner, _ = native_checkpoint
     peer_id = create_agent(db_conn)

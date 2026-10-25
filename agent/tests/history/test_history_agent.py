@@ -10,7 +10,7 @@ from base.agents.impersonation import sessions as sessions
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
@@ -25,7 +25,7 @@ _TIMELINE_INPUTS = TimestampPolicy.from_clock(
 
 @pytest.fixture
 def owner(
-    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentityReader
 ) -> RuntimeIncarnation:
     agent_id = create_agent(db_conn)
     incarnation = RuntimeIncarnation(agent_id, uuid4(), uuid4())
@@ -44,7 +44,7 @@ def start(
     active: bool = True,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> dict[str, Any]:
     result = sessions.request(
         Database.from_settings(gate=database_gate),
@@ -97,7 +97,7 @@ def test_inbound_attachments_survive_timeline_and_handoff(
     event_bus: EventBus,
     database_gate: ProcessDbGate,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from psycopg.types.json import Jsonb
 

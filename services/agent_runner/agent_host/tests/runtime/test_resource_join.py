@@ -16,7 +16,7 @@ import pytest
 
 from base.agents.context.clients import ClientSet
 from base.agents.sdk.tests.sampling_owners import gateway_sampling_owner
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -118,7 +118,7 @@ def exercise_unfinished_main() -> None:
         *,
         config: ConfigBoot,
         database: Callable[[], Database],
-        machine: MachineIdentity,
+        machine: MachineIdentityReader,
         home: Path,
         clients: ClientSet,
         on_clients_owned: Callable[[], None],

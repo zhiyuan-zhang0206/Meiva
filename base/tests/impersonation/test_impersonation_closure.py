@@ -6,7 +6,7 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -29,7 +29,7 @@ def test_closure_restores_six_native_owners(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     from base.agents.impersonation.maintenance import reap_impersonations
@@ -95,7 +95,7 @@ def test_closure_preserves_guarded_rows(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -170,7 +170,7 @@ def test_closure_restore_rolls_back_with_lease(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)

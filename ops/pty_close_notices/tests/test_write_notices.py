@@ -13,7 +13,7 @@ from dataclasses import replace
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
@@ -380,7 +380,7 @@ def test_a_crash_notice_names_the_crash_and_only_probably_an_interruption(
     database: Database,
     event_bus: EventBus,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     aid = _agent(db_conn, "running")
     (built,) = notices.notices_for(
@@ -404,7 +404,7 @@ def test_a_crash_notice_names_the_crash_and_only_probably_an_interruption(
 # meiva:note
 # A session that is not an agent shell yields no notice.
 def test_notices_for_skips_a_session_that_is_not_an_agent_shell(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     sessions = [
         closure.ClosedSession("meiva-gateway", OwnedProcess(1, 1.0, 1)),

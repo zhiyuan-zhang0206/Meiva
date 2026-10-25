@@ -7,7 +7,7 @@ from typing import Any, cast
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config
 from base.host.env.tests.env_files import unit_env_path
@@ -32,7 +32,7 @@ from ops import env_audit as audit
 
 
 def test_get_explicit_self_is_host_view_not_cluster(
-    clean_overrides: Path, *, machine_identity: MachineIdentity
+    clean_overrides: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     runtime_config.write_fields({"cross_machine_transfer_backend": "none"}, set())
     with gateway_test_client(machine=machine_identity) as client:
@@ -131,7 +131,9 @@ def test_put_remote_unknown_machine_404(clean_overrides: Path) -> None:
     assert "unknown machine" in resp.json()["detail"]
 
 
-def test_self_machine_name_is_known_without_a_row(*, machine_identity: MachineIdentity) -> None:
+def test_self_machine_name_is_known_without_a_row(
+    *, machine_identity: MachineIdentityReader
+) -> None:
     assert machine_identity.name()
 
 
@@ -213,7 +215,7 @@ def test_get_config_audit_default_last_comes_from_display_config(clean_overrides
 
 
 def test_get_config_audit_reads_own_records(
-    clean_overrides: Path, *, machine_identity: MachineIdentity
+    clean_overrides: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     env_path = unit_env_path()
     env_path.write_text("MEIVA_MODEL=audit-self\n")
@@ -238,7 +240,7 @@ def test_get_config_audit_reads_own_records(
 
 
 def test_get_config_audit_all_merges_runners_newest_first(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     def audit_read(call: OpsCall, *, machine: str, stamp: str) -> OpsReply:
         assert call.payload == {"last": 2}

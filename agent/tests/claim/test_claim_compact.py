@@ -30,7 +30,7 @@ from agent.tests.claim.claim_status_support import running_agent as running_agen
 from agent.tests.scripted_model import ScriptedChatModel
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -93,7 +93,7 @@ async def test_claim_compact_summary_replaces_messages_with_remove_sentinel(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """compact_summary inbound (written by agent meiva.compact) → claim returns
     Command containing RemoveMessage(REMOVE_ALL_MESSAGES) sentinel + summary.
@@ -139,7 +139,7 @@ async def test_claim_compact_summary_bumps_compact_version(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """Agent-authored compact (claim path) advances compact.version, matching the
     forced path's before_llm hook — this REMOVE_ALL stripped the messages just the
@@ -181,7 +181,7 @@ async def test_claim_compact_request_calls_backend_llm(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """compact_request inbound (user "/compact") → claim calls generate_summary,
     running backend LLM to generate a summary, then replaces messages."""
@@ -222,7 +222,7 @@ async def test_claim_compact_request_emits_live_run_pair_with_durable_anchor(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """Task #3323: the claim-path compact run (UI Compact / auto-resurrect)
     emits compact_started before the Compaction LLM call and
@@ -270,7 +270,7 @@ async def test_claim_two_compact_requests_second_replaces_first(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """Two compact_requests claimed in one batch (double-triggered Compact):
     the later summary wins the payload slot; the earlier run's generated
@@ -322,7 +322,7 @@ async def test_claim_compact_summary_supersedes_pending_request_and_closes_it_re
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """A batch whose compact_request is followed by an agent compact_summary:
     the request's LLM run produced a summary, but the summary overwrites the
@@ -374,7 +374,7 @@ async def test_claim_cancel_beats_pending_compact_and_closes_it_replaced(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """cancel co-batched with an already-run compact_request: the cancel path
     drops the compact payload instead of applying it — the run's live block
@@ -421,7 +421,7 @@ async def test_claim_compact_request_empty_conversation_consumed_as_noop(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """compact_request on no conversation messages (only SystemMessage) is a normal user operation,
     not a fault — consumed as a no-op: does not issue LLM request, does not replace messages,
@@ -460,7 +460,7 @@ async def test_claim_compact_request_retries_then_raises_compaction_failed(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """compact_request whose Compaction LLM keeps failing → claim retries
     COMPACT_MAX_ATTEMPTS times, then raises CompactionFailedError (the runloop
@@ -512,7 +512,7 @@ async def test_claim_compact_request_retries_then_succeeds(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """compact_request whose first Compaction LLM call fails → retried; a later
     attempt's summary is applied (same retry semantics as the auto-compact
@@ -558,7 +558,7 @@ async def test_claim_compact_summary_with_chat_in_same_batch_defers_chat(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """A chat sent between the agent's meiva.self.compact and claim's wake lands in
     the same batch as the compact_summary — it must not be lost, and it must NOT
@@ -618,7 +618,7 @@ async def test_claim_compact_summary_finalizes_claimed_history(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """A compaction finalizes every already-claimed inbound row to 'done'
     BEFORE the REMOVE_ALL wipe. Those rows' HumanMessages live in
@@ -679,7 +679,7 @@ async def test_claim_compact_request_batched_with_restart_is_dropped(
     aops_pool: AsyncConnectionPool,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """compact_request + restart in same batch → compact_request is the discarded loser:
     does **not** run the backend Compaction LLM (if it raised, the already consumed restart row
@@ -716,7 +716,7 @@ async def test_claim_compact_summary_batched_with_restart_applies_and_keeps_idle
     aops_pool: AsyncConnectionPool,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """compact_summary + restart in same batch → summary is data the agent already wrote itself,
     applied as usual (discarding = silently swallowing the agent's work), while the restart's idle

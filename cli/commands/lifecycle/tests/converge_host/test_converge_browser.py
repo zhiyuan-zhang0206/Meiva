@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
 from cli.commands.converge.plans.browser_plan import (
@@ -128,7 +128,7 @@ def test_steps_read_their_context_owner_and_later_overlay(
 ) -> None:
     first = _browser_ctx(ctx, npx=False)
     second_config = snapshot_process_config()
-    second = replace(first, config=second_config, machine=machine_from_boot(second_config))
+    second = replace(first, config=second_config, machine=ConfiguredMachineIdentity(second_config))
     first.config.set_field("browser_enabled", False)
     second.config.set_field("browser_enabled", True)
     second.config.set_field("chrome_binary", "/Applications/Chrome")

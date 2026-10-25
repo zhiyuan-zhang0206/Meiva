@@ -8,7 +8,7 @@ from typing import Any
 import psycopg
 
 from base import paths
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.db.code_version_gate import ProcessDbGate
 from base.packages.extensions import materialize as mat
 from base.packages.extensions import registry as reg
@@ -31,7 +31,7 @@ class _DbGateway:
             )
 
 
-_AsMachine = Callable[[Path], AbstractContextManager[MachineIdentity]]
+_AsMachine = Callable[[Path], AbstractContextManager[MachineIdentityReader]]
 
 _SKILL_MD = """---
 name: {name}

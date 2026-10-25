@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from base import telemetry
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.telemetry import event_store
 from base.telemetry.metrics import observed_metrics
 from cli import main, parsers
@@ -71,7 +71,7 @@ def _build_parser(*, retained_children: object) -> argparse.ArgumentParser:
 
 
 def _producer(
-    database_factory: OperatorDatabaseFactory, machine: MachineIdentity, home: Path
+    database_factory: OperatorDatabaseFactory, machine: MachineIdentityReader, home: Path
 ) -> OperatorEventPipeline:
     del database_factory
     return OperatorEventPipeline(

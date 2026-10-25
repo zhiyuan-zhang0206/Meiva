@@ -16,7 +16,7 @@ import pytest
 from base import telemetry
 from base.agents.birth.spawn import create_agent_row
 from base.agents.inbox.insert import insert_inbound_message
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -56,7 +56,7 @@ def test_a_spawn_is_recorded_with_its_machine(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     machine = machine_identity.name()
 
@@ -80,7 +80,7 @@ def test_a_fork_is_recorded_against_its_source_agent(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     parent, _, _, _ = create_agent_row(
         database,
@@ -115,7 +115,7 @@ def test_an_agent_sourced_first_prompt_is_recorded_as_a_message(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id, _, inbound_id, _ = create_agent_row(
         database,
@@ -139,7 +139,7 @@ def test_a_spawn_whose_audit_fact_cannot_be_recorded_creates_no_agent(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     before = db_conn.execute("SELECT count(*) FROM agents").fetchone()
     db_conn.commit()
@@ -164,7 +164,7 @@ def test_a_spawn_whose_audit_fact_cannot_be_recorded_creates_no_agent(
 
 @pytest.fixture
 def fork_events(
-    database_gate: ProcessDbGate, machine_identity: MachineIdentity, unit_home: Path
+    database_gate: ProcessDbGate, machine_identity: MachineIdentityReader, unit_home: Path
 ) -> Generator[telemetry.EventPipeline]:
     """Retain the actual writer only for fork event delivery contracts."""
     pipeline = telemetry.build_pipeline(
@@ -191,7 +191,7 @@ class TestSpawnFork:
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
         fork_events: telemetry.EventPipeline,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """User ruling 2026-08-28 (task #1879): the fork event's
         target_agent_id is the fork SOURCE (the lineage parent), never the
@@ -260,7 +260,7 @@ class TestSpawnFork:
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
         fork_events: telemetry.EventPipeline,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """A plain spawn keeps the old direction: target_agent_id = the
         spawner (its lineage parent), and the spawner column records it
@@ -317,7 +317,7 @@ class TestSpawnFork:
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
         fork_events: telemetry.EventPipeline,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """The unified inbound writer's kind='fork' mapping (currently
         reached by no caller; the fork inbound is inserted with raw SQL in

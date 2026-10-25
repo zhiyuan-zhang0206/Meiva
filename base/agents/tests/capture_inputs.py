@@ -13,7 +13,7 @@ from base.agents.impersonation.manifest import (
     open_local_participant,
 )
 from base.agents.impersonation.tests import test_history as history_cases
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
@@ -48,7 +48,7 @@ def create_capture_owner(
 
 @pytest.fixture
 def owner(
-    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentityReader
 ) -> RuntimeIncarnation:
     local_machine = machine_identity.name()
     return create_capture_owner(db_conn, local_machine=local_machine)
@@ -61,7 +61,7 @@ def lease(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> dict[str, Any]:
     local_machine = machine_identity.name()
     return history_cases.start(

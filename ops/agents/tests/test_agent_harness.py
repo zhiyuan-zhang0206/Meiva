@@ -5,7 +5,7 @@ import pytest
 from psycopg import sql
 
 from base.api_contracts.agent_contract import ForkHarnessMismatch
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -39,7 +39,7 @@ def test_plain_spawn_defaults_to_the_builtin_runtime(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent = spawn_agent(
         config_authority=config_authority,
@@ -57,7 +57,7 @@ def test_plain_spawn_records_the_requested_harness(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent = spawn_agent(
         harness="codex",
@@ -76,7 +76,7 @@ def test_fork_inherits_the_source_harness(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     source = spawn_agent(
         harness="meiva",
@@ -105,7 +105,7 @@ def test_fork_naming_the_same_harness_is_accepted(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     source = spawn_agent(
         harness="meiva",
@@ -137,7 +137,7 @@ def test_fork_of_an_external_harness_source_is_refused(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     source = spawn_agent(
         harness=external_harness,
@@ -169,7 +169,7 @@ def test_fork_naming_another_harness_is_refused(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     source = spawn_agent(
         harness="codex",
