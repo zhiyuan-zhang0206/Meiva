@@ -60,7 +60,9 @@ def test_modify_last_ai_message_passes():
         {"name": "execute_code", "args": {"code": "x"}, "id": "t1", "type": "tool_call"}
     ]
     merged = guarded_add_messages(before, [fixed])
-    assert merged[-1].tool_calls[0]["args"]["code"] == "x"
+    last = merged[-1]
+    assert isinstance(last, AIMessage)
+    assert last.tool_calls[0]["args"]["code"] == "x"
 
 
 def test_full_wipe_passes():

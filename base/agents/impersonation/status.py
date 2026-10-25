@@ -1,8 +1,10 @@
 """Impersonation lease status vocabulary and status-only row validation."""
 
 from collections.abc import Mapping
+from datetime import datetime
 from enum import StrEnum
-from typing import Any, Literal, TypedDict, cast, get_args
+from typing import Any, Literal, TypedDict, TypeGuard
+from uuid import UUID
 
 
 class ImpersonationStatus(StrEnum):
@@ -19,48 +21,64 @@ class ImpersonationStatus(StrEnum):
 OpenImpersonationStatus = Literal[
     ImpersonationStatus.REQUESTED, ImpersonationStatus.ACCEPTED, ImpersonationStatus.ACTIVE
 ]
-OPEN = cast(tuple[OpenImpersonationStatus, ...], tuple(get_args(OpenImpersonationStatus)))
+OPEN: tuple[OpenImpersonationStatus, ...] = (
+    ImpersonationStatus.REQUESTED,
+    ImpersonationStatus.ACCEPTED,
+    ImpersonationStatus.ACTIVE,
+)
 
 
 class LeaseRecord(TypedDict):
     """Lifecycle row: status is parsed; other database fields retain their existing types."""
 
     status: ImpersonationStatus
-    session_id: Any
-    next_entry: Any
-    handoff_path: Any
-    events_completed_at: Any
-    event_delivery_protocol_version: Any
-    event_delivery_pending_reason: Any
-    event_admission_closed_at: Any
-    ended_at: Any
-    accepted_generation: Any
-    accepted_owner: Any
-    ack_window_seconds: Any
-    agent_id: Any
-    applied_version: Any
-    delta_version: Any
-    expires_at: Any
-    handoff_applied_at: Any
-    id: Any
-    machine: Any
-    max_delivery_attempts: Any
-    relay_provider: Any
-    relay_generation: Any
-    relay_degraded_reason: Any
-    relay_token_hash: Any
-    process_metadata: Any
-    source: Any
-    summary_inbound_id: Any
-    summary: Any
-    rejection_reason: Any
-    ttl_seconds: Any
+    session_id: int
+    next_entry: int
+    handoff_path: str | None
+    events_completed_at: datetime | None
+    event_delivery_protocol_version: int | None
+    event_delivery_pending_reason: str | None
+    event_admission_closed_at: datetime | None
+    ended_at: datetime | None
+    accepted_generation: UUID | None
+    accepted_owner: UUID | None
+    ack_window_seconds: int
+    agent_id: int
+    applied_version: int
+    delta_version: int
+    expires_at: datetime
+    handoff_applied_at: datetime | None
+    id: UUID | str
+    machine: str
+    max_delivery_attempts: int
+    relay_provider: str | None
+    relay_generation: int
+    relay_degraded_reason: str | None
+    relay_token_hash: str | None
+    process_metadata: dict[str, Any]
+    source: str
+    summary_inbound_id: int | None
+    summary: str | None
+    rejection_reason: str | None
+    ttl_seconds: int
+
+
+def _is_lease_record(row: dict[str, object]) -> TypeGuard[LeaseRecord]:
+    return isinstance(row["status"], ImpersonationStatus)
 
 
 def parse_lease(row: dict[str, object]) -> LeaseRecord:
     """Validate only status as a raw SQL row enters lease lifecycle logic."""
-    row["status"] = ImpersonationStatus(row["status"])
-    return cast(LeaseRecord, row)
+    # meiva:note
+    # Invalid status strings or non-strings from untrusted DB rows must raise ValueError
+    # consistently across enum parsing and pre-enum guard checks.
+    raw_status = row["status"]
+    if not isinstance(raw_status, str):
+        raise ValueError(f"{raw_status!r} is not a valid ImpersonationStatus")  # noqa: TRY004
+    row["status"] = ImpersonationStatus(raw_status)
+    if _is_lease_record(row):
+        return row
+    raise TypeError("Lease status must be an ImpersonationStatus")
 
 
 # Wire version of the event log a lease records into its own entries (protocol v2).

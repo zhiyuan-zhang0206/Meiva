@@ -23,8 +23,6 @@ Reads use the process's constructed Settings domains. An unavailable domain
 fails explicitly; a read never constructs a second Settings image.
 """
 
-from typing import Any
-
 from base.config.config_registry import DOMAIN_ATTRS
 from base.host.env.config_lite_table import FIELD_DOMAINS, SENSITIVE_FIELDS
 
@@ -64,7 +62,7 @@ def validate_flag_key(key: str) -> str:
     return key
 
 
-def read_declared_flag(key: str, flags: tuple[str, ...]) -> Any:
+def read_declared_flag(key: str, flags: tuple[str, ...]) -> object:
     """Read a service's explicit pure-face Core dependency without an SDK registry.
 
     Secrets remain resources. Unavailable profile domains fail rather than

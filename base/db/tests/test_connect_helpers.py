@@ -19,7 +19,6 @@ import logging
 import os
 import subprocess
 import sys
-import threading
 import types
 from collections.abc import Iterator
 from pathlib import Path
@@ -203,13 +202,19 @@ def test_a_process_below_the_minimum_logs_critical_and_exits(
 
 def test_a_process_that_dials_before_opening_its_sinks_still_says_why(
     process_gate: gate.ProcessDbGate,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """loguru discards a record no handler receives; the refusal then goes to stderr."""
-    monkeypatch.setattr(gate, "has_log_sink", lambda: False)
-    with pytest.raises(_Exited):
-        process_gate.observe_minimum(_VERSION + 1)
+    # meiva:note
+    # Inspect loguru's internal handler table to simulate a process before sink setup.
+    core = getattr(loguru_logger, "_core")  # noqa: B009
+    handlers = dict(core.handlers)
+    core.handlers.clear()
+    try:
+        with pytest.raises(_Exited):
+            process_gate.observe_minimum(_VERSION + 1)
+    finally:
+        core.handlers.update(handlers)
     assert f"below the cluster minimum {_VERSION + 1}" in capsys.readouterr().err
 
 
@@ -547,68 +552,69 @@ def test_an_exempt_process_dials_as_the_cli_without_a_version(
 
 def test_independent_handles_and_async_restore_share_one_process_budget(
     monkeypatch: pytest.MonkeyPatch,
+    stored_minimum: int,
+    _gated_process: list[int],
 ) -> None:
     now = _clock(monkeypatch)
     owner = gate.ProcessDbGate(version=lambda: _VERSION, process="test-process")
-    original_connect = connections.psycopg.connect
-    test_thread = threading.current_thread()
-    restored: list[_FakeConn] = []
-
-    def dial(url: str, **kwargs: Any) -> Any:
-        if threading.current_thread() is not test_thread:
-            return original_connect(url, **kwargs)
-        conn = _FakeConn(minimum=0)
-        restored.append(conn)
-        return conn
-
-    monkeypatch.setattr(connections.psycopg, "connect", dial)
+    _set_minimum(_VERSION)
     first = Database.from_settings(gate=owner)
     second = Database.from_settings(gate=owner)
-    first.connect()
+    with first.connect() as conn:
+        row = conn.execute("SHOW application_name").fetchone()
+        assert row is not None and row[0] == f"meiva:test-process:v{_VERSION}"
+    _set_minimum(_VERSION + 1)
     now[0] += 29.9
-    second.connect()
+    with second.connect() as conn:
+        row = conn.execute("SHOW application_name").fetchone()
+        assert row is not None and row[0] == f"meiva:test-process:v{_VERSION}"
     # Refreshing a handle's config does not reset this process's clock.
-    Database.from_settings(gate=owner).connect()
-    assert [conn.executed[1][0] for conn in restored] == [
-        connections.PG_POOLED_RESTORE_WITH_MIN_SQL,
-        connections.PG_POOLED_BASELINE_RESTORE_SQL[1],
-        connections.PG_POOLED_BASELINE_RESTORE_SQL[1],
-    ]
-    assert all(len(conn.executed) == 2 and conn.commits == 1 for conn in restored)
-    assert all(conn.executed[1][1] == (f"meiva:test-process:v{_VERSION}",) for conn in restored)
+    with Database.from_settings(gate=owner).connect() as conn:
+        row = conn.execute("SHOW application_name").fetchone()
+        assert row is not None and row[0] == f"meiva:test-process:v{_VERSION}"
+    assert _gated_process == []
     now[0] += 0.1
-    first.connect()
-    assert restored[-1].executed[1][0] == connections.PG_POOLED_RESTORE_WITH_MIN_SQL
+    with pytest.raises(_Exited):
+        first.connect()
+    assert _gated_process == [CODE_BEHIND_MINIMUM_EXIT_CODE]
 
 
 async def test_sync_and_async_pool_callbacks_retain_the_same_gate(
     monkeypatch: pytest.MonkeyPatch,
+    stored_minimum: int,
+    _gated_process: list[int],
 ) -> None:
+    from psycopg_pool import AsyncConnectionPool
+
     now = _clock(monkeypatch)
     owner = gate.ProcessDbGate(version=lambda: _VERSION, process="test-process")
-
-    def pool_factory(_url: str, **kwargs: Any) -> Any:
-        return types.SimpleNamespace(**kwargs)
-
-    monkeypatch.setattr(connections, "ConnectionPool", pool_factory)
-    first: Any = Database.from_settings(gate=owner).pool()
-    pool_type: Any = pool_factory
-    second: Any = Database.from_settings(gate=owner).async_pool(
-        pool_type, min_size=1, max_size=2, timeout=1
+    _set_minimum(_VERSION)
+    first = Database.from_settings(gate=owner).pool(min_size=1, max_size=1)
+    second = Database.from_settings(gate=owner).async_pool(
+        AsyncConnectionPool, min_size=1, max_size=1, timeout=5
     )
-    sync_conn = _FakeConn(0)
-    first.configure(sync_conn)
-    first.check(sync_conn)
-    async_conn = _FakeAsyncConn(0)
-    await second.check(async_conn)
-    assert sync_conn.executed[1][0] == connections.PG_POOLED_RESTORE_WITH_MIN_SQL
-    assert sync_conn.executed[3][0] == connections.PG_POOLED_BASELINE_RESTORE_SQL[1]
-    assert async_conn.executed[1][0] == connections.PG_POOLED_BASELINE_RESTORE_SQL[1]
-    now[0] += 30
-    await second.check(async_conn)
-    assert async_conn.executed[3][0] == connections.PG_POOLED_RESTORE_WITH_MIN_SQL
-    first.check(sync_conn)
-    assert sync_conn.executed[5][0] == connections.PG_POOLED_BASELINE_RESTORE_SQL[1]
+    try:
+        await second.open(wait=True)
+        with first.connection() as conn:
+            row = conn.execute("SHOW application_name").fetchone()
+            assert row is not None and row[0] == f"meiva:test-process:v{_VERSION}"
+        now[0] += 30
+        async with second.connection() as aconn:
+            cur = await aconn.execute("SHOW application_name")
+            row = await cur.fetchone()
+            assert row is not None and row[0] == f"meiva:test-process:v{_VERSION}"
+        _set_minimum(_VERSION + 1)
+        with first.connection() as conn:
+            row = conn.execute("SHOW application_name").fetchone()
+            assert row is not None and row[0] == f"meiva:test-process:v{_VERSION}"
+        assert _gated_process == []
+        now[0] += 30
+        with pytest.raises(_Exited), first.connection():
+            pass
+        assert _gated_process == [CODE_BEHIND_MINIMUM_EXIT_CODE]
+    finally:
+        await second.close()
+        first.close()
     # A different process starts with an independent budget.
     other = gate.ProcessDbGate(version=lambda: _VERSION, process="other-process")
     assert other.min_read_due() is True

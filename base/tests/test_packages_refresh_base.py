@@ -9,8 +9,11 @@ from pathlib import Path
 
 import pytest
 
+from base import paths
 from base.packages.extensions import install_registry as reg
+from base.packages.plugins import manifest as plugin_manifest
 from base.paths.home import resolve_meiva_home
+from base.paths.tests.homes import point_home
 
 
 @pytest.fixture(autouse=True)
@@ -19,7 +22,7 @@ def _hermetic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     home = tmp_path / ".meiva"
     (home / "skills").mkdir(parents=True)
     (home / "logs").mkdir()
-    monkeypatch.setenv("MEIVA_HOME", str(home))
+    point_home(monkeypatch, home)
 
 
 def _home() -> Path:
@@ -93,7 +96,7 @@ def _manifest_for(name: str, **extra: object) -> dict[str, object]:
 
 
 def test_loadable_names_respect_the_host_contract(
-    core_repo: Path, monkeypatch: pytest.MonkeyPatch
+    core_repo: Path,
 ) -> None:
     from base.packages.extensions.install_registry import (
         host_contract_reason,
@@ -110,8 +113,9 @@ def test_loadable_names_respect_the_host_contract(
             (d / "meiva-plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
         reg.register(reg.InstalledPackage(name=name, type="skill", enabled=True))
 
-    head = _head(core_repo)
-    # a side-branch commit exists but is not an ancestor of main
+    head = _head(paths.repo_root())
+    # meiva:note
+    # A side-branch commit exists in core_repo but is not an ancestor of main.
     _git(core_repo, "checkout", "-qb", "side")
     (core_repo / "side.txt").write_text("side\n", encoding="utf-8")
     _git(core_repo, "add", "side.txt")
@@ -125,11 +129,9 @@ def test_loadable_names_respect_the_host_contract(
     skill("side", _manifest_for("side", requires_commit=side))
     skill("too_new", _manifest_for("too_new", engines={"meiva": ">=2099"}))
 
-    import base.paths as paths_mod
-
-    monkeypatch.setattr(paths_mod, "repo_root", lambda: core_repo)
     loadable = loadable_skill_names()
     assert "plain" in loadable and "ok" in loadable
     assert "future" not in loadable and "side" not in loadable and "too_new" not in loadable
     assert "unresolvable" in (host_contract_reason(home / "skills" / "future") or "")
-    assert "not an ancestor" in (host_contract_reason(home / "skills" / "side") or "")
+    side_errors = plugin_manifest.host_contract_errors_dir(home / "skills" / "side", repo=core_repo)
+    assert any("not an ancestor" in err for err in side_errors)

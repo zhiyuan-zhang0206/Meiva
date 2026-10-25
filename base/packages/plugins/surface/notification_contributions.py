@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TypeGuard
 
 IMPORTANCES = ("low", "normal", "high")
 
@@ -9,8 +9,21 @@ _FIELDS = frozenset(
 )
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 def _string(
-    entry: dict[str, Any], field: str, where: str, errors: list[str], *, default: str | None = None
+    entry: dict[str, object],
+    field: str,
+    where: str,
+    errors: list[str],
+    *,
+    default: str | None = None,
 ) -> str | None:
     value = entry.get(field, default)
     if not isinstance(value, str):
@@ -23,7 +36,7 @@ def _string(
 
 
 def _optional_fields(
-    entry: dict[str, Any], where: str, errors: list[str]
+    entry: dict[str, object], where: str, errors: list[str]
 ) -> dict[str, object] | None:
     importance = entry.get("importance", "normal")
     if importance not in IMPORTANCES:
@@ -61,17 +74,17 @@ def _optional_fields(
 def validate_notification_contributions(
     value: object, errors: list[str]
 ) -> list[dict[str, object]]:
-    if not isinstance(value, list):
+    if not _is_object_list(value):
         errors.append("contributions.notifications must be a list")
         return []
     parsed: list[dict[str, object]] = []
     seen: set[str] = set()
-    for index, raw in enumerate(cast(list[Any], value)):
+    for index, raw in enumerate(value):
         where = f"contributions.notifications[{index}]"
-        if not isinstance(raw, dict):
+        if not _is_object_dict(raw):
             errors.append(f"{where} must be an object")
             continue
-        entry = cast(dict[str, Any], raw)
+        entry = raw
         unknown = sorted(set(entry) - _FIELDS)
         if unknown:
             errors.append(f"{where}: unknown field {unknown[0]!r}")

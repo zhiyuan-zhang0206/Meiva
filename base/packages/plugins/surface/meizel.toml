@@ -11,13 +11,3 @@ exports = ["inspector.py", "notification_contributions.py", "stats.py", "ui_cont
 
 [debt.ambient-read]
 "stats.py#settings base.config.settings" = 1
-
-[debt.type-cast]
-"notification_contributions.py#cast validate_notification_contributions" = 2
-"ui_contributions.py#cast _entry_fields" = 1
-"ui_contributions.py#cast _validate_agent_inspect" = 1
-"ui_contributions.py#cast _validate_nav" = 1
-"ui_contributions.py#cast _validate_stats" = 1
-"ui_contributions.py#cast _validate_theme_tokens" = 1
-"ui_contributions.py#cast _validate_themes" = 1
-"ui_contributions.py#cast validate_ui_contributions" = 1

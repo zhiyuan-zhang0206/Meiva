@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from base import config
-from base.host.env.tests.env_files import use_env_files
+from base.paths.tests.homes import point_home
 
 _IDENTITY_LINES = [
     f"MEIVA_DB_URL={os.environ['MEIVA_DB_URL']}",
@@ -30,61 +30,24 @@ _IDENTITY_LINES = [
 
 
 @pytest.fixture(autouse=True)
-def restore_authority_env() -> Iterator[None]:
-    """`_enforce_cluster_env_authority` mutates os.environ directly (pop /
-    force-assign) — snapshot the keys it touches and restore them after each
-    test (same fixture as test_dotenv_boot.py)."""
-    from base.host.env.registry import (
-        agent_runner_cluster_aliases,
-        cluster_scope_aliases,
-        env_identity_keys,
-    )
-
-    touched = cluster_scope_aliases() | env_identity_keys() | agent_runner_cluster_aliases()
-    snapshot = {k: os.environ.get(k) for k in touched if k in os.environ}
-    yield
-    for key, val in snapshot.items():
-        if val is None:
-            os.environ.pop(key, None)
-        else:
-            os.environ[key] = val
-
-
-@pytest.fixture(autouse=True)
-def _restore_data_plane(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """The refresh mutates the process-global settings singleton; restore the
-    pre-test data-plane sub-model after each test."""
-    from base.config import settings
-
-    old = settings.data_plane
-    monkeypatch.setattr(settings, "env_boot", settings.env_boot)
-    yield
-    settings.data_plane = old
-
-
-@pytest.fixture(autouse=True)
-def _restore_env_after_refresh(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Restore os.environ after every refresh test.
-
-    `refresh_data_plane_settings` re-runs the boot env load, which writes the
-    fake unit's keys (the rotated Redis URL etc.) into os.environ for the rest
-    of the process. A later test that builds a fresh DataPlaneSettings from env
-    (base/tests/test_url_secret.py) would otherwise inherit them (observed
-    when the two files share a pytest worker)."""
+def _restore_env_and_data_plane() -> Iterator[None]:
+    """Restore os.environ and refresh the process-global data-plane sub-model
+    after every refresh test."""
     saved = dict(os.environ)
-    yield
-    os.environ.clear()
-    os.environ.update(saved)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+        config.refresh_data_plane_settings()
 
 
 def _point_env_at(monkeypatch: pytest.MonkeyPatch, env_text: str, tmp_path: Path) -> None:
-    env_file = tmp_path / "unit.env"
-    env_file.write_text(env_text)
-    merged = tmp_path / "merged.env"
+    merged = tmp_path / ".env"
     # meiva:note
     # The unit's own lines come last: a later duplicate key wins.
     merged.write_text("\n".join(_IDENTITY_LINES) + "\n" + env_text)
-    use_env_files(monkeypatch, merged)
+    point_home(monkeypatch, tmp_path)
 
 
 def _env_text(runtime_password: str) -> str:

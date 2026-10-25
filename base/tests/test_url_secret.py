@@ -20,12 +20,12 @@ from urllib.parse import unquote, urlsplit
 import pytest
 
 from base.cluster.machine.configured import ConfiguredMachineIdentity
-from base.config import DataPlaneSettings, settings
-from base.config.domains.storage import data_plane
+from base.config import DataPlaneSettings, get_field, set_field
 from base.config.domains.storage.data_plane import self_machine_host
 from base.config.tests.configuration import snapshot_process_config
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.net.url_secret import redacted_url, url_with_password, url_with_userinfo
+from base.paths.tests.homes import point_home
 
 _SECRET = "new-secret_v2"  # noqa: S105 — test fixture, not a real credential
 
@@ -174,7 +174,7 @@ class TestSettingsKeepDatabaseCredentialsVerbatim:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
-        monkeypatch.setattr(data_plane, "unit_home", lambda: Path.home() / ".meiva")
+        point_home(monkeypatch, Path.home() / ".meiva")
 
         with pytest.raises(ValueError, match="must receive a runner-class MEIVA_DB_URL"):
             _settings_with(
@@ -187,7 +187,7 @@ class TestSettingsKeepDatabaseCredentialsVerbatim:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
-        monkeypatch.setattr(data_plane, "unit_home", lambda: tmp_path / "test-home")
+        point_home(monkeypatch, tmp_path / "test-home")
 
         s = _settings_with(
             db_url=_pg("STALE", host="127.0.0.1:5432", user="meiva"),
@@ -214,7 +214,7 @@ class TestSettingsKeepDatabaseCredentialsVerbatim:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
-        monkeypatch.setattr(data_plane, "unit_home", lambda: Path.home() / ".meiva")
+        point_home(monkeypatch, Path.home() / ".meiva")
 
         s = _settings_with(
             db_url=_pg("delivered", host="127.0.0.1:5432", user="meiva_g4_runner"),
@@ -228,7 +228,7 @@ class TestSettingsKeepDatabaseCredentialsVerbatim:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
-        monkeypatch.setattr(data_plane, "unit_home", lambda: Path.home() / ".meiva")
+        point_home(monkeypatch, Path.home() / ".meiva")
 
         with pytest.raises(ValueError, match="must receive a runner-class MEIVA_DB_URL"):
             _settings_with(
@@ -279,13 +279,13 @@ def _restore_machine_env() -> Iterator[None]:
     monkeypatch.setenv on it is banned by the force-settings lint — but
     `self_machine_host` reads os.environ directly at sub-model construction time, so
     the tests set os.environ directly with explicit restore (the pattern of
-    base/config/tests/test_unit_home.py). MEIVA_HOME is not a Settings alias: the tests
-    set it with `monkeypatch.setenv`, which restores it (a bare assignment would leave
-    it behind for every later test in the worker)."""
+    base/config/tests/test_unit_home.py)."""
     saved = os.environ.get("MEIVA_MACHINE_HOST")
+    saved_field = get_field("machine_host")
     try:
         yield
     finally:
+        set_field("machine_host", saved_field)
         if saved is None:
             os.environ.pop("MEIVA_MACHINE_HOST", None)
         else:
@@ -304,7 +304,7 @@ class TestSelfHostDialsLoopback:
     def _isolate(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_host: str | None
     ) -> None:
-        monkeypatch.setenv("MEIVA_HOME", str(tmp_path))  # a home with no `.env`
+        point_home(monkeypatch, tmp_path)  # a home with no `.env`
         if machine_host is None:
             os.environ.pop("MEIVA_MACHINE_HOST", None)
         else:
@@ -459,17 +459,18 @@ class TestSelfMachineHostParity:
     def _pin(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, env: str | None
     ) -> ConfiguredMachineIdentity:
+        # meiva:note
         # The two resolvers read different surfaces of the same sources:
         # self_machine_host reads os.environ at construction time; reachable_host
         # reads the settings singleton (machine_host / meiva_home fields). Pin both
         # surfaces to the same values so the assertion compares precedence only.
-        monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+        point_home(monkeypatch, tmp_path)
         if env is None:
             os.environ.pop("MEIVA_MACHINE_HOST", None)
-            monkeypatch.setattr(settings.general, "machine_host", "")
+            set_field("machine_host", "")
         else:
             os.environ["MEIVA_MACHINE_HOST"] = env
-            monkeypatch.setattr(settings.general, "machine_host", env)
+            set_field("machine_host", env)
         return ConfiguredMachineIdentity(snapshot_process_config())
 
     def test_env_wins(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

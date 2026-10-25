@@ -36,13 +36,3 @@ exports = ["agent_env.py", "agent_slices.py", "boot_policy.py", "bootstrap.py", 
 "agent_slices.py#any AgentSlices.read.return" = 1
 "agent_slices.py#any _value.return" = 1
 "agent_slices.py#any agent_setting.return" = 1
-
-[debt.type-cast]
-"agent_slices.py#cast _value" = 1
-"boot_policy.py#cast validated_bootstrap_payload" = 1
-"bootstrap.py#cast cluster_plugin_config_values" = 2
-"bootstrap.py#cast read_config_snapshot" = 1
-"config_lite_table.py#cast <module>" = 8
-"config_lite_table.py#cast _read_index" = 2
-"port_lease.py#cast _body" = 1
-"port_lease.py#cast _ports_from" = 1

@@ -22,20 +22,39 @@ from collections.abc import Mapping
 from contextlib import ExitStack
 from threading import Lock, local
 from types import TracebackType
-from typing import Any, Self, cast
+from typing import Any, Protocol, Self, TypeGuard
 
 from base.agents.context.external_attachment.identity import AttachmentCodec, IdentitySource
+from base.agents.context.external_attachment.state_schema import BaseAgentState
 from base.log import logger
+from base.telemetry import Event
 
 _attachment_lock = Lock()
 _close_flush_permission = local()
+
+
+class _TelemetryDrainResult(Protocol):
+    @property
+    def status(self) -> object: ...
+
+
+class _TelemetryClients(Protocol):
+    def sync_events(self, timeout: float = 5.0) -> _TelemetryDrainResult: ...
+
+    def finalize_events(self) -> None: ...
+
+    def close(self) -> None: ...
 
 
 def _close_flush_permitted() -> bool:
     return bool(getattr(_close_flush_permission, "allowed", False))
 
 
-def _deliver_telemetry_before_detach(*, clients: Any) -> None:
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
+def _deliver_telemetry_before_detach(*, clients: _TelemetryClients) -> None:
     if "base.telemetry" not in sys.modules:
         return
     from base import telemetry
@@ -62,7 +81,7 @@ def _deliver_telemetry_before_detach(*, clients: Any) -> None:
 
 
 class ExternalAttachment:
-    def __init__(self, *, identity: IdentitySource, codec: AttachmentCodec) -> None:
+    def __init__(self, *, identity: IdentitySource, codec: AttachmentCodec[BaseAgentState]) -> None:
         self.identity = identity
         self._codec = codec
         self._closed = False
@@ -76,7 +95,7 @@ class ExternalAttachment:
         self._state_cls: type[Any]
         self._state: Any = None
 
-    def open(self, prior_context: Any) -> None:
+    def open(self, prior_context: object) -> None:
         self._prior_context = prior_context
         if not _attachment_lock.acquire(blocking=False):
             raise RuntimeError("this process already has an external attachment")
@@ -113,13 +132,13 @@ class ExternalAttachment:
     ) -> None:
         raise NotImplementedError
 
-    def _applied_version(self, _state: Any, lease: Mapping[str, Any]) -> int:
+    def _applied_version(self, _state: BaseAgentState, lease: Mapping[str, Any]) -> int:
         return int(lease["applied_version"])
 
-    def _set_state(self, state: Any) -> None:
+    def _set_state(self, state: BaseAgentState) -> None:
         raise NotImplementedError
 
-    def _state_update(self) -> Any:
+    def _state_update(self) -> object:
         raise NotImplementedError
 
     def _clear_state_update(self) -> None:
@@ -135,12 +154,12 @@ class ExternalAttachment:
         with self._call_lock:
             self._closing = True
 
-    def native_snapshot(self) -> Any:
+    def native_snapshot(self) -> BaseAgentState:
         self._validate()
         snapshot, _overlay, _birth = self._codec.load_snapshot(self.identity.agent_id())
         return snapshot
 
-    def admit_sdk_call(self) -> Any:
+    def admit_sdk_call(self) -> object:
         with self._call_lock:
             if self._closed or self._closing:
                 raise RuntimeError("external attachment is closing or closed")
@@ -154,7 +173,7 @@ class ExternalAttachment:
                 self._validate()
                 return gate.admit()
 
-    def capture_local_event(self, event: Any) -> Any:
+    def capture_local_event(self, event: Event) -> Event:
         return event
 
     def _validate(self) -> int:
@@ -168,11 +187,10 @@ class ExternalAttachment:
             raise RuntimeError("external attachment is closing")
         self._validate()
         raw_update = self._state_update()
-        if not isinstance(raw_update, dict):
+        if not _is_str_dict(raw_update):
             raise TypeError("external plugin state update must be a dict")
-        update = cast("dict[str, Any]", raw_update)
-        if update:
-            encoded = self._codec.encode_plugin_delta(update, self._state_cls)
+        if raw_update:
+            encoded = self._codec.encode_plugin_delta(raw_update, self._state_cls)
             self.identity.merge_delta(encoded, expected_version=self.identity.delta_version())
             self._clear_state_update()
 
@@ -215,7 +233,7 @@ class ExternalAttachment:
             return
         _deliver_telemetry_before_detach(clients=clients)
 
-    def _telemetry_clients(self) -> Any:
+    def _telemetry_clients(self) -> _TelemetryClients | None:
         return self._own_clients
 
     def _detach(self) -> None:

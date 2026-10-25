@@ -226,9 +226,8 @@ def test_cluster_default_iff_per_agent() -> None:
     for name, field in FIELD_INFOS.items():
         extra = field.json_schema_extra
         assert isinstance(extra, dict), f"{name}: json_schema_extra must be a dict"
-        is_default = extra.get("scope") == "cluster-default"  # pyright: ignore[reportUnknownMemberType]
         is_per_agent = extra.get("per_agent") is True  # pyright: ignore[reportUnknownMemberType]
-        if is_default:
+        if extra.get("scope") == "cluster-default":  # pyright: ignore[reportUnknownMemberType]
             assert is_per_agent, (
                 f"{name}: scope=cluster-default but per_agent is not True — "
                 "a cluster-default Settings field must be marked per_agent=True"

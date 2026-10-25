@@ -5,7 +5,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from base import paths
 from base.host.git import host_version as host_version_module
@@ -146,21 +146,26 @@ class PluginManifest:
     requires_commit: str | None = None
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
+def _is_any_list(value: object) -> TypeGuard[list[Any]]:
+    return isinstance(value, list)
+
+
 def _str_list(value: object, what: str, errors: list[str]) -> list[str] | None:
-    if not isinstance(value, list):
+    if not _is_any_list(value):
         errors.append(f"{what}: expected a list of non-empty strings")
         return None
-    values = cast(list[Any], value)
-    items = [v for v in values if isinstance(v, str) and v]
-    if len(items) != len(values):
+    items = [v for v in value if isinstance(v, str) and v]
+    if len(items) != len(value):
         errors.append(f"{what}: expected a list of non-empty strings")
         return None
     return items
 
 
-def _validate_identity(
-    data: dict[str, Any], errors: list[str]
-) -> tuple[str | None, str | None, str | None]:
+def _validate_identity(data: dict[str, Any], errors: list[str]) -> tuple[str, str, str | None]:
     known = {
         "apiVersion",
         "name",
@@ -196,11 +201,15 @@ def _validate_identity(
     description = data.get("description")
     if description is not None and not isinstance(description, str):
         errors.append("description must be a string")
-    return name, version, description
+    return (
+        name if isinstance(name, str) else "",
+        version if isinstance(version, str) else "",
+        description if isinstance(description, str) else None,
+    )
 
 
 def _validate_engines(data: dict[str, Any], errors: list[str]) -> dict[str, str]:
-    engines = cast(dict[str, Any] | None, data.get("engines"))
+    engines: dict[str, Any] | None = data.get("engines")
     parsed: dict[str, str] = {}
     if engines is None:
         if data.get("requires_commit") is None:
@@ -239,11 +248,11 @@ def _validate_requires_commit(data: dict[str, Any], errors: list[str]) -> str | 
 
 
 def _config_contribution(value: object, errors: list[str]) -> dict[str, object] | None:
-    if not isinstance(value, dict):
+    if not _is_str_dict(value):
         errors.append("contributions.config must be an object {schema?, perAgentFields?}")
         return None
     cfg: dict[str, object] = {}
-    for ckey, cval in cast(dict[str, Any], value).items():
+    for ckey, cval in value.items():
         if ckey not in ("schema", "perAgentFields"):
             errors.append(f"contributions.config: unknown field {ckey!r}")
         elif ckey == "schema" and not isinstance(cval, str):
@@ -267,7 +276,7 @@ def _check_hook_points(hooks: list[str], errors: list[str]) -> None:
 
 
 def _validate_contributions(data: dict[str, Any], errors: list[str]) -> dict[str, object]:
-    contributions = cast(dict[str, Any] | None, data.get("contributions"))
+    contributions: dict[str, Any] | None = data.get("contributions")
     parsed: dict[str, object] = {}
     if contributions is None:
         return parsed
@@ -296,7 +305,7 @@ def _validate_contributions(data: dict[str, Any], errors: list[str]) -> dict[str
 
 
 def _validate_plugins(dependencies: dict[str, Any], errors: list[str]) -> dict[str, str]:
-    plugins = cast(dict[str, Any] | None, dependencies.get("plugins"))
+    plugins: dict[str, Any] | None = dependencies.get("plugins")
     parsed: dict[str, str] = {}
     if plugins is None:
         return parsed
@@ -317,7 +326,7 @@ def _validate_plugins(dependencies: dict[str, Any], errors: list[str]) -> dict[s
 
 
 def _validate_python_packages(dependencies: dict[str, Any], errors: list[str]) -> dict[str, str]:
-    packages = cast(list[Any] | None, dependencies.get("pythonPackages"))
+    packages: list[Any] | None = dependencies.get("pythonPackages")
     parsed: dict[str, str] = {}
     if packages is None:
         return parsed
@@ -365,7 +374,7 @@ def _validate_python_packages(dependencies: dict[str, Any], errors: list[str]) -
 
 
 def _validate_host_capabilities(dependencies: dict[str, Any], errors: list[str]) -> dict[str, str]:
-    host_caps = cast(dict[str, Any] | None, dependencies.get("hostCapabilities"))
+    host_caps: dict[str, Any] | None = dependencies.get("hostCapabilities")
     parsed: dict[str, str] = {}
     if host_caps is None:
         return parsed
@@ -386,7 +395,7 @@ def _validate_host_capabilities(dependencies: dict[str, Any], errors: list[str])
 
 
 def _validate_dependencies(data: dict[str, Any], errors: list[str]) -> Dependencies:
-    dependencies = cast(dict[str, Any] | None, data.get("dependencies"))
+    dependencies: dict[str, Any] | None = data.get("dependencies")
     if dependencies is None:
         return Dependencies(plugins={}, python_packages={}, host_capabilities={})
     for dkey in dependencies:
@@ -400,7 +409,7 @@ def _validate_dependencies(data: dict[str, Any], errors: list[str]) -> Dependenc
 
 
 def _validate_lifecycle(data: dict[str, Any], errors: list[str]) -> Lifecycle:
-    lifecycle = cast(dict[str, Any] | None, data.get("lifecycle"))
+    lifecycle: dict[str, Any] | None = data.get("lifecycle")
     if lifecycle is None:
         return Lifecycle(entry=None, activation="immediate", dispose="effect-registry")
     for lkey in lifecycle:
@@ -436,8 +445,8 @@ def validate(data: dict[str, Any]) -> PluginManifest:
     if errors:
         raise ManifestError("\n".join(f"- {e}" for e in errors))
     return PluginManifest(
-        name=cast(str, name),
-        version=cast(str, version),
+        name=name,
+        version=version,
         engines=parsed_engines,
         description=description,
         contributions=parsed_contributions,
@@ -463,10 +472,10 @@ def load_manifest(pkg_dir: Path) -> PluginManifest:
     except OSError as e:
         raise ManifestError(f"cannot read {path}: {e}") from e
     try:
-        data = cast(dict[str, Any], json.loads(raw))
+        data = json.loads(raw)
     except json.JSONDecodeError as e:
         raise ManifestError(f"{path} is not valid JSON: {e}") from e
-    if not isinstance(data, dict):
+    if not _is_str_dict(data):
         raise ManifestError(f"{path}: manifest must be a JSON object; got {type(data).__name__}")
     return validate(data)
 

@@ -3,7 +3,7 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from pydantic import BaseModel, ValidationError
 
@@ -152,6 +152,10 @@ def _default_config(known_plugins: set[str]) -> PluginsConfig:
     )
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 @dataclass(frozen=True)
 class PluginEnableStore:
     # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
@@ -165,9 +169,9 @@ class PluginEnableStore:
             return None
         raw = p.read_text()
         data = json.loads(raw if raw.strip() else "{}")
-        if not isinstance(data, dict):
+        if not _is_str_dict(data):
             raise PluginsConfigError(f"{p}: expected a JSON object, got {type(data).__name__}")
-        return cast("dict[str, Any]", data)
+        return data
 
     def write(self, raw: dict[str, Any]) -> None:
         # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md

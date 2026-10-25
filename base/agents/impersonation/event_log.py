@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -34,7 +34,7 @@ MAX_LOG_ENTRIES = 100_000
 CENTRAL_SOURCE = "central"
 
 
-def event_item(event: Event) -> tuple[str, str, str, object]:
+def event_item(event: Event) -> tuple[str, str, str, datetime]:
     """Return the event's stable key, full-byte digest, entry kind and timestamp."""
     line = event_line(event)
     timestamp_ns = int(event.ts.timestamp() * 1_000_000_000)
@@ -50,7 +50,10 @@ def locked_receipt_state(conn: psycopg.Connection, lease_id: str, source_key: st
     ).fetchone()
     if row is None:
         raise RuntimeError("Receipt lock function returned no row")
-    return cast(str | None, row[0])
+    state = row[0]
+    if state is not None and not isinstance(state, str):
+        raise TypeError("Receipt lock state must be a string or None")
+    return state
 
 
 def append_source_event(
@@ -83,7 +86,7 @@ def append_source_event(
         kind,
         payload,
         event_key=key,
-        created_at=cast(datetime, timestamp),
+        created_at=timestamp,
         source_key=source_key,
     )
 

@@ -7,9 +7,6 @@ exports = ["daemon_shutdown.py", "daemon_shutdown_child.py", "short_tmp.py"]
 
 [debt.first-party-patch]
 "test_private_storage.py#monkeypatch.setattr base.host.private_storage.is_foreign_owned" = 1
-"test_private_storage.py#monkeypatch.setattr base.host.private_storage.logger" = 1
-"test_private_storage.py#monkeypatch.setattr base.host.private_storage.os.fsync" = 1
-"test_private_storage.py#monkeypatch.setattr base.host.private_storage.os.replace" = 2
 "test_private_storage.py#patch.object base.host.private_storage.is_foreign_owned" = 1
 "test_proc.py#monkeypatch.setattr base.host.proc.capture_tree" = 2
 "test_proc.py#monkeypatch.setattr base.host.proc.wait_owned" = 1
@@ -17,9 +14,6 @@ exports = ["daemon_shutdown.py", "daemon_shutdown_child.py", "short_tmp.py"]
 "test_proc.py#monkeypatch.setattr base.native_process.ownership.pidfd.open_process" = 1
 "test_proc.py#monkeypatch.setattr base.native_process.ownership.pidfd.send_signal" = 1
 "test_proc.py#monkeypatch.setattr base.native_process.ownership.sys" = 1
-
-[debt.patch-raising-false]
-"test_private_storage.py#monkeypatch.setattr base.host.private_storage.logger" = 1
 
 [debt.restricted-python]
 "test_proc.py#python -c" = 9

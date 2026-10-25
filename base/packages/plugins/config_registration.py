@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from pydantic import BaseModel, ValidationError
 from pydantic.fields import FieldInfo
@@ -101,6 +101,10 @@ def _instantiate_from_disk(owner: ConfigImage) -> BaseModel:
     return with_cluster_policy(owner.name, config_from_image(owner.cls, owner.read(), owner.path))
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 def _reconcile_config_image[C: BaseModel](
     cls: type[C], content: str | None, config_path: Path
 ) -> tuple[C, set[str], set[str]]:
@@ -110,9 +114,8 @@ def _reconcile_config_image[C: BaseModel](
         data = json.loads(content)
     except json.JSONDecodeError as exc:
         raise InvalidConfigData(f"plugin disk image JSON malformed ({config_path}): {exc}") from exc
-    if not isinstance(data, dict):
+    if not _is_str_dict(data):
         raise InvalidConfigData(f"plugin config disk image must be a JSON object ({config_path})")
-    data = cast("dict[str, object]", data)
     disk_keys = set(data)
     cls_keys = set(cls.model_fields)
     defaults = cls().model_dump(mode="json")
@@ -154,7 +157,7 @@ def merge_disk_image_schema(owner: ConfigImage) -> tuple[set[str], set[str]]:
 
 def _schema_extra(info: FieldInfo) -> dict[str, Any]:
     extra = info.json_schema_extra
-    return cast("dict[str, Any]", extra) if isinstance(extra, dict) else {}
+    return extra if _is_str_dict(extra) else {}
 
 
 def _per_agent_fields_for(cls: type[BaseModel]) -> set[str]:

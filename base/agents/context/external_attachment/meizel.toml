@@ -2,7 +2,7 @@ exports = ["core.py", "nodes.py", "plugin_state_codec.py", "state_channels.py", 
 
 [uses]
 "__init__.py" = ["core.py", "identity.py"]
-"core.py" = ["identity.py"]
+"core.py" = ["identity.py", "state_schema.py"]
 "identity.py" = []
 "plugin_state_codec.py" = ["state_schema.py"]
 "state_channels.py" = ["nodes.py"]
@@ -12,34 +12,3 @@ exports = ["core.py", "nodes.py", "plugin_state_codec.py", "state_channels.py", 
 "identity.py" = "strict"
 "nodes.py" = "strict"
 "state_channels.py" = "strict"
-
-[debt.any-collaborator]
-"core.py#any ExternalAttachment._applied_version._state" = 1
-"core.py#any ExternalAttachment._set_state.state" = 1
-"core.py#any ExternalAttachment._state_update.return" = 1
-"core.py#any ExternalAttachment._telemetry_clients.return" = 1
-"core.py#any ExternalAttachment.admit_sdk_call.return" = 1
-"core.py#any ExternalAttachment.capture_local_event.event" = 1
-"core.py#any ExternalAttachment.capture_local_event.return" = 1
-"core.py#any ExternalAttachment.native_snapshot.return" = 1
-"core.py#any ExternalAttachment.open.prior_context" = 1
-"core.py#any _deliver_telemetry_before_detach.clients" = 1
-"identity.py#any AttachmentCodec.apply_plugin_delta.delta" = 1
-"identity.py#any AttachmentCodec.apply_plugin_delta.state" = 1
-"identity.py#any AttachmentCodec.decode_plugin_delta.return" = 1
-"identity.py#any AttachmentCodec.plugin_state_schema.return" = 1
-"identity.py#any AttachmentCodec.plugin_state_schema.state" = 1
-"plugin_state_codec.py#any apply_plugin_delta.state" = 1
-"state_schema.py#any accumulate_delta.acc" = 1
-"state_schema.py#any accumulate_delta.new" = 1
-"state_schema.py#any accumulate_delta.return" = 1
-"state_schema.py#any is_messages_reducer_form.m" = 1
-"state_schema.py#any messages_annotation_key.annotation" = 1
-
-[debt.type-cast]
-"core.py#cast ExternalAttachment._flush" = 1
-"plugin_state_codec.py#cast _validate_messages_delta" = 1
-"plugin_state_codec.py#cast apply_plugin_delta" = 2
-"plugin_state_codec.py#cast decode_plugin_delta" = 1
-"plugin_state_codec.py#cast load_snapshot" = 2
-"state_schema.py#cast accumulate_delta" = 2
