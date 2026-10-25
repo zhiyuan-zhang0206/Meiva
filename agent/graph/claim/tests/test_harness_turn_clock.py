@@ -144,9 +144,11 @@ async def test_interrupt_keeps_tool_messages_without_a_finish_instant() -> None:
 
     assert halted["harness_cursor"] == 4
     messages = halted["messages"]
-    assert isinstance(messages, list) and len(messages) == 2
-    assert isinstance(messages[1], ToolMessage)
-    assert messages[1].tool_call_id == "call"
+    assert isinstance(messages, list)
+    items: list[object] = messages
+    assert len(items) == 2
+    assert isinstance(items[1], ToolMessage)
+    assert items[1].tool_call_id == "call"
 
 
 async def test_backward_time_still_clamps_execution_duration() -> None:
