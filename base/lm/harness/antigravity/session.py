@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import Any, cast
+from typing import Any
 
 from base.host.env.harness_binaries import resolve_harness_binary
 from base.lm.harness.antigravity.config import AntigravityConfig
 from base.lm.harness.antigravity.mapping import (
+    JsonPayload,
     assistant_text,
     map_init,
     map_step_update,
@@ -262,10 +263,10 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if ticket is None:
             return
         if name == "step_update":
-            raw = payload.get("step_update")
+            raw: JsonPayload = payload.get("step_update")
             if not isinstance(raw, dict):
                 return
-            update = cast("dict[str, Any]", raw)
+            update: dict[str, Any] = raw
             self._accumulate(update)
             for event in map_step_update(update, turn_id=ticket.turn_id):
                 self._emit(event)
@@ -298,8 +299,8 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         bucket = self._step_text.pop(index if isinstance(index, int) else 0, [])
         return "".join(bucket).strip()
 
-    def _handle_result(self, payload: Any, ticket: TurnTicket) -> None:
-        fields = parse_result(cast("dict[str, Any]", payload) if isinstance(payload, dict) else {})
+    def _handle_result(self, payload: JsonPayload, ticket: TurnTicket) -> None:
+        fields = parse_result(payload if isinstance(payload, dict) else {})
         text = fields.text.strip() or "".join(ticket.parts).strip()
         outcome = TurnOutcome(
             turn_id=ticket.turn_id,

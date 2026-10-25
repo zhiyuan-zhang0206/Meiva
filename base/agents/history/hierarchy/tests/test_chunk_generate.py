@@ -22,19 +22,18 @@ from base.agents.history.hierarchy.generate import GenerateError
 from base.agents.history.hierarchy.leaf_groups import UnitGroup
 from base.agents.history.hierarchy.units import divide_units
 from base.agents.messages.timestamp_policy import TimestampPolicy
-from base.clock import Clock
-from base.config import settings
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.lm.catalog import ModelCatalog
 
-_TIMELINE_INPUTS = TimestampPolicy.from_clock(
-    Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
+_CLOCK = Clock(
+    ClockConfig(
+        timezone="Asia/Shanghai",
+        authoritative_timezone="Asia/Shanghai",
+        message_timestamp_weekday=False,
+    ),
+    timers=SYSTEM_TIMERS,
 )
-
-
-@pytest.fixture(autouse=True)
-def _cluster_clock(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
-    monkeypatch.setattr(settings.general, "message_timestamp_weekday", False)
+_TIMELINE_INPUTS = TimestampPolicy.from_clock(_CLOCK, timestamps_enabled=True)
 
 
 def _inbound(text: str, at: str | None = "2026-10-05T03:04:05+00:00") -> HumanMessage:

@@ -33,18 +33,31 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Generator, Mapping, Sequence
-from contextlib import aclosing, closing, contextmanager
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Callable,
+    Generator,
+    Iterator,
+    Mapping,
+    Sequence,
+)
+from contextlib import contextmanager
 from copy import copy, deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from langchain_core.messages import BaseMessage, RemoveMessage, convert_to_messages
 from langchain_core.messages.utils import message_chunk_to_message
 from langchain_core.runnables import RunnableConfig
 from langgraph._internal._typing import MISSING
 from langgraph.channels.delta import DeltaChannel
-from langgraph.checkpoint.base import CheckpointTuple
+from langgraph.checkpoint.base import (
+    ChannelVersions,
+    Checkpoint,
+    CheckpointMetadata,
+    CheckpointTuple,
+)
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
@@ -100,10 +113,10 @@ class RecoveryReconstructionScope:
         if not self.active:
             raise RuntimeError("checkpoint recovery scope has ended")
         view = copy(self.saver)
-        read = cast("Callable[..., Awaitable[CheckpointTuple | None]]", self.saver.aget_tuple)
 
         async def aget_tuple(config: RunnableConfig) -> CheckpointTuple | None:
-            return await read(config, reconstruction=self)
+            fn: Callable[..., Any] = self.saver.aget_tuple
+            return await fn(config, reconstruction=self)
 
         def get_tuple(config: RunnableConfig) -> CheckpointTuple | None:
             return AsyncPostgresSaver.get_tuple(view, config)
@@ -119,7 +132,9 @@ class RecoveryReconstructionScope:
 
 
 def _invalidate_recovery_scopes(saver: AsyncPostgresSaver, thread_id: str) -> None:
-    scopes = cast("dict[str, set[RecoveryReconstructionScope]]", saver._meiva_recovery_scopes)  # type: ignore[attr-defined]
+    scopes: dict[str, set[RecoveryReconstructionScope]] = getattr(
+        saver, "_meiva_recovery_scopes", {}
+    )
     for scope in scopes.get(thread_id, ()):
         scope.invalidate()
 
@@ -133,19 +148,29 @@ def _install_recovery_invalidation(saver: AsyncPostgresSaver) -> None:
     orig_aput_writes = saver.aput_writes
     orig_flush = getattr(saver, "_meiva_nstep_flush", None)
 
-    async def aput(config: RunnableConfig, *args: Any, **kwargs: Any) -> Any:
+    async def aput(
+        config: RunnableConfig,
+        checkpoint: Checkpoint,
+        metadata: CheckpointMetadata,
+        new_versions: ChannelVersions,
+    ) -> RunnableConfig:
         thread_id = str(config["configurable"]["thread_id"])  # pyright: ignore[reportTypedDictNotRequiredAccess]
         _invalidate_recovery_scopes(saver, thread_id)
         try:
-            return await orig_aput(config, *args, **kwargs)
+            return await orig_aput(config, checkpoint, metadata, new_versions)
         finally:
             _invalidate_recovery_scopes(saver, thread_id)
 
-    async def aput_writes(config: RunnableConfig, *args: Any, **kwargs: Any) -> Any:
+    async def aput_writes(
+        config: RunnableConfig,
+        writes: Sequence[tuple[str, Any]],
+        task_id: str,
+        task_path: str = "",
+    ) -> None:
         thread_id = str(config["configurable"]["thread_id"])  # pyright: ignore[reportTypedDictNotRequiredAccess]
         _invalidate_recovery_scopes(saver, thread_id)
         try:
-            return await orig_aput_writes(config, *args, **kwargs)
+            await orig_aput_writes(config, writes, task_id, task_path)
         finally:
             _invalidate_recovery_scopes(saver, thread_id)
 
@@ -186,7 +211,9 @@ def recovery_reconstruction_scope(
         return
     _install_recovery_invalidation(saver)
     scope = RecoveryReconstructionScope(saver=saver, thread_id=thread_id)
-    scopes = cast("dict[str, set[RecoveryReconstructionScope]]", saver._meiva_recovery_scopes)  # type: ignore[attr-defined]
+    scopes: dict[str, set[RecoveryReconstructionScope]] = getattr(
+        saver, "_meiva_recovery_scopes", {}
+    )
     if scopes.get(thread_id):
         raise RuntimeError(f"concurrent checkpoint recovery for thread {thread_id}")
     scopes.setdefault(thread_id, set()).add(scope)
@@ -214,7 +241,9 @@ def _coerce_group(group: Sequence[Any]) -> list[BaseMessage] | None:
         return None
 
 
-def _fast_append(state: Any, groups: Sequence[list[BaseMessage]]) -> list[BaseMessage] | None:
+def _fast_append(
+    state: list[BaseMessage] | list[Any] | object, groups: Sequence[list[BaseMessage]]
+) -> list[BaseMessage] | None:
     """Append-only fast path: no removals, every id fresh and present.
 
     Value-identical to per-write `add_messages` application for this shape
@@ -225,10 +254,13 @@ def _fast_append(state: Any, groups: Sequence[list[BaseMessage]]) -> list[BaseMe
     """
     if state is MISSING:
         base: list[BaseMessage] = []
-    elif isinstance(state, list) and all(
-        isinstance(m, BaseMessage) and m.id is not None for m in cast("list[Any]", state)
-    ):
-        base = cast("list[BaseMessage]", state)
+    elif isinstance(state, list):
+        items: list[Any] = [*state]
+        base = []
+        for m in items:
+            if not isinstance(m, BaseMessage) or m.id is None:
+                return None
+            base.append(m)
     else:
         return None
     seen = {m.id for m in base}
@@ -245,7 +277,9 @@ def _fast_append(state: Any, groups: Sequence[list[BaseMessage]]) -> list[BaseMe
     return [*base, *flat]
 
 
-def fold_messages(state: Any, writes: Sequence[Any]) -> Any:
+def fold_messages(
+    state: list[BaseMessage] | list[Any] | object, writes: Sequence[Any]
+) -> list[BaseMessage]:
     """`DeltaChannel` reducer: fold stored write values into the message list.
 
     Each write is a list of message-likes (or one message-like). Append-only
@@ -275,13 +309,14 @@ def fold_history(entry: Mapping[str, Any]) -> list[BaseMessage]:
     )
     channel.replay_writes(entry["writes"])
     try:
-        return cast("list[BaseMessage]", normalize_stored_message_ids(channel.get()))
+        messages: list[BaseMessage] = normalize_stored_message_ids(channel.get())
+        return messages
     except EmptyChannelError:
         return []
 
 
 def _repair_kind(
-    checkpoint: Mapping[str, Any], metadata: Mapping[str, Any]
+    checkpoint: Checkpoint, metadata: Mapping[str, Any]
 ) -> Literal["snapshot", "walk"] | None:
     """Which reconstruction (if any) this checkpoint needs, per module docstring."""
     stored = checkpoint["channel_values"].get("messages", MISSING)
@@ -306,19 +341,23 @@ def _exact_config(tuple_: CheckpointTuple) -> RunnableConfig:
     configurable: dict[str, Any] = dict(tuple_.config.get("configurable") or {})
     configurable.setdefault("checkpoint_id", tuple_.checkpoint["id"])
     configurable.setdefault("checkpoint_ns", "")
-    return cast("RunnableConfig", {"configurable": configurable})
+    config: RunnableConfig = {"configurable": configurable}
+    return config
 
 
 def _apply_reconstruction(
-    checkpoint: dict[str, Any],
+    checkpoint: Checkpoint,
     kind: Literal["snapshot", "walk"],
     entry: Mapping[str, Any] | None,
     span: ReadSpan,
 ) -> bool:
     """Replace a delta checkpoint's messages value with its plain equivalent."""
     if kind == "snapshot":
-        snapshot = cast("_DeltaSnapshot", checkpoint["channel_values"]["messages"])
-        checkpoint["channel_values"]["messages"] = cast("list[BaseMessage]", snapshot.value)
+        stored = checkpoint["channel_values"]["messages"]
+        if not isinstance(stored, _DeltaSnapshot):
+            raise TypeError(f"expected _DeltaSnapshot, got {type(stored).__name__}")
+        messages: list[BaseMessage] = stored.value
+        checkpoint["channel_values"]["messages"] = messages
         return True
     if entry is None or (not entry["writes"] and "seed" not in entry):
         raise RuntimeError("delta checkpoint messages history is missing")
@@ -332,7 +371,10 @@ def _apply_reconstruction(
 
 
 def reconstruct_delta_messages(
-    checkpointer: PostgresSaver, tuple_: CheckpointTuple, *, span: ReadSpan | None = None
+    checkpointer: PostgresSaver | AsyncPostgresSaver,
+    tuple_: CheckpointTuple,
+    *,
+    span: ReadSpan | None = None,
 ) -> bool:
     """Materialize a delta-written checkpoint's `messages` value, in place.
 
@@ -341,7 +383,7 @@ def reconstruct_delta_messages(
     call for a stored `_DeltaSnapshot` (which is unwrapped, not folded).
     """
     span = span or ReadSpan()
-    checkpoint = cast("dict[str, Any]", tuple_.checkpoint)
+    checkpoint = tuple_.checkpoint
     normalize_checkpoint_message_ids(tuple_)
     kind = _repair_kind(checkpoint, tuple_.metadata or {})
     if kind is None:
@@ -370,7 +412,7 @@ async def areconstruct_delta_messages(
 ) -> bool:
     """Async twin of `reconstruct_delta_messages`."""
     span = span or ReadSpan()
-    checkpoint = cast("dict[str, Any]", tuple_.checkpoint)
+    checkpoint = tuple_.checkpoint
     normalize_checkpoint_message_ids(tuple_)
     kind = _repair_kind(checkpoint, tuple_.metadata or {})
     if kind is None:
@@ -419,7 +461,7 @@ async def areconstruct_in_recovery(
     )
     span.phase = "cache_lock"
     async with scope.lock:
-        checkpoint = cast("dict[str, Any]", tuple_.checkpoint)
+        checkpoint = tuple_.checkpoint
         if scope.key == key and scope.messages is not None and read_generation == scope.generation:
             span.phase = "cache_copy"
             checkpoint["channel_values"]["messages"] = deepcopy(scope.messages)
@@ -495,7 +537,7 @@ def wrap_saver_reads_with_delta_reconstruction(saver: AsyncPostgresSaver) -> Non
     orig_get_tuple = saver.get_tuple
     orig_aget_tuple = saver.aget_tuple
 
-    def get_tuple(config: Any) -> Any:
+    def get_tuple(config: RunnableConfig) -> CheckpointTuple | None:
         span = ReadSpan()
         started = time.monotonic()
         tuple_ = None
@@ -506,7 +548,7 @@ def wrap_saver_reads_with_delta_reconstruction(saver: AsyncPostgresSaver) -> Non
                 span.tuple_read_ms = (time.monotonic() - started) * 1000
             if tuple_ is not None:
                 span.phase = "repair_detection"
-                reconstruct_delta_messages(cast("PostgresSaver", saver), tuple_, span=span)
+                reconstruct_delta_messages(saver, tuple_, span=span)
             return tuple_
         except Exception as exc:
             log_reconstruction(
@@ -523,8 +565,8 @@ def wrap_saver_reads_with_delta_reconstruction(saver: AsyncPostgresSaver) -> Non
             raise
 
     async def aget_tuple(
-        config: Any, *, reconstruction: RecoveryReconstructionScope | None = None
-    ) -> Any:
+        config: RunnableConfig, *, reconstruction: RecoveryReconstructionScope | None = None
+    ) -> CheckpointTuple | None:
         span = ReadSpan()
         read_generation = reconstruction.generation if reconstruction is not None else None
         started = time.monotonic()
@@ -559,20 +601,28 @@ def wrap_saver_reads_with_delta_reconstruction(saver: AsyncPostgresSaver) -> Non
 
 def wrap_history_identity_reads(saver: AsyncPostgresSaver) -> None:
     """State-history readers bypass get_tuple; normalize their raw tuples too."""
-    orig_list = saver.list
-    orig_alist = saver.alist
+    orig_list: Callable[..., Iterator[CheckpointTuple]] = saver.list
+    orig_alist: Callable[..., AsyncIterator[CheckpointTuple]] = saver.alist
 
-    def list_tuples(*args: Any, **kwargs: Any) -> Generator[CheckpointTuple, None, None]:
-        with closing(cast(Any, orig_list(*args, **kwargs))) as iterator:
+    def list_tuples(*args: object, **kwargs: object) -> Generator[CheckpointTuple, None, None]:
+        iterator = orig_list(*args, **kwargs)
+        try:
             for tuple_ in iterator:
                 normalize_checkpoint_message_ids(tuple_)
                 yield tuple_
+        finally:
+            if isinstance(iterator, Generator):
+                iterator.close()
 
-    async def alist_tuples(*args: Any, **kwargs: Any) -> AsyncIterator[CheckpointTuple]:
-        async with aclosing(cast(Any, orig_alist(*args, **kwargs))) as iterator:
+    async def alist_tuples(*args: object, **kwargs: object) -> AsyncIterator[CheckpointTuple]:
+        iterator = orig_alist(*args, **kwargs)
+        try:
             async for tuple_ in iterator:
                 normalize_checkpoint_message_ids(tuple_)
                 yield tuple_
+        finally:
+            if isinstance(iterator, AsyncGenerator):
+                await iterator.aclose()
 
     saver.list = list_tuples  # type: ignore[method-assign]
     saver.alist = alist_tuples  # type: ignore[method-assign]

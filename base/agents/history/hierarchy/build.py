@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
-from langchain_core.messages import AIMessage, AnyMessage
+from langchain_core.messages import AIMessage, BaseMessage
 from psycopg_pool import ConnectionPool
 
 from base.agents.history.checkpoint import FullHistory
@@ -85,7 +85,7 @@ class CostEstimate:
     cost_usd: float | None
 
 
-def _turn_tokens(request: Sequence[AnyMessage]) -> list[tuple[int, int, int]]:
+def _turn_tokens(request: Sequence[BaseMessage]) -> list[tuple[int, int, int]]:
     """`(index, input_tokens, output_tokens)` of every AIMessage with usage, in order."""
     return [
         (i, int(msg.usage_metadata["input_tokens"]), int(msg.usage_metadata["output_tokens"]))

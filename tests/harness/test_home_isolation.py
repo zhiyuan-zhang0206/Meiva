@@ -126,20 +126,14 @@ def test_config_fetch_is_skipped() -> None:
     assert os.environ.get("MEIVA_CONFIG_FETCH") == "skip"
 
 
+# meiva:note
+# `tests/components/lifecycle/native_root/conftest.py` rewrites os.environ when it is
+# registered, unless it finds the repo-root conftest already registered. It finds it by
+# path, so moving or renaming the root conftest silently turns the rewrite on for every
+# run that collects `tests/`.
 def test_the_native_root_conftest_defers_to_the_repo_root_conftest(
-    pytestconfig: pytest.Config, monkeypatch: pytest.MonkeyPatch
+    pytestconfig: pytest.Config,
 ) -> None:
-    """`tests/components/lifecycle/native_root/conftest.py` rewrites os.environ when it is
-    registered, unless it finds the repo-root conftest already registered.
-
-    It finds it by path, so moving or renaming the root conftest silently turns the
-    rewrite on for every run that collects `tests/` (the hook fires while the tree is
-    collected, before any test): MEIVA_HOME becomes a throwaway dir while the settings
-    singleton keeps the session home, and every test that reads one and spawns a child
-    that reads the other disagrees with itself (pty sessions the test cannot list, a
-    gateway `.env` that does not exist). Run against a private copy of the environment
-    so a regression here reports itself without leaking into the tests that follow.
-    """
     from tests.components.lifecycle.native_root import conftest as native_root
 
     repo_conftest = Path(native_root.__file__ or "").parents[4] / "conftest.py"
@@ -147,11 +141,9 @@ def test_the_native_root_conftest_defers_to_the_repo_root_conftest(
     assert pytestconfig.pluginmanager.get_plugin(str(repo_conftest)) is not None
 
     before = dict(os.environ)
-    private_env = dict(before)
-    monkeypatch.setattr(os, "environ", private_env)
     native_root.pytest_configure(pytestconfig)
 
-    assert private_env == before, "native_root's configure hook rewrote the environment"
+    assert dict(os.environ) == before, "native_root's configure hook rewrote the environment"
 
 
 def test_the_e2e_env_fixture_tears_down_when_pytest_leaves_its_package() -> None:

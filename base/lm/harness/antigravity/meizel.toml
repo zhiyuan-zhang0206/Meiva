@@ -1,4 +1,4 @@
-exports = ["handoff_rules.py", "mapping.py", "session.py", "tests", "transport.py"]
+exports = ["mapping.py", "session.py", "tests", "transport.py"]
 
 [uses]
 "__init__.py" = ["config.py", "handoff_rules.py", "mapping.py", "session.py", "transport.py"]
@@ -13,20 +13,3 @@ exports = ["handoff_rules.py", "mapping.py", "session.py", "tests", "transport.p
 
 [debt.ambient-read]
 "mapping.py#home pathlib.Path.home" = 1
-
-[debt.any-collaborator]
-"mapping.py#any _denial_label.entry" = 1
-"mapping.py#any _int.value" = 1
-"mapping.py#any _mapping.value" = 1
-"mapping.py#any _text.value" = 1
-"mapping.py#any parse_usage.payload" = 1
-"session.py#any AgySession._handle_result.payload" = 1
-
-[debt.type-cast]
-"mapping.py#cast _mapping" = 1
-"mapping.py#cast _read_transcript_rows" = 1
-"mapping.py#cast _transcript_tool_args" = 1
-"mapping.py#cast parse_result" = 1
-"session.py#cast AgySession._handle" = 1
-"session.py#cast AgySession._handle_result" = 1
-"transport.py#cast AgyTransport._pump_stdout" = 1

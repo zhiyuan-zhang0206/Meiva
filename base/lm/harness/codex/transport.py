@@ -5,10 +5,13 @@ import contextlib
 import json
 import os
 from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
-from typing import Protocol, cast
+from typing import Any, Protocol
 
-JsonObject = dict[str, object]
-RequestParams = Mapping[str, object]
+type JsonValue = (
+    str | int | float | bool | dict[str, Any] | list[JsonValue] | Mapping[str, Any] | None
+)
+JsonObject = dict[str, Any]
+RequestParams = Mapping[str, Any]
 RequestHandler = Callable[[str, JsonObject], Awaitable[JsonObject]]
 NotificationHandler = Callable[[str, JsonObject], None]
 ClosedHandler = Callable[[str], None]
@@ -65,8 +68,8 @@ class AppServerTransport(Protocol):
     async def close(self) -> None: ...
 
 
-def as_object(value: object) -> JsonObject:
-    return cast("JsonObject", value) if isinstance(value, dict) else {}
+def as_object(value: JsonValue) -> JsonObject:
+    return value if isinstance(value, dict) else {}
 
 
 def as_text(value: object) -> str | None:
@@ -244,7 +247,7 @@ class StdioAppServer:
 
     async def _dispatch(self, line: bytes) -> None:
         try:
-            decoded: object = json.loads(line)
+            decoded = json.loads(line)
         except json.JSONDecodeError:
             return
         message = as_object(decoded)

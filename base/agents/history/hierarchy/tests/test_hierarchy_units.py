@@ -158,18 +158,13 @@ def test_a_message_without_a_real_time_yields_a_unit_with_no_time() -> None:
     assert unit.start is None and unit.end is None
 
 
-def test_a_mixed_kind_message_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.agents.history.hierarchy import units as units_module
+def test_a_mixed_kind_message_is_refused() -> None:
+    from base.agents.history.hierarchy.units import divide_timeline_items
     from base.agents.history.timeline import TimelineItem
 
     items = [
         TimelineItem(item_id="0.0", kind="inbound_chat", payload="a"),
         TimelineItem(item_id="0.1", kind="code_output", payload="b"),
     ]
-
-    def build(*_args: object, **_kwargs: object) -> tuple[list[TimelineItem], int]:
-        return items, 1
-
-    monkeypatch.setattr(units_module, "build_timeline_items", build)
     with pytest.raises(ValueError, match="uncovered mix"):
-        divide_units([], timeline_inputs=_TIMELINE_INPUTS)
+        divide_timeline_items(items)

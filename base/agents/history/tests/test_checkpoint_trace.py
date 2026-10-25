@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
+from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.checkpoint import (
     attach_trace_to_checkpoint,
@@ -69,7 +70,9 @@ def test_load_by_trace_resolves_checkpoint(db_conn, database_gate: ProcessDbGate
 
 
 @pytest.mark.asyncio
-async def test_attach_trace_to_checkpoint_stamps_metadata(aops_pool) -> None:
+async def test_attach_trace_to_checkpoint_stamps_metadata(
+    aops_pool: AsyncConnectionPool[Any],
+) -> None:
     msgs = [HumanMessage(content="hello")]
     ckpt_id = _put_checkpoint("7", msgs)
     await attach_trace_to_checkpoint(aops_pool, "7", ckpt_id, "c" * 32)

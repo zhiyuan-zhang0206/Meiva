@@ -47,7 +47,7 @@ def _names_pre_split_type(blob: bytes) -> bool:
 class CheckpointSerializer(JsonPlusSerializer):
     """`JsonPlusSerializer` that refuses a blob holding a pre-split ``agent.state`` envelope."""
 
-    def loads_typed(self, data: tuple[str, bytes]) -> Any:
+    def loads_typed(self, data: tuple[str, bytes]) -> object:
         tag, blob = data
         if tag == "msgpack" and _PRE_SPLIT_PREFIX in blob and _names_pre_split_type(blob):
             raise PreSplitCheckpointEnvelopeError(

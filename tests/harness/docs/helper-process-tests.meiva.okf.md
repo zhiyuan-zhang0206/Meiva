@@ -1,17 +1,18 @@
 ---
 type: doc
 title: Helper process contract tests
-description: Socket-free spawn doubles, durable ownership and real ancestor-chain probes.
+description: Unix-socket spawn servers, durable ownership and real ancestor-chain probes.
 tags: [tests, process, helper]
 ---
 
 # Helper process contract tests
 
-### Helper spawn double
+### Helper spawn server
 
-The test double accepts variable arguments to forward the production call unchanged
-to its scenario callback. Its existing `reportIncompatibleMethodOverride` exception
-is confined to that test override; the real client signature remains authoritative.
+The tests drive `PermissionsHelperClient` over a real temporary Unix domain socket
+server speaking the helper's JSON-line protocol. Spawn requests and refusal
+responses exercise the production client wire contract directly without
+subclassing `PermissionsHelperClient`.
 
 ### Helper record and identity
 

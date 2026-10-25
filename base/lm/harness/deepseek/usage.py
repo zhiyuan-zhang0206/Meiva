@@ -5,7 +5,9 @@ import subprocess
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
+
+type _Json = str | int | float | bool | dict[str, Any] | list[_Json] | None
 
 # meiva:note
 # ACP carries only an aggregate `usage_update` (`used`/`size` are context-window
@@ -172,22 +174,20 @@ def _parse(payload: bytes) -> tuple[StepUsage, ...]:
         if not line:
             continue
         try:
-            decoded = json.loads(line)
+            decoded: _Json = json.loads(line)
         except json.JSONDecodeError as exc:
             raise ValueError(f"session log line {number} is not JSON") from exc
         if not isinstance(decoded, dict):
             continue
-        event = cast("dict[str, Any]", decoded)
-        if event.get("type") != "assistant/message":
+        if decoded.get("type") != "assistant/message":
             continue
-        raw_data = event.get("data")
+        raw_data: _Json = decoded.get("data")
         if not isinstance(raw_data, dict):
             continue
-        data = cast("dict[str, Any]", raw_data)
-        raw_usage = data.get("usage")
+        raw_usage: _Json = raw_data.get("usage")
         if not isinstance(raw_usage, dict):
             continue
-        steps.append(_step(data, cast("dict[str, Any]", raw_usage)))
+        steps.append(_step(raw_data, raw_usage))
     return tuple(steps)
 
 
@@ -202,7 +202,7 @@ def _step(data: Mapping[str, Any], usage: Mapping[str, Any]) -> StepUsage:
     )
 
 
-def _int(value: Any) -> int:
+def _int(value: object) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 

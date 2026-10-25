@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from base.lm.harness.codex import CodexConfig, CodexSession
 from base.lm.harness.codex.tests.fake_app_server import CODEX_PID, FakeAppServer
-from base.lm.harness.codex.transport import as_object, as_text
+from base.lm.harness.codex.transport import JsonValue, as_object, as_text
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.registry import FileSessionRegistry
 
@@ -15,13 +15,12 @@ from base.lm.harness.registry import FileSessionRegistry
 # meiva:note
 # The text of the first input item of a `turn/start` request, so a test can assert
 # what the bridge actually sent without re-declaring the request shape.
-def turn_text(params: object) -> str:
+def turn_text(params: JsonValue) -> str:
     data = as_object(params)
-    inputs = data.get("input")
+    inputs: JsonValue = data.get("input")
     if not isinstance(inputs, list):
         return ""
-    entries = cast("list[object]", inputs)
-    return as_text(as_object(entries[0]).get("text")) or "" if entries else ""
+    return as_text(as_object(inputs[0]).get("text")) or "" if inputs else ""
 
 
 class ScriptedProbe:

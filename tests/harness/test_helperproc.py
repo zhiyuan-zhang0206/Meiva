@@ -1,36 +1,73 @@
 from __future__ import annotations
 
+import contextlib
 import inspect
+import json
 import os
 import signal
+import socket
 import subprocess
 import sys
-from collections.abc import Callable
+import tempfile
+import threading
+from collections.abc import Callable, Generator
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
 
 import psutil
 import pytest
 
-from base.host.permissions_helper import client
-from base.host.permissions_helper.client import PermissionsHelperClient, PermissionsHelperError
+from base.host.permissions_helper.client import PermissionsHelperClient
 from base.native_process.kernel_identity import pid_starttime_ticks
 from base.sessions import helperproc
 from base.sessions.helper_chain_guard import parent_chain_intact
 from base.sessions.record import SessionRecord
 
 
-class _SpawnClient(PermissionsHelperClient):
-    def __init__(self, spawn: Callable[..., client.SpawnResult]) -> None:
-        super().__init__("/unused.sock")
-        self._spawn = spawn
+@contextlib.contextmanager
+def _helper_socket_server(
+    handler: Callable[[dict[str, object]], dict[str, object]],
+) -> Generator[PermissionsHelperClient]:
+    # meiva:note
+    # Serve the permissions-helper JSON-line protocol over a real Unix domain socket so tests exercise PermissionsHelperClient.spawn_process end-to-end without subclassing the client.
+    # meiva:link tests/harness/docs/helper-process-tests.meiva.okf.md
+    with tempfile.TemporaryDirectory(dir="/tmp", prefix="mhp-") as temp_dir:
+        sock_path = Path(temp_dir) / "helper.sock"
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(sock_path))
+        server.listen(8)
+        server.settimeout(0.2)
+        stop = threading.Event()
 
-    def spawn_process(self, *args: Any, **kwargs: Any) -> client.SpawnResult:  # pyright: ignore[reportIncompatibleMethodOverride]
-        # meiva:note
-        # The helper spawn double records argv, environment and output destinations without opening a helper socket; helper refusal remains loud and has no fallback launch.
-        # meiva:link tests/harness/docs/helper-process-tests.meiva.okf.md
-        return self._spawn(*args, **kwargs)
+        def serve() -> None:
+            while not stop.is_set():
+                try:
+                    conn, _ = server.accept()
+                except TimeoutError:
+                    continue
+                except OSError:
+                    break
+                with conn:
+                    buf = bytearray()
+                    while not buf.endswith(b"\n"):
+                        chunk = conn.recv(65536)
+                        if not chunk:
+                            break
+                        buf += chunk
+                    if not buf:
+                        continue
+                    req = json.loads(buf.decode("utf-8"))
+                    reply = handler(req)
+                    conn.sendall((json.dumps(reply) + "\n").encode("utf-8"))
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        try:
+            yield PermissionsHelperClient(sock_path)
+        finally:
+            stop.set()
+            server.close()
+            thread.join(timeout=5)
 
 
 def _current_process_record(*, generation: str | None = None) -> SessionRecord:
@@ -48,115 +85,98 @@ def _current_process_record(*, generation: str | None = None) -> SessionRecord:
 
 # meiva:link tests/harness/docs/helper-process-tests.meiva.okf.md
 def test_new_session_preserves_login_shell_env_stderr_and_record(
-    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    unit_home: Path,
 ) -> None:
     from base.sessions import env_forwarding
 
     calls: list[dict[str, object]] = []
 
-    def fake_spawn_process(
-        name: str,
-        argv: list[str],
-        env: dict[str, str],
-        cwd: str,
-        stdout: str,
-        stderr: str,
-    ) -> client.SpawnResult:
+    def handle_spawn(req: dict[str, object]) -> dict[str, object]:
         calls.append(
             {
-                "name": name,
-                "argv": argv,
-                "env": env,
-                "cwd": cwd,
-                "stdout": stdout,
-                "stderr": stderr,
+                "name": req["name"],
+                "argv": req["argv"],
+                "env": req["env"],
+                "cwd": req["cwd"],
+                "stdout": req["stdout"],
+                "stderr": req["stderr"],
             }
         )
-        return {"pid": os.getpid(), "reused": False}
+        return {"ok": True, "result": {"pid": os.getpid(), "reused": False}}
 
-    fake_client = _SpawnClient(fake_spawn_process)
-    monkeypatch.setattr(env_forwarding, "venv_activation_prefix", lambda: "activate-venv && ")
+    prefix = env_forwarding.venv_activation_prefix()
     stderr = unit_home / "logs" / "service.stderr.log"
-    backend = helperproc.HelperProcSessionBackend(lambda: fake_client)
+    with _helper_socket_server(handle_spawn) as fake_client:
+        backend = helperproc.HelperProcSessionBackend(lambda: fake_client)
 
-    assert backend.new_session(
-        "meiva-service",
-        "python -m services.example.daemon",
-        unit_home,
-        env={"MEIVA_TEST": "forwarded"},
-        stderr_append=stderr,
-    )
-    assert calls == [
-        {
-            "name": "meiva-service",
-            "argv": [
-                "/bin/bash",
-                "-lc",
-                f"cd {unit_home.as_posix()} && activate-venv && "
-                "exec python -m services.example.daemon",
-            ],
-            "env": {"MEIVA_TEST": "forwarded"},
-            "cwd": str(unit_home),
-            "stdout": str(unit_home / "logs" / "meiva-service.out.log"),
-            "stderr": str(stderr),
-        }
-    ]
-    record = SessionRecord.read(unit_home / "run" / "sessions" / "meiva-service.json")
-    assert record is not None
-    assert record.pid == os.getpid()
-    assert record.cmd == "python -m services.example.daemon"
-    assert backend.has_session("meiva-service")
+        assert backend.new_session(
+            "meiva-service",
+            "python -m services.example.daemon",
+            unit_home,
+            env={"MEIVA_TEST": "forwarded"},
+            stderr_append=stderr,
+        )
+        assert calls == [
+            {
+                "name": "meiva-service",
+                "argv": [
+                    "/bin/bash",
+                    "-lc",
+                    f"cd {unit_home.as_posix()} && {prefix}exec python -m services.example.daemon",
+                ],
+                "env": {"MEIVA_TEST": "forwarded"},
+                "cwd": str(unit_home),
+                "stdout": str(unit_home / "logs" / "meiva-service.out.log"),
+                "stderr": str(stderr),
+            }
+        ]
+        record = SessionRecord.read(unit_home / "run" / "sessions" / "meiva-service.json")
+        assert record is not None
+        assert record.pid == os.getpid()
+        assert record.cmd == "python -m services.example.daemon"
+        assert backend.has_session("meiva-service")
 
-    assert backend.new_session(
-        "meiva-service",
-        "python -m services.example.daemon",
-        unit_home,
-        env={"MEIVA_TEST": "forwarded"},
-    )
-    assert len(calls) == 1
+        assert backend.new_session(
+            "meiva-service",
+            "python -m services.example.daemon",
+            unit_home,
+            env={"MEIVA_TEST": "forwarded"},
+        )
+        assert len(calls) == 1
 
 
 def test_new_session_preserves_argv_and_non_login_shell(
-    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    unit_home: Path,
 ) -> None:
-    calls: list[list[str]] = []
+    calls: list[object] = []
 
-    def fake_spawn_process(
-        _name: str,
-        argv: list[str],
-        _env: dict[str, str],
-        _cwd: str,
-        _stdout: str,
-        _stderr: str,
-    ) -> client.SpawnResult:
-        calls.append(argv)
-        return {"pid": os.getpid(), "reused": False}
+    def handle_spawn(req: dict[str, object]) -> dict[str, object]:
+        calls.append(req["argv"])
+        return {"ok": True, "result": {"pid": os.getpid(), "reused": False}}
 
-    fake_client = _SpawnClient(fake_spawn_process)
-    backend = helperproc.HelperProcSessionBackend(lambda: fake_client)
     argv = [sys.executable, "-m", "services.agent_runner.agent_host.daemon"]
-
-    assert backend.new_session("meiva-agent", argv, unit_home, env={})
-    assert backend.new_session(
-        "meiva-shell-command",
-        "echo direct",
-        unit_home,
-        env={},
-        login_shell=False,
-    )
+    with _helper_socket_server(handle_spawn) as fake_client:
+        backend = helperproc.HelperProcSessionBackend(lambda: fake_client)
+        assert backend.new_session("meiva-agent", argv, unit_home, env={})
+        assert backend.new_session(
+            "meiva-shell-command",
+            "echo direct",
+            unit_home,
+            env={},
+            login_shell=False,
+        )
     assert calls == [argv, ["/bin/sh", "-c", "echo direct"]]
 
 
 def test_spawn_failure_is_loud_and_has_no_fallback(
-    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    unit_home: Path,
 ) -> None:
-    def unavailable(*_args: object, **_kwargs: object) -> client.SpawnResult:
-        raise PermissionsHelperError("socket refused")
+    def refuse_spawn(_req: dict[str, object]) -> dict[str, object]:
+        return {"ok": False, "error": "socket refused"}
 
-    fake_client = _SpawnClient(unavailable)
-
-    with pytest.raises(
-        RuntimeError, match=r"helper is down or refused.*meiva converge.*helper log"
+    with (
+        _helper_socket_server(refuse_spawn) as fake_client,
+        pytest.raises(RuntimeError, match=r"helper is down or refused.*meiva converge.*helper log"),
     ):
         helperproc.HelperProcSessionBackend(lambda: fake_client).new_session(
             "meiva-service", "echo nope", unit_home, env={}
@@ -188,10 +208,16 @@ def test_record_registry_drives_list_timestamps_and_generation(unit_home: Path) 
     assert backend.session_log_path("meiva-live") == unit_home / "logs" / "meiva-live.out.log"
 
 
+def _spawn_sleep_child() -> subprocess.Popen[bytes]:
+    # meiva:note
+    # Re-enter this test file in sleep mode so signal and parent-chain tests exercise real OS processes without `python -c`.
+    return subprocess.Popen([sys.executable, __file__, "sleep"])  # noqa: S603
+
+
 def test_kill_signals_record_pid_and_unlinks_only_after_confirmed_death(
     unit_home: Path,
 ) -> None:
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    child = _spawn_sleep_child()
     try:
         record = replace(_current_process_record(), pid=child.pid)
         record = replace(
@@ -215,33 +241,53 @@ def test_kill_signals_record_pid_and_unlinks_only_after_confirmed_death(
 
 # meiva:link tests/harness/docs/helper-process-tests.meiva.okf.md
 def test_graceful_delivery_tolerates_whole_second_create_time_drift(
-    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    unit_home: Path,
 ) -> None:
-    drifted = replace(_current_process_record(), create_time=psutil.Process().create_time() - 1.0)
-    sent: list[tuple[int, int]] = []
+    child = _spawn_sleep_child()
+    try:
+        drifted = SessionRecord(
+            pid=child.pid,
+            create_time=psutil.Process(child.pid).create_time() - 1.0,
+            cmd="test command",
+            cwd="/test",
+            started_at=123.0,
+            starttime=None,
+        )
+        drifted.write(unit_home / "run" / "sessions" / "meiva-live.json")
 
-    drifted.write(unit_home / "run" / "sessions" / "meiva-live.json")
-    monkeypatch.setattr(helperproc.os, "kill", lambda pid, sig: sent.append((pid, sig)))
-
-    assert helperproc.HelperProcSessionBackend(
-        lambda: PermissionsHelperClient("/unused.sock")
-    ).graceful_signal("meiva-live", expected=drifted)
-    assert sent == [(drifted.pid, signal.SIGTERM)]
+        assert helperproc.HelperProcSessionBackend(
+            lambda: PermissionsHelperClient("/unused.sock")
+        ).graceful_signal("meiva-live", expected=drifted)
+        assert child.wait(timeout=10) == -signal.SIGTERM
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
 
 
 def test_graceful_delivery_refuses_a_birth_beyond_the_tolerance(
-    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    unit_home: Path,
 ) -> None:
-    replaced = replace(_current_process_record(), create_time=psutil.Process().create_time() + 60.0)
-    sent: list[tuple[int, int]] = []
+    child = _spawn_sleep_child()
+    try:
+        replaced = SessionRecord(
+            pid=child.pid,
+            create_time=psutil.Process(child.pid).create_time() + 60.0,
+            cmd="test command",
+            cwd="/test",
+            started_at=123.0,
+            starttime=None,
+        )
+        replaced.write(unit_home / "run" / "sessions" / "meiva-live.json")
 
-    replaced.write(unit_home / "run" / "sessions" / "meiva-live.json")
-    monkeypatch.setattr(helperproc.os, "kill", lambda pid, sig: sent.append((pid, sig)))
-
-    assert not helperproc.HelperProcSessionBackend(
-        lambda: PermissionsHelperClient("/unused.sock")
-    ).graceful_signal("meiva-live", expected=replaced)
-    assert sent == []
+        assert not helperproc.HelperProcSessionBackend(
+            lambda: PermissionsHelperClient("/unused.sock")
+        ).graceful_signal("meiva-live", expected=replaced)
+        assert child.poll() is None
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
 
 
 @pytest.mark.parametrize(
@@ -304,64 +350,60 @@ def test_permissions_helper_spawn_defaults_off() -> None:
     }
 
 
-def test_parent_chain_guard_allows_unmanaged_and_rejects_malformed_markers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    read_ppid = {os.getpid(): 100}.get
-    monkeypatch.delenv("MEIVA_PERMISSIONS_HELPER_PID", raising=False)
-    assert parent_chain_intact(read_ppid)
+def _check_parent_chain(
+    links: dict[str, int],
+    *,
+    marker: str | None,
+) -> bool:
+    # meiva:note
+    # Run the parent-chain check in a child process with an explicit environment dict so tests do not mutate os.environ.
+    env = dict(os.environ)
+    if marker is None:
+        env.pop("MEIVA_PERMISSIONS_HELPER_PID", None)
+    else:
+        env["MEIVA_PERMISSIONS_HELPER_PID"] = marker
+    res = subprocess.run(  # noqa: S603
+        [sys.executable, __file__, "parent-chain", json.dumps(links)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+    return res.stdout.strip() == "1"
 
-    monkeypatch.setenv("MEIVA_PERMISSIONS_HELPER_PID", "100")
-    assert parent_chain_intact(read_ppid)
 
-    monkeypatch.setenv("MEIVA_PERMISSIONS_HELPER_PID", "not-an-int")
-    assert not parent_chain_intact(read_ppid)
-
-    monkeypatch.setenv("MEIVA_PERMISSIONS_HELPER_PID", "0")
-    assert not parent_chain_intact(read_ppid)
-
-    monkeypatch.setenv("MEIVA_PERMISSIONS_HELPER_PID", "-3")
-    assert not parent_chain_intact(read_ppid)
+def test_parent_chain_guard_allows_unmanaged_and_rejects_malformed_markers() -> None:
+    links = {"self": 100}
+    assert _check_parent_chain(links, marker=None)
+    assert _check_parent_chain(links, marker="100")
+    assert not _check_parent_chain(links, marker="not-an-int")
+    assert not _check_parent_chain(links, marker="0")
+    assert not _check_parent_chain(links, marker="-3")
 
 
-def test_parent_chain_guard_rejects_a_helper_outside_the_chain(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    chain = {os.getpid(): 100, 100: 1}
-    monkeypatch.setenv("MEIVA_PERMISSIONS_HELPER_PID", "101")
-    assert not parent_chain_intact(chain.get)
+def test_parent_chain_guard_rejects_a_helper_outside_the_chain() -> None:
+    assert not _check_parent_chain({"self": 100, "100": 1}, marker="101")
 
 
 # meiva:note
 # A root supervisor between a unit and the permissions helper does not break the helper ancestry check; malformed markers, broken intermediate links and an unrelated helper are rejected.
 # meiva:link tests/harness/docs/helper-process-tests.meiva.okf.md
-def test_parent_chain_guard_accepts_the_helper_above_an_intermediate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    chain = {os.getpid(): 101, 101: 100}
-    monkeypatch.setenv("MEIVA_PERMISSIONS_HELPER_PID", "100")
-    assert parent_chain_intact(chain.get)
+def test_parent_chain_guard_accepts_the_helper_above_an_intermediate() -> None:
+    assert _check_parent_chain({"self": 101, "101": 100}, marker="100")
 
 
-def test_parent_chain_guard_rejects_a_broken_intermediate_link(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("MEIVA_PERMISSIONS_HELPER_PID", "100")
-    assert not parent_chain_intact({os.getpid(): 101}.get)
+def test_parent_chain_guard_rejects_a_broken_intermediate_link() -> None:
+    assert not _check_parent_chain({"self": 101}, marker="100")
 
 
-def test_parent_chain_guard_stops_at_the_depth_bound(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    links: dict[int, int] = {os.getpid(): 7000}
+def test_parent_chain_guard_stops_at_the_depth_bound() -> None:
+    links: dict[str, int] = {"self": 7000}
     for step in range(40):
-        links[7000 + step] = 7001 + step
+        links[str(7000 + step)] = 7001 + step
 
-    monkeypatch.setenv("MEIVA_PERMISSIONS_HELPER_PID", "7030")
-    assert parent_chain_intact(links.get)
-
-    monkeypatch.setenv("MEIVA_PERMISSIONS_HELPER_PID", "7040")
-    assert not parent_chain_intact(links.get)
+    assert _check_parent_chain(links, marker="7030")
+    assert not _check_parent_chain(links, marker="7040")
 
 
 # meiva:note
@@ -392,7 +434,7 @@ def test_parent_chain_guard_on_a_real_process_chain(tmp_path: Path) -> None:
 
 
 def test_parent_chain_guard_rejects_an_outside_pid_on_a_real_chain(tmp_path: Path) -> None:
-    outsider = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    outsider = _spawn_sleep_child()
     try:
         assert _run_probe_chain(tmp_path, marker_value=str(outsider.pid)) == "broken"
     finally:
@@ -410,15 +452,37 @@ def test_parent_chain_checks_are_wired_at_host_boot_and_heartbeat() -> None:
     assert "require_helper_parent_chain()" in hosted_beat
 
 
-def test_broken_parent_chain_exits_host_with_software_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from services.agent_runner.agent_host import daemon
+def test_broken_parent_chain_exits_host_with_software_error() -> None:
+    # meiva:note
+    # Execute `require_helper_parent_chain` in a real child process so `os._exit(70)` is observed via its actual exit status.
+    res = subprocess.run(  # noqa: S603
+        [sys.executable, __file__, "require-parent-chain"],
+        env={**os.environ, "MEIVA_PERMISSIONS_HELPER_PID": "not-an-int"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert res.returncode == 70
 
-    exits: list[int] = []
-    monkeypatch.setattr(daemon, "parent_chain_intact", lambda: False)
-    monkeypatch.setattr(os, "_exit", exits.append)
 
-    daemon.require_helper_parent_chain()
+def _child_main() -> None:
+    import time
 
-    assert exits == [70]
+    mode = sys.argv[1]
+    if mode == "sleep":
+        time.sleep(60)
+    elif mode == "parent-chain":
+        spec = json.loads(sys.argv[2])
+        links = {os.getpid() if k == "self" else int(k): int(v) for k, v in spec.items()}
+        sys.stdout.write("1" if parent_chain_intact(links.get) else "0")
+    elif mode == "require-parent-chain":
+        from services.agent_runner.agent_host import daemon
+
+        daemon.require_helper_parent_chain()
+    else:
+        raise ValueError(f"unknown child mode {mode!r}")
+
+
+if __name__ == "__main__":
+    _child_main()

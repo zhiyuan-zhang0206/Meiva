@@ -36,11 +36,14 @@ from base.lm.harness.wiring import HANDOFF_INSTRUCTION, bridge_for, open_session
 
 
 class FakeTicket:
-    deduplicated = False
-    settled = False
+    deduplicated: bool = False
+    settled: bool = False
 
     def __init__(self, turn_id: str) -> None:
         self.turn_id = turn_id
+
+    async def outcome(self) -> TurnCompleted:
+        return completion(self.turn_id, "")
 
 
 def completion(turn_id: str, text: str, usage: Usage | None = None) -> TurnCompleted:
@@ -392,13 +395,19 @@ def record(harness: str = "meiva") -> SessionRecord:
     )
 
 
-class RecordingRegistry(FileSessionRegistry):
+class RecordingRegistry:
     def __init__(self, root: Path, saved: list[SessionRecord]) -> None:
-        super().__init__(root)
+        self._inner = FileSessionRegistry(root)
         self.saved = saved
+
+    def load(self, agent_id: int, *, harness: str | None = None) -> SessionRecord | None:
+        return self._inner.load(agent_id, harness=harness)
 
     def save(self, record: SessionRecord) -> None:
         self.saved.append(record)
+
+    def delete(self, agent_id: int) -> bool:
+        return self._inner.delete(agent_id)
 
 
 def test_the_scope_stamps_every_save() -> None:

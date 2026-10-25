@@ -5,10 +5,9 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 from base.api_contracts.agent_contract import Harness
-from base.lm.harness.engine import HarnessSession, HarnessTurn
+from base.lm.harness.engine import CompletedTurnEvent, HarnessSession, HarnessTurn, SubmittedTurn
 from base.lm.harness.events import (
     AssistantText,
     BridgeEvent,
@@ -178,7 +177,7 @@ class HarnessBridge:
                 text = f"{rendered}\n\n{text}" if text else rendered
         try:
             try:
-                ticket: Any = session.submit(text, key=key)
+                ticket: SubmittedTurn = session.submit(text, key=key)
             except Exception as exc:
                 raise HarnessSetupError(f"{self.harness.value} refused the turn: {exc}") from exc
             if ticket.deduplicated and ticket.settled:
@@ -188,7 +187,7 @@ class HarnessBridge:
             await self._retire(session, reason="turn faulted")
             raise
 
-    async def interrupt(self) -> Any:
+    async def interrupt(self) -> object:
         session = self._session
         if session is None:
             raise HarnessClosedError("no harness session is running")
@@ -317,7 +316,7 @@ class HarnessBridge:
         return None
 
 
-def _completed(event: Any, streamed: str) -> HarnessTurn:
+def _completed(event: CompletedTurnEvent, streamed: str) -> HarnessTurn:
     return HarnessTurn(
         turn_id=event.turn_id,
         text=event.text or streamed,

@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from base.lm.pricing import PriceBook
+
 DEFAULT_MODEL = "deepseek-v4-flash"
 DEFAULT_PROFILE = "acp"
 # meiva:note
@@ -39,6 +41,7 @@ class BridgeConfig:
     permission_mode: str = "ask"
     allowed_permission_modes: tuple[str, ...] = ("ask", "deny", "allow")
     env_overrides: Mapping[str, str] = field(default_factory=dict[str, str])
+    prices: PriceBook | None = None
 
     def __post_init__(self) -> None:
         if self.permission_mode not in self.allowed_permission_modes:
@@ -75,4 +78,5 @@ class BridgeConfig:
             permission_mode=self.permission_mode,
             allowed_permission_modes=self.allowed_permission_modes,
             env_overrides=self.env_overrides,
+            prices=self.prices,
         )

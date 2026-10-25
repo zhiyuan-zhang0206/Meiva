@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from langchain_core.messages import (
     AIMessage,
@@ -220,16 +220,14 @@ def _inbound_item(
 
 
 def _attach_images(content: str | list[str | dict[str, Any]]) -> list[str] | None:
-    from base.lm.reasoning import content_blocks
-
     if not isinstance(content, list):
         return None
     urls: list[str] = []
-    for block in content_blocks(content):
+    for block in content:
         if not isinstance(block, dict) or block.get("type") != "image_url":
             continue
-        image_url = cast("dict[str, Any] | None", block.get("image_url"))
-        if image_url is None:
+        image_url: dict[str, Any] | str | None = block.get("image_url")
+        if not isinstance(image_url, dict):
             continue
         url = image_url.get("url")
         if isinstance(url, str) and url.startswith("data:"):
@@ -280,7 +278,7 @@ def _attach_item(
 
 
 def _exec_output_item(
-    msg_idx: int, content: str, created_at: str | None, exec_ms: Any
+    msg_idx: int, content: str, created_at: str | None, exec_ms: int | None
 ) -> TimelineItem:
     return TimelineItem(
         item_id=f"{msg_idx}.0",
@@ -294,7 +292,7 @@ def _exec_output_item(
 
 
 def _system_note_item(
-    msg_idx: int, content: str, note_tag: Any, created_at: str | None
+    msg_idx: int, content: str, note_tag: str | None, created_at: str | None
 ) -> TimelineItem:
     return TimelineItem(
         item_id=f"{msg_idx}.0",
@@ -361,11 +359,11 @@ def _fold_addl_reasoning_into_content(
     if not (addl_reasoning and isinstance(addl_reasoning, str) and addl_reasoning.strip()):
         return content
     if isinstance(content, list):
-        typed_content = cast("list[str | ContentBlock]", content)
-        if any(isinstance(b, dict) and b.get("type") == "thinking" for b in typed_content):
+        items: list[dict[str, Any] | str] = content
+        if any(isinstance(b, dict) and b.get("type") == "thinking" for b in items):
             return content
         head: ContentBlock = {"type": "thinking", "thinking": addl_reasoning, "index": 0}
-        return [head, *typed_content]
+        return [head, *content]
     if isinstance(content, str):
         return [
             {"type": "thinking", "thinking": addl_reasoning, "index": 0},
@@ -438,20 +436,20 @@ def _content_block_item(
     pos: int,
     msg_idx: int,
     created_at: str | None,
-    reasoning_ms_by_block: Any,
+    reasoning_ms_by_block: Mapping[str, int] | None,
     reasoning_tokens: int | None,
     *,
     reasoning_attached: bool,
 ) -> tuple[TimelineItem | None, int | None, bool]:
-    from base.lm.reasoning import ContentBlock
-
     if not isinstance(block, dict):
         return None, None, reasoning_attached
-    if (typed_block := cast(ContentBlock, block)).get("type") not in ("text", "thinking"):
+    block_type = block.get("type")
+    if block_type not in ("text", "thinking"):
         return None, None, reasoning_attached
-    block_idx = typed_block.get("index", pos)
-    if typed_block.get("type") == "thinking":
-        t = typed_block.get("thinking")
+    raw_idx = block.get("index", pos)
+    block_idx = raw_idx if isinstance(raw_idx, int) else pos
+    if block_type == "thinking":
+        t = block.get("thinking")
         if not (isinstance(t, str) and t):
             return None, block_idx, reasoning_attached
         block_reasoning_ms = (
@@ -468,7 +466,7 @@ def _content_block_item(
             reasoning_tokens=None if reasoning_attached else reasoning_tokens,
         )
         return item, block_idx, True
-    t = typed_block.get("text")
+    t = block.get("text")
     if not (isinstance(t, str) and t):
         return None, block_idx, reasoning_attached
     return _chat_item(msg_idx, block_idx, t, created_at), block_idx, reasoning_attached
@@ -499,7 +497,7 @@ def _tool_call_items(
     msg: AIMessage,
     msg_idx: int,
     content_indices: set[int],
-    code_ms_by_block: Any,
+    code_ms_by_block: Mapping[str, int] | None,
     created_at: str | None,
     sdk_by_id: Mapping[str, list[SdkCall]],
 ) -> list[TimelineItem]:

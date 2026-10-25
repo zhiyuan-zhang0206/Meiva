@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import cast
 
-from base.lm.harness.codex.transport import JsonObject, as_int, as_object, as_text
+from base.lm.harness.codex.transport import (
+    JsonValue,
+    RequestParams,
+    as_int,
+    as_object,
+    as_text,
+)
 from base.lm.harness.events import (
     BridgeEvent,
     ReasoningDelta,
@@ -27,21 +31,21 @@ from base.lm.harness.events import (
 TOOL_RESULT_PREVIEW_CHARS = 2000
 
 
-def text_delta(params: Mapping[str, object], turn_id: str) -> list[BridgeEvent]:
+def text_delta(params: RequestParams, turn_id: str) -> list[BridgeEvent]:
     delta = as_text(params.get("delta"))
     if not delta:
         return []
     return [TextDelta(turn_id=turn_id, text=delta)]
 
 
-def reasoning_delta(params: Mapping[str, object], turn_id: str) -> list[BridgeEvent]:
+def reasoning_delta(params: RequestParams, turn_id: str) -> list[BridgeEvent]:
     delta = as_text(params.get("delta"))
     if not delta:
         return []
     return [ReasoningDelta(turn_id=turn_id, text=delta)]
 
 
-def item_event(params: Mapping[str, object], *, phase: str, turn_id: str) -> list[BridgeEvent]:
+def item_event(params: RequestParams, *, phase: str, turn_id: str) -> list[BridgeEvent]:
     item = as_object(params.get("item"))
     if not item:
         return []
@@ -61,15 +65,13 @@ def item_event(params: Mapping[str, object], *, phase: str, turn_id: str) -> lis
     return []
 
 
-def _reasoning(item: Mapping[str, object], phase: str, turn_id: str) -> list[BridgeEvent]:
+def _reasoning(item: RequestParams, phase: str, turn_id: str) -> list[BridgeEvent]:
     if phase != "completed":
         return []
     for field in ("summary", "content"):
-        raw = item.get(field)
+        raw: JsonValue = item.get(field)
         if isinstance(raw, list):
-            parts = [
-                s.strip() for s in cast("list[object]", raw) if isinstance(s, str) and s.strip()
-            ]
+            parts = [s.strip() for s in raw if isinstance(s, str) and s.strip()]
             if parts:
                 return [ReasoningText(turn_id=turn_id, text="\n\n".join(parts))]
         elif isinstance(raw, str) and raw.strip():
@@ -77,7 +79,7 @@ def _reasoning(item: Mapping[str, object], phase: str, turn_id: str) -> list[Bri
     return []
 
 
-def assistant_text(item: Mapping[str, object], *, final_only: bool = False) -> str | None:
+def assistant_text(item: RequestParams, *, final_only: bool = False) -> str | None:
     if as_text(item.get("type")) != "agentMessage":
         return None
     if final_only and item.get("phase") not in {None, "final_answer"}:
@@ -92,7 +94,7 @@ def assistant_text(item: Mapping[str, object], *, final_only: bool = False) -> s
 # The other two adapters translate into the same shape; see `Usage` in
 # `base/lm/harness/events.py`.
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
-def usage_from(params: Mapping[str, object]) -> Usage:
+def usage_from(params: RequestParams) -> Usage:
     last = as_object(as_object(params.get("tokenUsage")).get("last"))
     if not last:
         return Usage()
@@ -111,7 +113,7 @@ class TurnFields:
     duration_ms: int
 
     @classmethod
-    def parse(cls, turn: Mapping[str, object]) -> TurnFields:
+    def parse(cls, turn: RequestParams) -> TurnFields:
         return cls(
             status=as_text(turn.get("status")) or "unknown",
             error_message=as_text(as_object(turn.get("error")).get("message")),
@@ -119,7 +121,7 @@ class TurnFields:
         )
 
 
-def approval_denial(method: str, params: Mapping[str, object]) -> str:
+def approval_denial(method: str, params: RequestParams) -> str:
     if method == "item/commandExecution/requestApproval":
         command = as_text(params.get("command"))
         return f"command: {command}" if command else "command"
@@ -130,7 +132,7 @@ def approval_denial(method: str, params: Mapping[str, object]) -> str:
     return method
 
 
-def _command(item: Mapping[str, object], phase: str, turn_id: str) -> list[BridgeEvent]:
+def _command(item: RequestParams, phase: str, turn_id: str) -> list[BridgeEvent]:
     identifier = as_text(item.get("id")) or ""
     if phase == "started":
         return [
@@ -157,7 +159,7 @@ def _command(item: Mapping[str, object], phase: str, turn_id: str) -> list[Bridg
     ]
 
 
-def _file_change(item: Mapping[str, object], phase: str, turn_id: str) -> list[BridgeEvent]:
+def _file_change(item: RequestParams, phase: str, turn_id: str) -> list[BridgeEvent]:
     identifier = as_text(item.get("id")) or ""
     raw_changes = item.get("changes")
     paths = _paths(raw_changes)
@@ -185,7 +187,7 @@ def _file_change(item: Mapping[str, object], phase: str, turn_id: str) -> list[B
     ]
 
 
-def _mcp_call(item: Mapping[str, object], phase: str, turn_id: str) -> list[BridgeEvent]:
+def _mcp_call(item: RequestParams, phase: str, turn_id: str) -> list[BridgeEvent]:
     identifier = as_text(item.get("id")) or ""
     name = f"mcp:{as_text(item.get('server'))}/{as_text(item.get('tool'))}"
     if phase == "started":
@@ -211,7 +213,7 @@ def _mcp_call(item: Mapping[str, object], phase: str, turn_id: str) -> list[Brid
     ]
 
 
-def _dynamic_tool(item: Mapping[str, object], phase: str, turn_id: str) -> list[BridgeEvent]:
+def _dynamic_tool(item: RequestParams, phase: str, turn_id: str) -> list[BridgeEvent]:
     identifier = as_text(item.get("id")) or ""
     if phase == "started":
         return [
@@ -232,7 +234,7 @@ def _dynamic_tool(item: Mapping[str, object], phase: str, turn_id: str) -> list[
     ]
 
 
-def _web_search(item: Mapping[str, object], phase: str, turn_id: str) -> list[BridgeEvent]:
+def _web_search(item: RequestParams, phase: str, turn_id: str) -> list[BridgeEvent]:
     if phase != "started":
         return []
     return [
@@ -245,25 +247,23 @@ def _web_search(item: Mapping[str, object], phase: str, turn_id: str) -> list[Br
     ]
 
 
-def _paths(value: object) -> list[str]:
+def _paths(value: JsonValue) -> list[str]:
     if not isinstance(value, list):
         return []
-    entries = cast("list[object]", value)
     paths: list[str] = []
-    for entry in entries:
+    for entry in value:
         path = as_text(as_object(entry).get("path"))
         if path is not None:
             paths.append(path)
     return paths
 
 
-def _changes(value: object) -> list[dict[str, object]]:
+def _changes(value: JsonValue) -> list[dict[str, object]]:
     if not isinstance(value, list):
         return []
-    entries = cast("list[object]", value)
     changes: list[dict[str, object]] = []
     has_detail = False
-    for entry in entries:
+    for entry in value:
         obj = as_object(entry)
         path = as_text(obj.get("path"))
         if path is None:
@@ -282,9 +282,9 @@ def _changes(value: object) -> list[dict[str, object]]:
     return changes if has_detail else []
 
 
-def _arguments(value: object) -> dict[str, object]:
+def _arguments(value: JsonValue) -> dict[str, object]:
     if isinstance(value, dict):
-        return dict(cast("JsonObject", value))
+        return dict(value)
     return {"arguments": value}
 
 

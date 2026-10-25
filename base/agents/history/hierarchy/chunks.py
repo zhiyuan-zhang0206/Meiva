@@ -720,7 +720,7 @@ INSERT INTO understanding_chunk_calls (
 _NUL_ESCAPE = re.compile(r"(?<!\\)((?:\\\\)*)\\u0000")
 
 
-def _json(value: Any) -> str | None:
+def _json(value: object) -> str | None:
     """`value` as JSON text for a jsonb column; `default=str` keeps an odd leaf from losing the row."""
     if value is None:
         return None

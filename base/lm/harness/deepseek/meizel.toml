@@ -17,9 +17,6 @@
 [debt.ambient-read]
 "session.py#clock time.perf_counter" = 2
 
-[debt.any-collaborator]
-"usage.py#any _int.value" = 1
-
 [debt.impure-call]
 "session.py#async def _begin" = 1
 "session.py#async def _configure" = 1
@@ -42,13 +39,3 @@
 "session.py#base/lm/harness/process.py" = 1
 "types.py#base/lm/harness/base_session.py" = 1
 "types.py#base/lm/harness/process.py" = 1
-
-[debt.type-cast]
-"mapping.py#cast _content_text" = 3
-"mapping.py#cast _text_of" = 1
-"mapping.py#cast _tool_use" = 1
-"session.py#cast DeepSeekSession._dispatch" = 1
-"usage.py#cast _parse" = 3
-
-[debt.wide-params]
-"session.py#def __init__" = 1

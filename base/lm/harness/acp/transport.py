@@ -6,9 +6,11 @@ import json
 import os
 import signal
 from collections import deque
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
+
+type _Json = str | int | float | bool | dict[str, Any] | list[_Json] | None
 
 # meiva:note
 # One ACP connection is one child process and one newline-delimited JSON-RPC
@@ -22,7 +24,6 @@ from typing import Any, cast
 # not implement would let an agent believe it read a file or ran a command.
 # meiva:link base/lm/harness/acp/docs/acp.meiva.okf.md
 MAX_STDERR_LINES = 200
-_STREAM_END = object()
 
 
 class AcpError(RuntimeError): ...
@@ -35,7 +36,7 @@ class AcpTimeoutError(AcpError): ...
 
 
 class AcpRpcError(AcpError):
-    def __init__(self, method: str, code: int, message: str, data: Any = None) -> None:
+    def __init__(self, method: str, code: int, message: str, data: object = None) -> None:
         super().__init__(f"{method} failed with JSON-RPC error {code}: {message}")
         self.method = method
         self.code = code
@@ -93,7 +94,6 @@ class AcpConnection:
         permission: PermissionHandler | None = None,
         request_timeout_seconds: float = 120.0,
         shutdown_timeout_seconds: float = 10.0,
-        stderr_limit: int = MAX_STDERR_LINES,
     ) -> None:
         self.argv = tuple(argv)
         self.cwd = cwd
@@ -101,20 +101,20 @@ class AcpConnection:
         self.permission = permission
         self.request_timeout_seconds = request_timeout_seconds
         self.shutdown_timeout_seconds = shutdown_timeout_seconds
-        self.stderr_tail: deque[str] = deque(maxlen=stderr_limit)
+        self.stderr_tail: deque[str] = deque(maxlen=MAX_STDERR_LINES)
         self._process: asyncio.subprocess.Process | None = None
         self._stdin: asyncio.StreamWriter | None = None
         self._pending: dict[int, _Pending] = {}
         self._next_id = 0
         self._reader: asyncio.Task[None] | None = None
         self._stderr_reader: asyncio.Task[None] | None = None
-        self._notifications: asyncio.Queue[Any] = asyncio.Queue()
+        self._notifications: asyncio.Queue[AcpNotification | None] = asyncio.Queue()
         self._write_lock = asyncio.Lock()
         self._closed = False
         self._close_complete = False
         self._close_lock = asyncio.Lock()
         self._tasks = asyncio.TaskGroup()
-        self._children: set[asyncio.Task[Any]] = set()
+        self._children: set[asyncio.Task[None]] = set()
         self._tasks_entered = False
 
     async def start(self) -> None:
@@ -140,7 +140,7 @@ class AcpConnection:
         self._reader = self._spawn(self._read_loop(stdout))
         self._stderr_reader = self._spawn(self._read_stderr(stderr))
 
-    def _spawn(self, coro: Any) -> asyncio.Task[Any]:
+    def _spawn(self, coro: Coroutine[object, object, None]) -> asyncio.Task[None]:
         task = self._tasks.create_task(coro)
         self._children.add(task)
         task.add_done_callback(self._children.discard)
@@ -197,9 +197,9 @@ class AcpConnection:
     async def notifications(self) -> AsyncIterator[AcpNotification]:
         while True:
             item = await self._notifications.get()
-            if item is _STREAM_END:
+            if item is None:
                 return
-            yield cast("AcpNotification", item)
+            yield item
 
     async def close(self, *, reason: str = "closed") -> None:
         # meiva:note
@@ -210,7 +210,7 @@ class AcpConnection:
             if self._close_complete:
                 return
             self._closed = True
-            self._notifications.put_nowait(_STREAM_END)
+            self._notifications.put_nowait(None)
             self._fail_pending(AcpClosedError(f"connection closed: {reason}"))
             if self._reader is not None:
                 self._reader.cancel()
@@ -272,27 +272,27 @@ class AcpConnection:
                 if not text:
                     continue
                 try:
-                    frame = json.loads(text)
+                    frame: _Json = json.loads(text)
                 except json.JSONDecodeError:
                     self.stderr_tail.append(f"non-JSON stdout: {text[:300]}")
                     continue
                 if isinstance(frame, dict):
-                    await self._dispatch(cast("dict[str, Any]", frame))
+                    await self._dispatch(frame)
         finally:
             self._closed = True
             self._fail_pending(AcpClosedError("the agent closed its output"))
-            self._notifications.put_nowait(_STREAM_END)
+            self._notifications.put_nowait(None)
 
     async def _dispatch(self, frame: dict[str, Any]) -> None:
         if "id" in frame and "method" in frame:
             await self._answer_server_request(frame)
             return
         if "method" in frame:
-            params = frame.get("params")
+            params: _Json = frame.get("params")
             self._notifications.put_nowait(
                 AcpNotification(
                     method=str(frame["method"]),
-                    params=cast("dict[str, Any]", params) if isinstance(params, dict) else {},
+                    params=params if isinstance(params, dict) else {},
                 )
             )
             return
@@ -302,45 +302,45 @@ class AcpConnection:
         pending = self._pending.pop(request_id, None)
         if pending is None or pending.future.done():
             return
-        error = frame.get("error")
+        error: _Json = frame.get("error")
         if isinstance(error, dict):
-            payload = cast("dict[str, Any]", error)
             pending.future.set_exception(
                 AcpRpcError(
                     pending.method,
-                    int(payload.get("code", -1)),
-                    str(payload.get("message", "")),
-                    payload.get("data"),
+                    int(error.get("code", -1)),
+                    str(error.get("message", "")),
+                    error.get("data"),
                 )
             )
             return
-        result = frame.get("result")
-        pending.future.set_result(
-            cast("dict[str, Any]", result) if isinstance(result, dict) else {}
-        )
+        result: _Json = frame.get("result")
+        pending.future.set_result(result if isinstance(result, dict) else {})
 
     async def _answer_server_request(self, frame: dict[str, Any]) -> None:
         method = str(frame["method"])
         request_id = frame["id"]
-        params = frame.get("params")
+        params: _Json = frame.get("params")
         if method == "session/request_permission" and isinstance(params, dict):
-            await self._answer_permission(request_id, cast("dict[str, Any]", params))
+            await self._answer_permission(request_id, params)
             return
         await self._answer_error(request_id, -32601, f"client does not implement {method}")
 
-    async def _answer_permission(self, request_id: Any, params: dict[str, Any]) -> None:
+    async def _answer_permission(self, request_id: object, params: dict[str, Any]) -> None:
+        raw_options: _Json = params.get("options")
+        option_items = raw_options if isinstance(raw_options, list) else []
         options = tuple(
             PermissionOption(
                 option_id=str(option.get("optionId", "")),
                 name=str(option.get("name", "")),
                 kind=str(option.get("kind", "")),
             )
-            for option in cast("list[dict[str, Any]]", params.get("options") or [])
+            for option in option_items
             if isinstance(option, dict)
         )
+        raw_tool_call: _Json = params.get("toolCall")
         request = PermissionRequest(
             session_id=str(params.get("sessionId", "")),
-            tool_call=cast("dict[str, Any]", params.get("toolCall") or {}),
+            tool_call=raw_tool_call if isinstance(raw_tool_call, dict) else {},
             options=options,
         )
         chosen: str | None = None
@@ -363,7 +363,7 @@ class AcpConnection:
             }
         )
 
-    async def _answer_error(self, request_id: Any, code: int, message: str) -> None:
+    async def _answer_error(self, request_id: object, code: int, message: str) -> None:
         await self._write(
             {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
         )

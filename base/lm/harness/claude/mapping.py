@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from base.lm.harness.events import (
     AssistantText,
@@ -15,6 +15,8 @@ from base.lm.harness.events import (
     ToolUse,
     Usage,
 )
+
+type _Json = str | int | float | bool | dict[str, Any] | list[_Json] | None
 
 # meiva:note
 # Dispatch is by class name rather than `isinstance`: the SDK is injected, and a
@@ -62,7 +64,7 @@ def parse_result(message: object) -> ResultFields:
     )
 
 
-def _system(message: Any, turn_id: str | None) -> list[BridgeEvent]:
+def _system(message: object, turn_id: str | None) -> list[BridgeEvent]:
     if getattr(message, "subtype", None) != "init":
         return []
     data = _as_dict(getattr(message, "data", None))
@@ -77,7 +79,7 @@ def _system(message: Any, turn_id: str | None) -> list[BridgeEvent]:
     ]
 
 
-def _stream(message: Any, turn_id: str | None) -> list[BridgeEvent]:
+def _stream(message: object, turn_id: str | None) -> list[BridgeEvent]:
     if turn_id is None:
         return []
     event = _as_dict(getattr(message, "event", None))
@@ -98,7 +100,7 @@ def _stream(message: Any, turn_id: str | None) -> list[BridgeEvent]:
     return [TextDelta(turn_id=turn_id, text=text)]
 
 
-def _assistant(message: Any, turn_id: str | None) -> list[BridgeEvent]:
+def _assistant(message: object, turn_id: str | None) -> list[BridgeEvent]:
     if turn_id is None:
         return []
     events: list[BridgeEvent] = []
@@ -124,7 +126,7 @@ def _assistant(message: Any, turn_id: str | None) -> list[BridgeEvent]:
     return events
 
 
-def _user(message: Any, turn_id: str | None) -> list[BridgeEvent]:
+def _user(message: object, turn_id: str | None) -> list[BridgeEvent]:
     if turn_id is None:
         return []
     events: list[BridgeEvent] = []
@@ -142,7 +144,7 @@ def _user(message: Any, turn_id: str | None) -> list[BridgeEvent]:
     return events
 
 
-def _rate_limit(message: Any, turn_id: str | None) -> list[BridgeEvent]:
+def _rate_limit(message: object, turn_id: str | None) -> list[BridgeEvent]:
     info = getattr(message, "rate_limit_info", None)
     if info is None:
         return []
@@ -174,7 +176,7 @@ _HANDLERS = {
 # 24020-token prompt. Reporting the remainder alone understates the prompt and
 # trips the pricing invariant that cached tokens cannot exceed input.
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
-def _usage(raw: Any) -> Usage:
+def _usage(raw: _Json) -> Usage:
     data = _as_dict(raw)
     cache_read = _int_or_zero(data.get("cache_read_input_tokens"))
     cache_creation = _int_or_zero(data.get("cache_creation_input_tokens"))
@@ -186,7 +188,7 @@ def _usage(raw: Any) -> Usage:
     )
 
 
-def _denials(raw: Any) -> tuple[str, ...]:
+def _denials(raw: _Json) -> tuple[str, ...]:
     names: list[str] = []
     for item in _as_list(raw):
         if isinstance(item, dict):
@@ -197,7 +199,7 @@ def _denials(raw: Any) -> tuple[str, ...]:
     return tuple(names)
 
 
-def _render(content: Any) -> str:
+def _render(content: _Json) -> str:
     if content is None:
         return ""
     if isinstance(content, str):
@@ -222,37 +224,39 @@ def _clip(text: str) -> str:
     return text[:TOOL_RESULT_PREVIEW_CHARS] + "..."
 
 
-def _dict(value: Any) -> dict[str, Any]:
+def _dict(value: _Json) -> dict[str, Any]:
     if isinstance(value, dict):
-        return cast("dict[str, Any]", value)
+        return value
     if value is None:
         return {}
     return {"value": value}
 
 
-def _as_dict(value: Any) -> dict[str, Any]:
-    return cast("dict[str, Any]", value) if isinstance(value, dict) else {}
+def _as_dict(value: _Json) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
-def _as_list(value: Any) -> list[Any]:
-    return cast("list[Any]", value) if isinstance(value, list) else []
+def _as_list(value: _Json) -> list[_Json]:
+    return value if isinstance(value, list) else []
 
 
-def _text(value: Any) -> str | None:
+def _text(value: object) -> str | None:
     if value is None:
         return None
     return str(value)
 
 
-def _int_or_zero(value: Any) -> int:
+def _int_or_zero(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
+        return 0
     try:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
 
 
-def _int_or_none(value: Any) -> int | None:
-    if value is None:
+def _int_or_none(value: object) -> int | None:
+    if value is None or isinstance(value, bool) or not isinstance(value, int | float | str):
         return None
     try:
         return int(value)
@@ -260,8 +264,8 @@ def _int_or_none(value: Any) -> int | None:
         return None
 
 
-def _float_or_none(value: Any) -> float | None:
-    if value is None:
+def _float_or_none(value: object) -> float | None:
+    if value is None or isinstance(value, bool) or not isinstance(value, int | float | str):
         return None
     try:
         return float(value)
