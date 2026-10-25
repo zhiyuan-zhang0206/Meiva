@@ -14,6 +14,7 @@ export function ApiProvider({ api, children }: { api: Api; children?: ReactNode 
 
 export function useApi(fallback?: Api): Api {
   const api = useContext(ApiContext);
+  if (fallback !== undefined && typeof fallback.head !== "function") return fallback;
   if (api !== null) return api;
   if (fallback !== undefined) return fallback;
   throw new Error("useApi must be used inside <ApiProvider>");
