@@ -21,14 +21,12 @@ import sys
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+
+from fastapi import FastAPI
 
 # meiva:note
 # the route annotation is resolved from module globals
 from starlette.requests import Request
-
-if TYPE_CHECKING:
-    from fastapi import FastAPI
 
 MARKERS_ENV = "GATEWAY_SHUTDOWN_TEST_MARKERS"
 PORT_ENV = "GATEWAY_SHUTDOWN_TEST_PORT"

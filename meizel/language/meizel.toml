@@ -7,13 +7,11 @@ exports = ["fixtures.py", "no_script_sibling_imports.py", "path_imports.py", "sc
 "purity_structure.py" = "strict"
 "python_commands.py" = "strict"
 "restricted.py" = "strict"
-"type_checking.py" = "strict"
 "typescript.py" = "strict"
 
 [uses]
 "ambient.py" = ["patching.py"]
 "patching.py" = ["bindings.py", "fixtures.py", "purity.py", "python_commands.py", "restricted.py"]
-"path_imports.py" = ["type_checking.py"]
 "purity.py" = ["purity_structure.py"]
 "python_commands.py" = ["restricted.py"]
 "scan.py" = ["ambient.py", "bindings.py", "fixtures.py", "input_mutations.py", "mounts.py", "purity.py", "restricted.py", "typescript.py"]

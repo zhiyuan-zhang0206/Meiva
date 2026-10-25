@@ -451,20 +451,25 @@ def test_ast_rules_retain_the_eight_package_scope(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], scope: str
 ) -> None:
     path = _write(tmp_path, f"{scope}/example.py", 0)
-    path.write_text("if TYPE_CHECKING:\n    import example\nmachine_role()\n", encoding="utf-8")
+    path.write_text(
+        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import example\nmachine_role()\n",
+        encoding="utf-8",
+    )
+    role = _write(tmp_path, "meizel.toml", 0)
+    role.write_text(f'[roles]\napplication = ["{scope}"]\n', encoding="utf-8")
+    _write(tmp_path, f"{scope}/__init__.py", 0)
+    _git(tmp_path, "add", "meizel.toml", f"{scope}/__init__.py")
 
     governed = scope not in {"tests", "scripts"}
-    assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == (
-        1 if governed else 0
-    )
+    assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 1
     output = capsys.readouterr().out
+    assert f"{scope}/example.py:2:" in output
+    assert "`if TYPE_CHECKING:` is banned" in output
     if governed:
-        assert f"{scope}/example.py:1:" in output
-        assert "`if TYPE_CHECKING:` is banned" in output
-        assert f"{scope}/example.py:3:" in output
+        assert f"{scope}/example.py:4:" in output
         assert "machine_role() is retired" in output
     else:
-        assert output == ""
+        assert "machine_role() is retired" not in output
 
 
 def test_retired_role_reader_has_no_former_file_allowance(
@@ -472,7 +477,20 @@ def test_retired_role_reader_has_no_former_file_allowance(
 ) -> None:
     # The existing TYPE_CHECKING policy is independent of machine retirement.
     path = _source(
-        tmp_path, "if typing.TYPE_CHECKING:\n    import example\n", "agent/graph/__init__.py"
+        tmp_path,
+        "import typing\nif typing.TYPE_CHECKING:\n    import example\n",
+        "agent/graph/__init__.py",
+    )
+    manifest = _write(tmp_path, "meizel.toml", 0)
+    manifest.write_text('[roles]\napplication = ["agent", "cli"]\n', encoding="utf-8")
+    policy = _write(tmp_path, "meizel.policy.toml", 0)
+    policy.write_text(
+        '[type-checking.files]\n"agent/graph/__init__.py" = "Local lazy door"\n', encoding="utf-8"
+    )
+    _write(tmp_path, "agent/__init__.py", 0)
+    _write(tmp_path, "cli/__init__.py", 0)
+    _git(
+        tmp_path, "add", "meizel.toml", "meizel.policy.toml", "agent/__init__.py", "cli/__init__.py"
     )
     role = _source(tmp_path, "def ask():\n    machine_role()\n", "cli/commands/lifecycle/start.py")
     assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 1
@@ -488,8 +506,12 @@ def test_explicit_alias_preserves_resolved_ast_scope(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], destination_scope: str
 ) -> None:
     destination = _write(tmp_path, f"{destination_scope}/original.py", 801)
+    manifest = _write(tmp_path, "meizel.toml", 0)
+    manifest.write_text('[roles]\napplication = ["base"]\n', encoding="utf-8")
+    _write(tmp_path, "base/__init__.py", 0)
+    _git(tmp_path, "add", "meizel.toml", "base/__init__.py")
     with destination.open("a", encoding="utf-8") as stream:
-        stream.write("if TYPE_CHECKING:\n    import example\n")
+        stream.write("from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import example\n")
     alias_scope = "docs" if destination_scope == "base" else "base"
     alias = tmp_path / alias_scope / "alias.py"
     alias.parent.mkdir(parents=True, exist_ok=True)
@@ -501,7 +523,7 @@ def test_explicit_alias_preserves_resolved_ast_scope(
     output = capsys.readouterr().out
     assert "hard ceiling" not in output
     if destination_scope == "base":
-        assert "base/original.py:802:" in output
+        assert "base/original.py:803:" in output
         assert "TYPE_CHECKING" in output
     else:
         assert output == ""
@@ -742,3 +764,25 @@ def test_retired_budget_sections_cannot_be_reintroduced(
     (directory / "tests.json").write_text(json.dumps({kind: entries}), encoding="utf-8")
     assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 1
     assert f"unknown section '{kind}'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "path", ["tools/helper.py", "jobs/helper.py", "tests/helpers.py", "conftest.py"]
+)
+def test_untracked_type_guard_uses_the_target_repository_scope(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], path: str
+) -> None:
+    manifest = _write(tmp_path, "meizel.toml", 0)
+    manifest.write_text(
+        '[roles]\ntooling = ["tools"]\ntemplates = ["jobs"]\ntests = ["tests"]\n',
+        encoding="utf-8",
+    )
+    for directory in ("tools", "jobs", "tests"):
+        _write(tmp_path, f"{directory}/__init__.py", 0)
+    _git(tmp_path, "add", "meizel.toml", "tools", "jobs", "tests")
+    source = _write(tmp_path, path, 0)
+    source.write_text(
+        "from typing import TYPE_CHECKING as TC\nif TC:\n    import decimal\n", encoding="utf-8"
+    )
+    assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 1
+    assert f"{path}:2: `if TYPE_CHECKING:` is banned" in capsys.readouterr().out

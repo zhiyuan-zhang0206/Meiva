@@ -14,7 +14,6 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from base.daemon.schedules.inputs import ScheduleInputs
 from schedules.jobs.agent_directory import notify_report_agent
@@ -28,9 +27,8 @@ from schedules.plans.ci_workflows import (
 )
 from schedules.plans.directory_plan import ReportRecipient
 
-if TYPE_CHECKING:
-    from base.clock import Timers
-    from scripts.ci.pull_requests.export_process import GhProcess
+from base.clock import Timers
+from scripts.ci.pull_requests.gh_process import GhProcess
 
 __all__ = ["CiMetrics", "alert_broken_workflows", "collect_ci_metrics"]
 

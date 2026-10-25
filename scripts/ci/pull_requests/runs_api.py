@@ -6,11 +6,10 @@ import json
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from base.clock import Timers
-    from scripts.ci.pull_requests.export_process import GhProcess
+from base.clock import Timers
+from scripts.ci.pull_requests.gh_process import GhProcess
 
 __all__ = [
     "CiRunsError",

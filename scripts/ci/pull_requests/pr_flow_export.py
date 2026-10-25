@@ -72,7 +72,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from zoneinfo import ZoneInfo
 
 # Script-mode path guard (PYTHONSAFEPATH=1 removed the implicit script-dir
@@ -82,10 +82,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+# meiva:note
+# The script-mode root guard must run before importing the checkout-owned API.
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener  # noqa: E402 — script path guard
-
-if TYPE_CHECKING:
-    from scripts.ci.pull_requests.export_process import GhProcess
+from scripts.ci.pull_requests.gh_process import GhProcess  # noqa: E402
 
 DEFAULT_REPO = "zhiyuan-zhang0206/Meiva"
 DEFAULT_WINDOW_DAYS = 30

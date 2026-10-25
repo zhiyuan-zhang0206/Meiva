@@ -9,11 +9,7 @@ is checking.
 import importlib.abc
 import socket
 import sys
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from cli.database import OperatorDatabaseFactory
-    from cli.database.runtime import CommandRuntime
+from typing import Any
 
 
 def _defer_logging() -> None:
@@ -176,26 +172,19 @@ def _init_and_start_settings_free() -> None:
     assert "base.config" not in sys.modules
     if not authority or scenario == "start_delivery_foreign":
         _boot_start_delivery(scenario, home)
-    command, factory = _operator_handles(home)
+    from cli.tests.guards.start_delivery_handles import operator_handles, verify_start_delivery
+
+    command, factory = operator_handles(home)
     with start_intent.admitted_home(home):
         assert not command.config.prepared
         configured()
         if authority:
-            _verify_start_delivery(scenario, home, command, factory, expected)
+            verify_start_delivery(scenario, home, command, factory, expected)
     assert "base.config" in sys.modules  # admitted root types are allowed; delivery stayed lazy
 
 
 # meiva:note
 # The command runtime and database factory `cli.main` gives a start, before it enters its home.
-def _operator_handles(home: Any) -> "tuple[CommandRuntime, OperatorDatabaseFactory]":
-    from cli.database import open_operator_database, operator_database_factory
-    from cli.database.runtime import CommandRuntime
-
-    command = CommandRuntime.create(home)
-    factory = operator_database_factory(
-        local_host=command.machine.host, open_database=open_operator_database
-    )
-    return command, factory
 
 
 def _boot_start_delivery(scenario: str, home: Any) -> None:
@@ -247,42 +236,6 @@ def _inherit_foreign_delivery(home: Any) -> None:
     own = os.environ["MEIVA_DB_URL"]
     os.environ.update(write_grant(foreign, "gateway").environment(own))
     assert os.environ["MEIVA_DB_URL"] != own
-
-
-def _verify_start_delivery(
-    scenario: str,
-    home: Any,
-    command: "CommandRuntime",
-    factory: "OperatorDatabaseFactory",
-    expected: Any,
-) -> None:
-    from urllib.parse import urlsplit
-
-    from base.db import NoDatabaseAuthorityError
-    from base.host.db_authority.tests.generation import seed_active_generation
-    from cli.commands.data_plane.completion import adopt_gateway_login
-
-    config = command.config
-    url: str = config.view.data_plane.db_url
-    if scenario in {"start_delivery_refused", "start_delivery_launcher"}:
-        reason = config.view.env_boot.db_authority_refusal
-        assert reason is not None
-        assert (
-            "source checkout" if scenario == "start_delivery_refused" else "agent-profile"
-        ) in reason
-        try:
-            factory().connect()
-        except NoDatabaseAuthorityError as exc:
-            assert expected.roles.gateway.password not in str(exc)
-            return
-        raise AssertionError("an unauthorized start reached the database")
-    if scenario == "start_delivery_cold":
-        assert urlsplit(url).password is None
-        expected = seed_active_generation(home)
-        adopt_gateway_login(home, url, database_factory=factory)
-    else:
-        assert urlsplit(url).password == expected.roles.gateway.password
-    assert urlsplit(factory.db_url()).password == expected.roles.gateway.password
 
 
 def _help_admission() -> None:

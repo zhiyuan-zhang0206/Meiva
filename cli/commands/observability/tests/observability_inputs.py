@@ -10,11 +10,9 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
-if TYPE_CHECKING:
-    from base.cluster import ClusterPorts
-
+from base.cluster import ClusterPorts
 from base.host.db_authority import unit
 from base.host.private_storage import write_private_bytes
 from cli.commands.observability.inputs import CollectorSettings, LgtmSettings

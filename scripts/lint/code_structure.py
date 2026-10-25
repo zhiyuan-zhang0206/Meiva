@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path, PurePosixPath
 
@@ -19,9 +20,19 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 from meizel import lint_common  # noqa: E402 — standalone script
 from meizel.budgets import limits  # noqa: E402 — standalone script
+from meizel.contracts.analysis import (  # noqa: E402
+    load_manifests,
+    load_policy,
+    sources_from,
+    type_checking_in_scope,
+    type_checking_violations,
+)
+from meizel.graph.model import Sources  # noqa: E402
+from meizel.graph.universe import Universe, load_universe  # noqa: E402
 from meizel.language import path_imports  # noqa: E402 — standalone script
+from meizel.language.scan import scan_tree  # noqa: E402
 from meizel.owners import decisions  # noqa: E402 — standalone script
-from meizel.roles import packages  # noqa: E402 - standalone script
+from meizel.roles import packages, select_packages  # noqa: E402
 from meizel.state import ambient_state, machine_role  # noqa: E402 — standalone script
 from scripts.structure import baseline_shards, locality  # noqa: E402 — standalone script
 from scripts.structure.budgets import quality_budget  # noqa: E402 — standalone script
@@ -43,7 +54,6 @@ def _scan_file(tree: ast.Module, rel_path: str) -> list[tuple[int, str]]:
     if lint_common.is_test_path(rel_path):
         return []  # tests are outside the AST rules (module docstring)
     out: list[tuple[int, str]] = []
-    out.extend(path_imports.type_checking_violations(tree, rel_path))
     out.extend(machine_role.violations(tree))
     out.extend(decisions.allowlist_errors(tree, rel_path, _SCAN_DIRS))
     return out
@@ -251,10 +261,67 @@ def _collect_locality(
     sites[path_imports.SECTION].update(path_imports.measure(tree, rel))
 
 
-def _governed(path: Path, rel: str, ast_files: set[Path]) -> tuple[bool, bool]:
+@dataclass(frozen=True)
+class _TypeContext:
+    universe: Universe
+    sources: Sources
+    allowed: frozenset[str]
+    packages: tuple[str, ...]
+    files: set[Path]
+
+    def in_scope(self, path: Path, rel: str) -> bool:
+        return path in self.files and type_checking_in_scope(rel, self.packages)
+
+    def errors(self, rel: str, tree: ast.Module) -> list[str]:
+        walrus = any(isinstance(n, ast.NamedExpr) for n in ast.walk(tree))
+        scan = scan_tree(self.universe, rel, tree, self.sources, walrus=walrus)
+        return [
+            f"{rel}:{line}: {message}"
+            for line, message in type_checking_violations(
+                scan.type_checking, rel, self.allowed, self.packages
+            )
+        ]
+
+
+def _load_type_context(argv: list[str], repo_root: Path) -> tuple[_TypeContext | None, list[str]]:
+    universe = load_universe(repo_root)
+    manifests, manifest_problems = load_manifests(universe)
+    policy, policy_problems = load_policy(universe)
+    if manifest_problems or policy_problems:
+        return None, [
+            f"{d.path}:{d.line}: {d.message}" for d in [*manifest_problems, *policy_problems]
+        ]
+    root_manifest = manifests.get("")
+    type_packages = select_packages(
+        root_manifest.roles if root_manifest else {}, "application", "tooling", "templates", "tests"
+    )
+    roots = (
+        [Path(arg).resolve() for arg in argv]
+        if argv
+        else [repo_root / d for d in type_packages] + [repo_root / "conftest.py"]
+    )
+    return (
+        _TypeContext(
+            universe,
+            sources_from(manifests, policy),
+            frozenset(policy.reasons("type-checking", "files")),
+            type_packages,
+            set(_iter_py_files(roots)),
+        ),
+        [],
+    )
+
+
+def _governed(
+    path: Path, rel: str, ast_files: set[Path], type_ctx: _TypeContext
+) -> tuple[bool, bool, bool]:
     """(Rules 1, 3-6; Rule 9) govern this file: Rule 9 also reaches schedules/."""
     in_ast = path in ast_files
-    return in_ast and _in_scan_scope(rel), in_ast and ambient_state.in_scope(rel)
+    return (
+        in_ast and _in_scan_scope(rel),
+        in_ast and ambient_state.in_scope(rel),
+        type_ctx.in_scope(path, rel),
+    )
 
 
 def _check_ast_and_quality(
@@ -267,25 +334,30 @@ def _check_ast_and_quality(
     parse_ast: Callable[..., ast.Module],
     measure_quality: Callable[[ast.AST, str], dict[str, dict[str, int]]],
 ) -> list[str]:
+    type_ctx, type_problems = _load_type_context(argv, repo_root)
+    if type_ctx is None:
+        return type_problems
     files = limits.budget_files(targets, repo_root, _STRUCTURE_DIRS)
     ast_files = _ast_rule_files(argv, repo_root)
     measurements: dict[str, dict[str, int]] = {kind: {} for kind in quality_budget.QUALITY_SECTIONS}
     sites: dict[str, locality.Sites] = {kind: {} for kind in _MEASURED_SECTIONS}
     scanned: set[str] = set()
     errors: list[str] = []
-    for path in sorted(files | ast_files):
+    for path in sorted(files | ast_files | type_ctx.files):
         try:
             rel = path.relative_to(repo_root).as_posix()
         except ValueError:
             continue
-        ast_rules, ambient = _governed(path, rel, ast_files)
-        if path not in files and not (ast_rules or ambient):
+        ast_rules, ambient, type_rules = _governed(path, rel, ast_files, type_ctx)
+        if not any((path in files, ast_rules, ambient, type_rules)):
             continue
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
         tree = parse_ast(text, filename=rel)
+        if type_rules:
+            errors.extend(type_ctx.errors(rel, tree))
         if ast_rules:
             errors.extend(f"{rel}:{line}: {message}" for line, message in _scan_file(tree, rel))
             _collect_locality(tree, rel, sites, scanned)

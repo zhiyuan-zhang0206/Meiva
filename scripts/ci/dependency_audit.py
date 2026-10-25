@@ -12,11 +12,9 @@ from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from functools import partial
+from http.client import HTTPResponse
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
-
-if TYPE_CHECKING:
-    from base.host.net.ports import UrlOpener
+from typing import Any, Literal, Protocol, cast
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 MARKER = "<!-- weekly-dependency-audit -->"
@@ -26,6 +24,9 @@ _SEVERITY_RANK = {"critical": 4, "high": 3, "moderate": 2, "low": 1, "unknown": 
 _ACTIONABLE_SEVERITIES = frozenset({"critical", "high", "unknown"})
 
 Fetch = Callable[[str], Any]
+type UrlOpener = Callable[
+    [str | urllib.request.Request, float], AbstractContextManager[HTTPResponse]
+]
 
 
 class AuditProcess(Protocol):
@@ -342,7 +343,7 @@ def _gh(argv: list[str], *, run: AuditProcess) -> str:
 
 def _system_open(
     target: str | urllib.request.Request, timeout: float
-) -> AbstractContextManager[Any]:
+) -> AbstractContextManager[HTTPResponse]:
     return urllib.request.urlopen(target, timeout=timeout)
 
 

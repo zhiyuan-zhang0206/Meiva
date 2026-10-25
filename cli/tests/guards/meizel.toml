@@ -4,6 +4,7 @@ exports = [
     "launcher_context_child.py",
     "service_readiness_guard.py",
     "start_refusal_child.py",
+    "start_delivery_handles.py",
 ]
 
 [debt.restricted-python]
