@@ -1,17 +1,19 @@
-"""Explicitly owned machine identity and cluster capability values.
-
-Composition roots supply four independent lazy readers. Each MachineIdentity
-caches its own name, capabilities, reachable host and optional description;
-resetting one owner never changes another. The startup factory is defined in
-base.cluster.machine.boot and consumes the root's ConfigBoot without reading
-any fields at construction. SDK consumers use the machine in their MeivaContext.
-
-Machine names are stable deployment labels, never inferred from hostnames.
-Capabilities are independently declared gateway, agent-runner and
-observability-station flags; a host runs their union. Missing name/role and
-invalid capability tokens retain their explicit errors. Gateway URL and bearer
-helpers validate the existing client credential policy independently of identity.
-"""
+# meiva:note
+# Explicitly owned machine identity and cluster capability values.
+#
+# Composition roots construct `ConfiguredMachineIdentity(config)` in
+# `base.cluster.machine.configured` without reading any fields at construction.
+# Each owner caches its own name, capabilities, reachable host and optional
+# description; resetting one owner never changes another. Read-only consumers take
+# `MachineIdentityReader`, which both `ConfiguredMachineIdentity` and
+# `MachineFacts` satisfy. SDK consumers use the machine in their `MeivaContext`.
+#
+# Machine names are stable deployment labels, never inferred from hostnames.
+# Capabilities are independently declared gateway, agent-runner and
+# observability-station flags; a host runs their union. Missing name/role and
+# invalid capability tokens retain their explicit errors. Gateway URL and bearer
+# helpers validate the existing client credential policy independently of identity.
+# meiva:link base/cluster/machine/docs/machine.meiva.okf.md
 
 from base.cluster.machine.gateway_access import (
     GatewayAccess,
@@ -22,7 +24,6 @@ from base.cluster.machine.gateway_access import (
 )
 from base.cluster.machine.identity import (
     MachineFacts,
-    MachineIdentity,
     MachineIdentityReader,
     MachineNameMissing,
     MachineRole,
@@ -40,7 +41,6 @@ __all__ = [
     "GatewayApiBaseMissing",
     "GatewayApiTokenMissing",
     "MachineFacts",
-    "MachineIdentity",
     "MachineIdentityReader",
     "MachineNameMissing",
     "MachineRole",

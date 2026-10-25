@@ -1,29 +1,11 @@
-"""Compose lazy machine fields from the startup owner's explicit configuration."""
+# meiva:note
+# Compose gateway access from the startup owner's explicit configuration.
+# meiva:link base/cluster/machine/docs/machine.meiva.okf.md
 
-from base.cluster.machine import GatewayAccess, MachineIdentity, roles_from_flags
+from base.cluster.machine import GatewayAccess
 from base.config import ConfigBoot
 
-__all__ = ["gateway_access_from_boot", "machine_from_boot"]
-
-
-def machine_from_boot(config: ConfigBoot) -> MachineIdentity:
-    """Own lazy, independently cached machine fields from this root's configuration.
-
-    Construction reads no fields. A live command owner can reset this identity
-    after repairing configuration; a delivery owner keeps its captured values.
-    """
-    return MachineIdentity(
-        name=lambda: config.view.general.machine_name,
-        role=lambda: roles_from_flags(
-            serve_gateway=bool(config.view.general.machine_serve_gateway),
-            serve_agent_runner=bool(config.view.general.machine_serve_agent_runner),
-            serve_observability_station=bool(
-                config.view.general.machine_serve_observability_station
-            ),
-        ),
-        host=lambda: config.view.general.machine_host,
-        description=lambda: config.view.general.machine_description,
-    )
+__all__ = ["gateway_access_from_boot"]
 
 
 # meiva:note

@@ -18,10 +18,26 @@ def machine_value_imports() -> None:
 
     sys.meta_path.insert(0, SettingsForbidden())
     from base.cluster.machine import (
-        MachineIdentity,  # noqa: F401  # pyright: ignore[reportUnusedImport]
+        MachineFacts,
+        MachineIdentityReader,
+        MachineNameMissing,
+        MachineRoleInvalid,
+        MachineRoleMissing,
+        roles_from_flags,
     )
-    from base.telemetry import EventPipeline  # noqa: F401  # pyright: ignore[reportUnusedImport]
+    from base.telemetry import EventPipeline
 
+    assert all(
+        (
+            MachineFacts,
+            MachineIdentityReader,
+            MachineNameMissing,
+            MachineRoleInvalid,
+            MachineRoleMissing,
+            roles_from_flags,
+            EventPipeline,
+        )
+    )
     assert "base.config" not in sys.modules
 
 

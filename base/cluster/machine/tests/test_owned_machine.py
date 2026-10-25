@@ -1,19 +1,26 @@
+from pathlib import Path
+
 import pytest
 
 from base.cluster.machine import MachineNameMissing
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
+from base.paths.tests.homes import point_home
 
 
-class _RefusingConfigBoot(ConfigBoot):
-    # meiva:note
-    # A boot config that fails the test if construction reads any field from it.
-    def get_field(self, name: str) -> object:
-        pytest.fail(f"construction must not read machine configuration (read {name!r})")
-
-
-def test_construction_does_not_read_configuration() -> None:
-    machine_from_boot(_RefusingConfigBoot())
+def test_construction_does_not_read_configuration(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    point_home(monkeypatch, tmp_path)
+    (tmp_path / ".env").write_bytes(b"\xff")
+    config = ConfigBoot()
+    owner = ConfiguredMachineIdentity(config)
+    assert not config.prepared
+    owner.set(role="gateway")
+    assert owner.role() == frozenset({"gateway"})
+    assert not config.prepared
+    with pytest.raises(UnicodeDecodeError):
+        owner.name()
 
 
 def test_role_never_requires_name_and_delivery_owners_are_independent() -> None:
@@ -23,14 +30,14 @@ def test_role_never_requires_name_and_delivery_owners_are_independent() -> None:
     prior_config.set_field("machine_serve_gateway", True)
     prior_config.set_field("machine_serve_agent_runner", False)
     prior_config.set_field("machine_serve_observability_station", False)
-    prior = machine_from_boot(prior_config)
+    prior = ConfiguredMachineIdentity(prior_config)
     assert prior.role() == frozenset({"gateway"})
     with pytest.raises(MachineNameMissing):
         prior.name()
     next_config = ConfigBoot()
     next_config.read_process_environment()
     next_config.set_field("machine_name", "next-host")
-    current = machine_from_boot(next_config)
+    current = ConfiguredMachineIdentity(next_config)
     assert current.name() == "next-host"
     prior.reset()
     with pytest.raises(MachineNameMissing):
@@ -43,8 +50,8 @@ def test_owner_reset_observes_repaired_fields_without_resetting_another() -> Non
     config.read_process_environment()
     config.view.general.machine_name = "before"
     config.view.general.machine_description = "first"
-    machine = machine_from_boot(config)
-    other = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
+    other = ConfiguredMachineIdentity(config)
     assert machine.name() == other.name() == "before"
     assert machine.description() == "first"
     config.view.general.machine_name = "after"
