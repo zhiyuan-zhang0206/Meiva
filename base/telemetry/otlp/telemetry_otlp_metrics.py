@@ -163,7 +163,6 @@ def build_providers(
     keep_logs: Callable[[Any], None] | None = None,
     keep_reader: Callable[[Any], None] | None = None,
     keep_metrics: Callable[[Any], None] | None = None,
-    metrics_interval_s: float = _METRICS_INTERVAL_S,
     home: Path | None = None,
 ) -> tuple[Any, Any]:
     """Build the production (LoggerProvider, MeterProvider) pair exporting
@@ -183,7 +182,7 @@ def build_providers(
     plan = provider_build_plan(
         endpoint,
         http_timeout_s=OTLP_HTTP_TIMEOUT_S,
-        metrics_interval_s=metrics_interval_s,
+        metrics_interval_s=_METRICS_INTERVAL_S,
     )
     # `shutdown_on_exit=False` on both providers: the SDK default registers a
     # provider shutdown on atexit at bring-up (mid-life), which sits AFTER

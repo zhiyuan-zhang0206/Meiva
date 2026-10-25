@@ -52,13 +52,13 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
         attributes={"ok": True, "duration_seconds": 2.5},
     )
     db_conn.execute("LOCK TABLE agent_metric_observations IN ACCESS EXCLUSIVE MODE")
-    pipeline = telemetry.build_pipeline(
-        database=lambda: database,
-        machine=machine_identity(),
-        home=Path(".meiva"),
-        target_dir=tmp_path,
-        exporter=exporter,
-    )
+    with telemetry_otlp.bind_exporter(exporter):
+        pipeline = telemetry.build_pipeline(
+            database=lambda: database,
+            machine=machine_identity(),
+            home=Path(".meiva"),
+            target_dir=tmp_path,
+        )
     try:
         telemetry.emit_prepared(event, producer=lambda: pipeline)
         assert pipeline.flush().status is telemetry.DrainStatus.COMPLETED

@@ -4,12 +4,13 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from threading import Barrier
 from typing import Any
-from unittest.mock import Mock
 
 import psycopg
 import pytest
 
 from base.db import Database
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.telemetry.delivery.mirror import event_row
 from base.telemetry.delivery.receipts import Event
 from base.telemetry.metrics import observed_metrics as metrics
@@ -73,9 +74,11 @@ def test_absent_usage_price_and_optional_fields_stay_unknown() -> None:
 
 
 def test_unrelated_large_logs_are_not_serialized_again() -> None:
-    encode = Mock(side_effect=AssertionError("unrelated body must not be serialized"))
-    assert metrics.observe_event(_event("log", body="large diagnostic"), row_fn=encode) is None
-    encode.assert_not_called()
+    class _UnserializableBody:
+        def __str__(self) -> str:
+            raise AssertionError("unrelated body must not be serialized")
+
+    assert metrics.observe_event(_event("log", body=_UnserializableBody())) is None
 
 
 def test_turn_and_node_exact_durations_preserve_missing_optional_fields() -> None:
@@ -212,21 +215,27 @@ def test_missing_agent_fails_batch_explicitly_without_partial_commit(
 
 def test_one_malformed_fact_does_not_discard_other_supported_rows(
     database: Database,
+    db_conn: psycopg.Connection[Any],
+    loguru_records: LogRecords,
 ) -> None:
-    write = Mock(return_value=1)
-    report = Mock()
-    metrics.project_events(
-        database,
-        [
-            _event("turn_end", duration_seconds="invalid", ok=True),
-            _event("turn_end", duration_seconds=1.25, ok=False),
-        ],
-        write_observations_fn=write,
-        report_fn=report,
-    )
-    assert len(write.call_args.args[0]) == 1
-    assert write.call_args.args[0][0].turn_duration_seconds == 1.25
-    report.assert_called_once()
+    _agent(db_conn)
+    try:
+        metrics.project_events(
+            database,
+            [
+                _event("turn_end", duration_seconds="invalid", ok=True),
+                _event("turn_end", duration_seconds=1.25, ok=False),
+            ],
+        )
+        rows = db_conn.execute(
+            "SELECT turn_duration_seconds FROM agent_metric_observations WHERE agent_id=71"
+        ).fetchall()
+        assert rows == [(1.25,)]
+        assert any(
+            "rejected 1 malformed measurement(s)" in msg for msg in loguru_records.messages()
+        )
+    finally:
+        metrics.close_projection()
 
 
 def test_lifecycle_intervals_follow_transactional_status_not_telemetry(

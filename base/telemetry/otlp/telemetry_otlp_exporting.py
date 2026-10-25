@@ -5,7 +5,7 @@ import time
 from collections.abc import Callable
 
 from base.telemetry.delivery.pipeline import EventPipeline
-from base.telemetry.delivery.receipts import DrainResult, DrainStatus, Event, EventExporter
+from base.telemetry.delivery.receipts import DrainResult, DrainStatus, Event
 from base.telemetry.otlp.telemetry_otlp import OtlpBackend, default_exporter, remaining_time
 
 __all__ = ["ExportingEventPipeline"]
@@ -18,14 +18,11 @@ class ExportingEventPipeline(EventPipeline):
         writer: Callable[[list[Event], OtlpBackend], None],
         export_allowed: Callable[[], bool],
         flush_interval_s: float = 0.5,
-        exporter: EventExporter | None = None,
+        exporter: OtlpBackend | None = None,
     ) -> None:
-        if exporter is None:
-            self._exporter: OtlpBackend = default_exporter(export_allowed=export_allowed)
-        elif isinstance(exporter, OtlpBackend):
-            self._exporter = exporter
-        else:
-            raise TypeError(f"Expected OtlpBackend, got {type(exporter).__name__}")
+        self._exporter: OtlpBackend = (
+            default_exporter(export_allowed=export_allowed) if exporter is None else exporter
+        )
         self._exports_finished = False
         super().__init__(
             writer=lambda events: writer(events, self._exporter), flush_interval_s=flush_interval_s

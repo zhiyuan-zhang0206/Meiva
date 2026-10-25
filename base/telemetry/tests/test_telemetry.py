@@ -16,7 +16,6 @@ asynchronously).
 from __future__ import annotations
 
 import json
-import queue
 import socket
 import threading
 from collections.abc import Iterator
@@ -390,9 +389,7 @@ def test_drain_on_exit_lands_queued_events() -> None:
     assert _mirror_rows("service_started", _AGENT), "service_started must land in the mirror"
 
 
-def test_resolve_machine_falls_back_only_on_documented_absence(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_resolve_machine_falls_back_only_on_documented_absence() -> None:
     machine = telemetry.resolve_machine()  # type: ignore[attr-defined]
     assert machine  # non-empty on this host
 
@@ -420,52 +417,47 @@ def _mk_event(category: str, event_name: str) -> telemetry.Event:
 
 def test_regular_events_shed_immediately_when_full() -> None:
     """A telemetry event on a full queue is shed at once (put_nowait)."""
-    pipe = telemetry.EventPipeline.__new__(telemetry.EventPipeline)
-    pipe._admission_lock = threading.Lock()
-    pipe._stop_requested = threading.Event()
-    pipe._finished = threading.Event()
-    pipe._dropped_lock = threading.Lock()
-    pipe.dropped = 0
+    entered, release = threading.Event(), threading.Event()
 
-    class _FullQueue:
-        def put_nowait(self, event: object) -> None:
-            raise queue.Full
+    def writer(_batch: list[telemetry.Event]) -> None:
+        entered.set()
+        assert release.wait(2)
 
-        def put(self, event: object, timeout: float | None = None) -> None:
-            raise AssertionError("regular events must not use the blocking put")
-
-    pipe._queue = _FullQueue()  # type: ignore[attr-defined]
-    telemetry.EventPipeline.enqueue(pipe, _mk_event("telemetry", "turn_end"))
-    assert pipe.dropped == 1
+    pipe = telemetry.EventPipeline(writer=writer, batch_size=1, queue_maxsize=1)
+    try:
+        pipe.enqueue(_mk_event("telemetry", "turn_end"))
+        assert entered.wait(1)
+        pipe.enqueue(_mk_event("telemetry", "turn_end"))
+        pipe.enqueue(_mk_event("telemetry", "turn_end"))
+        assert pipe.dropped == 1
+    finally:
+        release.set()
+        pipe.stop(timeout=1)
 
 
 def test_audit_events_are_shed_like_any_other_event_on_a_full_queue() -> None:
     """Their record is `audit_events`, so the projection takes no blocking lane."""
-    pipe = telemetry.EventPipeline.__new__(telemetry.EventPipeline)
-    pipe._admission_lock = threading.Lock()
-    pipe._stop_requested = threading.Event()
-    pipe._finished = threading.Event()
-    pipe._dropped_lock = threading.Lock()
-    pipe.dropped = 0
+    entered, release = threading.Event(), threading.Event()
 
-    class _FullQueue:
-        def put_nowait(self, event: object) -> None:
-            raise queue.Full
+    def writer(_batch: list[telemetry.Event]) -> None:
+        entered.set()
+        assert release.wait(2)
 
-        def put(self, event: object, timeout: float | None = None) -> None:
-            raise AssertionError("no event may block its producer")
+    pipe = telemetry.EventPipeline(writer=writer, batch_size=1, queue_maxsize=1)
+    try:
+        pipe.enqueue(_mk_event("audit", "send_message"))
+        assert entered.wait(1)
+        pipe.enqueue(_mk_event("audit", "send_message"))
+        pipe.enqueue(_mk_event("audit", "send_message"))
+        assert pipe.dropped == 1
+    finally:
+        release.set()
+        pipe.stop(timeout=1)
 
-    pipe._queue = _FullQueue()  # type: ignore[attr-defined]
-    telemetry.EventPipeline.enqueue(pipe, _mk_event("audit", "send_message"))
-    assert pipe.dropped == 1
 
-
-def test_explicit_capture_precedes_closed_projection_admission(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_explicit_capture_precedes_closed_projection_admission() -> None:
     pipe = telemetry.EventPipeline(writer=lambda _batch: None)
     pipe.stop(timeout=1)
-    monkeypatch.setitem(emitter.process_state, "pipeline", pipe)
     captured: list[telemetry.Event] = []
 
     def capture(prepared: telemetry.Event) -> telemetry.Event:
@@ -473,6 +465,6 @@ def test_explicit_capture_precedes_closed_projection_admission(
         return prepared
 
     prepared = _mk_event("log", "log")
-    emitter.emit_prepared(prepared, capture=capture)
+    emitter.emit_prepared(prepared, capture=capture, producer=lambda: pipe)
     assert captured == [prepared]
     assert pipe.dropped == 1
