@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from contextlib import suppress
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated
 
 from pydantic import Field, field_validator
 from pydantic_settings import NoDecode
@@ -425,8 +425,12 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
             if not s:
                 return []
             with suppress(json.JSONDecodeError):  # not JSON -> fall through to comma split
-                parsed = cast("list[Any]", json.loads(s))
+                parsed: object = json.loads(s)
                 if isinstance(parsed, list):
-                    return [x for x in parsed if isinstance(x, str)]
+                    # meiva:note
+                    # Narrowing `object` via `isinstance(..., list)` yields `list[Unknown]` in
+                    # basedpyright; copy into `list[object]` before filtering `str` members.
+                    items: list[object] = list(parsed)  # pyright: ignore[reportUnknownArgumentType]
+                    return [x for x in items if isinstance(x, str)]
             return [x.strip() for x in s.split(",") if x.strip()]
         return v

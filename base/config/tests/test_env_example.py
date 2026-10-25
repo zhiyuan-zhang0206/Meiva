@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from dotenv import dotenv_values
 from pydantic import AliasChoices
 
-from base.config import FIELD_INFOS, Settings
+from base.config import FIELD_INFOS
+from base.config._full import build
+from base.host.env.dotenv_boot import EnvBootResult
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -53,9 +54,10 @@ def test_env_example_has_no_blank_typed_fields() -> None:
     )
 
 
-def test_env_example_loads_as_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in sorted(_settings_env_names()):
-        monkeypatch.delenv(name, raising=False)
-    for key, value in _env_example_values().items():
-        monkeypatch.setenv(key, value)
-    Settings()
+def test_env_example_loads_as_settings() -> None:
+    clean_env = dict.fromkeys(sorted(_settings_env_names()), "")
+    for name in list(clean_env):
+        if name not in _env_example_values():
+            clean_env.pop(name, None)
+    clean_env.update(_env_example_values())
+    build(env_boot=EnvBootResult(), environment=clean_env)

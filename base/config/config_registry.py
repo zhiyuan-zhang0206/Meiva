@@ -28,13 +28,14 @@ environment and constructs no Settings.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from types import UnionType
-from typing import Any, Literal, Protocol, Union, cast, get_args, get_origin
+from typing import Any, Literal, Protocol, Union, get_args, get_origin
 
 from base.api_contracts.config import Capability
+from base.host.env.process_profile import ProcessProfile
 
 
 class _FieldInfoLike(Protocol):
@@ -45,10 +46,38 @@ class _FieldInfoLike(Protocol):
     package), while the real FieldInfo objects only appear through the build.
     """
 
-    alias: str | None
-    annotation: Any
-    serialization_alias: str | None
-    json_schema_extra: dict[str, Any] | Callable[[dict[str, Any]], None] | None
+    @property
+    def alias(self) -> str | None: ...
+
+    @property
+    def annotation(self) -> object: ...
+
+    @property
+    def default(self) -> object: ...
+
+    @property
+    def default_factory(self) -> Callable[..., object] | None: ...
+
+    @property
+    def description(self) -> str | None: ...
+
+    @property
+    def serialization_alias(self) -> str | None: ...
+
+    @property
+    def validation_alias(self) -> object: ...
+
+    @property
+    def json_schema_extra(self) -> dict[str, Any] | Callable[[dict[str, Any]], None] | None: ...
+
+    def get_default(
+        self, *, call_default_factory: Literal[True], validated_data: dict[str, Any] | None = None
+    ) -> object: ...
+
+
+class _DomainModelLike(Protocol):
+    @property
+    def model_fields(self) -> Mapping[str, _FieldInfoLike]: ...
 
 
 # The capability a config field configures — the top-level config-panel section.
@@ -65,7 +94,7 @@ ALLOWED_CAPABILITIES = frozenset({"gateway", "agent-runner", "common"})
 # Order = field render order. The default capability owns every field in the
 # domain unless a field overrides it with json_schema_extra={"capability": ...}
 # (services / daemon / general straddle both capabilities — see those files).
-DOMAIN_MODELS: tuple[tuple[str, str, str | type[Any], str], ...] = (
+DOMAIN_MODELS: tuple[tuple[str, str, str | Any, str], ...] = (
     ("lm", "LLM", "LmSettings", "agent-runner"),
     ("sandbox", "Sandbox", "SandboxSettings", "agent-runner"),
     ("agent", "Agent", "AgentSettings", "agent-runner"),
@@ -91,7 +120,7 @@ DOMAIN_MODELS: tuple[tuple[str, str, str | type[Any], str], ...] = (
 DOMAIN_ATTRS = frozenset(attr for attr, _label, _model, _cap in DOMAIN_MODELS)
 
 
-def model_classes() -> dict[str, type[Any]]:
+def model_classes() -> dict[str, Any]:
     """The sub-model class behind each `DOMAIN_MODELS` name.
 
     The classes are imported INSIDE this function (see module docstring):
@@ -155,7 +184,9 @@ def schema_extra(info: _FieldInfoLike) -> dict[str, Any]:
     isinstance narrowing through here so the metadata walkers read a clean dict.
     """
     extra = info.json_schema_extra
-    return cast("dict[str, Any]", extra) if isinstance(extra, dict) else {}
+    if callable(extra) or extra is None:
+        return {}
+    return extra
 
 
 _ALLOWED_SCOPES = frozenset({"cluster-pinned", "cluster-default", "host", "agent"})
@@ -178,14 +209,16 @@ ALLOWED_RESTART_REQUIRED = frozenset({"", "agent", "all", "gateway", "ops", "sch
 # matrix, verified bidirectionally by cli/commands/lifecycle/tests/startup/test_gateway_consumer_guard.py).
 # "schedule" / "all" / "" have no named-kind constraint ("schedule" runs without
 # a profile and constructs every domain; "all" is satisfied by any consumer).
-RESTART_REQUIRED_PROFILE = {
+RESTART_REQUIRED_PROFILE: dict[str, ProcessProfile] = {
     "agent": "agent",
     "gateway": "gateway",
     "ops": "runner",
 }
 
 
-def _validate_field(name: str, attr: str, extra: dict[str, Any], default_capability: str) -> str:
+def _validate_field(
+    name: str, attr: str, extra: dict[str, Any], default_capability: str
+) -> Capability:
     """Fail fast on one field's ownership metadata; returns its validated capability."""
     scope = extra.get("scope")
     # The field's capability is its explicit override or the domain default;
@@ -206,7 +239,11 @@ def _validate_field(name: str, attr: str, extra: dict[str, Any], default_capabil
     _validate_scope_rules(name, extra, scope)
     _validate_lifecycle(name, attr, extra)
     _validate_restart_required(name, attr, extra)
-    return capability
+    if capability == "gateway":
+        return "gateway"
+    if capability == "agent-runner":
+        return "agent-runner"
+    return "common"
 
 
 def _validate_scope_rules(name: str, extra: dict[str, Any], scope: object) -> None:
@@ -268,7 +305,7 @@ def _validate_restart_required(name: str, attr: str, extra: dict[str, Any]) -> N
     if profile_kind is not None:
         from base.config.profiles import PROCESS_PROFILES
 
-        profile = PROCESS_PROFILES[profile_kind]  # type: ignore[index]
+        profile = PROCESS_PROFILES[profile_kind]
         if attr not in profile:
             raise RuntimeError(
                 f"field {name!r} ({attr}) declares restart_required={restart_required!r} "
@@ -281,25 +318,22 @@ def _validate_restart_required(name: str, attr: str, extra: dict[str, Any]) -> N
             )
 
 
-@lru_cache(maxsize=1)
-def build_registry() -> dict[str, _FieldRef]:
-    """Walk the sub-models into a flat name->owner registry, failing fast on an
-    ownership-metadata mistake. The structural checks that used to live in a
-    standalone `lint_config_scope` hook run here — a field with a bad or missing
-    `scope` (which drives BOOTSTRAP_FIELDS + write routing) can never load, so
-    the drift the lint guarded against is impossible rather than merely flagged.
-    """
-    from base.config.base import EnvSettings
-
+# meiva:note
+# Walk `domain_models` into a flat name->owner registry, failing fast on an
+# ownership-metadata mistake. Accepting `domain_models` directly lets registry
+# contract tests validate synthetic domain models without patching module globals.
+def validate_domain_models(
+    domain_models: tuple[tuple[str, str, str | Any, str], ...],
+) -> dict[str, _FieldRef]:
     reg: dict[str, _FieldRef] = {}
-    for attr, label, model_name, default_capability in DOMAIN_MODELS:
+    for attr, label, model_name, default_capability in domain_models:
         if isinstance(model_name, str):
+            # meiva:note
             # Deferred import (see module docstring): the sub-model classes live
             # under the `base.config` package. Importing them only at build time
             # keeps this registry importable before Settings construction.
-            model = cast("type[EnvSettings]", model_classes()[model_name])
+            model: _DomainModelLike = model_classes()[model_name]
         else:
-            # A test-injected synthetic model class (config_lifecycle tests).
             model = model_name
         for name, info in model.model_fields.items():
             if name in reg:
@@ -314,12 +348,21 @@ def build_registry() -> dict[str, _FieldRef]:
                 name=name,
                 domain=attr,
                 group=label,
-                # Validated against ALLOWED_CAPABILITIES just above (a bad value
-                # already raised), so the narrowing to Capability is sound.
-                capability=cast(Capability, capability),
+                capability=capability,
                 info=info,
             )
     return reg
+
+
+@lru_cache(maxsize=1)
+def build_registry() -> dict[str, _FieldRef]:
+    """Walk the sub-models into a flat name->owner registry, failing fast on an
+    ownership-metadata mistake. The structural checks that used to live in a
+    standalone `lint_config_scope` hook run here — a field with a bad or missing
+    `scope` (which drives BOOTSTRAP_FIELDS + write routing) can never load, so
+    the drift the lint guarded against is impossible rather than merely flagged.
+    """
+    return validate_domain_models(DOMAIN_MODELS)
 
 
 def fields() -> dict[str, _FieldRef]:
@@ -338,7 +381,7 @@ def field_infos() -> dict[str, _FieldInfoLike]:
     return {n: r.info for n, r in fields().items()}
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> dict[str, _FieldInfoLike]:
     if name == "FIELD_INFOS":
         return field_infos()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -407,7 +450,12 @@ def field_lifecycle(name: str) -> Lifecycle:
     extra = schema_extra(fields()[name].info)
     if extra.get("per_agent") is not True:
         raise KeyError(f"config field {name!r} is not per_agent — it has no lifecycle class")
-    return cast(Lifecycle, extra["lifecycle"])
+    lifecycle = extra["lifecycle"]
+    if lifecycle == "frozen":
+        return "frozen"
+    if lifecycle == "live":
+        return "live"
+    raise RuntimeError(f"config field {name!r} has invalid lifecycle {lifecycle!r}")
 
 
 def frozen_field_names() -> set[str]:

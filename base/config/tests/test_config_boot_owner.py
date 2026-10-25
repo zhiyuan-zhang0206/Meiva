@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 
 import base.config as facade
-from base.config import ConfigBoot, ConfigBuildWaitTimeoutError, _full, _lite
+from base.config import ConfigBoot, ConfigBuildWaitTimeoutError, _full
 from base.host.env.dotenv_boot import EnvBootResult
 from base.host.proc import run_bounded
 
@@ -31,19 +31,12 @@ def _isolated_owner_environment(tmp_path: Path) -> Iterator[None]:
         yield
 
 
-def test_constructor_and_skip_boot_do_not_deliver_environment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def unexpected_load() -> None:
-        raise AssertionError("construction/skip boot must not load environment")
-
-    monkeypatch.setattr(_lite, "load_meiva_env", unexpected_load)
-    monkeypatch.setenv("MEIVA_CONFIG_FETCH", "skip")
-    monkeypatch.setenv("MEIVA_CONFIG_BOOT", "eager")
-    owner = ConfigBoot()
+def test_constructor_and_skip_boot_do_not_deliver_environment() -> None:
+    owner = ConfigBoot(environment={"MEIVA_CONFIG_FETCH": "skip", "MEIVA_CONFIG_BOOT": "eager"})
     owner.boot()
     assert not owner.boot_state()["prepared"]
     assert not owner.is_full()
+    assert owner.env_boot is None
 
 
 def test_read_only_owners_keep_delivered_values_through_parallel_eager_builds() -> None:
@@ -154,16 +147,12 @@ def test_full_view_assignment_and_data_plane_refresh_affect_only_its_owner(
     assert second.view.data_plane.db_url == old_url
 
 
-def test_profile_rejection_remains_lazy_and_instance_local(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("MEIVA_CONFIG_BOOT", raising=False)
-    monkeypatch.delenv("MEIVA_CONFIG_FETCH", raising=False)
-    monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "runner")
-    limited = ConfigBoot()
+def test_profile_rejection_remains_lazy_and_instance_local(tmp_path: Path) -> None:
+    limited = ConfigBoot(
+        environment={"MEIVA_HOME": str(tmp_path), "MEIVA_PROCESS_PROFILE": "runner"}
+    )
     limited.boot()
-    monkeypatch.delenv("MEIVA_PROCESS_PROFILE")
-    complete = ConfigBoot()
+    complete = ConfigBoot(environment={"MEIVA_HOME": str(tmp_path)})
     complete.boot()
     assert not limited.view.has_domain("alerts")
     assert complete.view.has_domain("alerts")
@@ -175,7 +164,8 @@ def test_profile_rejection_remains_lazy_and_instance_local(
 def test_owner_build_gate_is_bounded_and_does_not_block_another_owner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    blocked, independent = ConfigBoot(), ConfigBoot()
+    blocked = ConfigBoot(wait_timeout_seconds=0.05)
+    independent = ConfigBoot()
     entered, release = Event(), Event()
     builder_id: list[int] = []
     build = _full.build
@@ -191,7 +181,6 @@ def test_owner_build_gate_is_bounded_and_does_not_block_another_owner(
         return blocked.ensure_eager()
 
     monkeypatch.setattr(_full, "build", controlled_build)
-    monkeypatch.setattr(_lite, "BUILD_WAIT_TIMEOUT_SECONDS", 0.05)
     with ThreadPoolExecutor(max_workers=1) as pool:
         task = pool.submit(blocked_build)
         try:
@@ -237,13 +226,15 @@ def test_same_thread_build_reads_lite_without_recursive_build_and_retries_failur
 
 
 @pytest.mark.parametrize("probe", ["profile", "has_domain"])
-def test_skip_boot_profile_probes_prepare_without_full_build(
-    monkeypatch: pytest.MonkeyPatch, probe: str
-) -> None:
-    monkeypatch.setenv("MEIVA_CONFIG_FETCH", "skip")
-    monkeypatch.setenv("MEIVA_CONFIG_BOOT", "eager")
-    monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
-    owner = ConfigBoot()
+def test_skip_boot_profile_probes_prepare_without_full_build(tmp_path: Path, probe: str) -> None:
+    owner = ConfigBoot(
+        environment={
+            "MEIVA_HOME": str(tmp_path),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_CONFIG_BOOT": "eager",
+            "MEIVA_PROCESS_PROFILE": "agent",
+        }
+    )
     owner.boot()
     assert not owner.boot_state()["prepared"]
     if probe == "profile":
@@ -258,13 +249,17 @@ def test_skip_boot_profile_probes_prepare_without_full_build(
 
 
 def test_skip_agent_profile_selects_deferred_authority_for_other_domains(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     from base.config.service_read import ConfigAuthority
 
-    monkeypatch.setenv("MEIVA_CONFIG_FETCH", "skip")
-    monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
-    owner = ConfigBoot()
+    owner = ConfigBoot(
+        environment={
+            "MEIVA_HOME": str(tmp_path),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_PROCESS_PROFILE": "agent",
+        }
+    )
     owner.boot()
     builds = 0
 

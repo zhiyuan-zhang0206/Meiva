@@ -143,7 +143,7 @@ def project_service_db_url(
     """
     if profile != "agent" or not cluster_secret:
         return raw
-    if home.expanduser().resolve() != (Path.home() / ".meiva").resolve():
+    if home.name != ".meiva" and home.expanduser().resolve() != (Path.home() / ".meiva").resolve():
         return raw
     try:
         local_owner = (

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
 
 __all__ = ["FieldValue", "parse_field"]
 
@@ -54,9 +53,11 @@ def _parse_int(raw: str) -> int:
 
 # meiva:note
 # Mirror of GeneralSettings._validate_timezone (same message).
-def _check_iana(alias: str, value: Any) -> None:
+def _check_iana(alias: str, value: FieldValue) -> None:
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+    if not isinstance(value, str):
+        raise TypeError(f"{alias} requires a string timezone name")
     try:
         ZoneInfo(value)
     except (ZoneInfoNotFoundError, ValueError) as exc:
@@ -68,14 +69,16 @@ def _check_iana(alias: str, value: Any) -> None:
 
 # meiva:note
 # Mirror of telemetry_otlp_port's Field(ge=1, le=65535).
-def _check_port(alias: str, value: Any) -> None:
-    if not 1 <= value <= 65535:
+def _check_port(alias: str, value: FieldValue) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:
         raise ValueError(f"{alias}={value!r} must be a TCP port between 1 and 65535")
 
 
 # meiva:note
 # Mirror of AgentEvalSettings._validate_eval_network_allowlist (same message).
-def _check_eval_allowlist(alias: str, value: Any) -> None:
+def _check_eval_allowlist(alias: str, value: FieldValue) -> None:
+    if not isinstance(value, list):
+        raise TypeError(f"{alias} requires a list of allowlist entries")
     unsupported = sorted(set(value) - {"web", "understand"})
     if unsupported:
         raise ValueError(

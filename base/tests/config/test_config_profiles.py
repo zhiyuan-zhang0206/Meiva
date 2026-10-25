@@ -8,9 +8,7 @@ from base.config.service_read import ConfigAuthority
 
 
 @pytest.mark.usefixtures("served_gateway_home")
-def test_service_reads_stay_full_when_singleton_domain_excluded(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_service_reads_stay_full_when_singleton_domain_excluded(tmp_path: Path) -> None:
     from base import config
 
     real = config.settings
@@ -33,9 +31,7 @@ def test_service_reads_stay_full_when_singleton_domain_excluded(
     baseline_values = authority.current_field_values()
     baseline_flat = authority.flat_dump(mode="json")
 
-    monkeypatch.setattr(config, "settings", _GatewayProfileLimited())
-
-    authority = ConfigAuthority(config.settings, authority.all_domains, authority.env_path)
+    authority = ConfigAuthority(_GatewayProfileLimited(), authority.all_domains, authority.env_path)
     served = authority.bootstrap_config_values(provider_key_envs=(), plugin_cluster_config="")
     values = authority.current_field_values()
     flat = authority.flat_dump(mode="json")
@@ -50,31 +46,19 @@ def test_service_reads_stay_full_when_singleton_domain_excluded(
     assert "MEIVA_EXEC_TIMEOUT_SECONDS" in served
 
 
-def test_get_field_stays_strict_on_excluded_domain(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_field_stays_strict_on_excluded_domain() -> None:
     from base import config
 
-    real = config.settings
-
-    class _GatewayProfileLimited:
-        def __getattr__(self, name: str):
-            if name in ("agent", "sandbox", "web"):
-                raise AttributeError(f"{name} not in gateway profile (Task #856)")
-            return getattr(real, name)
-
-    monkeypatch.setattr(config, "settings", _GatewayProfileLimited())
-    import pytest
+    owner = config.ConfigBoot()
+    owner.settings = config.Settings(profile="gateway")
+    owner.mode = "full"
+    owner.prepared = True
 
     with pytest.raises(AttributeError):
-        config.get_field("exec_timeout_seconds")
+        owner.get_field("exec_timeout_seconds")
 
 
-def _profile_settings(monkeypatch: pytest.MonkeyPatch, profile: str):
-    from base import config
-
-    return config.Settings(profile=profile)
-
-
-def test_gateway_profile_excludes_agent_domains(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gateway_profile_excludes_agent_domains() -> None:
     from base import config
 
     s = config.Settings(profile="gateway")
@@ -98,7 +82,7 @@ def test_gateway_profile_excludes_agent_domains(monkeypatch: pytest.MonkeyPatch)
         assert s.has_domain(domain), domain
 
 
-def test_agent_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agent_profile_domains() -> None:
     from base import config
 
     s = config.Settings(profile="agent")
@@ -121,27 +105,29 @@ def test_agent_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
             getattr(s, domain)
 
 
-def test_keys_of_the_retired_stack_are_inert(monkeypatch: pytest.MonkeyPatch) -> None:
-    import os
-
+def test_keys_of_the_retired_stack_are_inert() -> None:
     from base import config
+    from base.config.service_read import domain_model_classes
 
-    for key, value in {
+    retired_env = {
+        "MEIVA_DB_URL": "postgresql://meiva@127.0.0.1:5433/meiva",
+        "MEIVA_REDIS_URL": "redis://127.0.0.1:6379/0",
         "MEIVA_PITR_ENABLED": "true",
         "MEIVA_PITR_STORE_BACKEND": "oss",
         "MEIVA_PITR_OSS_BUCKET": "retired",
         "MEIVA_PITR_GCS_PREFIX": "meiva-pitr/retired",
         "MEIVA_PITR_SPOOL_HARD_BYTES": "2362232013",
         "MEIVA_PITR_UPLOADER_HEALTH_PORT": "8117",
-    }.items():
-        monkeypatch.setitem(os.environ, key, value)
-
-    settings = config.Settings()
+    }
+    domains = {
+        name: model.from_environment(retired_env) for name, model in domain_model_classes().items()
+    }
+    settings = config.Settings(**domains)
 
     assert not hasattr(settings, "physical_backup")
 
 
-def test_runner_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runner_profile_domains() -> None:
     from base import config
 
     s = config.Settings(profile="runner")
@@ -162,36 +148,37 @@ def test_runner_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
             getattr(s, domain)
 
 
-def test_settings_reads_env_profile_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_settings_reads_env_profile_marker() -> None:
     from base import config
 
-    monkeypatch.setenv(config.MEIVA_PROCESS_PROFILE_ENV, "gateway")
-    s = config.Settings()
+    boot = config.ConfigBoot(
+        environment={
+            config.MEIVA_PROCESS_PROFILE_ENV: "gateway",
+            "MEIVA_CONFIG_FETCH": "skip",
+        }
+    )
+    s = boot.ensure_eager()
     assert not s.has_domain("agent")
-    monkeypatch.delenv(config.MEIVA_PROCESS_PROFILE_ENV, raising=False)
     s2 = config.Settings()
     assert s2.has_domain("agent") and s2.has_domain("sandbox") and s2.has_domain("web")
 
 
-def test_unknown_profile_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unknown_profile_fails_fast() -> None:
     from base import config
 
     with pytest.raises(ValueError):
         config.Settings(profile="bogus")
 
 
-def test_explicit_none_profile_is_full(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_explicit_none_profile_is_full() -> None:
     from base import config
 
-    monkeypatch.setenv(config.MEIVA_PROCESS_PROFILE_ENV, "gateway")
     s = config.Settings(profile=None)
     assert s.has_domain("agent") and s.has_domain("sandbox") and s.has_domain("web")
 
 
 @pytest.mark.usefixtures("served_gateway_home")
-def test_bootstrap_and_panel_full_under_real_gateway_profile(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_bootstrap_and_panel_full_under_real_gateway_profile(tmp_path: Path) -> None:
     from base import config
 
     authority = ConfigAuthority(config.settings, config.settings, tmp_path / ".env")
@@ -209,7 +196,6 @@ def test_bootstrap_and_panel_full_under_real_gateway_profile(
     }
 
     limited = config.Settings(profile="gateway")
-    monkeypatch.setattr(config, "settings", limited)
 
     authority = ConfigAuthority(limited, authority.all_domains, authority.env_path)
     served = authority.bootstrap_config_values(provider_key_envs=(), plugin_cluster_config="")
@@ -228,7 +214,7 @@ def test_bootstrap_and_panel_full_under_real_gateway_profile(
             assert values[name] == baseline_values[name], name
 
     with pytest.raises(AttributeError):
-        _ = config.settings.sandbox
+        _ = limited.sandbox
 
 
 def test_memory_backend_switch_fields_require_gateway_restart() -> None:
@@ -299,7 +285,7 @@ def test_hierarchy_model_declares_all_restart() -> None:
     assert extra["restart_required"] == "all"
 
 
-def test_build_registry_rejects_unknown_restart_required(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_registry_rejects_unknown_restart_required() -> None:
     from pydantic import Field
 
     from base.config import config_registry
@@ -312,22 +298,11 @@ def test_build_registry_rejects_unknown_restart_required(monkeypatch: pytest.Mon
             json_schema_extra={"scope": "cluster-pinned", "restart_required": "gatewat"},
         )
 
-    monkeypatch.setattr(
-        config_registry,
-        "DOMAIN_MODELS",
-        (("synthetic", "Synthetic", Bad, "agent-runner"),),
-    )
-    config_registry.build_registry.cache_clear()
-    try:
-        with pytest.raises(RuntimeError, match="restart_required='gatewat'"):
-            config_registry.build_registry()
-    finally:
-        config_registry.build_registry.cache_clear()
+    with pytest.raises(RuntimeError, match="restart_required='gatewat'"):
+        config_registry.validate_domain_models((("synthetic", "Synthetic", Bad, "agent-runner"),))
 
 
-def test_build_registry_rejects_restart_required_for_unconsuming_kind(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_build_registry_rejects_restart_required_for_unconsuming_kind() -> None:
     from pydantic import Field
 
     from base.config import config_registry
@@ -340,17 +315,8 @@ def test_build_registry_rejects_restart_required_for_unconsuming_kind(
             json_schema_extra={"scope": "cluster-pinned", "restart_required": "agent"},
         )
 
-    monkeypatch.setattr(
-        config_registry,
-        "DOMAIN_MODELS",
-        (("telegram", "Telegram", WrongKind, "gateway"),),
-    )
-    config_registry.build_registry.cache_clear()
-    try:
-        with pytest.raises(RuntimeError, match=r"restart_required='agent'.*process profile"):
-            config_registry.build_registry()
-    finally:
-        config_registry.build_registry.cache_clear()
+    with pytest.raises(RuntimeError, match=r"restart_required='agent'.*process profile"):
+        config_registry.validate_domain_models((("telegram", "Telegram", WrongKind, "gateway"),))
 
 
 def test_every_field_restart_required_names_a_kind_that_consumes_it() -> None:
@@ -359,7 +325,6 @@ def test_every_field_restart_required_names_a_kind_that_consumes_it() -> None:
     from base.config import FIELD_REFS
     from base.config.config_registry import ALLOWED_RESTART_REQUIRED, RESTART_REQUIRED_PROFILE
     from base.config.profiles import PROCESS_PROFILES
-    from base.host.env.process_profile import ProcessProfile
 
     def _extra(ref: object) -> dict[str, Any]:
         info = getattr(ref, "info", ref)
@@ -376,7 +341,7 @@ def test_every_field_restart_required_names_a_kind_that_consumes_it() -> None:
     for name, ref in FIELD_REFS.items():
         restart = str(_extra(ref).get("restart_required", ""))
         kind = RESTART_REQUIRED_PROFILE.get(restart)
-        if kind is not None and ref.domain not in PROCESS_PROFILES[cast(ProcessProfile, kind)]:
+        if kind is not None and ref.domain not in PROCESS_PROFILES[kind]:
             wrong_kind.append((name, ref.domain, restart))
     assert not wrong_kind, (
         f"fields whose restart_required names a process kind that does not consume "

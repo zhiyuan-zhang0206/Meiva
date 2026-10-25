@@ -15,8 +15,8 @@ would be circular).
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import KW_ONLY, dataclass
 from pathlib import Path
-from typing import Any
 
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
@@ -37,48 +37,36 @@ from base.config.service_read import ConfigAuthority, domain_model_classes
 CONFIG_UNCHANGED_SENTINEL = "__meiva_unchanged__"
 
 
+type _ConfigFieldValue = str | int | float | bool | list[str] | list[float] | None
+type _ConfigChoices = list[str] | None
+
+
+@dataclass(frozen=True)
 class ConfigFieldMeta:
     """Full metadata for a single config field — serialized by GET /api/config for the frontend."""
 
-    def __init__(
-        self,
-        name: str,
-        field_type: str,
-        current_value: Any,
-        default_value: Any,
-        description: str,
-        group: str,
-        restart_required: str,
-        *,
-        writable: bool,
-        sensitive: bool,
-        env_var: str,
-        scope: str,
-        capability: Capability,
-        remote_writable: bool,
-        per_agent: bool,
-        choices: list[str] | None = None,
-        owner: str | None = None,
-    ) -> None:
-        self.owner = owner
-        self.name = name
-        self.field_type = field_type
-        self.current_value = current_value
-        self.default_value = default_value
-        self.description = description
-        self.group = group
-        self.restart_required = restart_required
-        self.writable = writable
-        self.sensitive = sensitive
-        self.env_var = env_var
-        self.scope = scope
-        # gateway | agent-runner | common — conceptual ownership, not panel display grouping.
-        self.capability: Capability = capability
-        self.remote_writable = remote_writable
-        self.per_agent = per_agent
-        # For an "enum" field, the allowed values (the Literal members) the
-        # frontend renders as a fixed-option select; None for every other type.
-        self.choices = choices
+    name: str
+    field_type: str
+    current_value: _ConfigFieldValue
+    default_value: _ConfigFieldValue
+    description: str
+    group: str
+    restart_required: str
+    _: KW_ONLY
+    writable: bool
+    sensitive: bool
+    env_var: str
+    scope: str
+    # meiva:note
+    # gateway | agent-runner | common — conceptual ownership, not panel display grouping.
+    capability: Capability
+    remote_writable: bool
+    per_agent: bool
+    # meiva:note
+    # For an "enum" field, the allowed values (the Literal members) the
+    # frontend renders as a fixed-option select; None for every other type.
+    choices: _ConfigChoices = None
+    owner: str | None = None
 
 
 def get_config_metadata(*, authority: ConfigAuthority) -> list[ConfigFieldMeta]:

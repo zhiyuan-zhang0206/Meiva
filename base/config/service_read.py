@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
@@ -34,7 +34,12 @@ __all__ = [
 ]
 
 
-def _validate_complete_model(model: Any) -> None:
+class _ProfiledModel(Protocol):
+    @property
+    def profile(self) -> str | None: ...
+
+
+def _validate_complete_model(model: _ProfiledModel) -> None:
     if model.profile is not None:
         raise ValueError("ConfigAuthority requires a profile-independent read model")
 

@@ -2,56 +2,42 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from base import config
 
 # --- agent_communication_style: enum ---
 
-_STYLE_ENV = ("MEIVA_AGENT_COMMUNICATION_STYLE",)
 
-
-def _style_from_env(monkeypatch: pytest.MonkeyPatch, **env: str) -> str | None:
-    """Resolve agent_communication_style from a clean env plus `env`.
-
-    Constructs AgentSettings rather than reading the `settings` singleton: that
-    is built at import, so a later setenv never reaches it. Every style alias is
-    cleared first so an ambient `.env` cannot decide the outcome.
-    """
+def _style_from_env(**env: str) -> str | None:
     from base.config.domains.agent.settings import AgentSettings
 
-    for key in _STYLE_ENV:
-        monkeypatch.delenv(key, raising=False)
-    for key, value in env.items():
-        monkeypatch.setenv(key, value)
-    return AgentSettings().agent_communication_style
+    return AgentSettings.from_environment(env).agent_communication_style
 
 
-def test_communication_style_defaults_to_off(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_communication_style_defaults_to_off() -> None:
     """No env at all leaves the None sentinel (unset -> per-model resolution),
     whose shared floor is 'off' by user ruling (2026-08-22), so the section is
     omitted unless explicitly enabled."""
     from base.lm.registry import DEFAULT_TUNING
 
-    assert _style_from_env(monkeypatch) is None
+    assert _style_from_env() is None
     assert DEFAULT_TUNING.agent_communication_style == "off"
 
 
 @pytest.mark.parametrize("style", ["oriented", "concise", "silent", "off"])
-def test_communication_style_accepts_each_member(monkeypatch: pytest.MonkeyPatch, style) -> None:
-    assert _style_from_env(monkeypatch, MEIVA_AGENT_COMMUNICATION_STYLE=style) == style  # pyright: ignore[reportUnknownArgumentType]
+def test_communication_style_accepts_each_member(style: str) -> None:
+    assert _style_from_env(MEIVA_AGENT_COMMUNICATION_STYLE=style) == style
 
 
 @pytest.mark.parametrize("bad", ["loud", "", "verbose", "2"])
-def test_unknown_communication_style_fails_fast(monkeypatch: pytest.MonkeyPatch, bad) -> None:
+def test_unknown_communication_style_fails_fast(bad: str) -> None:
     """A value outside the documented members reaches Literal validation and
     raises rather than being coerced."""
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
-        _style_from_env(monkeypatch, MEIVA_AGENT_COMMUNICATION_STYLE=bad)  # pyright: ignore[reportUnknownArgumentType]
+        _style_from_env(MEIVA_AGENT_COMMUNICATION_STYLE=bad)
 
 
 def test_communication_style_is_a_per_agent_enum() -> None:
@@ -71,31 +57,18 @@ def test_communication_style_is_a_per_agent_enum() -> None:
     )
 
 
-_HELPER_ENV = ("MEIVA_PERMISSIONS_HELPER_PORT",)
-
-
-def _helper_port_from_env(monkeypatch: pytest.MonkeyPatch, **env: str) -> int:
-    """Resolve permissions_helper_port from a clean env plus `env` (same pattern
-    as `_style_from_env`: the settings singleton is built at import, so a later
-    env change never reaches it; every alias is cleared first so an ambient .env
-    cannot decide the outcome). delitem/setitem, not delenv/setenv: the lint
-    bans env mutation on Settings aliases; this constructs a fresh sub-model,
-    which reads the RAW env by design."""
+def _helper_port_from_env(**env: str) -> int:
     from base.config.domains.services.settings import ServiceSettings
 
-    for key in _HELPER_ENV:
-        monkeypatch.delitem(os.environ, key, raising=False)
-    for key, value in env.items():
-        monkeypatch.setitem(os.environ, key, value)
-    return ServiceSettings().permissions_helper_port
+    return ServiceSettings.from_environment(env).permissions_helper_port
 
 
-def test_permissions_helper_port_defaults_to_9223(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert _helper_port_from_env(monkeypatch) == 9223
+def test_permissions_helper_port_defaults_to_9223() -> None:
+    assert _helper_port_from_env() == 9223
 
 
-def test_permissions_helper_port_reads_new_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert _helper_port_from_env(monkeypatch, MEIVA_PERMISSIONS_HELPER_PORT="18010") == 18010
+def test_permissions_helper_port_reads_new_key() -> None:
+    assert _helper_port_from_env(MEIVA_PERMISSIONS_HELPER_PORT="18010") == 18010
 
 
 def test_permissions_helper_serialization_alias_is_the_new_key() -> None:
@@ -112,39 +85,30 @@ def test_permissions_helper_serialization_alias_is_the_new_key() -> None:
 # constant now, per design evaluation-record #14) ---
 
 
-def _im_send_delays_from_env(monkeypatch: pytest.MonkeyPatch, **env: str) -> list[float]:
-    """Construct ServiceSettings from a clean env plus `env` (the singleton is
-    built at import, so a later setenv never reaches it)."""
+def _im_send_delays_from_env(**env: str) -> list[float]:
     from base.config.domains.services.settings import ServiceSettings
 
-    # setenv/delenv via loop variables — the direct literal spelling is
-    # linted (settings is a module-load singleton), the indirect one
-    # reaches the fresh ServiceSettings() construction below.
-    for key in ("MEIVA_IM_SEND_RETRY_DELAYS",):
-        monkeypatch.delenv(key, raising=False)
-    for key, value in env.items():
-        monkeypatch.setenv(key, value)
-    return ServiceSettings().im_send_retry_delays
+    return ServiceSettings.from_environment(env).im_send_retry_delays
 
 
-def test_delay_lists_accept_comma_separated_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_delay_lists_accept_comma_separated_env() -> None:
     """A comma-separated env value parses into the delay list — the spelling a
     .env operator would naturally write (task #698 G8; regression: NoDecode
     handed the raw string to list[float] and Settings construction crashed,
     killing every spawned agent in e2e)."""
-    im = _im_send_delays_from_env(monkeypatch, MEIVA_IM_SEND_RETRY_DELAYS="0.5,1")
+    im = _im_send_delays_from_env(MEIVA_IM_SEND_RETRY_DELAYS="0.5,1")
     assert im == [0.5, 1.0]
 
 
-def test_delay_lists_accept_json_array_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_delay_lists_accept_json_array_env() -> None:
     """The JSON-array spelling pydantic-settings would natively decode also
     works."""
-    im = _im_send_delays_from_env(monkeypatch, MEIVA_IM_SEND_RETRY_DELAYS="[2.0, 4.0, 8.0]")
+    im = _im_send_delays_from_env(MEIVA_IM_SEND_RETRY_DELAYS="[2.0, 4.0, 8.0]")
     assert im == [2.0, 4.0, 8.0]
 
 
-def test_delay_lists_default_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    im = _im_send_delays_from_env(monkeypatch)
+def test_delay_lists_default_without_env() -> None:
+    im = _im_send_delays_from_env()
     assert im == [2.0, 4.0, 8.0, 16.0, 32.0]
 
 
@@ -152,41 +116,31 @@ def test_delay_lists_default_without_env(monkeypatch: pytest.MonkeyPatch) -> Non
 # the same before-validator treatment or any env value crashes settings load) ---
 
 
-def _disabled_adapters_from_env(
-    monkeypatch: pytest.MonkeyPatch, value: str | None = None
-) -> list[str]:
+def _disabled_adapters_from_env(value: str | None = None) -> list[str]:
     from base.config.domains.services.settings import ServiceSettings
 
-    # setenv via a loop variable — the direct literal spelling is linted
-    # (settings is a module-load singleton), the indirect one reaches the
-    # fresh ServiceSettings() construction below, same as the delay-list
-    # tests.
-    for key in ("MEIVA_IM_DISABLED_ADAPTERS",):
-        monkeypatch.delenv(key, raising=False)
-        if value is not None:
-            monkeypatch.setenv(key, value)
-    s = ServiceSettings()
-    return s.im_disabled_adapters
+    env = {} if value is None else {"MEIVA_IM_DISABLED_ADAPTERS": value}
+    return ServiceSettings.from_environment(env).im_disabled_adapters
 
 
-def test_disabled_adapters_accept_comma_separated_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_disabled_adapters_accept_comma_separated_env() -> None:
     """The natural .env spelling — "weixin,feishu" — parses into the list."""
-    assert _disabled_adapters_from_env(monkeypatch, "weixin,feishu") == ["weixin", "feishu"]
+    assert _disabled_adapters_from_env("weixin,feishu") == ["weixin", "feishu"]
 
 
-def test_disabled_adapters_accept_json_array_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_disabled_adapters_accept_json_array_env() -> None:
     """The JSON-array spelling works too."""
-    assert _disabled_adapters_from_env(monkeypatch, '["weixin", "feishu"]') == [
+    assert _disabled_adapters_from_env('["weixin", "feishu"]') == [
         "weixin",
         "feishu",
     ]
 
 
-def test_disabled_adapters_accept_empty_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_disabled_adapters_accept_empty_env() -> None:
     """An empty value must not crash — it means "nothing disabled"."""
-    assert _disabled_adapters_from_env(monkeypatch, "") == []
+    assert _disabled_adapters_from_env("") == []
 
 
-def test_disabled_adapters_default_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_disabled_adapters_default_without_env() -> None:
     """No env at all -> default empty (all adapters load)."""
-    assert _disabled_adapters_from_env(monkeypatch) == []
+    assert _disabled_adapters_from_env() == []

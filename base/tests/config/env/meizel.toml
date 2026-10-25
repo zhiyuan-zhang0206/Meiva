@@ -4,11 +4,7 @@
 "test_file_lock_bounded.py" = ["_file_lock_holder.py"]
 "test_registry.py" = ["_env_import_child.py"]
 
-[debt.env-patch]
-"test_agent_slices.py#patch.dict os.environ" = 1
-
 [debt.first-party-patch]
-"test_agent_slices.py#monkeypatch.setattr base.config.settings.agent.history_dump_keep" = 1
 "test_config_refresh.py#assignment base.config.settings.data_plane" = 1
 "test_config_refresh.py#monkeypatch.setattr base.config.settings.env_boot" = 1
 

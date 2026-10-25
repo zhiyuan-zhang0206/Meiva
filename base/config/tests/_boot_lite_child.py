@@ -190,7 +190,7 @@ def inflight_build_read_timeout_raises_retryable() -> None:
     import base.config._full as full
     import base.config._lite as lite
 
-    lite.BUILD_WAIT_TIMEOUT_SECONDS = 0.3
+    lite.set_wait_timeout(0.3)
     real: Any = full.build
     entered = threading.Event()
     release = threading.Event()
@@ -312,7 +312,7 @@ def inflight_build_get_field_timeout_raises_retryable() -> None:
     import base.config._full as full
     import base.config._lite as lite
 
-    lite.BUILD_WAIT_TIMEOUT_SECONDS = 0.3
+    lite.set_wait_timeout(0.3)
     real: Any = full.build
     entered = threading.Event()
     release = threading.Event()

@@ -11,14 +11,7 @@ def _registry_with(model: type[EnvSettings]) -> None:
     from base.config import config_registry
 
     domains = (("synthetic", "Synthetic", model, "agent-runner"),)
-    original = config_registry.DOMAIN_MODELS
-    config_registry.DOMAIN_MODELS = domains
-    config_registry.build_registry.cache_clear()
-    try:
-        config_registry.build_registry()
-    finally:
-        config_registry.DOMAIN_MODELS = original
-        config_registry.build_registry.cache_clear()
+    config_registry.validate_domain_models(domains)
 
 
 class TestRegistryEnforcement:

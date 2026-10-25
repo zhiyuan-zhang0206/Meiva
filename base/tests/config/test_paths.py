@@ -53,27 +53,21 @@ def test_workspace_dir_none_fails_fast(unit_home: Path) -> None:
 # ── prod_service_checkout_error (Task #966: 01:13 worktree accident) ──
 
 
-def _home_with_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    home = tmp_path / ".meiva"
-    (home / "source").mkdir(parents=True)
-    monkeypatch.setenv("MEIVA_HOME", str(home))
-    return home
+def _home_with_source(unit_home: Path) -> Path:
+    (unit_home / "source").mkdir(parents=True)
+    return unit_home
 
 
-def test_prod_checkout_guard_allows_the_homes_own_source(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_prod_checkout_guard_allows_the_homes_own_source(unit_home: Path) -> None:
     """A home's own source checkout is the one allowed launch site."""
-    home = _home_with_source(tmp_path, monkeypatch)
+    home = _home_with_source(unit_home)
     assert paths.prod_service_checkout_error(home / "source") is None
 
 
-def test_prod_checkout_guard_refuses_dev_worktree(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_prod_checkout_guard_refuses_dev_worktree(tmp_path: Path, unit_home: Path) -> None:
     """A worktree (under the home or anywhere else) must never launch a home's
     services: deleting the worktree removes the floor under the running fleet."""
-    home = _home_with_source(tmp_path, monkeypatch)
+    home = _home_with_source(unit_home)
     for repo in (home / "worktrees" / "meiva-2750-dev-wt", home / "source-wt", tmp_path / "Meiva"):
         err = paths.prod_service_checkout_error(repo)
         assert err is not None, repo
@@ -81,13 +75,11 @@ def test_prod_checkout_guard_refuses_dev_worktree(
 
 
 def test_prod_checkout_guard_allows_a_home_without_source_any_checkout(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, unit_home: Path
 ) -> None:
     """A home with no `source` of its own (a test or scratch home) runs whichever
     checkout's code launches it — the guard is about homes that have an owner."""
-    home = tmp_path / ".meiva-dev"
-    home.mkdir()
-    monkeypatch.setenv("MEIVA_HOME", str(home))
+    assert not (unit_home / "source").exists()
     assert paths.prod_service_checkout_error(tmp_path / "worktrees" / "dev-wt") is None
 
 

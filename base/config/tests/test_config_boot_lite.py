@@ -49,7 +49,7 @@ _LITE_CONFIG_MODULES = {
 
 
 @pytest.fixture(autouse=True)
-def _isolated_boot_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolated_boot_home(tmp_path: Path) -> Path:
     """The default child boots a local source; explicit home cases still override it."""
     home = tmp_path / "boot-home"
     home.mkdir()
@@ -59,27 +59,33 @@ def _isolated_boot_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         "MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("MEIVA_HOME", str(home))
+    return home
 
 
-def _clean_env(**overrides: str) -> dict[str, str]:
+def _clean_env(default_home: Path, **overrides: str) -> dict[str, str]:
     env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
     env.pop("VIRTUAL_ENV", None)
-    # Keep pytest's isolated home; cleaning config keys must not select a live unit.
-    env["MEIVA_HOME"] = os.environ["MEIVA_HOME"]
+    # meiva:note
+    # Keep the isolated home; cleaning config keys must not select a live unit.
+    env["MEIVA_HOME"] = str(default_home)
     env.update(overrides)
     return env
 
 
 def _spawn(
-    *argv: str, env: dict[str, str] | None = None, timeout: float = 180
+    *argv: str,
+    default_home: Path,
+    env: dict[str, str] | None = None,
+    timeout: float = 180,
 ) -> subprocess.CompletedProcess[str]:
+    cmd = [sys.executable, "-B"]
+    cmd.extend(argv)
     with live_host_control() as stdin:
         return subprocess.run(  # noqa: S603 — fixed argv, sys.executable owns the child
-            [sys.executable, "-B", *argv],
+            cmd,
             check=False,
             cwd=_REPO_ROOT,
-            env=_clean_env(**(env or {})),
+            env=_clean_env(default_home, **(env or {})),
             stdin=stdin,
             capture_output=True,
             text=True,
@@ -87,8 +93,12 @@ def _spawn(
         )
 
 
-def test_default_boot_is_lite_and_pydantic_settings_free() -> None:
-    proc = _spawn(_CHILD, "default_boot_is_lite_and_pydantic_settings_free")
+def test_default_boot_is_lite_and_pydantic_settings_free(_isolated_boot_home: Path) -> None:
+    proc = _spawn(
+        _CHILD,
+        "default_boot_is_lite_and_pydantic_settings_free",
+        default_home=_isolated_boot_home,
+    )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("BOOT lite 0 False"), proc.stdout
     assert set(proc.stdout.partition("[")[2].rstrip("]\n").replace("'", "").split(", ")) <= (
@@ -98,7 +108,7 @@ def test_default_boot_is_lite_and_pydantic_settings_free() -> None:
 
 @pytest.mark.parametrize("existing_images", [False, True], ids=["first-install", "existing-images"])
 def test_exec_child_closure_stays_lite_with_real_pin_map(
-    tmp_path: Path, existing_images: bool
+    tmp_path: Path, _isolated_boot_home: Path, existing_images: bool
 ) -> None:
     """The §5 canary: a crafted exec child booting with the real pin map must
     not upgrade, must not import `pydantic_settings`, and must not import any
@@ -114,11 +124,10 @@ def test_exec_child_closure_stays_lite_with_real_pin_map(
             "from base.paths.home import resolve_meiva_home\n"
             "result = update(plugin_dirs=discover_plugins(), home=resolve_meiva_home())\n"
             "assert not any(entry.status == 'error' for entry in result.entries), result\n",
+            default_home=_isolated_boot_home,
         )
         assert updated.returncode == 0, updated.stderr
-        assert (
-            Path(os.environ["MEIVA_HOME"]) / "configs" / "meiva_fleet" / "config.json"
-        ).is_file()
+        assert (_isolated_boot_home / "configs" / "meiva_fleet" / "config.json").is_file()
     request = tmp_path / "req.json"
     result = tmp_path / "res.json"
     code = (
@@ -150,6 +159,7 @@ def test_exec_child_closure_stays_lite_with_real_pin_map(
     proc = _spawn(
         "-m",
         "agent.execution.child",
+        default_home=_isolated_boot_home,
         env={
             "MEIVA_PROCESS_PROFILE": "agent",
             "MEIVA_AGENT_CONFIG_OVERLAY": json.dumps(_PINMAP),
@@ -169,20 +179,22 @@ def test_exec_child_closure_stays_lite_with_real_pin_map(
     assert set(canary["shared_config_mods"]) <= _LITE_CONFIG_MODULES
 
 
-def test_eager_escape_boots_full_at_import() -> None:
+def test_eager_escape_boots_full_at_import(_isolated_boot_home: Path) -> None:
     proc = _spawn(
         _CHILD,
         "eager_escape_boots_full_at_import",
+        default_home=_isolated_boot_home,
         env={"MEIVA_CONFIG_BOOT": "eager"},
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("EAGER full Settings "), proc.stdout
 
 
-def test_config_fetch_skip_wins_over_eager() -> None:
+def test_config_fetch_skip_wins_over_eager(_isolated_boot_home: Path) -> None:
     proc = _spawn(
         _CHILD,
         "config_fetch_skip_wins_over_eager",
+        default_home=_isolated_boot_home,
         env={"MEIVA_CONFIG_BOOT": "eager", "MEIVA_CONFIG_FETCH": "skip"},
     )
     assert proc.returncode == 0, proc.stderr
@@ -203,6 +215,7 @@ def test_dotenv_boot_mode_is_not_honored(tmp_path: Path) -> None:
     proc = _spawn(
         _CHILD,
         "dotenv_boot_mode_is_not_honored",
+        default_home=tmp_path,
         env={"MEIVA_HOME": str(tmp_path)},
     )
     assert proc.returncode == 0, proc.stderr
@@ -214,37 +227,50 @@ def test_required_fields_fail_fast_for_a_local_source(tmp_path: Path) -> None:
     no-default fields; the unit's own `.env` must carry the serve flag (the env
     authority pass drops inherited machine-identity keys)."""
     (tmp_path / ".env").write_text("MEIVA_MACHINE_SERVE_GATEWAY=true\n", encoding="utf-8")
-    proc = _spawn(_CHILD, "import_config", env={"MEIVA_HOME": str(tmp_path)})
+    proc = _spawn(_CHILD, "import_config", default_home=tmp_path, env={"MEIVA_HOME": str(tmp_path)})
     assert proc.returncode != 0
     assert "required config missing" in proc.stderr and "MEIVA_DB_URL" in proc.stderr, proc.stderr
 
 
-def test_overlay_writes_stay_pending_and_never_upgrade() -> None:
-    proc = _spawn(_CHILD, "overlay_writes_stay_pending_and_never_upgrade")
+def test_overlay_writes_stay_pending_and_never_upgrade(_isolated_boot_home: Path) -> None:
+    proc = _spawn(
+        _CHILD,
+        "overlay_writes_stay_pending_and_never_upgrade",
+        default_home=_isolated_boot_home,
+    )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("PENDING overlay-model 123.0 0 "), proc.stdout
 
 
-def test_overlay_replays_in_order_on_upgrade() -> None:
-    proc = _spawn(_CHILD, "overlay_replays_in_order_on_upgrade")
+def test_overlay_replays_in_order_on_upgrade(_isolated_boot_home: Path) -> None:
+    proc = _spawn(
+        _CHILD,
+        "overlay_replays_in_order_on_upgrade",
+        default_home=_isolated_boot_home,
+    )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("REPLAY replayed 7.5 full 1 0"), proc.stdout
 
 
-def test_overlay_unknown_and_out_of_profile_keys_fail_fast() -> None:
+def test_overlay_unknown_and_out_of_profile_keys_fail_fast(_isolated_boot_home: Path) -> None:
     proc = _spawn(
         _CHILD,
         "overlay_unknown_and_out_of_profile_keys_fail_fast",
+        default_home=_isolated_boot_home,
         env={"MEIVA_PROCESS_PROFILE": "agent"},
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("BADKEYS KeyError AttributeError 0"), proc.stdout
 
 
-def test_lite_reads_see_environment_changes_live() -> None:
+def test_lite_reads_see_environment_changes_live(_isolated_boot_home: Path) -> None:
     """The documented lite invariant (W5-e): lite reads resolve `os.environ` at
     read time — unlike the eager construction's boot snapshot."""
-    proc = _spawn(_CHILD, "lite_reads_see_environment_changes_live")
+    proc = _spawn(
+        _CHILD,
+        "lite_reads_see_environment_changes_live",
+        default_home=_isolated_boot_home,
+    )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("LIVE ") and proc.stdout.rstrip().endswith(" 0"), proc.stdout
     assert "changed-later" in proc.stdout
@@ -272,10 +298,11 @@ def test_first_error_follows_construction_order(tmp_path: Path) -> None:
             "MEIVA_TIMEZONE=Bogus/Zone",  # general domain, later
         ],
     )
-    lite = _spawn(_CHILD, "import_config", env=lite_env)
+    lite = _spawn(_CHILD, "import_config", default_home=lite_home, env=lite_env)
     eager = _spawn(
         _CHILD,
         "import_config",
+        default_home=lite_home,
         env={**lite_env, "MEIVA_CONFIG_BOOT": "eager"},
     )
     for proc in (lite, eager):
@@ -295,107 +322,139 @@ def test_first_error_follows_construction_order(tmp_path: Path) -> None:
     non_lite_eager = _spawn(
         _CHILD,
         "import_config",
+        default_home=eager_home,
         env={**non_lite_env, "MEIVA_CONFIG_BOOT": "eager"},
     )
-    non_lite_lite = _spawn(_CHILD, "import_then_ensure_eager", env=non_lite_env)
+    non_lite_lite = _spawn(
+        _CHILD, "import_then_ensure_eager", default_home=eager_home, env=non_lite_env
+    )
     for proc in (non_lite_eager, non_lite_lite):
         assert proc.returncode != 0
         assert "MEIVA_EXEC_TIMEOUT_SECONDS" in proc.stderr
         assert "MEIVA_TELEGRAM_POLL_TIMEOUT_SECONDS" not in proc.stderr
 
 
-def test_concurrent_first_touch_upgrades_once() -> None:
+def test_concurrent_first_touch_upgrades_once(_isolated_boot_home: Path) -> None:
     """The upgrade is single-lock idempotent; readers that arrive while another
     thread's build is in flight wait for it (bounded) and still get the value,
     and every read after the join is correct."""
-    proc = _spawn(_CHILD, "concurrent_first_touch_upgrades_once")
+    proc = _spawn(_CHILD, "concurrent_first_touch_upgrades_once", default_home=_isolated_boot_home)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("CONC 1 0 8 True"), proc.stdout
 
 
-def test_inflight_build_read_waits_then_serves_the_full_value() -> None:
+def test_inflight_build_read_waits_then_serves_the_full_value(_isolated_boot_home: Path) -> None:
     """A read that lands while another thread's eager build is in flight waits
     for the build instead of failing, and is served the full value once the
     build installs (task #4069: the window used to hard-fail the reader)."""
-    proc = _spawn(_CHILD, "inflight_build_read_waits_then_serves_the_full_value")
+    proc = _spawn(
+        _CHILD,
+        "inflight_build_read_waits_then_serves_the_full_value",
+        default_home=_isolated_boot_home,
+    )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("WAIT 1 True True True"), proc.stdout
 
 
-def test_inflight_build_read_timeout_raises_retryable() -> None:
+def test_inflight_build_read_timeout_raises_retryable(_isolated_boot_home: Path) -> None:
     """When the in-flight build overruns the bounded wait, the reader raises
     ConfigBuildWaitTimeoutError (clearly retryable) instead of hanging forever, and
     the in-flight build still completes for the thread that owns it."""
-    proc = _spawn(_CHILD, "inflight_build_read_timeout_raises_retryable")
+    proc = _spawn(
+        _CHILD,
+        "inflight_build_read_timeout_raises_retryable",
+        default_home=_isolated_boot_home,
+    )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("TMOUT 1 True True True"), proc.stdout
 
 
-def test_inflight_build_same_thread_read_does_not_self_wait() -> None:
+def test_inflight_build_same_thread_read_does_not_self_wait(_isolated_boot_home: Path) -> None:
     """The building thread must never wait on its own build: a read it makes
     mid-build keeps the documented window behavior (raise), completes at once,
     and the build itself still succeeds."""
-    proc = _spawn(_CHILD, "inflight_build_same_thread_read_does_not_self_wait")
+    proc = _spawn(
+        _CHILD,
+        "inflight_build_same_thread_read_does_not_self_wait",
+        default_home=_isolated_boot_home,
+    )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("SELF 1 True True"), proc.stdout
 
 
-def test_inflight_build_get_field_waits_then_serves() -> None:
+def test_inflight_build_get_field_waits_then_serves(_isolated_boot_home: Path) -> None:
     """The `get_field` face takes the same bounded wait: a reflective read that
     lands while another thread's build is in flight waits for it and is served
     the full value (formalized from the task #4069 QA probe)."""
-    proc = _spawn(_CHILD, "inflight_build_get_field_waits_then_serves")
+    proc = _spawn(
+        _CHILD,
+        "inflight_build_get_field_waits_then_serves",
+        default_home=_isolated_boot_home,
+    )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("GETFL 1 True True True"), proc.stdout
 
 
-def test_inflight_build_get_field_timeout_raises_retryable() -> None:
+def test_inflight_build_get_field_timeout_raises_retryable(_isolated_boot_home: Path) -> None:
     """The `get_field` bounded wait expires into the same retryable error as the
     view faces: the reflective reader raises ConfigBuildWaitTimeoutError and a
     later retry serves the full value (formalized from the task #4069 QA
     probe)."""
-    proc = _spawn(_CHILD, "inflight_build_get_field_timeout_raises_retryable")
+    proc = _spawn(
+        _CHILD,
+        "inflight_build_get_field_timeout_raises_retryable",
+        default_home=_isolated_boot_home,
+    )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("GETFLT 1 True True True True"), proc.stdout
 
 
-def test_pre_install_build_death_revives_on_waiting_reader() -> None:
+def test_pre_install_build_death_revives_on_waiting_reader(_isolated_boot_home: Path) -> None:
     """A build that dies before installing hands the waiting reader the revive
     path: the builder sees its real error, the waiter re-runs the build itself
     and is served, and exactly one successful install is counted (formalized
     from the task #4069 QA probe)."""
-    proc = _spawn(_CHILD, "pre_install_build_death_revives_on_waiting_reader")
+    proc = _spawn(
+        _CHILD,
+        "pre_install_build_death_revives_on_waiting_reader",
+        default_home=_isolated_boot_home,
+    )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("DEATH 1 True True True"), proc.stdout
 
 
-def test_config_build_wait_timeout_is_exported() -> None:
+def test_config_build_wait_timeout_is_exported(_isolated_boot_home: Path) -> None:
     """The retryable exception is importable from the public facade (the catch
     shape callers may rely on)."""
-    proc = _spawn(_CHILD, "config_build_wait_timeout_is_exported")
+    proc = _spawn(_CHILD, "config_build_wait_timeout_is_exported", default_home=_isolated_boot_home)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("EXPORT True True"), proc.stdout
 
 
-def test_facade_settings_rebinds_to_the_singleton_after_upgrade() -> None:
+def test_facade_settings_rebinds_to_the_singleton_after_upgrade(_isolated_boot_home: Path) -> None:
     """The upgrade-time binding contract: pre-upgrade holders keep a working
     view; the facade name `settings` becomes the constructed singleton."""
-    proc = _spawn(_CHILD, "facade_settings_rebinds_to_the_singleton_after_upgrade")
+    proc = _spawn(
+        _CHILD,
+        "facade_settings_rebinds_to_the_singleton_after_upgrade",
+        default_home=_isolated_boot_home,
+    )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("REBIND _SettingsView Settings False True"), proc.stdout
 
 
-def test_current_facade_resolves_after_upgrade() -> None:
+def test_current_facade_resolves_after_upgrade(_isolated_boot_home: Path) -> None:
     """The lite and eager config surfaces preserve Settings identity."""
-    proc = _spawn(_CHILD, "current_facade_resolves_after_upgrade")
+    proc = _spawn(_CHILD, "current_facade_resolves_after_upgrade", default_home=_isolated_boot_home)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("FACADE True [] base.config True full"), proc.stdout
 
 
-def test_forked_child_keeps_full_state() -> None:
+def test_forked_child_keeps_full_state(_isolated_boot_home: Path) -> None:
     proc = _spawn(
         _CHILD,
         "forked_child_keeps_full_state",
+        default_home=_isolated_boot_home,
         env={"MEIVA_CONFIG_BOOT": "eager"},
     )
     assert proc.returncode == 0, proc.stderr
@@ -410,6 +469,7 @@ def test_bad_non_lite_field_does_not_block_lite_scripts(tmp_path: Path) -> None:
     proc = _spawn(
         _CHILD,
         "bad_non_lite_field_does_not_block_lite_scripts",
+        default_home=tmp_path,
         env={"MEIVA_HOME": str(tmp_path)},
     )
     assert proc.returncode == 0, proc.stderr
@@ -417,24 +477,32 @@ def test_bad_non_lite_field_does_not_block_lite_scripts(tmp_path: Path) -> None:
     assert proc.stdout.rstrip().endswith(" 0 yes"), proc.stdout
 
 
-def test_field_faces_serve_while_another_thread_builds() -> None:
+def test_field_faces_serve_while_another_thread_builds(_isolated_boot_home: Path) -> None:
     """The settings-free faces must not race another thread's eager build: a
     `from base.config import FIELD_REFS` that lands while a build is in flight is
     served in place — without waiting and without upgrading (task #4964: the
     delivery_outbox keyed-send path used to get a spurious ImportError from
     the global `is_upgrading()` gate; these faces never depend on the
     upgrade)."""
-    proc = _spawn(_CHILD, "field_faces_serve_while_another_thread_builds")
+    proc = _spawn(
+        _CHILD,
+        "field_faces_serve_while_another_thread_builds",
+        default_home=_isolated_boot_home,
+    )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("FACES ok True 0 full"), proc.stdout
 
 
-def test_module_attribute_read_waits_then_serves() -> None:
+def test_module_attribute_read_waits_then_serves(_isolated_boot_home: Path) -> None:
     """A module-attribute read (`getattr(base.config, 'Settings')`) takes the
     same bounded wait as the view and `get_field` faces (task #4069): it lands
     during another thread's in-flight build, waits for it, and is served the
     installed value — while the building thread's own re-entrant read keeps
     the documented window error instead of self-waiting (task #4964)."""
-    proc = _spawn(_CHILD, "module_attribute_read_waits_then_serves")
+    proc = _spawn(
+        _CHILD,
+        "module_attribute_read_waits_then_serves",
+        default_home=_isolated_boot_home,
+    )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("ATTR 1 True True True True True"), proc.stdout
