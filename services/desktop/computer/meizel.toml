@@ -19,6 +19,7 @@ exports = ["config.py", "execute.py", "input.py", "mcp_daemon.py", "mcp_wrapper.
 "errors.py" = "strict"
 "protocol.py" = "strict"
 "targets.py" = "strict"
+"task_sessions.py" = "strict"
 
 [roots]
 "mcp_daemon.py" = ["settings", "db"]

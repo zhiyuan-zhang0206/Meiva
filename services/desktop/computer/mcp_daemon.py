@@ -464,9 +464,10 @@ class ComputerMcpDaemon:
         if tid is None:
             return
         try:
-            self._task_sessions.note(
-                tid, agent_id, tool, self._emit_session_event, now=time.monotonic()
-            )
+            for event_type, session_agent_id, payload in self._task_sessions.note(
+                tid, agent_id, tool, now=time.monotonic()
+            ):
+                self._emit_session_event(event_type, session_agent_id, payload)
         except Exception as e:  # auxiliary path, see below
             # The session envelope is auxiliary to the action
             # itself: never fail the action, but never stay

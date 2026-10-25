@@ -96,10 +96,6 @@ def _stale_installed_helper(
     agents.mkdir()
     stage_signing_identity(installed)
 
-    def scan(_exe: Path) -> Sequence[int]:
-        events.append("scan")
-        return pids
-
     def launchd_run(
         command: Sequence[str], **_kwargs: object
     ) -> subprocess.CompletedProcess[bytes]:
@@ -127,7 +123,7 @@ def _stale_installed_helper(
     retirement = jobs.RetirementEnv(
         home=home,
         agents_dir=agents,
-        pids=scan,
+        pids=pids,
         runner=launchd_run,
     )
     env = lifecycle.BuildEnv(
@@ -178,7 +174,7 @@ def test_retired_stale_installed_helper_is_replaced_after_the_compile(
 
     assert lifecycle.build_and_sign(env=env) == (exe.parents[2], True)
     assert exe.read_bytes() == b"new helper"
-    assert " ".join(events) == "launchd scan swiftc launchd scan codesign read-dr"
+    assert " ".join(events) == "launchd swiftc launchd codesign read-dr"
     state = json.loads((exe.parents[3] / "build-state.json").read_text())
     assert (state["source_hash"], state["dr"]) == ("new", "adhoc-dr-new")
     warned = "need granting again" in capsys.readouterr().err
@@ -519,7 +515,6 @@ def test_unproven_shutdown_never_boots_out_native_job(tmp_path: Path, fault: str
         platform="darwin",
         agents_dir=tmp_path,
         owner=owner,
-        wait_for_owner=False,
         runner=command,
     )
     with pytest.raises(RuntimeError):
@@ -632,6 +627,8 @@ def test_helper_shutdown_waits_for_inflight_gui_child_before_acknowledging() -> 
 def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
     tmp_path: Path, waiting: bytes
 ) -> None:
+    import psutil
+
     from base.host.permissions_helper import client
 
     home = tmp_path.resolve() / "home"
@@ -641,50 +638,56 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
     stopped_helper_plist(home, path)
     neighbor = agents / "neighbor.plist"
     neighbor.write_bytes(b"neighbor authority")
-    alive = [True]
-    owner = OwnedProcess(321, 100.0, None)
-    commands: list[list[str]] = []
-    loaded = [True]
-
-    def shutdown(run_dir: Path) -> client.HelperShutdownResult:
-        assert run_dir == home / "run" / "meiva-root"
-        marker = run_dir / "helper-stopped"
-        marker.write_bytes(b"stopped\n")
-        marker.chmod(0o600)
-        alive[0] = False
-        return {"stopping": True, "pid": owner.pid, "run_dir": str(run_dir)}
-
-    connect = scripted_at(ScriptedHelper(shutdown_helper=shutdown))
-
-    def command(cmd: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        argv = list(cmd)
-        args = argv[1:]
-        commands.append(args)
-        if args[0] == "bootout":
-            assert not alive[0], "bootout must wait for the captured native helper's exit"
-            loaded[0] = False
-            return subprocess.CompletedProcess(argv, 0, b"", b"")
-        if alive[0]:
-            return subprocess.CompletedProcess(argv, 0, b"pid = 321\n", b"")
-        if loaded[0]:
-            return subprocess.CompletedProcess(
-                argv, 0, b"state = not running\nlast exit code = 0\n" + waiting, b""
-            )
-        return subprocess.CompletedProcess(argv, 113, b"", b"Could not find service")
-
-    env = jobs.RetirementEnv(
-        platform="darwin",
-        agents_dir=agents,
-        owner=owner,
-        wait_for_owner=False,
-        runner=command,
+    child = subprocess.Popen(
+        [sys.executable, "-m", "services.desktop.permissions_helper.tests.support"]
     )
-    jobs.unregister_helper(home, helper_port=23456, connect=connect, env=env)
-    jobs.unregister_helper(home, helper_port=23456, connect=connect, env=env)
-    jobs.unregister_helper(home, helper_port=23456, connect=connect, env=env)
-    assert not path.exists()
-    assert neighbor.read_bytes() == b"neighbor authority"
-    expected = f"{jobs.helper_job_domain()}/{jobs.helper_job_label(home)}"
-    assert all(args[1] == expected for args in commands)
-    assert [args[0] for args in commands].count("bootout") == 1
-    assert all(args[0] in ("print", "bootout") for args in commands)
+    try:
+        owner = OwnedProcess.capture(psutil.Process(child.pid))
+        commands: list[list[str]] = []
+        loaded = [True]
+
+        def shutdown(run_dir: Path) -> client.HelperShutdownResult:
+            assert run_dir == home / "run" / "meiva-root"
+            marker = run_dir / "helper-stopped"
+            marker.write_bytes(b"stopped\n")
+            marker.chmod(0o600)
+            child.kill()
+            return {"stopping": True, "pid": owner.pid, "run_dir": str(run_dir)}
+
+        connect = scripted_at(ScriptedHelper(shutdown_helper=shutdown))
+
+        def command(cmd: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+            argv = list(cmd)
+            args = argv[1:]
+            commands.append(args)
+            if args[0] == "bootout":
+                assert not owner.live(), "bootout must wait for the captured native helper's exit"
+                loaded[0] = False
+                return subprocess.CompletedProcess(argv, 0, b"", b"")
+            if owner.live():
+                return subprocess.CompletedProcess(argv, 0, f"pid = {owner.pid}\n".encode(), b"")
+            if loaded[0]:
+                return subprocess.CompletedProcess(
+                    argv, 0, b"state = not running\nlast exit code = 0\n" + waiting, b""
+                )
+            return subprocess.CompletedProcess(argv, 113, b"", b"Could not find service")
+
+        env = jobs.RetirementEnv(
+            platform="darwin",
+            agents_dir=agents,
+            owner=owner,
+            runner=command,
+        )
+        jobs.unregister_helper(home, helper_port=23456, connect=connect, env=env)
+        jobs.unregister_helper(home, helper_port=23456, connect=connect, env=env)
+        jobs.unregister_helper(home, helper_port=23456, connect=connect, env=env)
+        assert not path.exists()
+        assert neighbor.read_bytes() == b"neighbor authority"
+        expected = f"{jobs.helper_job_domain()}/{jobs.helper_job_label(home)}"
+        assert all(args[1] == expected for args in commands)
+        assert [args[0] for args in commands].count("bootout") == 1
+        assert all(args[0] in ("print", "bootout") for args in commands)
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=5)
