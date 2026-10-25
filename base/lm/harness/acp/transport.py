@@ -111,6 +111,8 @@ class AcpConnection:
         self._notifications: asyncio.Queue[Any] = asyncio.Queue()
         self._write_lock = asyncio.Lock()
         self._closed = False
+        self._close_complete = False
+        self._close_lock = asyncio.Lock()
         self._tasks = asyncio.TaskGroup()
         self._children: set[asyncio.Task[Any]] = set()
         self._tasks_entered = False
@@ -200,25 +202,32 @@ class AcpConnection:
             yield cast("AcpNotification", item)
 
     async def close(self, *, reason: str = "closed") -> None:
-        if self._closed:
-            return
-        self._closed = True
-        self._notifications.put_nowait(_STREAM_END)
-        self._fail_pending(AcpClosedError(f"connection closed: {reason}"))
-        if self._reader is not None:
-            self._reader.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._reader
-        process = self._process
-        if process is not None and process.returncode is None:
-            if self._stdin is not None:
-                with contextlib.suppress(OSError, RuntimeError):
-                    self._stdin.close()
-            try:
-                await asyncio.wait_for(process.wait(), timeout=self.shutdown_timeout_seconds)
-            except TimeoutError:
-                await self._terminate(process)
-        await self._close_tasks()
+        # meiva:note
+        # Stdout EOF closes admission before the child necessarily exits. Only a
+        # completed teardown may skip the process wait and retained task cleanup.
+        # A cancelled caller leaves completion false for the next close to finish.
+        async with self._close_lock:
+            if self._close_complete:
+                return
+            self._closed = True
+            self._notifications.put_nowait(_STREAM_END)
+            self._fail_pending(AcpClosedError(f"connection closed: {reason}"))
+            if self._reader is not None:
+                self._reader.cancel()
+                await asyncio.wait({self._reader})
+                with contextlib.suppress(asyncio.CancelledError):
+                    self._reader.result()
+            process = self._process
+            if process is not None and process.returncode is None:
+                if self._stdin is not None:
+                    with contextlib.suppress(OSError, RuntimeError):
+                        self._stdin.close()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=self.shutdown_timeout_seconds)
+                except TimeoutError:
+                    await self._terminate(process)
+            await self._close_tasks()
+            self._close_complete = True
 
     async def _terminate(self, process: asyncio.subprocess.Process) -> None:
         for sig in (signal.SIGTERM, signal.SIGKILL):

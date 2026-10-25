@@ -1,4 +1,4 @@
-exports = ["transport.py"]
+exports = ["tests", "transport.py"]
 
 [uses]
 "__init__.py" = ["transport.py"]

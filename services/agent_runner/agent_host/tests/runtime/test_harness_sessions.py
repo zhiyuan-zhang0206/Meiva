@@ -8,6 +8,7 @@ import pytest
 
 from base.api_contracts.agent_contract import Harness
 from base.lm.harness import HarnessTurn, RegistrationStore
+from base.lm.harness.acp.tests.eof_process import eof_peer
 from base.lm.harness.acp.transport import AcpConnection
 from base.log.tests.log_records import LogRecords
 from services.agent_runner.agent_host.runtime import AgentRuntime, HarnessSessions
@@ -248,6 +249,19 @@ async def test_a_real_child_exit_status_reaches_the_recorder(tmp_path: Path) -> 
         assert recorder.writes == [(44, 3)]
     finally:
         await owner.aclose()
+
+
+async def test_stdout_eof_does_not_finish_retirement_before_the_child_exits(tmp_path: Path) -> None:
+    async with eof_peer(tmp_path, gate_exit=False) as peer:
+        recorder = ExitRecorder()
+        owner = HarnessSessions(RegistrationStore(tmp_path), record_exit=recorder)
+        await owner.start()
+        try:
+            owner.retire(44, runtime(TransportBackedEngine(peer.connection)))
+            await owner.join(44)
+            assert recorder.writes == [(44, 3)]
+        finally:
+            await owner.aclose()
 
 
 async def test_a_running_session_records_nothing(tmp_path: Path) -> None:
