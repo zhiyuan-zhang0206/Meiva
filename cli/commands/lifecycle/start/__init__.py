@@ -16,11 +16,11 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import assert_never
 
 from base import cluster
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster import session_name
 from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.deploy import start_trace
@@ -128,7 +128,9 @@ def _stand_down(home: Path, *, boot_attempt: bool) -> int | None:
     # operator's stop (task #5493). An explicit start is the one thing that ends
     # a stand-down, so it clears the record before anything is admitted or launched.
     held = stand_down.read(home)
-    now = datetime.now(UTC)
+    now = Clock(
+        ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+    ).now()
     step = stand_down_step(
         boot_attempt=boot_attempt,
         recorded=held is not None,

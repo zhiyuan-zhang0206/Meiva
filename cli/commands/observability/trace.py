@@ -21,7 +21,6 @@ import gzip
 import json
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
 
 import httpx
 
@@ -104,21 +103,10 @@ def _save_watermark(marks: dict[str, int], *, traces_dir: Path) -> None:
 
 
 # meiva:note
-# Repair ids stored as base64 of hex (the wrong length) back to their raw byte length, in place.
-def _correct_span_ids(request: Any) -> None:
-    for resource_spans in request.resource_spans:
-        for scope_spans in resource_spans.scope_spans:
-            for span in scope_spans.spans:
-                for attribute, expected_length in _SPAN_ID_LENGTHS:
-                    repaired = repaired_span_id(getattr(span, attribute), expected_length)
-                    if repaired is not None:
-                        setattr(span, attribute, repaired)
-
-
-# meiva:note
 # POST one OTLP/JSON line as protobuf and return the span count in it.
 #
-# Reconstructs the OTLP `ExportTraceServiceRequest` from the stored JSON and re-serializes it to
+# Reconstructs the OTLP `ExportTraceServiceRequest` from the stored JSON, repairs ids stored as
+# base64 of hex (the wrong length) back to their raw byte length in place, and re-serializes it to
 # protobuf: the exact wire shape Tempo's OTLP endpoint ingests.
 #
 # The protobuf modules are imported here: only a real ship needs them, and a dry run must not pay
@@ -128,7 +116,13 @@ def post_line(client: httpx.Client, target: ShipTarget, line: str) -> int:
     from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 
     request = Parse(line, ExportTraceServiceRequest())
-    _correct_span_ids(request)
+    for resource_spans in request.resource_spans:
+        for scope_spans in resource_spans.scope_spans:
+            for span in scope_spans.spans:
+                for attribute, expected_length in _SPAN_ID_LENGTHS:
+                    repaired = repaired_span_id(getattr(span, attribute), expected_length)
+                    if repaired is not None:
+                        setattr(span, attribute, repaired)
     headers = {"Content-Type": "application/x-protobuf", **target.headers}
     response = client.post(target.endpoint, content=request.SerializeToString(), headers=headers)
     response.raise_for_status()

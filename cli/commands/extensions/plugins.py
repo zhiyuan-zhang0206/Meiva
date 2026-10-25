@@ -27,7 +27,6 @@ pieces land.
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import sys
@@ -228,7 +227,7 @@ def _atomic_plugin_replace(dest: Path, pkg_dir: Path) -> None:
     from . import _claude_code_plugin
 
     _claude_code_plugin.sweep_plugin_residue(dest.parent)
-    backup = dest.parent / f".{dest.name}.backup-{os.getpid()}"
+    backup = dest.parent / f".{dest.name}.backup"
     if dest.exists():
         dest.replace(backup)
     try:
@@ -505,9 +504,13 @@ def cmd_plugins_upgrade(name: str, *, binding: SourceBinding) -> int:
                 shutil.rmtree(dest)
             shutil.move(str(pkg_dir), str(dest))
 
-        from datetime import UTC, datetime
+        from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 
-        pkg.updated_at = datetime.now(UTC).isoformat(timespec="seconds")
+        pkg.updated_at = (
+            Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+            .now()
+            .isoformat(timespec="seconds")
+        )
         pkg.installed_hash = install_registry.tree_hash(dest)
         install_registry.register(pkg)
         if pkg.type == "plugin":

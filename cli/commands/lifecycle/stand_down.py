@@ -20,9 +20,13 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 _STEM = "stand-down.json"
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 # meiva:note
@@ -96,14 +100,13 @@ def read(home: Path) -> StandDown | None:
         loaded: object = json.loads(text)
     except ValueError:
         return _unreadable()
-    if not isinstance(loaded, dict):
+    if not _is_object_dict(loaded):
         return _unreadable()
-    body = cast("dict[str, object]", loaded)
-    reason = body.get("reason")
-    machine = body.get("machine")
+    reason = loaded.get("reason")
+    machine = loaded.get("machine")
     return StandDown(
-        since=_moment(body.get("since")),
-        until=_moment(body.get("until")),
+        since=_moment(loaded.get("since")),
+        until=_moment(loaded.get("until")),
         reason=reason if isinstance(reason, str) else None,
         machine=machine if isinstance(machine, str) else None,
     )

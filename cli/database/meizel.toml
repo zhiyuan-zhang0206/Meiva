@@ -4,8 +4,4 @@ exports = ["lifecycle_audit.py", "runtime.py", "tests"]
 "tests" = ["__init__.py", "lifecycle_audit.py", "runtime.py"]
 
 [roots]
-"runtime.py" = { kinds = ["settings"], why = "CLI command composition root boots configuration before assembling command inputs" }
-
-[debt.ambient-read]
-"runtime.py#environ os.environ" = 1
-"runtime.py#home pathlib.Path.home" = 1
+"runtime.py" = { kinds = ["environ", "home", "settings"], why = "CLI command composition root boots configuration and resolves process environment and home before assembling command inputs" }

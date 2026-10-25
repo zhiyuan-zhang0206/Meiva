@@ -40,10 +40,10 @@ from __future__ import annotations
 import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 
 from base import paths
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import (
     IGNORED_NAMES,
@@ -472,7 +472,11 @@ def converge_skills(repo: Path, meiva_home: Path, binding: SourceBinding) -> Ski
     assert_repo_source_bound(repo, meiva_home, binding)
     skills_root = meiva_home / "skills"
     skills_root.mkdir(parents=True, exist_ok=True)
-    now = datetime.now(UTC).isoformat(timespec="seconds")
+    now = (
+        Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+        .now()
+        .isoformat(timespec="seconds")
+    )
     result = SkillsConvergeResult()
 
     with install_registry.mutate() as registry:

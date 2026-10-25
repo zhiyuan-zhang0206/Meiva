@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from base.host.private_storage import write_private_bytes
 from cli.commands.extensions.external_skill_host.filesystem import (
@@ -60,6 +60,18 @@ def stage_manifest(source_manifest: list[dict[str, Any]], marker: bytes) -> list
     )
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 def parse_record(path: Path) -> dict[str, Any] | None:
     if not exists(path):
         return None
@@ -68,9 +80,9 @@ def parse_record(path: Path) -> dict[str, Any] | None:
         value: object = json.loads(data)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ClientConflictError("Meiva ownership ledger is invalid") from exc
-    if not isinstance(value, dict):
+    if not _is_any_dict(value):
         raise ClientConflictError("Meiva ownership ledger is invalid")
-    return cast(dict[str, Any], value)
+    return value
 
 
 def _valid_id(value: object) -> bool:
@@ -103,21 +115,22 @@ def _valid_manifest_item(item: dict[str, Any], paths: set[str]) -> bool:
 
 
 def _valid_manifest(value: object) -> bool:
-    if not isinstance(value, list):
+    if not _is_object_list(value):
         return False
     paths: set[str] = set()
-    for item_value in cast(list[object], value):
-        if not isinstance(item_value, dict):
+    for item_value in value:
+        if not _is_any_dict(item_value):
             return False
-        item = cast(dict[str, Any], item_value)
-        if not _valid_manifest_item(item, paths):
+        if not _valid_manifest_item(item_value, paths):
             return False
-        paths.add(item["path"])
-    for item_value in cast(list[object], value):
-        if isinstance(item_value, dict):
-            item = cast(dict[str, object], item_value)
-            if item.get("path") == "." and item.get("kind") == "directory":
-                return True
+        paths.add(item_value["path"])
+    for item_value in value:
+        if (
+            _is_object_dict(item_value)
+            and item_value.get("path") == "."
+            and item_value.get("kind") == "directory"
+        ):
+            return True
     return False
 
 
@@ -149,75 +162,70 @@ def _valid_claim(
 
 
 def _valid_file_claims(value: object, manifest: object) -> bool:
-    if not isinstance(value, list) or not isinstance(manifest, list):
+    if not _is_object_list(value) or not _is_object_list(manifest):
         return False
-    manifest_items = cast(list[object], manifest)
     expected_files = {
-        str(cast(dict[str, object], item)["path"])
-        for item in manifest_items
-        if isinstance(item, dict) and cast(dict[str, object], item).get("kind") == "file"
+        str(item["path"])
+        for item in manifest
+        if _is_object_dict(item) and item.get("kind") == "file"
     }
     paths: set[str] = set()
     quarantines: set[str] = set()
-    for claim_value in cast(list[object], value):
-        if not isinstance(claim_value, dict):
+    for claim_value in value:
+        if not _is_object_dict(claim_value):
             return False
-        claim = cast(dict[str, object], claim_value)
-        if not _valid_claim(claim, expected_files, paths, quarantines):
+        if not _valid_claim(claim_value, expected_files, paths, quarantines):
             return False
-        paths.add(cast(str, claim["path"]))
-        quarantines.add(cast(str, claim["quarantine"]))
+        paths.add(str(claim_value["path"]))
+        quarantines.add(str(claim_value["quarantine"]))
     return paths == expected_files
 
 
 def _all_claims_retained(value: object) -> bool:
-    if not isinstance(value, list):
+    if not _is_object_list(value):
         return False
-    for claim_value in cast(list[object], value):
-        if not isinstance(claim_value, dict):
+    for claim_value in value:
+        if not _is_object_dict(claim_value):
             return False
-        if cast(dict[str, object], claim_value).get("state") != "retained":
+        if claim_value.get("state") != "retained":
             return False
     return True
 
 
 def _valid_cleanup_item(value: object, *, retained: bool) -> bool:
-    if not isinstance(value, dict):
+    if not _is_any_dict(value):
         return False
-    item = cast(dict[str, Any], value)
     allowed_locations = {"retained"} if retained else {"source", "claiming", "quarantine"}
-    claims = item.get("file_claims")
+    claims = value.get("file_claims")
     return (
-        set(item) == {"file_claims", "kind", "location", "manifest", "path_generation_id"}
-        and item["kind"] in {"prepared", "stage", "previous"}
-        and item["location"] in allowed_locations
-        and _valid_id(item["path_generation_id"])
-        and _valid_manifest(item["manifest"])
-        and _valid_file_claims(claims, item["manifest"])
+        set(value) == {"file_claims", "kind", "location", "manifest", "path_generation_id"}
+        and value["kind"] in {"prepared", "stage", "previous"}
+        and value["location"] in allowed_locations
+        and _valid_id(value["path_generation_id"])
+        and _valid_manifest(value["manifest"])
+        and _valid_file_claims(claims, value["manifest"])
         and (not retained or _all_claims_retained(claims))
     )
 
 
 def _check_installed(installed_value: object) -> None:
-    if not isinstance(installed_value, dict):
+    if not _is_any_dict(installed_value):
         raise ClientConflictError("Meiva ownership ledger is invalid")
-    installed = cast(dict[str, Any], installed_value)
     if (
-        set(installed) != {"digest", "generation_id", "manifest", "source_digest"}
-        or not all(_valid_digest(installed[key]) for key in ("digest", "source_digest"))
-        or not _valid_id(installed["generation_id"])
-        or not _valid_manifest(installed["manifest"])
-        or manifest_digest(installed["manifest"]) != installed["digest"]
+        set(installed_value) != {"digest", "generation_id", "manifest", "source_digest"}
+        or not all(_valid_digest(installed_value[key]) for key in ("digest", "source_digest"))
+        or not _valid_id(installed_value["generation_id"])
+        or not _valid_manifest(installed_value["manifest"])
+        or manifest_digest(installed_value["manifest"]) != installed_value["digest"]
     ):
         raise ClientConflictError("Meiva ownership ledger is invalid")
 
 
 def _check_transaction(transaction_value: object, *, has_installed: bool) -> None:
-    if not isinstance(transaction_value, dict):
+    if not _is_any_dict(transaction_value):
         raise ClientConflictError("Meiva ownership ledger is invalid")
-    transaction = cast(dict[str, Any], transaction_value)
     if (
-        set(transaction)
+        set(transaction_value)
         != {
             "claim_state",
             "expected_digest",
@@ -226,15 +234,19 @@ def _check_transaction(transaction_value: object, *, has_installed: bool) -> Non
             "source_digest",
             "stage_state",
         }
-        or not _valid_id(transaction["generation_id"])
-        or not _valid_digest(transaction["source_digest"])
-        or not _valid_digest(transaction["expected_digest"])
-        or not _valid_manifest(transaction["expected_manifest"])
-        or manifest_digest(transaction["expected_manifest"]) != transaction["expected_digest"]
-        or transaction["claim_state"] not in {"idle", "claiming", "claimed"}
-        or transaction["stage_state"] not in {"preparing", "publishing", "published"}
-        or (transaction["claim_state"] != "idle" and transaction["stage_state"] != "published")
-        or (transaction["claim_state"] != "idle" and not has_installed)
+        or not _valid_id(transaction_value["generation_id"])
+        or not _valid_digest(transaction_value["source_digest"])
+        or not _valid_digest(transaction_value["expected_digest"])
+        or not _valid_manifest(transaction_value["expected_manifest"])
+        or manifest_digest(transaction_value["expected_manifest"])
+        != transaction_value["expected_digest"]
+        or transaction_value["claim_state"] not in {"idle", "claiming", "claimed"}
+        or transaction_value["stage_state"] not in {"preparing", "publishing", "published"}
+        or (
+            transaction_value["claim_state"] != "idle"
+            and transaction_value["stage_state"] != "published"
+        )
+        or (transaction_value["claim_state"] != "idle" and not has_installed)
     ):
         raise ClientConflictError("Meiva ownership ledger is invalid")
 
@@ -264,9 +276,9 @@ def load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
         _check_transaction(transaction_value, has_installed=installed_value is not None)
     for key, retained in (("garbage", False), ("retained", True)):
         items: object = record[key]
-        if not isinstance(items, list):
+        if not _is_object_list(items):
             raise ClientConflictError("Meiva ownership ledger is invalid")
-        for item_value in cast(list[object], items):
+        for item_value in items:
             if not _valid_cleanup_item(item_value, retained=retained):
                 raise ClientConflictError("Meiva ownership ledger is invalid")
     return record

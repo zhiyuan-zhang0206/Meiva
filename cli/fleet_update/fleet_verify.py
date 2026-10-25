@@ -32,6 +32,10 @@ from .plan.verify_steps import drift_checks, duplicate_names, machine_name, smok
 from .session import FailedError, Session
 
 
+def _pause(delay: float) -> None:
+    time.sleep(delay)
+
+
 def machine_names(s: Session, aliases: tuple[str, ...]) -> dict[str, str]:
     names: dict[str, str] = {}
     for alias in aliases:
@@ -77,7 +81,7 @@ def roster(
             for line in unlisted_lines(rows, wanted):
                 s.say(line)
             raise FailedError(timeout_message(args.roster_timeout, seen))
-        time.sleep(delay)
+        _pause(delay)
 
 
 def refresh(s: Session, hosts: tuple[str, ...]) -> list[HostFailure]:

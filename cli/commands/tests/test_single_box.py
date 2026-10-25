@@ -22,8 +22,7 @@ import subprocess
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Any, cast
-from unittest.mock import patch
+from typing import Any
 
 import psycopg
 import pytest
@@ -94,12 +93,12 @@ class Born:
     def endpoint(self) -> str:
         return self.values["MEIVA_DB_URL"]
 
-    def login(self, cls: str) -> tuple[str, str]:
+    def login(self, cls: model.GenerationClass) -> tuple[str, str]:
         secret = ledger.read_secret(self.home, delivery.active_generation(self.home))
-        role = secret.roles.of(cast("Any", cls))
+        role = secret.roles.of(cls)
         return role.name, role.password
 
-    def dsn(self, cls: str) -> str:
+    def dsn(self, cls: model.GenerationClass) -> str:
         name, password = self.login(cls)
         return url_with_userinfo(self.endpoint(), name, password)
 
@@ -161,12 +160,12 @@ def _configure(
     # Allocate the entire roster at once. The lease hands out a number it never repeats
     # while this session lives, so the slots cannot collide with each other, with another
     # holder on the host, or with a later fixture that asks for one more port.
-    ports = dict(
-        zip(cluster.FIXED_PORTS, distinct_free_ports(len(cluster.FIXED_PORTS)), strict=True)
-    )
-    record = cluster.ClusterRecord(
-        ports=cast("cluster.ClusterPorts", ports), gateway_home=str(home), created_at="test"
-    )
+    ports = cluster.new_home_ports()
+    for name, port in zip(
+        cluster.FIXED_PORTS, distinct_free_ports(len(cluster.FIXED_PORTS)), strict=True
+    ):
+        ports[name] = port
+    record = cluster.ClusterRecord(ports=ports, gateway_home=str(home), created_at="test")
     values = gateway_values(
         record,
         IdentityInput(
@@ -277,12 +276,11 @@ def configured(
     data_plane_config: DataPlaneConfig,
 ) -> Iterator[Born]:
     # These commands simulate a process entry and deliver its unit environment.
-    with patch.dict(os.environ):
-        born = _configure(monkeypatch, tmp_path, distinct_free_ports, data_plane_config)
-        try:
-            yield born
-        finally:
-            _teardown(born)
+    born = _configure(monkeypatch, tmp_path, distinct_free_ports, data_plane_config)
+    try:
+        yield born
+    finally:
+        _teardown(born)
 
 
 @pytest.fixture

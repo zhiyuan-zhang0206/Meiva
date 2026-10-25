@@ -33,10 +33,10 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+from base.clock import Clock, ClockConfig
 from base.cluster import get_record, port_free
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.git.gitenv import git_env
@@ -213,7 +213,8 @@ def ensure_health_preflight(ctx: ConvergeCtx) -> None:
     )
     log_dir = ctx.meiva_home / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(UTC).isoformat(timespec="seconds")
+    clock = Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=ctx.timers)
+    stamp = clock.now().isoformat(timespec="seconds")
     with (log_dir / "health_preflight.log").open("a", encoding="utf-8") as f:
         for line in warnings:
             f.write(f"{stamp} {line}\n")

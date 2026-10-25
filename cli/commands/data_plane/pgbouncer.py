@@ -49,6 +49,7 @@ from typing import Literal, assert_never
 
 import psutil
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import ownership, port_preflight
 from base.cluster.dataplane import pooler as pooler_files
 from base.cluster.machine import MachineIdentityReader
@@ -324,13 +325,13 @@ def _launch(run: _Run) -> int:
     # meiva:note
     # `-d` daemonizes and returns at once; wait for the admin console to authenticate. The
     # caller proves each delivered login's pooled backend.
-    deadline = time.monotonic() + spec.ready_wait_s
+    deadline = SYSTEM_TIMERS.monotonic() + spec.ready_wait_s
     while not pooler_files.admin_reachable(spec.shape.listen_port, spec.admin_password):
-        left = deadline - time.monotonic()
+        left = deadline - SYSTEM_TIMERS.monotonic()
         if left <= 0:
             print(text.not_ready(), file=sys.stderr)
             return 1
-        time.sleep(min(_READY_POLL_S, left))
+        SYSTEM_TIMERS.sleep(min(_READY_POLL_S, left))
     machine = spec.shape.machine
     if not pooler_files.pgbouncer_public_listener_reachable(
         spec.shape.listen_port, POOLER_ADMIN, machine=machine

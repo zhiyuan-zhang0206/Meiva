@@ -5,13 +5,10 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from collections.abc import Generator
-from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import psycopg
 import pytest
 
 from cli.commands.data_plane import walg as walg_cmd
@@ -26,7 +23,6 @@ from services.backup.walg import config as walg_config
 from services.backup.walg import probe, state
 from services.backup.walg.tests.support import (
     SECRETS,
-    PgInstance,
     Sandbox,
     archive_current_segment,
     archiving_postgres,
@@ -257,15 +253,6 @@ def test_status_reports_an_unusable_configuration_instead_of_raising(
     assert "health: WAL archiving: the WAL-G configuration is unusable" in out
 
 
-def _dial(pg: PgInstance, monkeypatch: pytest.MonkeyPatch) -> None:
-    @contextmanager
-    def admin() -> Generator[psycopg.Connection[Any]]:
-        with pg.connect() as conn:
-            yield conn
-
-    monkeypatch.setattr(probe, "admin_connection", admin)
-
-
 # meiva:note
 # The retained-postmaster case: archiving was configured after Postgres launched.
 def test_a_postgres_that_kept_its_old_launch_arguments_is_flagged_at_start(
@@ -276,9 +263,7 @@ def test_a_postgres_that_kept_its_old_launch_arguments_is_flagged_at_start(
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
     with archiving_postgres() as pg:
-        _dial(pg, monkeypatch)
-
-        walg_cmd.warn_archive_inactive(sandbox.config_file)
+        walg_cmd.warn_archive_inactive_on(sandbox.config_file, probe.admin_connection_to(pg.target))
 
     err = capsys.readouterr().err
     assert "this Postgres is not running with the configured archive settings" in err
@@ -293,9 +278,7 @@ def test_a_postgres_launched_with_the_arguments_is_not_flagged(
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
     with archiving_postgres() as pg:
-        _dial(pg, monkeypatch)
-
-        walg_cmd.warn_archive_inactive(sandbox.config_file)
+        walg_cmd.warn_archive_inactive_on(sandbox.config_file, probe.admin_connection_to(pg.target))
 
     assert capsys.readouterr().err == ""
 

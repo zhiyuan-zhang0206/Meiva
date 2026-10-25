@@ -1,7 +1,5 @@
 """Suite-wide health-port guard owned by the CLI probe package."""
 
-from typing import Any, cast
-
 import pytest
 
 from cli.commands import probe
@@ -28,9 +26,7 @@ def guard_health_port_gate(request: pytest.FixtureRequest, monkeypatch: pytest.M
 
     Opt out with `@pytest.mark.real_health_port_gate` when the gate itself is the
     subject (cli/commands/lifecycle/tests/startup/test_start_health_port_gate.py)."""
-    # Pytest leaves FixtureRequest.node untyped; this function-scoped node is an Item.
-    node = cast(pytest.Item, cast(Any, request).node)
-    if node.get_closest_marker("real_health_port_gate"):
+    if "real_health_port_gate" in request.keywords:
         return
 
     def no_occupied_ports(*_args: object, **_kwargs: object) -> tuple[()]:

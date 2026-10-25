@@ -14,7 +14,7 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 from base.agents.context.clients import DatabaseFactory
 from base.host.atomic_io import write_text_atomic
@@ -22,6 +22,14 @@ from cli.commands.observability._lgtm_provisioning import record_rendered_hash
 from cli.commands.observability.plans.lgtm.dashboard_plan import RENDERED_DASHBOARD_REL
 
 __all__ = ["cmd_grafana_render"]
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
 
 
 # meiva:note
@@ -43,11 +51,18 @@ def _digest(content: str) -> str:
 # parseable as a dashboard (reported by the caller, not crashed on).
 def _panels_by_identity(content: str) -> dict[str, object] | None:
     try:
-        data = json.loads(content)
+        data: object = json.loads(content)
     except json.JSONDecodeError:
         return None
-    panels = cast("list[dict[str, object]]", data.get("panels", []))
-    return {f"{panel.get('id')}:{panel.get('title')}": panel for panel in panels}
+    if not _is_object_dict(data):
+        return None
+    raw_panels = data.get("panels", [])
+    panels = raw_panels if _is_object_list(raw_panels) else []
+    return {
+        f"{panel.get('id')}:{panel.get('title')}": panel
+        for panel in panels
+        if _is_object_dict(panel)
+    }
 
 
 # meiva:note

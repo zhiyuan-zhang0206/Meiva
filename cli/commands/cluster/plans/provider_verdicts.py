@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import cast
+from typing import TypeGuard
 
 __all__ = [
     "BALANCE_CHECK",
@@ -83,6 +83,14 @@ def _skipped(why: str) -> ProviderCheck:
     return ProviderCheck(BALANCE_CHECK, None, (f"  (provider balance check skipped: {why})",))
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 # meiva:note
 # The CNY `total_balance` from a DeepSeek /user/balance payload, or None. The guard compares
 # in CNY, the account's funded currency, only; a payload without a CNY entry cannot be judged
@@ -90,17 +98,19 @@ def _skipped(why: str) -> ProviderCheck:
 # that is not shaped like a balance answer is a read error, not a verdict.
 def _cny_balance(payload: Mapping[str, object]) -> float | None:
     infos = payload.get("balance_infos")
-    if not isinstance(infos, list):
+    if not _is_object_list(infos):
         raise TypeError("response has no balance_infos")
-    for entry in cast("list[object]", infos):
-        if not isinstance(entry, dict):
+    for entry in infos:
+        if not _is_object_dict(entry):
             continue
-        fields = cast("dict[str, object]", entry)
-        if fields.get("currency") != "CNY":
+        if entry.get("currency") != "CNY":
             continue
+        raw_balance = entry.get("total_balance")
+        if not isinstance(raw_balance, str | int | float) or isinstance(raw_balance, bool):
+            raise ValueError("CNY total_balance is not numeric")  # noqa: TRY004
         try:
-            return float(cast("str | float | int", fields.get("total_balance")))
-        except (TypeError, ValueError):
+            return float(raw_balance)
+        except ValueError:
             raise ValueError("CNY total_balance is not numeric") from None
     return None
 

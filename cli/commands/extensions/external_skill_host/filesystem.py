@@ -8,10 +8,11 @@ import hashlib
 import json
 import os
 import stat
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from base.native_process.os_platform import is_linux, is_macos
 
 _MARKER_NAME = ".meiva-managed.json"
 
@@ -312,10 +313,10 @@ def rename_no_replace(source: Path, destination: Path) -> None:
     library = ctypes.CDLL(None, use_errno=True)
     source_bytes = os.fsencode(source)
     destination_bytes = os.fsencode(destination)
-    if sys.platform == "darwin":
+    if is_macos():
         rename_exclusive = 0x00000004
         result = library.renamex_np(source_bytes, destination_bytes, rename_exclusive)
-    elif sys.platform.startswith("linux"):
+    elif is_linux():
         at_current_working_directory = -100
         rename_no_replace = 1
         try:

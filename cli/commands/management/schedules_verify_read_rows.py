@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import inspect
 import json
 import sys
@@ -17,7 +19,7 @@ def read_rows(out: str) -> None:
     if "database_factory" in inspect.signature(read_schedule_rows).parameters:
         from cli.database import operator_database_factory
 
-        command = _command_runtime()
+        command: Any = _command_runtime()
         parameters = inspect.signature(operator_database_factory).parameters
         if "gateway_url_reader" in parameters:
             from cli.database import open_operator_database
@@ -42,7 +44,8 @@ def read_rows(out: str) -> None:
     elif "access" in inspect.signature(read_schedule_rows).parameters:
         from base.cluster.machine.boot import gateway_access_from_boot
 
-        rows = read_schedule_rows(gateway_access_from_boot(_command_runtime().config))
+        legacy_command: Any = _command_runtime()
+        rows = read_schedule_rows(gateway_access_from_boot(legacy_command.config))
     else:
         rows = read_schedule_rows()
     with Path(out).open("w") as handle:
@@ -53,7 +56,7 @@ def read_rows(out: str) -> None:
 # The invocation's runtime under whichever checkout this program runs in. This file is shipped
 # to hosts whose installed code predates the checkout it came from, and `CommandRuntime.create`
 # takes the resolved home only in newer ones.
-def _command_runtime() -> Any:
+def _command_runtime() -> object:
     from cli.database.runtime import CommandRuntime
 
     create: Any = CommandRuntime.create

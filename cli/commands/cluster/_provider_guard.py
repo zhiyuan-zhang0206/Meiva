@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import cast
+from typing import TypeGuard
 
 import httpx
 import psycopg
@@ -93,6 +93,10 @@ def _read_balance(guard: ProviderGuardConfig) -> NoProviderKey | BalanceUnreadab
     return fetch_balance(guard.balance_url, guard.deepseek_api_key, guard.balance_timeout_s)
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 # meiva:note
 # One authenticated read of the provider balance endpoint. Any failure is a value with a
 # sanitized reason: an HTTP status, an exception class, or the shape of the answer, never a
@@ -105,14 +109,14 @@ def fetch_balance(url: str, key: str, timeout_s: float) -> BalancePayload | Bala
             timeout=timeout_s,
         )
         response.raise_for_status()
-        payload = response.json()
+        payload: object = response.json()
     except httpx.HTTPStatusError as exc:
         return BalanceUnreadable(f"HTTP {exc.response.status_code}")
     except (httpx.HTTPError, ValueError) as exc:
         return BalanceUnreadable(type(exc).__name__)
-    if not isinstance(payload, dict):
+    if not _is_object_dict(payload):
         return BalanceUnreadable("response is not a JSON object")
-    return BalancePayload(cast("dict[str, object]", payload))
+    return BalancePayload(payload)
 
 
 # meiva:note

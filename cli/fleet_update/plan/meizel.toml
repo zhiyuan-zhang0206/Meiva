@@ -28,11 +28,3 @@ exports = ["gateway_commands.py", "helper_gate.py", "host_commands.py", "host_fa
 "stored_schedules.py" = "strict"
 "verify_steps.py" = "strict"
 "wave_order.py" = "strict"
-
-[debt.type-cast]
-"host_failures.py#cast start_failure" = 1
-"journal.py#cast parse_journal" = 2
-"lease_announcement.py#cast _lease" = 1
-"lease_announcement.py#cast read_leases" = 2
-"roster.py#cast _row" = 1
-"roster.py#cast parse_roster" = 1

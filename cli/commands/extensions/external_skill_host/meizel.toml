@@ -6,17 +6,3 @@ exports = ["cleanup.py", "filesystem.py", "ledger.py"]
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.ambient-read]
-"filesystem.py#platform sys.platform" = 2
-
-[debt.type-cast]
-"ledger.py#cast _all_claims_retained" = 2
-"ledger.py#cast _check_installed" = 1
-"ledger.py#cast _check_transaction" = 1
-"ledger.py#cast _valid_cleanup_item" = 1
-"ledger.py#cast _valid_file_claims" = 5
-"ledger.py#cast _valid_file_claims.<setcomp>" = 2
-"ledger.py#cast _valid_manifest" = 4
-"ledger.py#cast load_ledger" = 1
-"ledger.py#cast parse_record" = 1

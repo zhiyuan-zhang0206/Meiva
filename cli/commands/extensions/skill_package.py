@@ -33,10 +33,10 @@ from __future__ import annotations
 
 import shutil
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.packages.extensions.install_registry import IGNORED_NAMES, tree_hash
 from base.packages.extensions.registry import ExtensionKind
@@ -180,7 +180,11 @@ def register_installed(
     """
     from base.packages.extensions import install_registry
 
-    now = datetime.now(UTC).isoformat(timespec="seconds")
+    now = (
+        Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+        .now()
+        .isoformat(timespec="seconds")
+    )
     update = install_registry.UpdateState()
     if update_mode is not None:
         update.mode = update_mode  # type: ignore[assignment]  # callers pass the literal

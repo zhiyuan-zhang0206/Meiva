@@ -9,7 +9,15 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import cast
+from typing import TypeGuard
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
 
 
 @dataclass(frozen=True)
@@ -33,7 +41,9 @@ class CountdownTick:
 
 
 def _lease(item: object) -> Lease:
-    row = cast("dict[str, object]", item)
+    if not _is_object_dict(item):
+        raise TypeError("lease row must be a mapping")
+    row = item
     agent_id, session_id = row["agent_id"], row["session_id"]
     executor, expires_at = row["executor"], row["expires_at"]
     if not (isinstance(agent_id, int) and isinstance(session_id, int)):
@@ -50,10 +60,12 @@ def _lease(item: object) -> Lease:
 def read_leases(output: str) -> LeaseReading:
     lines = output.splitlines()
     try:
-        parsed = cast(
-            "dict[str, object]", json.loads([ln for ln in lines if ln.startswith("{")][-1])
-        )
-        listed = cast("list[object]", parsed["leases"])
+        parsed: object = json.loads([ln for ln in lines if ln.startswith("{")][-1])
+        if not _is_object_dict(parsed):
+            raise TypeError("leases payload must be a mapping")
+        listed = parsed["leases"]
+        if not _is_object_list(listed):
+            raise TypeError("leases list must be a sequence")
         return LeaseReading(tuple(_lease(item) for item in listed), None)
     except (IndexError, KeyError, TypeError, ValueError):
         failed = next((line for line in lines if line.startswith("LEASES failed")), "no output")

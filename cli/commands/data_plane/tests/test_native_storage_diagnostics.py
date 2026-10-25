@@ -10,17 +10,11 @@ import subprocess
 import sys
 from functools import partial
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import Mock
-
-import pytest
 
 from base import cluster
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
 from base.deploy.tests.containers import free_port, redis_server
-from base.host.db_authority import delivery
 from cli.commands.data_plane._pooler_stop import OwnedPooler
 from cli.commands.data_plane.tests.native_cluster import redis_command, redis_from_url, redis_ping
 from cli.commands.data_plane.tests.native_processes import native_pooler as native_pooler
@@ -76,27 +70,27 @@ def test_absent_native_redis_diagnostic_is_down(tmp_path: Path, redis_access: No
 
 async def test_native_pooler_diagnostic_authenticates_without_config_writes(
     native_pooler: tuple[OwnedPooler, str, str],
-    monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentityReader,
 ) -> None:
     custodian, _pooled, _direct = native_pooler
+    home = custodian.config.parent.parent
     ports = cluster.new_home_ports()
     ports["pgbouncer"] = custodian.port
-    record = cluster.ClusterRecord(
-        ports=ports, gateway_home=str(custodian.config.parent.parent), created_at="fixture"
-    )
-    monkeypatch.setattr(cluster, "get_record", Mock(return_value=record))
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
+    record = cluster.ClusterRecord(ports=ports, gateway_home=str(home), created_at="fixture")
+    before = custodian.config.read_bytes()
     # meiva:note
     # The fixture pooler trusts its userlist; the probe authenticates as the
     # admin-console operator entry with the home's recorded credential.
-    monkeypatch.setattr(
-        delivery,
-        "read_pooler_admin",
-        Mock(return_value=SimpleNamespace(password="fixture-admin")),  # noqa: S106
+    result = await ProbeRunner().observe(
+        partial(
+            probes.pgbouncer,
+            machine=machine_identity,
+            home=home,
+            record=record,
+            admin_password="fixture-admin",  # noqa: S106
+        ),
+        5,
     )
-    before = custodian.config.read_bytes()
-    result = await ProbeRunner().observe(partial(probes.pgbouncer, machine=machine_identity), 5)
     assert result.verdict.value == "alive", result.detail
     assert custodian.identity.live()
     assert custodian.config.read_bytes() == before

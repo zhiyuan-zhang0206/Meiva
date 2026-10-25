@@ -12,6 +12,7 @@ from typing import Any
 
 import psycopg
 
+from base.cluster.checkpoint_schema import CheckpointSchema, PostgresCheckpointSchema
 from base.cluster.machine import MachineIdentityReader
 from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from cli.commands.data_plane.config import DataPlaneConfig
@@ -20,6 +21,8 @@ from cli.commands.lifecycle.start.cold_start_plan import (
     migration_authority,
 )
 from cli.database import OperatorDatabaseFactory
+
+_DEFAULT_CHECKPOINT_SCHEMA: CheckpointSchema = PostgresCheckpointSchema()
 
 
 # meiva:note
@@ -43,9 +46,9 @@ def cmd_migrations_apply(
     machine: MachineIdentityReader,
     config: DataPlaneConfig,
     home: Path,
+    checkpoint_schema: CheckpointSchema = _DEFAULT_CHECKPOINT_SCHEMA,
 ) -> list[str]:
     from base import cluster
-    from base.cluster.checkpoint_schema import PostgresCheckpointSchema
     from base.cluster.dataplane import pg_admin
     from base.cluster.provision import CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS
     from base.deploy.schema.migration_layout import required_migration_set
@@ -57,7 +60,7 @@ def cmd_migrations_apply(
     cluster.assert_checkpoint_dependency_pinned(
         required_migration_set(migrations_dir=MIGRATIONS_DIR),
         manifest=CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS,
-        upstream_migrations=PostgresCheckpointSchema().migrations,
+        upstream_migrations=checkpoint_schema.migrations,
     )
 
     if migration_authority(remote_plane=config.is_remote) is MigrationAuthority.ACCESS_URL:

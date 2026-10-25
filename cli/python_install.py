@@ -156,6 +156,7 @@ def install(
     reinstall_package: str | None = None,
     mirror_env: Path | None = None,
     run: UvRunner = _run,
+    environment: Mapping[str, str] = os.environ,
 ) -> int:
     """Validate first, then install into this checkout's own inexact environment."""
     if (repo / ".venv").is_symlink():
@@ -163,7 +164,7 @@ def install(
     errors = violations(repo / "uv.lock")
     if errors:
         raise ValueError("Noncanonical uv.lock; restore the committed PyPI lock before installing")
-    configured = configured_env(os.environ, mirror_env)
+    configured = configured_env(environment, mirror_env)
     index = python_index(repo, configured)
     env = {key: value for key, value in configured.items() if key not in _IGNORED_ENV}
     flags = (["--no-dev"] if no_dev else []) + (["--verbose"] if verbose else [])

@@ -23,10 +23,11 @@ import sys
 import time
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import NamedTuple, assert_never, cast
+from typing import NamedTuple, TypeGuard, assert_never
 
 import psutil
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import session_name
 from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.deploy import start_trace
@@ -97,17 +98,23 @@ class RootDriverError(RuntimeError):
     """The root-driven tree could not be brought up, reconciled or stopped."""
 
 
-def complete_boot_start(*, helper: HelperFactory | None, host: Host, home: Path) -> None:
+def complete_boot_start(
+    *,
+    helper: HelperFactory | None,
+    host: Host,
+    home: Path,
+    proc_root: Path = Path("/proc"),
+) -> None:
     """Hand Linux systemd the verified root after ordinary readiness succeeds."""
     from base.host.system.boot_unit import in_boot_unit, publish_root_ready
 
-    if not in_boot_unit(host=host):
+    if not in_boot_unit(host=host, proc_root=proc_root):
         return
     snapshot = root_status(root_client(home))
     if snapshot is None:
         raise RootDriverError("cannot hand systemd an unobservable root")
     require_root_owner(snapshot, helper=helper, home=home)
-    publish_root_ready(home, native_identity(snapshot["root"]), host=host)
+    publish_root_ready(home, native_identity(snapshot["root"]), host=host, proc_root=proc_root)
 
 
 class LaunchOutcome(NamedTuple):
@@ -303,7 +310,7 @@ def await_root_status(
     interval_s: float = READY_POLL_INTERVAL_S,
 ) -> RootSnapshot:
     """Poll the control socket until the daemon serves, or fail with its log tail."""
-    started = time.monotonic()
+    started = SYSTEM_TIMERS.monotonic()
     while True:
         if proc is not None and proc.poll() is not None:
             raise RootDriverError(
@@ -314,11 +321,13 @@ def await_root_status(
         if snapshot is not None:
             return snapshot
         unmet = unmet_step(
-            elapsed_s=time.monotonic() - started, timeout_s=timeout_s, interval_s=interval_s
+            elapsed_s=SYSTEM_TIMERS.monotonic() - started,
+            timeout_s=timeout_s,
+            interval_s=interval_s,
         )
         match unmet:
             case Retry(after_s):
-                time.sleep(after_s)
+                SYSTEM_TIMERS.sleep(after_s)
             case Expired():
                 raise RootDriverError(
                     f"meiva-root did not become ready within {timeout_s:.0f}s; "
@@ -345,7 +354,7 @@ def seed_via_helper(
         keeper = helper().seed_root(seed)
     except Exception as exc:
         raise RootDriverError(f"root_seed over the helper failed: {exc}") from exc
-    started = time.monotonic()
+    started = SYSTEM_TIMERS.monotonic()
     while True:
         verdict = keeper_verdict(keeper, str(launch.run_dir))
         match verdict:
@@ -358,11 +367,13 @@ def seed_via_helper(
             case _:
                 assert_never(verdict)
         unmet = unmet_step(
-            elapsed_s=time.monotonic() - started, timeout_s=timeout_s, interval_s=interval_s
+            elapsed_s=SYSTEM_TIMERS.monotonic() - started,
+            timeout_s=timeout_s,
+            interval_s=interval_s,
         )
         match unmet:
             case Retry(after_s):
-                time.sleep(after_s)
+                SYSTEM_TIMERS.sleep(after_s)
             case Expired():
                 raise RootDriverError(
                     f"the helper did not bring meiva-root up within {timeout_s:.0f}s "
@@ -426,16 +437,18 @@ def stop_root_process(
             raise RootDriverError("helper did not retain root stop intent")
     else:
         identity.send_signal(signal.SIGTERM)
-    started = time.monotonic()
+    started = SYSTEM_TIMERS.monotonic()
     while True:
         if not identity.live() and root_status(client) is None:
             return
         unmet = unmet_step(
-            elapsed_s=time.monotonic() - started, timeout_s=timeout_s, interval_s=interval_s
+            elapsed_s=SYSTEM_TIMERS.monotonic() - started,
+            timeout_s=timeout_s,
+            interval_s=interval_s,
         )
         match unmet:
             case Retry(after_s):
-                time.sleep(after_s)
+                SYSTEM_TIMERS.sleep(after_s)
             case Expired():
                 raise RootDriverError(
                     f"meiva-root at {root_run_dir(home)} did not stop within {timeout_s:.0f}s"
@@ -490,13 +503,27 @@ def _launch_outcome(roster: tuple[ServiceSpec, ...], snapshot: RootSnapshot) -> 
     return LaunchOutcome(roster, tuple(session_name(problem.unit_id) for problem in problems))
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 # meiva:note
 # The requested manifest digest of every unit, by unit id.
 def unit_digests(manifest: Mapping[str, object]) -> dict[str, str]:
     from services.supervision.meiva_root.manifest import UnitManifest
 
-    rows = cast("list[dict[str, object]]", manifest["units"])
-    desired = (UnitManifest.from_mapping(row, origin="requested tree") for row in rows)
+    rows = manifest["units"]
+    if not _is_object_list(rows):
+        raise TypeError("the launch manifest carries no unit list")
+    desired = (
+        UnitManifest.from_mapping(row, origin="requested tree")
+        for row in rows
+        if _is_object_dict(row)
+    )
     return {unit.id: unit.digest() for unit in desired}
 
 

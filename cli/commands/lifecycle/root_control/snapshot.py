@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import NotRequired, TypedDict, cast
+from typing import NotRequired, TypedDict, TypeGuard
 
 __all__ = [
     "HealthRow",
@@ -22,6 +22,14 @@ __all__ = [
 ]
 
 _UNIT_TEXT_FIELDS = ("intent", "manifest_digest", "last_error", "last_exit")
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 # meiva:note
@@ -72,11 +80,11 @@ class RootSnapshot(TypedDict):
 def parse_snapshot(result: object) -> RootSnapshot:
     body = _object(result, "root status")
     items = body.get("units")
-    if not isinstance(items, list):
+    if not _is_object_list(items):
         raise SnapshotError("root status omitted its unit roster")
     snapshot: RootSnapshot = {
         "root": _root_block(body.get("root")),
-        "units": [_unit_row(item) for item in cast("list[object]", items)],
+        "units": [_unit_row(item) for item in items],
     }
     health = body.get("health")
     if health is not None:
@@ -91,12 +99,12 @@ def root_units(snapshot: RootSnapshot) -> dict[str, UnitRow]:
 
 
 def _object(value: object, what: str) -> dict[str, object]:
-    if not isinstance(value, dict):
+    if not _is_object_dict(value):
         raise SnapshotError(f"{what} is not an object")
-    return cast("dict[str, object]", value)
+    return value
 
 
-def _is_int(value: object) -> bool:
+def _is_int(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
@@ -116,9 +124,18 @@ def _root_block(value: object) -> RootBlock:
     return {
         "pid": pid,
         "create_time": float(birth),
-        "starttime": cast("int | None", starttime),
+        "starttime": starttime,
         "launch_digest": digest,
     }
+
+
+def _optional_unit_text(row: dict[str, object], unit_id: str, field: str) -> str | None:
+    text = row.get(field)
+    if text is None:
+        return None
+    if not isinstance(text, str):
+        raise SnapshotError(f"unit {unit_id!r} reports a non-text {field}")
+    return text
 
 
 def _unit_row(value: object) -> UnitRow:
@@ -126,15 +143,16 @@ def _unit_row(value: object) -> UnitRow:
     unit_id, state = row.get("id"), row.get("state")
     if not isinstance(unit_id, str) or not unit_id or not isinstance(state, str):
         raise SnapshotError("a unit row lacks its id or state")
-    built: dict[str, object] = {"id": unit_id, "state": state}
-    for field in _UNIT_TEXT_FIELDS:
-        text = row.get(field)
-        if text is None:
-            continue
-        if not isinstance(text, str):
-            raise SnapshotError(f"unit {unit_id!r} reports a non-text {field}")
-        built[field] = text
-    return cast("UnitRow", built)
+    built: UnitRow = {"id": unit_id, "state": state}
+    if (intent := _optional_unit_text(row, unit_id, "intent")) is not None:
+        built["intent"] = intent
+    if (manifest_digest := _optional_unit_text(row, unit_id, "manifest_digest")) is not None:
+        built["manifest_digest"] = manifest_digest
+    if (last_error := _optional_unit_text(row, unit_id, "last_error")) is not None:
+        built["last_error"] = last_error
+    if (last_exit := _optional_unit_text(row, unit_id, "last_exit")) is not None:
+        built["last_exit"] = last_exit
+    return built
 
 
 def _health(value: object) -> dict[str, HealthRow]:

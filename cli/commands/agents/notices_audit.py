@@ -10,7 +10,7 @@ import sys
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from datetime import datetime, tzinfo
-from typing import Any, cast
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
@@ -40,11 +40,11 @@ def _bar(value: int, peak: int, width: int = 40) -> str:
 
 
 def _per_day_section(report: Mapping[str, Any]) -> list[str]:
-    categories = cast(list[str], report["categories"])
+    categories: list[str] = list(report["categories"])
     rows: list[list[object]] = [["day", *categories, "total"]]
     totals: Counter[str] = Counter()
-    for row in cast(list[dict[str, Any]], report["delivered"]["per_day"]):
-        counts = cast(dict[str, int], row["by_category"])
+    for row in report["delivered"]["per_day"]:
+        counts: dict[str, int] = dict(row["by_category"])
         totals.update(counts)
         rows.append([row["day"], *(counts[name] for name in categories), row["total"]])
     rows.append(["total", *(totals[name] for name in categories), sum(totals.values())])
@@ -52,7 +52,7 @@ def _per_day_section(report: Mapping[str, Any]) -> list[str]:
 
 
 def _per_category_section(report: Mapping[str, Any]) -> list[str]:
-    delivered = cast(dict[str, int], report["delivered"]["per_category"])
+    delivered: dict[str, int] = dict(report["delivered"]["per_category"])
     grand_total = sum(delivered.values()) or 1
     return [
         "",
@@ -65,7 +65,7 @@ def _per_category_section(report: Mapping[str, Any]) -> list[str]:
 
 
 def _per_hour_section(report: Mapping[str, Any]) -> list[str]:
-    hours = cast(list[int], report["delivered"]["per_hour"])
+    hours: list[int] = list(report["delivered"]["per_hour"])
     peak = max(hours) if hours else 0
     return [
         "",
@@ -78,7 +78,7 @@ def _per_hour_section(report: Mapping[str, Any]) -> list[str]:
 
 
 def _candidates_section(report: Mapping[str, Any]) -> list[str]:
-    rows = cast(list[dict[str, Any]], report["candidates"])
+    rows = report["candidates"]
     return [
         "",
         "Candidates and suppression",
@@ -99,7 +99,7 @@ def _candidates_section(report: Mapping[str, Any]) -> list[str]:
 
 
 def _simulation_section(report: Mapping[str, Any]) -> list[str]:
-    rows = cast(list[dict[str, Any]], report["simulations"])
+    rows = report["simulations"]
     return [
         "",
         "Simulations (one flipped input at a time, against the configured baseline)",
@@ -114,7 +114,7 @@ def _simulation_section(report: Mapping[str, Any]) -> list[str]:
 
 
 def _explain_section(report: Mapping[str, Any]) -> list[str]:
-    rows = cast(list[dict[str, Any]], report.get("explain") or [])
+    rows: list[dict[str, Any]] = report.get("explain") or []
     if not rows:
         return []
     stamp = "%Y-%m-%d %H:%M"
@@ -125,11 +125,11 @@ def _explain_section(report: Mapping[str, Any]) -> list[str]:
             ["at", "category", "agent", "outcome", "dedupe key"],
             [
                 [
-                    datetime.fromisoformat(row["at"]).strftime(stamp),
-                    row["category"],
-                    row["agent_id"],
-                    row["outcome"],
-                    row["dedupe_key"] or "-",
+                    datetime.fromisoformat(str(row["at"])).strftime(stamp),
+                    str(row["category"]),
+                    str(row["agent_id"]),
+                    str(row["outcome"]),
+                    str(row["dedupe_key"] or "-"),
                 ]
                 for row in rows
             ],
@@ -138,19 +138,18 @@ def _explain_section(report: Mapping[str, Any]) -> list[str]:
 
 
 def render_text(report: Mapping[str, Any], *, tz: tzinfo) -> list[str]:
-    window = cast(dict[str, Any], report["window"])
+    window = report["window"]
     stamp = "%Y-%m-%d %H:%M"
-    start = datetime.fromisoformat(cast(str, window["start"])).astimezone(tz)
-    end = datetime.fromisoformat(cast(str, window["end"])).astimezone(tz)
+    start = datetime.fromisoformat(str(window["start"])).astimezone(tz)
+    end = datetime.fromisoformat(str(window["end"])).astimezone(tz)
     return [
         f"Notification audit — {window['days']} day{'' if window['days'] == 1 else 's'} "
         f"ending {end:{stamp}} {window['timezone']}",
         f"window    {start:{stamp}} .. {end:{stamp}}",
-        *_source_lines(cast(dict[str, str], report["sources"])),
+        *_source_lines(report["sources"]),
         "switches  "
         + "  ".join(
-            f"{name}={_on_off(value=value)}"
-            for name, value in cast(dict[str, bool], report["switches"]).items()
+            f"{name}={_on_off(value=bool(value))}" for name, value in report["switches"].items()
         ),
         *_per_day_section(report),
         *_per_category_section(report),

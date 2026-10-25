@@ -10,11 +10,19 @@
 from __future__ import annotations
 
 import json
-from typing import cast
+from typing import TypeGuard
 
 __all__ = ["build_server_spec", "derive_server_name", "parse_env_pairs", "server_summary"]
 
 _NAME_PREFIXES = ("meiva-mcp-", "mcp-server-", "mcp-")
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 # meiva:note
@@ -42,9 +50,9 @@ def build_server_spec(
         raise ValueError("pass either --json or --command, not both")
     if json_spec is not None:
         parsed: object = json.loads(json_spec)
-        if not isinstance(parsed, dict):
+        if not _is_object_dict(parsed):
             raise ValueError(f"--json must be a server object (got {type(parsed).__name__})")
-        return cast(dict[str, object], parsed)
+        return parsed
     if command is not None:
         spec: dict[str, object] = {"command": command}
         if args:
@@ -59,18 +67,13 @@ def build_server_spec(
 # meiva:note
 # One-line description of a server entry for the list view: its url, else its command and args.
 def server_summary(spec: object) -> str:
-    if not isinstance(spec, dict):
+    if not _is_object_dict(spec):
         return "(malformed entry)"
-    entry = cast(dict[str, object], spec)
-    if "url" in entry:
-        return str(entry["url"])
-    command = entry.get("command", "")
-    args = entry.get("args", [])
-    parts = (
-        [str(command), *(str(a) for a in cast(list[object], args))]
-        if isinstance(args, list)
-        else [str(command)]
-    )
+    if "url" in spec:
+        return str(spec["url"])
+    command = spec.get("command", "")
+    args = spec.get("args", [])
+    parts = [str(command), *(str(a) for a in args)] if _is_object_list(args) else [str(command)]
     return " ".join(p for p in parts if p)
 
 

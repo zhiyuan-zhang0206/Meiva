@@ -10,10 +10,10 @@
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
 from typing import assert_never
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane.redis_bridge import (
     RedisBridgeUnconfiguredError,
     redis_bridge_endpoint,
@@ -79,10 +79,10 @@ def bootout_and_wait(host: Host, *, timeout_s: float = _BOOTOUT_TIMEOUT_S) -> bo
         text=True,
         timeout=_LAUNCHCTL_TIMEOUT_S,
     )
-    started = time.monotonic()
+    started = SYSTEM_TIMERS.monotonic()
     while job_loaded(host):
         wait = bootout_wait_step(
-            elapsed_s=time.monotonic() - started,
+            elapsed_s=SYSTEM_TIMERS.monotonic() - started,
             timeout_s=timeout_s,
             interval_s=_BOOTOUT_POLL_INTERVAL_S,
         )
@@ -90,7 +90,7 @@ def bootout_and_wait(host: Host, *, timeout_s: float = _BOOTOUT_TIMEOUT_S) -> bo
             case Expired():
                 return False
             case Retry(after_s):
-                time.sleep(after_s)
+                SYSTEM_TIMERS.sleep(after_s)
             case _:
                 assert_never(wait)
     return True

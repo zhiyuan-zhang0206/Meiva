@@ -8,7 +8,6 @@ parser building never loads Settings (see ``cli.main`` module docstring)."""
 from __future__ import annotations
 
 import argparse
-from typing import Any
 
 
 def _duration(value: str) -> str:
@@ -22,13 +21,6 @@ def _duration(value: str) -> str:
     return value
 
 
-def _extension_gateway(args: argparse.Namespace) -> Any:
-    from base.cluster.machine.boot import gateway_access_from_boot
-    from cli.commands.extensions.packages.cluster_registry import HttpExtensionGateway
-
-    return HttpExtensionGateway(gateway_access_from_boot(args.runtime.config))
-
-
 def _h_plugins_update(_args: argparse.Namespace) -> int:
     from cli.commands.extensions.plugins import cmd_plugins_update
 
@@ -36,6 +28,8 @@ def _h_plugins_update(_args: argparse.Namespace) -> int:
 
 
 def _h_plugins_install(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
+    from cli.commands.extensions.packages.cluster_registry import HttpExtensionGateway
     from cli.commands.extensions.plugins import cmd_plugins_install
     from cli.commands.extensions.skills_sync import source_binding
 
@@ -44,7 +38,7 @@ def _h_plugins_install(args: argparse.Namespace) -> int:
         args.ref,
         args.path,
         accept_risk=args.accept_risk,
-        gateway=_extension_gateway(args),
+        gateway=HttpExtensionGateway(gateway_access_from_boot(args.runtime.config)),
         machine=args.runtime.machine,
         binding=source_binding(
             args.runtime.session.user_home, args.runtime.config.process_environment()
@@ -132,6 +126,8 @@ def _h_plugins_disable(args: argparse.Namespace) -> int:
 
 
 def _h_skill_install(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
+    from cli.commands.extensions.packages.cluster_registry import HttpExtensionGateway
     from cli.commands.extensions.skill import cmd_skill_install
 
     return cmd_skill_install(
@@ -141,7 +137,7 @@ def _h_skill_install(args: argparse.Namespace) -> int:
         accept_risk=args.accept_risk,
         update_mode=args.update_mode,
         check_every=args.check_every,
-        gateway=_extension_gateway(args),
+        gateway=HttpExtensionGateway(gateway_access_from_boot(args.runtime.config)),
         machine=args.runtime.machine,
     )
 
