@@ -3,7 +3,7 @@
 # Who else is running, and how much room they already claimed: the reservations a big job
 # writes, the class lock it takes, and the staleness rules that let both heal without a
 # daemon (pid gone or a different boot means the claim is void).
-# meiva:link scripts/host_ops/docs/admission-run.meiva.okf.md
+# meiva:link scripts/host_ops/docs/admission-run/admission-run.meiva.okf.md
 from __future__ import annotations
 
 import contextlib
