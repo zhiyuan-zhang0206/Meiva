@@ -1,21 +1,22 @@
 from __future__ import annotations
 
 import enum
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
 __all__ = [
     "MachineFacts",
-    "MachineIdentity",
     "MachineIdentityReader",
     "MachineNameMissing",
     "MachineRole",
     "MachineRoleInvalid",
     "MachineRoleMissing",
     "MachineRoles",
+    "Unset",
     "format_capabilities",
     "roles_from_flags",
+    "roles_from_input",
     "validate_machine_name",
 ]
 
@@ -44,16 +45,16 @@ class MachineRoleInvalid(ValueError):  # noqa: N818
     pass
 
 
-class _Unset(enum.Enum):
+class Unset(enum.Enum):
     TOKEN = enum.auto()
 
 
-_UNSET = _Unset.TOKEN
+_UNSET = Unset.TOKEN
 
 
 # meiva:note
 # The read-only machine identity contract shared by an owned configuration reader and frozen
-# declared facts. Mutation belongs only to the legacy owner, never to this boundary.
+# declared facts. Mutation belongs only to the configuration owner, never to this boundary.
 class MachineIdentityReader(Protocol):
     def name(self) -> str: ...
 
@@ -62,76 +63,6 @@ class MachineIdentityReader(Protocol):
     def host(self) -> str: ...
 
     def description(self) -> str | None: ...
-
-
-# meiva:note
-# Explicitly owned machine identity cache. Each field resolves lazily and
-# independently, sharing one reset() for test isolation and one set() for explicit injection.
-class MachineIdentity:
-    def __init__(
-        self,
-        *,
-        name: Callable[[], str],
-        role: Callable[[], MachineRoles],
-        host: Callable[[], str],
-        description: Callable[[], str | None],
-    ) -> None:
-        self._read_name = name
-        self._read_role = role
-        self._read_host = host
-        self._read_description = description
-        self._name: str | None = None
-        self._role: MachineRoles | None = None
-        self._description: str | None = None
-        self._description_resolved: bool = False
-        self._host: str | None = None
-
-    def name(self) -> str:
-        if self._name is None:
-            self._name = validate_machine_name(self._read_name())
-        return self._name
-
-    def role(self) -> MachineRoles:
-        if self._role is None:
-            self._role = _coerce_roles(self._read_role())
-        return self._role
-
-    def host(self) -> str:
-        if self._host is None:
-            self._host = self._read_host().strip() or "localhost"
-        return self._host
-
-    def description(self) -> str | None:
-        if not self._description_resolved:
-            description = self._read_description()
-            self._description = description.strip() or None if description else None
-            self._description_resolved = True
-        return self._description
-
-    def set(
-        self,
-        *,
-        name: str | _Unset = _UNSET,
-        role: str | Iterable[str] | _Unset = _UNSET,
-        description: str | _Unset | None = _UNSET,
-        host: str | _Unset = _UNSET,
-    ) -> None:
-        if name is not _UNSET:
-            self._name = name
-        if role is not _UNSET:
-            self._role = _coerce_roles(role)
-        if description is not _UNSET:
-            self._description = description
-            self._description_resolved = True
-        if host is not _UNSET:
-            self._host = host
-
-    def reset(self) -> None:
-        self._name = None
-        self._role = None
-        self._description = None
-        self._description_resolved = False
-        self._host = None
 
 
 # meiva:note
@@ -168,17 +99,17 @@ class MachineFacts:
         cls,
         identity: MachineIdentityReader,
         *,
-        name: str | _Unset = _UNSET,
-        role: str | Iterable[str] | _Unset = _UNSET,
-        host: str | _Unset = _UNSET,
-        description: str | _Unset | None = _UNSET,
+        name: str | Unset = _UNSET,
+        role: str | Iterable[str] | Unset = _UNSET,
+        host: str | Unset = _UNSET,
+        description: str | Unset | None = _UNSET,
     ) -> MachineFacts:
-        if isinstance(name, _Unset):
+        if isinstance(name, Unset):
             try:
                 name = identity.name()
             except MachineNameMissing:
                 name = ""
-        if isinstance(role, _Unset):
+        if isinstance(role, Unset):
             try:
                 role = identity.role()
             except MachineRoleMissing:
@@ -186,23 +117,23 @@ class MachineFacts:
         return cls.of(
             name=name,
             role=role,
-            host=identity.host() if isinstance(host, _Unset) else host,
-            description=identity.description() if isinstance(description, _Unset) else description,
+            host=identity.host() if isinstance(host, Unset) else host,
+            description=identity.description() if isinstance(description, Unset) else description,
         )
 
     def replaced(
         self,
         *,
-        name: str | _Unset = _UNSET,
-        role: str | Iterable[str] | _Unset = _UNSET,
-        host: str | _Unset = _UNSET,
-        description: str | _Unset | None = _UNSET,
+        name: str | Unset = _UNSET,
+        role: str | Iterable[str] | Unset = _UNSET,
+        host: str | Unset = _UNSET,
+        description: str | Unset | None = _UNSET,
     ) -> MachineFacts:
         return type(self).of(
-            name=self._name if isinstance(name, _Unset) else name,
-            role=self._roles if isinstance(role, _Unset) else role,
-            host=self._host if isinstance(host, _Unset) else host,
-            description=self._description if isinstance(description, _Unset) else description,
+            name=self._name if isinstance(name, Unset) else name,
+            role=self._roles if isinstance(role, Unset) else role,
+            host=self._host if isinstance(host, Unset) else host,
+            description=self._description if isinstance(description, Unset) else description,
         )
 
     def name(self) -> str:
@@ -297,7 +228,7 @@ def _parse_roles(value: str) -> MachineRoles:
     return tokens
 
 
-def _coerce_roles(role: str | Iterable[str]) -> MachineRoles:
+def roles_from_input(role: str | Iterable[str]) -> MachineRoles:
     if isinstance(role, str):
         return _parse_roles(role)
     return _parse_roles(",".join(role))

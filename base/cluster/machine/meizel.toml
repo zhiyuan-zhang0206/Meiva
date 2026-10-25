@@ -1,13 +1,15 @@
-exports = ["ambient.py", "boot.py", "tests"]
+exports = ["ambient.py", "boot.py", "configured.py", "tests"]
 
 [uses]
 "__init__.py" = ["gateway_access.py", "identity.py"]
 "ambient.py" = ["__init__.py"]
 "boot.py" = ["__init__.py"]
-"tests" = ["__init__.py", "boot.py"]
+"configured.py" = ["identity.py"]
+"tests" = ["__init__.py", "configured.py"]
 
 [purity]
 "." = "strict-to-be"
+"configured.py" = "none"
 "gateway_access.py" = "strict"
 "identity.py" = "strict"
 
