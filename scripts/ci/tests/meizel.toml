@@ -6,6 +6,3 @@ exports = ["leak_guard_suite.py"]
 [uses]
 "test_harness_imports.py" = ["harness_imports.py"]
 "test_read_only_cli_imports.py" = ["child_read_only_cli.py"]
-
-[debt.first-party-patch]
-"test_watch_pr.py#monkeypatch.setattr base.paths.workspace_dir" = 1

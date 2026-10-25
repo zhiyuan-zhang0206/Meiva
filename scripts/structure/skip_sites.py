@@ -27,7 +27,7 @@ import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -234,6 +234,18 @@ def record(found: dict[str, list[tuple[int, str]]]) -> dict[str, list[str]]:
     return {path: sorted(what for _, what in sites) for path, sites in sorted(found.items())}
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 # meiva:note
 # The recorded sites, or an empty record when the file is missing (a fresh checkout reads
 # as "nothing recorded yet" and the gate reports every site as added).
@@ -242,12 +254,14 @@ def load(root: Path = _REPO_ROOT) -> dict[str, tuple[str, ...]]:
     if not path.is_file():
         return {}
     raw: object = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
+    if not _is_str_object_dict(raw):
         raise SystemExit(f"{BASELINE}: expected a JSON object of path -> [what]")
-    return {
-        str(key): tuple(str(item) for item in cast("list[object]", value))
-        for key, value in cast("dict[str, object]", raw).items()
-    }
+    result: dict[str, tuple[str, ...]] = {}
+    for key, value in raw.items():
+        if not _is_object_list(value):
+            raise SystemExit(f"{BASELINE}: expected a JSON object of path -> [what]")
+        result[key] = tuple(str(item) for item in value)
+    return result
 
 
 # meiva:note

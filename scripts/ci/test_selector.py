@@ -9,6 +9,7 @@ import math
 import os
 import re
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -165,12 +166,12 @@ class SelectionResult:
         """Return the selected test-file count."""
         return len(self.tests)
 
-    def as_json(self) -> dict[str, object]:
+    def as_json(self, *, mode: str = "enforce") -> dict[str, object]:
         """Return the stable machine-readable selector payload."""
         return {
             "decision": self.decision,
             "reason": self.reason,
-            "mode": selection_mode(),
+            "mode": mode,
             "tests": list(self.tests),
             "count": self.count,
             "est_seconds": self.est_seconds,
@@ -199,14 +200,14 @@ class Checkout:
 FULL_FANOUT_SHARDS = 8
 
 
-def selection_mode() -> str:
+def selection_mode(env: Mapping[str, str]) -> str:
     """The mode CI is running: the ci.yml TEST_SELECTION_MODE value.
 
     The selector itself behaves identically in either mode — the mode only
     decides how CI routes its decision — so this is audit metadata for the
     recorded payload, defaulting to the repository's enforce default.
     """
-    return os.environ.get("TEST_SELECTION_MODE", "enforce")
+    return env.get("TEST_SELECTION_MODE", "enforce")
 
 
 def _is_test_dir_path(path: str, hosts: tuple[str, ...]) -> bool:
@@ -647,12 +648,13 @@ def main(argv: list[str] | None = None) -> int:
         head_ref=args.head_ref,
         base_ref=args.base_ref,
     )
+    mode = selection_mode(os.environ)
     for diagnostic in result.diagnostics:
         print(f"test-impact: {diagnostic}", file=sys.stderr)
     if args.json:
-        print(json.dumps(result.as_json(), sort_keys=True))
+        print(json.dumps(result.as_json(mode=mode), sort_keys=True))
     else:
-        print(f"selector mode={selection_mode()} decision={result.decision} reason={result.reason}")
+        print(f"selector mode={mode} decision={result.decision} reason={result.reason}")
         print(f"changed files={args.changed_files}")
         print(
             f"tests={result.count} estimate={result.est_seconds:.3f}s full={result.full_est_seconds:.3f}s"

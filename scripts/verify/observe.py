@@ -217,9 +217,8 @@ def check_scripted_agent(home: Path, _source: Path) -> Detail:
         )
         created.raise_for_status()
         agent = created.json()["id"]
-        deadline = time.monotonic() + AGENT_DEADLINE_S
         items: list[dict[str, Any]] = []
-        while time.monotonic() < deadline:
+        for _ in range(AGENT_DEADLINE_S):
             timeline = client.get(f"/api/agents/{agent}/timeline?limit=1000")
             timeline.raise_for_status()
             items = timeline.json()["items"]

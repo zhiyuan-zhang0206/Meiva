@@ -8,8 +8,8 @@ purity = "strict-to-be"
 [external]
 "module_moves.py" = "imports the old and new module names the operator passes on the command line"
 
-[debt.ambient-read]
-"schema_drift.py#settings base.config.settings" = 1
+[roots]
+"schema_drift.py" = { kinds = ["settings"], why = "CLI schema drift audit falls back to the deployment database URL from settings when --dsn is omitted" }
 
 [debt.impure-call]
 "branch_protection.py#Path.read_text" = 1
@@ -29,8 +29,3 @@ purity = "strict-to-be"
 "impact_census.py#scripts/ci/test_impact.py" = 1
 "impact_census.py#scripts/ci/test_selector.py" = 1
 "schema_drift.py#base/config/__init__.py" = 1
-
-[debt.type-cast]
-"branch_protection.py#cast _list" = 1
-"branch_protection.py#cast _mapping" = 2
-"branch_protection.py#cast _string_set" = 1

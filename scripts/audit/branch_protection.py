@@ -17,7 +17,7 @@ import re
 import subprocess
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 from urllib.parse import quote
 
 import yaml
@@ -48,19 +48,34 @@ _REQUIRED_WORKFLOWS = (
 )
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_list(value: object) -> TypeGuard[list[str]]:
+    return _is_object_list(value) and all(isinstance(item, str) for item in value)
+
+
 def _mapping(value: object, location: str) -> dict[str, object]:
-    if not isinstance(value, dict):
+    if not _is_raw_dict(value):
         raise TypeError(f"{location} must be a mapping")
-    mapping = cast(dict[object, object], value)
-    if not all(isinstance(key, str) for key in mapping):
+    if not _is_str_dict(value):
         raise TypeError(f"{location} keys must be strings")
-    return cast(dict[str, object], mapping)
+    return value
 
 
 def _list(value: object, location: str) -> list[object]:
-    if not isinstance(value, list):
+    if not _is_object_list(value):
         raise TypeError(f"{location} must be a list")
-    return cast(list[object], value)
+    return value
 
 
 def expected_checks() -> frozenset[str]:
@@ -103,9 +118,9 @@ def trunk_gate_findings(text: str) -> list[str]:
 
 def _string_set(value: object, location: str) -> frozenset[str]:
     items = _list(value, location)
-    if not all(isinstance(item, str) for item in items):
+    if not _is_str_list(items):
         raise TypeError(f"{location} entries must be strings")
-    return frozenset(cast(list[str], items))
+    return frozenset(items)
 
 
 def _boolean(value: object, location: str) -> bool:

@@ -24,6 +24,7 @@ import argparse
 import json
 import os
 from collections.abc import Mapping
+from datetime import datetime
 from pathlib import Path
 
 from base.clock import Clock
@@ -49,7 +50,11 @@ def _validate_common_args(args: argparse.Namespace, parser: argparse.ArgumentPar
 
 
 def _ci_usage_command(
-    args: argparse.Namespace, parser: argparse.ArgumentParser, *, ledger_path: Path
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+    *,
+    ledger_path: Path,
+    now: datetime,
 ) -> int | None:
     """Dispatch --ci-usage when set; None when not set.
     Reads the repo ledger (scripts/ci/ci_usage/ledger.jsonl, produced by scripts/ci/pull_requests/accounting.py
@@ -72,7 +77,12 @@ def _ci_usage_command(
         )
     if args.pr is not None:
         parser.error("--ci-usage takes no PR number")
-    rows = report_rows(load_ledger(ledger_path), days=args.ci_usage_days, agent=args.ci_usage_agent)
+    rows = report_rows(
+        load_ledger(ledger_path),
+        days=args.ci_usage_days,
+        agent=args.ci_usage_agent,
+        now=now,
+    )
     if args.json:
         print(json.dumps(rows, indent=2))
         return 0
@@ -246,7 +256,7 @@ def main(
     args = p.parse_args(argv)
     _validate_common_args(args, p)
 
-    ci_usage_rc = _ci_usage_command(args, p, ledger_path=ledger_path)
+    ci_usage_rc = _ci_usage_command(args, p, ledger_path=ledger_path, now=clock.now())
     if ci_usage_rc is not None:
         return ci_usage_rc
 

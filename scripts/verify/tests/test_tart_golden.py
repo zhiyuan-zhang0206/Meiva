@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -26,12 +27,20 @@ GRANTED: dict[str, Any] = {
 }
 
 
+def _listing_tart(directory: Path, rows: list[dict[str, Any]]) -> Tart:
+    directory.mkdir(parents=True, exist_ok=True)
+    binary = directory / "tart"
+    binary.write_text(f"#!/bin/sh\nprintf '%s\\n' '{json.dumps(rows)}'\n")
+    binary.chmod(0o755)
+    return Tart(str(binary), home=directory / "home")
+
+
 def test_a_dry_run_prints_every_step_in_order_and_touches_nothing(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     repo = Path(__file__).resolve().parents[3]
     evidence_root = tmp_path / "evidence"
-    tart = Tart(str(tmp_path / "no-tart-here"), dry_run=True)
+    tart = Tart(str(tmp_path / "no-tart-here"), home=tmp_path / "home", dry_run=True)
 
     status = tart_golden.build_golden(
         "HEAD", evidence_root, name="meiva-golden", repo=repo, tart=tart
@@ -57,26 +66,21 @@ def test_a_dry_run_prints_every_step_in_order_and_touches_nothing(
 
 
 def test_the_golden_build_never_overwrites_a_vm_or_boots_a_third(tmp_path: Path) -> None:
-    class Listing(Tart):
-        def __init__(self, vms: list[dict[str, Any]]) -> None:
-            super().__init__(str(tmp_path / "unused"))
-            self.rows = vms
-
-        def vms(self) -> list[dict[str, Any]]:
-            return self.rows
-
     repo = Path(__file__).resolve().parents[3]
-    exists = Listing([{"Name": "meiva-golden", "Running": False, "Source": "local"}])
+    exists = _listing_tart(
+        tmp_path / "exists", [{"Name": "meiva-golden", "Running": False, "Source": "local"}]
+    )
     with pytest.raises(RunFailedError, match="delete it yourself"):
         tart_golden.build_golden(
             "HEAD", tmp_path / "ev", name="meiva-golden", repo=repo, tart=exists
         )
 
-    crowded = Listing(
+    crowded = _listing_tart(
+        tmp_path / "crowded",
         [
             {"Name": "a", "Running": True, "Source": "local"},
             {"Name": "b", "Running": True, "Source": "local"},
-        ]
+        ],
     )
     with pytest.raises(RunFailedError, match="at most 2"):
         tart_golden.build_golden(

@@ -11,7 +11,7 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 from meizel.language import path_imports
 from meizel.owners import decisions
@@ -116,10 +116,18 @@ def _valid_target(kind: str, target: str) -> bool:
     )
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
 def validate_entries(kind: str, entries: object, scope: tuple[str, ...]) -> None:
-    if not isinstance(entries, dict):
-        raise ValueError(f"'{kind}' must be an object")  # noqa: TRY004 — invalid JSON schema
-    for key, count in cast("dict[str, object]", entries).items():
+    if not _is_str_object_dict(entries):
+        raise ValueError(f"'{kind}' must be an object")
+    for key, count in entries.items():
         path_text, separator, target = key.partition("::")
         path = Path(path_text)
         valid_path = (
