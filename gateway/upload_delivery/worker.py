@@ -59,7 +59,7 @@ class UploadRecovery:
         self.calls: set[asyncio.Future[Any]] = set()
         self.task: asyncio.Task[None] | None = None
 
-    async def native(self, call: Callable[..., Any], *args: Any, **kwargs: object) -> Any:
+    async def native[T](self, call: Callable[..., T], *args: object, **kwargs: object) -> T:
         task = asyncio.get_running_loop().run_in_executor(None, partial(call, *args, **kwargs))
         self.calls.add(task)
         task.add_done_callback(self.finished_call)

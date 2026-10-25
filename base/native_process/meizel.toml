@@ -33,6 +33,9 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 "ownership.py#platform sys.platform" = 6
 "pidfd.py#platform sys.platform" = 1
 
+[debt.any-collaborator]
+"exec_domain.py#any ExecProcessDomain.launch_posix.options" = 1
+
 [debt.type-cast]
 "exec_domain.py#cast ExecProcessDomain.launch_posix" = 1
 "exec_domain.py#cast ExecProcessDomain.signal" = 1

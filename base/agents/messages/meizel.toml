@@ -22,6 +22,20 @@ exports = ["delivery", "envelope.py", "external_caller.py", "guard.py", "identit
 [roots]
 "external_caller.py" = { kinds = ["environ"], why = "per-invocation external child profile, consumed by SDK identity bootstrap before Settings; caller provenance is not cluster config and must not enter its persisted Settings projection" }
 
+[debt.any-collaborator]
+"guard.py#any _coerce.messages" = 1
+"guard.py#any _contains_remove_all.delta" = 1
+"guard.py#any _is_delta.current" = 1
+"guard.py#any _try_pure_append.current" = 1
+"guard.py#any _try_pure_append.delta" = 1
+"guard.py#any guarded_add_messages.current" = 1
+"guard.py#any guarded_add_messages.delta" = 1
+"guard.py#any guarded_add_messages.return" = 1
+"guard.py#any guarded_delta_reducer.return" = 1
+"guard.py#any guarded_delta_reducer.state" = 1
+"identity.py#any normalize_stored_message_ids.return" = 1
+"identity.py#any normalize_stored_message_ids.value" = 1
+
 [debt.type-cast]
 "guard.py#cast _coerce.<listcomp>" = 1
 "guard.py#cast _contains_remove_all" = 1

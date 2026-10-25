@@ -5,5 +5,9 @@
 "chat.py" = "strict"
 "plugin.py" = "strict"
 
+[debt.any-collaborator]
+"chat.py#any DeepSeekChatModel.with_structured_output.kwargs" = 1
+"chat.py#any _StructuredOutputFactory.__call__.kwargs" = 1
+
 [debt.type-cast]
 "chat.py#cast DeepSeekChatModel.with_structured_output" = 2

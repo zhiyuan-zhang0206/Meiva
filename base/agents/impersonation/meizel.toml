@@ -26,6 +26,37 @@ exports = ["delivery.py", "event_signals.py", "history.py", "host_transport.py",
 "__init__.py#random secrets.token_urlsafe" = 1
 "__init__.py#random uuid.uuid4" = 1
 
+[debt.any-collaborator]
+"status.py#any LeaseRecord.accepted_generation" = 1
+"status.py#any LeaseRecord.accepted_owner" = 1
+"status.py#any LeaseRecord.ack_window_seconds" = 1
+"status.py#any LeaseRecord.agent_id" = 1
+"status.py#any LeaseRecord.applied_version" = 1
+"status.py#any LeaseRecord.delta_version" = 1
+"status.py#any LeaseRecord.ended_at" = 1
+"status.py#any LeaseRecord.event_admission_closed_at" = 1
+"status.py#any LeaseRecord.event_delivery_pending_reason" = 1
+"status.py#any LeaseRecord.event_delivery_protocol_version" = 1
+"status.py#any LeaseRecord.events_completed_at" = 1
+"status.py#any LeaseRecord.expires_at" = 1
+"status.py#any LeaseRecord.handoff_applied_at" = 1
+"status.py#any LeaseRecord.handoff_path" = 1
+"status.py#any LeaseRecord.id" = 1
+"status.py#any LeaseRecord.machine" = 1
+"status.py#any LeaseRecord.max_delivery_attempts" = 1
+"status.py#any LeaseRecord.next_entry" = 1
+"status.py#any LeaseRecord.process_metadata" = 1
+"status.py#any LeaseRecord.rejection_reason" = 1
+"status.py#any LeaseRecord.relay_degraded_reason" = 1
+"status.py#any LeaseRecord.relay_generation" = 1
+"status.py#any LeaseRecord.relay_provider" = 1
+"status.py#any LeaseRecord.relay_token_hash" = 1
+"status.py#any LeaseRecord.session_id" = 1
+"status.py#any LeaseRecord.source" = 1
+"status.py#any LeaseRecord.summary" = 1
+"status.py#any LeaseRecord.summary_inbound_id" = 1
+"status.py#any LeaseRecord.ttl_seconds" = 1
+
 [debt.type-cast]
 "event_log.py#cast append_source_event" = 1
 "event_log.py#cast locked_receipt_state" = 1

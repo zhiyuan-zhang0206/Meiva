@@ -18,6 +18,9 @@
 "evaluate.py#random uuid.uuid4" = 1
 "mine.py#clock datetime.datetime.now" = 1
 
+[debt.any-collaborator]
+"record.py#any _msg_text.content" = 1
+
 [debt.type-cast]
 "aggregate.py#cast measured_mean" = 1
 "calibrate.py#cast load_cases" = 1

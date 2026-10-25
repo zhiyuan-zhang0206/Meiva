@@ -20,3 +20,14 @@ exports = ["agent_events.py", "computer_traces.py", "merged.py", "metrics.py", "
 "agent_events.py#clock datetime.datetime.now" = 1
 "metrics.py#clock datetime.datetime.now" = 1
 "router.py#clock datetime.datetime.now" = 1
+
+[debt.any-collaborator]
+"merged.py#any _drain.pubsub" = 1
+"merged.py#any _finish.client" = 1
+"merged.py#any _finish.pubsub" = 1
+"merged.py#any attach_sources.pubsub" = 1
+"sse.py#any _drain_redis_messages.pubsub" = 1
+"sse.py#any _matches_filter.event" = 1
+"sse.py#any _subscribe_error_frame.pubsub" = 1
+"sse.py#any close_pubsub.client" = 1
+"sse.py#any close_pubsub.pubsub" = 1

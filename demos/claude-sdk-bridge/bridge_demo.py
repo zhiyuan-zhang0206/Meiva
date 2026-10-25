@@ -16,6 +16,7 @@ from base.lm.harness.claude import (
     ClaudeSession,
     SessionTotals,
     TurnOutcome,
+    TurnTicket,
 )
 from base.lm.harness.process import PsutilChildProbe
 
@@ -92,7 +93,7 @@ async def stage_cancel(session: ClaudeSession, probe: PsutilChildProbe) -> dict[
 
 
 async def wait_for_child(
-    session: ClaudeSession, probe: PsutilChildProbe, ticket: Any, *, timeout: float
+    session: ClaudeSession, probe: PsutilChildProbe, ticket: TurnTicket, *, timeout: float
 ) -> set[int]:
     deadline = time.perf_counter() + timeout
     while time.perf_counter() < deadline:

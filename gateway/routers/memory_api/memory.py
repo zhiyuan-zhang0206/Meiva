@@ -5,8 +5,8 @@ import subprocess
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
 
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from base.api_contracts.agent_contract import IndexerUnavailable
@@ -77,7 +77,7 @@ async def _bounded_semaphore(semaphore: asyncio.Semaphore, budget: float) -> Asy
 
 async def _backend_topk(
     database: Database,
-    query_vector: Any,
+    query_vector: np.ndarray,
     k: int,
     deadline: float,
     dim: int,

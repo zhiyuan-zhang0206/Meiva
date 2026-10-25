@@ -23,8 +23,8 @@ from __future__ import annotations
 
 import threading
 from datetime import UTC, datetime
-from typing import Any
 
+from base.db.transaction import ConnectionSource
 from base.log import logger
 from gateway.lgtm.staleness_plan import (
     HEARTBEAT_EVENT,
@@ -37,7 +37,7 @@ from gateway.lgtm.staleness_plan import (
 CHECK_INTERVAL_S = 60
 
 
-def heartbeat_age(pool: Any, *, now: datetime) -> float | None:
+def heartbeat_age(pool: ConnectionSource, *, now: datetime) -> float | None:
     """Age in seconds of the newest heartbeat row in `telemetry_events`, if any.
 
     Only the last `STALENESS_THRESHOLD_S * 2` seconds are read, so the scan stays on the newest
@@ -83,7 +83,7 @@ class TelemetryStaleness:
     # A heartbeat-query exception is not a staleness verdict: it is logged at debug,
     # left out of this poll's result, and does not mutate transition state. The
     # fail-open verdict is cached on the check cadence alongside successful checks.
-    def check_and_report(self, pool: Any, *, now: datetime) -> bool:
+    def check_and_report(self, pool: ConnectionSource, *, now: datetime) -> bool:
         with self._lock:
             now_s = now.timestamp()
             if not check_due(self._last_checked_s, now_s, self._check_interval_s):

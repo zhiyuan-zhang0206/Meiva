@@ -14,6 +14,14 @@ exports = ["handoff_rules.py", "mapping.py", "session.py", "tests", "transport.p
 [debt.ambient-read]
 "mapping.py#home pathlib.Path.home" = 1
 
+[debt.any-collaborator]
+"mapping.py#any _denial_label.entry" = 1
+"mapping.py#any _int.value" = 1
+"mapping.py#any _mapping.value" = 1
+"mapping.py#any _text.value" = 1
+"mapping.py#any parse_usage.payload" = 1
+"session.py#any AgySession._handle_result.payload" = 1
+
 [debt.type-cast]
 "mapping.py#cast _mapping" = 1
 "mapping.py#cast _read_transcript_rows" = 1
