@@ -16,25 +16,16 @@
 "agent_status_guard.py" = "strict"
 
 [roots]
-"adversarial-eval-weekly-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its scheduler identity before composing the weekly batch loop" }
-"c9-daily-report-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its report recipient and scheduler identity before constructing C9Report" }
-"debt-sweep-daily-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its worker label, report recipient and scheduler identity before constructing the debt-sweep job" }
-"dev-ci-metrics-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its report recipient and scheduler identity before constructing the CI metrics job" }
-"memory-steward-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its scheduler identity before composing the memory maintenance loop" }
-"model-update-tracker-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its subprocess environment, report recipient and scheduler identity before constructing ModelTracker" }
+"adversarial-eval-weekly-schedule.py" = { kinds = ["clock", "environ"], why = "Schedule process entry reads its scheduler identity and start instant before composing the weekly batch loop" }
+"c9-daily-report-schedule.py" = { kinds = ["clock", "environ"], why = "Schedule process entry reads its report recipient, scheduler identity and start instant before constructing C9Report" }
+"db-write-stall-watch-schedule.py" = { kinds = ["clock"], why = "Schedule process entry supplies the stall watcher with a wall-clock reader" }
+"debt-sweep-daily-schedule.py" = { kinds = ["clock", "environ"], why = "Schedule process entry reads its worker label, report recipient, scheduler identity and start instant before constructing the debt-sweep job" }
+"dev-ci-metrics-schedule.py" = { kinds = ["clock", "environ"], why = "Schedule process entry reads its report recipient, scheduler identity and start instant before constructing the CI metrics job" }
+"memory-steward-schedule.py" = { kinds = ["clock", "environ"], why = "Schedule process entry reads its scheduler identity and start instant before composing the memory maintenance loop" }
+"model-update-tracker-schedule.py" = { kinds = ["clock", "environ"], why = "Schedule process entry reads its subprocess environment, report recipient, scheduler identity and start instant before constructing ModelTracker" }
 "qa-keepalive-schedule.py" = { kinds = ["environ", "clock"], why = "Schedule process entry reads the site values (health URL, probed host, owner) and supplies the keeper with a clock, so every round is a function of one instant" }
-"self-evolution-daily-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its report recipient and scheduler identity before constructing DailyScan" }
-"self-evolution-weekly-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its event API environment and scheduler identity before composing the weekly job" }
-
-[debt.ambient-read]
-"adversarial-eval-weekly-schedule.py#clock datetime.datetime.now" = 1
-"c9-daily-report-schedule.py#clock datetime.datetime.now" = 1
-"debt-sweep-daily-schedule.py#clock datetime.datetime.now" = 2
-"dev-ci-metrics-schedule.py#clock datetime.datetime.now" = 1
-"memory-steward-schedule.py#clock datetime.datetime.now" = 1
-"model-update-tracker-schedule.py#clock datetime.datetime.now" = 1
-"self-evolution-daily-schedule.py#clock datetime.datetime.now" = 1
-"self-evolution-weekly-schedule.py#clock datetime.datetime.now" = 1
+"self-evolution-daily-schedule.py" = { kinds = ["clock", "environ"], why = "Schedule process entry reads its report recipient, scheduler identity and start instant before constructing DailyScan" }
+"self-evolution-weekly-schedule.py" = { kinds = ["clock", "environ"], why = "Schedule process entry reads its event API environment, scheduler identity and clock before composing the weekly job" }
 
 [debt.restricted-python]
 "model-update-tracker-schedule.py#python subprocess that runs something other than a literal repository file" = 1

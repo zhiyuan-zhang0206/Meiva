@@ -55,7 +55,7 @@ import subprocess
 import sys
 import urllib.parse
 from pathlib import Path
-from typing import assert_never, cast
+from typing import TypeGuard, assert_never
 
 from loguru import logger
 
@@ -209,6 +209,10 @@ def save(post: Post, root: Path) -> Path:
     return outdir
 
 
+def _is_post(value: object) -> TypeGuard[Post]:
+    return isinstance(value, dict)
+
+
 # meiva:note
 # The saved post for `url` if its mirror already has `post.json` (so a re-run reuses it instead
 # of re-fetching), else None.
@@ -216,7 +220,8 @@ def _load_if_complete(url: str, root: Path) -> Post | None:
     post_json = root / _url_slug(url) / "post.json"
     if not post_json.exists():
         return None
-    return cast(Post, json.loads(post_json.read_text()))
+    loaded: object = json.loads(post_json.read_text())
+    return loaded if _is_post(loaded) else None
 
 
 # meiva:note

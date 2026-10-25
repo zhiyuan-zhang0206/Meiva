@@ -15,7 +15,7 @@ import argparse
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from base.daemon.schedules.inputs import ScheduleInputs
@@ -142,11 +142,7 @@ def sweep_day(
             machine_reader=inputs.machine.name,
             image=inputs.image,
         )
-        print(
-            log_line(
-                datetime.now(UTC), done.day, done.scan, done.dispatch.action, done.dispatch.agent_id
-            )
-        )
+        print(log_line(slot, done.day, done.scan, done.dispatch.action, done.dispatch.agent_id))
     except Exception as exc:
         detail = f"{type(exc).__name__}: {exc}"
         print(f"debt-sweep-daily failed: {detail}")

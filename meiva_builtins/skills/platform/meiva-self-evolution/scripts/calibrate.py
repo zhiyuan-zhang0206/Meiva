@@ -10,7 +10,7 @@ import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 Verdict = str
 VERDICTS = ("pass", "fail", "uncertain")
@@ -53,9 +53,17 @@ class Calibration:
         return self.accuracy > self.best_baseline
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_dict_list(value: object) -> TypeGuard[list[dict[str, Any]]]:
+    return _is_object_list(value) and all(isinstance(item, dict) for item in value)
+
+
 def load_cases(path: str | Path) -> list[Case]:
-    raw = cast("list[dict[str, Any]]", json.loads(Path(path).read_text(encoding="utf-8")))
-    if not isinstance(raw, list) or not raw:
+    raw: object = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not _is_dict_list(raw) or not raw:
         raise ValueError(f"{path}: expected a non-empty JSON array of cases")
     return [
         Case(

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 LABELS = ("ok", "fumbled", "failed", "unknown")
 REGRESSION_LABELS = ("failed", "fumbled")
@@ -16,17 +16,22 @@ FUMBLE_MIN_EXEC_FAILURES = 3
 FUMBLE_TURNS_PER_EXEC_FAILURE = 10
 
 
+def _is_any_mapping(value: object) -> TypeGuard[Mapping[str, Any]]:
+    return isinstance(value, Mapping)
+
+
 def label(rec: Mapping[str, object]) -> str:
-    raw = cast(dict[str, Any], rec)
-    grade = raw.get("evidence_grade")
+    if not _is_any_mapping(rec):
+        raise TypeError("record must be a mapping")
+    grade = rec.get("evidence_grade")
     if grade is None:
-        return _rule_label(raw)
+        return _rule_label(rec)
     if grade != "complete":
         return "unknown"
-    return _rule_label(raw)
+    return _rule_label(rec)
 
 
-def _rule_label(rec: dict[str, Any]) -> str:
+def _rule_label(rec: Mapping[str, Any]) -> str:
     if _is_failed(rec):
         return "failed"
     if _is_fumbled(rec):
@@ -34,7 +39,7 @@ def _rule_label(rec: dict[str, Any]) -> str:
     return "ok"
 
 
-def _delivered_via_side_channel(rec: dict[str, Any]) -> bool:
+def _delivered_via_side_channel(rec: Mapping[str, Any]) -> bool:
     """True when the agent delivered results through send_message, notify,
     serve, or a result file (files.write / files.append) — even though
     final_output may be empty.
@@ -53,7 +58,7 @@ def _delivered_via_side_channel(rec: dict[str, Any]) -> bool:
     )
 
 
-def _is_failed(rec: dict[str, Any]) -> bool:
+def _is_failed(rec: Mapping[str, Any]) -> bool:
     delivered = _delivered_via_side_channel(rec)
     # A 0-turn agent was spawned but never scheduled to run — not a real
     # failure of the agent itself.  Also exempt agents that delivered via
@@ -64,7 +69,7 @@ def _is_failed(rec: dict[str, Any]) -> bool:
     return bool(rec["last_exec_failed"])
 
 
-def _is_fumbled(rec: dict[str, Any]) -> bool:
+def _is_fumbled(rec: Mapping[str, Any]) -> bool:
     # User re-prompts (neutral follow-ups) — 2+ = fumbled.
     if len(rec["followup_prompts"]) >= FUMBLE_MIN_REPROMPTS:
         return True

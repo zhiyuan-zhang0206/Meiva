@@ -57,7 +57,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TextIO
+from typing import TextIO
 
 # meiva:note
 # `imap`/`smtp` and the gmail_* modules are siblings in this same scripts/ dir, not an
@@ -161,7 +161,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 # meiva:note
 # Run the lens `args.cmd` names and return its JSON-able result.
-def _run(args: argparse.Namespace, proc: Process) -> Any:
+def _run(args: argparse.Namespace, proc: Process) -> object:
     auth = proc.auth
     match args.cmd:
         case "search":

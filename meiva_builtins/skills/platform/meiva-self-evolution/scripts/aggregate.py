@@ -25,7 +25,7 @@ import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 # `render_report` is a sibling in this skill's own scripts/ dir, not an
 # importable package (PYTHONSAFEPATH=1 keeps a script's own directory off
@@ -119,14 +119,18 @@ def compute_score_dimensions(
     return dims
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 def measured_mean(state: dict[str, Any]) -> dict[str, Any] | None:
     n = state.get("n")
-    mean = state.get("mean")
-    if not isinstance(mean, dict):
+    mean: object = state.get("mean")
+    if not _is_str_dict(mean):
         return None
     if isinstance(n, int) and n <= 0:
         return None
-    return cast(dict[str, Any], mean)
+    return mean
 
 
 def main(argv: Sequence[str], now: datetime) -> None:

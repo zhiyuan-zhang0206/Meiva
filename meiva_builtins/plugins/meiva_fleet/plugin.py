@@ -40,10 +40,11 @@ __description__: str = (
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any, TypedDict
+from typing import TypedDict
 
 import meiva
 import meiva.sdk_surface.agent_identity
+from base.agents.context.gateway_client.transport import TransportResponse
 from base.agents.tasks.priority import validate_priority
 from base.packages.plugins.extensions import PluginContributions, SdkMember, SdkNamespace
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
@@ -108,7 +109,7 @@ class Notice(int):
         return instance
 
 
-def _raise_as_value_error(resp: Any) -> None:
+def _raise_as_value_error(resp: TransportResponse) -> None:
     """Raise gateway 409/422 refusals as ValueError — the SDK's validation
     contract (fail fast with a clear message the agent can act on). Any other
     error propagates through the normal wire contract."""

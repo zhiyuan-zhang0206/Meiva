@@ -17,7 +17,6 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import cast
 
 from schedules.plans.adversarial_cases import (
     CASE_DEFINITIONS,
@@ -102,7 +101,9 @@ class ScenarioServer(HTTPServer):
 
 class _ScenarioHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
-        status, content_type, body = cast(ScenarioServer, self.server).answer(self.path)
+        if not isinstance(self.server, ScenarioServer):
+            raise TypeError(f"expected ScenarioServer, got {type(self.server).__name__}")
+        status, content_type, body = self.server.answer(self.path)
         encoded = body.encode()
         self.send_response(status)
         self.send_header("Content-Type", content_type)

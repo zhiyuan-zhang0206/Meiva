@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import base.paths
 import meiva
@@ -32,7 +32,11 @@ def panel_path(path: str | Path, *, agent_id: int) -> Path | None:
     return target
 
 
-def _state_handle() -> Any:
+class _StateHandle(Protocol):
+    def update(self, delta: dict[str, Any]) -> object: ...
+
+
+def _state_handle() -> _StateHandle:
     materialize = getattr(meiva.state, "materialize", None)
     if materialize is not None:
         materialize()

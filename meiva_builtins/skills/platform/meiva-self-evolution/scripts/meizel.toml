@@ -8,28 +8,8 @@
 "window_records.py" = "strict"
 
 [roots]
-"collect.py" = ["db"]
-
-[debt.ambient-read]
-"aggregate.py#clock datetime.datetime.now" = 1
-"collect.py#clock datetime.datetime.now" = 1
-"daily_scan.py#settings base.config.settings" = 1
-"evaluate.py#clock datetime.datetime.now" = 2
-"evaluate.py#random uuid.uuid4" = 1
-"mine.py#clock datetime.datetime.now" = 1
-
-[debt.any-collaborator]
-"record.py#any _msg_text.content" = 1
-
-[debt.type-cast]
-"aggregate.py#cast measured_mean" = 1
-"calibrate.py#cast load_cases" = 1
-"evaluate.py#cast assemble_report" = 1
-"evaluate.py#cast assemble_report.<listcomp>" = 1
-"label.py#cast label" = 1
-"record.py#cast _msg_text" = 2
-"record.py#cast task_prompt_of" = 2
-"record_inputs.py#cast event_facts" = 3
-"scan_report.py#cast alert_verdict.<listcomp>" = 1
-"scan_report.py#cast render.<listcomp>" = 1
-"window_records.py#cast group_by_agent" = 3
+"aggregate.py" = { kinds = ["clock"], why = "CLI entry passes current UTC timestamp into main()" }
+"collect.py" = { kinds = ["clock", "db"], why = "CLI entry constructs cluster DB handle and passes current UTC timestamp into CollectFacts" }
+"daily_scan.py" = { kinds = ["settings"], why = "CLI entry reads self_evolution_coverage_alert_floor from settings in process_env()" }
+"evaluate.py" = { kinds = ["clock", "random"], why = "Skill evaluation driver stamps evaluation runs with UTC time and generates spawn idempotency keys" }
+"mine.py" = { kinds = ["clock"], why = "CLI entry passes current UTC timestamp into main() for default dataset resolution" }

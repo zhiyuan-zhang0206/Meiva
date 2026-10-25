@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 import meiva
@@ -52,8 +52,8 @@ def _scan(scan: DailyScan) -> ScanResult:
     return ScanRan(done.returncode, done.stdout or "", done.stderr or "")
 
 
-def run_daily_scan(_slot: datetime, _payload: str | None, *, scan: DailyScan) -> None:
-    plan = plan_scan(_scan(scan), datetime.now(UTC))
+def run_daily_scan(slot: datetime, _payload: str | None, *, scan: DailyScan) -> None:
+    plan = plan_scan(_scan(scan), slot)
     for line in plan.log_lines:
         print(line)
     if plan.wake_prompt is not None:

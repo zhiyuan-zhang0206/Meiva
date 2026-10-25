@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
 __description__ = "Meiva Code conventions — maintains cwd and auto-injects project AGENTS.md / CLAUDE.md (walking up from meiva.files.read paths)"
 
@@ -245,7 +245,8 @@ def _wrapped_read(
     # synchronously mutates the meiva.state working copy); no extra cache needed.
     from meiva.sdk_surface import settings as sdk_settings
 
-    max_chars = cast("int", sdk_settings.agent_setting("exec_output_max_chars"))
+    raw_max: object = sdk_settings.agent_setting("exec_output_max_chars")
+    max_chars = raw_max if isinstance(raw_max, int) and not isinstance(raw_max, bool) else 0
     for ctx_file in candidates:
         _process_context_file(ctx_file, p, injected=injected, hashes=hashes, max_chars=max_chars)
 
@@ -410,15 +411,15 @@ def wrapped_understand(
 # (files / shell / understand), not the agent process cwd — otherwise the
 # page-server daemon reports serve_dir missing and the page degrades
 # (Task #1523).
-def wrapped_serve(
-    inner: Callable[..., Any],
+def wrapped_serve[R](
+    inner: Callable[..., R],
     dir: str,
     name: str,
     port: int | None = None,
     title: str | None = None,
     *,
     ttl: float | None = None,
-) -> Any:
+) -> R:
     dir = coerce_str(dir, "dir", allow_types=(Path,))
     p = _resolve_for_cwd(dir)
     return inner(str(p), name, port=port, title=title, ttl=ttl)

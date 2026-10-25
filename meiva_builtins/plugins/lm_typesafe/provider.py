@@ -10,7 +10,7 @@ used; the model id is pinned to a versioned release, never a ``jev-latest`` alia
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from base.lm.provider_api import (
     FALSE,
@@ -82,15 +82,23 @@ def _wire_question(question: Question) -> dict[str, Any]:
             }
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
 def _object(value: object, what: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
+    if not _is_str_dict(value):
         raise DecisionResponseError(f"Jev response: {what} is not an object")
-    return cast(dict[str, Any], value)
+    return value
 
 
 def _input_tokens(body: Mapping[str, Any]) -> int:
     usage = body.get("usage")
-    tokens = cast(dict[str, Any], usage).get("input_tokens") if isinstance(usage, dict) else None
+    tokens = usage.get("input_tokens") if _is_str_dict(usage) else None
     if not isinstance(tokens, int) or isinstance(tokens, bool) or tokens < 0:
         raise DecisionResponseError("Jev response carries no valid usage.input_tokens")
     return tokens

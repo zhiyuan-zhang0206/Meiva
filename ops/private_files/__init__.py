@@ -14,7 +14,6 @@ import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
-from typing import cast
 
 from base.paths.home import resolve_meiva_home
 from ops.private_files.model import (
@@ -145,12 +144,14 @@ def _parse_args(argv: Sequence[str] | None) -> CliArgs:
         "--json", action="store_true", dest="json_output", help="emit machine-readable output"
     )
     parsed = parser.parse_args(argv)
-    if cast(str, parsed.command) != "verify":
+    if parsed.command != "verify":
         raise AssertionError(f"unknown private-files command: {parsed.command!r}")
+    root = parsed.root if isinstance(parsed.root, Path) else None
+    manifest = parsed.manifest if isinstance(parsed.manifest, Path) else _DEFAULT_MANIFEST
     return CliArgs(
-        root=cast(Path | None, parsed.root),
-        manifest=cast(Path, parsed.manifest),
-        json_output=cast(bool, parsed.json_output),
+        root=root,
+        manifest=manifest,
+        json_output=bool(parsed.json_output),
     )
 
 

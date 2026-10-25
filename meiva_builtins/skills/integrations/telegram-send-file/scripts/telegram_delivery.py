@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import cast
+from typing import TypeGuard
 
 # meiva:note
 # Telegram's hard cap for documents sent through the Bot API.
@@ -104,8 +104,12 @@ def build_request(api_base: str, credentials: Credentials, caption: str | None) 
     )
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 def _json_object(value: object) -> Mapping[str, object] | None:
-    return cast("Mapping[str, object]", value) if isinstance(value, dict) else None
+    return value if _is_str_dict(value) else None
 
 
 # meiva:note

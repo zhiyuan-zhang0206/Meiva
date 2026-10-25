@@ -14,7 +14,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import NoReturn
 
@@ -91,28 +91,27 @@ def count_events(api: EventsApi, since: datetime, until: datetime) -> int:
 
 
 def handle_weekly_trigger(
-    _slot: datetime, trigger: str | None, *, api: EventsApi, prompt: str
+    slot: datetime, trigger: str | None, *, api: EventsApi, prompt: str
 ) -> bool:
-    now = datetime.now(UTC)
     if trigger == MAIN_TRIGGER:
-        decision = decide_main(count_events(api, now - timedelta(days=WEEK_DAYS), now), now, prompt)
+        decision = decide_main(
+            count_events(api, slot - timedelta(days=WEEK_DAYS), slot), slot, prompt
+        )
     elif trigger == FOLLOW_UP_TRIGGER:
-        since = now - timedelta(days=FOLLOW_UP_WINDOW_DAYS)
-        decision = decide_follow_up(count_events(api, since, now), now, prompt)
+        since = slot - timedelta(days=FOLLOW_UP_WINDOW_DAYS)
+        decision = decide_follow_up(count_events(api, since, slot), slot, prompt)
     else:
         raise ValueError(f"unknown self-evolution weekly trigger: {trigger}")
-    _carry_out(decision)
+    _carry_out(decision, slot)
     return decision.follow_up_next
 
 
-def _carry_out(decision: WeeklyDecision) -> None:
+def _carry_out(decision: WeeklyDecision, now: datetime) -> None:
     for line in decision.log_lines:
         print(line)
     if decision.prompt is not None:
         dispatch = ensure_agent(AGENT_LABEL, decision.prompt)
-        print(
-            f"[{datetime.now(UTC).isoformat()}] self-evolution agent #{dispatch.agent_id} triggered"
-        )
+        print(f"[{now.isoformat()}] self-evolution agent #{dispatch.agent_id} triggered")
 
 
 # meiva:note
@@ -157,6 +156,7 @@ def run_weekly(
     *,
     schedule_id: int,
     started_at: datetime,
+    clock: Callable[[], datetime],
 ) -> NoReturn:
     state = WeeklyState(floor=started_at, follow_up_armed=False)
     while True:
@@ -165,7 +165,7 @@ def run_weekly(
             schedule,
             fire,
             state=state,
-            now=datetime.now(UTC),
+            now=clock(),
             schedule_id=schedule_id,
         )
         time.sleep(sleep)

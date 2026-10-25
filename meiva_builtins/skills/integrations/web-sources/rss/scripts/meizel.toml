@@ -5,15 +5,4 @@ exports = ["feed.py"]
 "rss_post.py" = "strict"
 
 [roots]
-"feed.py" = { kinds = ["environ"], why = "The command entry builds its scrape configuration from the process environment before invoking run" }
-
-[debt.ambient-read]
-"feed.py#clock datetime.datetime.now" = 1
-"feed.py#clock time.time" = 1
-
-[debt.any-collaborator]
-"rss_post.py#any _entry.raw" = 1
-
-[debt.type-cast]
-"feed.py#cast _read_post" = 1
-"rss_post.py#cast parse_feed" = 1
+"feed.py" = { kinds = ["clock", "environ"], why = "The command entry builds its scrape configuration from the process environment and stamps fetched posts with UTC time" }

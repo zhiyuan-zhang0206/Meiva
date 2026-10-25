@@ -9,7 +9,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NamedTuple, cast
+from typing import Any, NamedTuple, TypeGuard
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -98,10 +98,14 @@ class Alert(NamedTuple):
     reason: str | None
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 def alert_verdict(
     records: Sequence[Mapping[str, object]], counts: Mapping[str, int] | None, coverage_floor: float
 ) -> Alert:
-    rows = [cast(dict[str, Any], r) for r in records]
+    rows = [r if _is_str_dict(r) else dict(r) for r in records]
     return _verdict(rows, counts, coverage_floor)
 
 
@@ -286,7 +290,7 @@ def render(
     report_path: Path | None = None,
     compact_bad: bool = False,
 ) -> str:
-    rows = [cast(dict[str, Any], r) for r in records]
+    rows = [r if _is_str_dict(r) else dict(r) for r in records]
     return _render(rows, view, report_path=report_path, compact_bad=compact_bad)
 
 

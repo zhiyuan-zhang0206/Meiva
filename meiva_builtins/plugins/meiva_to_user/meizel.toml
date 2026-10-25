@@ -8,8 +8,5 @@
 "__init__.py" = "strict"
 "_state.py" = "strict"
 
-[debt.ambient-read]
-"agent_runtime.py#clock datetime.datetime.now" = 1
-
-[debt.any-collaborator]
-"written.py#any _state_handle.return" = 1
+[roots]
+"agent_runtime.py" = { kinds = ["clock"], why = "Plugin runtime hook stamps emitted soft-limit reminder notes with current UTC time" }

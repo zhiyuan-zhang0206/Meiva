@@ -5,5 +5,5 @@
 [purity]
 "copy_plan.py" = "strict"
 
-[debt.ambient-read]
-"__init__.py#home pathlib.Path.home" = 1
+[roots]
+"__init__.py" = { kinds = ["home"], why = "Upload delivery receive entry resolves the OS user's Downloads directory under Path.home()" }
