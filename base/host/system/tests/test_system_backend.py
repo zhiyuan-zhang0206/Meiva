@@ -3,13 +3,13 @@ from __future__ import annotations
 import pytest
 
 import base.host.system.backend as backend_module
-from base.host.system import autostart
 from base.host.system.backend import (
     LinuxPlatformBackend,
     MacPlatformBackend,
     PlatformBackend,
     get_backend,
 )
+from base.host.system.boot_autostart import registration as autostart
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import LINUX_X86, fake_host
 

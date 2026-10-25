@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 
 from base.host.proc import CommandRunner
-from base.host.system import autostart, cron, logs_job, packages_job, pr_flow_job, walg_job
+from base.host.system import cron, logs_job, packages_job, pr_flow_job, walg_job
+from base.host.system.boot_autostart import registration as autostart
 from base.host.system.job_values import JobRoots
 from base.host.system.packages_content import RefreshSchedule
 from base.host.system.tests.fake_commands import (
