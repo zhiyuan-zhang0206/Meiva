@@ -1,3 +1,6 @@
+// meiva:note
+// @vitest-environment happy-dom
+
 import { describe, expect, it } from "vitest";
 
 import { newOperationKey } from "./operation-key";

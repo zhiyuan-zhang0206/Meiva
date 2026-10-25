@@ -1,3 +1,6 @@
+// meiva:note
+// @vitest-environment happy-dom
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { startGateway, type GatewayReply, type GatewayRequest, type TestGateway } from "./tests/gateway-server";
