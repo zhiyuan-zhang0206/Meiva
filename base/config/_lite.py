@@ -220,7 +220,7 @@ def _build_wait_timeout_message(
     )
 
 
-def _require_local_fields(env: Mapping[str, str] = os.environ) -> None:
+def _require_local_fields(env: Mapping[str, str]) -> None:
     """W1: a local-source unit fails fast when a required field has no value.
 
     A field with no default (the data-plane URLs) is filled from the unit's
@@ -240,7 +240,7 @@ def _require_local_fields(env: Mapping[str, str] = os.environ) -> None:
         )
 
 
-def _plant_placeholders(env: dict[str, str] | os._Environ[str] = os.environ) -> None:
+def _plant_placeholders(env: dict[str, str] | os._Environ[str]) -> None:
     """Plant never-dialed placeholders for the required data-plane URLs so a
     construction succeeds without a gateway fetch. A value already in env/.env
     is left alone — the placeholder only fills the nothing-at-all case."""
@@ -494,7 +494,7 @@ class ConfigBoot:
             self._apply_cluster_timezone()
 
     def _apply_source_decision(
-        self, home: Path, target_env: dict[str, str] | os._Environ[str] = os.environ
+        self, home: Path, target_env: dict[str, str] | os._Environ[str]
     ) -> None:
         """The eager boot's source decision, minus the construction it guarded.
 

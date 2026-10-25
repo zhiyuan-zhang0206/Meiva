@@ -320,26 +320,24 @@ def test_build_registry_rejects_restart_required_for_unconsuming_kind() -> None:
 
 
 def test_every_field_restart_required_names_a_kind_that_consumes_it() -> None:
-    from typing import Any, cast
-
     from base.config import FIELD_REFS
-    from base.config.config_registry import ALLOWED_RESTART_REQUIRED, RESTART_REQUIRED_PROFILE
+    from base.config.config_registry import (
+        ALLOWED_RESTART_REQUIRED,
+        RESTART_REQUIRED_PROFILE,
+        schema_extra,
+    )
     from base.config.profiles import PROCESS_PROFILES
 
-    def _extra(ref: object) -> dict[str, Any]:
-        info = getattr(ref, "info", ref)
-        extra = getattr(info, "json_schema_extra", None)
-        return cast("dict[str, Any]", extra) if isinstance(extra, dict) else {}
-
     bad_value: list[tuple[str, str]] = [
-        (name, str(_extra(ref).get("restart_required", ""))) for name, ref in FIELD_REFS.items()
+        (name, str(schema_extra(ref.info).get("restart_required", "")))
+        for name, ref in FIELD_REFS.items()
     ]
     bad_value = [(n, v) for n, v in bad_value if v not in ALLOWED_RESTART_REQUIRED]
     assert not bad_value, f"fields with invalid restart_required: {bad_value}"
 
     wrong_kind: list[tuple[str, str, str]] = []
     for name, ref in FIELD_REFS.items():
-        restart = str(_extra(ref).get("restart_required", ""))
+        restart = str(schema_extra(ref.info).get("restart_required", ""))
         kind = RESTART_REQUIRED_PROFILE.get(restart)
         if kind is not None and ref.domain not in PROCESS_PROFILES[kind]:
             wrong_kind.append((name, ref.domain, restart))
