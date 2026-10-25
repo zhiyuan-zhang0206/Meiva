@@ -38,11 +38,11 @@ The age is a positive integer number of days. `--older-than` and
 `--family-days` are mutually exclusive. Without either flag, the legacy global
 threshold remains: `MEIVA_LOG_RETENTION_DAYS`, otherwise 14 days. `--older-than`
 is the explicit global override. `--family-days` activates the C baseline:
-agent-main, `meiva-agent-*` service stdout, and their archives 15 days; named PTY
-shell transcript/host files and computer-use snapshots 7 days; `gateway*`,
-`ops*`, and `*-watchdog` / `*_watchdog` service files and rotations 30 days;
-all other service and native
-archives 3 days. The rotation shape also admits underscores, so
+agent-main, `meiva-agent-*` service stdout, `agent_host` (the per-turn agent
+runtime), and their archives 15 days; named PTY shell transcript/host files and
+computer-use snapshots 7 days; `gateway*`, `ops*`, `meiva-root` / `root` (the root
+supervisor's own log), and `*-watchdog` / `*_watchdog` service files and rotations
+30 days; all other service and native archives 3 days. The rotation shape also admits underscores, so
 `delivery_watchdog` is in the watchdog family. Supply only the family values
 that differ; omitted values retain that baseline. In a mapping, `default=N`
 aliases `other=N` for the catch-all service family.
