@@ -10,13 +10,5 @@ exports = ["daemon.py", "settings.py", "worker.py"]
 "commit_plan.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+"daemon.py" = { kinds = ["clock", "settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 "worker.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
-
-[debt.ambient-read]
-"daemon.py#clock datetime.datetime.now" = 2
-"daemon.py#clock time.time" = 1
-"daemon.py#pid os.getpid" = 1
-
-[debt.type-cast]
-"recovery_drill.py#cast _parse_success_marker" = 1

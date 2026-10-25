@@ -12,8 +12,8 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus, EventBusConfig, event_bus_config_from_settings
-from base.events.live.projection import AgentUpdated
+from base.events.live.bus import EventBus
+from base.events.live.tests.live_capture import snapshots_at_events
 from base.lm.catalog import ModelCatalog
 from services.wake.heartbeat.liveness import (
     OFFLINE_AFTER_FAILURES,
@@ -88,32 +88,6 @@ def _state(db: psycopg.Connection, agent_id: int) -> tuple[str, object]:
         row = cur.fetchone()
         assert row is not None
         return (row[0], row[1])
-
-
-class _RecordingBus(EventBus):
-    def __init__(self, config: EventBusConfig, connection: psycopg.Connection) -> None:
-        super().__init__(config)
-        self.connection = connection
-        self.announced: list[int] = []
-        self.committed_states: list[str] = []
-
-    def publish_best_effort_sync(
-        self,
-        payload: str,
-        *,
-        channel: str | None = None,
-        decode_responses: bool = True,
-        context: str = "",
-    ) -> int | None:
-        assert context == "agent_updated"
-        event = AgentUpdated.model_validate_json(payload)
-        self.announced.append(event.agent_id)
-        row = self.connection.execute(
-            "SELECT liveness_state FROM agents_meta WHERE id=%s", (event.agent_id,)
-        ).fetchone()
-        assert row is not None
-        self.committed_states.append(row[0])
-        return 0
 
 
 class TestLivenessPass:
@@ -455,78 +429,76 @@ class TestLivenessPass:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        bus = _RecordingBus(event_bus_config_from_settings(), db_conn)
-        announced = bus.announced
-
-        asyncio.run(
-            run_liveness_pass(
-                Database.from_settings(gate=database_gate),
-                pool,
-                bus,
-                probe=FakeProbe({MACHINE: True}),
-                config=LivenessConfig(8.0),
+        bus = EventBus.from_settings()
+        with snapshots_at_events(bus, lambda: str(_state(db_conn, aid)[0])) as seen:
+            asyncio.run(
+                run_liveness_pass(
+                    Database.from_settings(gate=database_gate),
+                    pool,
+                    bus,
+                    probe=FakeProbe({MACHINE: True}),
+                    config=LivenessConfig(8.0),
+                )
             )
-        )
-        assert announced == []
+        assert seen == []
 
-        announced.clear()
-        asyncio.run(
-            run_liveness_pass(
-                Database.from_settings(gate=database_gate),
-                pool,
-                bus,
-                probe=FakeProbe({MACHINE: True}),
-                config=LivenessConfig(8.0),
+        with snapshots_at_events(bus, lambda: str(_state(db_conn, aid)[0])) as seen:
+            asyncio.run(
+                run_liveness_pass(
+                    Database.from_settings(gate=database_gate),
+                    pool,
+                    bus,
+                    probe=FakeProbe({MACHINE: True}),
+                    config=LivenessConfig(8.0),
+                )
             )
-        )
-        assert announced == []
+        assert seen == []
 
         fail = FakeProbe({MACHINE: False})
-        asyncio.run(
-            run_liveness_pass(
-                Database.from_settings(gate=database_gate),
-                pool,
-                bus,
-                probe=fail,
-                config=LivenessConfig(8.0),
+        with snapshots_at_events(bus, lambda: str(_state(db_conn, aid)[0])) as seen:
+            asyncio.run(
+                run_liveness_pass(
+                    Database.from_settings(gate=database_gate),
+                    pool,
+                    bus,
+                    probe=fail,
+                    config=LivenessConfig(8.0),
+                )
             )
-        )
-        asyncio.run(
-            run_liveness_pass(
-                Database.from_settings(gate=database_gate),
-                pool,
-                bus,
-                probe=fail,
-                config=LivenessConfig(8.0),
+            asyncio.run(
+                run_liveness_pass(
+                    Database.from_settings(gate=database_gate),
+                    pool,
+                    bus,
+                    probe=fail,
+                    config=LivenessConfig(8.0),
+                )
             )
-        )
-        assert announced == [aid]
-        assert bus.committed_states == ["offline"]
+        assert [(e["agent_id"], s) for e, s in seen] == [(aid, "offline")]
 
-        announced.clear()
-        asyncio.run(
-            run_liveness_pass(
-                Database.from_settings(gate=database_gate),
-                pool,
-                bus,
-                probe=fail,
-                config=LivenessConfig(8.0),
+        with snapshots_at_events(bus, lambda: str(_state(db_conn, aid)[0])) as seen:
+            asyncio.run(
+                run_liveness_pass(
+                    Database.from_settings(gate=database_gate),
+                    pool,
+                    bus,
+                    probe=fail,
+                    config=LivenessConfig(8.0),
+                )
             )
-        )
-        assert announced == []
+        assert seen == []
 
-        announced.clear()
-        asyncio.run(
-            run_liveness_pass(
-                Database.from_settings(gate=database_gate),
-                pool,
-                bus,
-                probe=FakeProbe({MACHINE: True}),
-                config=LivenessConfig(8.0),
+        with snapshots_at_events(bus, lambda: str(_state(db_conn, aid)[0])) as seen:
+            asyncio.run(
+                run_liveness_pass(
+                    Database.from_settings(gate=database_gate),
+                    pool,
+                    bus,
+                    probe=FakeProbe({MACHINE: True}),
+                    config=LivenessConfig(8.0),
+                )
             )
-        )
-        assert announced == [aid]
-        assert bus.committed_states == ["offline", "online"]
+        assert [(e["agent_id"], s) for e, s in seen] == [(aid, "online")]
 
     @pytest.mark.usefixtures(pool.__name__)
     def test_never_admitted_idling_follows_the_machine_probe(

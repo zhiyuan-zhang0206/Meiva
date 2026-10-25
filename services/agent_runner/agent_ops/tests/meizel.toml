@@ -7,6 +7,3 @@ exports = ["db_outage.py", "ops_support.py"]
 "test_idempotency_plan.py" = []
 "test_ops_in_flight.py" = ["ops_support.py"]
 "test_process_exit.py" = ["child_daemon_exit.py"]
-
-[debt.test-subclass-override]
-"test_to_user_watch.py#subclass base.events.live.bus.EventBus.publish_best_effort" = 1

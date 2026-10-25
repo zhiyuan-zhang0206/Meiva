@@ -15,8 +15,8 @@ takes that full name. Nothing printed here contains a credential or key value.
 
 from __future__ import annotations
 
+import hashlib
 import tempfile
-import uuid
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,7 +42,7 @@ class Step:
 
 
 def _storage_round_trip(*, path: Path | None) -> str:
-    token = uuid.uuid4().hex
+    token = hashlib.sha256(str(path).encode()).hexdigest()[:32]
     remote = f"{_CHECK_DIR}/{token}.txt"
     stored = f"{remote}.lz4"
     payload = f"meiva walg check {token}\n".encode()

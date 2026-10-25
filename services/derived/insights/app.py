@@ -1,7 +1,6 @@
 # meiva:link services/derived/insights/docs/insights.meiva.okf.md
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from functools import partial
@@ -30,6 +29,7 @@ def build_app(
     home: Path,
     catalog: ModelCatalog,
     timestamps: TimestampSource,
+    pid: int = 0,
 ) -> FastAPI:
     jobs = IndexJobs(
         partial(index_next, db, timestamps=timestamps, read_segment=read_checkpoint_segment)
@@ -65,6 +65,6 @@ def build_app(
         description="Identity for the supervisor's probe: which service, which home, which process.",
     )
     async def healthz() -> dict[str, object]:
-        return {"name": "insights", "pid": os.getpid(), "home": str(home)}
+        return {"name": "insights", "pid": pid, "home": str(home)}
 
     return app

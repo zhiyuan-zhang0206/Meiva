@@ -35,9 +35,11 @@ import pytest
 
 from base.db import create_agent
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.bus import EventBus
+from base.events.live.tests.live_capture import recorded_events
 from base.lm.catalog import ModelCatalog
 from services.derived.labeler import label_rules
-from services.derived.labeler.tests.slices import RecordingBus, generate
+from services.derived.labeler.tests.slices import generate
 
 _MAX_CHARS = 64
 
@@ -254,30 +256,34 @@ class TestGenerateLabelRejectsNonLabels:
         self,
         raw: str,
         db_conn: psycopg.Connection,
+        event_bus: EventBus,
         model_catalog: ModelCatalog,
         *,
         database_gate: ProcessDbGate,
     ) -> None:
         tid = create_agent(db_conn)
-        bus = RecordingBus()
 
-        result = await generate(
-            tid,
-            f"say:{raw}",
-            bus=bus,
-            catalog=model_catalog,
-            database_gate=database_gate,
-            prompt="a long agent brief",
-        )
+        with recorded_events(event_bus) as events:
+            result = await generate(
+                tid,
+                f"say:{raw}",
+                bus=event_bus,
+                catalog=model_catalog,
+                database_gate=database_gate,
+                prompt="a long agent brief",
+            )
 
         assert result is False, f"expected a generation failure for {raw!r}"
         assert _label_of(db_conn, tid) is None
-        assert bus.payloads == []
+        assert [
+            e for e in events if e.get("role") == "label_updated" and e.get("agent_id") == tid
+        ] == []
 
     @pytest.mark.asyncio
     async def test_good_label_still_written(
         self,
         db_conn: psycopg.Connection,
+        event_bus: EventBus,
         model_catalog: ModelCatalog,
         *,
         database_gate: ProcessDbGate,
@@ -285,35 +291,44 @@ class TestGenerateLabelRejectsNonLabels:
         """The other half of the contract: the classifier must not fire on a
         real label."""
         tid = create_agent(db_conn)
-        bus = RecordingBus()
         good = "\u9a8c\u8bc1\u9884\u89c8\u96c6\u7fa4\u65f6\u533a\u7edf\u4e00\u5e76\u6d4b\u8bd5SDK"
 
-        result = await generate(
-            tid,
-            f"say:{good}",
-            bus=bus,
-            catalog=model_catalog,
-            database_gate=database_gate,
-            prompt="a long agent brief",
-        )
+        with recorded_events(event_bus) as events:
+            result = await generate(
+                tid,
+                f"say:{good}",
+                bus=event_bus,
+                catalog=model_catalog,
+                database_gate=database_gate,
+                prompt="a long agent brief",
+            )
 
         assert result is True
         assert _label_of(db_conn, tid) == good
-        assert len(bus.payloads) == 1
+        assert (
+            len(
+                [e for e in events if e.get("role") == "label_updated" and e.get("agent_id") == tid]
+            )
+            == 1
+        )
 
 
 # meiva:note
 # A thinking block carries a signature (PR #69): only the text blocks make a label.
 @pytest.mark.asyncio
 async def test_a_thinking_block_never_reaches_the_label(
-    db_conn: psycopg.Connection, model_catalog: ModelCatalog, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     tid = create_agent(db_conn)
 
     result = await generate(
         tid,
         "blocks:Fix label generation",
-        bus=RecordingBus(),
+        bus=event_bus,
         catalog=model_catalog,
         database_gate=database_gate,
     )
@@ -324,7 +339,11 @@ async def test_a_thinking_block_never_reaches_the_label(
 
 @pytest.mark.asyncio
 async def test_generated_label_overwrites_stray_empty_string(
-    db_conn: psycopg.Connection, model_catalog: ModelCatalog, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """Regression: a stray label='' row was invisible to the CAS's `label IS
     NULL` predicate, so it could never be auto-labeled — empty string must be
@@ -333,25 +352,32 @@ async def test_generated_label_overwrites_stray_empty_string(
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents SET label = '' WHERE id = %s", (tid,))
     db_conn.commit()
-    bus = RecordingBus()
 
-    result = await generate(
-        tid,
-        "say:ui docs fix",
-        bus=bus,
-        catalog=model_catalog,
-        database_gate=database_gate,
-        prompt="a long agent brief",
-    )
+    with recorded_events(event_bus) as events:
+        result = await generate(
+            tid,
+            "say:ui docs fix",
+            bus=event_bus,
+            catalog=model_catalog,
+            database_gate=database_gate,
+            prompt="a long agent brief",
+        )
 
     assert result is True
     assert _label_of(db_conn, tid) == "ui docs fix"
-    assert len(bus.payloads) == 1
+    assert (
+        len([e for e in events if e.get("role") == "label_updated" and e.get("agent_id") == tid])
+        == 1
+    )
 
 
 @pytest.mark.asyncio
 async def test_empty_string_label_with_user_sticky_bit_is_never_overwritten(
-    db_conn: psycopg.Connection, model_catalog: ModelCatalog, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The sticky bit still wins: label='' with label_user_set=TRUE means the
     user owns the (unset) label — the CAS must skip it just like it skips a
@@ -360,25 +386,28 @@ async def test_empty_string_label_with_user_sticky_bit_is_never_overwritten(
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents SET label = '', label_user_set = TRUE WHERE id = %s", (tid,))
     db_conn.commit()
-    bus = RecordingBus()
 
-    result = await generate(
-        tid,
-        "say:ui docs fix",
-        bus=bus,
-        catalog=model_catalog,
-        database_gate=database_gate,
-        prompt="a long agent brief",
-    )
+    with recorded_events(event_bus) as events:
+        result = await generate(
+            tid,
+            "say:ui docs fix",
+            bus=event_bus,
+            catalog=model_catalog,
+            database_gate=database_gate,
+            prompt="a long agent brief",
+        )
 
     assert result is None
     assert _label_of(db_conn, tid) == ""
-    assert bus.payloads == []
+    assert [
+        e for e in events if e.get("role") == "label_updated" and e.get("agent_id") == tid
+    ] == []
 
 
 @pytest.mark.asyncio
 async def test_label_generation_logs_batch_usage_for_the_target_agent(
     db_conn: psycopg.Connection,
+    event_bus: EventBus,
     loguru_records: list[dict[str, Any]],
     model_catalog: ModelCatalog,
     *,
@@ -390,7 +419,7 @@ async def test_label_generation_logs_batch_usage_for_the_target_agent(
     result = await generate(
         agent_id,
         "usage:Review deployment readiness",
-        bus=RecordingBus(),
+        bus=event_bus,
         catalog=model_catalog,
         database_gate=database_gate,
         prompt="a long agent brief",

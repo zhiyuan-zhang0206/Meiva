@@ -6,6 +6,3 @@
 "test_operation_worker.py" = ["operation_support.py"]
 "test_scheduler_composition.py" = ["operation_support.py"]
 "test_scheduler_shutdown.py" = ["shutdown_daemon.py"]
-
-[debt.restricted-python]
-"test_worker_bootstrap.py#python subprocess that runs something other than a literal repository file" = 1

@@ -8,10 +8,4 @@ exports = ["daemon.py", "tests"]
 "launch_plan.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
-
-[debt.ambient-read]
-"daemon.py#pid os.getpid" = 1
-
-[debt.type-cast]
-"daemon.py#cast Handler.gate" = 1
+"daemon.py" = { kinds = ["pid", "settings"], why = "Service or operator process entry boots configuration before composing its resources" }

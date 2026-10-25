@@ -1,9 +1,0 @@
-[uses]
-"test_entry_config_failure.py" = ["test_reconcile_embed_error_truncates_and_returns_false.py"]
-
-[debt.env-patch]
-"test_reconcile_embed_error_truncates_and_returns_false.py#patch.dict os.environ" = 1
-
-[debt.test-subclass-override]
-"test_patrol_loop.py#subclass services.derived.memory_indexer.patrol_status.PatrolStatus.failed" = 1
-"test_patrol_loop.py#subclass services.derived.memory_indexer.patrol_status.PatrolStatus.succeeded" = 1

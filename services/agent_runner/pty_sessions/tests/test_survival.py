@@ -202,24 +202,19 @@ def test_a_crashed_services_stale_socket_is_replaced_by_the_next_start(
     assert not client.has_session("meiva-agent-987-shell-6-stale", socket_path=service_socket())
 
 
+_SHELL_WITH_JOB = Path(__file__).with_name("child_shell_with_job.py")
+
+
+# meiva:note
+# The ledger sweep in isolation: a session leader killed with a job behind it that
+# ignores the hangup. Its recorded birth supplies a known group target, and
+# the outcome names that interrupted session for its owner; the child script is a fixed repository helper.
 def test_the_sweep_closes_the_members_a_dead_shell_left_and_reports_the_busy_session(
     tmp_path: Path,
 ) -> None:
-    """The ledger sweep in isolation: a session leader killed with a job behind it that
-    ignores the hangup. Its recorded birth supplies a known group target, and
-    the outcome names that interrupted session for its owner."""
     path = tmp_path / "ledger.json"
-    leader = subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            "import os, signal, subprocess, sys, time\n"
-            "job = subprocess.Popen([sys.executable, '-c', 'import signal, time\\n"
-            "signal.signal(signal.SIGHUP, signal.SIG_IGN)\\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\\n"
-            "time.sleep(300)'])\n"
-            "print(job.pid, flush=True)\n"
-            "time.sleep(300)\n",
-        ],
+    leader = subprocess.Popen(  # noqa: S603
+        [sys.executable, str(_SHELL_WITH_JOB), "--ignore-hangup"],
         stdout=subprocess.PIPE,
         text=True,
         start_new_session=True,

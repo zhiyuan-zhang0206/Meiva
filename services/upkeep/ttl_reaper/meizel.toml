@@ -16,7 +16,3 @@ exports = ["daemon.py", "shells.py"]
 
 [roots]
 "daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
-
-[debt.ambient-read]
-"shells.py#clock datetime.datetime.now" = 1
-"sweep.py#clock datetime.datetime.now" = 3

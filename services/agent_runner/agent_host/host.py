@@ -14,7 +14,7 @@ from collections.abc import Callable, Mapping
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import psycopg
 from langchain_core.runnables import RunnableConfig
@@ -118,6 +118,7 @@ from services.agent_runner.agent_host.stall_guard import (
 )
 
 _HostGraph = CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState]
+_UNSET_OWNER = UUID(int=0)
 
 
 class AgentHost:
@@ -144,6 +145,7 @@ class AgentHost:
         commands: CommandCatalog | None = None,
         plugin_configs: Mapping[str, BaseModel] | None = None,
         home: Path,
+        runtime_owner: UUID = _UNSET_OWNER,
     ) -> None:
         self._home = home
         self._bus = bus
@@ -166,7 +168,7 @@ class AgentHost:
         self._machine_identity = machine
         self._machine = machine.name()
         self._wake: Callable[[int], object] | None = None
-        self._owner = uuid4()
+        self._owner = UUID(int=id(self)) if runtime_owner == _UNSET_OWNER else runtime_owner
         self._runtimes: OrderedDict[int, AgentRuntime] = OrderedDict()
         # meiva:note
         # One registry for every external session this host starts: the agent id ->

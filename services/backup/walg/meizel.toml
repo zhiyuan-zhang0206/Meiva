@@ -17,25 +17,9 @@ exports = ["archive.py", "check.py", "config.py", "probe.py", "restore.py", "sta
 [purity]
 "archive_plan.py" = "strict"
 
-[debt.ambient-read]
-"check.py#random uuid.uuid4" = 1
-"drill.py#clock datetime.datetime.now" = 1
-"pg_target.py#settings base.config.settings" = 1
-"probe.py#clock datetime.datetime.now" = 1
-"restore.py#clock time.monotonic" = 2
-"tick.py#clock datetime.datetime.now" = 1
-
-[debt.any-collaborator]
-"runner.py#any run_walg.return" = 1
-"state.py#any update_state.sections" = 1
-
-[debt.type-cast]
-"backups.py#cast parse_backups" = 2
-"config.py#cast read_config" = 1
-"gaps.py#cast load_recorded_gaps" = 1
-"gaps.py#cast load_recorded_gaps.<genexpr>" = 1
-"state.py#cast _section" = 1
-"state.py#cast _timestamps_to_json" = 1
-"state.py#cast from_json" = 1
-"verify.py#cast _missing_lost" = 2
-"verify.py#cast parse_verdict" = 3
+[roots]
+"drill.py" = { kinds = ["clock"], why = "Stamps the recovery drill state record with the wall-clock completion instant" }
+"pg_target.py" = { kinds = ["settings"], why = "Operator and tick entrypoint resolver reads data-plane settings to locate this home's Postgres" }
+"probe.py" = { kinds = ["clock"], why = "Cluster health probe entrypoint reads current UTC time to evaluate WAL-G tick and drill freshness" }
+"restore.py" = { kinds = ["clock"], why = "Operator restore command bounds recovery wait and narrates elapsed phase duration" }
+"tick.py" = { kinds = ["clock"], why = "Daily WAL-G tick entrypoint stamps step records with current UTC time" }

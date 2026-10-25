@@ -170,7 +170,7 @@ class ExecMemoryGuard:
             await asyncio.sleep(self._interval_s)
 
 
-async def run_memory_guard_forever(log: logging.Logger) -> None:
+async def run_memory_guard_forever(log: logging.Logger, *, host_pid: int) -> None:
     """Relieve critical memory pressure by killing the largest exec domain.
 
     Where the OS reports no pressure state (Linux), the guard does not run.
@@ -181,5 +181,4 @@ async def run_memory_guard_forever(log: logging.Logger) -> None:
     if source is None:
         log.info("[agent-host] exec memory guard idle — this OS reports no memory pressure state")
         return
-    host_pid = os.getpid()
     await ExecMemoryGuard(source, domains=lambda: find_exec_domains(host_pid, source)).run_forever()

@@ -46,7 +46,6 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import cast
 
 import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
@@ -411,7 +410,7 @@ def run_locked_backup(
         raise ValueError(f"backup needs a TZ-aware datetime, got naive {now!r}")
     directory = ensure_private_dir(directory)
     db_conninfo, password = passwordless_conninfo(db_url)
-    dbname = cast(str, conninfo_to_dict(db_url)["dbname"])
+    dbname = str(conninfo_to_dict(db_url)["dbname"])
     _log.info("[backup] db composition: %s", db_size_breakdown(db_url))
     files = target_files(directory, dbname, now, {entry.name for entry in directory.iterdir()})
     files.dump_partial.touch(mode=0o600, exist_ok=False)

@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import TypeGuard
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import ChannelVersions, Checkpoint, CheckpointMetadata
@@ -12,6 +13,12 @@ from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.checkpoint_postgres_walks import HistoryAsyncPostgresSaver
+
+
+def _is_dict_row_pool(
+    _pool: AsyncConnectionPool[AsyncConnection],
+) -> TypeGuard[AsyncConnectionPool[AsyncConnection[DictRow]]]:
+    return True
 
 
 class MissingCheckpointParentError(RuntimeError):
@@ -41,6 +48,17 @@ class PooledPostgresSaver(HistoryAsyncPostgresSaver):
     ) -> None:
         super().__init__(conn=conn, serde=serde)
         self._pool = conn
+
+    @classmethod
+    def from_pool(
+        cls,
+        pool: AsyncConnectionPool[AsyncConnection],
+        *,
+        serde: SerializerProtocol | None = None,
+    ) -> "PooledPostgresSaver":
+        if not _is_dict_row_pool(pool):
+            raise TypeError("expected DictRow pool")
+        return cls(conn=pool, serde=serde)
 
     async def aput(
         self,

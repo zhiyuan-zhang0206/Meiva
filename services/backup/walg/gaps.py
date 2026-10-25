@@ -5,7 +5,7 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import TypeGuard
 
 # meiva:note
 # A recorded gap is a WAL range this cluster has accepted as permanently missing.
@@ -45,21 +45,55 @@ class MissingRange:
     segments: int
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _require_object_dict(value: object, message: str) -> dict[str, object]:
+    if not _is_object_dict(value):
+        raise TypeError(message)
+    return value
+
+
+def _require_object_list(value: object, message: str) -> list[object]:
+    if not _is_object_list(value):
+        raise TypeError(message)
+    return value
+
+
+def _to_int(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise TypeError("expected int")
+    return int(value)
+
+
 def load_recorded_gaps(path: Path | None = None) -> tuple[RecordedGap, ...]:
     source = path or RECORDED_GAPS_PATH
     try:
-        payload: Any = json.loads(source.read_text(encoding="utf-8"))
-        entries = cast("dict[str, Any]", payload)["gaps"]
-        return tuple(_gap(cast("dict[str, Any]", entry)) for entry in entries)
+        payload = _require_object_dict(
+            json.loads(source.read_text(encoding="utf-8")),
+            "recorded gaps payload must be an object",
+        )
+        entries = _require_object_list(
+            payload["gaps"],
+            "recorded gaps list must be a list",
+        )
+        return tuple(_gap(entry) for entry in entries)
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise RecordedGapError(f"{source}: recorded WAL gaps are unreadable ({exc})") from None
 
 
-def _gap(entry: dict[str, Any]) -> RecordedGap:
+def _gap(entry: object) -> RecordedGap:
+    if not _is_object_dict(entry):
+        raise TypeError("gap entry must be an object")
     gap = RecordedGap(
         start_segment=str(entry["start_segment"]),
         end_segment=str(entry["end_segment"]),
-        segments=int(entry["segments"]),
+        segments=_to_int(entry["segments"]),
         reason=str(entry["reason"]),
         occurred_on=str(entry["occurred_on"]),
     )

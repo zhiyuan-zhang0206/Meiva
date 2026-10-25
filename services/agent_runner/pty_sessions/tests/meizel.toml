@@ -1,7 +1,4 @@
 [uses]
 "test_session.py" = ["child_shell_with_job.py", "child_tty_leader.py"]
-"test_survival.py" = ["child_pty_clients.py"]
-
-[debt.restricted-python]
-"test_sessions.py#python -c" = 1
-"test_survival.py#python -c" = 1
+"test_sessions.py" = ["child_shell_with_job.py"]
+"test_survival.py" = ["child_pty_clients.py", "child_shell_with_job.py"]

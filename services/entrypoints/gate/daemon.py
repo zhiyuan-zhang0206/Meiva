@@ -44,7 +44,6 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import cast
 from urllib.parse import urlsplit
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -299,7 +298,9 @@ class Handler(BaseHTTPRequestHandler):
 
     @property
     def gate(self) -> Gate:
-        return cast("GateServer", self.server).gate
+        if not isinstance(self.server, GateServer):
+            raise TypeError("expected GateServer")
+        return self.server.gate
 
     def do_GET(self) -> None:
         self._handle()

@@ -102,6 +102,7 @@ class RunnerRoot:
     plugins: PluginInputs
     policy: StallPolicy
     home: Path
+    pid: int = 0
 
 
 # A .py schedule script is run in-process, so a single call that hangs (a
@@ -277,7 +278,13 @@ def restore_park_detection() -> None:
 
 
 def stall_action(
-    database: Database, schedule_id: int, message: str, run_id: int | None, *, policy: StallPolicy
+    database: Database,
+    schedule_id: int,
+    message: str,
+    run_id: int | None,
+    *,
+    policy: StallPolicy,
+    pid: int = 0,
 ) -> None:
     """Reap descendants, record the failure within a fixed deadline, hard-exit 1."""
     try:
@@ -285,7 +292,7 @@ def stall_action(
             # Snapshot descendants while ancestry still proves ownership. Retain
             # identities through TERM/KILL; never signal the shared PTY group.
             # setsid stays covered; already-reparented daemons are exempt.
-            base.host.proc.kill_process_tree(os.getpid(), include_root=False)
+            base.host.proc.kill_process_tree(pid, include_root=False)
         except Exception:
             logger.exception("Schedule {} child cleanup failed", schedule_id)
         logger.error("Schedule {} {}", schedule_id, message)
@@ -325,12 +332,19 @@ class StallGuard:
     """
 
     def __init__(
-        self, database: Database, schedule_id: int, run_id: int | None, *, policy: StallPolicy
+        self,
+        database: Database,
+        schedule_id: int,
+        run_id: int | None,
+        *,
+        policy: StallPolicy,
+        pid: int = 0,
     ) -> None:
         self.database = database
         self.schedule_id = schedule_id
         self.run_id = run_id
         self.policy = policy
+        self.pid = pid
         self.main_thread_id = threading.get_ident()
         self.stop = threading.Event()
         self.admission = threading.Lock()
@@ -377,6 +391,7 @@ class StallGuard:
                         stall_message(stood_s, signature),
                         self.run_id,
                         policy=self.policy,
+                        pid=self.pid,
                     )
                 return
 
@@ -412,7 +427,7 @@ def run_python_script(
     # so an import hang is covered too. Stopped before _mark_completed
     # so a clean return cannot be overtaken by a spurious kill.
     patch_park_detection()
-    guard = StallGuard(root.database, schedule_id, run_id, policy=root.policy)
+    guard = StallGuard(root.database, schedule_id, run_id, policy=root.policy, pid=root.pid)
     # The gateway launches this runner as `python -m services.wake.schedule_manager.runner
     # <id>`, so sys.argv carries the schedule id. The script must not
     # inherit that runner-only argv: hand it the argv `python <script>`

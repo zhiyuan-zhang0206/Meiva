@@ -317,7 +317,7 @@ def test_closure_error_releases_the_allocation_fence(live_session: MakeSession) 
     session = live_session("meiva-test-closure-error", 1024)
     control = FakeProcessControl(groups={session.pid: session.pid})
     control.refuse(session.pid, PermissionError("group signal denied"))
-    refusing = PtyService(home=meiva_home(), process_control=control)
+    refusing = PtyService(home=meiva_home(), process_control=control, now=float)
     refusing._sessions[session.name] = session
 
     with pytest.raises(PermissionError, match="group signal denied"):

@@ -12,6 +12,8 @@ import contextlib
 import os
 import resource
 import sys
+import time
+import uuid
 from pathlib import Path
 
 from base.log import logger
@@ -66,7 +68,13 @@ def main() -> int:
 
 
 def _run(run: Path) -> int:
-    service = PtyService(home=meiva_home(), process_control=SYSTEM_PROCESS_CONTROL)
+    service = PtyService(
+        home=meiva_home(),
+        process_control=SYSTEM_PROCESS_CONTROL,
+        pid=os.getpid(),
+        host_generation=uuid.uuid4().hex,
+        now=time.time,
+    )
     ledger.sweep(ledger_path(run), process_control=SYSTEM_PROCESS_CONTROL)
     path = service_socket_path(run)
     if path.parent == fallback_dir() and not _own_fallback_dir(path.parent):
