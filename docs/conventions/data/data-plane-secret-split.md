@@ -94,6 +94,16 @@ reloads its Redis URL. Each execute writes a 0600 recovery file beneath
 `$MEIVA_HOME/backups/secret-rotation/`; on failure, re-run the exact printed
 `--execute --resume <state-file>` command rather than editing one side by hand.
 
+Resume validates the saved JSON before plan output, preflight, confirmation or
+rotation effects. Every field written by the journal is required, including
+`started_at` and `phase`; fresh-state defaults never repair a truncated journal.
+Scope is `admin`, `runner` or `both`; phase is `minted`, `admin`, `runner`,
+`verified` or `env_written`. A phase records the last completed step: resume
+still retries the complete four-step sequence with the persisted credentials.
+Invalid field types and unknown vocabulary are refused without displaying their
+values. PostgreSQL-era journals retain the Redis-only refusal; start a new
+rotation rather than converting them.
+
 ## Emergency bearer rotation
 
 `MEIVA_CLUSTER_SECRET` does not rotate with the data plane, and machine callers
