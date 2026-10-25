@@ -317,10 +317,13 @@ def _patch_fields(body: TaskUpdateRequest) -> tuple[list[str], list[object]]:
             detail="Nothing to update: pass at least one of status, priority, "
             "title, description, results, remind_interval_seconds, owner, parent_id.",
         )
-    # Reset the reminder counters on any update — a fresh overdue window starts
-    # from this update, so any previous reminder is stale (same rule as the SDK).
-    # The delegator escalation marker is part of the bookkeeping: clearing it
-    # lets the fresh window escalate on its own.
+    # meiva:note
+    # Reset the reminder counters on any update: the HTTP surface has no note channel, so every
+    # field here is a deliberate edit and a fresh overdue window starts from it. The delegator
+    # escalation marker is part of the bookkeeping — clearing it lets the fresh window escalate
+    # on its own. The SDK path narrows this to writes that change the work
+    # (`base/agents/tasks/reminder_window.py`, Fleet `task_reminder_reset_on`), because there an
+    # appended note is not an edit to the task's work.
     sets.append("last_reminded_at = NULL")
     sets.append("reminder_count = 0")
     sets.append("escalated_at = NULL")

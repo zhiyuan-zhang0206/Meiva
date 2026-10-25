@@ -83,7 +83,7 @@ When a task is cancelled:
 
 ### Reminder Mechanism
 
-A task's `remind_interval_seconds` (seconds) triggers a reminder to its owner if the task is not updated within that window — a chat message telling the owner the task has gone quiet. New tasks default to 30 minutes (`meiva.tasks.create(...)` sets `remind_interval_seconds=1800` unless you pass a different value; `None` also means the default — reminders cannot be turned off). Any `meiva.tasks.update()` resets the reminder counters. The daemon also escalates to the parent task's owner after 3 unanswered reminders. Reminders are useful for:
+A task's `remind_interval_seconds` (seconds) triggers a reminder to its owner if the task is not updated within that window — a chat message telling the owner the task has gone quiet. New tasks default to 30 minutes (`meiva.tasks.create(...)` sets `remind_interval_seconds=1800` unless you pass a different value; `None` also means the default — reminders cannot be turned off). An `meiva.tasks.update()` restarts the reminder counters when it changes the work (status, results, owner, priority, parent); appending a note or renaming the task does not. The daemon also escalates to the parent task's owner after 3 unanswered reminders. Reminders are useful for:
 - Long-running tasks where the orchestrator wants a periodic pulse
 - Tasks assigned to agents that might stall silently
 - Health checks on delegation chains

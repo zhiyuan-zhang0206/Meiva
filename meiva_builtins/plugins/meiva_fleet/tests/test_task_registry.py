@@ -437,7 +437,10 @@ def test_log_preserves_replaced_results(
     assert lines[1].endswith("appended")
 
 
-def test_log_resets_reminder_count(
+# meiva:note
+# A log line records activity, not progress: it must not rewind the escalation ladder (task #5314
+# — resetting on it held every task at one reminder).
+def test_log_keeps_reminder_count(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     agent_id = seed_agent(db_conn)
@@ -450,14 +453,21 @@ def test_log_resets_reminder_count(
             (task.id,),
         )
     db_conn.commit()
+
+    def ladder() -> tuple[object, object, object]:
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT reminder_count, last_reminded_at, escalated_at "
+                "FROM agent_tasks WHERE id = %s",
+                (task.id,),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        return row[0], row[1], row[2]
+
+    before = ladder()
     task_registry.log(task.id, "note", operation_key=str(uuid4()))
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT reminder_count, last_reminded_at, escalated_at FROM agent_tasks WHERE id = %s",
-            (task.id,),
-        )
-        row = cur.fetchone()
-    assert row == (0, None, None)
+    assert ladder() == before
 
 
 def test_log_bumps_updated_at(

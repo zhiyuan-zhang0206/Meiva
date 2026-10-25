@@ -13,6 +13,7 @@
     "task_registry/test_creation_receipt_identity.py",
     "task_registry/test_creation_receipts.py",
     "task_registry/test_notification_fences.py",
+    "task_registry/test_reminder_window.py",
     "task_registry/test_notification_recovery.py",
     "task_registry/test_update_non_owner_notifies_owner.py",
     "task_registry/test_update_receipt_identity.py",

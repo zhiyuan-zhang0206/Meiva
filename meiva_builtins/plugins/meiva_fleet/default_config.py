@@ -1,7 +1,8 @@
 """Fleet policy and maintenance configuration; pure across agent and service faces."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from base.agents.tasks.reminder_window import DEFAULT_RESET_ON, validate_reset_on
 from base.packages.plugins.extensions import PluginContributions
 
 
@@ -61,6 +62,27 @@ class FleetConfig(BaseModel):
         },
     )
 
+    task_reminder_reset_on: tuple[str, ...] = Field(
+        default=DEFAULT_RESET_ON,
+        description=(
+            "Which kinds of task update restart a task's reminder window, the counter the "
+            "task-maintenance daemon escalates on. The default names the work itself (status, "
+            "results, owner, priority, parent): recording a note or renaming a task says nothing "
+            "about progress, and resetting on it held every task's ladder at zero. Any kind an "
+            "update can change may be named — status, title, description, results, owner, "
+            "priority, parent, remind_interval_seconds, note — so naming 'note' restores the "
+            "older rule in which every write restarted the window."
+        ),
+        json_schema_extra={
+            "env_var": "MEIVA_TASK_REMINDER_RESET_ON",
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "capability": "common",
+            "scope": "host",
+        },
+    )
+
     reduce_context_switch: bool = Field(
         default=True,
         description=(
@@ -81,6 +103,13 @@ class FleetConfig(BaseModel):
             "capability": "agent-runner",
         },
     )
+
+    # meiva:note
+    # Reject an unknown kind or an empty policy at the config boundary, before an update reads it.
+    @field_validator("task_reminder_reset_on")
+    @classmethod
+    def _known_reset_kinds(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return validate_reset_on(value)
 
 
 def contribute() -> PluginContributions:
