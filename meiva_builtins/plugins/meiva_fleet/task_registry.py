@@ -346,11 +346,12 @@ def _update_value(value: int | Unset | None) -> int | None:
 
 
 # meiva:note
-# The reminder-window policy is read from this home's `meiva_fleet` config image on every write,
-# not cached for the process and not taken from the gateway's boot packet: task updates are how
-# every agent reports, so a write must not depend on what a lagging gateway sent at boot, and an
-# operator's edit (`task_reminder_reset_on`) has to take effect without a restart. The imports are
-# deferred so the config stack stays off plugin autoload (task #3816).
+# The reminder-window policy is read from this home's `meiva_fleet` image on every write rather than
+# cached for the process: an edit then takes effect at the next write, with no restart. It is
+# `host`-scoped on purpose. A `cluster-pinned` read would overlay the gateway's boot packet, and an
+# agent whose launcher sent a packet from the previous schema would fail every task update with
+# SchemaDriftError — a rollout would break the fleet's reporting path. The imports are deferred so
+# the config stack stays off plugin autoload (task #3816).
 def _reminder_reset_on() -> frozenset[str]:
     """Kinds of task update that restart a task's reminder window, per this home's policy."""
     from base.packages.plugins.config_registration import disk_image_path, read_config_image
