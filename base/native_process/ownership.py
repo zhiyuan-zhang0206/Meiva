@@ -98,7 +98,6 @@ class OwnedProcess:
         *,
         platform: str | None = None,
         observed_ticks: Sequence[int | None] | None = None,
-        birth_override: float | None = None,
     ) -> OwnedProcess:
         """Sample the PID's current native birth; lineage needs separate evidence."""
         sys_platform = sys.platform if platform is None else platform
@@ -108,8 +107,7 @@ class OwnedProcess:
             ticks = _validate_start_ticks(process.pid, first_raw)
         else:
             ticks = _start_ticks(process.pid)
-        birth = stable_create_time(process) if birth_override is None else birth_override
-        identity = cls(process.pid, birth, ticks)
+        identity = cls(process.pid, stable_create_time(process), ticks)
         if sys_platform == "linux" and identity.starttime is None:
             if not psutil.pid_exists(process.pid):
                 raise psutil.NoSuchProcess(process.pid)
@@ -225,7 +223,7 @@ class OwnedProcess:
     ) -> bool:
         return self.judge_live(self.read_live(platform=platform, observed_ticks=observed_ticks))
 
-    def send_signal(self, signum: int, *, birth_override: float | None = None) -> bool:
+    def send_signal(self, signum: int) -> bool:
         """Signal this birth, retaining the Linux process object through delivery.
 
         A gone birth returns false. Unknown or changed custody refuses. Linux
@@ -238,7 +236,7 @@ class OwnedProcess:
             if sys.platform == "linux":
                 descriptor = pidfd.open_process(self.pid)
             process = psutil.Process(self.pid)
-            if not self.same_birth(OwnedProcess.capture(process, birth_override=birth_override)):
+            if not self.birth_matches(process):
                 raise RuntimeError(f"native identity changed before signal: {self.pid}")
             if descriptor is not None:
                 pidfd.send_signal(descriptor, signum)

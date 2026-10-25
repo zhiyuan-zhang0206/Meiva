@@ -170,21 +170,11 @@ def test_unit_enabled_reads_the_one_systemctl_seam(tmp_path: Path) -> None:
     assert len(commands.calls) == 2
 
 
-def _install_seams(
-    tmp_path: Path, *, enabled: bool
-) -> tuple[FakeCommands, dict[str, str], Path, Path]:
+def _install_seams(tmp_path: Path, *, enabled: bool) -> tuple[FakeCommands, Path, Path]:
     unit_dir = tmp_path / "etc-systemd"
     runtime_dir = _runtime_dir(tmp_path)
-    installed: dict[str, str] = {}
     commands = FakeCommands()
-    commands.on(
-        ["install", "-m", "0644"],
-        lambda argv: (
-            installed.update({"destination": argv[-1], "content": Path(argv[-2]).read_text()})
-            or Reply()
-        ),
-        repeat=True,
-    )
+    commands.on(["install", "-m", "0644"], Reply(), repeat=True)
     commands.on(["systemctl", "daemon-reload"], Reply(), repeat=True)
     commands.on(
         ["systemctl", "is-enabled"],
@@ -192,7 +182,7 @@ def _install_seams(
         repeat=True,
     )
     commands.on(["systemctl", "enable", "meiva-boot.service"], Reply(), repeat=True)
-    return commands, installed, unit_dir, runtime_dir
+    return commands, unit_dir, runtime_dir
 
 
 def test_install_refuses_without_systemd(ctx: BootUnitContext, tmp_path: Path) -> None:
@@ -425,7 +415,7 @@ def test_uninstall_failed_stop_preserves_unit(ctx: BootUnitContext, tmp_path: Pa
 def test_install_enables_native_unit_without_recursively_starting(
     ctx: BootUnitContext, tmp_path: Path
 ) -> None:
-    commands, installed, unit_dir, runtime_dir = _install_seams(tmp_path, enabled=False)
+    commands, unit_dir, runtime_dir = _install_seams(tmp_path, enabled=False)
     steps = install(
         services=ctx.services,
         context=ctx,
@@ -434,7 +424,8 @@ def test_install_enables_native_unit_without_recursively_starting(
         runtime_dir=runtime_dir,
     )
     recorded = [list(argv) for argv in commands.argvs]
-    assert installed["content"] == render_unit(ctx)
+    assert recorded[0][:3] == ["install", "-m", "0644"]
+    assert recorded[0][-1] == str(boot_unit.unit_path(unit_dir))
     assert ["systemctl", "enable", "meiva-boot.service"] in recorded
     assert ["systemctl", "start", "meiva-boot.service"] not in recorded
     assert not any("crontab" in arg for call in recorded for arg in call)
@@ -444,7 +435,7 @@ def test_install_enables_native_unit_without_recursively_starting(
 def test_unchanged_enabled_unit_never_restarts_or_rewrites(
     ctx: BootUnitContext, tmp_path: Path
 ) -> None:
-    commands, _installed, unit_dir, runtime_dir = _install_seams(tmp_path, enabled=True)
+    commands, unit_dir, runtime_dir = _install_seams(tmp_path, enabled=True)
     target = boot_unit.unit_path(unit_dir)
     target.parent.mkdir()
     target.write_text(render_unit(ctx))

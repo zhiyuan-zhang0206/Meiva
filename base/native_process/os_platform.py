@@ -15,7 +15,7 @@ import time
 from collections.abc import Generator, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TextIO
 
 
 @dataclass(frozen=True)
@@ -295,7 +295,7 @@ def crontab_lock() -> Generator[None]:
         yield
 
 
-def ensure_line_buffered_stdio(*, streams: Iterable[object] | None = None) -> None:
+def ensure_line_buffered_stdio(*, streams: Iterable[TextIO] | None = None) -> None:
     """Make this process's stdout line-buffered even when it is a pipe.
 
     Python line-buffers stdout only when it is a tty; into a pipe it uses an 8 KiB

@@ -74,7 +74,6 @@ class CodeVersion:
     def __init__(self, loaded: loaded_commit.LoadedCommit) -> None:
         self.loaded = loaded
         self._version: int | None = None
-        self.resolution_calls: int = 0
 
     def get(self) -> int:
         """Resolve only the captured SHA, without consulting the current HEAD."""
@@ -84,6 +83,5 @@ class CodeVersion:
                     f"cannot resolve the loaded commit of {self.loaded.source_root}: "
                     "the process must capture its code version at startup"
                 )
-            self.resolution_calls += 1
             self._version = first_parent_count(self.loaded.source_root, self.loaded.sha)
         return self._version

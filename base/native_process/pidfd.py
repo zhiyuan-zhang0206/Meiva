@@ -38,23 +38,19 @@ def pidfd_libc() -> ctypes.CDLL:
     return libc
 
 
-def open_process(pid: int, *, simulated_errno: int | None = None) -> int:
+def check_pidfd_result(result: int, errno_code: int, *, call: str) -> int:
+    if result < 0:
+        raise OSError(errno_code, f"{call}: {os.strerror(errno_code)}")
+    return result
+
+
+def open_process(pid: int) -> int:
     """Return a non-inheritable descriptor; the caller owns its close."""
-    if simulated_errno is not None:
-        raise OSError(simulated_errno, f"pidfd_open({pid}): {os.strerror(simulated_errno)}")
     descriptor = pidfd_libc().pidfd_open(pid, 0)
-    if descriptor < 0:
-        code = ctypes.get_errno()
-        raise OSError(code, f"pidfd_open({pid}): {os.strerror(code)}")
-    return descriptor
+    return check_pidfd_result(descriptor, ctypes.get_errno(), call=f"pidfd_open({pid})")
 
 
-def send_signal(descriptor: int, signum: int, *, simulated_errno: int | None = None) -> None:
+def send_signal(descriptor: int, signum: int) -> None:
     """Signal the retained task, preserving native errno for the custody owner."""
-    if simulated_errno is not None:
-        raise OSError(
-            simulated_errno, f"pidfd_send_signal({descriptor}): {os.strerror(simulated_errno)}"
-        )
-    if pidfd_libc().pidfd_send_signal(descriptor, signum, None, 0) < 0:
-        code = ctypes.get_errno()
-        raise OSError(code, f"pidfd_send_signal({descriptor}): {os.strerror(code)}")
+    result = pidfd_libc().pidfd_send_signal(descriptor, signum, None, 0)
+    check_pidfd_result(result, ctypes.get_errno(), call=f"pidfd_send_signal({descriptor})")

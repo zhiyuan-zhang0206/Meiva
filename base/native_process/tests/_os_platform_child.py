@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import sys
 import time
+from types import FrameType
 
 
 def cold_import_does_not_probe_uname() -> None:
@@ -19,11 +20,9 @@ def cold_import_does_not_probe_uname() -> None:
 
     called_uname: list[str] = []
 
-    def profile(frame: object, event: str, _arg: object) -> None:
-        if event == "call":
-            code = getattr(frame, "f_code", None)
-            if getattr(code, "co_name", None) == "uname":
-                called_uname.append("uname")
+    def profile(frame: FrameType | None, event: str, _arg: object) -> None:
+        if event == "call" and frame is not None and frame.f_code.co_name == "uname":
+            called_uname.append("uname")
 
     sys.setprofile(profile)
     try:

@@ -27,7 +27,7 @@ class Call:
     kwargs: Mapping[str, Any]
 
 
-ReplySpec = Reply | BaseException | Callable[[tuple[str, ...]], Reply]
+ReplySpec = Reply | BaseException
 
 
 @dataclass
@@ -119,8 +119,6 @@ class FakeCommands:
         reply = self._next_reply(command)
         if isinstance(reply, BaseException):
             raise reply
-        if callable(reply):
-            reply = reply(command)
         return _result(command, reply, capture_output=capture_output, popen_kwargs=popen_kwargs)
 
 

@@ -112,13 +112,7 @@ class EventBus:
         )
 
     async def publish_best_effort(
-        self,
-        payload: str,
-        *,
-        channel: str | None = None,
-        context: str = "",
-        recorded_delays: list[float] | None = None,
-        now: float | None = None,
+        self, payload: str, *, channel: str | None = None, context: str = ""
     ) -> int | None:
         """Publish `payload` on the shared async client (the events channel unless `channel`
         names another). Known Redis/network failures return None; unknown errors propagate."""
@@ -130,8 +124,6 @@ class EventBus:
             attempt_timeout_s=self._config.publish_attempt_timeout_s,
             context=context,
             auth_retry_policy=self._config.auth_retry_policy,
-            recorded_delays=recorded_delays,
-            now=now,
         )
 
     def publish_best_effort_sync(
@@ -141,8 +133,6 @@ class EventBus:
         channel: str | None = None,
         decode_responses: bool = True,
         context: str = "",
-        recorded_delays: list[float] | None = None,
-        now: float | None = None,
     ) -> int | None:
         """Sync counterpart: recover known Redis/network errors, propagate unknown ones."""
         return publish_sync_via(
@@ -152,6 +142,4 @@ class EventBus:
             warn_last=self._warn_last,
             context=context,
             auth_retry_policy=self._config.auth_retry_policy,
-            recorded_delays=recorded_delays,
-            now=now,
         )

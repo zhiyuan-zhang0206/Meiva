@@ -37,12 +37,19 @@ def test_replaced_name_never_signals_replacement(
         try:
             expected, new = record_for(old.pid), record_for(replacement.pid)
             path = tmp_path / "meiva-ops.json"
-            expected.write(path)
+            new.write(path)
             assert not posixproc.graceful_signal(
                 "meiva-ops",
                 expected=expected,
                 sessions_dir=tmp_path,
-                recheck_record=new,
+            )
+            assert not posixproc.admit_expected_signal(
+                psutil.Process(old.pid),
+                expected,
+                latest=new,
+                observed_ticks=None,
+                first_tick=None,
+                has_first_tick=False,
             )
             assert replacement.poll() is None
             assert old.poll() is None

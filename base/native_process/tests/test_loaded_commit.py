@@ -7,6 +7,7 @@ cache that same captured SHA, with honest unknowns and bounded Git failures.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -169,10 +170,11 @@ def test_image_counts_from_the_frozen_commit_and_caches(tmp_path: Path) -> None:
     repo = _repo_with_commits(tmp_path / "repo", 3)
     image = loaded_commit.LoadedCommit.capture(repo)
     version = code_version.CodeVersion(image)
+    _git(repo, "commit", "--allow-empty", "-m", "fourth after capture")
 
     assert version.get() == 3
+    shutil.rmtree(repo / ".git")
     assert version.get() == 3
-    assert version.resolution_calls == 1
 
 
 def test_image_without_a_git_checkout_fails_fast_and_is_not_zero() -> None:

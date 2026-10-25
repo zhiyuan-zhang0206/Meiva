@@ -17,10 +17,10 @@ from redis.exceptions import DataError, NoPermissionError, ResponseError
 
 from base.config import settings
 from base.events.live.bus import EventBus, event_bus_config_from_settings
-from base.events.live.redis_resilience import AuthRetryPolicy
+from base.events.live.redis_resilience import AuthRetryPolicy, should_warn_publish_failure
 from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
 
-_FAST_RETRY = AuthRetryPolicy(deterministic_jitter=True, sleep_scale=0.0)
+_FAST_RETRY = AuthRetryPolicy(initial_delay_s=0.0005, delay_cap_s=0.002, window_s=1.0)
 _bus = EventBus(replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY))
 
 
@@ -185,7 +185,6 @@ async def test_warning_cadence_is_shared_by_bus_publishers_and_isolated_across_b
     monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
 ) -> None:
     """Each bus shares sync/async warning cadence, while a new owner reports afresh."""
-    now = 100.0
     failure = ResponseError("NOPERM")
     patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(failure))
     patch_async_redis(monkeypatch, lambda: _BoomAsyncClient(failure))
@@ -193,25 +192,30 @@ async def test_warning_cadence_is_shared_by_bus_publishers_and_isolated_across_b
     second = EventBus(replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY))
     channel = "meiva:owner-cadence"
 
-    assert first.publish_best_effort_sync("{}", channel=channel, now=now) is None
-    assert await first.publish_best_effort("{}", channel=channel, now=now) is None
-    assert await second.publish_best_effort("{}", channel=channel, now=now) is None
-    now += 59.0
-    assert first.publish_best_effort_sync("{}", channel=channel, now=now) is None
-    now += 1.0
-    assert await first.publish_best_effort("{}", channel=channel, now=now) is None
-    assert first.publish_best_effort_sync("{}", channel=f"{channel}:other", now=now) is None
+    assert first.publish_best_effort_sync("{}", channel=channel) is None
+    assert await first.publish_best_effort("{}", channel=channel) is None
+    assert await second.publish_best_effort("{}", channel=channel) is None
+    assert first.publish_best_effort_sync("{}", channel=f"{channel}:other") is None
 
     assert [r["level"].name for r in loguru_records] == [
         "WARNING",
         "DEBUG",
         "WARNING",
-        "DEBUG",
-        "WARNING",
         "WARNING",
     ]
-    assert [r["exception"] is not None for r in loguru_records] == [False] * 6
-    assert sum("rate-limited" in r["message"] for r in loguru_records) == 2
+    assert [r["exception"] is not None for r in loguru_records] == [False] * 4
+    assert sum("rate-limited" in r["message"] for r in loguru_records) == 1
+
+    cadence: dict[tuple[str, str], float] = {}
+    assert should_warn_publish_failure(
+        cadence, channel=channel, error_type="ResponseError", now=100.0
+    )
+    assert not should_warn_publish_failure(
+        cadence, channel=channel, error_type="ResponseError", now=159.0
+    )
+    assert should_warn_publish_failure(
+        cadence, channel=channel, error_type="ResponseError", now=160.0
+    )
 
 
 @pytest.mark.parametrize("failure", [AttributeError("bug"), DataError("invalid input")])

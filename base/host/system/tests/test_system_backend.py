@@ -56,18 +56,12 @@ def test_linux_autostart_has_one_native_manager(tmp_path: Path) -> None:
         services=frozenset({"gateway"}),
     )
     commands = FakeCommands()
-    commands.on(
-        ["install", "-m", "0644"],
-        lambda argv: (Path(argv[-1]).write_text(Path(argv[-2]).read_text()) and Reply()) or Reply(),
-    )
+    commands.on(["install", "-m", "0644"], Reply())
     commands.on(["systemctl", "daemon-reload"], Reply(), repeat=True)
     commands.on(["systemctl", "is-enabled"], Reply("disabled\n"))
     commands.on(["systemctl", "enable", "meiva-boot.service"], Reply())
     commands.on(["systemctl", "disable", "--now", "meiva-boot.service"], Reply())
-    commands.on(
-        ["rm", "-f"],
-        lambda argv: Path(argv[-1]).unlink(missing_ok=True) or Reply(),
-    )
+    commands.on(["rm", "-f"], Reply())
     commands.on(["systemctl", "show"], Reply("inactive\n"))
     host = fake_host(
         commands,
@@ -75,6 +69,7 @@ def test_linux_autostart_has_one_native_manager(tmp_path: Path) -> None:
         uid=0,
         programs={"systemctl": "/usr/bin/systemctl"},
     )
+    unit_file = unit_dir / "meiva-boot.service"
     assert (
         autostart.register_linux(
             services=frozenset({"gateway"}),
@@ -85,7 +80,9 @@ def test_linux_autostart_has_one_native_manager(tmp_path: Path) -> None:
         )
         == 0
     )
-    assert (unit_dir / "meiva-boot.service").exists()
+    assert commands.argvs[0][:3] == ("install", "-m", "0644")
+    assert commands.argvs[0][-1] == str(unit_file)
+    unit_file.write_text("installed\n")
     assert (
         autostart.unregister_linux(
             host=host,
@@ -94,7 +91,7 @@ def test_linux_autostart_has_one_native_manager(tmp_path: Path) -> None:
         )
         == 0
     )
-    assert not (unit_dir / "meiva-boot.service").exists()
+    assert ("rm", "-f", str(unit_file)) in commands.argvs
 
 
 def test_linux_autostart_propagates_unavailable_systemd() -> None:
