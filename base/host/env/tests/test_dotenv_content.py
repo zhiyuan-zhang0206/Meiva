@@ -115,7 +115,7 @@ def test_upsert_renders_existing_empty_quoted_and_bare_line_behavior(
     ("lines", "keys", "expected"),
     [
         ([], {"A"}, None),
-        (["A=1"], set(), None),
+        (["A=1"], set[str](), None),
         (["A", "# A=1", "KEEP=1"], {"A"}, None),
         (["A=1", "export A=2", "'A'=3"], {"A"}, b"\n"),
         (["A=1", "KEEP=2", "A=3", ""], {"A"}, b"KEEP=2\n\n"),
@@ -150,6 +150,7 @@ def test_content_import_does_not_load_file_or_configuration_resources(tmp_path: 
         capture_output=True,
         text=True,
         check=False,
+        timeout=30,
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["source"] == str(
