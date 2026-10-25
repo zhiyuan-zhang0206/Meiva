@@ -1,17 +1,11 @@
-"""services.supervision.meiva_root.daemon: the standalone process, end to end.
-
-These tests run the daemon as a real child process (`python -m
-services.supervision.meiva_root`), talk to it over its unix socket with the real client, and
-pin the process-level contract: one tree per run directory, a clean SIGTERM
-stop, and — critically — an instance lock that dies with its owner and is
-never inherited by the units.
-"""
+# meiva:note
+# The real root child is observed through its control socket; its instance lock
+# must die with the owner and must never be inherited by the units.
 
 from __future__ import annotations
 
 import json
 import os
-import re
 import stat
 import subprocess
 import sys
@@ -21,7 +15,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
 
-import httpx
 import psutil
 import pytest
 
@@ -31,8 +24,14 @@ from base.host.system.hostport import Host
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.client import RootClient, RootClientError, caller_identity
 from base.native_process.root_control.ipc import ResponsePayload
+from services.supervision.meiva_root.tests.daemon.observations import (
+    assert_serving_siblings,
+    serving_port,
+    status_births,
+    wait_for_replacement,
+)
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
+REPO_ROOT = Path(__file__).resolve().parents[5]
 
 _SLEEPER = [sys.executable, "-u", "-c", "import time; time.sleep(300)"]
 
@@ -76,11 +75,13 @@ def _daemon(
     env: dict[str, str] | None = None,
     extra: Sequence[str] = (),
 ) -> Generator[tuple[subprocess.Popen[bytes], Path]]:
-    """Run a daemon; guarantee it is gone (TERM, then KILL) at scope exit."""
+    # meiva:note
+    # Run a daemon; guarantee it is gone (TERM, then KILL) at scope exit.
+    # The fixed module argv is launched directly without a shell.
     run_dir.mkdir(parents=True, exist_ok=True)
     log_path = run_dir / "daemon.log"
     with log_path.open("ab") as log_file:
-        proc = subprocess.Popen(  # noqa: S603 — fixed argv, this module's own command, no shell
+        proc = subprocess.Popen(  # noqa: S603
             _daemon_command(run_dir, manifests, wiring=wiring, extra=extra),
             cwd=REPO_ROOT,
             stdout=log_file,
@@ -104,7 +105,6 @@ def _read_log(path: Path) -> str:
 
 
 def _wait_ready(run_dir: Path, proc: subprocess.Popen[bytes], log_path: Path) -> RootClient:
-    """Poll the control socket until the daemon answers; fail loudly on early exit."""
     socket_path = run_dir / _SOCKET_NAME
     client = RootClient(socket_path, caller=caller_identity({}), timeout=5.0)
     deadline = time.monotonic() + 15.0
@@ -145,10 +145,12 @@ def _wait_dead(pid: int, *, timeout: float = 5.0) -> None:
 
 
 def _wait_orphaned(pid: int, *, timeout: float = 5.0) -> None:
-    """Wait until the process is reparented to init (its parent died)."""
+    # meiva:note
+    # Wait until the process is reparented to init (its parent died).
+    # The fixed ps argv observes reparenting without a shell.
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        out = subprocess.run(  # noqa: S603 — fixed system tool, literal argv, no shell
+        out = subprocess.run(  # noqa: S603
             ["ps", "-o", "ppid=", "-p", str(pid)],
             capture_output=True,
             text=True,
@@ -180,8 +182,6 @@ def _wait_for(predicate: Callable[[], bool], message: str) -> None:
 def _assert_first_status_and_unit_pid(
     client: RootClient, proc: subprocess.Popen[bytes], run_dir: Path
 ) -> int:
-    """The freshly ready daemon reports itself and one running `svc`; returns that unit's pid."""
-    # K3 face: the control socket is owner-only.
     assert stat.S_IMODE((run_dir / _SOCKET_NAME).stat().st_mode) == 0o600
 
     response = client.status()
@@ -196,7 +196,6 @@ def _assert_first_status_and_unit_pid(
 
 
 def _assert_down_up_restart_cycle(client: RootClient, unit_pid: int) -> None:
-    """`down` stops the unit, `up` starts a different process, `restart` succeeds."""
     response = client.down("svc")
     assert response["ok"] is True
     assert _units_of(response)[0]["action"] == "stopped"
@@ -213,14 +212,13 @@ def _assert_down_up_restart_cycle(client: RootClient, unit_pid: int) -> None:
 
 
 def test_daemon_end_to_end(short_tmp: Path) -> None:
-    run_dir = short_tmp / "nested" / "run"  # the daemon creates its run dir
+    run_dir = short_tmp / "nested" / "run"
     manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": _SLEEPER, "restart": "always"}])
     with _daemon(run_dir, manifests) as (proc, log_path):
         client = _wait_ready(run_dir, proc, log_path)
         unit_pid = _assert_first_status_and_unit_pid(client, proc, run_dir)
         _assert_down_up_restart_cycle(client, unit_pid)
 
-    # SIGTERM ran the graceful stop: process exited 0, tree is down, socket gone.
     assert proc.returncode == 0
     assert not (run_dir / _SOCKET_NAME).exists()
     assert (run_dir / "meiva-root.lock").exists()
@@ -253,11 +251,13 @@ def test_keeps_running_while_the_helper_ancestry_is_intact(short_tmp: Path) -> N
 
 
 def test_second_daemon_refuses_the_same_run_dir(short_tmp: Path) -> None:
+    # meiva:note
+    # The child argv names this module's fixed root entry and uses no shell.
     run_dir = short_tmp / "run"
     manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": _SLEEPER, "restart": "always"}])
     with _daemon(run_dir, manifests) as (proc, log_path):
         client = _wait_ready(run_dir, proc, log_path)
-        second = subprocess.Popen(  # noqa: S603 — fixed argv, this module's own command
+        second = subprocess.Popen(  # noqa: S603
             _daemon_command(run_dir, manifests),
             cwd=REPO_ROOT,
             stdout=subprocess.PIPE,
@@ -266,12 +266,12 @@ def test_second_daemon_refuses_the_same_run_dir(short_tmp: Path) -> None:
         out, _ = second.communicate(timeout=15)
         assert second.returncode == 1
         assert "already holds the instance lock" in out.decode()
-        # The first daemon is unaffected.
         assert client.status()["ok"] is True
 
 
 def _stubborn(ready: Path) -> list[str]:
-    """A unit that ignores TERM once it has written `ready`."""
+    # meiva:note
+    # A unit that ignores TERM once it has written `ready`.
     return [
         sys.executable,
         "-u",
@@ -285,12 +285,12 @@ def _stubborn(ready: Path) -> list[str]:
 
 @pytest.mark.parametrize("reaped_first", [False, True])
 def test_termination_after_unit_exit_exits(short_tmp: Path, reaped_first: bool) -> None:
-    """A unit that exited before any stop does not hold root past SIGTERM.
-
-    systemd's root boot unit sets SendSIGKILL=no: TERM is the only stop, so a
-    root must not wait for a second stop request. That holds too when
-    the leader was reaped before root read its birth.
-    """
+    # meiva:note
+    # A unit that exited before any stop does not hold root past SIGTERM.
+    #
+    # systemd's root boot unit sets SendSIGKILL=no: TERM is the only stop, so a
+    # root must not wait for a second stop request. That holds too when
+    # the leader was reaped before root read its birth.
     command = [sys.executable, "-c", "pass"]
     manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": command, "restart": "never"}])
     run_dir = short_tmp / "run"
@@ -312,18 +312,20 @@ def test_termination_after_unit_exit_exits(short_tmp: Path, reaped_first: bool) 
 
 
 def test_lock_dies_with_the_daemon_and_is_not_inherited_by_units(short_tmp: Path) -> None:
-    """A crashed owner releases its singleton lock, without a durable admission record."""
+    # meiva:note
+    # A crashed owner releases its singleton lock, without a durable admission record.
     run_dir = short_tmp / "run"
     manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": _SLEEPER, "restart": "always"}])
     with _daemon(run_dir, manifests) as (proc_a, log_a):
         client_a = _wait_ready(run_dir, proc_a, log_a)
         unit_pid = cast(int, _units_of(client_a.status())[0]["pid"])
         try:
+            # meiva:note
             # Hard-crash the supervisor: no cleanup runs.
             proc_a.kill()
             proc_a.wait(timeout=10)
-            _assert_alive(unit_pid)  # the unit outlives its parent
-            _wait_orphaned(unit_pid)  # reparented to init — the chain root is gone
+            _assert_alive(unit_pid)
+            _wait_orphaned(unit_pid)
 
             with _daemon(run_dir, manifests) as (proc_b, log_b):
                 client_b = _wait_ready(run_dir, proc_b, log_b)
@@ -337,10 +339,12 @@ def test_lock_dies_with_the_daemon_and_is_not_inherited_by_units(short_tmp: Path
 
 
 def test_bad_manifests_exit_nonzero(short_tmp: Path) -> None:
+    # meiva:note
+    # The child argv names this module's fixed root entry and uses no shell.
     run_dir = short_tmp / "run"
     bad = short_tmp / "units.json"
     bad.write_text("{ not json", encoding="utf-8")
-    result = subprocess.run(  # noqa: S603 — fixed argv, this module's own command
+    result = subprocess.run(  # noqa: S603
         _daemon_command(run_dir, bad),
         cwd=REPO_ROOT,
         capture_output=True,
@@ -354,7 +358,6 @@ def test_bad_manifests_exit_nonzero(short_tmp: Path) -> None:
 
 
 def _wiring(module: str) -> str:
-    """The `--wiring` reference of a hook module that lives beside this test."""
     return f"services.supervision.meiva_root.tests.hooks.{module}:build"
 
 
@@ -383,9 +386,11 @@ def test_wiring_hook_start_stop_lifecycle(short_tmp: Path) -> None:
 
 
 def test_wiring_failure_refuses_startup(short_tmp: Path) -> None:
+    # meiva:note
+    # The child argv names this module's fixed root entry and uses no shell.
     run_dir = short_tmp / "run"
     manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": _SLEEPER, "restart": "always"}])
-    broken = subprocess.run(  # noqa: S603 — fixed argv, this module's own command
+    broken = subprocess.run(  # noqa: S603
         _daemon_command(run_dir, manifests, wiring="no_such_module_xyz:build"),
         cwd=REPO_ROOT,
         capture_output=True,
@@ -397,7 +402,7 @@ def test_wiring_failure_refuses_startup(short_tmp: Path) -> None:
     assert "cannot import wiring module" in broken.stderr
     assert not (run_dir / _SOCKET_NAME).exists()
 
-    malformed = subprocess.run(  # noqa: S603 — fixed argv, this module's own command
+    malformed = subprocess.run(  # noqa: S603
         _daemon_command(run_dir, manifests, wiring="no_colon"),
         cwd=REPO_ROOT,
         capture_output=True,
@@ -436,10 +441,10 @@ def _root_uptime(result: dict[str, object]) -> float:
 def _systemd_starter(
     home: Path, receipt: Path, run_dir: Path, manifest: Path, failure: str
 ) -> tuple[Path, Path]:
-    """A disposable readiness caller for the real generic root, not a deployed wrapper.
-
-    Returns the starter script and the parameter file it reads.
-    """
+    # meiva:note
+    # A disposable readiness caller for the real generic root, not a deployed wrapper.
+    #
+    # Returns the starter script and the parameter file it reads.
     parameters = receipt.parent / "starter.json"
     parameters.write_text(
         json.dumps(
@@ -453,7 +458,7 @@ def _systemd_starter(
             }
         )
     )
-    return Path(__file__).parent / "hooks" / "systemd_starter.py", parameters
+    return Path(__file__).parents[1] / "hooks" / "systemd_starter.py", parameters
 
 
 def _terminate_systemd_test_births(receipt: Path) -> None:
@@ -462,6 +467,7 @@ def _terminate_systemd_test_births(receipt: Path) -> None:
     if not receipt.exists():
         return
     births = json.loads(receipt.read_text())
+    # meiva:note
     # Let root close its application before cleaning any independent leftovers.
     # Signalling both at once would invalidate root's stop capture artificially.
     for name in ("root", "app", "data"):
@@ -500,11 +506,14 @@ def _assert_failed_adoption(ctx: BootUnitContext, receipt: Path, failure: str) -
     births = json.loads(receipt.read_text())
     assert set(births) == {"data", "root", "app"}
     assert boot_unit.manager_properties(host=Host.system())["MainPID"] == "0"
+    # meiva:note
     # Before publication the deliberately stale hint names data; afterwards it
     # names root. Neither becomes MainPID when the ordinary starter fails.
     expected = births["data" if failure == "before" else "root"]["pid"]
     hint = boot_unit.root_pid_path(ctx.home)
-    if hint.exists():  # Native manager may remove the failed unit's hint.
+    # meiva:note
+    # The native manager may remove the failed unit's hint before this observation.
+    if hint.exists():
         assert hint.read_text().strip() == str(expected)
 
 
@@ -516,10 +525,11 @@ def _require_native_systemd() -> None:
     allowed = subprocess.run(["sudo", "-n", "true"], check=False, timeout=10)
     if allowed.returncode:
         pytest.skip("native systemd test requires passwordless sudo")
+    # meiva:note
     # The host has one boot unit and the test must be that unit to be adopted, so it
     # runs only where none exists: otherwise it would start, stop and reset the
     # host's own.
-    known = subprocess.run(  # noqa: S603 — fixed systemctl verb, the module's own unit name
+    known = subprocess.run(  # noqa: S603
         ["systemctl", "show", "--property=LoadState", "--value", boot_unit.UNIT_NAME],
         capture_output=True,
         text=True,
@@ -538,6 +548,7 @@ def native_systemd_unit(tmp_path_factory: pytest.TempPathFactory) -> Generator[N
 
     import fcntl
 
+    # meiva:note
     # xdist worker basetemps are siblings under the same test-run directory.
     lock_path = tmp_path_factory.getbasetemp().parent / "meiva-boot-test.lock"
     with lock_path.open("a") as lock:
@@ -549,12 +560,12 @@ def native_systemd_unit(tmp_path_factory: pytest.TempPathFactory) -> Generator[N
 @pytest.mark.parametrize("failure", ["", "before", "after"])
 @pytest.mark.usefixtures("native_systemd_unit")
 def test_native_systemd_root_lifetime(tmp_path: Path, failure: str) -> None:
-    """Actual manager handoff, root TERM closure, and data sibling retention.
-
-    The retained sleeper represents a separately owned native data process;
-    this does not claim database protocol or durability verification. The
-    dedicated Ubuntu CI step asserts systemd and sudo before invoking this test.
-    """
+    # meiva:note
+    # Actual manager handoff, root TERM closure, and data sibling retention.
+    #
+    # The retained sleeper represents a separately owned native data process;
+    # this does not claim database protocol or durability verification. The
+    # dedicated Ubuntu CI step asserts systemd and sudo before invoking this test.
     from base.host.system import boot_unit
 
     ctx = _systemd_test_context(tmp_path / "home")
@@ -578,7 +589,9 @@ def test_native_systemd_root_lifetime(tmp_path: Path, failure: str) -> None:
     )
 
     def native(*args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(  # noqa: S603 — fixed test-owned unit and explicit native verbs
+        # meiva:note
+        # Only explicit native verbs for this test-owned unit are passed to sudo.
+        return subprocess.run(  # noqa: S603
             ["sudo", "-n", *args], capture_output=True, text=True, check=False, timeout=45
         )
 
@@ -596,6 +609,7 @@ def test_native_systemd_root_lifetime(tmp_path: Path, failure: str) -> None:
             return
         assert started.returncode == 0, started.stdout + started.stderr
         raw = json.loads(receipt.read_text())
+        # meiva:note
         # Receipt keys use OwnedProcess's dataclass spelling; status uses create_time.
         from base.native_process.ownership import OwnedProcess
 
@@ -619,7 +633,8 @@ def test_native_systemd_root_lifetime(tmp_path: Path, failure: str) -> None:
 
 
 def test_failed_shutdown_reports_error_and_exits_without_another_stop(short_tmp: Path) -> None:
-    """A live child's refusal is concrete, without a persistent custody owner loop."""
+    # meiva:note
+    # A live child's refusal is concrete, without a persistent custody owner loop.
     ready = short_tmp / "child-ready"
     manifests = _write_manifests(
         short_tmp, [{"id": "svc", "exec": _stubborn(ready), "restart": "never"}]
@@ -680,29 +695,6 @@ def test_unknown_monitor_failure_exits_and_preserves_cleanup_refusal(
                 _kill_quietly(child)
 
 
-def _serving_port(run_dir: Path, unit_id: str) -> int | None:
-    log = run_dir / "logs" / unit_id / "output.log"
-    match = re.search(r"Serving HTTP on .* port (\d+)", log.read_text()) if log.exists() else None
-    return int(match[1]) if match else None
-
-
-def _assert_serving_siblings(run_dir: Path) -> None:
-    for unit_id in ("gateway", "frontend"):
-        port = _serving_port(run_dir, unit_id)
-        assert port is not None
-        response = httpx.get(f"http://127.0.0.1:{port}/reply", timeout=1, trust_env=False)
-        assert response.status_code == 200 and response.text == "still serving"
-
-
-def _status_births(result: dict[str, object]) -> dict[str, tuple[object, ...]]:
-    root = cast("dict[str, object]", result["root"])
-    units = cast("list[dict[str, object]]", result["units"])
-    return {
-        name: (entry["pid"], entry["create_time"], entry["starttime"])
-        for name, entry in [("root", root), *((str(unit["id"]), unit) for unit in units)]
-    }
-
-
 def _assert_refused_generation(current: dict[str, object]) -> None:
     failed = next(
         unit
@@ -730,7 +722,7 @@ def test_health_replacement_kills_a_stuck_unit_and_keeps_serving_siblings(
     short_tmp: Path,
 ) -> None:
     run_dir, ready, release = short_tmp / "run", short_tmp / "ready", short_tmp / "release"
-    child_script = Path(__file__).with_name("child_unit.py")
+    child_script = Path(__file__).parents[1] / "child_unit.py"
     units: list[dict[str, object]] = [
         {
             "id": "agent-host",
@@ -767,22 +759,24 @@ def test_health_replacement_kills_a_stuck_unit_and_keeps_serving_siblings(
         try:
             _wait_for(ready.exists, "child did not install its TERM handler")
             _wait_for(
-                lambda: all(_serving_port(run_dir, name) for name in ("gateway", "frontend")),
+                lambda: all(serving_port(run_dir, name) for name in ("gateway", "frontend")),
                 "representative services did not start",
             )
-            _assert_serving_siblings(run_dir)
+            assert_serving_siblings(run_dir)
             initial = cast("dict[str, object]", client.status().get("result"))
             (run_dir / "fail-health").touch()
             _wait_for(
                 lambda: proc.poll() is not None or _read_log(log).count("escaped_term_window") >= 1,
-                "health rounds stopped while replacing a unit stuck in TERM",
+                "stuck unit never reached TERM escalation",
             )
             assert proc.poll() is None, _read_log(log)
-            current = cast("dict[str, object]", client.status().get("result"))
-            assert _status_births(current) != _status_births(initial), "stuck generation kept"
-            replaced = _units_of(client.status())[0]
-            assert replaced["state"] == "running" and replaced["restart_failed"] is None
-            _assert_serving_siblings(run_dir)
+            before = status_births(initial)
+            current = wait_for_replacement(client, proc, log, before["agent-host"])
+            after = status_births(current)
+            for unit_id in ("root", "gateway", "frontend"):
+                assert after[unit_id] == before[unit_id], f"unrelated {unit_id} generation changed"
+            assert not original_child.live(), "replaced native child remains live"
+            assert_serving_siblings(run_dir)
         finally:
             release.touch()
             _wait_for(lambda: not original_child.live(), "released child did not exit")
