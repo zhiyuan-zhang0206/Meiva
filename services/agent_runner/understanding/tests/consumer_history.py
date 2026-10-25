@@ -36,3 +36,29 @@ def inbound_history() -> FullHistory:
         for i in range(4)
     ]
     return FullHistory(body, (SystemMessage(content="head"),), (0,))
+
+
+async def job_statuses(pool: AsyncConnectionPool) -> list[tuple]:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT status, attempts, error FROM understanding_chunk_jobs ORDER BY id"
+        )
+        return await cur.fetchall()
+
+
+async def written_nodes(pool: AsyncConnectionPool) -> list[tuple]:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT agent_id, depth, span_start, span_end, text FROM understanding_nodes"
+        )
+        return await cur.fetchall()
+
+
+async def call_receipts(pool: AsyncConnectionPool) -> list[tuple]:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT job_id, agent_id, attempt, round, model, instruction, prefix_len,"
+            " start_offset, content, tool_calls, usage_metadata, response_metadata,"
+            " duration_ms, error FROM understanding_chunk_calls ORDER BY id"
+        )
+        return await cur.fetchall()

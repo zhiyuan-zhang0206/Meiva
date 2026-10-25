@@ -11,8 +11,7 @@ tags:
 
 # Chunk-triggered Understanding
 
-The producer of the understanding tree's level 1. It
-describes an agent's context **while it grows**, in chunks, and writes level 1: depth-1 rows,
+This produces level 1 by describing an agent's growing context in chunks: depth-1 rows,
 one per **group of layer-0 message units** (`units.py`: inbound, text, reasoning + tool call +
 result) the model splits a chunk into by meaning. The levels above:
 [[base/agents/history/hierarchy/docs/groups.meiva.okf.md|Upper-level Grouping]].
@@ -60,7 +59,7 @@ best-effort: a failure is the `understanding_enqueue_failed` event and never tou
 Claim is `FOR UPDATE SKIP LOCKED` over pending rows, only the oldest live job of its agent: runners
 share the queue. A `running` row past its lease (claimer died) is failed by the next claim. Statuses: pending, running, done, failed, skipped.
 
-## Consumer (`chunk_consumer.py`)
+## Consumer (`services/agent_runner/understanding/chunk_consumer.py`)
 
 A loop of the agent host (`services/agent_runner/agent_host/daemon.py`, given the agent's
 `execute_code` schema), never raising. Every due job runs at
