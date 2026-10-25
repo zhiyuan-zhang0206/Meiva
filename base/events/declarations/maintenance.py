@@ -243,12 +243,19 @@ EVENTS: dict[str, EventSpec] = {
         payload=CiRunsRun,
         site="scripts/ci/pull_requests/runs_export.py:emit_snapshot (positional emit)",
     ),
+    # meiva:note
+    # Persisted because the reminder/escalation record is the only external evidence a
+    # stalled task leaves: the root's `task-telemetry` diagnostic compares these rows with
+    # the digests the daemon actually delivered. A task row's counters describe one window
+    # and move on; a stall assessment reads this history. Left unmarked, only Loki and the
+    # JSONL mirror keep them, which is how 2026-10-03 → 10-25 went dark unnoticed.
     "task_reminder_digest": telemetry_event(
         "task_reminder_digest",
         "overdue-task owner digest",
         payload=TaskReminderDigest,
         tier="noise",
         site="task_maintenance/daemon.py:run_reminders",
+        persist=True,
     ),
     "task_reminder_rerouted": telemetry_event(
         "task_reminder_rerouted",
@@ -257,12 +264,14 @@ EVENTS: dict[str, EventSpec] = {
         payload=TaskReminderRerouted,
         tier="noise",
         site="task_maintenance/daemon.py:run_reminders",
+        persist=True,
     ),
     "task_escalation": telemetry_event(
         "task_escalation",
         "stalled-task escalation",
         payload=TaskEscalation,
         site="task_maintenance/daemon.py:run_escalate",
+        persist=True,
     ),
     "label_generated": telemetry_event("label_generated", "label auto-generated", tier="noise"),
     "label_generate_failed": telemetry_event(

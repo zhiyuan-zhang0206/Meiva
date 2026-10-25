@@ -638,17 +638,19 @@ def test_each_root_roster_owns_its_helper_episode_reporter(
 
 
 class _ProbeCursor:
-    def __init__(self, error: BaseException | None) -> None:
+    def __init__(self, error: BaseException | None, row: tuple[int, ...] = (1,)) -> None:
         self._error = error
+        self._row = row
         self.executed: list[str] = []
 
-    def execute(self, sql: str) -> None:
+    def execute(self, sql: str, params: object = None) -> None:
+        del params
         self.executed.append(sql)
         if self._error is not None:
             raise self._error
 
-    def fetchone(self) -> tuple[int]:
-        return (1,)
+    def fetchone(self) -> tuple[int, ...]:
+        return self._row
 
     def __enter__(self) -> _ProbeCursor:
         return self
@@ -658,10 +660,10 @@ class _ProbeCursor:
 
 
 class _ProbeConnection:
-    def __init__(self, error: BaseException | None) -> None:
+    def __init__(self, error: BaseException | None, row: tuple[int, ...] = (1,)) -> None:
         self._error = error
         self.autocommit: bool | None = None
-        self.cursor_instance = _ProbeCursor(error)
+        self.cursor_instance = _ProbeCursor(error, row)
 
     def cursor(self) -> _ProbeCursor:
         return self.cursor_instance
@@ -674,8 +676,8 @@ class _ProbeConnection:
 
 
 class _ProbeDatabase:
-    def __init__(self, error: BaseException | None = None) -> None:
-        self.connection = _ProbeConnection(error)
+    def __init__(self, error: BaseException | None = None, row: tuple[int, ...] = (1,)) -> None:
+        self.connection = _ProbeConnection(error, row)
         self.dials = 0
 
     def connect(self, *, autocommit: bool = False) -> _ProbeConnection:
@@ -705,3 +707,65 @@ def test_database_recovery_probe_separates_unreachable_from_unobserved() -> None
     unavailable = probes.database_recovery_probe(lambda: cast("Database", unobserved))()
     assert unavailable.verdict.value == "unavailable"
     assert "RuntimeError" in unavailable.detail
+
+
+# meiva:note
+# The reminder record: the digests the daemon delivered against the telemetry rows those
+# deliveries emit. Both sides are in this test's one query, so a delivery without a stored
+# row is the DOWN verdict while "nothing was due" stays healthy.
+def test_task_telemetry_sees_deliveries_that_left_no_stored_row() -> None:
+    database = _ProbeDatabase(row=(129, 0))
+    result = probes.task_telemetry(lambda: cast("Database", database))()
+    assert result.verdict == ProbeVerdict.DOWN
+    assert "129 reminder notice(s) delivered in 24h" in result.detail
+    assert "no task reminder or escalation row" in result.detail
+    (sql,) = database.connection.cursor_instance.executed
+    assert "inbound_messages" in sql and "telemetry_events" in sql
+    assert "'task_reminder_digest', 'task_reminder_rerouted', 'task_escalation'" in sql
+
+
+@pytest.mark.parametrize(("delivered", "stored"), [(129, 129), (0, 0)])
+def test_task_telemetry_stays_healthy_with_a_stored_record_or_nothing_due(
+    delivered: int, stored: int
+) -> None:
+    database = _ProbeDatabase(row=(delivered, stored))
+    result = probes.task_telemetry(lambda: cast("Database", database))()
+    assert result.verdict == ProbeVerdict.ALIVE
+    assert f"{delivered} reminder notice(s) delivered" in result.detail
+    assert f"{stored} task telemetry row(s) stored" in result.detail
+
+
+def test_task_telemetry_is_unavailable_when_the_record_cannot_be_read() -> None:
+    import psycopg
+
+    database = _ProbeDatabase(psycopg.OperationalError("connection refused"))
+    result = probes.task_telemetry(lambda: cast("Database", database))()
+    assert result.verdict == ProbeVerdict.UNAVAILABLE
+    assert "OperationalError" in result.detail
+
+
+def test_the_reminder_record_is_observed_on_the_gateway_only(
+    *, machine_identity: ConfiguredMachineIdentity
+) -> None:
+    overrides = {
+        "redis_url": "redis://localhost:6380",
+        "db_url": "postgresql://localhost/meiva_main",
+        "pgbouncer_enabled": False,
+        "observability_url": "",
+    }
+
+    def roster(role: str) -> dict[str, Diagnostic]:
+        machine_identity.set(role=role)
+        return {
+            check.name: check
+            for check in probes.build_diagnostics(
+                set(),
+                database=_unused_database,
+                machine=machine_identity,
+                overrides=overrides,
+                macos=False,
+            )
+        }
+
+    assert "task-telemetry" not in roster("agent-runner")
+    assert roster("gateway")["task-telemetry"].interval_s == 3600
