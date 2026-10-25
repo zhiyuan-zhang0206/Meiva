@@ -117,7 +117,7 @@ def add_logs_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         help=(
             "comma-separated retention overrides; mutually exclusive with --older-than. "
             "Tier defaults: agent=15, shell=7, gateway=30, ops=30, watchdog=30, "
-            "snapshot=7, other=3 days (the no-flag fallback remains "
+            "snapshot=7, other=15 days (the no-flag fallback remains "
             "MEIVA_LOG_RETENTION_DAYS, otherwise 14 days)"
         ),
     )

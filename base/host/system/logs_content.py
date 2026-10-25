@@ -25,7 +25,7 @@ __all__ = [
 ]
 
 
-FAMILY_DAYS = "agent=15,shell=7,gateway=30,ops=30,watchdog=30,snapshot=7,other=3"
+FAMILY_DAYS = "agent=15,shell=7,gateway=30,ops=30,watchdog=30,snapshot=7,other=15"
 
 MARKER = "# meiva-logs-maintenance"
 

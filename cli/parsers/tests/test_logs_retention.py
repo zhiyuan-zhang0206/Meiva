@@ -59,7 +59,7 @@ def test_family_days_apply_tier_defaults_and_report_each_candidate_family(
         _file_at(
             tmp_path,
             "restarter.2026-08-01_00-00-00_12345.log",
-            _NOW - timedelta(days=4),
+            _NOW - timedelta(days=16),
         ),
     ]
     retained = [
@@ -77,7 +77,7 @@ def test_family_days_apply_tier_defaults_and_report_each_candidate_family(
         _file_at(
             tmp_path,
             "restarter.2026-08-01_00-00-00_54321.log",
-            _NOW - timedelta(days=3),
+            _NOW - timedelta(days=15),
         ),
     ]
 
@@ -99,7 +99,7 @@ def test_family_days_apply_tier_defaults_and_report_each_candidate_family(
         "gateway": 30,
         "ops": 30,
         "watchdog": 30,
-        "other": 3,
+        "other": 15,
     }.items():
         assert f"retention_family\tfamily={family}\tdays={days}\tfiles=1\tbytes=" in out
     assert "retention_summary\tmode=dry-run\tfiles=6\tbytes=" in out
@@ -156,7 +156,7 @@ def test_family_days_dry_run_reports_empty_policy_families(
         "ops": 30,
         "watchdog": 30,
         "snapshot": 7,
-        "other": 3,
+        "other": 15,
     }.items():
         assert f"retention_family\tfamily={family}\tdays={days}\tfiles=0\tbytes=0" in out
 
@@ -491,6 +491,7 @@ def test_service_stdout_names_are_managed_and_follow_service_family_rules(
     ("name", "family"),
     [
         ("agent_host.2026-10-20_00-33-19_718373.log", "agent"),
+        ("page_server.2026-10-23_13-10-31_174359.log", "agent"),
         ("meiva-root.2026-10-19_08-00-05_763203.log", "ops"),
         ("wibble.2026-10-20_00-33-19_718373.log", "other"),
     ],
@@ -567,8 +568,8 @@ def test_retention_deletes_expired_service_stdout_and_native_archive(
     native_path = tmp_path / "lgtm" / "native" / "logs"
     logs_path.mkdir()
     native_path.mkdir(parents=True)
-    service = _file_at(logs_path, "meiva-otel-collector.out.log", _NOW - timedelta(days=4))
-    native_archive = _file_at(native_path, "loki.log.2026-08-01", _NOW - timedelta(days=4))
+    service = _file_at(logs_path, "meiva-otel-collector.out.log", _NOW - timedelta(days=16))
+    native_archive = _file_at(native_path, "loki.log.2026-08-01", _NOW - timedelta(days=16))
     live_native = _file_at(native_path, "loki.log", _NOW - timedelta(days=40))
 
     rc = logs.cmd_logs_retention(

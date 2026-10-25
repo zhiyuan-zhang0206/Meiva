@@ -39,7 +39,7 @@ FAMILY_DEFAULT_DAYS = {
     "ops": 30,
     "watchdog": 30,
     "snapshot": 7,
-    "other": 3,
+    "other": 15,
 }
 
 
@@ -67,6 +67,11 @@ class RetentionFailure:
 # was silently the shortest one. Their rotated copies arrive here as `agent_host` and
 # `meiva-root`, while `meiva-root.out.log` is stripped to `root`, so all three names
 # must answer the same question.
+#
+# `page_server` joins the agent family for a different reason: one process per page,
+# 1-4 MB per file in the observed logs, so 30 days would double the largest bucket.
+# The family answers "how long do I need to look back at one session", not "is this
+# infrastructure".
 # meiva:link cli/commands/observability/docs/log-maintenance.md
 def _service_family(service: str) -> str:
     if service.startswith("gateway"):
@@ -79,7 +84,7 @@ def _service_family(service: str) -> str:
         return "watchdog"
     if _AGENT_SHELL_SERVICE.match(service):
         return "shell"
-    if service == "agent_host" or service.startswith("agent-"):
+    if service in {"agent_host", "page_server"} or service.startswith("agent-"):
         return "agent"
     return "other"
 
