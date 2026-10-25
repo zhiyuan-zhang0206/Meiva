@@ -13,7 +13,7 @@ from dataclasses import replace
 import pytest
 
 import cli.commands.lifecycle.converge_host as cv
-from base.config import get_field, set_field
+from base.config import ConfigBoot, get_field, set_field
 from base.deploy.git.memory_repo import MemoryRemoteMissing
 from base.host.system.tests.fake_commands import FakeCommands, Reply, fake_host
 from cli.commands.converge.plans.split_host_checks import github_pr_failure, requires_github_pr
@@ -98,7 +98,7 @@ def test_step_registered_agent_runner_only() -> None:
 
 
 @pytest.fixture
-def remote_configuration(process_config) -> Iterator[None]:
+def remote_configuration(process_config: ConfigBoot) -> Iterator[None]:
     previous = get_field("memory_remote")
     set_field("memory_remote", "")
     try:

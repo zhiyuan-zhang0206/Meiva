@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Generator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Event, Thread
 
@@ -33,7 +33,7 @@ class PoolResponse:
 
 
 @contextlib.contextmanager
-def pool_server(response: PoolResponse) -> Iterator[str]:
+def pool_server(response: PoolResponse) -> Generator[str]:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             self.connection.settimeout(5)
