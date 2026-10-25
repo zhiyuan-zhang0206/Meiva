@@ -1,5 +1,8 @@
 exports = ["alert_rules"]
 
+[uses]
+"test_rotation_journal_inputs.py" = ["rotation_journal_child.py"]
+
 [debt.first-party-patch]
 "test_rotate_data_plane_secrets.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
 "test_rotate_data_plane_secrets.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 2
