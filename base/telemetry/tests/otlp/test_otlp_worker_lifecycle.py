@@ -1,30 +1,92 @@
 from __future__ import annotations
 
+import http.server
+import json
 import threading
 import time
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from base.telemetry.delivery import reporting
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus, Event
 from base.telemetry.otlp import telemetry_otlp, telemetry_otlp_exporting
-from base.telemetry.otlp import telemetry_otlp_worker as worker_module
 from base.telemetry.tests.otlp.test_telemetry_otlp import otlp_test_event
 
 
-class _Provider:
-    def __init__(self) -> None:
-        self.closed = threading.Event()
-        self.flushed = threading.Event()
+class _Instrument:
+    def __init__(self, on_metric: Callable[[int | float], None] | None = None) -> None:
+        self._on_metric = on_metric
 
-    def get_meter(self, _name: str) -> object:
+    def add(self, value: int | float, _attributes: Any = None) -> None:
+        if self._on_metric is not None:
+            self._on_metric(value)
+
+    def record(self, value: int | float, _attributes: Any = None) -> None:
+        if self._on_metric is not None:
+            self._on_metric(value)
+
+
+class _Meter:
+    def __init__(self, on_metric: Callable[[int | float], None] | None = None) -> None:
+        self._on_metric = on_metric
+
+    def create_counter(self, _name: str, **_kwargs: Any) -> _Instrument:
+        return _Instrument(self._on_metric)
+
+    def create_histogram(self, _name: str, **_kwargs: Any) -> _Instrument:
+        return _Instrument(self._on_metric)
+
+    def create_observable_gauge(self, _name: str, **_kwargs: Any) -> object:
         return object()
 
+
+class _Logger:
+    def __init__(self, on_emit: Callable[[Any], None] | None = None) -> None:
+        self._on_emit = on_emit
+
+    def emit(self, record: Any) -> None:
+        if self._on_emit is not None:
+            self._on_emit(record)
+
+
+class _Provider:
+    def __init__(
+        self,
+        *,
+        on_emit: Callable[[Any], None] | None = None,
+        on_get_meter: Callable[[], object] | None = None,
+        on_metric: Callable[[int | float], None] | None = None,
+        on_flush: Callable[[int], None] | None = None,
+        on_shutdown: Callable[[], None] | None = None,
+    ) -> None:
+        self.closed = threading.Event()
+        self.flushed = threading.Event()
+        self._on_emit = on_emit
+        self._on_get_meter = on_get_meter
+        self._on_metric = on_metric
+        self._on_flush = on_flush
+        self._on_shutdown = on_shutdown
+
+    def get_logger(self, _name: str) -> _Logger:
+        return _Logger(self._on_emit)
+
+    def get_meter(self, _name: str) -> object:
+        if self._on_get_meter is not None:
+            return self._on_get_meter()
+        return _Meter(self._on_metric)
+
     def force_flush(self, *, timeout_millis: int) -> None:
+        if self._on_flush is not None:
+            self._on_flush(timeout_millis)
         self.flushed.set()
 
     def shutdown(self) -> None:
+        if self._on_shutdown is not None:
+            self._on_shutdown()
         self.closed.set()
 
 
@@ -42,22 +104,34 @@ class _BlockingProvider(_Provider):
         self.closed.set()
 
 
-class _CloseGateFaultBackend(telemetry_otlp.OtlpBackend):
-    def _enabled(self) -> bool:
-        raise RuntimeError("close-time eligibility read failed")
+class _OkProbeHandler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self) -> None:
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"{}")
 
-
-def _backend(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, _Provider, _Provider]:
-    logs, metrics = _Provider(), _Provider()
-    backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True, providers=(logs, metrics))
-    monkeypatch.setattr(backend, "_enabled", lambda: True)
-
-    def ignore(_event: Event) -> None:
+    def log_message(self, format: str, *args: object) -> None:
         pass
 
-    monkeypatch.setattr(backend, "_emit_log", ignore)
-    monkeypatch.setattr(backend, "_record_metrics", ignore)
-    return backend, logs, metrics
+
+def _backend(
+    *,
+    logs: _Provider | None = None,
+    metrics: _Provider | None = None,
+    enabled: Callable[[], bool] = lambda: True,
+    queue_maxsize: int = 4096,
+    defer_enabled: bool = True,
+) -> tuple[telemetry_otlp.OtlpBackend, _Provider, _Provider]:
+    resolved_logs = _Provider() if logs is None else logs
+    resolved_metrics = _Provider() if metrics is None else metrics
+    backend = telemetry_otlp.OtlpBackend(
+        export_allowed=lambda: True,
+        enabled=enabled,
+        providers=(resolved_logs, resolved_metrics),
+        queue_maxsize=queue_maxsize,
+        defer_enabled=defer_enabled,
+    )
+    return backend, resolved_logs, resolved_metrics
 
 
 def _assert_release_completes(pipeline: Any, release: threading.Event) -> None:
@@ -66,18 +140,21 @@ def _assert_release_completes(pipeline: Any, release: threading.Event) -> None:
     assert pipeline.stopped
 
 
-def test_blocked_sdk_init_stays_owned_after_finite_stop(monkeypatch: pytest.MonkeyPatch) -> None:
-    backend, logs, metrics = _backend(monkeypatch)
-    entered, release = threading.Event(), threading.Event()
-    original = backend._initialize_worker
+def _logged_exceptions(loguru_records: LogRecords) -> list[BaseException]:
+    return [r["exception"].value for r in loguru_records if r["exception"] is not None]
 
-    def initialize(worker: Any) -> bool:
+
+def test_blocked_sdk_init_stays_owned_after_finite_stop() -> None:
+    entered, release = threading.Event(), threading.Event()
+
+    def get_meter() -> object:
         entered.set()
         assert release.wait(5)
-        return original(worker)
+        return _Meter()
 
-    monkeypatch.setattr(backend, "_initialize_worker", initialize)
+    backend, logs, metrics = _backend(metrics=_Provider(on_get_meter=get_meter))
     worker = backend._get_worker()
+    assert worker is not None
     try:
         assert entered.wait(5)
         started = time.monotonic()
@@ -95,15 +172,14 @@ def test_blocked_sdk_init_stays_owned_after_finite_stop(monkeypatch: pytest.Monk
     assert logs.closed.is_set() and metrics.closed.is_set()
 
 
-def test_sdk_flush_does_not_block_observing_caller(monkeypatch: pytest.MonkeyPatch) -> None:
-    backend, logs, _ = _backend(monkeypatch)
+def test_sdk_flush_does_not_block_observing_caller() -> None:
     entered, release = threading.Event(), threading.Event()
 
-    def flush(*, timeout_millis: int) -> None:
+    def flush(_timeout_millis: int) -> None:
         entered.set()
         assert release.wait(5)
 
-    monkeypatch.setattr(logs, "force_flush", flush)
+    backend, logs, _ = _backend(logs=_Provider(on_flush=flush))
     backend.export_batch([otlp_test_event()])
     try:
         started = time.monotonic()
@@ -114,26 +190,25 @@ def test_sdk_flush_does_not_block_observing_caller(monkeypatch: pytest.MonkeyPat
         assert not logs.closed.is_set()
     finally:
         release.set()
+        assert backend._worker is not None
         assert backend._worker.finished.wait(5)
         assert backend.shutdown().status is DrainStatus.COMPLETED
     assert logs.closed.is_set()
 
 
-def test_full_queue_stop_uses_same_worker_and_preserves_admitted_records(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend, logs, _ = _backend(monkeypatch)
-    backend._queue.maxsize = 1
+def test_full_queue_stop_uses_same_worker_and_preserves_admitted_records() -> None:
     entered, release = threading.Event(), threading.Event()
-    delivered: list[Any] = []
+    delivered: list[int] = []
 
-    def emit(event: Any) -> None:
+    def emit(record: Any) -> None:
         entered.set()
         assert release.wait(5)
-        delivered.append(event)
+        delivered.append(json.loads(record.body)["attributes"]["seq"])
 
-    monkeypatch.setattr(backend, "_emit_log", emit)
-    first, second, after_stop = otlp_test_event(), otlp_test_event(), otlp_test_event()
+    backend, logs, _ = _backend(logs=_Provider(on_emit=emit), queue_maxsize=1)
+    first = otlp_test_event(attributes={"seq": 1})
+    second = otlp_test_event(attributes={"seq": 2})
+    after_stop = otlp_test_event(attributes={"seq": 3})
     backend.export_batch([first])
     try:
         assert entered.wait(5)
@@ -144,179 +219,140 @@ def test_full_queue_stop_uses_same_worker_and_preserves_admitted_records(
         assert not logs.closed.is_set()
     finally:
         release.set()
+        assert backend._worker is not None
         assert backend._worker.finished.wait(5)
         assert backend.shutdown().status is DrainStatus.COMPLETED
-    assert delivered == [first, second]
+    assert delivered == [1, 2]
 
 
 def test_unknown_error_after_stop_is_immediate_and_same_owner_raises(
-    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: LogRecords,
 ) -> None:
-    backend, _, _ = _backend(monkeypatch)
-    entered, release, observed = threading.Event(), threading.Event(), threading.Event()
+    entered, release = threading.Event(), threading.Event()
     error = BaseException("unknown late initialization defect")
-    seen: list[BaseException] = []
 
-    def initialize(_worker: Any) -> bool:
+    def get_meter() -> object:
         entered.set()
         assert release.wait(5)
         raise error
 
-    def report(_message: str, **details: Any) -> None:
-        if "exc" in details:
-            seen.append(details["exc"])
-            observed.set()
-
-    monkeypatch.setattr(backend, "_initialize_worker", initialize)
-    monkeypatch.setattr(worker_module, "report_no_pipeline", report)
+    backend, _, _ = _backend(metrics=_Provider(on_get_meter=get_meter))
     worker = backend._get_worker()
+    assert worker is not None
     try:
         assert entered.wait(5)
         assert backend.shutdown(timeout=0.01).status is DrainStatus.UNFINISHED
-        assert not observed.is_set()
+        assert error not in _logged_exceptions(loguru_records)
         release.set()
-        assert observed.wait(5)
         assert worker.finished.wait(5)
-        assert seen == [error]
+        assert _logged_exceptions(loguru_records) == [error]
         with pytest.raises(BaseException) as raised:
             backend.shutdown()
-        assert raised.value is error
-        assert backend._worker is worker
+        assert raised.value is error and backend._worker is worker
     finally:
         release.set()
         worker._thread.join(timeout=5)
         assert not worker._thread.is_alive()
 
 
-def test_failed_sdk_build_keeps_partial_resources_until_owned_cleanup(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True)
-    logs, reader = _Provider(), _Provider()
+def test_failed_sdk_build_keeps_partial_resources_until_owned_cleanup() -> None:
     cleaning, release = threading.Event(), threading.Event()
 
     def close() -> None:
         cleaning.set()
         assert release.wait(5)
-        logs.closed.set()
 
-    def build(_endpoint: str, **receipts: Any) -> tuple[Any, Any]:
-        receipts["keep_logs"](logs)
-        receipts["keep_reader"](reader)
+    def fail_meter() -> object:
         raise RuntimeError("named SDK construction failure")
 
-    monkeypatch.setattr(logs, "shutdown", close)
-
-    def reachable(_endpoint: str) -> bool:
-        return True
-
-    monkeypatch.setattr(backend, "_endpoint_reachable", reachable)
-    monkeypatch.setattr(telemetry_otlp, "build_providers", build)
+    logs, metrics = _Provider(on_shutdown=close), _Provider(on_get_meter=fail_meter)
+    backend = telemetry_otlp.OtlpBackend(
+        export_allowed=lambda: True, enabled=lambda: True, providers=(logs, metrics)
+    )
     try:
         assert backend._ensure() is False
         assert cleaning.wait(5)
         worker = backend._worker
-        assert worker is not None
-        assert worker.logs is logs and worker.metric_reader is reader
+        assert worker is not None and worker.logs is logs and worker.metrics is metrics
         assert backend.shutdown(timeout=0.01).status is DrainStatus.UNFINISHED
-        assert not reader.closed.is_set()
+        assert not metrics.closed.is_set()
     finally:
         release.set()
         worker = backend._worker
-        assert worker is not None
-        assert worker.finished.wait(5)
+        assert worker is not None and worker.finished.wait(5)
         assert backend.shutdown().status is DrainStatus.COMPLETED
-    assert logs.closed.is_set() and reader.closed.is_set()
+    assert logs.closed.is_set() and metrics.closed.is_set()
 
 
-def test_shutdown_replays_deferred_metrics_before_logs_once(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend, _, _ = _backend(monkeypatch)
-    calls: list[tuple[str, Any]] = []
-
-    def record(event: Event) -> None:
-        calls.append(("metric", event))
-
-    def emit(event: Event) -> None:
-        calls.append(("log", event))
-
-    monkeypatch.setattr(backend, "_record_metrics", record)
-    monkeypatch.setattr(backend, "_emit_log", emit)
-    first, second = otlp_test_event(), otlp_test_event()
+def test_shutdown_replays_deferred_metrics_before_logs_once() -> None:
+    calls: list[tuple[str, int]] = []
+    logs = _Provider(
+        on_emit=lambda r: calls.append(("log", int(json.loads(r.body)["attributes"]["in_total"])))
+    )
+    metrics = _Provider(on_metric=lambda v: calls.append(("metric", int(v))))
+    backend, _, _ = _backend(logs=logs, metrics=metrics)
     backend.defer_until_exit()
-    backend.export_batch([first, second])
+    backend.export_batch(
+        [otlp_test_event(attributes={"in_total": 1}), otlp_test_event(attributes={"in_total": 2})]
+    )
     assert backend.shutdown().status is DrainStatus.COMPLETED
-    assert calls == [("metric", first), ("metric", second), ("log", first), ("log", second)]
+    assert calls == [("metric", 1), ("metric", 2), ("log", 1), ("log", 2)]
     assert backend.shutdown().status is DrainStatus.COMPLETED
     assert len(calls) == 4
 
 
-def test_disabled_nonempty_deferred_shutdown_does_not_start_sdk(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend, logs, metrics = _backend(monkeypatch)
+def test_disabled_nonempty_deferred_shutdown_does_not_start_sdk() -> None:
     reads: list[bool] = []
-    delivered: list[Event] = []
+    delivered: list[Any] = []
 
     def enabled_at_bringup() -> bool:
         reads.append(False)
         return False
 
-    monkeypatch.setattr(backend, "_enabled", enabled_at_bringup)
-    monkeypatch.setattr(backend, "_emit_log", delivered.append)
-    event = otlp_test_event()
+    backend, logs, metrics = _backend(
+        logs=_Provider(on_emit=delivered.append), enabled=enabled_at_bringup
+    )
     backend.defer_until_exit()
-    backend.export_batch([event])
+    backend.export_batch([otlp_test_event()])
     assert reads == []
     result = backend.shutdown()
-    assert reads == [False]
-    assert backend._closed.is_set()
-    assert backend._deferral.stop(timeout=5)
-    assert result.status is DrainStatus.UNFINISHED
-    assert backend._worker is None
-    assert backend._queue.qsize() == 1
-    assert delivered == []
-    assert not logs.flushed.is_set() and not logs.closed.is_set()
-    assert not metrics.closed.is_set()
+    assert reads == [False] and backend._closed.is_set()
+    assert backend._deferral.stop(timeout=5) and result.status is DrainStatus.UNFINISHED
+    assert backend._worker is None and backend._queue.qsize() == 1 and delivered == []
+    assert not logs.flushed.is_set() and not logs.closed.is_set() and not metrics.closed.is_set()
 
 
-def test_enabled_nonempty_deferred_shutdown_reads_flag_only_at_bringup(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend, logs, metrics = _backend(monkeypatch)
+def test_enabled_nonempty_deferred_shutdown_reads_flag_only_at_bringup() -> None:
     reads: list[bool] = []
-    delivered: list[Event] = []
+    delivered: list[int] = []
 
     def enabled_at_bringup() -> bool:
         reads.append(True)
         return True
 
-    monkeypatch.setattr(backend, "_enabled", enabled_at_bringup)
-    monkeypatch.setattr(backend, "_emit_log", delivered.append)
-    event = otlp_test_event()
+    backend, logs, metrics = _backend(
+        logs=_Provider(
+            on_emit=lambda r: delivered.append(int(json.loads(r.body)["attributes"]["seq"]))
+        ),
+        enabled=enabled_at_bringup,
+    )
     backend.defer_until_exit()
-    backend.export_batch([event])
-    assert reads == []
-    assert backend.shutdown().status is DrainStatus.COMPLETED
-    assert reads == [True]
-    assert backend._worker is not None
-    assert not backend._worker._thread.is_alive()
-    assert delivered == [event]
-    assert logs.closed.is_set() and metrics.closed.is_set()
+    backend.export_batch([otlp_test_event(attributes={"seq": 7})])
+    assert reads == [] and backend.shutdown().status is DrainStatus.COMPLETED
+    assert (
+        reads == [True] and backend._worker is not None and not backend._worker._thread.is_alive()
+    )
+    assert delivered == [7] and logs.closed.is_set() and metrics.closed.is_set()
 
 
 def test_primary_error_survives_blocked_secondary_cleanup(
-    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: LogRecords,
 ) -> None:
-    backend, logs, metrics = _backend(monkeypatch)
     primary = BaseException("original writer defect")
     secondary = BaseException("secondary SDK teardown defect")
     cleaning, release = threading.Event(), threading.Event()
-    seen: list[BaseException] = []
 
-    def initialize(worker: Any) -> bool:
-        worker.logs, worker.metrics = logs, metrics
+    def get_meter() -> object:
         raise primary
 
     def close() -> None:
@@ -324,24 +360,20 @@ def test_primary_error_survives_blocked_secondary_cleanup(
         assert release.wait(5)
         raise secondary
 
-    def report(_message: str, **details: Any) -> None:
-        seen.append(details["exc"])
-
-    monkeypatch.setattr(backend, "_initialize_worker", initialize)
-    monkeypatch.setattr(logs, "shutdown", close)
-    monkeypatch.setattr(worker_module, "report_no_pipeline", report)
+    backend, _logs, metrics = _backend(
+        logs=_Provider(on_shutdown=close), metrics=_Provider(on_get_meter=get_meter)
+    )
     worker = backend._get_worker()
+    assert worker is not None
     try:
         assert cleaning.wait(5)
-        assert seen[0] is primary
+        assert _logged_exceptions(loguru_records)[0] is primary
         with pytest.raises(BaseException) as raised:
             backend.shutdown(timeout=0.01)
-        assert raised.value is primary
-        assert worker._thread.is_alive()
+        assert raised.value is primary and worker._thread.is_alive()
         release.set()
         assert worker.finished.wait(5)
-        assert secondary in seen
-        assert metrics.closed.is_set()
+        assert secondary in _logged_exceptions(loguru_records) and metrics.closed.is_set()
         with pytest.raises(BaseException) as raised_again:
             backend.shutdown()
         assert raised_again.value is primary
@@ -352,52 +384,38 @@ def test_primary_error_survives_blocked_secondary_cleanup(
 
 
 def test_known_sdk_shutdown_failure_is_isolated_but_not_claimed_complete(
-    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: LogRecords,
 ) -> None:
-    backend, logs, metrics = _backend(monkeypatch)
-    names: list[str] = []
-
     def close() -> None:
         raise RuntimeError("named optional exporter cleanup failure")
 
-    def report(sink: str, _error: Exception) -> None:
-        names.append(sink)
-
-    monkeypatch.setattr(logs, "shutdown", close)
-    monkeypatch.setattr(reporting, "report_sink_failure", report)
+    backend, _logs, metrics = _backend(logs=_Provider(on_shutdown=close))
     assert backend._ensure()
     assert backend.shutdown().status is DrainStatus.UNFINISHED
+    assert backend._worker is not None
     assert backend._worker.finished.is_set()
     assert not backend._worker._thread.is_alive()
-    assert "otlp logs shutdown" in names
+    assert any("otlp logs shutdown" in r["message"] for r in loguru_records)
     assert metrics.closed.is_set()
     assert backend.shutdown().status is DrainStatus.UNFINISHED
 
 
-def test_deferral_completion_in_flight_cannot_close_providers_under_replay(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend, logs, _ = _backend(monkeypatch)
+def test_deferral_completion_in_flight_cannot_close_providers_under_replay() -> None:
     entered, release = threading.Event(), threading.Event()
-    calls: list[tuple[str, Event]] = []
-    original = backend._initialize_worker
+    calls: list[tuple[str, int]] = []
 
-    def initialize(worker: Any) -> bool:
+    def get_meter() -> object:
         entered.set()
         assert release.wait(5)
-        return original(worker)
+        return _Meter(lambda v: calls.append(("metric", int(v))))
 
-    def record(event: Event) -> None:
-        calls.append(("metric", event))
-
-    def emit(event: Event) -> None:
-        calls.append(("log", event))
-
-    monkeypatch.setattr(backend, "_initialize_worker", initialize)
-    monkeypatch.setattr(backend, "_record_metrics", record)
-    monkeypatch.setattr(backend, "_emit_log", emit)
+    logs = _Provider(
+        on_emit=lambda r: calls.append(("log", int(json.loads(r.body)["attributes"]["in_total"])))
+    )
+    metrics = _Provider(on_get_meter=get_meter)
+    backend, _, _ = _backend(logs=logs, metrics=metrics)
     backend.defer_until_exit()
-    event = otlp_test_event()
+    event = otlp_test_event(attributes={"in_total": 5})
     backend.export_batch([event])
     caller = threading.Thread(target=backend.finalize)
     caller.start()
@@ -408,29 +426,33 @@ def test_deferral_completion_in_flight_cannot_close_providers_under_replay(
         assert not caller.is_alive()
         assert not logs.closed.is_set()
         release.set()
+        assert backend._worker is not None
         assert backend._worker.finished.wait(5)
         assert backend.shutdown().status is DrainStatus.COMPLETED
-        assert calls == [("metric", event), ("log", event)]
+        assert calls == [("metric", 5), ("log", 5)]
     finally:
         release.set()
         caller.join(timeout=5)
+        assert backend._worker is not None
         backend._worker._thread.join(timeout=5)
         assert not caller.is_alive() and not backend._worker._thread.is_alive()
 
 
-def test_admitted_metric_call_retains_provider_until_it_finishes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend, logs, metrics = _backend(monkeypatch)
+def test_admitted_metric_call_retains_provider_until_it_finishes() -> None:
     entered, release = threading.Event(), threading.Event()
+    metrics: _Provider
 
-    def record(_event: Event) -> None:
+    def record_metric(_value: int | float) -> None:
         entered.set()
         assert release.wait(5)
         assert not metrics.closed.is_set()
 
-    monkeypatch.setattr(backend, "_record_metrics", record)
-    caller = threading.Thread(target=backend.export_batch, args=([otlp_test_event()],))
+    metrics = _Provider(on_metric=record_metric)
+    backend, logs, _ = _backend(metrics=metrics)
+    caller = threading.Thread(
+        target=backend.export_batch,
+        args=([otlp_test_event(attributes={"in_total": 1})],),
+    )
     caller.start()
     try:
         assert entered.wait(5)
@@ -438,95 +460,93 @@ def test_admitted_metric_call_retains_provider_until_it_finishes(
         assert not logs.closed.is_set() and not metrics.closed.is_set()
         release.set()
         caller.join(timeout=5)
+        assert backend._worker is not None
         assert backend._worker.finished.wait(5)
         assert backend.shutdown().status is DrainStatus.COMPLETED
         assert logs.closed.is_set() and metrics.closed.is_set()
     finally:
         release.set()
         caller.join(timeout=5)
+        assert backend._worker is not None
         backend._worker._thread.join(timeout=5)
         assert not caller.is_alive() and not backend._worker._thread.is_alive()
 
 
-def test_real_sdk_partial_build_threads_are_owned_and_closed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from base.telemetry.otlp import telemetry_otlp_metrics
+def test_real_sdk_partial_build_threads_are_owned_and_closed(tmp_path: Path) -> None:
+    server = http.server.HTTPServer(("127.0.0.1", 0), _OkProbeHandler)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    try:
+        port = server.server_address[1]
+        backend = telemetry_otlp.OtlpBackend(
+            export_allowed=lambda: True,
+            enabled=lambda: True,
+            endpoint=f"http://127.0.0.1:{port}",
+            home=tmp_path / "missing-home",
+        )
+        assert backend._ensure() is False
+        worker = backend._worker
+        assert worker is not None
+        assert worker.finished.wait(5)
+        assert worker.logs is not None and worker.metric_reader is not None
+        assert worker.metrics is None
+        processor = worker.logs._multi_log_record_processor._log_record_processors[0]
+        assert not processor._batch_processor._worker_thread.is_alive()
+        assert not worker.metric_reader._daemon_thread.is_alive()
+        assert backend.shutdown().status is DrainStatus.COMPLETED
+    finally:
+        server.shutdown()
+        server.server_close()
 
-    backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True)
 
-    def reachable(_endpoint: str) -> bool:
-        return True
-
-    def resource() -> None:
-        raise RuntimeError("failure after real log processor and metric reader creation")
-
-    monkeypatch.setattr(backend, "_endpoint_reachable", reachable)
-    monkeypatch.setattr(telemetry_otlp_metrics, "metrics_resource", resource)
-    assert backend._ensure() is False
-    worker = backend._worker
-    assert worker is not None
-    assert worker.finished.wait(5)
-    assert worker.logs is not None and worker.metric_reader is not None
-    assert worker.metrics is None
-    processor = worker.logs._multi_log_record_processor._log_record_processors[0]
-    assert not processor._batch_processor._worker_thread.is_alive()
-    assert not worker.metric_reader._daemon_thread.is_alive()
-    assert backend.shutdown().status is DrainStatus.COMPLETED
-
-
-def test_failed_teardown_owner_is_not_overwritten_at_retry_deadline(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True)
-    logs = _Provider()
-    attempts: list[str] = []
-
-    def reachable(_endpoint: str) -> bool:
-        return True
-
-    def build(endpoint: str, **receipts: Any) -> tuple[Any, Any]:
-        attempts.append(endpoint)
-        receipts["keep_logs"](logs)
-        raise RuntimeError("named SDK init failure")
+def test_failed_teardown_owner_is_not_overwritten_at_retry_deadline() -> None:
+    attempts: list[int] = []
 
     def close() -> None:
         raise RuntimeError("SDK cannot close the half-built resource")
 
-    monkeypatch.setattr(backend, "_endpoint_reachable", reachable)
-    monkeypatch.setattr(telemetry_otlp, "build_providers", build)
-    monkeypatch.setattr(logs, "shutdown", close)
+    def fail_meter() -> object:
+        attempts.append(len(attempts) + 1)
+        raise RuntimeError("named SDK init failure")
+
+    logs = _Provider(on_shutdown=close)
+    metrics = _Provider(on_get_meter=fail_meter)
+    backend = telemetry_otlp.OtlpBackend(
+        export_allowed=lambda: True,
+        enabled=lambda: True,
+        retry_interval_s=0.05,
+        providers=(logs, metrics),
+    )
     assert backend._ensure() is False
     worker = backend._worker
     assert worker is not None
     assert worker.finished.wait(5)
     assert backend._init_failed_at is not None
-    backend._init_failed_at -= telemetry_otlp.COLLECTOR_RETRY_INTERVAL_S
+    time.sleep(0.06)
     assert backend._ensure() is False
     assert backend._worker is worker
     assert len(attempts) == 1
     assert backend.shutdown().status is DrainStatus.UNFINISHED
 
 
-def test_unknown_failed_attempt_still_closes_deferred_admission_and_clock(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend, _, _ = _backend(monkeypatch)
+def test_unknown_failed_attempt_still_closes_deferred_admission_and_clock() -> None:
     error = BaseException("failed attempt before deferred stop")
 
-    def initialize(_worker: Any) -> bool:
+    def fail_meter() -> object:
         raise error
 
+    backend, _, _ = _backend(metrics=_Provider(on_get_meter=fail_meter))
     backend.defer_until_exit()
     backend.export_batch([otlp_test_event()])
-    monkeypatch.setattr(backend, "_initialize_worker", initialize)
     worker = backend._get_worker()
+    assert worker is not None
     assert worker.finished.wait(5)
     try:
         with pytest.raises(BaseException) as raised:
             backend.shutdown(timeout=0.01)
         assert raised.value is error
         assert backend._closed.is_set()
+        assert backend._deferral._clock is not None
         assert backend._deferral._clock.finished.is_set()
     finally:
         assert backend._deferral.stop(timeout=5)
@@ -562,15 +582,8 @@ def test_stop_refuses_non_finite_and_negative_timeout() -> None:
     assert pipeline.stopped
 
 
-def test_unfinished_ordinary_writer_keeps_its_exporter_alive(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend, logs, metrics = _backend(monkeypatch)
-
-    def build_backend(**_inputs: object) -> telemetry_otlp.OtlpBackend:
-        return backend
-
-    monkeypatch.setattr(telemetry_otlp_exporting, "OtlpBackend", build_backend)
+def test_unfinished_ordinary_writer_keeps_its_exporter_alive() -> None:
+    backend, logs, metrics = _backend()
     entered, release = threading.Event(), threading.Event()
 
     def write(_events: list[Event], _exporter: Any) -> None:
@@ -578,7 +591,7 @@ def test_unfinished_ordinary_writer_keeps_its_exporter_alive(
         assert release.wait(5)
 
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=write, export_allowed=lambda: True
+        writer=write, export_allowed=lambda: True, exporter=backend
     )
     assert backend._ensure()
     pipeline.enqueue(otlp_test_event())
@@ -596,26 +609,16 @@ def test_unfinished_ordinary_writer_keeps_its_exporter_alive(
     assert logs.closed.is_set() and metrics.closed.is_set()
 
 
-def test_unfinished_exporter_keeps_pipeline_for_later_observation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend, logs, metrics = _backend(monkeypatch)
-
-    def build_backend(**_inputs: object) -> telemetry_otlp.OtlpBackend:
-        return backend
-
-    monkeypatch.setattr(telemetry_otlp_exporting, "OtlpBackend", build_backend)
+def test_unfinished_exporter_keeps_pipeline_for_later_observation() -> None:
     entered, release = threading.Event(), threading.Event()
-    original = logs.shutdown
 
     def close() -> None:
         entered.set()
         assert release.wait(5)
-        original()
 
-    monkeypatch.setattr(logs, "shutdown", close)
+    backend, logs, metrics = _backend(logs=_Provider(on_shutdown=close))
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=lambda _events, _exporter: None, export_allowed=lambda: True
+        writer=lambda _events, _exporter: None, export_allowed=lambda: True, exporter=backend
     )
     assert backend._ensure()
     try:
@@ -644,11 +647,10 @@ def test_two_stage_stop_hands_stage_two_the_real_remaining_time() -> None:
         time.sleep(writer_sleep)
         writer_done.append(time.monotonic())
 
+    backend, _, _ = _backend(logs=logs, metrics=metrics)
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=write, export_allowed=lambda: True
+        writer=write, export_allowed=lambda: True, exporter=backend
     )
-    backend = pipeline._exporter
-    backend._providers = (logs, metrics)
     assert backend._ensure()
     pipeline.enqueue(otlp_test_event())
     assert writer_started.wait(5)
@@ -700,11 +702,10 @@ def test_blocked_writer_and_blocked_exporter_release_in_stages() -> None:
         writer_started.set()
         assert release_writer.wait(5)
 
+    backend, _, _ = _backend(logs=logs, metrics=metrics)
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=write, export_allowed=lambda: True
+        writer=write, export_allowed=lambda: True, exporter=backend
     )
-    backend = pipeline._exporter
-    backend._providers = (logs, metrics)
     assert backend._ensure()
     pipeline.enqueue(otlp_test_event())
     assert writer_started.wait(5)
@@ -738,11 +739,10 @@ def test_stop_from_the_writer_thread_is_refused() -> None:
 
 def test_concurrent_stop_calls_share_the_blocked_observation() -> None:
     logs, metrics = _BlockingProvider(), _Provider()
+    backend, _, _ = _backend(logs=logs, metrics=metrics)
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=lambda _events, _exporter: None, export_allowed=lambda: True
+        writer=lambda _events, _exporter: None, export_allowed=lambda: True, exporter=backend
     )
-    backend = pipeline._exporter
-    backend._providers = (logs, metrics)
     assert backend._ensure()
     results: list[DrainResult] = []
     failures: list[BaseException] = []
@@ -771,11 +771,19 @@ def test_concurrent_stop_calls_share_the_blocked_observation() -> None:
 
 def test_close_time_gate_fault_raises_after_the_finite_observation() -> None:
     logs, metrics = _BlockingProvider(), _Provider()
-    backend = _CloseGateFaultBackend(export_allowed=lambda: True, providers=(logs, metrics))
+    fail_on_close = False
+
+    def enabled_gate() -> bool:
+        if fail_on_close:
+            raise RuntimeError("close-time eligibility read failed")
+        return True
+
+    backend, _, _ = _backend(logs=logs, metrics=metrics, enabled=enabled_gate)
     backend.defer_until_exit()
     backend.export_batch([otlp_test_event()])
     assert backend._deferral.is_active()
     assert backend._ensure()
+    fail_on_close = True
     started = time.monotonic()
     with pytest.raises(RuntimeError) as raised:
         backend.shutdown(timeout=0.3)
@@ -785,6 +793,7 @@ def test_close_time_gate_fault_raises_after_the_finite_observation() -> None:
     assert backend._worker is not None
     assert backend._worker._thread.is_alive()
     logs.release.set()
+    fail_on_close = False
     assert backend.shutdown().status is DrainStatus.COMPLETED
     assert backend._worker is not None
     assert not backend._worker._thread.is_alive()

@@ -41,6 +41,8 @@ class TraceConfig:
     max_dir_mb: int
     disk_watermark: float
     endpoint_explicit: bool
+    retry_interval_s: float = 300.0
+    gzip_grace_s: int | None = None
 
     # meiva:note
     # The recording config of a process's observability settings.

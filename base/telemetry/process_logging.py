@@ -30,6 +30,7 @@ __all__ = [
     "event_sink",
     "init_cli_process",
     "init_gateway_process",
+    "reset_info_sample_counter",
 ]
 
 # The one host-stall companion whose EVENT level is rewritten: psycopg logs
@@ -179,6 +180,13 @@ def event_sink(
 # Level-graded sampling for bare INFO `log` records (task #1637).
 _LOG_INFO_SAMPLE_EVERY = 10
 log_info_sample_counter = itertools.count()
+
+
+# meiva:note
+# Reset the bare-INFO sampling counter for deterministic test isolation.
+def reset_info_sample_counter() -> None:
+    global log_info_sample_counter  # noqa: PLW0603
+    log_info_sample_counter = itertools.count()
 
 
 def event_pipeline_filter(record: loguru.Record) -> bool:

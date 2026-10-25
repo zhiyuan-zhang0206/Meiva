@@ -11,16 +11,14 @@ from opentelemetry.sdk._logs import ReadableLogRecord
 from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter, LogRecordExportResult
 
 from base.telemetry.delivery.receipts import Event as TelemetryEvent
-from base.telemetry.otlp import telemetry_otlp, telemetry_otlp_exporting
+from base.telemetry.otlp import telemetry_otlp
 
 # A bounded handshake allows close telemetry to drain on a loaded runner.
 HANDSHAKE_BOUND_S = 30.0
 
 
 @pytest.fixture
-def paused_otlp_record(
-    monkeypatch: pytest.MonkeyPatch,
-) -> Iterator[tuple[Event, InMemoryLogRecordExporter]]:
+def paused_otlp_record() -> Iterator[tuple[Event, InMemoryLogRecordExporter]]:
     """Pause an already-dequeued real record until the caller releases its flush."""
     from opentelemetry.sdk._logs import LoggerProvider
     from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter, SimpleLogRecordProcessor
@@ -45,11 +43,6 @@ def paused_otlp_record(
         enabled=lambda: True,
         providers=(logger_provider, MeterProvider(metric_readers=[InMemoryMetricReader()])),
     )
-
-    def build_backend(**_inputs: object) -> telemetry_otlp.OtlpBackend:
-        return backend
-
-    monkeypatch.setattr(telemetry_otlp_exporting, "OtlpBackend", build_backend)
     backend.export_batch(
         [
             TelemetryEvent(
@@ -71,7 +64,8 @@ def paused_otlp_record(
     )
     try:
         assert paused.wait(HANDSHAKE_BOUND_S), "OTLP worker did not dequeue the tail record"
-        yield release, exporter
+        with telemetry_otlp.bind_exporter(backend):
+            yield release, exporter
     finally:
         release.set()
         backend.shutdown()

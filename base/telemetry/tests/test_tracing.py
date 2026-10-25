@@ -2,37 +2,88 @@
 
 from __future__ import annotations
 
-import os
+import http.server
+import socket
 import threading
-from collections.abc import Callable
+from collections.abc import Iterator
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from base import config
-from base.cluster import derive
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.telemetry import tracing as tracing_mod
-from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.otlp.trace_config import TraceConfig
 from base.telemetry.otlp.trace_readiness import TraceReadiness
-from base.telemetry.tests.otlp.identity_inputs import (
-    allow_identity,
-    deny_identity,
-    machine_identity,
-)
+from base.telemetry.tests.otlp.identity_inputs import machine_identity
 from base.telemetry.tracing import (
     OtlpJsonHttpSpanExporter,
     initialize_tracing,
 )
 
 
-@pytest.fixture(autouse=True)
-def production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity, raising=False)
+# meiva:note
+# Loopback HTTP collector recording OTLP trace POSTs.
+class CollectorStubServer:
+    def __init__(self, host: str = "127.0.0.1", port: int = 0) -> None:
+        self.posts: list[tuple[str, bytes, dict[str, str]]] = []
+        self.status_sequence: list[int] = []
+        self.block_event: threading.Event | None = None
+        self._cond = threading.Condition()
+        self._in_flight = 0
+        owner = self
+
+        class _Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                with owner._cond:
+                    owner._in_flight += 1
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    body = self.rfile.read(length) if length > 0 else b""
+                    headers = dict(self.headers.items())
+                    owner.posts.append((f"{owner.endpoint}{self.path}", body, headers))
+                    if owner.block_event is not None:
+                        owner.block_event.wait(timeout=2.0)
+                    status = owner.status_sequence.pop(0) if owner.status_sequence else 200
+                    self.send_response(status)
+                    self.end_headers()
+                    self.wfile.write(b"{}")
+                finally:
+                    with owner._cond:
+                        owner._in_flight -= 1
+                        if owner._in_flight == 0:
+                            owner._cond.notify_all()
+
+            def log_message(self, format: str, *args: object) -> None:
+                pass
+
+        self._server = http.server.ThreadingHTTPServer((host, port), _Handler)
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    def reset(self) -> None:
+        if self.block_event is not None:
+            self.block_event.set()
+        with self._cond:
+            self._cond.wait_for(lambda: self._in_flight == 0, timeout=2.0)
+        self.posts.clear()
+        self.status_sequence.clear()
+        self.block_event = None
+
+    @property
+    def endpoint(self) -> str:
+        host, port = self._server.server_address[:2]
+        return f"http://{host}:{port}"
+
+    def close(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(timeout=2.0)
+
+
+_shared_collector_server: CollectorStubServer | None = None
+_active_collector_endpoint: str = "http://127.0.0.1:4318"
 
 
 # meiva:note
@@ -41,20 +92,24 @@ def trace_config(
     *,
     enabled: bool = True,
     strip_content: bool = True,
-    endpoint: str = "http://127.0.0.1:4318",
+    endpoint: str | None = None,
     retention_days: int = 3,
     max_dir_mb: int = 2048,
-    disk_watermark: float = 0.9,
+    disk_watermark: float = 1.0,
     endpoint_explicit: bool = False,
+    retry_interval_s: float = 300.0,
+    gzip_grace_seconds: int = 60,
 ) -> TraceConfig:
     return TraceConfig(
         enabled=enabled,
         strip_content=strip_content,
-        endpoint=endpoint,
+        endpoint=_active_collector_endpoint if endpoint is None else endpoint,
         retention_days=retention_days,
         max_dir_mb=max_dir_mb,
         disk_watermark=disk_watermark,
         endpoint_explicit=endpoint_explicit,
+        retry_interval_s=retry_interval_s,
+        gzip_grace_s=gzip_grace_seconds,
     )
 
 
@@ -90,19 +145,12 @@ def trace_readiness() -> TraceReadiness:
 
 
 @pytest.fixture(autouse=True)
-def reset_trace_workers(monkeypatch: pytest.MonkeyPatch, trace_readiness: TraceReadiness):
-    monkeypatch.setenv("TRACELOOP_TRACE_CONTENT", "")
+def reset_trace_workers(trace_readiness: TraceReadiness) -> Iterator[None]:
     _assert_no_background_trace_threads()
-    tracing_mod.state.clear()
-    tracing_mod.state.update(
-        closed=False, collector_offline_reported=False, retry_owner=None, arm_owner=None
-    )
+    tracing_mod.reset_tracing_state()
     yield
     _drain_background_trace_threads(trace_readiness=trace_readiness)
-    tracing_mod.state.clear()
-    tracing_mod.state.update(
-        closed=False, collector_offline_reported=False, retry_owner=None, arm_owner=None
-    )
+    tracing_mod.reset_tracing_state()
 
 
 def wait_init_resolved(timeout: float = 5.0, *, trace_readiness: TraceReadiness) -> None:
@@ -112,26 +160,31 @@ def wait_init_resolved(timeout: float = 5.0, *, trace_readiness: TraceReadiness)
     assert trace_readiness.resolved, "background trace attempt did not resolve"
 
 
+# meiva:note
+# Share a loopback HTTP collector across tests, resetting its state per test.
 @pytest.fixture(autouse=True)
-def collector_up(monkeypatch: pytest.MonkeyPatch):
-    """The local-collector preflight must pass by default — the tests exercise
-    the exporter/init logic, not the network probe (which is covered by its own
-    telemetry_otlp tests)."""
-    monkeypatch.setattr(
-        tracing_mod,
-        "endpoint_reachable",
-        lambda _e: True,  # pyright: ignore[reportUnknownArgumentType]
-    )
+def collector_up() -> Iterator[CollectorStubServer]:
+    global _active_collector_endpoint, _shared_collector_server  # noqa: PLW0603
+    if _shared_collector_server is None:
+        _shared_collector_server = CollectorStubServer()
+    _shared_collector_server.reset()
+    previous = _active_collector_endpoint
+    _active_collector_endpoint = _shared_collector_server.endpoint
+    try:
+        yield _shared_collector_server
+    finally:
+        _active_collector_endpoint = previous
+        _shared_collector_server.reset()
 
 
-def test_disabled_returns_early(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
-):
+def test_disabled_returns_early(tmp_path: Path, *, trace_readiness: TraceReadiness) -> None:
     """When trace_enabled=False, initialize_tracing returns None and does not init the SDK."""
+    home = tmp_path / ".meiva"
+    home.mkdir()
     assert (
         initialize_tracing(
             machine=machine_identity(),
-            home=tmp_path,
+            home=home,
             config=trace_config(enabled=False),
             readiness=trace_readiness,
         )
@@ -140,65 +193,46 @@ def test_disabled_returns_early(
     assert trace_readiness.ready is False
 
 
-def fixed_disk_usage(fraction: float, free: int) -> Callable[..., tuple[float, int]]:
-    """A `disk_usage` stand-in that reports one reading whatever directory it is asked about."""
-
-    def disk_usage(*, traces_dir: Path) -> tuple[float, int]:
-        _ = traces_dir
-        return fraction, free
-
-    return disk_usage
-
-
 def warned_fields(records: LogRecords) -> list[dict[str, Any]]:
     """The structured fields of every WARNING logged so far, in order (the tracing module tags
     its warnings with `action=` and the details of the episode)."""
     return [r["extra"] for r in records if r["level"].name == "WARNING"]
 
 
-def under_watermark(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Disk usage below the watermark: initialize_tracing's auto-degrade guard
-    must not skip recording in tests (the dev disk can be >90% full and would
-    otherwise make every init-path test environment-dependent)."""
-    monkeypatch.setattr(tracing_mod, "disk_usage", fixed_disk_usage(0.1, 100 * 1024**3))
-
-
 def test_enabled_inits_traceloop_with_otlp_exporter(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
-):
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    collector_up: CollectorStubServer,
+    *,
+    trace_readiness: TraceReadiness,
+) -> None:
     """trace_enabled=True: Traceloop.init is handed an OtlpJsonHttpSpanExporter
     pointed at the LOCAL collector as the sole exporter (no api_endpoint/api_key
     network sink), batch on, traceloop's own telemetry off, plus the instruments
     set covering Anthropic/OpenAI/LangChain/Google."""
-    monkeypatch.setattr(
-        config.settings.observability,
-        "telemetry_otlp_endpoint",
-        "http://127.0.0.1:4318",
-    )
+    home = tmp_path / ".meiva-test"
+    home.mkdir()
 
-    def label(_home: Path | None = None) -> str:
-        return ".meiva-test"
-
-    monkeypatch.setattr(tracing_mod, "cluster_label", label)
-    monkeypatch.setattr(derive, "production_identity", deny_identity)
-    under_watermark(monkeypatch)
-
-    calls: list[dict] = []
+    calls: list[dict[str, Any]] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     initialize_tracing(
         machine=machine_identity(),
-        home=tmp_path,
-        config=trace_config(enabled=True),
+        home=home,
+        config=trace_config(
+            enabled=True,
+            endpoint=collector_up.endpoint,
+            endpoint_explicit=True,
+        ),
         readiness=trace_readiness,
     )
     wait_init_resolved(trace_readiness=trace_readiness)
 
-    assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert len(calls) == 1
     kw = calls[0]
     exporter = kw["exporter"]
     assert isinstance(exporter, OtlpJsonHttpSpanExporter)
-    assert exporter._endpoint == "http://127.0.0.1:4318/v1/traces"
+    assert exporter._endpoint == f"{collector_up.endpoint}/v1/traces"
     assert "api_endpoint" not in kw  # no SDK-level network sink; the exporter owns the POST
     assert "api_key" not in kw
     assert kw["telemetry_enabled"] is False
@@ -223,10 +257,8 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
 def test_gateway_trace_recording_skips_without_lgtm_marker(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
 ) -> None:
-    home = tmp_path / ".meiva-preview"
+    home = tmp_path / ".meiva"
     home.mkdir()
-    monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity)
-    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
 
     calls: list[dict[str, object]] = []
 
@@ -250,11 +282,7 @@ def test_gateway_trace_recording_arms_with_lgtm_marker(
     home = tmp_path / ".meiva"
     home.mkdir()
     (home / "lgtm-host").touch()
-    monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity)
-    monkeypatch.setattr(derive, "production_identity", allow_identity)
-    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
 
-    under_watermark(monkeypatch)
     calls: list[dict[str, object]] = []
 
     def record_init(**kw: object) -> None:
@@ -282,20 +310,21 @@ def test_sdk_initialize_failure_logs_and_state_unchanged(
     loguru_records: LogRecords,
     *,
     trace_readiness: TraceReadiness,
-):
+) -> None:
     # meiva:note
     # If Traceloop.init() itself raises on the arm thread, the failure is
     # logged (not propagated — tracing is observability, not a boot blocker),
     # readiness remains false, and the wait resolves so turns still run.
-    under_watermark(monkeypatch)
+    home = tmp_path / ".meiva"
+    home.mkdir()
 
-    def _raise(**_kw):
+    def _raise(**_kw: object) -> None:
         raise RuntimeError("boom: init failed")
 
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", _raise)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", _raise)
     initialize_tracing(
         machine=machine_identity(),
-        home=tmp_path,
+        home=home,
         config=trace_config(enabled=True),
         readiness=trace_readiness,
     )  # must not raise: the failure is the arm thread's
@@ -310,11 +339,12 @@ def test_sdk_initialize_failure_logs_and_state_unchanged(
 
 def test_arm_failure_blocks_rearming(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
-):
+) -> None:
     """One arm attempt per process: after a failed init, a later call (e.g. a
     collector-retry re-entry) must NOT run Traceloop.init again — the
     TracerWrapper singleton would fake-succeed without the instrumentors."""
-    under_watermark(monkeypatch)
+    home = tmp_path / ".meiva"
+    home.mkdir()
 
     calls: list[int] = []
 
@@ -326,7 +356,7 @@ def test_arm_failure_blocks_rearming(
 
     initialize_tracing(
         machine=machine_identity(),
-        home=tmp_path,
+        home=home,
         config=trace_config(enabled=True),
         readiness=trace_readiness,
     )
@@ -335,7 +365,7 @@ def test_arm_failure_blocks_rearming(
 
     initialize_tracing(
         machine=machine_identity(),
-        home=tmp_path,
+        home=home,
         config=trace_config(enabled=True),
         readiness=trace_readiness,
     )  # must be a no-op, not a second arming attempt
@@ -345,27 +375,28 @@ def test_arm_failure_blocks_rearming(
 
 def test_idempotent_second_call_is_noop(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
-):
+) -> None:
     """Second call within the same process does not re-initialize."""
-    under_watermark(monkeypatch)
-    calls: list[dict] = []
+    home = tmp_path / ".meiva"
+    home.mkdir()
+    calls: list[dict[str, Any]] = []
     monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     initialize_tracing(
         machine=machine_identity(),
-        home=tmp_path,
+        home=home,
         config=trace_config(enabled=True),
         readiness=trace_readiness,
     )
     initialize_tracing(
         machine=machine_identity(),
-        home=tmp_path,
+        home=home,
         config=trace_config(enabled=True),
         readiness=trace_readiness,
     )
     wait_init_resolved(trace_readiness=trace_readiness)
 
-    assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert len(calls) == 1
 
 
 def test_collector_unreachable_retries_once_until_init_succeeds(
@@ -377,18 +408,14 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
 ) -> None:
     """One daemon loop retries a collector-unreachable preflight, logs the
     episode once, and exits after tracing initializes."""
-    monkeypatch.setattr(tracing_mod, "COLLECTOR_RETRY_INTERVAL_S", 0.1)
-    under_watermark(monkeypatch)
+    home = tmp_path / ".meiva"
+    home.mkdir()
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    endpoint = f"http://127.0.0.1:{port}"
+    cfg = trace_config(enabled=True, endpoint=endpoint, retry_interval_s=0.05)
 
-    reachable = iter((False, False, True))
-    attempts: list[bool] = []
-
-    def endpoint_reachable(_endpoint: str) -> bool:
-        result = next(reachable)
-        attempts.append(result)
-        return result
-
-    monkeypatch.setattr(tracing_mod, "endpoint_reachable", endpoint_reachable)
     initialized = threading.Event()
 
     def init_traceloop(**_kwargs: object) -> None:
@@ -398,8 +425,8 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
 
     initialize_tracing(
         machine=machine_identity(),
-        home=tmp_path,
-        config=trace_config(enabled=True),
+        home=home,
+        config=cfg,
         readiness=trace_readiness,
     )
     retry_thread = tracing_mod.state["retry_owner"]._thread
@@ -407,16 +434,20 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
 
     initialize_tracing(
         machine=machine_identity(),
-        home=tmp_path,
-        config=trace_config(enabled=True),
+        home=home,
+        config=cfg,
         readiness=trace_readiness,
     )
     assert tracing_mod.state["retry_owner"]._thread is retry_thread
-    assert initialized.wait(timeout=1.0)
-    retry_thread.join(timeout=0.5)
-    wait_init_resolved(trace_readiness=trace_readiness)
 
-    assert attempts == [False, False, True]
+    late_server = CollectorStubServer(port=port)
+    try:
+        assert initialized.wait(timeout=2.0)
+        retry_thread.join(timeout=1.0)
+        wait_init_resolved(trace_readiness=trace_readiness)
+    finally:
+        late_server.close()
+
     assert loguru_records.messages("WARNING") == [
         "trace recording disabled — local OTel collector not answering"
     ]
@@ -427,12 +458,13 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
 
 def test_arming_runs_off_the_caller_thread(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
-):
+) -> None:
     # meiva:note
     # The heavy part never blocks the boot path: initialize_tracing returns
     # while Traceloop.init is still pending (the mock blocks until released),
     # and shared recording readiness is what use sites wait on.
-    under_watermark(monkeypatch)
+    home = tmp_path / ".meiva"
+    home.mkdir()
 
     entered = threading.Event()
     release = threading.Event()
@@ -445,7 +477,7 @@ def test_arming_runs_off_the_caller_thread(
 
     initialize_tracing(
         machine=machine_identity(),
-        home=tmp_path,
+        home=home,
         config=trace_config(enabled=True),
         readiness=trace_readiness,
     )  # returns immediately — the mock is still blocked
@@ -459,14 +491,15 @@ def test_arming_runs_off_the_caller_thread(
 
 def test_teardown_drains_pending_arm_thread(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
-):
+) -> None:
     """A test body that returns while the arm thread is still in flight must
     not leave a zombie behind: its delayed Traceloop.init would then land in
     the NEXT test's monkeypatched lambda (counted as a second init — the
     #1065 delta attempt 1 flake). This test only has to leave one in flight;
     the reset_tracing_init_flag teardown has to drain it, and the setup boundary
     check turns a leftover into a deterministic failure."""
-    under_watermark(monkeypatch)
+    home = tmp_path / ".meiva"
+    home.mkdir()
 
     release = threading.Event()
 
@@ -477,7 +510,7 @@ def test_teardown_drains_pending_arm_thread(
 
     initialize_tracing(
         machine=machine_identity(),
-        home=tmp_path,
+        home=home,
         config=trace_config(enabled=True),
         readiness=trace_readiness,
     )
@@ -520,19 +553,7 @@ def test_shared_recording_read_has_a_bounded_wait(trace_readiness: TraceReadines
 # --- turn_span placeholder-root export timing (#1964) ------------------------------
 
 
-def capture_otlp_json_posts(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, bytes, dict]]:
-    """Route `httpx.post` into a list so exported OTLP/JSON batches can be decoded."""
-    posts: list[tuple[str, bytes, dict]] = []
-
-    def _post(url, *, content, headers, timeout):
-        posts.append((url, content, headers))  # pyright: ignore[reportUnknownMemberType]
-        return SimpleNamespace(raise_for_status=lambda: None)
-
-    monkeypatch.setattr("httpx.post", _post)  # pyright: ignore[reportUnknownArgumentType]
-    return posts
-
-
-def spans_received(posts: list[tuple[str, bytes, dict]]) -> list[Any]:
+def spans_received(posts: list[tuple[str, bytes, dict[str, str]]]) -> list[Any]:
     from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
         ExportTraceServiceRequest,
     )

@@ -7,6 +7,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 
 from base.log import logger
 from base.telemetry.delivery.mirror import append_jsonl
@@ -84,6 +85,10 @@ def report_loss(
 class _ExporterDropFilter(logging.Filter):
     """Observe the pinned OTel SDK's queue-overflow warning at the source."""
 
+    def __init__(self, *, mirror_dir: Path | None = None) -> None:
+        super().__init__()
+        self._mirror_dir = mirror_dir
+
     def filter(self, record: logging.LogRecord) -> bool:
         if record.msg != "Queue full, dropping %s.":
             return True
@@ -111,7 +116,7 @@ class _ExporterDropFilter(logging.Filter):
                 "otel-sdk",
                 record_metric=pipeline.record_export_loss if pipeline is not None else None,
             )
-            append_jsonl([report])
+            append_jsonl([report], target_dir=self._mirror_dir)
         except Exception as exc:
             _stderr(f"ERROR: OTel SDK queue-overflow loss could not be recorded: {exc!r}")
         # The replacement error already reached local sinks. Re-exporting the
@@ -119,9 +124,13 @@ class _ExporterDropFilter(logging.Filter):
         return False
 
 
-def install_exporter_drop_observer() -> None:
+def install_exporter_drop_observer(*, mirror_dir: Path | None = None) -> None:
     """Attach once before constructing providers, including standalone SDK processes."""
     sdk_logger = logging.getLogger("opentelemetry.sdk._shared_internal")
-    if not any(isinstance(item, _ExporterDropFilter) for item in sdk_logger.filters):
-        # Run before OTel's DuplicateFilter: every lost record must count.
-        sdk_logger.filters.insert(0, _ExporterDropFilter())
+    for item in sdk_logger.filters:
+        if isinstance(item, _ExporterDropFilter):
+            if mirror_dir is not None:
+                item._mirror_dir = mirror_dir
+            return
+    # Run before OTel's DuplicateFilter: every lost record must count.
+    sdk_logger.filters.insert(0, _ExporterDropFilter(mirror_dir=mirror_dir))

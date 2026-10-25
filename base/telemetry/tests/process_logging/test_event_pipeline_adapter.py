@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import itertools
 import json
 import time
 from collections.abc import Iterator
@@ -151,7 +150,7 @@ def test_event_pipeline_filter_samples_info_log_one_in_ten() -> None:
     """Bare INFO `log` records are level-graded-sampled: exactly one in ten
     passes; the counter is per-process and resettable for tests."""
     f = slog.event_pipeline_filter
-    slog.log_info_sample_counter = itertools.count()
+    slog.reset_info_sample_counter()
     kept = [f(_rec_level({"event": "log"})) for _ in range(10)]
     assert kept.count(True) == 1
     assert kept[0] is True  # the first record of each block is the survivor
@@ -161,7 +160,7 @@ def test_event_pipeline_filter_keeps_warning_and_named_events() -> None:
     """WARNING+ bare logs and every named event pass unchanged — the alerts /
     unresolved surfaces depend on them; only bare INFO logs are sampled."""
     f = slog.event_pipeline_filter
-    slog.log_info_sample_counter = itertools.count()
+    slog.reset_info_sample_counter()
     assert f(_rec_level({"event": "log"}, "WARNING"))
     assert f(_rec_level({"event": "log"}, "ERROR"))
     assert f(_rec_level({"event": "log"}, "CRITICAL"))
@@ -169,16 +168,14 @@ def test_event_pipeline_filter_keeps_warning_and_named_events() -> None:
     assert f(_rec_level({"event": "node_exit"}))
     assert f(_rec_level({"event": "llm_usage"}))
     # A label is payload metadata and follows the ordinary bare-log sample rate.
-    slog.log_info_sample_counter = itertools.count()
+    slog.reset_info_sample_counter()
     assert sum(f(_rec_level({"label": "exec"})) for _ in range(10)) == 1
     # a record without a level passes unsampled (test-records / tolerant path)
     assert f(_rec({}))
 
 
 @pytest.mark.usefixtures("logging_pipeline")
-def test_loguru_adapter_sets_source_from_extra(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_loguru_adapter_sets_source_from_extra() -> None:
     """`source=` on a logger call lands in the unified source field (default
     'system')."""
     from loguru import logger as _g

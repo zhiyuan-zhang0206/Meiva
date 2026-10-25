@@ -125,29 +125,28 @@ def test_audit_events_reject_every_rewrite(
     ("stream_id", "stored"),
     [(0, 0), (5, 5), ((1 << 63) - 1, (1 << 63) - 1), (1 << 63, -(1 << 63)), ((1 << 64) - 1, -1)],
 )
-def test_the_stream_id_maps_onto_a_signed_bigint(
-    monkeypatch: pytest.MonkeyPatch, stream_id: int, stored: int
-) -> None:
-    def fixed_id(_line: str, _ts_ns: int) -> int:
-        return stream_id
-
-    monkeypatch.setattr(telemetry, "event_id", fixed_id)
-
-    assert audit_events.audit_event_uid(_event(_marker())) == stored
+def test_the_stream_id_maps_onto_a_signed_bigint(stream_id: int, stored: int) -> None:
+    assert audit_events.audit_event_uid(_event(_marker()), stream_id=stream_id) == stored
 
 
 def test_standalone_commits_the_row_before_it_emits(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
+    db_conn: psycopg.Connection, database: Database
 ) -> None:
     marker = _marker()
     seen_at_emit: list[int] = []
 
-    def emit(event: telemetry.Event) -> None:
-        seen_at_emit.append(len(_rows(db_conn, event.source)))
+    def writer(batch: list[telemetry.Event]) -> None:
+        for event in batch:
+            if event.source == marker:
+                seen_at_emit.append(len(_rows(db_conn, event.source)))
 
-    monkeypatch.setattr(telemetry, "emit_prepared", emit)
-
-    record_audit_standalone(database, _event(marker))
+    pipe = telemetry.EventPipeline(writer=writer, batch_size=1)
+    try:
+        telemetry.init_telemetry(process="test-audit", pipeline=pipe)
+        record_audit_standalone(database, _event(marker))
+        assert pipe.sync(timeout=1).status is telemetry.DrainStatus.COMPLETED
+    finally:
+        pipe.stop(timeout=1)
 
     assert seen_at_emit == [1]
 
@@ -182,17 +181,23 @@ async def test_async_record_commits_with_the_callers_transaction(
 
 
 async def test_async_standalone_commits_the_row_before_it_emits(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
     marker = _marker()
     seen_at_emit: list[int] = []
 
-    def emit(event: telemetry.Event) -> None:
-        seen_at_emit.append(len(_rows(db_conn, event.source)))
+    def writer(batch: list[telemetry.Event]) -> None:
+        for event in batch:
+            if event.source == marker:
+                seen_at_emit.append(len(_rows(db_conn, event.source)))
 
-    monkeypatch.setattr(telemetry, "emit_prepared", emit)
-
-    await audit_events.record_audit_standalone_async(aops_pool, _event(marker))
+    pipe = telemetry.EventPipeline(writer=writer, batch_size=1)
+    try:
+        telemetry.init_telemetry(process="test-audit-async", pipeline=pipe)
+        await audit_events.record_audit_standalone_async(aops_pool, _event(marker))
+        assert pipe.sync(timeout=1).status is telemetry.DrainStatus.COMPLETED
+    finally:
+        pipe.stop(timeout=1)
 
     assert seen_at_emit == [1]
 
@@ -227,17 +232,23 @@ def test_reported_recording_of_a_healthy_write_reports_nothing(
 
 
 def test_standalone_many_commits_every_row_together_and_emits_after(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
+    db_conn: psycopg.Connection, database: Database
 ) -> None:
     first, second = _marker(), _marker()
     seen_at_emit: list[int] = []
 
-    def emit(event: telemetry.Event) -> None:
-        seen_at_emit.append(len(_rows(db_conn, event.source)))
+    def writer(batch: list[telemetry.Event]) -> None:
+        for event in batch:
+            if event.source in {first, second}:
+                seen_at_emit.append(len(_rows(db_conn, event.source)))
 
-    monkeypatch.setattr(telemetry, "emit_prepared", emit)
-
-    audit_events.record_audit_standalone_many(database, [_event(first), _event(second)])
+    pipe = telemetry.EventPipeline(writer=writer, batch_size=2)
+    try:
+        telemetry.init_telemetry(process="test-audit-many", pipeline=pipe)
+        audit_events.record_audit_standalone_many(database, [_event(first), _event(second)])
+        assert pipe.sync(timeout=1).status is telemetry.DrainStatus.COMPLETED
+    finally:
+        pipe.stop(timeout=1)
 
     assert seen_at_emit == [1, 1]
 
