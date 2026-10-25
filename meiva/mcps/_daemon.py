@@ -37,6 +37,8 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
+from mcp import ClientSession
+from mcp.types import CallToolResult, ListToolsResult
 
 from base.config import settings
 from base.host.system.hostport import Host
@@ -64,9 +66,12 @@ from meiva.mcps.config import (
     validate_requirements,
 )
 
-from ._browser import connect_browser_direct
-from ._computer import connect_computer_direct
+from ._browser import BrowserLineSession, connect_browser_direct
+from ._computer import ComputerLineSession, connect_computer_direct
 from ._oauth import OAUTH_FLOW_TIMEOUT_S
+
+type DirectSession = ClientSession | BrowserLineSession | ComputerLineSession
+type ManagedSession = DirectSession | SerialSession
 
 # ─── server subprocess sharing ─────────────────────────────────────────────
 #
@@ -160,17 +165,20 @@ class SerialSession:
     shared session is serialized, never the per-connection ones.
     """
 
-    def __init__(self, session: object, lock: asyncio.Lock) -> None:
-        self._session: Any = session
+    def __init__(self, session: DirectSession, lock: asyncio.Lock) -> None:
+        self._session = session
         self._lock = lock
 
-    async def list_tools(self) -> object:
+    async def list_tools(self) -> ListToolsResult:
         async with self._lock:
             return await self._session.list_tools()
 
-    async def call_tool(self, name: str, args: dict[str, Any]) -> object:
+    async def call_tool(self, name: str, args: dict[str, Any]) -> CallToolResult:
         async with self._lock:
-            return await self._session.call_tool(name, args)
+            result = await self._session.call_tool(name, args)
+            if not isinstance(result, CallToolResult):
+                raise TypeError(f"Expected CallToolResult, got {type(result).__name__}")
+            return result
 
 
 async def invalidate_session(
@@ -202,7 +210,7 @@ async def invalidate_session(
 # Start MCP server `server` and return (session, AsyncExitStack); the caller owns the stack. The entry decides the transport (`plan_connect`): a `url` entry is dialed over Streamable HTTP, `"shared": "browser"` and `"shared": "computer_use"` dial the per-machine service with no child, and everything else spawns a stdio child. A server whose `requires` this host cannot meet raises before anything starts.
 async def connect_server(
     server: str, config: DaemonConfig, oauth_locks: dict[str, asyncio.Lock]
-) -> tuple[Any, AsyncExitStack]:
+) -> tuple[DirectSession, AsyncExitStack]:
     spec = load_mcp_config()[server]
     unmet = unmet_requirement(
         validate_requirements(spec), display_available=config.display_available
@@ -223,8 +231,8 @@ async def connect_server(
 # Spawn the stdio child of `plan` and initialize an MCP session over it; the child's stderr is discarded. On failure the local stack is closed so no resources (subprocess, pipes, fds) leak.
 async def connect_stdio(
     server: str, plan: StdioConnect, timeout_seconds: float
-) -> tuple[Any, AsyncExitStack]:
-    from mcp import ClientSession, StdioServerParameters
+) -> tuple[ClientSession, AsyncExitStack]:
+    from mcp import StdioServerParameters
     from mcp.client.stdio import stdio_client
 
     # meiva:note
@@ -260,8 +268,7 @@ async def connect_stdio(
 # Connect to a remote Streamable HTTP MCP server, with no child process. The 2026-07-28 protocol revision is stateless over HTTP: every request is self-describing (protocol version and client capabilities ride in `_meta`), so one endpoint serves every agent connection with no session state on either side. Static auth (API keys) goes in `plan.headers` via the SDK's own client factory; `plan.oauth` builds an OAuth 2.1 provider instead (authorization code + PKCE, browser flow, see `meiva/mcps/_oauth.py`). An OAuth connect envelope is far more generous than `timeout_seconds`, since the user clicks through a browser. On failure the local stack is closed so no HTTP client leaks; the caller owns the returned stack. `create_mcp_http_client` is re-exported from `mcp.shared._httpx_utils`, which pyright reports as a private import.
 async def connect_http(
     plan: HttpConnect, oauth_locks: dict[str, asyncio.Lock], timeout_seconds: float
-) -> tuple[Any, AsyncExitStack]:
-    from mcp import ClientSession
+) -> tuple[ClientSession, AsyncExitStack]:
     from mcp.client.streamable_http import (
         create_mcp_http_client,  # pyright: ignore[reportPrivateImportUsage]
         streamable_http_client,
@@ -294,7 +301,7 @@ async def connect_http(
 
 async def _handle_list_tools(req_id: object, server: str, scope: Scope) -> dict[str, object]:
     """List the configured server's tools in the daemon wire format."""
-    session: Any = await get_session(server, scope)
+    session = await get_session(server, scope)
     result = await session.list_tools()
     return tools_response(req_id, result.tools)
 
@@ -305,11 +312,11 @@ async def _handle_call_tool(
     """Call one MCP tool and serialize its result for the daemon wire protocol."""
     tool = params.get("tool", "")
     args: dict[str, Any] = params.get("args") or {}
-    session: Any = await get_session(server, scope)
-    # The computer-mcp direct-dial session carries the calling agent's identity
-    # to the computer daemon (governance + audit). Duck-typed: only
-    # ComputerLineSession has the attribute.
-    if hasattr(session, "client_agent_id"):
+    session = await get_session(server, scope)
+    # meiva:note
+    # The direct-dial sessions carry the calling agent's identity to their
+    # respective daemons (page affinity + governance/audit).
+    if isinstance(session, (BrowserLineSession, ComputerLineSession)):
         session.client_agent_id = req.get("agent_id")
     try:
         result = await session.call_tool(tool, args)
@@ -321,6 +328,8 @@ async def _handle_call_tool(
             f"MCP tool result unknown for {server}.{tool}; request may have executed: "
             f"{type(e).__name__}: {e}"
         ) from e
+    if not isinstance(result, CallToolResult):
+        raise TypeError(f"Expected CallToolResult, got {type(result).__name__}")
     return call_response(req_id, result)
 
 
@@ -396,7 +405,7 @@ async def handle_client(
             await writer.wait_closed()
 
 
-async def get_session(server: str, scope: Scope) -> object:
+async def get_session(server: str, scope: Scope) -> ManagedSession:
     """Get or create MCP server session (thread-safe).
 
     Shared servers (`"shared": true` in their spec) live in the daemon-wide
@@ -409,7 +418,8 @@ async def get_session(server: str, scope: Scope) -> object:
     shared = cfg[server].get("shared")
     buckets = scope.buckets_for(shared)
     if server in buckets.sessions:
-        return buckets.sessions[server]
+        cached: ManagedSession = buckets.sessions[server]
+        return cached
 
     lock = buckets.locks.get(server)
     if lock is None:
@@ -421,11 +431,13 @@ async def get_session(server: str, scope: Scope) -> object:
         if server not in cfg:
             raise ValueError(f"Server {server!r} not configured")
         if server in buckets.sessions:
-            return buckets.sessions[server]
+            cached_locked: ManagedSession = buckets.sessions[server]
+            return cached_locked
 
-        session, stack = await connect_server(server, scope.config, scope.oauth_locks)
-        if shared is True:
-            session = SerialSession(session, lock)
+        raw_session, stack = await connect_server(server, scope.config, scope.oauth_locks)
+        session: ManagedSession = (
+            SerialSession(raw_session, lock) if shared is True else raw_session
+        )
         buckets.sessions[server] = session
         buckets.stacks[server] = stack
         return session

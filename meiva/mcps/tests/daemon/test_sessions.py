@@ -215,44 +215,46 @@ async def test_buckets_close_releases_every_stack_even_when_one_fails() -> None:
 
 
 # meiva:note
-# An inner session whose calls park until released, counting how many are in flight.
-class SlowSession:
-    def __init__(self) -> None:
-        self.entered = 0
-        self.in_flight = 0
-        self.max_in_flight = 0
-        self.release = asyncio.Event()
-
-    async def list_tools(self) -> str:
-        self.entered += 1
-        self.in_flight += 1
-        self.max_in_flight = max(self.max_in_flight, self.in_flight)
-        await self.release.wait()
-        self.in_flight -= 1
-        return "tools"
-
-
-# meiva:note
 # Concurrent calls on a shared session are serialized under one lock: the inner session sees one
 # in-flight call at a time.
 async def test_serial_session_serializes_concurrent_calls() -> None:
-    inner = SlowSession()
-    serial = daemon_mod.SerialSession(inner, asyncio.Lock())
+    from meiva.mcps._browser import BrowserLineSession
+    from meiva.mcps.tests.line_streams import line_pair
 
-    first = asyncio.create_task(serial.list_tools())
-    await asyncio.sleep(0.01)
-    second = asyncio.create_task(serial.list_tools())
-    await asyncio.sleep(0.01)
-    # meiva:note
-    # the second call is blocked on the lock
-    assert inner.entered == 1
-    inner.release.set()
-    await asyncio.gather(first, second)
+    entered = 0
+    in_flight = 0
+    max_in_flight = 0
+    release = asyncio.Event()
 
-    assert inner.entered == 2
-    # meiva:note
-    # never two at once
-    assert inner.max_in_flight == 1
+    async with line_pair() as ((reader, writer), peer):
+
+        async def serve_two() -> None:
+            nonlocal entered, in_flight, max_in_flight
+            for _ in range(2):
+                req = await peer.receive()
+                entered += 1
+                in_flight += 1
+                max_in_flight = max(max_in_flight, in_flight)
+                await release.wait()
+                in_flight -= 1
+                peer.send({"id": req["id"], "ok": True, "result": []})
+
+        server_task = asyncio.create_task(serve_two())
+        serial = daemon_mod.SerialSession(BrowserLineSession(reader, writer), asyncio.Lock())
+        first = asyncio.create_task(serial.list_tools())
+        await asyncio.sleep(0.01)
+        second = asyncio.create_task(serial.list_tools())
+        await asyncio.sleep(0.01)
+        # meiva:note
+        # the second call is blocked on the lock
+        assert entered == 1
+        release.set()
+        await asyncio.gather(first, second, server_task)
+
+        assert entered == 2
+        # meiva:note
+        # never two at once
+        assert max_in_flight == 1
 
 
 # meiva:note
