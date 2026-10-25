@@ -1,14 +1,16 @@
-exports = ["agent_env.py", "agent_slices.py", "boot_policy.py", "bootstrap.py", "config_lite_table.py", "dotenv_boot.py", "dotenv_file.py", "harness_binaries.py", "health_ports.py", "port_lease.py", "port_table.py", "process_profile.py", "registry.py", "tests"]
+exports = ["agent_env.py", "agent_slices.py", "boot_policy.py", "bootstrap.py", "config_lite_table.py", "dotenv_boot.py", "dotenv_content.py", "dotenv_file.py", "harness_binaries.py", "health_ports.py", "port_lease.py", "port_table.py", "process_profile.py", "registry.py", "tests"]
 
 [uses]
 "agent_slices.py" = ["config_lite_table.py"]
 "bootstrap.py" = ["boot_policy.py", "process_profile.py", "registry.py"]
 "dotenv_boot.py" = ["bootstrap.py", "dotenv_file.py", "registry.py"]
+"dotenv_file.py" = ["dotenv_content.py"]
 "health_ports.py" = ["port_table.py", "registry.py"]
 "registry.py" = ["agent_env.py", "config_lite_table.py", "process_profile.py"]
-"tests" = ["agent_env.py", "boot_policy.py", "bootstrap.py", "dotenv_boot.py", "dotenv_file.py", "harness_binaries.py", "port_lease.py", "port_table.py", "registry.py"]
+"tests" = ["agent_env.py", "boot_policy.py", "bootstrap.py", "dotenv_boot.py", "dotenv_content.py", "dotenv_file.py", "harness_binaries.py", "port_lease.py", "port_table.py", "registry.py"]
 
 [purity]
+"dotenv_content.py" = "strict"
 "__init__.py" = "strict"
 "agent_env.py" = "strict"
 "boot_policy.py" = "strict"

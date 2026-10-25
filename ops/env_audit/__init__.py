@@ -26,7 +26,8 @@ from typing import assert_never, cast
 
 import psutil
 
-from base.host.env.dotenv_file import ENV_LOCK_TIMEOUT_S, env_line_key, env_lock_path
+from base.host.env.dotenv_content import env_line_key
+from base.host.env.dotenv_file import ENV_LOCK_TIMEOUT_S, env_lock_path
 from base.host.private_storage import write_private_bytes
 from base.log import logger
 from base.native_process.os_platform import file_lock

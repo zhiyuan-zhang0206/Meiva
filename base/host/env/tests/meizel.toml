@@ -1,6 +1,7 @@
 exports = ["env_files.py"]
 
 [uses]
+"test_dotenv_content.py" = ["_dotenv_content_child.py"]
 "test_port_lease.py" = ["_lease_child.py"]
 "test_process_timezone.py" = ["_process_timezone_child.py"]
 

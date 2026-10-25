@@ -1,20 +1,20 @@
-"""Idempotent KEY=VALUE upsert into a unit's .env, preserving unrelated lines.
+# meiva:note
+# Idempotent KEY=VALUE upsert into a unit's .env, preserving unrelated lines.
+#
+# Idempotence is byte-level: an upsert whose rendered result equals the current file
+# writes nothing — no snapshot, no rewrite, no audit record (task #3637: a repeated
+# converge, e.g. a boot-retry storm, must not manufacture `old == new` records). Any
+# differing byte still takes the full write path, so normalization of quoted or
+# oddly-spaced lines is preserved.
+#
+# Lives in `base` (no settings import) so lifecycle commands and
+# first-start identity preparation share one implementation. `dotenv_content.env_line_key` reads a line's key with the
+# same grammar the settings parser uses (`export KEY=v` sets `KEY`; #2981).
 
-Idempotence is byte-level: an upsert whose rendered result equals the current file
-writes nothing — no snapshot, no rewrite, no audit record (task #3637: a repeated
-converge, e.g. a boot-retry storm, must not manufacture `old == new` records). Any
-differing byte still takes the full write path, so normalization of quoted or
-oddly-spaced lines is preserved.
-
-Lives in `base` (no settings import) so lifecycle commands and
-first-start identity preparation share one implementation. `env_line_key` reads a line's key with the
-same grammar the settings parser uses (`export KEY=v` sets `KEY`; #2981).
-"""
 
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +22,7 @@ from typing import Protocol
 
 from dotenv import dotenv_values
 
+from base.host.env import dotenv_content
 from base.host.private_storage import ensure_private_file, write_private_bytes
 from base.native_process.os_platform import file_lock
 from base.paths.private_dir import ensure_private_dir
@@ -46,59 +47,6 @@ def env_lock_path(env_path: Path) -> Path:
     secrets outright.
     """
     return env_path.with_name(env_path.name + ".lock")
-
-
-_EXPORT_PREFIX = re.compile(r"export[^\S\r\n]+")
-_UNQUOTED_KEY = re.compile(r"[^=\s#]+")
-
-
-def env_line_key(line: str) -> str | None:
-    """The key a `.env` assignment line targets, in the parser's own grammar.
-
-    `export KEY=v` targets `KEY` — `export` plus whitespace is a prefix, never
-    part of the key; `exportKEY=v` keeps its name. `'KEY'=v` is dotenv's
-    single-quoted-key form; `"KEY"=v` keeps its quotes, as the parser leaves
-    them. Comments, blank lines, and lines that carry no assignment (`KEY`, or
-    junk after the key) return `None` — a bare key binds no value, and trailing
-    junk makes the parser drop the binding wholesale.
-
-    Only the KEY is read here, never the value: a line whose value does not
-    decode still reports its key, so a reader can tell "not set" from "set to
-    something the parser cannot read" and never silently ignores the latter
-    (#2981).
-    """
-    stripped = line.strip()
-    if not stripped or stripped.startswith("#"):
-        return None
-    prefix = _EXPORT_PREFIX.match(stripped)
-    if prefix is not None:
-        stripped = stripped[prefix.end() :]
-    if stripped.startswith("'"):
-        end = stripped.find("'", 1)
-        if end <= 1:
-            return None
-        key, rest = stripped[1:end], stripped[end + 1 :]
-    else:
-        unquoted = _UNQUOTED_KEY.match(stripped)
-        if unquoted is None:
-            return None
-        key, rest = unquoted.group(0), stripped[unquoted.end() :]
-    rest = rest.lstrip()
-    if not rest.startswith("="):
-        return None
-    return key
-
-
-def env_line_export_prefix(line: str) -> str:
-    """The normalized `export ` prefix a rewrite of `line` must keep, else `""`.
-
-    Purely textual, and only meaningful for a line whose key was matched (the
-    writer is about to replace it): a shell consumer treats `export KEY=v` and
-    `KEY=v` differently, so a rewrite keeps the operator's prefix instead of
-    silently dropping it. Whitespace variants normalize to one space; `exportKEY=`
-    and `export=1` carry no prefix.
-    """
-    return "export " if _EXPORT_PREFIX.match(line.lstrip()) else ""
 
 
 def capture_env_bytes(path: Path) -> bytes:
@@ -196,26 +144,6 @@ class EnvAudit(Protocol):
     ) -> None: ...
 
 
-def env_values_from_text(text: str) -> dict[str, str]:
-    """Parse `key=value` text into `{alias: value}` for an audit value diff.
-
-    Surrounding matching quotes are stripped, matching how the write paths
-    render values. This feeds ONLY the local audit record: the audit drops the
-    values of sensitive and unregistered aliases before persisting.
-    """
-    values: dict[str, str] = {}
-    for line in text.splitlines():
-        key = env_line_key(line)
-        if key is None:
-            continue
-        _, _, raw = line.partition("=")
-        raw = raw.strip()
-        if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {"'", '"'}:
-            raw = raw[1:-1]
-        values[key] = raw
-    return values
-
-
 def upsert_env(
     path: Path,
     updates: dict[str, str],
@@ -241,17 +169,7 @@ def upsert_env(
     path.parent.mkdir(parents=True, exist_ok=True)
     with file_lock(env_lock_path(path), timeout_s=ENV_LOCK_TIMEOUT_S):
         lines = path.read_text().splitlines() if path.exists() else []
-        remaining = dict(updates)
-        out: list[str] = []
-        for line in lines:
-            key = env_line_key(line)
-            if key is not None and key in remaining:
-                out.append(f"{env_line_export_prefix(line)}{key}={remaining.pop(key)}")
-            else:
-                out.append(line)
-        for k, v in remaining.items():
-            out.append(f"{k}={v}")
-        payload = ("\n".join(out) + "\n").encode()
+        payload = dotenv_content.render_env_upsert(lines, updates)
         # Skip-when-unchanged (task #3637): the bytes this call would write are the
         # bytes already on disk, so the correct write is no write — no snapshot, no
         # rewrite, no audit record. Decided under the same lock that would perform
@@ -260,7 +178,7 @@ def upsert_env(
             return
         prepared = None
         if audit is not None:
-            before = env_values_from_text("\n".join(lines))
+            before = dotenv_content.env_values_from_text("\n".join(lines))
             changes = [
                 {"alias": key, "old": before.get(key), "new": value}
                 for key, value in updates.items()
@@ -290,12 +208,12 @@ def remove_env(
     with file_lock(env_lock_path(path), timeout_s=ENV_LOCK_TIMEOUT_S):
         content = path.read_text()
         lines = content.splitlines()
-        out = [line for line in lines if env_line_key(line) not in keys]
-        if len(out) == len(lines):
-            return  # nothing to remove — no snapshot churn
+        payload = dotenv_content.render_env_removal(lines, keys)
+        if payload is None:
+            return
         prepared = None
         if audit is not None:
-            before = env_values_from_text("\n".join(lines))
+            before = dotenv_content.env_values_from_text("\n".join(lines))
             changes = [
                 {"alias": key, "old": before.get(key), "new": None}
                 for key in sorted(keys)
@@ -303,6 +221,6 @@ def remove_env(
             ]
             prepared = audit.prepare(changes)
         snapshot_env(path)
-        write_private_bytes(path, ("\n".join(out) + "\n").encode())
+        write_private_bytes(path, payload)
         if audit is not None:
             audit.record(path, set(), keys, prepared)
