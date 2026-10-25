@@ -54,7 +54,7 @@ class ExitRecorder:
         self.writes.append((agent_id, exit_code))
 
 
-def runtime(engine: ClosingEngine) -> AgentRuntime:
+def runtime(engine: ClosingEngine | TransportBackedEngine) -> AgentRuntime:
     return AgentRuntime(
         fingerprint="old",
         llm=Mock(),
