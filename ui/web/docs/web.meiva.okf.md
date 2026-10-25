@@ -86,6 +86,14 @@ this bundle. Icon names map to lucide components the console imports
 (`components/plugin-nav-icon.ts`), locked against the validator's vocabulary by
 its test. Design: [frontend-plugin-contributions.md](../../../future/frontend-plugin-contributions.md).
 
+## Formatting
+
+No prettier: there is no dependency, config, or CI gate for it, and the tree was
+never formatted to its defaults (553 of 611 files under `src/` differ from them).
+Style is held by eslint + tsc + vitest. `ui/web/.prettierignore` ignores `src/`
+so an ad-hoc `npx prettier --write` cannot rewrite the tree as a side effect of
+an unrelated change.
+
 ## Sub-concepts
 
 - [[ui/web/src/docs/src.meiva.okf.md|Src]]
