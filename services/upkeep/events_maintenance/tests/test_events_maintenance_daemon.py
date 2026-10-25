@@ -104,6 +104,7 @@ def _pass(
         events_maintenance_config(process_config, mirror_dir=mirror_dir),
         database,
         now=_NOW,
+        host="local",
     )
 
 

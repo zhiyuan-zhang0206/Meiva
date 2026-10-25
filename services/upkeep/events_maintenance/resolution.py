@@ -29,8 +29,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any
 
+import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
@@ -144,7 +144,9 @@ class AutoDismissCadence:
         self.last_scan_day = at.date()
 
 
-def class_counts(conn: Any, *, start: datetime, end: datetime) -> dict[EventClass, int]:
+def class_counts(
+    conn: psycopg.Connection, *, start: datetime, end: datetime
+) -> dict[EventClass, int]:
     """Counts of the warning, error and critical event classes over `(start, end]`.
 
     Read from `telemetry_events`; `category` is always telemetry or log there. The level
@@ -169,7 +171,7 @@ def class_counts(conn: Any, *, start: datetime, end: datetime) -> dict[EventClas
 
 
 def alert_classes(
-    conn: Any, *, start: datetime, end: datetime, cluster: str | None = None
+    conn: psycopg.Connection, *, start: datetime, end: datetime, cluster: str | None = None
 ) -> list[AlertClass]:
     """The warning, error and critical classes over `(start, end]`, most frequent first.
 
@@ -184,7 +186,7 @@ def alert_classes(
         WHERE level IN ('warning', 'error', 'critical')
           AND ts > %s AND ts <= %s
     """
-    params: list[Any] = [start, end]
+    params: list[object] = [start, end]
     if cluster is not None:
         query += " AND (cluster = %s OR cluster = '')"
         params.append(cluster)
@@ -204,7 +206,7 @@ def alert_classes(
     ]
 
 
-def active_dismissals(conn: Any) -> list[Dismissal]:
+def active_dismissals(conn: psycopg.Connection) -> list[Dismissal]:
     """Load active class dismissals only (agent-scoped rows excluded).
 
     An empty ``process`` is a wildcard pattern; a concrete one targets a
@@ -242,7 +244,7 @@ def active_dismissals(conn: Any) -> list[Dismissal]:
     ]
 
 
-def _reopen_for_burst(conn: Any, dismissal: Dismissal, count: int) -> bool:
+def _reopen_for_burst(conn: psycopg.Connection, dismissal: Dismissal, count: int) -> bool:
     """Atomically flip one active dismissal; False means another actor won."""
 
     with conn.cursor() as cur:
@@ -258,7 +260,7 @@ def _reopen_for_burst(conn: Any, dismissal: Dismissal, count: int) -> bool:
         return cur.fetchone() is not None
 
 
-def _insert_auto_dismissal(conn: Any, event_class: EventClass, days: int) -> bool:
+def _insert_auto_dismissal(conn: psycopg.Connection, event_class: EventClass, days: int) -> bool:
     """Insert one system dismissal if no concurrent resolution already did."""
 
     with conn.cursor() as cur:
@@ -285,7 +287,7 @@ def _insert_auto_dismissal(conn: Any, event_class: EventClass, days: int) -> boo
 
 def stable_auto_classes(
     now: datetime,
-    conn: Any,
+    conn: psycopg.Connection,
     current: dict[EventClass, int],
     config: EventsMaintenanceConfig,
     cadence: AutoDismissCadence,

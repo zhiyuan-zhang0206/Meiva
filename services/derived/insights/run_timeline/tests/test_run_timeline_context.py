@@ -5,7 +5,7 @@ from cProfile import Profile
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 import psycopg
 import pytest
@@ -63,8 +63,9 @@ def human(text: str, minutes: int) -> HumanMessage:
 
 
 def two_sessions() -> HistoryView:
+    first = SystemMessage(content="first prompt")
     messages: list[BaseMessage] = [
-        SystemMessage(content="first prompt"),
+        first,
         human("ask one", 0),
         ai("reply one", 100, 1),
         human("ask two", 10),
@@ -74,7 +75,7 @@ def two_sessions() -> HistoryView:
     units = display_blocks(divide_units(messages, timeline_inputs=_TIMELINE_INPUTS), messages, read)
     history = FullHistory(
         messages,
-        (cast(SystemMessage, messages[0]), SystemMessage(content="second prompt")),
+        (first, SystemMessage(content="second prompt")),
         (1, 3),
     )
     return HistoryView.of(history, units, MessageUsage(messages), read)
@@ -99,8 +100,9 @@ def with_output(msg: AIMessage, output: int) -> AIMessage:
 
 
 def three_requests_then_a_session() -> HistoryView:
+    first = SystemMessage(content="first prompt")
     messages: list[BaseMessage] = [
-        SystemMessage(content="first prompt"),
+        first,
         human("ask one", 0),
         with_output(ai("reply one", 100, 1), 5),
         human("ask two", 2),
@@ -115,7 +117,7 @@ def three_requests_then_a_session() -> HistoryView:
     units = display_blocks(divide_units(messages, timeline_inputs=_TIMELINE_INPUTS), messages, read)
     history = FullHistory(
         messages,
-        (cast(SystemMessage, messages[0]), SystemMessage(content="second prompt")),
+        (first, SystemMessage(content="second prompt")),
         (1, 8),
     )
     return HistoryView.of(history, units, MessageUsage(messages), read)
@@ -281,7 +283,6 @@ def call(
     agent_id: int = 7,
 ) -> RunTimelineContext:
     app_state = SimpleNamespace(
-        db=cast(Database, object()),
         db_pool=pool,
         run_timeline_reader=Views(view),
         catalog=catalog,
@@ -290,7 +291,7 @@ def call(
             default_model=default_model,
         ),
     )
-    request = cast(Request, SimpleNamespace(app=SimpleNamespace(state=app_state)))
+    request = Request({"type": "http", "app": SimpleNamespace(state=app_state)})
     return context.get_run_timeline_context(request, agent_id, at)
 
 

@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Any
 
 import httpx
 import psycopg
@@ -52,11 +52,13 @@ def _alerts_published(bus: EventBus) -> Generator[Callable[[], list[dict[str, An
         assert pubsub.get_message(timeout=5.0) is not None, "the subscription was not confirmed"
 
         def drain() -> list[dict[str, Any]]:
+            # meiva:note
+            # redis-py's PubSub.get_message has partially unknown member typing under strict mode.
             frames: list[dict[str, Any]] = []
-            while (
-                message := cast("dict[str, Any] | None", pubsub.get_message(timeout=0.5))
-            ) is not None:
-                frames.append(json.loads(message["data"]))
+            while (message := pubsub.get_message(timeout=0.5)) is not None:  # pyright: ignore[reportUnknownMemberType]
+                data = message["data"]
+                if isinstance(data, str | bytes):
+                    frames.append(json.loads(data))
             return frames
 
         try:

@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import psycopg
+from langchain_core.language_models.chat_models import BaseChatModel
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from base import telemetry
@@ -143,12 +144,12 @@ class ModelCache:
         self.catalog = catalog
         self.keys = keys
         self.llm_override = llm_override
-        self._models: dict[tuple[str, ModelOverrides, str], Any] = {}
+        self._models: dict[tuple[str, ModelOverrides, str], BaseChatModel] = {}
         # meiva:note
         # jobs build models from several worker threads
         self._lock = threading.Lock()
 
-    def get(self, model: str, overrides: ModelOverrides, reasoning: str = "") -> Any:
+    def get(self, model: str, overrides: ModelOverrides, reasoning: str = "") -> BaseChatModel:
         # meiva:note
         # The model; `reasoning` is `MEIVA_UNDERSTANDING_GROUP_REASONING`'s value: empty keeps
         # the model's own tier, `off` disables thinking, anything else is the effort asked.

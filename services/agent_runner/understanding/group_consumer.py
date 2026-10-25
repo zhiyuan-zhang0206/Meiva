@@ -24,13 +24,13 @@ import asyncio
 import uuid
 from collections.abc import Callable
 from concurrent.futures import Executor
-from typing import Any, Protocol
+from typing import Protocol
 
 from psycopg_pool import AsyncConnectionPool
 
 from base import telemetry
 from base.agents.history.hierarchy.check_plan import check_threshold as threshold_value
-from base.agents.history.hierarchy.generate import GenerateError
+from base.agents.history.hierarchy.generate import GenerateError, InvocableLlm
 from base.agents.history.hierarchy.group import (
     GROUP_ENGINE_VERSION,
     Group,
@@ -85,7 +85,7 @@ class GroupingModels(Protocol):
 
     catalog: ModelCatalog
 
-    def get(self, model: str, overrides: ModelOverrides, reasoning: str = "") -> Any: ...
+    def get(self, model: str, overrides: ModelOverrides, reasoning: str = "") -> InvocableLlm: ...
 
 
 def group_model(

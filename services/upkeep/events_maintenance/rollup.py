@@ -33,6 +33,8 @@ from datetime import UTC, date, datetime, timedelta
 
 import psycopg
 
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.db.code_version_gate import ProcessDbGate
@@ -216,8 +218,9 @@ def main(argv: list[str] | None = None) -> int:
     image = LoadedCommit.capture()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process=process_name())
+    clock = Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
     with events_maintenance_db(config, gate=gate, local_host=machine.host).connect() as conn:
-        report = roll_range(conn, first, last, today=datetime.now(UTC).date())
+        report = roll_range(conn, first, last, today=clock.now().date())
     if report.rebuilt:
         sys.stdout.write("rebuilt agent_model_tokens_total\n")
     sys.stdout.write(

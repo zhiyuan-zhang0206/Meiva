@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 from types import SimpleNamespace
-from typing import cast
 
 import pytest
 from fastapi import HTTPException, Request
@@ -15,7 +14,6 @@ from base.agents.history.message_tokens import MessageTokens
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import Clock
 from base.config import settings
-from base.db import Database
 from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline import messages as route
 from services.derived.insights.run_timeline.history import HistoryView
@@ -66,7 +64,6 @@ class Views:
 
 def request(messages: list[BaseMessage]) -> Request:
     state = SimpleNamespace(
-        db=cast(Database, object()),
         timeline_timestamps=_TIMELINE_SOURCE,
         run_timeline_reader=Views(messages),
         insights_config=InsightsConfig(
@@ -74,7 +71,7 @@ def request(messages: list[BaseMessage]) -> Request:
             default_model="claude-opus-5",
         ),
     )
-    return cast(Request, SimpleNamespace(app=SimpleNamespace(state=state)))
+    return Request({"type": "http", "app": SimpleNamespace(state=state)})
 
 
 def test_a_range_returns_those_messages_in_order() -> None:
@@ -157,7 +154,7 @@ def test_a_message_without_a_read_time_has_no_timestamp() -> None:
 
 def test_a_message_carries_the_tokens_it_occupies_and_whether_they_are_estimated() -> None:
     req = request(history(3))
-    views = cast(Views, req.app.state.run_timeline_reader)
+    views: Views = req.app.state.run_timeline_reader
     views.built = replace(
         views.built,
         tokens=[

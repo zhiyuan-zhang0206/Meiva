@@ -15,17 +15,12 @@ exports = ["derive.py", "jobs.py", "reader.py", "source.py"]
 [roots]
 "backfill.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 
-[debt.ambient-read]
-"reader.py#random uuid.uuid4" = 1
-
 [debt.impure-call]
-"nodes.py#import psycopg" = 3
 "reader.py#import fastapi" = 1
 "reader.py#import psycopg" = 1
 "reader.py#import psycopg_pool" = 1
-"reader.py#uuid.uuid4" = 1
-"source.py#import psycopg" = 2
-"store.py#import psycopg" = 3
+"source.py#import psycopg" = 1
+"store.py#import psycopg" = 1
 
 [debt.impure-edge]
 "backfill.py#base/agents/history/checkpoint_segment.py" = 1

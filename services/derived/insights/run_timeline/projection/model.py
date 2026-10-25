@@ -36,6 +36,22 @@ class Fact(BaseModel):
     after_totals: Totals
 
 
+class NodeRow(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    id: int
+    depth: int
+    parent_id: int | None
+    span_start: int
+    span_end: int
+    text: str
+    job_id: int | None
+    check_key: str | None
+    start: datetime
+    end: datetime
+    before: Totals
+    after: Totals
+
+
 class Segment(BaseModel):
     model_config = ConfigDict(frozen=True)
     session: int
