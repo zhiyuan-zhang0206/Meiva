@@ -25,22 +25,23 @@ class _Instrument:
         if self._on_metric is not None:
             self._on_metric(value)
 
-    def record(self, value: int | float, _attributes: Any = None) -> None:
-        if self._on_metric is not None:
-            self._on_metric(value)
+    record = add
 
 
 class _Meter:
     def __init__(self, on_metric: Callable[[int | float], None] | None = None) -> None:
         self._on_metric = on_metric
 
-    def create_counter(self, _name: str, **_kwargs: Any) -> _Instrument:
+    def create_counter(self, _name: str, *, unit: str = "", description: str = "") -> _Instrument:
+        del unit, description
         return _Instrument(self._on_metric)
 
-    def create_histogram(self, _name: str, **_kwargs: Any) -> _Instrument:
-        return _Instrument(self._on_metric)
+    create_histogram = create_counter
 
-    def create_observable_gauge(self, _name: str, **_kwargs: Any) -> object:
+    def create_observable_gauge(
+        self, _name: str, *, callbacks: Any = None, unit: str = "", description: str = ""
+    ) -> object:
+        del callbacks, unit, description
         return object()
 
 

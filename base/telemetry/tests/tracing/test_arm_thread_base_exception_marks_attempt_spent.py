@@ -160,9 +160,7 @@ def test_turn_span_exports_root_at_start_not_at_end(tmp_path: Path) -> None:
     run_trace_scenario(tmp_path, "root")
 
 
-def test_prune_old_mirror_removes_stale_keeps_recent(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_prune_old_mirror_removes_stale_keeps_recent(tmp_path: Path) -> None:
     """prune_old_mirror deletes the collector's rotated `spans-<ISO>-size.jsonl`
     files older than retention_days, keeps recent ones, and never touches the
     unstamped ACTIVE `spans.jsonl` or non-mirror files."""
@@ -229,9 +227,7 @@ def test_mirror_sort_key_orders_suffixed_rotated_and_cut_files(
     assert keys == sorted(keys)
 
 
-def test_prune_old_mirror_removes_stale_suffixed_and_gz(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_prune_old_mirror_removes_stale_suffixed_and_gz(tmp_path: Path) -> None:
     """prune_old_mirror deletes stale files regardless of the rotation
     naming era — timberjack-suffixed (`-size`), manual cuts, and gzipped
     segments — and keeps the ACTIVE `spans.jsonl` untouched."""
@@ -254,9 +250,7 @@ def test_prune_old_mirror_removes_stale_suffixed_and_gz(
     assert active.exists()
 
 
-def test_enforce_dir_cap_counts_suffixed_and_gz_keeps_active(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_enforce_dir_cap_counts_suffixed_and_gz_keeps_active(tmp_path: Path) -> None:
     """The cap prune counts suffixed rotated and gzipped files toward the
     directory size and deletes oldest-first, and never deletes the ACTIVE
     `spans.jsonl` even when every other file carries an unrecognized-era
@@ -276,9 +270,7 @@ def test_enforce_dir_cap_counts_suffixed_and_gz_keeps_active(
     assert remaining == ["spans-2026-01-02T00-00-00.000-time.jsonl.gz", "spans.jsonl"]
 
 
-def test_gzip_old_mirror_compresses_rotated_keeps_active(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_gzip_old_mirror_compresses_rotated_keeps_active(tmp_path: Path) -> None:
     """gzip_old_mirror compresses every non-active mirror file (rotated,
     suffixed, cut) to `.jsonl.gz` with lossless content, leaves the
     ACTIVE `spans.jsonl` alone, and is idempotent on re-run."""
@@ -310,9 +302,7 @@ def test_gzip_old_mirror_compresses_rotated_keeps_active(
     assert gzip_old_mirror(grace_seconds=-1, traces_dir=tmp_path) == 0
 
 
-def test_gzip_old_mirror_skips_recently_written_files(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_gzip_old_mirror_skips_recently_written_files(tmp_path: Path) -> None:
     """A file written within the grace window is skipped (a freshly cut
     active file may still be appended by the collector until its next size
     rotation); the next pass with no grace compresses it."""
@@ -336,9 +326,7 @@ def test_gzip_old_mirror_skips_recently_written_files(
     assert not fresh.exists()
 
 
-def test_prune_old_mirror_disabled_when_nonpositive(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_prune_old_mirror_disabled_when_nonpositive(tmp_path: Path) -> None:
     """retention_days <= 0 disables pruning entirely."""
     from base.telemetry.tracing import prune_old_mirror
 

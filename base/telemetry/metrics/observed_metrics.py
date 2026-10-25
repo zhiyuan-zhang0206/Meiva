@@ -13,7 +13,7 @@ price remains unpriced; replay never consults today's price catalog.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -190,15 +190,13 @@ def observe_row(row: Mapping[str, Any]) -> MetricObservation | None:
 
 
 # meiva:note
-# Use exactly the identity serialized to the event's JSONL mirror.
-def observe_event(
-    event: Event, *, row_fn: Callable[[Event], Mapping[str, object]] = event_row
-) -> MetricObservation | None:
-    # Ordinary logs can hold large bodies. Do not serialize them a second time
-    # for a projection that never consumes their contents.
+# Use exactly the identity serialized to the event's JSONL mirror. Ordinary logs
+# can hold large bodies; do not serialize them a second time for a projection
+# that never consumes their contents.
+def observe_event(event: Event) -> MetricObservation | None:
     if not _supports(event.event_name, event.category, event.agent_id):
         return None
-    return observe_row(row_fn(event))
+    return observe_row(event_row(event))
 
 
 _COUNTERS = (
@@ -233,6 +231,7 @@ _DAY_FIELDS = (
     + ", ".join(_SUMS)
     + ", turn_duration_sum, turn_duration_min, turn_duration_max, last_observed_at"
 )
+# meiva:note
 # Insert and aggregate in one statement: ON CONFLICT returns only novel facts,
 # including when two processes concurrently replay the same source batch.
 _DAY_SUMS = ", ".join(
@@ -323,8 +322,6 @@ def write_observations(
 def _write_projected(
     database: Database,
     observations: Sequence[MetricObservation],
-    *,
-    write_observations_fn: Callable[..., int] = write_observations,
 ) -> int:
     if not observations:
         return 0
@@ -333,7 +330,7 @@ def _write_projected(
     with write_transaction(_projection_pool(database), timeout=0.1) as connection:
         connection.execute("SET LOCAL statement_timeout = '500ms'")
         connection.execute("SET LOCAL lock_timeout = '100ms'")
-        return write_observations_fn(observations, db=connection)
+        return write_observations(observations, db=connection)
 
 
 _failures = 0
@@ -344,14 +341,10 @@ _failures = 0
 def project_events(
     database: Database,
     events: Sequence[Event],
-    *,
-    write_observations_fn: Callable[..., int] = write_observations,
-    report_fn: Callable[..., None] | None = None,
 ) -> None:
     global _failures  # noqa: PLW0603
     from base.telemetry.delivery.reporting import report_no_pipeline
 
-    reporter = report_no_pipeline if report_fn is None else report_fn
     observations: list[MetricObservation] = []
     rejected = 0
     first_rejection: Exception | None = None
@@ -364,17 +357,17 @@ def project_events(
             rejected += 1
             first_rejection = first_rejection or exc
     if rejected:
-        reporter(
+        report_no_pipeline(
             "[observed-metrics] rejected {n} malformed measurement(s); collection is partial",
             n=rejected,
             exc=first_rejection,
         )
     try:
-        _write_projected(database, observations, write_observations_fn=write_observations_fn)
+        _write_projected(database, observations)
     except Exception as exc:
         _failures += 1
         if _failures == 1 or _failures % 50 == 0:
-            reporter(
+            report_no_pipeline(
                 "[observed-metrics] projection failed ({n} consecutive): {err}; "
                 "collection remains partial",
                 n=_failures,

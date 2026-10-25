@@ -244,9 +244,7 @@ class OtlpBackend:
         enabled: Callable[[], bool] | None = None,
         endpoint: str | None = None,
         retry_interval_s: float = COLLECTOR_RETRY_INTERVAL_S,
-        metrics_interval_s: float | None = None,
         defer_enabled: bool | None = None,
-        defer_max_age_s: float | None = None,
         mirror_dir: Path | None = None,
         home: Path | None = None,
     ) -> None:
@@ -254,7 +252,6 @@ class OtlpBackend:
         self._enabled_flag = enabled
         self._endpoint_override = endpoint
         self._retry_interval_s = retry_interval_s
-        self._metrics_interval_s = metrics_interval_s
         self._mirror_dir = mirror_dir
         self._home = home
         self._export_decision: bool | None = None
@@ -292,7 +289,6 @@ class OtlpBackend:
             record_metrics=lambda event: self._record_metrics(event),  # noqa: PLW0108 — per-call lookup keeps owner seams live
             export_live=lambda events: self._export_live(events),  # noqa: PLW0108 — per-call lookup keeps owner seams live
             enabled=defer_enabled,
-            max_age_s=defer_max_age_s,
         )
 
     # ── public surface (called by base.telemetry) ─────────────────────────
@@ -580,23 +576,13 @@ class OtlpBackend:
                 def keep_metrics(provider: object) -> None:
                     worker.metrics = provider
 
-                if self._metrics_interval_s is not None:
-                    worker.logs, worker.metrics = build_providers(
-                        endpoint,
-                        keep_logs=keep_logs,
-                        keep_reader=keep_reader,
-                        keep_metrics=keep_metrics,
-                        metrics_interval_s=self._metrics_interval_s,
-                        home=self._home,
-                    )
-                else:
-                    worker.logs, worker.metrics = build_providers(
-                        endpoint,
-                        keep_logs=keep_logs,
-                        keep_reader=keep_reader,
-                        keep_metrics=keep_metrics,
-                        home=self._home,
-                    )
+                worker.logs, worker.metrics = build_providers(
+                    endpoint,
+                    keep_logs=keep_logs,
+                    keep_reader=keep_reader,
+                    keep_metrics=keep_metrics,
+                    home=self._home,
+                )
             meter = worker.metrics.get_meter("meiva.telemetry")
             self._logs, self._metric_provider, self._meter = worker.logs, worker.metrics, meter
         except Exception as exc:

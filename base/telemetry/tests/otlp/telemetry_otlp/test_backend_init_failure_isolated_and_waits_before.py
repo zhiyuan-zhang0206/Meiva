@@ -233,13 +233,13 @@ def test_pipeline_mirror_survives_otlp_failure(database: Database, tmp_path: Pat
     existing = telemetry.process_state["pipeline"]
     if existing is not None:
         existing.stop(timeout=2)
-    pipeline = telemetry.build_pipeline(
-        database=lambda: database,
-        machine=machine_identity(),
-        home=Path(".meiva"),
-        target_dir=tmp_path,
-        exporter=backend,
-    )
+    with telemetry_otlp.bind_exporter(backend):
+        pipeline = telemetry.build_pipeline(
+            database=lambda: database,
+            machine=machine_identity(),
+            home=Path(".meiva"),
+            target_dir=tmp_path,
+        )
     try:
         telemetry.init_telemetry(process="test-proc", pipeline=pipeline)
         telemetry.emit("log", "log", agent_id=AGENT, attributes={"msg": "boom"})

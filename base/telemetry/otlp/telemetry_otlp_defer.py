@@ -77,14 +77,13 @@ class ChildDeferral:
         record_metrics: Callable[[Event], None],
         export_live: Callable[[list[Event]], None],
         enabled: bool | None = None,
-        max_age_s: float | None = None,
     ) -> None:
         self._queue = queue
         self._bring_up = bring_up
         self._record_metrics = record_metrics
         self._export_live = export_live
         self._enabled_override = enabled
-        self._max_age_override = max_age_s
+        self._max_age_override: float | None = None
         self._lock = threading.Lock()
         self._clock_lock = threading.Lock()
         self.active = False
