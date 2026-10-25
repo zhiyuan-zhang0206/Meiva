@@ -9,5 +9,5 @@
 "tests" = ["changes.py", "check.py", "cli.py", "model.py", "python_source.py", "typescript_index.py"]
 "typescript_index.py" = ["check.py", "model.py"]
 
-[debt.ambient-read]
-"cli.py#cwd pathlib.Path.cwd" = 1
+[roots]
+"cli.py" = { kinds = ["cwd"], why = "CLI entrypoint resolves the enclosing Git checkout from the current working directory when --repo is omitted" }

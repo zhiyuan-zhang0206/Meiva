@@ -371,14 +371,10 @@ def test_json_cli_output_is_machine_readable_and_deterministic(
     assert repeated.as_json() == payload
 
 
-def test_selector_mode_is_audit_metadata_from_the_workflow_env(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_selector_mode_is_audit_metadata_from_the_workflow_env() -> None:
     """The recorded mode follows ci.yml's switch; the default matches it."""
-    monkeypatch.delenv("TEST_SELECTION_MODE", raising=False)
-    assert test_selector.selection_mode() == "enforce"
-    monkeypatch.setenv("TEST_SELECTION_MODE", "shadow")
-    assert test_selector.selection_mode() == "shadow"
+    assert test_selector.selection_mode({}) == "enforce"
+    assert test_selector.selection_mode({"TEST_SELECTION_MODE": "shadow"}) == "shadow"
 
 
 def test_duration_estimates_are_identical_across_python_hash_seeds() -> None:
@@ -400,7 +396,7 @@ def test_duration_estimates_are_identical_across_python_hash_seeds() -> None:
     assert len(set(outputs)) == 1
 
 
-def test_real_repository_map_is_fast_and_has_broad_static_coverage() -> None:
+def test_real_repository_map_is_fast_and_has_broad_static_coverage(tmp_path: Path) -> None:
     """The production checkout must keep the selector map usable in CI.
 
     The map is an AST pass over every tracked source file: CPU-bound Python that the
@@ -410,14 +406,20 @@ def test_real_repository_map_is_fast_and_has_broad_static_coverage() -> None:
     it, with no tracer, so it is measured in a child interpreter; the repository does not
     enable coverage's subprocess measurement, so the child runs untraced.
     """
-    probe = (
-        "import json, sys; from pathlib import Path; from scripts.ci import test_selector;"
-        "r = test_selector.select_tests(['scripts/ci/test_selector.py'], repo_root=Path(sys.argv[1]));"
-        "print(r.map_source_count)"
-    )
+    changed_files = tmp_path / "changed.txt"
+    changed_files.write_text("scripts/ci/test_selector.py\n")
     started = perf_counter()
     completed = subprocess.run(  # noqa: S603 -- fixed interpreter and in-repo code
-        [sys.executable, "-c", probe, str(_REPO_ROOT)],
+        [
+            sys.executable,
+            "-m",
+            "scripts.ci.test_selector",
+            "--changed-files",
+            str(changed_files),
+            "--repo-root",
+            str(_REPO_ROOT),
+            "--json",
+        ],
         cwd=_REPO_ROOT,
         capture_output=True,
         check=True,
@@ -425,7 +427,7 @@ def test_real_repository_map_is_fast_and_has_broad_static_coverage() -> None:
     )
     elapsed = perf_counter() - started
 
-    map_source_count = int(completed.stdout.splitlines()[-1])
+    map_source_count = int(json.loads(completed.stdout)["map_source_count"])
     assert map_source_count > 500
     assert elapsed < 60
 

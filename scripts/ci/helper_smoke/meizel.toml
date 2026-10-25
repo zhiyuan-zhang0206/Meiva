@@ -5,15 +5,5 @@
 "f12.py" = ["support.py"]
 "tests" = ["__init__.py", "signing_smoke.py"]
 
-[debt.ambient-read]
-"cli.py#clock time.monotonic" = 2
-"cli.py#clock time.time" = 1
-"cli.py#home pathlib.Path.home" = 2
-"cli.py#pid os.getuid" = 1
-"f12.py#clock time.time" = 2
-"support.py#clock time.monotonic" = 2
-"support.py#pid os.getuid" = 1
-
-[debt.type-cast]
-"cli.py#cast main.helper_root_status" = 1
-"support.py#cast root_call" = 1
+[roots]
+"cli.py" = { kinds = ["clock", "home", "pid"], why = "CLI entrypoint for the macOS permissions-helper smoke test" }

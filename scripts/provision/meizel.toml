@@ -2,9 +2,3 @@ exports = ["apt_lock.py", "check_git_hooks.py", "prepush_branch_diff.py", "prepu
 
 [uses]
 "tests" = ["apt_lock.py"]
-
-[debt.ambient-read]
-"apt_lock.py#clock time.monotonic" = 4
-
-[debt.type-cast]
-"prepush_branch_diff.py#cast _run" = 1

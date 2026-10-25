@@ -2,22 +2,7 @@
 "onboard-helper-grants.py" = ["scan_child.py"]
 "tests" = ["request_grants_evidence.py"]
 
-[debt.ambient-read]
-"helper-signing.py#clock datetime.datetime.now" = 3
-"onboard-helper-grants.py#clock time.monotonic" = 2
-"onboard-helper-grants.py#home pathlib.Path.home" = 3
-"onboard-helper-grants.py#pid os.getpid" = 1
-"onboard-helper-grants.py#platform os.uname" = 1
-"onboard-helper-grants.py#platform sys.platform" = 1
-"request_grants_evidence.py#clock datetime.datetime.now" = 1
-"request_grants_evidence.py#platform sys.platform" = 1
-
-[debt.any-collaborator]
-"onboard-helper-grants.py#any _apple_event_grants.client" = 1
-"onboard-helper-grants.py#any _fill_pending_grants.client" = 1
-"onboard-helper-grants.py#any _folder_grants.client" = 1
-"onboard-helper-grants.py#any helper_client.return" = 1
-"onboard-helper-grants.py#any preflight_matrix.client" = 1
-"onboard-helper-grants.py#any reap_child.client" = 1
-"onboard-helper-grants.py#any spawn_child.client" = 1
-"onboard-helper-grants.py#any wait_for_item.client" = 1
+[roots]
+"helper-signing.py" = { kinds = ["clock"], why = "operator signing CLI timestamps detached logs and helper backup directories" }
+"onboard-helper-grants.py" = { kinds = ["home", "pid", "platform"], why = "macOS TCC onboarding CLI checks the host platform, resolves guarded folders under $HOME, and stamps the run report with PID and nodename" }
+"request_grants_evidence.py" = { kinds = ["clock", "platform"], why = "macOS TCC grant-request evidence CLI checks the host platform and timestamps the tccd log window" }

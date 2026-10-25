@@ -13,6 +13,8 @@ import argparse
 import hashlib
 import re
 import sys
+from collections.abc import Callable, Generator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 
 from psycopg import Connection
@@ -33,21 +35,25 @@ def require_agent_host_stopped(home: Path) -> None:
         raise RuntimeError("script repair requires the agent host to be stopped")
 
 
-def load_installed_runtime(home: Path, source: Path) -> None:
-    """Select the explicit installed source and let its owner check admission."""
+# meiva:note
+# Verify the operator interpreter, home, environment and admitted source checkout.
+# A copied operator script must not import its containing development tree.
+def check_runtime_admission(
+    home: Path,
+    source: Path,
+    *,
+    operator_home: Path,
+    env: Mapping[str, str],
+) -> None:
     if Path(sys.prefix).resolve() != (source / ".venv").resolve():
         raise RuntimeError("run this tool with the source checkout's own .venv interpreter")
-    # A copied operator script must not import its containing development tree.
     sys.path.insert(0, str(source))
     from base.host.env.bootstrap import LAUNCHER_PROFILE_ENV_KEY
     from base.host.env.dotenv_boot import skip_config_fetch
     from base.host.env.process_profile import MEIVA_PROCESS_PROFILE_ENV
-    from base.host.env.registry import process_environment
-    from base.paths.home import resolve_meiva_home
 
-    if resolve_meiva_home().expanduser().resolve() != home:
+    if operator_home.expanduser().resolve() != home:
         raise RuntimeError("--home must match this operator's MEIVA_HOME")
-    env = process_environment()
     if env.get(MEIVA_PROCESS_PROFILE_ENV) or env.get(LAUNCHER_PROFILE_ENV_KEY):
         raise RuntimeError("run as a local operator without a launcher credential delivery")
     skip_config_fetch()
@@ -57,6 +63,22 @@ def load_installed_runtime(home: Path, source: Path) -> None:
     if repo_root().resolve() != source:
         raise RuntimeError("loaded application modules do not belong to the requested source")
     require_admitted_runtime(home, code_root=source)
+
+
+def load_installed_runtime(home: Path, source: Path) -> None:
+    """Select the explicit installed source and let its owner check admission."""
+    if Path(sys.prefix).resolve() != (source / ".venv").resolve():
+        raise RuntimeError("run this tool with the source checkout's own .venv interpreter")
+    sys.path.insert(0, str(source))
+    from base.host.env.registry import process_environment
+    from base.paths.home import resolve_meiva_home
+
+    check_runtime_admission(
+        home,
+        source,
+        operator_home=resolve_meiva_home(),
+        env=process_environment(),
+    )
 
 
 # meiva:note
@@ -90,29 +112,44 @@ def replace_script(
 
 
 # meiva:note
+# The installed source supplied by the operator owns this image. A copied
+# adapter's __file__ must not lend its checkout identity to the installed writer.
+def source_version(source: Path) -> Callable[[], int]:
+    from base.native_process.code_version import CodeVersion
+    from base.native_process.loaded_commit import LoadedCommit
+
+    image = LoadedCommit.capture(source_root=source)
+    return CodeVersion(image).get
+
+
+@contextmanager
+def repair_guard(home: Path, *, lock_timeout_s: float = 30.0) -> Generator[None]:
+    from base.deploy.lifecycle.home_lifecycle_locks import resource_lock
+
+    with resource_lock(purpose="operator.update_schedule_script", timeout_s=lock_timeout_s):
+        require_agent_host_stopped(home)
+        yield
+
+
+# meiva:note
 # Run one script-only edit while no agent host serves `home`.
 def repair_script(
-    *, home: Path, source: Path, schedule_id: int, script: str, expected_sha256: str
+    *,
+    home: Path,
+    source: Path,
+    schedule_id: int,
+    script: str,
+    expected_sha256: str,
 ) -> str:
     load_installed_runtime(home, source)
     from base.db import Database
     from base.db.code_version_gate import ProcessDbGate
-    from base.deploy.lifecycle.home_lifecycle_locks import resource_lock
-    from base.native_process.code_version import CodeVersion
-    from base.native_process.loaded_commit import LoadedCommit
     from base.telemetry import process_name
 
-    # The installed source supplied by the operator owns this image. A copied
-    # adapter's __file__ must not lend its checkout identity to the installed writer.
-    image = LoadedCommit.capture(source_root=source)
-    version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process=process_name())
-
-    with resource_lock(purpose="operator.update_schedule_script"):
-        require_agent_host_stopped(home)
+    with repair_guard(home):
+        gate = ProcessDbGate(version=source_version(source), process=process_name())
         with Database.from_settings(gate=gate).pool() as pool:
-            result = replace_script(pool, schedule_id, script, expected_sha256)
-    return result
+            return replace_script(pool, schedule_id, script, expected_sha256)
 
 
 def old_script_digest(value: str) -> str:

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
-HOME = Path(os.environ["FAKE_TART_HOME"])
+HOME = Path(__file__).resolve().parent
 
 
 def _load() -> dict[str, Any]:
@@ -40,6 +39,30 @@ def _exec(state: dict[str, Any], rest: list[str]) -> int:
     return 0
 
 
+def _list(state: dict[str, Any]) -> int:
+    if state.get("fail_list"):
+        return 1
+    vms: dict[str, dict[str, bool]] = state["vms"]
+    rows = [{"Source": "local", "Name": n, "Running": v["running"]} for n, v in vms.items()]
+    rows.append({"Source": "OCI", "Name": "ghcr.io/example/image@sha256:0", "Running": False})
+    print(json.dumps(rows))
+    return 0
+
+
+def _delete(state: dict[str, Any], name: str) -> int:
+    vms: dict[str, dict[str, bool]] = state["vms"]
+    if vms[name]["running"]:
+        return 1
+    if state.get("fail_delete"):
+        state["fail_list"] = True
+        _save(state)
+        return 1
+    if not state.get("keep_on_delete"):
+        del vms[name]
+        _save(state)
+    return 0
+
+
 def main() -> int:
     argv = sys.argv[1:]
     stdin = sys.stdin.read() if argv[:2] == ["exec", "-i"] else None
@@ -50,9 +73,7 @@ def main() -> int:
     if command == "--version":
         print("9.9.9-fake")
     elif command == "list":
-        rows = [{"Source": "local", "Name": n, "Running": v["running"]} for n, v in vms.items()]
-        rows.append({"Source": "OCI", "Name": "ghcr.io/example/image@sha256:0", "Running": False})
-        print(json.dumps(rows))
+        return _list(state)
     elif command == "clone":
         if argv[1] not in vms:
             return 1
@@ -67,10 +88,7 @@ def main() -> int:
         vms[argv[1]]["running"] = False
         _save(state)
     elif command == "delete":
-        if vms[argv[1]]["running"]:
-            return 1
-        del vms[argv[1]]
-        _save(state)
+        return _delete(state, argv[1])
     elif command == "exec":
         return _exec(state, argv[1:] if stdin is None else argv[2:])
     return 0
