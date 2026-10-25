@@ -259,22 +259,15 @@ def new_session(
     return True
 
 
-def _recheck_expected_record(
-    name: str,
+def admit_expected_signal(
     proc: psutil.Process,
     expected: SessionRecord,
     *,
-    sessions_dir: Path | None,
-    recheck_record: SessionRecord | None,
+    latest: SessionRecord | None,
     observed_ticks: Sequence[int | None] | None,
     first_tick: int | None,
     has_first_tick: bool,
 ) -> bool:
-    if recheck_record is not None:
-        recheck_record.write(record_path(name, sessions_dir=sessions_dir))
-        latest: SessionRecord | None = recheck_record
-    else:
-        latest = read_record(name, sessions_dir=sessions_dir)
     if latest != expected:
         return False
     if expected.starttime is not None:
@@ -298,7 +291,6 @@ def graceful_signal(
     *,
     expected: SessionRecord | None = None,
     sessions_dir: Path | None = None,
-    recheck_record: SessionRecord | None = None,
     observed_ticks: Sequence[int | None] | None = None,
 ) -> bool:
     """Send the graceful-stop signal (SIGTERM) to the session's process without
@@ -323,12 +315,10 @@ def graceful_signal(
     if proc is None:
         return False
     with contextlib.suppress(*_GONE):
-        if expected is not None and not _recheck_expected_record(
-            name,
+        if expected is not None and not admit_expected_signal(
             proc,
             expected,
-            sessions_dir=sessions_dir,
-            recheck_record=recheck_record,
+            latest=read_record(name, sessions_dir=sessions_dir),
             observed_ticks=observed_ticks,
             first_tick=first_tick,
             has_first_tick=has_first_tick,

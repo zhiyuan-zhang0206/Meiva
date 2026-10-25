@@ -19,11 +19,11 @@ from base.config import settings
 from base.events.live import redis_client as mod
 from base.events.live.bus import EventBus, event_bus_config_from_settings
 from base.events.live.redis_client import TransportAwareAsyncConnection
-from base.events.live.redis_resilience import AuthRetryPolicy
+from base.events.live.redis_resilience import AuthRetryPolicy, plan_auth_retry_delays
 from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
 from base.host.net.predicates import is_ipv4_literal
 
-_FAST_RETRY = AuthRetryPolicy(deterministic_jitter=True, sleep_scale=0.0)
+_FAST_RETRY = AuthRetryPolicy(initial_delay_s=0.0005, delay_cap_s=0.002, window_s=1.0)
 _bus = EventBus.from_settings()
 _PUBLISH_BOUND_S = event_bus_config_from_settings().publish_attempt_timeout_s
 
@@ -127,29 +127,23 @@ async def test_publish_retries_auth_failures_with_bounded_exponential_delays(
     monkeypatch: pytest.MonkeyPatch, error: type[Exception]
 ) -> None:
     publisher = _EventuallyAsyncPublisher(error, failures=2)
-    delays: list[float] = []
     patch_async_redis(monkeypatch, lambda: publisher)
 
-    assert (
-        await _bus.publish_best_effort("payload", channel="meiva:events", recorded_delays=delays)
-        == 3
-    )
+    assert await _bus.publish_best_effort("payload", channel="meiva:events") == 3
     assert publisher.attempts == 3
-    assert delays == [0.5, 1.0]
+    assert plan_auth_retry_delays(failures=2) == [0.5, 1.0]
 
 
 async def test_publish_auth_retry_stops_within_its_total_wait_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     publisher = _EventuallyAsyncPublisher(AuthenticationError, failures=100)
-    delays: list[float] = []
     patch_async_redis(monkeypatch, lambda: publisher)
 
-    assert (
-        await _bus.publish_best_effort("payload", channel="meiva:events", recorded_delays=delays)
-        is None
-    )
-    assert publisher.attempts > 1
+    assert await _bus.publish_best_effort("payload", channel="meiva:events") is None
+    assert publisher.attempts == _FAST_RETRY.max_attempts
+    delays = plan_auth_retry_delays(failures=100)
+    assert len(delays) == 9
     assert sum(delays) <= 60.0
     assert max(delays) <= 10.0
 
@@ -158,15 +152,10 @@ async def test_publish_does_not_retry_connection_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     publisher = _EventuallyAsyncPublisher(RedisConnectionError, failures=100)
-    delays: list[float] = []
     patch_async_redis(monkeypatch, lambda: publisher)
 
-    assert (
-        await _bus.publish_best_effort("payload", channel="meiva:events", recorded_delays=delays)
-        is None
-    )
+    assert await _bus.publish_best_effort("payload", channel="meiva:events") is None
     assert publisher.attempts == 1
-    assert delays == []
 
 
 @pytest.mark.parametrize("bound", [0, -1.0])
@@ -207,15 +196,11 @@ def test_sync_publish_retries_auth_failures_with_bounded_exponential_delays(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     publisher = _EventuallySyncPublisher(failures=2)
-    delays: list[float] = []
     patch_sync_redis(monkeypatch, lambda: publisher)
 
-    assert (
-        _bus.publish_best_effort_sync("payload", channel="meiva:events", recorded_delays=delays)
-        == 3
-    )
+    assert _bus.publish_best_effort_sync("payload", channel="meiva:events") == 3
     assert publisher.attempts == 3
-    assert delays == [0.5, 1.0]
+    assert plan_auth_retry_delays(failures=2) == [0.5, 1.0]
 
 
 async def test_different_loops_get_different_clients() -> None:
@@ -497,11 +482,32 @@ def _acl_user_url(user: str) -> str:
 
 
 def _set_acl_user(user: str, *rules: str) -> None:
-    admin = mod.open_sync_redis(settings.data_plane.redis_url)
+    admin = mod.open_sync_redis(settings.data_plane.redis_url, decode_responses=True)
     try:
         admin.execute_command("ACL", "SETUSER", user, "on", f">{user}", *rules)
     finally:
         admin.close()
+
+
+def _reset_acl_log() -> None:
+    admin = mod.open_sync_redis(settings.data_plane.redis_url, decode_responses=True)
+    try:
+        admin.execute_command("ACL", "LOG", "RESET")
+    finally:
+        admin.close()
+
+
+def _acl_denied_attempts(user: str, command: str) -> int:
+    admin = mod.open_sync_redis(settings.data_plane.redis_url, decode_responses=True)
+    try:
+        entries: list[dict[str, str | int]] = admin.execute_command("ACL", "LOG")
+    finally:
+        admin.close()
+    total = 0
+    for entry in entries:
+        if entry.get("username") == user and str(entry.get("object", "")).lower() == command:
+            total += int(entry.get("count", 0))
+    return total
 
 
 @pytest.mark.usefixtures("redis_url")
@@ -511,11 +517,10 @@ async def test_async_command_and_publish_keep_one_auth_retry_budget(
 ) -> None:
     user = f"acl_async_budget_{int(best_effort)}"
     _set_acl_user(user, "resetkeys", "~*", "resetchannels", "&*", "+@all", "-get", "-publish")
-    delays: list[float] = []
+    _reset_acl_log()
     client = mod.open_async_redis(
         _acl_user_url(user),
         auth_retry_policy=_FAST_RETRY,
-        recorded_auth_delays=delays,
     )
     try:
         if best_effort:
@@ -526,16 +531,15 @@ async def test_async_command_and_publish_keep_one_auth_retry_budget(
                 warn_last={},
                 attempt_timeout_s=_PUBLISH_BOUND_S,
                 auth_retry_policy=_FAST_RETRY,
-                recorded_delays=delays,
             )
             assert result is None
+            assert _acl_denied_attempts(user, "publish") == _FAST_RETRY.max_attempts
         else:
             with pytest.raises(NoPermissionError):
                 await client.get("key")
+            assert _acl_denied_attempts(user, "get") == _FAST_RETRY.max_attempts
     finally:
         await client.aclose()
-    assert len(delays) == 9
-    assert sum(delays) <= 60.0
 
 
 @pytest.mark.usefixtures("redis_url")
@@ -545,11 +549,10 @@ def test_sync_command_and_publish_keep_one_auth_retry_budget(
 ) -> None:
     user = f"acl_sync_budget_{int(best_effort)}"
     _set_acl_user(user, "resetkeys", "~*", "resetchannels", "&*", "+@all", "-get", "-publish")
-    delays: list[float] = []
+    _reset_acl_log()
     client = mod.open_sync_redis(
         _acl_user_url(user),
         auth_retry_policy=_FAST_RETRY,
-        recorded_auth_delays=delays,
     )
     try:
         if best_effort:
@@ -560,35 +563,30 @@ def test_sync_command_and_publish_keep_one_auth_retry_budget(
                     "payload",
                     warn_last={},
                     auth_retry_policy=_FAST_RETRY,
-                    recorded_delays=delays,
                 )
                 is None
             )
+            assert _acl_denied_attempts(user, "publish") == _FAST_RETRY.max_attempts
         else:
             with pytest.raises(NoPermissionError):
                 client.get("key")
+            assert _acl_denied_attempts(user, "get") == _FAST_RETRY.max_attempts
     finally:
         client.close()
-    assert len(delays) == 9
-    assert sum(delays) <= 60.0
 
 
 @pytest.mark.usefixtures("redis_url")
 async def test_task_started_during_publish_keeps_its_own_command_retry_budget() -> None:
     user = "acl_concurrent_budget"
     _set_acl_user(user, "resetkeys", "~*", "resetchannels", "&*", "+@all", "-get", "-publish")
-    publish_delays: list[float] = []
-    get_delays: list[float] = []
+    _reset_acl_log()
     policy = AuthRetryPolicy(
         initial_delay_s=0.02,
         delay_cap_s=0.05,
-        deterministic_jitter=True,
-        sleep_scale=1.0,
     )
     client = mod.open_async_redis(
         _acl_user_url(user),
         auth_retry_policy=policy,
-        recorded_auth_delays=get_delays,
     )
     child: asyncio.Task[object] | None = None
     publish_task = asyncio.create_task(
@@ -599,21 +597,20 @@ async def test_task_started_during_publish_keeps_its_own_command_retry_budget() 
             warn_last={},
             attempt_timeout_s=_PUBLISH_BOUND_S,
             auth_retry_policy=policy,
-            recorded_delays=publish_delays,
         )
     )
     try:
         for _ in range(200):
-            if len(publish_delays) >= 1:
+            if _acl_denied_attempts(user, "publish") >= 1:
                 break
             await asyncio.sleep(0.005)
-        assert len(publish_delays) >= 1
+        assert _acl_denied_attempts(user, "publish") >= 1
         child = asyncio.create_task(client.execute_command("GET", "independent-key"))
         for _ in range(200):
-            if len(get_delays) >= 1:
+            if _acl_denied_attempts(user, "get") >= 1:
                 break
             await asyncio.sleep(0.005)
-        assert len(get_delays) >= 1
+        assert _acl_denied_attempts(user, "get") >= 1
         _set_acl_user(user, "resetkeys", "~*", "resetchannels", "&*", "+@all")
         assert await asyncio.wait_for(publish_task, timeout=2.0) == 0
         assert await asyncio.wait_for(child, timeout=2.0) is None

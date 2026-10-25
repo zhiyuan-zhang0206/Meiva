@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import errno
 import os
 import signal
@@ -73,12 +74,9 @@ def test_native_signal_keeps_exact_birth_and_preserves_sibling() -> None:
     try:
         owner = OwnedProcess.capture(psutil.Process(children[0].pid))
         sibling = OwnedProcess.capture(psutil.Process(children[1].pid))
-        birth_override = (
-            proc_tree.stable_create_time(psutil.Process(children[0].pid)) + 3600
-            if sys.platform == "linux"
-            else None
-        )
-        assert owner.send_signal(signal.SIGTERM, birth_override=birth_override)
+        if sys.platform == "linux":
+            owner = dataclasses.replace(owner, birth=owner.birth - 3600)
+        assert owner.send_signal(signal.SIGTERM)
         assert children[0].wait(timeout=5) == -signal.SIGTERM
         assert sibling.live()
         assert not owner.send_signal(signal.SIGTERM)
@@ -97,11 +95,9 @@ def test_native_signal_keeps_exact_birth_and_preserves_sibling() -> None:
 def test_native_pidfd_errno_remains_an_authority_failure(
     operation: str, code: int, error: type[OSError]
 ) -> None:
+    call = "pidfd_open(41)" if operation == "open" else "pidfd_send_signal(70)"
     with pytest.raises(error) as failure:
-        if operation == "open":
-            pidfd.open_process(41, simulated_errno=code)
-        else:
-            pidfd.send_signal(70, signal.SIGTERM, simulated_errno=code)
+        pidfd.check_pidfd_result(-1, code, call=call)
     assert failure.value.errno == code
 
 
