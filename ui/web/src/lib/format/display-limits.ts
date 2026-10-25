@@ -10,8 +10,9 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { api } from "../transport/api";
 import type { ConfigFieldView } from "../contracts/types";
+import { api } from "../transport/api";
+import { useApi } from "../transport/transport-context";
 
 const DISPLAY_CONFIG_QUERY_KEY = ["config", null] as const;
 
@@ -25,14 +26,15 @@ interface DisplayConfigView {
  *  Returns `fallback` until the config read lands and whenever the field is
  *  missing, non-numeric, or the read failed. */
 export function useDisplayLimit(envVar: string, fallback: number): number {
+  const client = useApi(api);
   const { data } = useQuery({
     queryKey: DISPLAY_CONFIG_QUERY_KEY,
-    queryFn: () => api.getConfig(),
+    queryFn: () => client.getConfig(),
   });
   // A malformed payload (an unknown endpoint served as {} — the visual-
   // regression e2e stubs do exactly that) must fall back, never crash: read
   // through a view type whose field list is honestly optional.
-  const view: DisplayConfigView | undefined = data;
+  const view = data as DisplayConfigView | undefined;
   const raw = view?.fields?.find((f) => f.env_var === envVar)?.current_value;
   return typeof raw === "number" && Number.isFinite(raw) ? raw : fallback;
 }

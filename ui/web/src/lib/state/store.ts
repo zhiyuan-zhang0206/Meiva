@@ -23,11 +23,11 @@
 
 import { create } from "zustand";
 
-import type { OpenTasksHint } from "@/lib/contracts/types";
+import type { OpenTasksHint } from "../contracts/types";
 import { registerSseRuntime } from "../transport/sse-lifecycle";
 
 // Single dismiss timer for the toast slot (see showToast).
-let toastTimer: ReturnType<typeof setTimeout> | null = null;
+const toastState: { timer: ReturnType<typeof setTimeout> | null } = { timer: null };
 
 // =============================================================
 // UI Slice
@@ -84,7 +84,7 @@ interface UISlice {
 // watchdog also repairs a half-dead socket, directly through the shared
 // transport or through bumpReconnect() on the legacy path.
 
-import type { ConnectionState } from "@/lib/contracts/types";
+import type { ConnectionState } from "../contracts/types";
 
 interface ClusterSlice {
   /** Monotonic token requesting fresh system EventSources after a gateway bounce. */
@@ -130,9 +130,9 @@ export const useStore = create<Store>()((set) => ({
     // One 3s dismiss timer at a time — a burst of toasts must not let an
     // older timer clear the newer message early (the old code leaked a
     // timer per toast and the first one fired whenever).
-    if (toastTimer !== null) clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => {
-      toastTimer = null;
+    if (toastState.timer !== null) clearTimeout(toastState.timer);
+    toastState.timer = setTimeout(() => {
+      toastState.timer = null;
       set({ toast: null });
     }, 3000);
   },

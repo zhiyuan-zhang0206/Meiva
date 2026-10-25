@@ -3,7 +3,8 @@ import { useCallback, useEffect } from "react";
 
 import type { StatsDashboard } from "../contracts/types";
 import { useUserSettings } from "../state/use-user-settings";
-import { api } from "../transport/api";
+import { api, type Api } from "../transport/api";
+import { useApi } from "../transport/transport-context";
 
 export const STATS_WINDOWS = [0, 1, 6, 24, 72, 168] as const;
 export type StatsWindowHours = (typeof STATS_WINDOWS)[number];
@@ -46,7 +47,11 @@ interface StatsPollEntry {
 
 const statsPollers = new WeakMap<QueryClient, Map<StatsWindowHours, StatsPollEntry>>();
 
-function subscribeStatsPoll(queryClient: QueryClient, windowHours: StatsWindowHours): () => void {
+function subscribeStatsPoll(
+  queryClient: QueryClient,
+  windowHours: StatsWindowHours,
+  client: Api,
+): () => void {
   let byWindow = statsPollers.get(queryClient);
   if (byWindow === undefined) {
     byWindow = new Map();
@@ -69,7 +74,7 @@ function subscribeStatsPoll(queryClient: QueryClient, windowHours: StatsWindowHo
       void queryClient
         .query({
           queryKey: ["stats", "dashboard", windowHours],
-          queryFn: () => api.getStatsDashboard(windowHours),
+          queryFn: () => client.getStatsDashboard(windowHours),
           retry: 1,
           staleTime: 0,
         })
@@ -108,17 +113,18 @@ export function useStatsDashboard(windowHours: StatsWindowHours): {
   isFetching: boolean;
   refetch: UseQueryResult<StatsDashboard>["refetch"];
 } {
+  const client = useApi(api);
   const queryClient = useQueryClient();
   const { data: stats, error, isFetching, refetch } = useQuery({
     queryKey: ["stats", "dashboard", windowHours],
-    queryFn: ({ signal }) => api.getStatsDashboard(windowHours, signal),
+    queryFn: ({ signal }) => client.getStatsDashboard(windowHours, signal),
     retry: 1,
     staleTime: STATS_POLL_MS,
     placeholderData: keepPreviousData,
   });
   useEffect(
-    () => subscribeStatsPoll(queryClient, windowHours),
-    [queryClient, windowHours],
+    () => subscribeStatsPoll(queryClient, windowHours, client),
+    [queryClient, windowHours, client],
   );
   return { stats, error, isFetching, refetch };
 }

@@ -28,14 +28,9 @@ afterEach(() => {
 
 describe("composer send-to-turn-start timing", () => {
   it("reports a positive bounded delta once", () => {
-    vi.spyOn(performance, "now")
-      .mockReturnValueOnce(1_000)
-      .mockReturnValueOnce(1_123.6)
-      .mockReturnValueOnce(1_500);
-
-    markMessageSent(42);
-    noteTurnStart(42);
-    noteTurnStart(42);
+    markMessageSent(42, 1_000);
+    noteTurnStart(42, 1_123.6);
+    noteTurnStart(42, 1_500);
 
     expect(track).toHaveBeenCalledTimes(1);
     expect(track).toHaveBeenCalledWith("composer-latency", {
@@ -45,30 +40,22 @@ describe("composer send-to-turn-start timing", () => {
   });
 
   it("does nothing without a pending send mark", () => {
-    noteTurnStart(42);
+    noteTurnStart(42, 1_000);
 
     expect(track).not.toHaveBeenCalled();
   });
 
   it("drops a delta beyond the 120 second sanity bound", () => {
-    vi.spyOn(performance, "now")
-      .mockReturnValueOnce(1_000)
-      .mockReturnValueOnce(121_001);
-
-    markMessageSent(42);
-    noteTurnStart(42);
+    markMessageSent(42, 1_000);
+    noteTurnStart(42, 121_001);
 
     expect(track).not.toHaveBeenCalled();
   });
 
   it("clears a failed or abandoned send mark", () => {
-    vi.spyOn(performance, "now")
-      .mockReturnValueOnce(1_000)
-      .mockReturnValueOnce(1_200);
-
-    markMessageSent(42);
+    markMessageSent(42, 1_000);
     clearMessageSent(42);
-    noteTurnStart(42);
+    noteTurnStart(42, 1_200);
 
     expect(track).not.toHaveBeenCalled();
   });

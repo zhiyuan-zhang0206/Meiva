@@ -1,27 +1,36 @@
 import { flushTelemetry, track } from "./telemetry";
+import {
+  buildFinalWebVitalsMetrics,
+  consumeLayoutShiftAndEventEntries,
+  consumeLcpEntries,
+  consumePaintEntries,
+  createWebVitalsMetricsState,
+  resetWebVitalsMetricsState,
+} from "./web-vitals-plan";
 
-interface LayoutShiftEntry extends PerformanceEntry {
-  value: number;
-  hadRecentInput: boolean;
+export interface PerformanceObserverConstructorLike {
+  new (callback: PerformanceObserverCallback): PerformanceObserver;
+  supportedEntryTypes: readonly string[];
 }
 
-interface InteractionTimingEntry extends PerformanceEntry {
-  interactionId: number;
+export interface WebVitalsRuntime {
+  observerConstructor?: PerformanceObserverConstructorLike;
+  hasWindow?: boolean;
 }
 
-let initialized = false;
-let finalized = false;
 interface MetricObserver {
   observer: PerformanceObserver;
   consume: (entries: PerformanceEntry[], observer: PerformanceObserver) => void;
 }
 
-let observers: MetricObserver[] = [];
-let fcpReported = false;
-let latestLcp: number | undefined;
-let cumulativeLayoutShift = 0;
-let collectingLayoutShift = false;
-let interactionToNextPaint: number | undefined;
+const state = {
+  initialized: false,
+  finalized: false,
+  observers: [] as MetricObserver[],
+  metrics: createWebVitalsMetricsState(),
+  cleanupFinalizers: null as (() => void) | null,
+  testRuntime: null as WebVitalsRuntime | null,
+};
 
 function reportMetric(key: "fcp" | "lcp" | "cls" | "inp", value: number | string): void {
   track("web-vitals", { key, value, dedupe: false });
@@ -31,9 +40,16 @@ function observe(
   type: string,
   consume: MetricObserver["consume"],
   options: { durationThreshold?: number } = {},
+  observerCtor?: PerformanceObserverConstructorLike,
 ): PerformanceObserver | undefined {
-  if (!PerformanceObserver.supportedEntryTypes.includes(type)) return undefined;
-  const observer = new PerformanceObserver((list, currentObserver) => {
+  const ObserverCtor =
+    observerCtor ??
+    state.testRuntime?.observerConstructor ??
+    (typeof PerformanceObserver === "undefined" ? undefined : PerformanceObserver);
+  if (!ObserverCtor?.supportedEntryTypes.includes(type)) {
+    return undefined;
+  }
+  const observer = new ObserverCtor((list, currentObserver) => {
     consume(list.getEntries(), currentObserver);
   });
   try {
@@ -42,98 +58,112 @@ function observe(
     observer.disconnect();
     return undefined;
   }
-  observers.push({ observer, consume });
+  state.observers.push({ observer, consume });
   return observer;
 }
 
 function stopObservers(): void {
-  for (const { observer } of observers) observer.disconnect();
+  for (const { observer } of state.observers) observer.disconnect();
 }
 
 function drainObservers(): void {
-  for (const { observer, consume } of observers) {
+  for (const { observer, consume } of state.observers) {
     const pending = observer.takeRecords();
     if (pending.length > 0) consume(pending, observer);
   }
 }
 
 function detachFinalizers(): void {
-  if (typeof window === "undefined") return;
-  window.removeEventListener("pagehide", reportFinalMetrics);
-  document.removeEventListener("visibilitychange", reportWhenHidden);
+  state.cleanupFinalizers?.();
+  state.cleanupFinalizers = null;
 }
 
 function reportFinalMetrics(): void {
-  if (finalized) return;
-  finalized = true;
+  if (state.finalized) return;
+  state.finalized = true;
   drainObservers();
-  if (latestLcp !== undefined) reportMetric("lcp", Math.round(latestLcp));
-  if (collectingLayoutShift) {
-    const stableScore = Math.round(cumulativeLayoutShift * 10_000) / 10_000;
-    reportMetric("cls", String(stableScore));
-  }
-  if (interactionToNextPaint !== undefined) {
-    reportMetric("inp", Math.round(interactionToNextPaint));
+  for (const metric of buildFinalWebVitalsMetrics(state.metrics)) {
+    reportMetric(metric.key, metric.value);
   }
   stopObservers();
   detachFinalizers();
   flushTelemetry();
 }
 
-function reportWhenHidden(): void {
-  if (document.visibilityState === "hidden") reportFinalMetrics();
-}
-
 /** Start one-shot native Web Vitals observers for the current page load. */
-export function initWebVitals(): void {
+export function initWebVitals(runtime?: WebVitalsRuntime): void {
+  const effectiveRuntime = runtime ?? state.testRuntime ?? undefined;
+  const hasWindow = effectiveRuntime?.hasWindow ?? typeof window !== "undefined";
+  const observerCtor = effectiveRuntime?.observerConstructor;
   if (
-    initialized ||
-    typeof window === "undefined" ||
-    typeof PerformanceObserver === "undefined"
+    state.initialized ||
+    !hasWindow ||
+    (observerCtor === undefined && typeof PerformanceObserver === "undefined")
   ) {
     return;
   }
-  initialized = true;
+  state.initialized = true;
 
-  observe("paint", (entries, observer) => {
-    if (fcpReported) return;
-    const fcp = entries.find((candidate) => candidate.name === "first-contentful-paint");
-    if (fcp === undefined) return;
-    fcpReported = true;
-    reportMetric("fcp", Math.round(fcp.startTime));
-    observer.disconnect();
-  });
+  observe(
+    "paint",
+    (entries, observer) => {
+      const fcp = consumePaintEntries(state.metrics, entries);
+      if (fcp === null) return;
+      reportMetric("fcp", fcp);
+      observer.disconnect();
+    },
+    {},
+    observerCtor,
+  );
 
-  observe("largest-contentful-paint", (entries) => {
-    for (const candidate of entries) latestLcp = candidate.startTime;
-  });
+  observe(
+    "largest-contentful-paint",
+    (entries) => {
+      consumeLcpEntries(state.metrics, entries);
+    },
+    {},
+    observerCtor,
+  );
 
-  collectingLayoutShift = observe("layout-shift", (entries) => {
-    for (const candidate of entries as LayoutShiftEntry[]) {
-      if (!candidate.hadRecentInput) cumulativeLayoutShift += candidate.value;
-    }
-  }) !== undefined;
+  state.metrics.collectingLayoutShift =
+    observe(
+      "layout-shift",
+      (entries) => {
+        consumeLayoutShiftAndEventEntries(state.metrics, "layout-shift", entries);
+      },
+      {},
+      observerCtor,
+    ) !== undefined;
 
-  observe("event", (entries) => {
-    for (const candidate of entries as InteractionTimingEntry[]) {
-      if (typeof candidate.interactionId !== "number" || candidate.interactionId <= 0) continue;
-      interactionToNextPaint = Math.max(interactionToNextPaint ?? 0, candidate.duration);
-    }
-  }, { durationThreshold: 40 });
+  observe(
+    "event",
+    (entries) => {
+      consumeLayoutShiftAndEventEntries(state.metrics, "event", entries);
+    },
+    { durationThreshold: 40 },
+    observerCtor,
+  );
 
+  const onVisibilityChange = () => {
+    if (document.visibilityState === "hidden") reportFinalMetrics();
+  };
   window.addEventListener("pagehide", reportFinalMetrics);
-  document.addEventListener("visibilitychange", reportWhenHidden);
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  state.cleanupFinalizers = () => {
+    window.removeEventListener("pagehide", reportFinalMetrics);
+    document.removeEventListener("visibilitychange", onVisibilityChange);
+  };
+}
+
+export function webVitalsSetRuntimeForTest(runtime: WebVitalsRuntime | null): void {
+  state.testRuntime = runtime;
 }
 
 export function webVitalsResetForTest(): void {
   stopObservers();
   detachFinalizers();
-  initialized = false;
-  finalized = false;
-  observers = [];
-  fcpReported = false;
-  latestLcp = undefined;
-  cumulativeLayoutShift = 0;
-  collectingLayoutShift = false;
-  interactionToNextPaint = undefined;
+  state.initialized = false;
+  state.finalized = false;
+  state.observers = [];
+  resetWebVitalsMetricsState(state.metrics);
 }

@@ -6,41 +6,29 @@
 // wrong frame whenever a commit and the passive flush straddled a rendering
 // pass).
 
+// meiva:note
+// @vitest-environment happy-dom
+
 import { act, cleanup, render } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useMediaQuery } from "./use-media-query";
 
-type Listener = () => void;
+const initialInnerWidth = window.innerWidth;
 
-const mediaState = {
-  matches: false,
-  listeners: new Set<Listener>(),
-};
-
-function installMatchMedia(): void {
-  mediaState.matches = false;
-  mediaState.listeners = new Set();
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn((query: string) => ({
-      matches: mediaState.matches,
-      media: query,
-      addEventListener: (_type: "change", listener: Listener) => {
-        mediaState.listeners.add(listener);
-      },
-      removeEventListener: (_type: "change", listener: Listener) => {
-        mediaState.listeners.delete(listener);
-      },
-    })),
-  );
+function resizeViewport(width: number): void {
+  window.innerWidth = width;
+  window.dispatchEvent(new Event("resize"));
 }
 
-beforeEach(installMatchMedia);
+beforeEach(() => {
+  resizeViewport(390);
+});
+
 afterEach(() => {
   cleanup();
-  vi.unstubAllGlobals();
+  resizeViewport(initialInnerWidth);
 });
 
 function Probe() {
@@ -49,15 +37,14 @@ function Probe() {
 
 describe("useMediaQuery", () => {
   it("answers the server snapshot (false) during SSR", () => {
-    mediaState.matches = true; // the "server" has no viewport; the snapshot wins
+    resizeViewport(1024); // the "server" has no viewport; the snapshot wins
     expect(renderToString(<Probe />)).toContain(">false<");
   });
 
   it("reads the live match on the first client render", () => {
-    mediaState.matches = true;
+    resizeViewport(1024);
     const { getByTestId } = render(<Probe />);
     expect(getByTestId("value").textContent).toBe("true");
-    expect(mediaState.listeners.size).toBe(1); // subscribed
   });
 
   it("follows change events", () => {
@@ -65,8 +52,7 @@ describe("useMediaQuery", () => {
     expect(getByTestId("value").textContent).toBe("false");
 
     act(() => {
-      mediaState.matches = true;
-      for (const listener of mediaState.listeners) listener();
+      resizeViewport(1024);
     });
     expect(getByTestId("value").textContent).toBe("true");
   });

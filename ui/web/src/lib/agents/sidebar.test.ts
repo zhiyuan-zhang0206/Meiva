@@ -1,21 +1,16 @@
-// Sidebar preference hooks are DB-backed now (display.sidebar_*), so these tests
-// drive them against the reactive user-settings mock and assert the read-side
-// mapping: defaults, validation of stored values (sort shape,
-// stats-window whitelist), and that a setter writes the right key.
+// meiva:note
+// @vitest-environment happy-dom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { getStatsDashboard } = vi.hoisted(() => ({
-  getStatsDashboard: vi.fn(),
-}));
-vi.mock("@/lib/transport/api", () => ({ api: { getStatsDashboard } }));
-vi.mock("@/lib/state/use-user-settings", () => import("@/lib/state/user-settings-mock"));
-
-import { mockSetSettingCalls, resetMockSettings, setMockSetting } from "@/lib/state/user-settings-mock";
-
+import { USER_SETTING_DEFAULTS, type StatsDashboard } from "../contracts/types";
+import { SETTINGS_QUERY_KEY } from "../state/use-user-settings";
+import type { Api } from "../transport/api";
+import { cacheOnlyApi } from "../transport/tests/api/api-provider";
+import { ApiProvider } from "../transport/transport-context";
 import {
   SIDEBAR_SORT_DEFAULT,
   STATS_WINDOW_DEFAULT,
@@ -25,70 +20,124 @@ import {
   useStatsWindow,
 } from "./sidebar";
 
-beforeEach(() => resetMockSettings());
+const getStatsDashboard = vi.fn<(hours: number, signal?: AbortSignal) => Promise<StatsDashboard>>();
+
 afterEach(() => {
   cleanup();
   getStatsDashboard.mockReset();
   vi.useRealTimers();
 });
 
+function createSettingsRig(initial: Record<string, unknown> = {}) {
+  const putCalls: { key: string; value: unknown }[] = [];
+  const stored: Record<string, unknown> = { ...initial };
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  client.setQueryData(SETTINGS_QUERY_KEY, {
+    ...USER_SETTING_DEFAULTS,
+    ...stored,
+  });
+  const testApi: Api = {
+    ...cacheOnlyApi(),
+    getSettings: () =>
+      Promise.resolve({
+        settings: Object.entries(stored).map(([key, value]) => ({
+          key,
+          value,
+          updated_at: "2026-01-01T00:00:00Z",
+        })),
+      }),
+    putSetting: (key: string, value: unknown) => {
+      putCalls.push({ key, value });
+      stored[key] = value;
+      return Promise.resolve({
+        key,
+        value,
+        updated_at: "2026-01-01T00:00:00Z",
+      });
+    },
+    getStatsDashboard,
+  };
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(
+      ApiProvider,
+      { api: testApi },
+      createElement(QueryClientProvider, { client }, children),
+    );
+  return { wrapper, putCalls, client };
+}
+
 describe("useSidebarSort (DB-backed)", () => {
   it("default sort is id descending", () => {
-    const { result } = renderHook(() => useSidebarSort());
+    const { wrapper } = createSettingsRig();
+    const { result } = renderHook(() => useSidebarSort(), { wrapper });
     expect(result.current.sort).toEqual(SIDEBAR_SORT_DEFAULT);
     expect(SIDEBAR_SORT_DEFAULT).toEqual({ key: "id", dir: "desc" });
   });
 
   it("reads a stored valid sort", () => {
-    setMockSetting("display.sidebar_sort", { key: "status", dir: "asc" });
-    const { result } = renderHook(() => useSidebarSort());
+    const { wrapper } = createSettingsRig({
+      "display.sidebar_sort": { key: "status", dir: "asc" },
+    });
+    const { result } = renderHook(() => useSidebarSort(), { wrapper });
     expect(result.current.sort).toEqual({ key: "status", dir: "asc" });
   });
 
   it("malformed stored value (not an object) → default kept", () => {
-    setMockSetting("display.sidebar_sort", "not-an-object");
-    const { result } = renderHook(() => useSidebarSort());
+    const { wrapper } = createSettingsRig({
+      "display.sidebar_sort": "not-an-object",
+    });
+    const { result } = renderHook(() => useSidebarSort(), { wrapper });
     expect(result.current.sort).toEqual(SIDEBAR_SORT_DEFAULT);
   });
 
   it("out-of-range key/dir → default kept", () => {
-    setMockSetting("display.sidebar_sort", { key: "bogus", dir: "sideways" });
-    const { result } = renderHook(() => useSidebarSort());
+    const { wrapper } = createSettingsRig({
+      "display.sidebar_sort": { key: "bogus", dir: "sideways" },
+    });
+    const { result } = renderHook(() => useSidebarSort(), { wrapper });
     expect(result.current.sort).toEqual(SIDEBAR_SORT_DEFAULT);
   });
 
-  it("setSort writes display.sidebar_sort", () => {
-    const { result } = renderHook(() => useSidebarSort());
+  it("setSort writes display.sidebar_sort", async () => {
+    const { wrapper, putCalls } = createSettingsRig();
+    const { result } = renderHook(() => useSidebarSort(), { wrapper });
     act(() => result.current.setSort({ key: "last_active", dir: "desc" }));
-    expect(result.current.sort).toEqual({ key: "last_active", dir: "desc" });
-    expect(mockSetSettingCalls().at(-1)).toEqual({
-      key: "display.sidebar_sort",
-      value: { key: "last_active", dir: "desc" },
+    await waitFor(() => {
+      expect(result.current.sort).toEqual({ key: "last_active", dir: "desc" });
+      expect(putCalls.at(-1)).toEqual({
+        key: "display.sidebar_sort",
+        value: { key: "last_active", dir: "desc" },
+      });
     });
   });
 });
 
 describe("useSidebarCollapsed", () => {
-  it("setCollapsed writes display.sidebar_collapsed", () => {
-    const { result } = renderHook(() => useSidebarCollapsed());
+  it("setCollapsed writes display.sidebar_collapsed", async () => {
+    const { wrapper, putCalls } = createSettingsRig();
+    const { result } = renderHook(() => useSidebarCollapsed(), { wrapper });
     act(() => result.current.setCollapsed(true));
-    expect(mockSetSettingCalls().at(-1)).toEqual({
-      key: "display.sidebar_collapsed",
-      value: true,
+    await waitFor(() => {
+      expect(putCalls.at(-1)).toEqual({
+        key: "display.sidebar_collapsed",
+        value: true,
+      });
     });
   });
 });
 
 describe("useStatsWindow (DB-backed, validated)", () => {
   it("keeps the valid five-minute window", () => {
-    setMockSetting("display.stats_window_hours", 0);
-    const { result } = renderHook(() => useStatsWindow());
+    const { wrapper } = createSettingsRig({ "display.stats_window_hours": 0 });
+    const { result } = renderHook(() => useStatsWindow(), { wrapper });
     expect(result.current.windowHours).toBe(0);
   });
 
   it("rejects an out-of-whitelist window → default", () => {
-    setMockSetting("display.stats_window_hours", 999);
-    const { result } = renderHook(() => useStatsWindow());
+    const { wrapper } = createSettingsRig({ "display.stats_window_hours": 999 });
+    const { result } = renderHook(() => useStatsWindow(), { wrapper });
     expect(result.current.windowHours).toBe(STATS_WINDOW_DEFAULT);
   });
 });
@@ -98,20 +147,26 @@ describe("useStatsDashboard shared polling", () => {
     vi.useFakeTimers();
     getStatsDashboard.mockResolvedValue({
       live_count: 1,
-      stale: false,
       window_hours: 24,
       tokens: { input: 0, output: 0, cache_read: 0, cache_hit_pct: 0 },
       cost_usd: 0,
       avg_turn_seconds: null,
       warnings: 0,
       errors: 0,
+      alert_classes_active: 0,
+      alert_classes_dismissed: 0,
       plugin_stats: [],
     });
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
+    const testApi: Api = { ...cacheOnlyApi(), getStatsDashboard };
     const wrapper = ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client: queryClient }, children);
+      createElement(
+        ApiProvider,
+        { api: testApi },
+        createElement(QueryClientProvider, { client: queryClient }, children),
+      );
 
     const first = renderHook(() => useStatsDashboard(24), { wrapper });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
@@ -143,8 +198,13 @@ describe("useStatsDashboard shared polling", () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, retryDelay: 0 } },
     });
+    const testApi: Api = { ...cacheOnlyApi(), getStatsDashboard };
     const wrapper = ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client: queryClient }, children);
+      createElement(
+        ApiProvider,
+        { api: testApi },
+        createElement(QueryClientProvider, { client: queryClient }, children),
+      );
 
     const hook = renderHook(() => useStatsDashboard(24), { wrapper });
     const tick = (ms: number) =>
@@ -168,13 +228,14 @@ describe("useStatsDashboard shared polling", () => {
     // ticks after it resume at the plain interval.
     getStatsDashboard.mockResolvedValue({
       live_count: 1,
-      stale: false,
       window_hours: 24,
       tokens: { input: 0, output: 0, cache_read: 0, cache_hit_pct: 0 },
       cost_usd: 0,
       avg_turn_seconds: null,
       warnings: 0,
       errors: 0,
+      alert_classes_active: 0,
+      alert_classes_dismissed: 0,
       plugin_stats: [],
     });
     await tick(240_000);
@@ -191,8 +252,13 @@ describe("useStatsDashboard shared polling", () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retryDelay: 0 } },
     });
+    const testApi: Api = { ...cacheOnlyApi(), getStatsDashboard };
     const wrapper = ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client: queryClient }, children);
+      createElement(
+        ApiProvider,
+        { api: testApi },
+        createElement(QueryClientProvider, { client: queryClient }, children),
+      );
 
     const hook = renderHook(() => useStatsDashboard(24), { wrapper });
     await waitFor(() => expect(hook.result.current.error).toBe(failure));

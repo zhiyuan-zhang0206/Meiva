@@ -1,89 +1,91 @@
 "use client";
 
 // meiva:note
-// Where a navigation's seconds actually go, measured in the reviewer's own
-// browser, plus a floor under the worst case. Measured on 2026-10-20: a click on
-// Control reported click-to-URL of 15.2 s and 17.9 s with a longest main-thread
-// task of ZERO - the router issued its RSC request (answered in 6 ms), then made
-// no request at all and committed nothing for fifteen seconds while the main
-// thread stayed idle. That is a navigation that never gets to run, not a slow
-// one, so after NAV_FALLBACK_MS without a commit this performs a real location
-// change: a full load costs ~1.5 s on the machine that reported the stall, which
-// bounds the worst case instead of leaving it unbounded.
+// Navigation timing — measures the user-visible cost of a route change from
+// the click that started it to the first frame after the new route commits.
 //
-// The floor is 5000 ms: click-to-commit measures p50 69 / p95 84 / p99 106
-// unthrottled (30 navigations, preview build, ubuntu host, 2026-10-20), p99 332 at
-// 4x CPU throttle and 655 at 8x, so 5000 is ~47x the unthrottled p99 and ~7.6x the
-// slowest healthy commit measured. It is deliberately far above any healthy
-// navigation: everything faster than it is a real measurement, so the fallback
-// never rewrites a slow-but-fine commit into a full reload, and the only rows it
-// produces are genuine non-commits. A real hang costs 5000 ms plus the ~0.6 s load
-// that follows. The user can override it with behavior.navFallbackMs.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// Why two numbers plus the longest task:
+//   - commitMs: markNavIntent() -> usePathname() changed (React committed the
+//     new route's tree). Includes RSC fetch if any and the synchronous render.
+//   - paintMs:  markNavIntent() -> the first animation frame after the commit.
+//     The gap between commit and paint is layout + paint + any passive effects
+//     that blocked the frame.
+//   - taskMs:   the longest LongTask observed between intent and 400ms after
+//     paint (late query resolves / deferred mounts). Zero when the browser has
+//     no LongTask observer or no task crossed the 50ms floor.
+//
+// All three ride in one `nav-timing` event's ≤64-char `value` (`c=...|p=...|t=...`)
+// so a single row in `frontend_telemetry` tells whether a slow switch was
+// network/render before commit, frame work at commit, or a post-mount stall.
+//
+// Fallback: if the App Router transition has not committed within 5s of a
+// sidebar click, record `key: "fallback"` with how many resources started, the
+// worst connection-queue wait and the frames actually painted while stuck, then
+// assign `window.location` so awedged transition still lands on the page.
 
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 
+import {
+  createNavTimingMetrics,
+  formatNavFallbackHead,
+  formatNavTiming,
+  recordLongTaskDuration,
+  recordResourceEntry,
+  resetNavWatchMetrics,
+} from "./nav-timing-plan";
 import { track } from "./telemetry";
 
-const SETTLE_MS = 400;
-const NAV_FALLBACK_MS = 5000;
-let fallbackMs = NAV_FALLBACK_MS;
+export { formatNavTiming } from "./nav-timing-plan";
 
-let intentAt: number | null = null;
-let intentPath: string | null = null;
-let longestTask = 0;
-let maxQueueMs = 0;
-let startedResources = 0;
-let resourceNames: string[] = [];
-let frames = 0;
-let frameLoop = 0;
-let observer: PerformanceObserver | null = null;
-let resources: PerformanceObserver | null = null;
-let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+const SETTLE_MS = 400;
+
+const state = {
+  metrics: createNavTimingMetrics(),
+  frameLoop: 0,
+  observer: null as PerformanceObserver | null,
+  resources: null as PerformanceObserver | null,
+  fallbackTimer: null as ReturnType<typeof setTimeout> | null,
+};
 
 function countFrames(): void {
-  frames += 1;
-  frameLoop = requestAnimationFrame(countFrames);
+  state.frameLoop = requestAnimationFrame(() => {
+    state.metrics.frames += 1;
+    countFrames();
+  });
 }
 
 function stopFrames(): void {
-  if (frameLoop !== 0) cancelAnimationFrame(frameLoop);
-  frameLoop = 0;
+  if (state.frameLoop !== 0) cancelAnimationFrame(state.frameLoop);
+  state.frameLoop = 0;
 }
 
 function startWatching(): void {
-  longestTask = 0;
-  maxQueueMs = 0;
-  startedResources = 0;
-  resourceNames = [];
-  frames = 0;
+  resetNavWatchMetrics(state.metrics);
   stopFrames();
-  frameLoop = requestAnimationFrame(countFrames);
+  countFrames();
   if (typeof PerformanceObserver === "undefined") return;
   try {
-    if (observer === null) {
-      observer = new PerformanceObserver((list) => {
-        if (intentAt === null) return;
+    if (state.observer === null) {
+      state.observer = new PerformanceObserver((list) => {
         for (const entry of list.getEntries()) {
-          longestTask = Math.max(longestTask, entry.duration);
+          recordLongTaskDuration(state.metrics, entry.duration);
         }
       });
-      observer.observe({ entryTypes: ["longtask"] });
+      state.observer.observe({ entryTypes: ["longtask"] });
     }
-    if (resources === null) {
-      resources = new PerformanceObserver((list) => {
-        if (intentAt === null) return;
+    if (state.resources === null) {
+      state.resources = new PerformanceObserver((list) => {
         for (const entry of list.getEntries() as PerformanceResourceTiming[]) {
-          startedResources += 1;
-          if (resourceNames.length < 4) {
-            resourceNames.push(entry.name.split("/").pop() ?? entry.name);
-          }
-          const queued = entry.requestStart - entry.startTime;
-          if (queued > maxQueueMs) maxQueueMs = queued;
+          recordResourceEntry(
+            state.metrics,
+            entry.name,
+            entry.startTime,
+            entry.requestStart,
+          );
         }
       });
-      resources.observe({ entryTypes: ["resource"] });
+      state.resources.observe({ entryTypes: ["resource"] });
     }
   } catch {
     return;
@@ -91,52 +93,50 @@ function startWatching(): void {
 }
 
 function clearFallback(): void {
-  if (fallbackTimer !== null) clearTimeout(fallbackTimer);
-  fallbackTimer = null;
+  if (state.fallbackTimer !== null) clearTimeout(state.fallbackTimer);
+  state.fallbackTimer = null;
 }
 
 export function setNavFallbackMs(ms: number): void {
-  if (Number.isFinite(ms) && ms > 0) fallbackMs = ms;
+  if (Number.isFinite(ms) && ms > 0) state.metrics.fallbackMs = ms;
 }
 
 export function markNavIntent(href?: string): void {
   if (typeof window === "undefined") return;
-  intentAt = performance.now();
-  intentPath = href ?? null;
+  state.metrics.intentAt = performance.now();
+  state.metrics.intentPath = href ?? null;
   startWatching();
   clearFallback();
-  if (intentPath === null) return;
-  const target: string = intentPath;
-  fallbackTimer = setTimeout(() => {
-    fallbackTimer = null;
+  if (state.metrics.intentPath === null) return;
+  const target: string = state.metrics.intentPath;
+  state.fallbackTimer = setTimeout(() => {
+    state.fallbackTimer = null;
     if (window.location.pathname === target) return;
-    const elapsed = intentAt === null ? 0 : performance.now() - intentAt;
+    const elapsed =
+      state.metrics.intentAt === null ? 0 : performance.now() - state.metrics.intentAt;
     stopFrames();
     const page = target.replace(/^\//, "") || "home";
     track("nav-timing", {
       page,
       key: "fallback",
       value:
-        `c=${Math.round(elapsed)}|n=${startedResources}|q=${Math.round(maxQueueMs)}|f=1` +
-        `|fr=${frames}|v=${document.visibilityState === "visible" ? 1 : 0}`,
+        formatNavFallbackHead(elapsed, state.metrics) +
+        `|fr=${state.metrics.frames}|v=${document.visibilityState === "visible" ? 1 : 0}`,
       dedupe: false,
     });
     track("nav-timing", {
       page,
       key: "res",
-      value: resourceNames.join(","),
+      value: state.metrics.resourceNames.join(","),
       dedupe: false,
     });
     window.location.assign(target);
-  }, fallbackMs);
+  }, state.metrics.fallbackMs);
 }
 
-export function formatNavTiming(commitMs: number, paintMs: number, taskMs: number): string {
-  return `c=${Math.round(commitMs)}|p=${Math.round(paintMs)}|t=${Math.round(taskMs)}`;
-}
-
-export function useNavTimingReport(): void {
-  const pathname = usePathname();
+export function useNavTimingReport(pathnameOverride?: string): void {
+  const routerPathname = usePathname();
+  const pathname = pathnameOverride ?? (routerPathname || "/");
   const previous = useRef<string | null>(null);
   useEffect(() => {
     if (previous.current === null) {
@@ -145,17 +145,17 @@ export function useNavTimingReport(): void {
     }
     if (previous.current === pathname) return;
     previous.current = pathname;
-    if (intentAt === null) return;
+    if (state.metrics.intentAt === null) return;
     clearFallback();
     stopFrames();
-    const commit = performance.now() - intentAt;
+    const commit = performance.now() - state.metrics.intentAt;
     requestAnimationFrame(() => {
-      if (intentAt === null) return;
-      const paint = performance.now() - intentAt;
+      if (state.metrics.intentAt === null) return;
+      const paint = performance.now() - state.metrics.intentAt;
       setTimeout(() => {
-        const task = longestTask;
-        intentAt = null;
-        intentPath = null;
+        const task = state.metrics.longestTask;
+        state.metrics.intentAt = null;
+        state.metrics.intentPath = null;
         track("nav-timing", {
           page: pathname.replace(/^\//, "") || "home",
           key: "nav",

@@ -2,19 +2,23 @@ exports = ["nav-timing.ts", "telemetry-page-view.tsx", "telemetry.ts"]
 
 [uses]
 "nav-timing.test.tsx" = ["nav-timing.ts", "telemetry.ts"]
-"nav-timing.ts" = ["telemetry.ts"]
-"telemetry-page-view.test.tsx" = ["telemetry-page-view.tsx", "telemetry.ts"]
+"nav-timing.ts" = ["nav-timing-plan.ts", "telemetry.ts"]
+"telemetry-page-view.test.tsx" = ["telemetry-page-view.tsx", "telemetry.ts", "web-vitals.ts"]
 "telemetry-page-view.tsx" = ["telemetry.ts", "web-vitals.ts"]
 "telemetry.test.ts" = ["telemetry.ts"]
+"telemetry.ts" = ["telemetry-plan.ts"]
 "web-vitals-integration.test.ts" = ["telemetry.ts", "web-vitals.ts"]
 "web-vitals.test.ts" = ["telemetry.ts", "web-vitals.ts"]
-"web-vitals.ts" = ["telemetry.ts"]
+"web-vitals.ts" = ["telemetry.ts", "web-vitals-plan.ts"]
 
 [purity]
 "." = "strict-to-be"
+"nav-timing-plan.ts" = "strict"
 "nav-timing.ts" = "strict-to-be"
 "telemetry-page-view.tsx" = "strict-to-be"
+"telemetry-plan.ts" = "strict"
 "telemetry.ts" = "strict-to-be"
+"web-vitals-plan.ts" = "strict"
 "web-vitals.ts" = "strict-to-be"
 
 [debt.impure-call]
@@ -25,7 +29,6 @@ exports = ["nav-timing.ts", "telemetry-page-view.tsx", "telemetry.ts"]
 "nav-timing.ts#markNavIntent#window" = 1
 "nav-timing.ts#startWatching#PerformanceObserver" = 1
 "nav-timing.ts#startWatching#new PerformanceObserver" = 1
-"nav-timing.ts#startWatching#requestAnimationFrame" = 1
 "nav-timing.ts#stopFrames#cancelAnimationFrame" = 1
 "nav-timing.ts#useNavTimingReport#performance.now" = 1
 "nav-timing.ts#useNavTimingReport#requestAnimationFrame" = 1
@@ -40,57 +43,9 @@ exports = ["nav-timing.ts", "telemetry-page-view.tsx", "telemetry.ts"]
 "telemetry.ts#ensureTimer#window" = 1
 "telemetry.ts#flush#Date.now" = 1
 "telemetry.ts#flush#console.warn" = 1
-"telemetry.ts#flush#fetch" = 1
 "telemetry.ts#flush#navigator" = 1
 "telemetry.ts#newSessionId#Math.random" = 1
 "telemetry.ts#newSessionId#crypto.randomUUID" = 1
-"telemetry.ts#rateLimited#Date.now" = 1
 "telemetry.ts#track#Date.now" = 1
-"web-vitals.ts#detachFinalizers#document" = 1
-"web-vitals.ts#detachFinalizers#window" = 1
 "web-vitals.ts#initWebVitals#document" = 1
 "web-vitals.ts#initWebVitals#window" = 1
-"web-vitals.ts#observe#PerformanceObserver" = 1
-"web-vitals.ts#observe#new PerformanceObserver" = 1
-"web-vitals.ts#reportWhenHidden#document" = 1
-
-[debt.stdlib-patch]
-"nav-timing.test.tsx#vi.stubGlobal cancelAnimationFrame" = 1
-"nav-timing.test.tsx#vi.stubGlobal requestAnimationFrame" = 1
-"telemetry.test.ts#vi.stubGlobal fetch" = 1
-"web-vitals-integration.test.ts#vi.stubGlobal PerformanceObserver" = 1
-"web-vitals.test.ts#vi.stubGlobal PerformanceObserver" = 1
-"web-vitals.test.ts#vi.stubGlobal window" = 1
-
-[debt.third-party-patch]
-"nav-timing.test.tsx#vi.mock next" = 1
-"telemetry-page-view.test.tsx#vi.mock next" = 1
-
-[debt.unfrozen-value]
-"nav-timing.ts#fallbackMs" = 1
-"nav-timing.ts#fallbackTimer" = 1
-"nav-timing.ts#frameLoop" = 1
-"nav-timing.ts#frames" = 1
-"nav-timing.ts#intentAt" = 1
-"nav-timing.ts#intentPath" = 1
-"nav-timing.ts#longestTask" = 1
-"nav-timing.ts#maxQueueMs" = 1
-"nav-timing.ts#observer" = 1
-"nav-timing.ts#resourceNames" = 1
-"nav-timing.ts#resources" = 1
-"nav-timing.ts#startedResources" = 1
-"telemetry.ts#buffer" = 1
-"telemetry.ts#currentPage" = 1
-"telemetry.ts#enabled" = 1
-"telemetry.ts#flushTimer" = 1
-"telemetry.ts#lastTracked" = 1
-"telemetry.ts#sessionId" = 1
-"telemetry.ts#warnedOnce" = 1
-"web-vitals.ts#collectingLayoutShift" = 1
-"web-vitals.ts#cumulativeLayoutShift" = 1
-"web-vitals.ts#fcpReported" = 1
-"web-vitals.ts#finalized" = 1
-"web-vitals.ts#initialized" = 1
-"web-vitals.ts#interactionToNextPaint" = 1
-"web-vitals.ts#latestLcp" = 1
-"web-vitals.ts#observers" = 1

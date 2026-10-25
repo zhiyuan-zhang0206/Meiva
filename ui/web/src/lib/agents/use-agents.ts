@@ -4,16 +4,19 @@
 // ID-addressed read. Neither selection nor lineage depends on loading history.
 import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef } from "react";
-import { api } from "../transport/api";
-import { errMsg } from "../contracts/errors";
-import { AGENTS_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "../fold/agents";
+
 import { REFERENCE_PARAM } from "../context/reference-url";
-import { useStore } from "../state/store";
-import { useAgentActions } from "./use-agent-actions";
+import { errMsg } from "../contracts/errors";
 import type { AgentRoster } from "../contracts/types";
+import { AGENT_DETAIL_QUERY_KEY, AGENTS_QUERY_KEY } from "../fold/agents";
+import { useStore } from "../state/store";
+import { api } from "../transport/api";
+import { useApi } from "../transport/transport-context";
+import { useAgentActions } from "./use-agent-actions";
 
 export { AGENTS_QUERY_KEY } from "../fold/agents";
 export type { PendingAction } from "./use-agent-actions";
+
 const EMPTY_ROSTER: AgentRoster = { agents: [], ancestors: [] };
 const ACTIVE_ID_KEY = "meiva.active.agent_id";
 
@@ -21,32 +24,29 @@ const ACTIVE_ID_KEY = "meiva.active.agent_id";
 // A browser can refuse storage (private windows, disabled site data). The
 // selection still works for the session; it just stops being remembered.
 // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
-function readRememberedAgent(): string | null {
+function rememberAgent(): string | null;
+function rememberAgent(id: number | null): void;
+function rememberAgent(id?: number | null): string | null | void {
   try {
-    return localStorage.getItem(ACTIVE_ID_KEY);
+    if (id === undefined) return localStorage.getItem(ACTIVE_ID_KEY);
+    if (id === null) localStorage.removeItem(ACTIVE_ID_KEY);
+    else localStorage.setItem(ACTIVE_ID_KEY, String(id));
   } catch {
     return null;
   }
 }
 
-function rememberAgent(id: number | null): void {
-  try {
-    if (id == null) localStorage.removeItem(ACTIVE_ID_KEY);
-    else localStorage.setItem(ACTIVE_ID_KEY, String(id));
-  } catch {
-    // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
-  }
-}
-
 export function useAgentRoster() {
+  const client = useApi(api);
   return useQuery({
     queryKey: AGENTS_QUERY_KEY,
-    queryFn: ({ signal }) => api.getAgentRoster(signal),
+    queryFn: ({ signal }) => client.getAgentRoster(signal),
     staleTime: Infinity,
   });
 }
 
 export function useAgents(showError: (msg: string) => void) {
+  const client = useApi(api);
   const queryClient = useQueryClient();
   const roster = useAgentRoster();
   const { agents, ancestors } = roster.data ?? EMPTY_ROSTER;
@@ -58,7 +58,7 @@ export function useAgents(showError: (msg: string) => void) {
   const liveSelected = agents.find((agent) => agent.agent_id === activeId);
   const selected = useQuery({
     queryKey: [...AGENT_DETAIL_QUERY_KEY, activeId],
-    queryFn: activeId == null ? skipToken : ({ signal }) => api.getAgent(activeId, signal),
+    queryFn: activeId == null ? skipToken : ({ signal }) => client.getAgent(activeId, signal),
     enabled: activeId != null && liveSelected == null,
     staleTime: Infinity,
     gcTime: 0,
@@ -75,7 +75,7 @@ export function useAgents(showError: (msg: string) => void) {
 
   useEffect(() => {
     const raw = new URL(window.location.href).searchParams.get("agent_id");
-    const remembered = readRememberedAgent();
+    const remembered = rememberAgent();
     const candidate = [raw, remembered].map(Number).find((id) => Number.isSafeInteger(id) && id > 0);
     if (candidate != null) setActiveId(candidate);
     hydrated.current = true;

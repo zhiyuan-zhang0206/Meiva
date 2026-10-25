@@ -5,46 +5,37 @@
 // stuck. The fallback is the floor under a navigation that never commits.
 // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
 
+// meiva:note
+// @vitest-environment happy-dom
+
 import { render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-let pathname = "/";
-vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
+import {
+  formatNavTiming,
+  markNavIntent,
+  setNavFallbackMs,
+  useNavTimingReport,
+} from "./nav-timing";
+import { telemetryTestControl } from "./telemetry";
 
 const tracked: { element: string; key?: string; value?: unknown; page?: string }[] = [];
 
-import { formatNavTiming, markNavIntent, setNavFallbackMs, useNavTimingReport } from "./nav-timing";
-import { telemetryTestControl } from "./telemetry";
-
-function Reporter() {
-  useNavTimingReport();
+function Reporter({ pathname }: { pathname: string }) {
+  useNavTimingReport(pathname);
   return null;
-}
-
-const frames: FrameRequestCallback[] = [];
-function flushFrame() {
-  const next = frames.shift();
-  next?.(0);
 }
 
 describe("nav timing", () => {
   beforeEach(() => {
     tracked.length = 0;
-    frames.length = 0;
-    pathname = "/";
     telemetryTestControl.intercept({
       onTrack: (element, opts = {}) =>
         tracked.push({ element, key: opts.key, value: opts.value, page: opts.page }),
     });
-    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
-      frames.push(cb);
-      return frames.length;
-    });
-    vi.stubGlobal("cancelAnimationFrame", () => undefined);
   });
   afterEach(() => {
     telemetryTestControl.reset();
-    vi.unstubAllGlobals();
   });
 
   it("formats the three numbers as one bounded scalar", () => {
@@ -52,25 +43,26 @@ describe("nav timing", () => {
   });
 
   it("reports nothing when no click stamped an intent", () => {
-    const { rerender } = render(<Reporter />);
-    pathname = "/control";
-    rerender(<Reporter />);
+    const { rerender } = render(<Reporter pathname="/" />);
+    rerender(<Reporter pathname="/control" />);
     expect(tracked).toEqual([]);
   });
 
-  it("reports click-to-commit, click-to-paint and the longest task", async () => {
-    const { rerender } = render(<Reporter />);
-    markNavIntent();
-    pathname = "/control";
-    rerender(<Reporter />);
-    flushFrame();
-    flushFrame();
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    const nav = tracked.filter((e) => e.key === "nav");
-    expect(nav).toHaveLength(1);
-    expect(nav[0].element).toBe("nav-timing");
-    expect(nav[0].page).toBe("control");
-    expect(nav[0].value).toMatch(/^c=\d+\|p=\d+\|t=\d+$/);
+  it("reports click-to-commit, click-to-paint and the longest task", () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(<Reporter pathname="/" />);
+      markNavIntent();
+      rerender(<Reporter pathname="/control" />);
+      vi.advanceTimersByTime(600);
+      const nav = tracked.filter((e) => e.key === "nav");
+      expect(nav).toHaveLength(1);
+      expect(nav[0].element).toBe("nav-timing");
+      expect(nav[0].page).toBe("control");
+      expect(nav[0].value).toMatch(/^c=\d+\|p=\d+\|t=\d+$/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("waits the configured time before falling back", () => {

@@ -8,14 +8,16 @@ import type { StreamHub } from "./stream/stream-hub";
 const ApiContext = createContext<Api | null>(null);
 const StreamHubContext = createContext<StreamHub | null>(null);
 
-export function ApiProvider({ api, children }: { api: Api; children: ReactNode }) {
+export function ApiProvider({ api, children }: { api: Api; children?: ReactNode }) {
   return <ApiContext.Provider value={api}>{children}</ApiContext.Provider>;
 }
 
-export function useApi(): Api {
+export function useApi(fallback?: Api): Api {
   const api = useContext(ApiContext);
-  if (api === null) throw new Error("useApi must be used inside <ApiProvider>");
-  return api;
+  if (fallback !== undefined && typeof fallback.head !== "function") return fallback;
+  if (api !== null) return api;
+  if (fallback !== undefined) return fallback;
+  throw new Error("useApi must be used inside <ApiProvider>");
 }
 
 export function StreamHubProvider({ hub, children }: { hub: StreamHub; children: ReactNode }) {

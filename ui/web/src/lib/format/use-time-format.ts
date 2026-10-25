@@ -6,7 +6,7 @@
 
 import { useMemo } from "react";
 
-import { useUserSettings } from "@/lib/state/use-user-settings";
+import { useUserSettings } from "../state/use-user-settings";
 
 import {
   DEFAULT_CLOCK_FORMAT,
@@ -33,7 +33,7 @@ export interface TimeFormat {
   formatShort: (iso: string, opts?: Omit<FormatShortOptions, "clockFormat">) => string;
   formatUpcoming: (
     iso: string | Date,
-    now?: Date,
+    now: Date,
     opts?: Omit<FormatUpcomingOptions, "clockFormat">,
   ) => string;
 }
@@ -50,7 +50,7 @@ export function useTimeFormat(): TimeFormat {
       showTimeZone,
       formatAbsolute: (iso, opts = {}) => formatAbsolute(iso, { ...opts, clockFormat, showTimeZone }),
       formatShort: (iso, opts = {}) => formatShort(iso, { ...opts, clockFormat }),
-      formatUpcoming: (iso, now = new Date(), opts = {}) =>
+      formatUpcoming: (iso, now, opts = {}) =>
         formatUpcoming(iso, now, { ...opts, clockFormat }),
     }),
     [clockFormat, showTimeZone],

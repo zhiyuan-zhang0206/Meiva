@@ -22,11 +22,14 @@ function browserStorage(): Storage | null {
 }
 
 /** SSR-safe LayoutStorage for `useDefaultLayout`. */
-export function panelLayoutStorage(): LayoutStorage {
+export function panelLayoutStorage(
+  backing?: Pick<Storage, "getItem" | "setItem"> | null,
+): LayoutStorage {
+  const resolveStorage = () => (backing === undefined ? browserStorage() : backing);
   return {
     getItem(key) {
       try {
-        return browserStorage()?.getItem(key) ?? null;
+        return resolveStorage()?.getItem(key) ?? null;
       } catch {
         // A read can throw too (private mode, cleared site data): no saved layout.
         return null;
@@ -34,7 +37,7 @@ export function panelLayoutStorage(): LayoutStorage {
     },
     setItem(key, value) {
       try {
-        browserStorage()?.setItem(key, value);
+        resolveStorage()?.setItem(key, value);
       } catch {
         // A write can throw (quota, private mode): the layout just is not remembered.
       }

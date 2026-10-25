@@ -2,6 +2,9 @@
 // page in one fetch), invalidated by page events. Mirrors use-agent-pages
 // without the per-agent filter.
 
+// meiva:note
+// @vitest-environment happy-dom
+
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

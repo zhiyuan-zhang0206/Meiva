@@ -13,36 +13,36 @@
 // PUTting to the server. Falls back to defaults when the server is
 // unreachable.
 
-"use client";
-
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api } from "../transport/api";
 import { errMsg } from "../contracts/errors";
 import { track } from "../telemetry/telemetry";
-import { USER_SETTING_DEFAULTS } from "../contracts/types";
+import { api } from "../transport/api";
+import { useApi } from "../transport/transport-context";
 import { useStore } from "./store";
+import {
+  SETTINGS_QUERY_KEY,
+  defaultUserSettings,
+  mergeUserSettings,
+  withOptimisticSetting,
+} from "./user-settings-plan";
 
-export const SETTINGS_QUERY_KEY = ["user-settings"] as const;
+export { SETTINGS_QUERY_KEY } from "./user-settings-plan";
 
 export function useUserSettings(): {
   settings: Record<string, unknown>;
   setSetting: (key: string, value: unknown) => void;
   isLoading: boolean;
 } {
+  const client = useApi(api);
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
     queryKey: SETTINGS_QUERY_KEY,
     queryFn: async () => {
-      const res = await api.getSettings();
-      // Merge server values on top of defaults
-      const merged: Record<string, unknown> = { ...USER_SETTING_DEFAULTS };
-      for (const s of res.settings) {
-        merged[s.key] = s.value;
-      }
-      return merged;
+      const res = await client.getSettings();
+      return mergeUserSettings(res.settings);
     },
     // Settings change rarely; long stale time avoids refetching on every mount.
     staleTime: 60_000,
@@ -58,7 +58,7 @@ export function useUserSettings(): {
 
   const mutation = useMutation({
     mutationFn: ({ key, value }: { key: string; value: unknown }) =>
-      api.putSetting(key, value),
+      client.putSetting(key, value),
     onMutate: async ({ key, value }) => {
       // Cancel in-flight queries so they don't overwrite our optimistic update
       await queryClient.cancelQueries({ queryKey: SETTINGS_QUERY_KEY });
@@ -68,12 +68,11 @@ export function useUserSettings(): {
       // a sane state instead of skipping the rollback.
       const prev =
         queryClient.getQueryData<Record<string, unknown>>(SETTINGS_QUERY_KEY) ??
-        { ...USER_SETTING_DEFAULTS };
+        defaultUserSettings();
       // Optimistically update
-      queryClient.setQueryData<Record<string, unknown>>(SETTINGS_QUERY_KEY, (old) => ({
-        ...(old ?? USER_SETTING_DEFAULTS),
-        [key]: value,
-      }));
+      queryClient.setQueryData<Record<string, unknown>>(SETTINGS_QUERY_KEY, (old) =>
+        withOptimisticSetting(old, key, value),
+      );
       return { prev };
     },
     onError: (err, _vars, context) => {
@@ -102,7 +101,7 @@ export function useUserSettings(): {
   );
 
   return {
-    settings: data ?? { ...USER_SETTING_DEFAULTS },
+    settings: data ?? defaultUserSettings(),
     setSetting,
     isLoading,
   };
