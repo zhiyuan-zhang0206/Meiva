@@ -1,23 +1,22 @@
 """Explicit plugin scaffolding and its isolation from host convergence."""
 
 import inspect
-import shutil
 import subprocess
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from base import paths
-from base.deploy.git import memory_repo
-from base.host import proc
 from base.packages.plugins.enable_config import write_local
+from base.paths.tests.homes import point_home
 from base.telemetry import EventPipeline
 from cli.commands.extensions import memory
 from cli.commands.extensions.memory import run_plugin_scaffolds
 from cli.commands.lifecycle import converge_host
+from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
@@ -26,20 +25,13 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    repo = tmp_path / "repo_plugins"
-    user = tmp_path / "user_plugins"
-    repo.mkdir()
-    user.mkdir()
-    monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
-    monkeypatch.setattr(paths, "plugins_dir", lambda: user)
-    # One home, read through the one seam every consumer shares. `paths.meiva_home()` is
-    # `MEIVA_HOME` plus a mkdir, and modules that did `from base.paths import
-    # meiva_home` (the service roster `converge_host` consults) hold their own reference that a
-    # patch of `paths.meiva_home` never reaches — so the home lives in the variable, not in a patch,
-    # and a second, real `meiva_home()` cannot create a sibling directory next to it.
     home = tmp_path / "meiva"
     home.mkdir()
-    monkeypatch.setenv("MEIVA_HOME", str(home))
+    point_home(monkeypatch, home)
+
+
+def _enable_user_plugins(plugins: dict[str, dict[str, object]]) -> None:
+    write_local({"plugins": {"meiva_memory": {"enabled": False}, **plugins}})
 
 
 # meiva:note
@@ -64,7 +56,7 @@ def test_scaffold_runs_despite_dangling_config(*, command_runtime: CommandRuntim
         "    Path(__file__).with_name('scaffolded.marker').write_text('1')\n",
         encoding="utf-8",
     )
-    write_local({"plugins": {"real": {"enabled": True}, "vanished": {"enabled": True}}})
+    _enable_user_plugins({"real": {"enabled": True}, "vanished": {"enabled": True}})
 
     result = run_plugin_scaffolds(machine=command_runtime.machine)  # must not raise
 
@@ -73,7 +65,7 @@ def test_scaffold_runs_despite_dangling_config(*, command_runtime: CommandRuntim
 
 
 def test_broken_setup_py_is_skipped_and_other_scaffolds_run(
-    loguru_records: list[dict],
+    loguru_records: list[dict[str, Any]],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -93,7 +85,7 @@ def test_broken_setup_py_is_skipped_and_other_scaffolds_run(
         "    Path(__file__).with_name('scaffolded.marker').write_text('1')\n",
         encoding="utf-8",
     )
-    write_local({"plugins": {"broken": {"enabled": True}, "real": {"enabled": True}}})
+    _enable_user_plugins({"broken": {"enabled": True}, "real": {"enabled": True}})
 
     result = run_plugin_scaffolds(machine=command_runtime.machine)  # must not raise
 
@@ -115,7 +107,7 @@ def test_scaffold_execution_stays_fail_fast(*, command_runtime: CommandRuntime) 
     (pdir / "setup.py").write_text(
         "def scaffold(*, machine):\n    raise RuntimeError('scaffold boom')\n", encoding="utf-8"
     )
-    write_local({"plugins": {"real": {"enabled": True}}})
+    _enable_user_plugins({"real": {"enabled": True}})
 
     with pytest.raises(RuntimeError, match="scaffold boom"):
         run_plugin_scaffolds(machine=command_runtime.machine)
@@ -159,33 +151,20 @@ def _skip_host_integration(_ctx: converge_host.ConvergeCtx) -> None:
     return
 
 
-@contextmanager
-def _stub_host_integrations() -> Generator[None]:
-    """Stub only production steps that reach host services.
-
-    The test still runs the real `CONVERGE_STEPS` tuple and every file-only and
-    plugin-related production step. The
-    listed steps can probe, install, or register host-wide infrastructure, so
-    they are no-ops here to keep the regression test hermetic.
-    """
-    originals: list[tuple[converge_host.ConvergeStep, object]] = []
-    try:
-        for step in converge_host.CONVERGE_STEPS:
-            if step.name in _HOST_INTEGRATION_STEP_NAMES:
-                originals.append((step, step.apply))
-                object.__setattr__(step, "apply", _skip_host_integration)
-        yield
-    finally:
-        for step, apply in originals:
-            object.__setattr__(step, "apply", apply)
+def _hermetic_converge_steps() -> tuple[converge_host.ConvergeStep, ...]:
+    # meiva:note
+    # Replace only production steps that reach host services with no-ops so the test runs
+    # the real CONVERGE_STEPS tuple hermetically without touching host-wide infrastructure.
+    return tuple(
+        replace(step, apply=_skip_host_integration)
+        if step.name in _HOST_INTEGRATION_STEP_NAMES
+        else step
+        for step in converge_host.CONVERGE_STEPS
+    )
 
 
-def _install_memory_plugin() -> Path:
-    source = Path(__file__).parents[2] / "meiva_builtins" / "plugins" / "meiva_memory"
-    target = paths.repo_plugins_dir() / "meiva_memory"
-    shutil.copytree(source, target)
+def _install_memory_plugin() -> None:
     write_local({"plugins": {"meiva_memory": {"enabled": True}}})
-    return target
 
 
 def _make_dirty_memory_repo(pool: Path, branch: str) -> None:
@@ -207,9 +186,8 @@ def _make_dirty_memory_repo(pool: Path, branch: str) -> None:
 
 
 def test_converge_ignores_a_dirty_wrong_branch_memory_pool(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
@@ -220,46 +198,23 @@ def test_converge_ignores_a_dirty_wrong_branch_memory_pool(
     memory_pool = paths.memory_dir()
     _make_dirty_memory_repo(memory_pool, "main")
 
-    git_cwds: list[Path] = []
-    real_run_bounded = memory_repo.run_bounded
-    real_subprocess_run = subprocess.run
+    converge_host.converge_host(
+        tmp_path / "repo",
+        frozenset({"agent-runner"}),
+        steps=_hermetic_converge_steps(),
+        services=frozenset(),
+        database_factory=operator_database,
+        producer=operator_pipeline,
+        command=command_runtime,
+    )
 
-    def _record_run_bounded(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        if argv[0] == "git":
-            git_cwds.append(Path(str(kwargs["cwd"])).resolve())
-        return real_run_bounded(argv, **kwargs)  # type: ignore[arg-type, return-value]
-
-    def _record_subprocess_run(
-        argv: list[str], *args: object, **kwargs: object
-    ) -> subprocess.CompletedProcess[str]:
-        if argv[0] == "git":
-            cwd = kwargs.get("cwd")
-            if isinstance(cwd, (str, Path)):
-                git_cwds.append(Path(cwd).resolve())
-            elif "-C" in argv:
-                git_cwds.append(Path(argv[argv.index("-C") + 1]).resolve())
-        return real_subprocess_run(argv, *args, **kwargs)  # type: ignore[arg-type, return-value]
-
-    monkeypatch.setattr(proc, "run_bounded", _record_run_bounded)
-    monkeypatch.setattr(memory_repo, "run_bounded", _record_run_bounded)
-    monkeypatch.setattr(subprocess, "run", _record_subprocess_run)
-
-    with _stub_host_integrations():
-        converge_host.converge_host(
-            tmp_path / "repo",
-            frozenset({"agent-runner"}),
-            steps=converge_host.CONVERGE_STEPS,
-            services=frozenset(),
-            database_factory=operator_database,
-            producer=operator_pipeline,
-            command=command_runtime,
-        )
-
-    assert not [cwd for cwd in git_cwds if cwd.is_relative_to(memory_pool)]
+    assert (memory_pool / "tracked.md").read_text(encoding="utf-8") == "dirty\n"
+    assert (memory_pool / "untracked.md").read_text(encoding="utf-8") == "untracked\n"
+    assert not (memory_pool / "MEMORY.md").exists()
+    assert not (memory_pool / ".githooks").exists()
 
 
 def test_memory_init_returns_a_clean_error_for_the_wrong_branch_guard(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     *,
     command_runtime: CommandRuntime,
@@ -314,7 +269,7 @@ def test_memory_init_reports_scaffolded_plugins(
         "    Path(__file__).with_name('scaffolded.marker').write_text('ready')\n",
         encoding="utf-8",
     )
-    write_local({"plugins": {"example": {"enabled": True}}})
+    _enable_user_plugins({"example": {"enabled": True}})
 
     assert memory.cmd_memory_init(machine=command_runtime.machine) == 0
     assert (plugin / "scaffolded.marker").read_text(encoding="utf-8") == "ready"
@@ -333,7 +288,7 @@ def test_scaffolds_borrow_the_same_invocation_machine(command_runtime: CommandRu
     command_runtime.machine.set(name="scaffold-owner", role="agent-runner")
     for name in ("first", "second"):
         plugin = paths.plugins_dir() / name
-        plugin.mkdir()
+        plugin.mkdir(parents=True)
         (plugin / "plugin.py").write_text("__description__ = 'same owner'\n", encoding="utf-8")
         (plugin / "setup.py").write_text(
             "from pathlib import Path\n"
@@ -341,7 +296,7 @@ def test_scaffolds_borrow_the_same_invocation_machine(command_runtime: CommandRu
             "    Path(__file__).with_name('owner').write_text(f'{id(machine)}:{machine.name()}')\n",
             encoding="utf-8",
         )
-    write_local({"plugins": {"first": {"enabled": True}, "second": {"enabled": True}}})
+    _enable_user_plugins({"first": {"enabled": True}, "second": {"enabled": True}})
 
     assert run_plugin_scaffolds(machine=command_runtime.machine).ran == ["first", "second"]
     expected = f"{id(command_runtime.machine)}:scaffold-owner"
@@ -351,12 +306,12 @@ def test_scaffolds_borrow_the_same_invocation_machine(command_runtime: CommandRu
 
 def test_legacy_zero_argument_scaffold_fails_fast(command_runtime: CommandRuntime) -> None:
     plugin = paths.plugins_dir() / "legacy"
-    plugin.mkdir()
+    plugin.mkdir(parents=True)
     (plugin / "plugin.py").write_text("__description__ = 'legacy'\n", encoding="utf-8")
     (plugin / "setup.py").write_text(
         "def scaffold():\n    raise AssertionError('not entered')\n", encoding="utf-8"
     )
-    write_local({"plugins": {"legacy": {"enabled": True}}})
+    _enable_user_plugins({"legacy": {"enabled": True}})
 
     with pytest.raises(TypeError, match="machine"):
         run_plugin_scaffolds(machine=command_runtime.machine)

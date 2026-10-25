@@ -72,6 +72,7 @@ def observability_config_from_boot(boot: ConfigBoot) -> ObservabilityConfig:
         lgtm_grafana_port=domain.lgtm_grafana_port,
         trace_retention_days=domain.trace_retention_days,
         otel_collector_metrics_port=domain.otel_collector_metrics_port,
+        lgtm_storage_dir=domain.lgtm_storage_dir,
     )
 
 

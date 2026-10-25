@@ -78,14 +78,15 @@ def provider_off() -> ProviderGuardConfig:
 
 # meiva:note
 # A round that holds a healthy cluster to its rules: the gateway of the test, one live agent
-# required, no prod checkout to guard, WAL-G off, the volume of `tmp_path`, no retry wait.
+# required, no prod checkout to guard, WAL-G off, the volume of `tmp_path` with a non-tripping
+# watermark (the watermark check itself is covered by `disk_watermark=0.0`), no retry wait.
 @pytest.fixture
 def healthy_options(
     gateway: ScriptedGateway, tmp_path: Path, probe_command: CommandRuntime
 ) -> HealthOptions:
     return HealthOptions(
         gateway_url=gateway.url,
-        rules=HealthRules(agent_min=1, check_schema=True, disk_watermark=0.90),
+        rules=HealthRules(agent_min=1, check_schema=True, disk_watermark=1.0),
         provider=provider_off(),
         source_root=None,
         editable_allowed_roots=(),

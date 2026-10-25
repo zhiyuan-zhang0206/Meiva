@@ -7,7 +7,22 @@ Every `meiva` invocation passes `require_own_checkout` first.
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+
+
+# meiva:note
+# Refuse every command from a checkout that is not `home`'s own.
+def check_own_checkout(args_in: Sequence[str], repo: Path, *, home: Path) -> int | None:
+    from base.paths.home import home_checkout_error
+
+    if tuple(args_in) in ((), ("-h",), ("--help",)):
+        return None
+    error = home_checkout_error(repo, home=home)
+    if error is None:
+        return None
+    print(f"✗ meiva: {error}", file=sys.stderr)
+    return 1
 
 
 def require_own_checkout(args_in: list[str], repo: Path) -> int | None:
@@ -25,15 +40,9 @@ def require_own_checkout(args_in: list[str], repo: Path) -> int | None:
     anything loads the home's configuration. The refusal does not echo the argv: it
     can carry a secret (`meiva config set KEY=...`).
     """
-    from base.paths.home import home_checkout_error, resolve_meiva_home
+    from base.paths.home import resolve_meiva_home
 
-    if args_in in ([], ["-h"], ["--help"]):
-        return None
-    error = home_checkout_error(repo, home=resolve_meiva_home())
-    if error is None:
-        return None
-    print(f"✗ meiva: {error}", file=sys.stderr)
-    return 1
+    return check_own_checkout(args_in, repo, home=resolve_meiva_home())
 
 
 # meiva:note
@@ -41,13 +50,12 @@ def require_own_checkout(args_in: list[str], repo: Path) -> int | None:
 #
 # The same machine fact `root_driver.require_root_absent` proves: the root's instance
 # lock is free.
-def unit_already_stopped() -> bool:
+def unit_already_stopped(home: Path) -> bool:
     from base.native_process.root_control import instance_lock
     from base.paths import root_run_dir
-    from base.paths.home import resolve_meiva_home
 
     try:
-        fd = instance_lock.acquire_instance_lock(root_run_dir(resolve_meiva_home()))
+        fd = instance_lock.acquire_instance_lock(root_run_dir(home))
     except instance_lock.AlreadyRunningError:
         return False
     instance_lock.release_instance_lock(fd)

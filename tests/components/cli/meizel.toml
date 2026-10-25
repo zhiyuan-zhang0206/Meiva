@@ -16,7 +16,3 @@ exports = ["test_pgbouncer_wire.py"]
 "test_pgbouncer_config.py#monkeypatch.setattr base.db.connections.ConnectionPool" = 1
 "test_pgbouncer_config.py#monkeypatch.setattr base.db.connections.psycopg.connect" = 1
 "test_pgbouncer_config.py#monkeypatch.setattr services.backup.dump.local_owner_authority" = 1
-"test_pgbouncer_wire.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 7
-
-[debt.unresolved-patch]
-"test_pgbouncer_wire.py#monkeypatch.setattr dp.db_url" = 2

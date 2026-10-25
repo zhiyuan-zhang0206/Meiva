@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from threading import Lock
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
 from base.cluster.machine import MachineIdentityReader
 from base.telemetry import DrainResult, EventPipeline
@@ -45,7 +45,7 @@ class OperatorDatabaseFactory:
         self._local_host = local_host
         self._open_database = open_database
         self._lock = Lock()
-        self._gate: Any = None
+        self._gate: ProcessDbGate | None = None
         self._adopted_url: str | None = None
 
     def adopt_login(self, db_url: str) -> None:
@@ -67,7 +67,7 @@ class OperatorDatabaseFactory:
         """The access URL a handle from this factory dials: the adopted login, else the settings'."""
         return self._config().db_url
 
-    def _config(self) -> Any:
+    def _config(self) -> DbConfig:
         from base.db.config import db_config_from_settings
 
         config = db_config_from_settings()
@@ -75,7 +75,7 @@ class OperatorDatabaseFactory:
             return config
         return replace(config, db_url=self._adopted_url)
 
-    def _admission_gate(self) -> Any:
+    def _admission_gate(self) -> ProcessDbGate:
         from base.db.code_version_gate import ProcessDbGate
 
         with self._lock:
@@ -83,13 +83,13 @@ class OperatorDatabaseFactory:
                 self._gate = ProcessDbGate(version=_unavailable_version, process="cli", exempt=True)
         return self._gate
 
-    def __call__(self) -> Any:
+    def __call__(self) -> Database:
         return self._open(self._config())
 
-    def for_url(self, url: str) -> Any:
+    def for_url(self, url: str) -> Database:
         return self._open(replace(self._config(), db_url=url))
 
-    def _open(self, config: Any) -> Any:
+    def _open(self, config: DbConfig) -> Database:
         from base.cluster.dataplane.direct_url import ClusterDirectUrl
 
         return self._open_database(
@@ -103,7 +103,9 @@ def _unavailable_version() -> NoReturn:
     raise RuntimeError("an exempt operator database must not resolve a code version")
 
 
-def open_operator_database(config: Any, gate: Any, direct_url: Any) -> Any:
+def open_operator_database(
+    config: DbConfig, gate: ProcessDbGate, direct_url: ClusterDirectUrl
+) -> Database:
     """The real handle: a `Database` over `config`, admitted by the operator `gate`."""
     from base.db import Database
 
@@ -135,6 +137,21 @@ class OperatorEventPipeline:
         self._flush_interval_s = flush_interval_s
         self._database_factory = database_factory
         self._pipeline: EventPipeline | None = None
+
+    # meiva:note
+    # Bind an already-built `EventPipeline` to this command owner.
+    @classmethod
+    def wrapping(
+        cls,
+        pipeline: EventPipeline,
+        *,
+        database_factory: OperatorDatabaseFactory,
+        machine: MachineIdentityReader,
+        home: Path,
+    ) -> OperatorEventPipeline:
+        owner = cls(database_factory, machine=machine, home=home)
+        owner._pipeline = pipeline
+        return owner
 
     def __call__(self) -> EventPipeline:
         if self._pipeline is None:
@@ -179,7 +196,7 @@ class OperatorEventPipeline:
 
 
 def operator_event_pipeline(
-    database_factory: OperatorDatabaseFactory, *, machine: MachineIdentityReader, home: Path
+    database_factory: OperatorDatabaseFactory, machine: MachineIdentityReader, home: Path
 ) -> OperatorEventPipeline:
     """Construct a lazy command owner without opening a writer or database."""
     return OperatorEventPipeline(database_factory, machine=machine, home=home)
