@@ -19,7 +19,10 @@ Functions, lambdas and comprehensions do not close over class namespace
 bindings. Attribute and subscript comprehension targets still contribute the
 existing source facts and restricted-form checks.
 
+Function and async-function defaults, decorators, argument annotations and
+return annotations contribute their outer bindings. Class bases, keywords and
+decorators do too. Definition bodies are separate scopes. Python 3.12 type
+parameters have annotation scopes and are not collected as outer bindings.
+
 This is lexical resolution, not a proof of runtime branch ordering or dynamic
-rebinding. Function-definition defaults, annotations and decorators retain the
-existing scanner behavior; this expression-scope contract does not establish
-that all binding forms have been modeled.
+rebinding, and does not establish that all binding forms have been modeled.
