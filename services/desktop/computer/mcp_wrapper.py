@@ -104,15 +104,13 @@ async def _serve(*, timeout_reader: Callable[[], float]) -> None:
         await server.run(server_read, server_write, server.create_initialization_options())
 
 
-def timeout_reader(config: ConfigBoot | None = None) -> tuple[ConfigBoot, Callable[[], float]]:
-    boot = ConfigBoot() if config is None else config
-    boot.boot()
-    return boot, lambda: boot.view.sandbox.mcp_connect_timeout_seconds
+def timeout_reader(config: ConfigBoot) -> Callable[[], float]:
+    config.boot()
+    return lambda: config.view.sandbox.mcp_connect_timeout_seconds
 
 
 def main() -> None:
-    _, reader = timeout_reader()
-    asyncio.run(_serve(timeout_reader=reader))
+    asyncio.run(_serve(timeout_reader=timeout_reader(ConfigBoot())))
 
 
 if __name__ == "__main__":

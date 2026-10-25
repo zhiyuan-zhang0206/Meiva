@@ -734,8 +734,8 @@ def test_wrapper_main_keeps_its_own_boot_bound_reader() -> None:
     first, second = ConfigBoot(), ConfigBoot()
     first.set_field("mcp_connect_timeout_seconds", 0.25)
     second.set_field("mcp_connect_timeout_seconds", 0.75)
-    _, first_reader = computer_wrapper.timeout_reader(first)
-    _, second_reader = computer_wrapper.timeout_reader(second)
+    first_reader = computer_wrapper.timeout_reader(first)
+    second_reader = computer_wrapper.timeout_reader(second)
     seen: list[tuple[float, float]] = []
     for owner, reader in ((first, first_reader), (second, second_reader)):
         before = reader()
