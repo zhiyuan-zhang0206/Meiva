@@ -15,12 +15,13 @@ import pytest
 
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.host.permissions_helper.client import AxNode, AxTreeResult, PermissionsHelperClient
+from base.host.permissions_helper.client import AxNode, AxTreeResult
 
 from .. import ax_tools as ax
 from ..errors import ComputerUseError
 from ..mcp_daemon import ComputerMcpDaemon
-from .slices import computer_use_config
+from ..screen import DesktopHelper
+from .slices import FakeDesktopHelper, computer_use_config
 
 
 def node(
@@ -231,16 +232,15 @@ def test_scoped_walk_is_not_judged_sparse() -> None:
 # ── tool entry through the daemon ───────────────────────────────────────────
 
 
-class FakeAxHelper(PermissionsHelperClient):
+class FakeAxHelper(FakeDesktopHelper):
     def __init__(self) -> None:
-        super().__init__("/nonexistent-test-helper.sock")
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.supported = True
         self.forbid_frontmost = False
         self.target_supported = True
         self.tree = result(compose_window())
 
-    def ping(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def ping(self, **kw: Any) -> dict[str, Any]:
         self.calls.append(("ping", {}))
         return (
             {"pong": True, "ax_tree_v1": True, "ax_target_v1": self.target_supported}
@@ -248,15 +248,15 @@ class FakeAxHelper(PermissionsHelperClient):
             else {"pong": True}
         )
 
-    def frontmost_app(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def frontmost_app(self, **kw: Any) -> dict[str, Any]:
         if self.forbid_frontmost:
             pytest.fail("explicit AX targets must not select the foreground app")
         return {"app": "Mail"}
 
-    def screen_size(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def screen_size(self, **kw: Any) -> dict[str, Any]:
         return {"x": 0.0, "y": 0.0, "w": 1512.0, "h": 982.0, "scale": 2.0}
 
-    def ax_tree(self, app: str | None, **kw: Any) -> AxTreeResult:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def ax_tree(self, app: str | None = None, **kw: Any) -> AxTreeResult:
         self.calls.append(("ax_tree", {"app": app, **kw}))
         return self.tree
 
@@ -271,7 +271,7 @@ async def call_ax(
     daemon: ComputerMcpDaemon | None = None,
     *,
     database_gate: ProcessDbGate,
-    helper: PermissionsHelperClient | None = None,
+    helper: DesktopHelper | None = None,
 ) -> dict[str, Any]:
     daemon = daemon or ComputerMcpDaemon(
         computer_use_config(),
@@ -284,7 +284,9 @@ async def call_ax(
     )
     if resp["ok"] is False:
         raise ComputerUseError(resp["error"])
-    return json.loads(resp["result"]["content"][0]["text"])
+    res = resp["result"]
+    assert isinstance(res, dict)
+    return json.loads(res["content"][0]["text"])
 
 
 async def test_ax_tree_defaults_to_the_frontmost_app_and_renders(
@@ -396,8 +398,8 @@ async def test_ax_tree_is_declared_in_the_tool_list(database: Database) -> None:
     )
     resp = await daemon._dispatch({"id": 1, "method": "list_tools"})
     assert resp["ok"] is True
-    assert resp["ok"] is True
-    tools: list[dict[str, Any]] = resp["result"]
+    tools = resp["result"]
+    assert isinstance(tools, list)
     assert "ax_tree" in {t["name"] for t in tools}
 
 

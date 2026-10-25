@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-import uuid
+import time
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -71,7 +71,7 @@ def check(
     result = probe.probe(
         seat.client,
         workdir=seat.workdir,
-        run_id=run_id or uuid.uuid4().hex[:8],
+        run_id=run_id or f"{time.monotonic_ns():x}",
         env=seat.env,
     )
     report = gate.evaluate(result, deferred=deferred, now=now)
@@ -116,7 +116,7 @@ def _ask_items(
     timeout_s: float,
     progress: TextIO | None,
 ) -> None:
-    run_id = uuid.uuid4().hex[:8]
+    run_id = f"{time.monotonic_ns():x}"
     for item in pending:
         if item.group == "desktop":
             continue

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -22,14 +21,14 @@ from services.desktop.permissions_helper.tests.test_permissions_helper import (
 
 
 def test_foreign_label_job_bound_to_our_socket_is_refused(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
-    agents = retire_env(monkeypatch, tmp_path)
-    sock = str(tmp_path / "run" / "permissions-helper.9223.sock")
+    agents, sock_path = retire_env(tmp_path)
+    sock = str(sock_path)
 
-    mine = lifecycle.label()
+    mine = lifecycle.label(tmp_path)
     foreign = write_agent_plist(agents, "com.meiva.permissions-helper.stray", sock)
     other_cluster = write_agent_plist(
         agents,
@@ -37,50 +36,44 @@ def test_foreign_label_job_bound_to_our_socket_is_refused(
         str(tmp_path / ".." / "x") + "/.meiva-other/run/permissions-helper.18010.sock",
     )
     own = write_agent_plist(agents, mine, sock)
-    recorded: list[list[str]] = []
-
-    def fake_run(cmd, **kwargs):
-        recorded.append(list(cmd))  # pyright: ignore[reportUnknownArgumentType]
-        return subprocess.CompletedProcess(cmd, 0, b"", b"")  # pyright: ignore[reportUnknownArgumentType]
-
-    monkeypatch.setattr(lifecycle, "run_bounded", fake_run)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="reconcile them externally"):
-        lifecycle.refuse_foreign_label_jobs()
+        lifecycle.refuse_foreign_label_jobs(
+            agents=agents,
+            socket=sock_path,
+            current_label=mine,
+        )
     assert foreign.exists()
-    assert recorded == []
     # ...while other clusters' jobs and our own are untouched.
     assert other_cluster.exists()
     assert own.exists()
 
 
 def test_foreign_label_refusal_holds_when_the_job_is_not_loaded(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
-    agents = retire_env(monkeypatch, tmp_path)
-    sock = str(tmp_path / "run" / "permissions-helper.9223.sock")
+    agents, sock_path = retire_env(tmp_path)
+    sock = str(sock_path)
 
     write_agent_plist(agents, "com.meiva.permissions-helper.stray", sock)
 
-    def bootout_job_not_loaded(cmd: list[str], **_kw: object) -> subprocess.CompletedProcess[bytes]:
-        return subprocess.CompletedProcess(cmd, 78, b"", b"")
-
-    monkeypatch.setattr(lifecycle, "run_bounded", bootout_job_not_loaded)
-
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="reconcile them externally"):
-        lifecycle.refuse_foreign_label_jobs()
+        lifecycle.refuse_foreign_label_jobs(
+            agents=agents,
+            socket=sock_path,
+            current_label=lifecycle.label(tmp_path),
+        )
     assert (agents / "com.meiva.permissions-helper.stray.plist").exists()
 
 
 def test_unrelated_cluster_plists_are_left_alone(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
-    agents = retire_env(monkeypatch, tmp_path)
-    sock = str(tmp_path / "run" / "permissions-helper.9223.sock")
+    agents, sock_path = retire_env(tmp_path)
 
     other = write_agent_plist(
         agents,
@@ -88,22 +81,34 @@ def test_unrelated_cluster_plists_are_left_alone(
         str(tmp_path / ".." / "z") + "/.meiva-demo/run/permissions-helper.1234.sock",
         env_key="MEIVA_PERMISSIONS_HELPER_SOCKET",
     )
-    monkeypatch.setattr(lifecycle, "helper_socket", lambda: Path(sock))
 
-    assert lifecycle.foreign_label_plists() == []
+    assert (
+        lifecycle.foreign_label_plists(
+            agents=agents,
+            socket=sock_path,
+            current_label=lifecycle.label(tmp_path),
+        )
+        == []
+    )
     assert other.exists()
 
 
 def test_long_mac_ipc_path_refuses_before_building_or_native_jobs(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     from services.desktop.permissions_helper import lifecycle
 
     long_socket = tmp_path / ("s" * 104)
-    monkeypatch.setattr(lifecycle, "helper_socket", lambda: long_socket)
-    recorded = fake_tools(monkeypatch)
+    recorded, build_env = fake_tools()
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="shorter cluster home"):
-        lifecycle.converge(helper=refuse_helper)
+        lifecycle.converge(
+            helper=refuse_helper,
+            env=lifecycle.InstallEnv(
+                home=tmp_path,
+                socket=long_socket,
+                build=build_env,
+            ),
+        )
     assert recorded == []
 
 

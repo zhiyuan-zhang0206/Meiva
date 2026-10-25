@@ -12,10 +12,9 @@ behavior; here the seam is patched.
 from __future__ import annotations
 
 import os
-import subprocess
+import stat
 import time
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -23,120 +22,95 @@ from services.desktop.computer import ocr as ocr_mod
 from services.desktop.computer.ocr import OcrError, ocr_image
 
 
-class _FakeCompleted:
-    def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = "") -> None:
-        self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = stderr
+def _script(path: Path, body: str, *, fresh: bool = True) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"#!/bin/sh\n{body}\n")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    mtime = (
+        max(time.time(), ocr_mod.SOURCE.stat().st_mtime) + 60.0
+        if fresh
+        else ocr_mod.SOURCE.stat().st_mtime - 60.0
+    )
+    os.utime(path, (mtime, mtime))
+    return path
 
 
-@pytest.fixture
-def fake_bin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A prebuilt binary, older than the real ocr.swift, so _binary() runs
-    the OCR subprocess without recompiling. Lives in the test's own tmp dir,
-    never a fixed /tmp path (audit M-3)."""
-    bin_path = tmp_path / "fake-ocr-bin" / "ocr"
-    bin_path.parent.mkdir(parents=True, exist_ok=True)
-    bin_path.write_text("fake")
-    os.utime(bin_path, (time.time(), time.time()))
-    monkeypatch.setattr(ocr_mod, "bin_path", lambda: bin_path)
-    return bin_path
-
-
-def _stub_run(monkeypatch: pytest.MonkeyPatch, results: list[_FakeCompleted]) -> None:
-    """Patch ocr's bounded-run seam (base.host.proc.run_bounded's shape)."""
-
-    def _run(argv: list[str], **kw: Any) -> _FakeCompleted:
-        return results.pop(0) if results else _FakeCompleted()
-
-    monkeypatch.setattr(ocr_mod, "run_bounded", _run)
-
-
-def _force_rebuild(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: str) -> None:
-    """Make _binary() see a stale binary + newer source (the swiftc path).
-
-    The fake binary/source live under the test's own tmp dir (audit M-3),
-    keyed by `name` so one test's rebuild state never touches another's."""
-    bin_path = tmp_path / name / "ocr"
+def _stale_pair(tmp_path: Path, name: str) -> tuple[Path, Path]:
+    bin_path = _script(tmp_path / name / "ocr", "exit 0", fresh=False)
     src_path = tmp_path / name / "s.swift"
-    bin_path.parent.mkdir(parents=True, exist_ok=True)
-    bin_path.write_text("old")
     src_path.parent.mkdir(parents=True, exist_ok=True)
     src_path.write_text("// source")
     future = time.time() + 7200
     os.utime(src_path, (future, future))
-    monkeypatch.setattr(ocr_mod, "SOURCE", src_path)
-    monkeypatch.setattr(ocr_mod, "bin_path", lambda: bin_path)
+    return bin_path, src_path
 
 
-def test_parses_tsv_lines_zh_en(fake_bin: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    out = "\u4f60\u597d\u4e16\u754c\t10.0\t20.0\t100.0\t30.0\nHello\t200.5\t400.25\t80.0\t20.0\n"
-    _stub_run(monkeypatch, [_FakeCompleted(stdout=out)])
-    items = ocr_image("/tmp/x.png")  # noqa: S108
+def test_parses_tsv_lines_zh_en(tmp_path: Path) -> None:
+    out_file = tmp_path / "out.tsv"
+    out_file.write_text(
+        "\u4f60\u597d\u4e16\u754c\t10.0\t20.0\t100.0\t30.0\nHello\t200.5\t400.25\t80.0\t20.0\n"
+    )
+    binary = _script(tmp_path / "ocr", f'cat "{out_file}"')
+    items = ocr_image("/tmp/x.png", binary=binary)  # noqa: S108
     assert items == [
         {"text": "\u4f60\u597d\u4e16\u754c", "x": 10.0, "y": 20.0, "w": 100.0, "h": 30.0},
         {"text": "Hello", "x": 200.5, "y": 400.25, "w": 80.0, "h": 20.0},
     ]
 
 
-def test_skips_malformed_lines(fake_bin: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    out = "short\t1.0\nbad\tx\ty\tw\th\nok\t1\t2\t3\t4\n"
-    _stub_run(monkeypatch, [_FakeCompleted(stdout=out)])
-    items = ocr_image("/tmp/x.png")  # noqa: S108
+def test_skips_malformed_lines(tmp_path: Path) -> None:
+    out_file = tmp_path / "out.tsv"
+    out_file.write_text("short\t1.0\nbad\tx\ty\tw\th\nok\t1\t2\t3\t4\n")
+    binary = _script(tmp_path / "ocr", f'cat "{out_file}"')
+    items = ocr_image("/tmp/x.png", binary=binary)  # noqa: S108
     assert items == [{"text": "ok", "x": 1.0, "y": 2.0, "w": 3.0, "h": 4.0}]
 
 
-def test_nonzero_exit_raises(fake_bin: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_run(monkeypatch, [_FakeCompleted(returncode=1, stderr="boom")])
+def test_nonzero_exit_raises(tmp_path: Path) -> None:
+    binary = _script(tmp_path / "ocr", 'echo "boom" >&2\nexit 1')
     with pytest.raises(OcrError, match="boom"):
-        ocr_image("/tmp/x.png")  # noqa: S108
+        ocr_image("/tmp/x.png", binary=binary)  # noqa: S108
 
 
-def test_timeout_raises(fake_bin: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    def _hang(argv: list[str], **kw: Any) -> _FakeCompleted:
-        raise subprocess.TimeoutExpired(cmd=argv, timeout=30)
-
-    monkeypatch.setattr(ocr_mod, "run_bounded", _hang)
+def test_timeout_raises(tmp_path: Path) -> None:
+    binary = _script(tmp_path / "ocr", "sleep 5")
     with pytest.raises(OcrError, match="timed out"):
-        ocr_image("/tmp/x.png")  # noqa: S108
+        ocr_image("/tmp/x.png", binary=binary, timeout=0.05)  # noqa: S108
 
 
-def test_empty_output_is_empty_list(fake_bin: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_run(monkeypatch, [_FakeCompleted(stdout="")])
-    assert ocr_image("/tmp/x.png") == []  # noqa: S108
+def test_empty_output_is_empty_list(tmp_path: Path) -> None:
+    binary = _script(tmp_path / "ocr", "exit 0")
+    assert ocr_image("/tmp/x.png", binary=binary) == []  # noqa: S108
 
 
-def test_missing_swiftc_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _force_rebuild(monkeypatch, tmp_path, "rebuild1")
-    monkeypatch.setattr(ocr_mod.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+def test_missing_swiftc_raises(tmp_path: Path) -> None:
+    bin_path, src_path = _stale_pair(tmp_path, "rebuild1")
     with pytest.raises(OcrError, match="swiftc"):
-        ocr_image("/tmp/x.png")  # noqa: S108
+        ocr_image("/tmp/x.png", binary=bin_path, source=src_path, swiftc="")  # noqa: S108
 
 
-def test_swiftc_failure_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _force_rebuild(monkeypatch, tmp_path, "rebuild2")
-    monkeypatch.setattr(ocr_mod.shutil, "which", lambda _name: "/usr/bin/swiftc")  # pyright: ignore[reportUnknownArgumentType]
-
-    def _run(argv: list[str], **kw: Any) -> _FakeCompleted:
-        return _FakeCompleted(returncode=1, stderr="compile error")
-
-    monkeypatch.setattr(ocr_mod, "run_bounded", _run)
+def test_swiftc_failure_raises(tmp_path: Path) -> None:
+    bin_path, src_path = _stale_pair(tmp_path, "rebuild2")
+    compiler = _script(tmp_path / "swiftc", 'echo "compile error" >&2\nexit 1')
     with pytest.raises(OcrError, match="compile error"):
-        ocr_image("/tmp/x.png")  # noqa: S108
+        ocr_image(
+            "/tmp/x.png",  # noqa: S108
+            binary=bin_path,
+            source=src_path,
+            swiftc=str(compiler),
+        )
 
 
-def test_existing_fresh_binary_skips_compile(
-    fake_bin: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls: list[list[str]] = []
-
-    def _run(argv: list[str], **kw: Any) -> _FakeCompleted:
-        calls.append(argv)
-        return _FakeCompleted(stdout="ok\t1\t2\t3\t4\n")
-
-    monkeypatch.setattr(ocr_mod, "run_bounded", _run)
-    items = ocr_image("/tmp/x.png")  # noqa: S108
+def test_existing_fresh_binary_skips_compile(tmp_path: Path) -> None:
+    calls_file = tmp_path / "calls.txt"
+    binary = _script(
+        tmp_path / "ocr",
+        f'printf "ocr:%s\\n" "$1" >> "{calls_file}"\nprintf "ok\\t1\\t2\\t3\\t4\\n"',
+    )
+    compiler = _script(
+        tmp_path / "swiftc",
+        f'printf "swiftc\\n" >> "{calls_file}"\nexit 1',
+    )
+    items = ocr_image("/tmp/x.png", binary=binary, swiftc=str(compiler))  # noqa: S108
     assert items == [{"text": "ok", "x": 1.0, "y": 2.0, "w": 3.0, "h": 4.0}]
-    # exactly one subprocess call: the OCR run itself, no swiftc compile
-    assert len(calls) == 1
-    assert calls[0][0].endswith("ocr")
+    assert calls_file.read_text().splitlines() == ["ocr:/tmp/x.png"]

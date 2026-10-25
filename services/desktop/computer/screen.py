@@ -5,14 +5,126 @@ daemon.
 from __future__ import annotations
 
 import struct
-from datetime import UTC, datetime
+import time
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any, Protocol
 
-from base.host.permissions_helper.client import PermissionsHelperClient, ScreenSize
+from base.host.permissions_helper.wire import AxActResult, AxTreeResult
 from base.paths import logs_dir
 
 from .errors import ComputerUseError
 from .targets import CaptureRegion
+
+
+class ScaleHelper(Protocol):
+    def screen_size(self) -> Mapping[str, Any]: ...
+
+
+class ScreenHelper(ScaleHelper, Protocol):
+    def screencapture_region(self, x: int, y: int, w: int, h: int, path: str) -> object: ...
+
+
+class DesktopHelper(ScreenHelper, Protocol):
+    def ping(self) -> Mapping[str, Any]: ...
+    def frontmost_app(self) -> Mapping[str, Any]: ...
+    def cursor_position(self) -> Mapping[str, Any]: ...
+    def click(
+        self,
+        x: float,
+        y: float,
+        *,
+        double: bool = False,
+        button: str = "left",
+        click_count: int | None = None,
+        modifiers: list[str] | None = None,
+        duration_ms: float | None = None,
+    ) -> Mapping[str, Any]: ...
+    def move(
+        self, x: float, y: float, *, modifiers: list[str] | None = None
+    ) -> Mapping[str, Any]: ...
+    def drag(
+        self,
+        start_x: float,
+        start_y: float,
+        end_x: float,
+        end_y: float,
+        *,
+        button: str | None = None,
+        modifiers: list[str] | None = None,
+    ) -> Mapping[str, Any]: ...
+    def mouse_down(
+        self,
+        x: float | None = None,
+        y: float | None = None,
+        *,
+        button: str = "left",
+        modifiers: list[str] | None = None,
+    ) -> Mapping[str, Any]: ...
+    def mouse_up(
+        self,
+        x: float | None = None,
+        y: float | None = None,
+        *,
+        button: str = "left",
+    ) -> Mapping[str, Any]: ...
+    def mouse_release_all(self) -> Mapping[str, Any]: ...
+    def type_text(self, text: str) -> Mapping[str, Any]: ...
+    def key(
+        self,
+        code: int,
+        *,
+        cmd: bool = False,
+        modifiers: list[str] | None = None,
+        duration_ms: float | None = None,
+    ) -> Mapping[str, Any]: ...
+    def scroll(
+        self,
+        x: float,
+        y: float,
+        dy: int,
+        *,
+        dx: int | None = None,
+        modifiers: list[str] | None = None,
+    ) -> Mapping[str, Any]: ...
+    def clipboard_read(self) -> Mapping[str, Any]: ...
+    def clipboard_write(self, text: str) -> Mapping[str, Any]: ...
+    def indicator_stop(self) -> Mapping[str, Any]: ...
+    def list_apps(self) -> Mapping[str, Any]: ...
+    def list_windows(self, app: str | None = None) -> Mapping[str, Any]: ...
+    def focus_app(self, target: dict[str, object]) -> Mapping[str, Any]: ...
+    def screencapture_window(self, pid: int, window_id: int, path: str) -> Mapping[str, Any]: ...
+    def ax_window_info(self, app: str) -> Mapping[str, Any]: ...
+    def window_info(self, owner: str) -> Mapping[str, Any]: ...
+    def session_info(self) -> Mapping[str, Any]: ...
+    def ax_tree(
+        self,
+        app: str | None = None,
+        *,
+        target: dict[str, object] | None = None,
+        scope: int | None = None,
+        scope_fp: str | None = None,
+        max_nodes: int = 600,
+        max_depth: int = 14,
+        budget_ms: int = 1500,
+        timeout_ms: int = 400,
+        enable_ax: bool = True,
+    ) -> AxTreeResult: ...
+    def ax_act(
+        self,
+        app: str,
+        raw_id: int,
+        action: str,
+        *,
+        pid: int | None = None,
+        value: str | None = None,
+        native_action: str | None = None,
+        text: str | None = None,
+        prefix: str | None = None,
+        suffix: str | None = None,
+        selection_type: str | None = None,
+        timeout_ms: int = 2000,
+    ) -> AxActResult: ...
 
 
 def png_size(path: Path) -> tuple[int, int]:
@@ -45,7 +157,7 @@ def _pixel_scale(pixels_w: int, logical_w: float) -> float:
     return pixels_w / logical_w
 
 
-def current_scale(helper: PermissionsHelperClient, measured: float | None) -> float:
+def current_scale(helper: ScaleHelper, measured: float | None) -> float:
     """The physical->logical scale for coordinate conversion.
 
     Prefers the daemon's own measurement (last snapshot, ``_pixel_scale``);
@@ -60,13 +172,13 @@ def snapshot_path(agent_id: int | None) -> Path:
     """A fresh capture path under $MEIVA_HOME/logs/computer/snapshots/."""
     directory = logs_dir() / "computer" / "snapshots"
     directory.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
+    stamp = time.monotonic_ns()
     return directory / f"agent-{agent_id or 0}-{stamp}.png"
 
 
 def capture_screen(
-    helper: PermissionsHelperClient, agent_id: int
-) -> tuple[Path, ScreenSize, float, tuple[int, int]]:
+    helper: ScreenHelper, agent_id: int
+) -> tuple[Path, Mapping[str, Any], float, tuple[int, int]]:
     """One full-screen capture: (PNG path, helper screen report, measured
     scale, physical pixel size).
 
@@ -84,7 +196,11 @@ def capture_screen(
 
 
 def capture_region(
-    helper: PermissionsHelperClient, agent_id: int, region: CaptureRegion
+    helper: ScreenHelper,
+    agent_id: int,
+    region: CaptureRegion,
+    *,
+    path: Path | None = None,
 ) -> tuple[Path, float, tuple[int, int]]:
     """Capture a main-display rectangle without changing whole-screen state.
 
@@ -101,10 +217,10 @@ def capture_region(
         and region.y + region.h <= screen["y"] + screen["h"]
     ):
         raise ComputerUseError("region must be wholly inside the main display")
-    path = snapshot_path(agent_id)
-    helper.screencapture_region(region.x, region.y, region.w, region.h, str(path))
-    pw, ph = png_size(path)
+    out_path = snapshot_path(agent_id) if path is None else path
+    helper.screencapture_region(region.x, region.y, region.w, region.h, str(out_path))
+    pw, ph = png_size(out_path)
     scale = _pixel_scale(pw, region.w)
     if abs(ph - region.h * scale) > 1:
         raise ComputerUseError("captured region dimensions do not match the requested rectangle")
-    return path, scale, (pw, ph)
+    return out_path, scale, (pw, ph)

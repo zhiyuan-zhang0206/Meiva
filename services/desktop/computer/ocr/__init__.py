@@ -41,28 +41,44 @@ class OcrError(Exception):
     """OCR could not run or produced no parseable output."""
 
 
-def bin_path() -> Path:
+def bin_path(home: Path | None = None) -> Path:
     """Where the compiled OCR binary lives, under this home's logs dir."""
-    return logs_dir() / "computer" / "ocr-bin" / "ocr"
+    root = logs_dir() if home is None else home / "logs"
+    return root / "computer" / "ocr-bin" / "ocr"
 
 
-def _binary() -> Path:
+def _binary(
+    *,
+    binary: Path | None = None,
+    source: Path = SOURCE,
+    swiftc: str | None = None,
+) -> Path:
     """The compiled OCR binary, built on demand (source-newer check)."""
-    binary = bin_path()
-    if not binary.exists() or SOURCE.stat().st_mtime > binary.stat().st_mtime:
-        binary.parent.mkdir(parents=True, exist_ok=True)
-        swiftc = shutil.which("swiftc")
-        if swiftc is None:
+    resolved = bin_path() if binary is None else binary
+    if not resolved.exists() or source.stat().st_mtime > resolved.stat().st_mtime:
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        compiler = shutil.which("swiftc") if swiftc is None else (swiftc or None)
+        if compiler is None:
             raise OcrError("swiftc not found on PATH — cannot build the OCR helper")
         built = run_bounded(
-            [swiftc, "-o", str(binary), str(SOURCE)], timeout=120, capture_output=True, text=True
+            [compiler, "-o", str(resolved), str(source)],
+            timeout=120,
+            capture_output=True,
+            text=True,
         )
         if built.returncode != 0:
             raise OcrError(f"swiftc failed: {built.stderr.strip()[:300]}")
-    return binary
+    return resolved
 
 
-def ocr_image(path: str | Path) -> list[dict[str, float | str]]:
+def ocr_image(
+    path: str | Path,
+    *,
+    binary: Path | None = None,
+    source: Path = SOURCE,
+    swiftc: str | None = None,
+    timeout: float = _OCR_TIMEOUT_S,
+) -> list[dict[str, float | str]]:
     """Recognize text in a PNG and return items with physical-pixel boxes.
 
     Each item is {"text", "x", "y", "w", "h"} in the same coordinate space
@@ -71,9 +87,10 @@ def ocr_image(path: str | Path) -> list[dict[str, float | str]]:
     daemon degrades a failed OCR to `ocr: []` + `ocr_error`, never failing
     the snapshot itself.
     """
+    compiled = _binary(binary=binary, source=source, swiftc=swiftc)
     try:
         ran = run_bounded(
-            [str(_binary()), str(path)], timeout=_OCR_TIMEOUT_S, capture_output=True, text=True
+            [str(compiled), str(path)], timeout=timeout, capture_output=True, text=True
         )
     except (subprocess.TimeoutExpired, OSError) as e:
         raise OcrError(f"ocr run failed: {e}") from e

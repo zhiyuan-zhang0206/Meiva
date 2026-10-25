@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from base.host.permissions_helper.client import (
-    PermissionsHelperClient,
     PermissionsHelperError,
     SpawnResult,
 )
@@ -20,7 +19,7 @@ from services.desktop.permissions_helper import onboarding
 NOW = datetime(2026, 10, 17, 8, 0, tzinfo=UTC)
 
 
-class FakeHelper(PermissionsHelperClient):
+class FakeHelper:
     def __init__(
         self,
         codes: dict[str, int],
@@ -30,7 +29,6 @@ class FakeHelper(PermissionsHelperClient):
         request_capable: bool = True,
         request_fails: bool = False,
     ) -> None:
-        super().__init__("/unused.sock")
         self.codes = codes
         self.screen = screen
         self.ax = ax
@@ -86,11 +84,22 @@ class FakeHelper(PermissionsHelperClient):
         return {"pid": 1, "reused": False}
 
 
-class DeadHelper(PermissionsHelperClient):
-    def __init__(self) -> None:
-        super().__init__("/unused.sock")
-
+class DeadHelper:
     def ping(self) -> Any:
+        raise PermissionsHelperError("no socket")
+
+    def request_grants(self) -> Any:
+        raise PermissionsHelperError("no socket")
+
+    def spawn_process(
+        self,
+        name: str,
+        argv: list[str],
+        env: dict[str, str],
+        cwd: str,
+        stdout: str,
+        stderr: str,
+    ) -> SpawnResult:
         raise PermissionsHelperError("no socket")
 
 

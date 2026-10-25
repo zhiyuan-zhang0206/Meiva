@@ -15,7 +15,6 @@ Config via env: MEIVA_COMPUTER_SESSION_IDLE_S (default 600).
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -45,13 +44,12 @@ class TaskSessionTracker:
         self._idle_s = idle_s
         self._sessions: dict[int, _TaskSession] = {}
 
-    def note(self, task_id: int, agent_id: int, tool: str, emit: Emit) -> None:
+    def note(self, task_id: int, agent_id: int, tool: str, emit: Emit, *, now: float) -> None:
         """Record one action for a task; emit start/end events as they happen.
 
         Call after the action's computer_action row (the envelope describes
         the same facts). `emit` must be cheap — it is called synchronously.
         """
-        now = time.time()
         self._sweep(now, emit)
         sess = self._sessions.get(task_id)
         if sess is None:

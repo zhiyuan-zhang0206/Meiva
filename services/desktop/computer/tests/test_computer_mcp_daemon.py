@@ -15,24 +15,23 @@ from typing import Any
 
 import pytest
 
-from base.agents.impersonation import manifest
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.host.permissions_helper.client import PermissionsHelperClient, UserAbortError
+from base.host.permissions_helper.client import UserAbortError
 from base.paths import logs_dir
 
-from .. import ocr as ocr_mod
 from .. import ocr_text as ocr_text_mod
 from ..errors import ComputerUseError
 from ..mcp_daemon import ComputerMcpDaemon
 from ..protocol import Request, Response
-from .slices import computer_use_config
+from ..screen import DesktopHelper
+from .slices import AuditLog, FakeDesktopHelper, FakeOcr, computer_use_config
 
 
 def computer_daemon(
     *,
     database_gate: ProcessDbGate,
-    helper: PermissionsHelperClient | None = None,
+    helper: DesktopHelper | None = None,
     **config: Any,
 ) -> ComputerMcpDaemon:
     return ComputerMcpDaemon(
@@ -62,11 +61,10 @@ def _req(
 # ── helper fakes ────────────────────────────────────────────────────────────
 
 
-class FakeHelper(PermissionsHelperClient):
+class FakeHelper(FakeDesktopHelper):
     """Records calls; frontmost app + screen geometry are scriptable."""
 
     def __init__(self) -> None:
-        super().__init__("/nonexistent-test-helper.sock")
         self.calls: list[tuple[str, dict[str, Any]]] = []
         # Errors the next clicks raise (one per call, in pop order), and the one every
         # indicator_stop raises: scripted failures need no patching of the fake.
@@ -79,15 +77,15 @@ class FakeHelper(PermissionsHelperClient):
         # a stale-helper regression sets it to the 1x 1920x1080 shape.
         self.png_size: tuple[int, int] = (3024, 1964)
 
-    def cursor_position(self, **kw: Any) -> dict[str, float]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def cursor_position(self, **kw: Any) -> dict[str, float]:
         self.calls.append(("cursor_position", {}))
         return self.cursor
 
-    def screen_size(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def screen_size(self, **kw: Any) -> dict[str, Any]:
         self.calls.append(("screen_size", {}))
         return self.screen
 
-    def frontmost_app(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def frontmost_app(self, **kw: Any) -> dict[str, Any]:
         self.calls.append(("frontmost_app", {}))
         return {"app": self.frontmost}
 
@@ -104,41 +102,41 @@ class FakeHelper(PermissionsHelperClient):
             )
         return {"path": path, "bytes": 42}
 
-    def click(self, x: float, y: float, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def click(self, x: float, y: float, **kw: Any) -> dict[str, Any]:
         self.calls.append(("click", {"x": x, "y": y, **kw}))
         if self.click_errors:
             raise self.click_errors.pop()
         return {"clicked": {"x": x, "y": y}, "double": bool(kw.get("double"))}
 
-    def type_text(self, text: str, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def type_text(self, text: str, **kw: Any) -> dict[str, Any]:
         self.calls.append(("type_text", {"text": text}))
         return {"typed": len(text)}
 
-    def key(self, code: int, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def key(self, code: int, **kw: Any) -> dict[str, Any]:
         # Mirrors main.swift's real echo shape {"key": code, "cmd": ...} — the
         # daemon maps it to the MCP "pressed" contract.
         self.calls.append(("key", {"code": code, **kw}))
         return {"key": code, "cmd": bool(kw.get("cmd"))}
 
-    def scroll(self, x: float, y: float, dy: int, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def scroll(self, x: float, y: float, dy: int, **kw: Any) -> dict[str, Any]:
         self.calls.append(("scroll", {"x": x, "y": y, "dy": dy}))
         return {"scrolled": dy}
 
-    def indicator_stop(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def indicator_stop(self, **kw: Any) -> dict[str, Any]:
         self.calls.append(("indicator_stop", {}))
         if self.indicator_stop_error is not None:
             raise self.indicator_stop_error
         return {"stopped": False}
 
-    def ax_window_info(self, app: str, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def ax_window_info(self, app: str, **kw: Any) -> dict[str, Any]:
         self.calls.append(("ax_window_info", {"app": app}))
         return {"app": app, "x": 0.0, "y": 0.0, "w": 800.0, "h": 600.0}
 
-    def window_info(self, owner: str, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def window_info(self, owner: str, **kw: Any) -> dict[str, Any]:
         self.calls.append(("window_info", {"owner": owner}))
         return {"owner": owner, "x": 0.0, "y": 0.0, "w": 800.0, "h": 600.0}
 
-    def session_info(self, **kw: Any) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def session_info(self, **kw: Any) -> dict[str, Any]:
         self.calls.append(("session_info", {}))
         return {"locked": False, "on_console": True}
 
@@ -149,20 +147,9 @@ def fake_helper() -> FakeHelper:
 
 
 @pytest.fixture
-def audit_log(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    log: list[dict[str, Any]] = []
-
-    def _record(_db: object, event: Any) -> None:
-        log.append(
-            {
-                "event_type": event.event_name,
-                "agent_id": event.agent_id,
-                "source": event.source,
-                "payload": event.attributes,
-            }
-        )
-
-    monkeypatch.setattr(manifest, "emit_recorded_central_event", _record)
+def audit_log(database: Database) -> AuditLog:
+    log = AuditLog(database)
+    log.clear()
     return log
 
 
@@ -186,7 +173,9 @@ async def ok_result(
     union, and pins the response shape at the same time."""
     resp = await call(daemon, tool, args, agent_id)
     assert resp["ok"] is True
-    content = (resp["result"] or {}).get("content")  # pyright: ignore[reportUnknownMemberType]
+    res = resp["result"]
+    assert isinstance(res, dict)
+    content = res.get("content")
     assert isinstance(content, list) and len(content) == 1  # pyright: ignore[reportUnknownArgumentType]
     block = content[0]
     assert block["type"] == "text"
@@ -200,7 +189,9 @@ async def test_list_tools_and_ping(*, database_gate: ProcessDbGate) -> None:
     d = computer_daemon(database_gate=database_gate)
     resp = await d._dispatch(_req("list_tools"))
     assert resp["ok"] is True
-    names = {t["name"] for t in (resp["result"] or [])}
+    tools = resp["result"]
+    assert isinstance(tools, list)
+    names = {t["name"] for t in tools}
     assert names == {
         "release_control",
         "snapshot",
@@ -363,16 +354,11 @@ async def test_click_before_any_snapshot_falls_back_to_helper_scale(
 
 async def test_snapshot_include_ocr_adds_text_boxes(
     fake_helper: FakeHelper,
-    audit_log: list,
-    monkeypatch: pytest.MonkeyPatch,
+    audit_log: Any,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    monkeypatch.setattr(
-        ocr_mod,
-        "ocr_image",
-        lambda _path: [{"text": "\u4f60\u597d", "x": 1.0, "y": 2.0, "w": 30.0, "h": 12.0}],  # pyright: ignore[reportUnknownArgumentType]
-    )
+    FakeOcr([{"text": "\u4f60\u597d", "x": 1.0, "y": 2.0, "w": 30.0, "h": 12.0}])
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
     result = await ok_result(d, "snapshot", {"include_ocr": True})
     assert result["ocr"] == [{"text": "\u4f60\u597d", "x": 1.0, "y": 2.0, "w": 30.0, "h": 12.0}]
@@ -381,59 +367,32 @@ async def test_snapshot_include_ocr_adds_text_boxes(
 
 async def test_snapshot_include_ocr_failure_degrades(
     fake_helper: FakeHelper,
-    audit_log: list,
-    monkeypatch: pytest.MonkeyPatch,
+    audit_log: Any,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-
-    def _boom(path: str) -> list[dict]:
-        raise ocr_mod.OcrError("swiftc missing")
-
-    monkeypatch.setattr(ocr_mod, "ocr_image", _boom)  # pyright: ignore[reportUnknownArgumentType]
+    ocr = FakeOcr()
+    ocr.error = "swiftc missing"
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
     result = await ok_result(d, "snapshot", {"include_ocr": True})
     assert result["ocr"] == []
-    assert result["ocr_error"] == "swiftc missing"
+    assert "swiftc missing" in result["ocr_error"]
 
 
 async def test_snapshot_without_include_ocr_skips_ocr(
     fake_helper: FakeHelper,
-    audit_log: list,
-    monkeypatch: pytest.MonkeyPatch,
+    audit_log: Any,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    called: list[str] = []
-
-    def _ocr(path: str) -> list[dict]:
-        called.append(path)
-        return []
-
-    monkeypatch.setattr(ocr_mod, "ocr_image", _ocr)  # pyright: ignore[reportUnknownArgumentType]
+    ocr = FakeOcr([])
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
     result = await ok_result(d, "snapshot", {})
-    assert called == []
+    assert ocr.called_paths == []
     assert "ocr" not in result
 
 
 # ── OCR text tools: find_text / click_text ─────────────────────────────────
-
-
-class FakeOcr:
-    """Scriptable ocr_image stand-in: yields canned boxes, counts runs, and
-    can be switched to raise OcrError (strictness probe)."""
-
-    def __init__(self, boxes: list[dict[str, float | str]]) -> None:
-        self.boxes = boxes
-        self.calls = 0
-        self.error: str | None = None
-
-    def __call__(self, path: str) -> list[dict[str, float | str]]:
-        self.calls += 1
-        if self.error is not None:
-            raise ocr_mod.OcrError(self.error)
-        return self.boxes
 
 
 # Physical-pixel OCR boxes over the default fake 1512x982pt @2x screen
@@ -448,10 +407,8 @@ _OCR_BOXES: list[dict[str, float | str]] = [
 
 
 @pytest.fixture
-def fake_ocr(monkeypatch: pytest.MonkeyPatch) -> FakeOcr:
-    stub = FakeOcr(_OCR_BOXES)
-    monkeypatch.setattr(ocr_mod, "ocr_image", stub)
-    return stub
+def fake_ocr() -> FakeOcr:
+    return FakeOcr(_OCR_BOXES)
 
 
 def _capture_count(fh: FakeHelper) -> int:

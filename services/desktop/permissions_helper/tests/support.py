@@ -141,3 +141,22 @@ func requestHelperShutdown(runDir: String) throws -> [String: Any] { [:] }
     for name in ["listApps", "sessionInfo", "frontmostApp"]:
         stubs += f"func {name}() -> [String: Any] {{ stubCalls += 1; return [:] }}\n"
     return stubs
+
+
+def _ignore_sigterm(_signum: int, _frame: object) -> None:
+    pass
+
+
+def _run_sleeper() -> None:
+    import signal
+    import sys
+    import time
+
+    signal.signal(signal.SIGTERM, _ignore_sigterm)
+    if len(sys.argv) > 1:
+        Path(sys.argv[1]).touch()
+    time.sleep(60)
+
+
+if __name__ == "__main__":
+    _run_sleeper()

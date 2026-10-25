@@ -1,27 +1,36 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from base.host.permissions_helper.client import PermissionsHelperClient
+from services.desktop.permissions_helper.tests.test_permissions_helper import (
+    fake_helper as fake_helper,
+)
 
 _SWIFT = (Path(__file__).parents[1] / "helper" / "main.swift").read_text()
 
 
-class _RecordingHelper(PermissionsHelperClient):
-    def __init__(self) -> None:
-        super().__init__("/unused.sock")
-        self.seen: list[tuple[str, dict[str, Any]]] = []
+def _recording_client(
+    start_server: Callable[..., str],
+) -> tuple[PermissionsHelperClient, list[tuple[str, dict[str, Any]]]]:
+    seen: list[tuple[str, dict[str, Any]]] = []
 
-    def call(self, method: str, **args: object) -> Any:
-        self.seen.append((method, dict(args)))
-        return {}
+    def handler(req: dict[str, Any]) -> dict[str, Any]:
+        args = {key: value for key, value in req.items() if key != "method"}
+        seen.append((str(req["method"]), args))
+        return {"id": req["id"], "ok": True, "result": {}}
+
+    return PermissionsHelperClient(start_server(handler)), seen
 
 
-def test_ax_tree_request_carries_the_bounds_and_omits_an_absent_scope() -> None:
-    helper = _RecordingHelper()
+def test_ax_tree_request_carries_the_bounds_and_omits_an_absent_scope(
+    fake_helper: Callable[..., str],
+) -> None:
+    helper, seen = _recording_client(fake_helper)
     helper.ax_tree("Finder")
-    method, args = helper.seen[0]
+    method, args = seen[0]
     assert method == "ax_tree"
     assert args["app"] == "Finder"
     assert (args["max_nodes"], args["max_depth"], args["budget_ms"], args["timeout_ms"]) == (
@@ -34,18 +43,20 @@ def test_ax_tree_request_carries_the_bounds_and_omits_an_absent_scope() -> None:
     assert args["enable_ax"] is True
 
 
-def test_ax_tree_request_forwards_a_scope() -> None:
-    helper = _RecordingHelper()
+def test_ax_tree_request_forwards_a_scope(fake_helper: Callable[..., str]) -> None:
+    helper, seen = _recording_client(fake_helper)
     helper.ax_tree("Finder", scope=12, scope_fp="abc", max_nodes=50)
-    assert (helper.seen[0][1]["scope"], helper.seen[0][1]["scope_fp"]) == (12, "abc")
-    assert helper.seen[0][1]["max_nodes"] == 50
+    assert (seen[0][1]["scope"], seen[0][1]["scope_fp"]) == (12, "abc")
+    assert seen[0][1]["max_nodes"] == 50
 
 
-def test_ax_act_request_carries_the_value_only_when_given() -> None:
-    helper = _RecordingHelper()
+def test_ax_act_request_carries_the_value_only_when_given(
+    fake_helper: Callable[..., str],
+) -> None:
+    helper, seen = _recording_client(fake_helper)
     helper.ax_act("Mail", 7, "press")
     helper.ax_act("Mail", 7, "set_value", value="hi")
-    (method, plain), (_, with_value) = helper.seen
+    (method, plain), (_, with_value) = seen
     assert method == "ax_act"
     assert (plain["app"], plain["id"], plain["action"]) == ("Mail", 7, "press")
     assert "value" not in plain
