@@ -5,13 +5,17 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields
 from types import MappingProxyType
-from typing import Any, Literal, cast
+from typing import Any, Literal, TypeGuard
 
 from pydantic import BaseModel
 
 from base.host.env.config_lite_table import FIELD_DOMAINS
 
 Cadence = Literal["once_per_compaction", "every_time"]
+
+
+def _is_any_list(value: object) -> TypeGuard[list[Any]]:
+    return isinstance(value, list)
 
 
 @dataclass(frozen=True)
@@ -120,7 +124,7 @@ class HarnessCli:
 def _value(pins: Mapping[str, Any], name: str, default_reader: Callable[[str, str], Any]) -> Any:
 
     value = pins[name] if name in pins else default_reader(FIELD_DOMAINS[name], name)
-    return tuple(cast("list[Any]", value)) if isinstance(value, list) else value
+    return tuple(value) if _is_any_list(value) else value
 
 
 def agent_setting(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Protocol, cast, overload
+from typing import Any, Protocol, TypeGuard, overload
 
 from pydantic import BaseModel, ValidationError
 from pydantic.fields import FieldInfo
@@ -25,6 +25,10 @@ class _AgentConfigSlices(Protocol):
     def plugin_configs(self) -> dict[str, BaseModel]: ...
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 def config_from_image[C: BaseModel](cls: type[C], content: str, config_path: Path) -> C:
     try:
         disk_data = json.loads(content)
@@ -33,12 +37,11 @@ def config_from_image[C: BaseModel](cls: type[C], content: str, config_path: Pat
             f"plugin config disk image JSON parse failed ({config_path}): {e}"
         ) from e
 
-    if not isinstance(disk_data, dict):
+    if not _is_str_dict(disk_data):
         raise InvalidConfigData(
             "plugin config disk image top-level must be a JSON object, got "
             f"{type(disk_data).__name__} ({config_path})"
         )
-    disk_data = cast("dict[str, Any]", disk_data)
 
     disk_keys = set(disk_data.keys())
     cls_keys = set(cls.model_fields.keys())
@@ -82,14 +85,13 @@ def process_plugin_config(plugin: str, configs: Mapping[str, BaseModel]) -> Base
 
 def _schema_extra(info: FieldInfo) -> dict[str, Any]:
     extra = info.json_schema_extra
-    return cast("dict[str, Any]", extra) if isinstance(extra, dict) else {}
+    return extra if _is_str_dict(extra) else {}
 
 
 def _field_is_sensitive(extra: object) -> bool:
-    if not isinstance(extra, dict):
+    if not _is_str_dict(extra):
         return False
-    extras = cast(dict[str, Any], extra)
-    return extras.get("sensitive") is True
+    return extra.get("sensitive") is True
 
 
 def is_per_agent_field(plugin: str, field: str, configs: Mapping[str, BaseModel]) -> bool:

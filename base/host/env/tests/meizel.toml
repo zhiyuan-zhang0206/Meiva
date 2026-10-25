@@ -4,6 +4,3 @@ exports = ["env_files.py"]
 "test_dotenv_content.py" = ["_dotenv_content_child.py"]
 "test_port_lease.py" = ["_lease_child.py"]
 "test_process_timezone.py" = ["_process_timezone_child.py"]
-
-[debt.env-patch]
-"env_files.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1

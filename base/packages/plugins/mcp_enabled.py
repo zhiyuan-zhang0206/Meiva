@@ -23,7 +23,7 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from pydantic import BaseModel, ValidationError
 
@@ -72,6 +72,10 @@ class _MalformedOverlayError(McpEnabledConfigError):
     state change with no visible error)."""
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 def _read_local() -> dict[str, Any] | None:
     """Read the per-machine MCP-enable overlay file. None = absent; a
     present-but-malformed file raises `_MalformedOverlay` — the caller decides
@@ -84,9 +88,9 @@ def _read_local() -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError) as e:
         _log.error("mcp_enabled: local file %s is malformed — refusing MCP configuration", p)
         raise _MalformedOverlayError(f"mcp_enabled.json unreadable: {e}") from e
-    if not isinstance(data, dict):
+    if not _is_str_dict(data):
         raise SchemaInvalid(f"mcp_enabled.json must be a JSON object, got {type(data).__name__}")
-    return dict(cast("dict[str, Any]", data))
+    return dict(data)
 
 
 def write_local(cfg: McpEnabledConfig) -> None:

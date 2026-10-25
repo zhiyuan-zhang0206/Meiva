@@ -242,23 +242,39 @@ def test_missing_start_lookup_waits_for_concurrent_latest_instance(
 
 
 def test_member_write_failure_rolls_back_previously_inserted_group_and_alert_revision(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
 ) -> None:
-    from base.telemetry.alerts import shadow
-
     ingest(db_conn, [alert("a", severity="warning")], mark_legacy_notified=True)
     original = facts(db_conn)
-    db_conn.commit()
-
-    def fail_snapshot(value: object) -> None:
-        assert db_conn.execute("SELECT count(*) FROM alert_notification_groups").fetchone() == (2,)
-        raise RuntimeError("injected member write failure")
-
-    monkeypatch.setattr(shadow, "Jsonb", fail_snapshot)
-    with pytest.raises(RuntimeError, match="member write failure"):
-        ingest(db_conn, [alert("a", severity="critical")])
-    assert facts(db_conn) == original
-    assert db_conn.execute("SELECT notification_revision,severity FROM alerts").fetchone() == (
-        1,
-        "warning",
+    db_conn.execute(
+        """
+        CREATE OR REPLACE FUNCTION _test_fail_member_write() RETURNS trigger AS $$
+        BEGIN
+            IF (SELECT count(*) FROM alert_notification_groups) != 2 THEN
+                RAISE EXCEPTION 'expected 2 groups before member insert';
+            END IF;
+            RAISE EXCEPTION 'injected member write failure';
+        END;
+        $$ LANGUAGE plpgsql;
+        CREATE TRIGGER _test_fail_member_write_trg
+        BEFORE INSERT ON alert_notification_members
+        FOR EACH ROW EXECUTE FUNCTION _test_fail_member_write();
+        """
     )
+    db_conn.commit()
+    try:
+        with pytest.raises(psycopg.Error, match="injected member write failure"):
+            ingest(db_conn, [alert("a", severity="critical")])
+        assert facts(db_conn) == original
+        assert db_conn.execute("SELECT notification_revision,severity FROM alerts").fetchone() == (
+            1,
+            "warning",
+        )
+    finally:
+        db_conn.execute(
+            """
+            DROP TRIGGER IF EXISTS _test_fail_member_write_trg ON alert_notification_members;
+            DROP FUNCTION IF EXISTS _test_fail_member_write();
+            """
+        )
+        db_conn.commit()

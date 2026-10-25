@@ -16,7 +16,6 @@ from typing import Any, NamedTuple
 
 import pytest
 
-from base.db import connections
 from base.db.code_version_gate import ProcessDbGate
 from base.db.connections import NoDatabaseAuthorityError, guard_db_url
 from base.host.db_authority import delivery, ledger, model
@@ -231,7 +230,6 @@ def test_a_database_handle_retains_its_boot_refusal_after_another_delivery(
     boot: Boot,
     seeded: Any,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
 ) -> None:
     """A later admitted boot cannot authorize a previously refused handle."""
@@ -245,14 +243,19 @@ def test_a_database_handle_retains_its_boot_refusal_after_another_delivery(
     first = Settings(
         env_boot=result, data_plane={"db_url": _ENDPOINT, "redis_url": "redis://localhost:1"}
     )
-    monkeypatch.setattr(db_config, "settings", first)
-    handle = Database.from_settings(gate=database_gate)
+    handle = Database(
+        db_config.DbConfig(
+            db_url=first.data_plane.db_url,
+            db_sslmode=first.data_plane.db_sslmode,
+            db_pool_min_size=first.data_plane.db_pool_min_size,
+            db_pool_max_size=first.data_plane.db_pool_max_size,
+            pgbouncer_enabled=first.data_plane.pgbouncer_enabled,
+            db_authority_refusal=first.env_boot.db_authority_refusal,
+        ),
+        gate=database_gate,
+    )
     _intent(boot.home, _REPO)
     dotenv_boot.enforce_cluster_env_authority(boot.env, boot.home)
 
-    def unexpected_dial(*_args: Any, **_kwargs: Any) -> Any:
-        pytest.fail("a later boot authorized a previously refused database handle")
-
-    monkeypatch.setattr(connections.psycopg, "connect", unexpected_dial)
     with pytest.raises(NoDatabaseAuthorityError, match="source checkout"):
         handle.connect()

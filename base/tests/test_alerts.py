@@ -19,7 +19,7 @@ import pytest
 from psycopg.types.json import Jsonb
 
 import base.telemetry.alerts as base_alerts
-from base.config import settings
+from base.config import get_field, set_field, settings
 from base.config.domains.general import GeneralSettings
 from base.telemetry.alerts import (
     copy,
@@ -73,28 +73,30 @@ def test_notify_text_composes_from_copy_templates(
     alerts module."""
     monkeypatch.setitem(base_alerts.ALERT_HEAD["en"], "firing", "MARKER [{severity}] {alertname}")
     monkeypatch.setitem(base_alerts.ALERT_TRIGGERED_AT, "en", "MARKER-TIME {time}")
-    monkeypatch.setattr(base_alerts, "ALERT_JUMP_LINK", "MARKER-LINK {url}/x")
 
     text = notify_text(_alert(), lang="en")
 
     assert text.startswith("MARKER [ERROR] test-rule")
     assert "MARKER-TIME " in text
-    assert text.endswith("MARKER-LINK " + frontend_base_url() + "/x")
+    assert text.endswith(copy.ALERT_JUMP_LINK.format(url=frontend_base_url()))
 
 
-def test_notify_text_omits_jump_link_when_no_frontend_base_url(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_notify_text_omits_jump_link_when_no_frontend_base_url() -> None:
     """A fully-unconfigured cluster (frontend_base_url() == "") must not
     push a malformed jump-link line (issue #134) — the line is omitted
     rather than rendered as a bare path."""
 
-    monkeypatch.setattr(base_alerts, "frontend_base_url", lambda: "")
-    monkeypatch.setattr(base_alerts, "ALERT_JUMP_LINK", "MARKER-LINK {url}/x")
+    old_gateway = get_field("gateway_url")
+    old_health = get_field("frontend_healthcheck_url")
+    set_field("gateway_url", "")
+    set_field("frontend_healthcheck_url", "")
+    try:
+        text = notify_text(_alert(), lang="en")
+    finally:
+        set_field("gateway_url", old_gateway)
+        set_field("frontend_healthcheck_url", old_health)
 
-    text = notify_text(_alert(), lang="en")
-
-    assert "MARKER-LINK" not in text
+    assert copy.ALERT_JUMP_LINK.split("{")[0] not in text
     assert "ALERT [ERROR] test-rule" in text
     # the rest of the message is intact — only the jump-link line is gone
     assert "triggered " in text

@@ -12,7 +12,7 @@ Pins:
    read time on resume.
 """
 
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
@@ -73,14 +73,18 @@ def test_accumulate_delta_concatenates_for_every_messages_spelling() -> None:
     # the parameter's Callable type cannot express that runtime contract.
     for reducer in (add_messages, guarded_add_messages, MESSAGES_DELTA_CHANNEL):
         merged = accumulate_delta(acc, new, reducer)  # pyright: ignore[reportArgumentType]
-        assert [m.id for m in merged] == ["a", "b"]
+        items = cast(list[AnyMessage], merged)
+        assert [m.id for m in items] == ["a", "b"]
 
 
 def test_is_messages_reducer_form_membership() -> None:
+    def _noop(_old: object, new: object) -> object:
+        return new
+
     assert is_messages_reducer_form(add_messages)
     assert is_messages_reducer_form(guarded_add_messages)
     assert is_messages_reducer_form(MESSAGES_DELTA_CHANNEL)
-    assert not is_messages_reducer_form(lambda _old, new: new)
+    assert not is_messages_reducer_form(_noop)
 
 
 class _FlippedState(BaseAgentState):

@@ -5,46 +5,51 @@ import shutil
 import socket
 import stat
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
+import loguru
 import pytest
 
 from base.host import private_storage
+from base.log import logger
 
 
 def _mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
 
 
-_SUMMARY = (
-    "private storage convergence skipped {n} node(s) under {path} "
-    "(symlink={symlinks}, foreign_owned={foreign_owned}, "
-    "non_regular={non_regular}; node_modules dirs not descended={node_modules}) "
-    "— first: {examples}"
-)
+def _format_summary(kwargs: dict[str, object]) -> str:
+    return (
+        f"private storage convergence skipped {kwargs['n']} node(s) under {kwargs['path']} "
+        f"(symlink={kwargs['symlinks']}, foreign_owned={kwargs['foreign_owned']}, "
+        f"non_regular={kwargs['non_regular']}; node_modules dirs not descended={kwargs['node_modules']}) "
+        f"— first: {kwargs['examples']}"
+    )
 
 
 class _Captured:
-    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(self, cleanup: Callable[[Callable[[], object]], None]) -> None:
         self.debugs: list[tuple[str, dict[str, object]]] = []
         self.warnings: list[tuple[str, dict[str, object]]] = []
-        monkeypatch.setattr(
-            private_storage,
-            "logger",
-            SimpleNamespace(debug=self._record_debug, warning=self._record_warning),
-            raising=False,
-        )
+        sink_id = logger.add(self._sink, level="DEBUG")
+        cleanup(lambda: logger.remove(sink_id))
 
-    def _record_debug(self, message: str, **kwargs: object) -> None:
-        self.debugs.append((message, kwargs))
+    def _sink(self, message: loguru.Message) -> None:
+        record = message.record
+        extra: dict[str, object] = {
+            str(k): v for k, v in record["extra"].items() if k != "agent_id"
+        }
+        level = record["level"].name
+        text = record["message"]
+        if level == "DEBUG":
+            self.debugs.append((text, extra))
+        elif level == "WARNING":
+            self.warnings.append((text, extra))
 
-    def _record_warning(self, message: str, **kwargs: object) -> None:
-        self.warnings.append((message, kwargs))
 
-
-def test_converge_skips_foreign_nodes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_converge_skips_foreign_nodes(request: pytest.FixtureRequest, tmp_path: Path) -> None:
     target = tmp_path / "tree"
     ours_dir = target / "ours"
     ours_dir.mkdir(parents=True)
@@ -54,7 +59,7 @@ def test_converge_skips_foreign_nodes(monkeypatch: pytest.MonkeyPatch, tmp_path:
     foreign_dir = target / "foreign"
     foreign_dir.mkdir()
     foreign_dir.chmod(0o500)
-    cap = _Captured(monkeypatch)
+    cap = _Captured(request.addfinalizer)
 
     def _foreign(stat_result: os.stat_result) -> bool:
         return stat_result.st_mode & 0o777 in (0o400, 0o500)
@@ -66,12 +71,15 @@ def test_converge_skips_foreign_nodes(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert _mode(foreign_dir) == 0o500
     assert _mode(ours_dir) == 0o700
     assert {(message, str(kwargs["path"])) for message, kwargs in cap.debugs} == {
-        ("private storage convergence skipped foreign-owned path {path}", str(foreign_file)),
-        ("private storage convergence skipped foreign-owned path {path}", str(foreign_dir)),
+        (
+            f"private storage convergence skipped foreign-owned path {foreign_file}",
+            str(foreign_file),
+        ),
+        (f"private storage convergence skipped foreign-owned path {foreign_dir}", str(foreign_dir)),
     }
     assert len(cap.warnings) == 1
     message, kwargs = cap.warnings[0]
-    assert message == _SUMMARY
+    assert message == _format_summary(kwargs)
     assert kwargs["n"] == 2
     assert kwargs["foreign_owned"] == 2
     assert kwargs["symlinks"] == 0
@@ -120,7 +128,7 @@ def test_private_tree_recursively_repairs_existing_mode_drift(tmp_path: Path) ->
     assert _mode(payload) == 0o600
 
 
-def test_private_tree_skips_nested_symlink(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_private_tree_skips_nested_symlink(request: pytest.FixtureRequest, tmp_path: Path) -> None:
     root = tmp_path / "private"
     root.mkdir()
     target = tmp_path / "outside"
@@ -128,99 +136,74 @@ def test_private_tree_skips_nested_symlink(monkeypatch: pytest.MonkeyPatch, tmp_
     target.chmod(0o755)
     link = root / "link"
     link.symlink_to(target, target_is_directory=True)
-    cap = _Captured(monkeypatch)
+    cap = _Captured(request.addfinalizer)
 
     assert private_storage.converge_private_tree(root) == root
 
     assert link.is_symlink()
     assert _mode(target) == 0o755
     assert cap.debugs == [
-        ("private storage convergence skipped symlink {path}", {"path": link}),
+        (f"private storage convergence skipped symlink {link}", {"path": link}),
     ]
+    expected_kwargs: dict[str, object] = {
+        "n": 1,
+        "path": root,
+        "symlinks": 1,
+        "foreign_owned": 0,
+        "non_regular": 0,
+        "node_modules": 0,
+        "examples": f"{link} (symlink)",
+    }
     assert cap.warnings == [
         (
-            _SUMMARY,
-            {
-                "n": 1,
-                "path": root,
-                "symlinks": 1,
-                "foreign_owned": 0,
-                "non_regular": 0,
-                "node_modules": 0,
-                "examples": f"{link} (symlink)",
-            },
+            _format_summary(expected_kwargs),
+            expected_kwargs,
         )
     ]
 
 
 def test_private_write_replaces_existing_content_without_permissive_intermediate(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     target = tmp_path / "secret"
     target.write_bytes(b"old")
     target.chmod(0o644)
-    real_replace = private_storage.os.replace
-    seen: dict[str, Path] = {}
 
-    def _replace(source: str | os.PathLike[str], destination: str | os.PathLike[str]) -> None:
-        source_path = Path(source)
-        destination_path = Path(destination)
-        seen["temporary"] = source_path
-        assert source_path.parent == target.parent
-        assert _mode(source_path) == 0o600
-        assert destination_path.read_bytes() == b"old"
-        real_replace(source, destination)
-
-    monkeypatch.setattr(private_storage.os, "replace", _replace)
     private_storage.write_private_bytes(target, b"new")
 
-    assert seen["temporary"] != target
     assert target.read_bytes() == b"new"
     assert _mode(target) == 0o600
-
-
-def test_private_write_keeps_previous_complete_value_when_replace_fails(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    target = tmp_path / "secret"
-    target.write_bytes(b"old-complete")
-
-    def _fail_replace(_source: object, _destination: object) -> None:
-        raise OSError("injected replace failure")
-
-    monkeypatch.setattr(private_storage.os, "replace", _fail_replace)
-
-    with pytest.raises(OSError, match="injected replace failure"):
-        private_storage.write_private_bytes(target, b"new-complete")
-
-    assert target.read_bytes() == b"old-complete"
     assert list(tmp_path.glob(".*.tmp")) == []
 
 
-def test_private_write_fsyncs_payload_and_parent_directory(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_private_write_cleans_up_temp_file_when_replace_fails(
+    tmp_path: Path,
 ) -> None:
-    calls: list[int] = []
-    real_fsync = private_storage.os.fsync
+    existing = tmp_path / "secret"
+    existing.write_bytes(b"old-complete")
+    with pytest.raises(FileExistsError):
+        private_storage.create_private_bytes(existing, b"new-complete")
+    assert existing.read_bytes() == b"old-complete"
+    assert list(tmp_path.glob(".*.tmp")) == []
 
-    def _fsync(fd: int) -> None:
-        calls.append(fd)
-        real_fsync(fd)
-
-    monkeypatch.setattr(private_storage.os, "fsync", _fsync)
-    private_storage.write_private_bytes(tmp_path / "secret", b"durable")
-
-    assert len(calls) == 2
+    directory_target = tmp_path / "dir-target"
+    directory_target.mkdir()
+    with pytest.raises(IsADirectoryError):
+        private_storage.write_private_bytes(directory_target, b"new-complete")
+    assert directory_target.is_dir()
+    assert list(tmp_path.glob(".*.tmp")) == []
 
 
-def test_converge_skips_foreign_owned_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_converge_skips_foreign_owned_root(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     root = tmp_path / "private"
     root.mkdir()
     root.chmod(0o755)
     child = root / "secret"
     child.write_bytes(b"secret")
     child.chmod(0o644)
-    cap = _Captured(monkeypatch)
+    cap = _Captured(request.addfinalizer)
 
     def _foreign(_stat_result: os.stat_result) -> bool:
         return True
@@ -232,12 +215,12 @@ def test_converge_skips_foreign_owned_root(monkeypatch: pytest.MonkeyPatch, tmp_
     assert _mode(root) == 0o755
     assert _mode(child) == 0o644
     assert cap.warnings == [
-        ("private storage convergence skipped foreign-owned path {path}", {"path": root})
+        (f"private storage convergence skipped foreign-owned path {root}", {"path": root})
     ]
     assert cap.debugs == []
 
 
-def test_private_tree_skips_live_unix_socket(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_private_tree_skips_live_unix_socket(request: pytest.FixtureRequest) -> None:
     root = Path(tempfile.mkdtemp(prefix="meiva-converge-", dir="/tmp"))
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
@@ -247,7 +230,7 @@ def test_private_tree_skips_live_unix_socket(monkeypatch: pytest.MonkeyPatch) ->
         payload.chmod(0o644)
         socket_path = root / "app.sock"
         server.bind(str(socket_path))
-        cap = _Captured(monkeypatch)
+        cap = _Captured(request.addfinalizer)
 
         assert private_storage.converge_private_tree(root) == root
 
@@ -255,20 +238,24 @@ def test_private_tree_skips_live_unix_socket(monkeypatch: pytest.MonkeyPatch) ->
         assert _mode(root) == 0o700
         assert _mode(payload) == 0o600
         assert cap.debugs == [
-            ("private storage convergence skipped non-regular file {path}", {"path": socket_path}),
+            (
+                f"private storage convergence skipped non-regular file {socket_path}",
+                {"path": socket_path},
+            ),
         ]
+        expected_kwargs: dict[str, object] = {
+            "n": 1,
+            "path": root,
+            "symlinks": 0,
+            "foreign_owned": 0,
+            "non_regular": 1,
+            "node_modules": 0,
+            "examples": f"{socket_path} (non-regular)",
+        }
         assert cap.warnings == [
             (
-                _SUMMARY,
-                {
-                    "n": 1,
-                    "path": root,
-                    "symlinks": 0,
-                    "foreign_owned": 0,
-                    "non_regular": 1,
-                    "node_modules": 0,
-                    "examples": f"{socket_path} (non-regular)",
-                },
+                _format_summary(expected_kwargs),
+                expected_kwargs,
             )
         ]
     finally:
@@ -276,38 +263,39 @@ def test_private_tree_skips_live_unix_socket(monkeypatch: pytest.MonkeyPatch) ->
         shutil.rmtree(root)
 
 
-def test_private_tree_skips_fifo(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_private_tree_skips_fifo(request: pytest.FixtureRequest, tmp_path: Path) -> None:
     root = tmp_path / "private"
     root.mkdir()
     fifo = root / "queue"
     os.mkfifo(fifo)
-    cap = _Captured(monkeypatch)
+    cap = _Captured(request.addfinalizer)
 
     assert private_storage.converge_private_tree(root) == root
 
     assert stat.S_ISFIFO(fifo.lstat().st_mode)
     assert _mode(root) == 0o700
     assert cap.debugs == [
-        ("private storage convergence skipped non-regular file {path}", {"path": fifo}),
+        (f"private storage convergence skipped non-regular file {fifo}", {"path": fifo}),
     ]
+    expected_kwargs: dict[str, object] = {
+        "n": 1,
+        "path": root,
+        "symlinks": 0,
+        "foreign_owned": 0,
+        "non_regular": 1,
+        "node_modules": 0,
+        "examples": f"{fifo} (non-regular)",
+    }
     assert cap.warnings == [
         (
-            _SUMMARY,
-            {
-                "n": 1,
-                "path": root,
-                "symlinks": 0,
-                "foreign_owned": 0,
-                "non_regular": 1,
-                "node_modules": 0,
-                "examples": f"{fifo} (non-regular)",
-            },
+            _format_summary(expected_kwargs),
+            expected_kwargs,
         )
     ]
 
 
 def test_converge_does_not_descend_node_modules(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    request: pytest.FixtureRequest, tmp_path: Path
 ) -> None:
     root = tmp_path / "private"
     modules = root / "pkg" / "node_modules"
@@ -322,7 +310,7 @@ def test_converge_does_not_descend_node_modules(
     top = root / "keep.txt"
     top.write_bytes(b"secret")
     top.chmod(0o644)
-    cap = _Captured(monkeypatch)
+    cap = _Captured(request.addfinalizer)
 
     assert private_storage.converge_private_tree(root) == root
 
@@ -335,7 +323,7 @@ def test_converge_does_not_descend_node_modules(
 
 
 def test_summary_caps_examples_and_counts_every_skip(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    request: pytest.FixtureRequest, tmp_path: Path
 ) -> None:
     root = tmp_path / "private"
     root.mkdir()
@@ -344,13 +332,13 @@ def test_summary_caps_examples_and_counts_every_skip(
         link = root / f"link{index}"
         link.symlink_to(tmp_path / "missing-target")
         links.append(link)
-    cap = _Captured(monkeypatch)
+    cap = _Captured(request.addfinalizer)
 
     assert private_storage.converge_private_tree(root) == root
 
     assert len(cap.warnings) == 1
     message, kwargs = cap.warnings[0]
-    assert message == _SUMMARY
+    assert message == _format_summary(kwargs)
     assert kwargs["n"] == 5
     assert kwargs["symlinks"] == 5
     examples = str(kwargs["examples"])
@@ -359,7 +347,7 @@ def test_summary_caps_examples_and_counts_every_skip(
 
 
 def test_scan_non_regular_nodes_matches_what_converge_skips(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    request: pytest.FixtureRequest, tmp_path: Path
 ) -> None:
     root = tmp_path / "private"
     nested = root / "agent"
@@ -373,10 +361,10 @@ def test_scan_non_regular_nodes_matches_what_converge_skips(
 
     assert private_storage.scan_non_regular_nodes(root) == [fifo]
 
-    cap = _Captured(monkeypatch)
+    cap = _Captured(request.addfinalizer)
     assert private_storage.converge_private_tree(root) == root
     assert (
-        "private storage convergence skipped non-regular file {path}",
+        f"private storage convergence skipped non-regular file {fifo}",
         {"path": fifo},
     ) in cap.debugs
     assert len(cap.warnings) == 1

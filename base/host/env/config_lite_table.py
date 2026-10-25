@@ -27,45 +27,66 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, cast
+from typing import Any
 
 LiteField = tuple[str, str, str, str, object, str | None]
 
 
-def _read_index() -> dict[str, object]:
+@dataclass(frozen=True)
+class _Index:
+    lite_fields: Mapping[str, LiteField]
+    field_domains: Mapping[str, str]
+    field_aliases: Mapping[str, str]
+    field_scopes: Mapping[str, str]
+    field_capabilities: Mapping[str, str]
+    per_agent_fields: frozenset[str]
+    sensitive_fields: frozenset[str]
+    required_fields: frozenset[str]
+
+
+def _read_index() -> tuple[
+    Mapping[str, LiteField],
+    Mapping[str, str],
+    Mapping[str, str],
+    Mapping[str, str],
+    Mapping[str, str],
+    frozenset[str],
+    frozenset[str],
+    frozenset[str],
+]:
     """Parse once; only immutable index values survive the local JSON payload."""
-    raw = cast(
-        dict[str, Any],
-        json.loads(Path(__file__).with_name("config_lite_table.json").read_text(encoding="utf-8")),
+    raw: dict[str, Any] = json.loads(
+        Path(__file__).with_name("config_lite_table.json").read_text(encoding="utf-8")
     )
+    raw_lite: dict[str, list[Any]] = raw["lite_fields"]
     lite_fields: dict[str, LiteField] = {
-        name: (row[0], row[1], row[2], row[3], row[4], row[5])
-        for name, row in cast(dict[str, list[Any]], raw["lite_fields"]).items()
+        name: (row[0], row[1], row[2], row[3], row[4], row[5]) for name, row in raw_lite.items()
     }
-    return {
-        "lite_fields": MappingProxyType(lite_fields),
-        "field_domains": MappingProxyType(raw["field_domains"]),
-        "field_aliases": MappingProxyType(raw["field_aliases"]),
-        "field_scopes": MappingProxyType(raw["field_scopes"]),
-        "field_capabilities": MappingProxyType(raw["field_capabilities"]),
-        "per_agent_fields": frozenset(raw["per_agent_fields"]),
-        "sensitive_fields": frozenset(raw["sensitive_fields"]),
-        "required_fields": frozenset(raw["required_fields"]),
-    }
+    return (
+        MappingProxyType(lite_fields),
+        MappingProxyType(raw["field_domains"]),
+        MappingProxyType(raw["field_aliases"]),
+        MappingProxyType(raw["field_scopes"]),
+        MappingProxyType(raw["field_capabilities"]),
+        frozenset(raw["per_agent_fields"]),
+        frozenset(raw["sensitive_fields"]),
+        frozenset(raw["required_fields"]),
+    )
 
 
-_INDEX = MappingProxyType(_read_index())
+_INDEX = _Index(*_read_index())
 
 # name: (domain, env alias, parse kind, default kind, literal default | None, validity check | None)
-LITE_FIELDS = cast(Mapping[str, LiteField], _INDEX["lite_fields"])
-FIELD_DOMAINS = cast(Mapping[str, str], _INDEX["field_domains"])
-FIELD_ALIASES = cast(Mapping[str, str], _INDEX["field_aliases"])
+LITE_FIELDS: Mapping[str, LiteField] = _INDEX.lite_fields
+FIELD_DOMAINS: Mapping[str, str] = _INDEX.field_domains
+FIELD_ALIASES: Mapping[str, str] = _INDEX.field_aliases
 # The env-authority pass (base/host/env/registry.py) reads these two without the registry.
-FIELD_SCOPES = cast(Mapping[str, str], _INDEX["field_scopes"])
-FIELD_CAPABILITIES = cast(Mapping[str, str], _INDEX["field_capabilities"])
-PER_AGENT_FIELDS = cast(frozenset[str], _INDEX["per_agent_fields"])
-SENSITIVE_FIELDS = cast(frozenset[str], _INDEX["sensitive_fields"])
+FIELD_SCOPES: Mapping[str, str] = _INDEX.field_scopes
+FIELD_CAPABILITIES: Mapping[str, str] = _INDEX.field_capabilities
+PER_AGENT_FIELDS: frozenset[str] = _INDEX.per_agent_fields
+SENSITIVE_FIELDS: frozenset[str] = _INDEX.sensitive_fields
 # Fields with no default and no factory — the W1 required check in _lite.prepare().
-REQUIRED_FIELDS = cast(frozenset[str], _INDEX["required_fields"])
+REQUIRED_FIELDS: frozenset[str] = _INDEX.required_fields

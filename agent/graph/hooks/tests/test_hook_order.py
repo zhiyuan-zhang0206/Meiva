@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -83,8 +83,8 @@ async def test_repair_preserves_the_plugin_note_and_state_across_turns() -> None
     config: RunnableConfig = {"configurable": {"thread_id": "1"}}
 
     command = await run(state, runtime, config)
-    update = command.update
-    assert isinstance(update, dict)
+    assert isinstance(command.update, dict)
+    update = cast("dict[str, Any]", command.update)
     messages = guarded_add_messages(state.messages, update["messages"])
     committed = state.model_copy(update={**update, "messages": messages})
 

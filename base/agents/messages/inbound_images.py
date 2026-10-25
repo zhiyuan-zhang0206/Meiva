@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 # Suffix -> MIME for image uploads that can be inlined as native model content.
 # Mirrors the image row of `meiva._understand`'s media map; a suffix not listed
@@ -17,6 +17,14 @@ IMAGE_MIME: dict[str, str] = {
     ".webp": "image/webp",
     ".gif": "image/gif",
 }
+
+
+def _is_object_list(value: object) -> TypeGuard[list[Any]]:
+    return isinstance(value, list)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
 
 
 def parse_upload_url(url: str) -> tuple[int, str] | None:
@@ -51,19 +59,18 @@ def inbound_image_urls(agent_id: int, payload: Mapping[str, object] | None) -> l
     failing the whole strip.
     """
     raw_blocks = payload.get("content_blocks") if payload else None
-    if not isinstance(raw_blocks, list):
+    if not _is_object_list(raw_blocks):
         return None
     urls: list[str] = []
-    for raw_block in cast("list[Any]", raw_blocks):
-        if not isinstance(raw_block, dict):
+    for raw_block in raw_blocks:
+        if not _is_str_dict(raw_block):
             continue
-        block = cast("dict[str, Any]", raw_block)
-        if block.get("type") != "image_url":
+        if raw_block.get("type") != "image_url":
             continue
-        image_url = block.get("image_url")
-        if not isinstance(image_url, dict):
+        image_url = raw_block.get("image_url")
+        if not _is_str_dict(image_url):
             continue
-        url = cast("dict[str, Any]", image_url).get("url")
+        url = image_url.get("url")
         if not isinstance(url, str):
             continue
         parsed = parse_upload_url(url)

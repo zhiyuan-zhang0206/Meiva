@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from base.config import get_field, settings
+from base.config import get_field, set_field, settings
 from base.db import Database, DbConfig, connect, connections
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_settings
@@ -39,8 +39,17 @@ class _Dialed:
 
 
 class _FakeConn:
-    def execute(self, *_args: object) -> object:
+    def execute(self, *_args: object, **_kwargs: object) -> _FakeConn:
         return self
+
+    def cursor(self, **_kwargs: object) -> _FakeConn:
+        return self
+
+    def fetchone(self) -> tuple[str, str, int]:
+        return ("60000", "meiva:test", 0)
+
+    def commit(self) -> None:
+        return None
 
     def __enter__(self) -> _FakeConn:
         return self
@@ -50,14 +59,9 @@ class _FakeConn:
 
 
 @pytest.fixture
-def dialed(database_gate: ProcessDbGate, monkeypatch: pytest.MonkeyPatch) -> _Dialed:
+def dialed(monkeypatch: pytest.MonkeyPatch) -> _Dialed:
     rec = _Dialed()
     monkeypatch.setattr(connections.psycopg, "connect", rec.connect)
-
-    def no_restore(_conn: object, *, gate: ProcessDbGate) -> None:
-        assert gate is database_gate
-
-    monkeypatch.setattr(connections, "restore_pooled_session", no_restore)
     return rec
 
 
@@ -77,12 +81,16 @@ def test_a_handle_applies_its_sslmode_when_the_url_is_silent(
 
 
 def test_the_module_level_connect_builds_the_live_settings_each_call(
-    database_gate: ProcessDbGate, dialed: _Dialed, monkeypatch: pytest.MonkeyPatch
+    database_gate: ProcessDbGate, dialed: _Dialed
 ) -> None:
-    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://u:p@first.example:1/x")
-    connect(gate=database_gate)
-    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://u:p@second.example:2/y")
-    connect(gate=database_gate)
+    old_url = get_field("db_url")
+    try:
+        set_field("db_url", "postgresql://u:p@first.example:1/x")
+        connect(gate=database_gate)
+        set_field("db_url", "postgresql://u:p@second.example:2/y")
+        connect(gate=database_gate)
+    finally:
+        set_field("db_url", old_url)
     assert dialed.urls == [
         "postgresql://u:p@first.example:1/x",
         "postgresql://u:p@second.example:2/y",
@@ -97,15 +105,19 @@ def test_a_write_transaction_declares_itself_writable(
     assert dialed.urls == [_URL]
 
 
-def test_the_config_carries_the_live_value_of_every_field(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.data_plane, "db_pool_max_size", 7)
-    config = db_config_from_settings()
-    for field in dataclasses.fields(config):
-        if field.name != "db_authority_refusal":
-            assert getattr(config, field.name) == get_field(field.name), field.name
-    assert config.db_authority_refusal == settings.env_boot.db_authority_refusal
-    assert config.db_pool_max_size == 7
-    assert "handle_user" not in repr(_config())
+def test_the_config_carries_the_live_value_of_every_field() -> None:
+    old_max = get_field("db_pool_max_size")
+    set_field("db_pool_max_size", 7)
+    try:
+        config = db_config_from_settings()
+        for field in dataclasses.fields(config):
+            if field.name != "db_authority_refusal":
+                assert getattr(config, field.name) == get_field(field.name), field.name
+        assert config.db_authority_refusal == settings.env_boot.db_authority_refusal
+        assert config.db_pool_max_size == 7
+        assert "handle_user" not in repr(_config())
+    finally:
+        set_field("db_pool_max_size", old_max)
 
 
 _RUNNER_URL = "postgresql://meiva_runner:sek@10.20.30.40:6433/meiva_main"

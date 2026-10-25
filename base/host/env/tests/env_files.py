@@ -1,10 +1,8 @@
 from pathlib import Path
 
-import pytest
-
 from base.host.env.dotenv_file import process_env_file, read_env_aliases
 
-__all__ = ["unit_env_aliases", "unit_env_path", "use_env_files"]
+__all__ = ["unit_env_aliases", "unit_env_path"]
 
 
 # meiva:note
@@ -19,15 +17,3 @@ def unit_env_path() -> Path:
 # The `{ALIAS: value}` of `unit_env_path()` as it is on disk now.
 def unit_env_aliases() -> dict[str, str]:
     return read_env_aliases(unit_env_path())
-
-
-def use_env_files(
-    monkeypatch: pytest.MonkeyPatch, env_file: Path, mirror_file: Path | None = None
-) -> Path:
-    home = env_file.parent / f"{env_file.stem}-home"
-    home.mkdir(exist_ok=True)
-    (home / ".env").write_text(env_file.read_text())
-    if mirror_file is not None and mirror_file.exists():
-        (home / "mirror.env").write_text(mirror_file.read_text())
-    monkeypatch.setenv("MEIVA_HOME", str(home))
-    return home

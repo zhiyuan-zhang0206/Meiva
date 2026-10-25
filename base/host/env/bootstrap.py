@@ -36,7 +36,7 @@ import json
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import TypeGuard
 
 from base.host.atomic_io import write_bytes_atomic
 from base.host.env.boot_policy import (
@@ -50,6 +50,11 @@ from base.host.env.process_profile import (
     ProcessProfile,
     parse_process_profile,
 )
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
 
 LAUNCHER_PROFILE_ENV_KEY = "MEIVA_LAUNCHER_PROFILE"
 
@@ -183,15 +188,14 @@ def cluster_plugin_config_values(env: Mapping[str, str], plugin: str) -> dict[st
     if packet is None:
         return None
     raw: object = json.loads(packet)
-    if not isinstance(raw, dict):
+    if not _is_object_dict(raw):
         raise TypeError("plugin cluster config must be a JSON object")
-    contents = cast("dict[str, object]", raw)
-    if plugin not in contents:
+    if plugin not in raw:
         return None
-    values = contents[plugin]
-    if not isinstance(values, dict):
+    values = raw[plugin]
+    if not _is_object_dict(values):
         raise TypeError(f"plugin cluster config {plugin!r} must be a JSON object")
-    return cast("dict[str, object]", values)
+    return values
 
 
 # The parent config snapshot (P0 #2100): a successful fetch writes the payload
@@ -373,18 +377,17 @@ def read_config_snapshot(
         raw = json.loads(path.read_text())
     except (OSError, ValueError):
         return None
-    if not isinstance(raw, dict):
+    if not _is_object_dict(raw):
         return None
-    data = cast("dict[str, Any]", raw)
-    if data.get("v") != SNAPSHOT_VERSION:
+    if raw.get("v") != SNAPSHOT_VERSION:
         return None
-    if data.get("base_url") != base_url:
+    if raw.get("base_url") != base_url:
         return None
-    written_at = data.get("written_at")
+    written_at = raw.get("written_at")
     if not isinstance(written_at, (int, float)):
         return None
     try:
-        values = validated_bootstrap_payload(data.get("values"))
+        values = validated_bootstrap_payload(raw.get("values"))
     except TypeError:
         return None
     return values, max(0.0, now - float(written_at))

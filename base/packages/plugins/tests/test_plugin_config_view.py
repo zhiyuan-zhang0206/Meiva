@@ -14,6 +14,8 @@ Locks four contracts, one layer over the framework pins:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,7 +44,7 @@ class _BetaConfig(BaseModel):
 
 
 @pytest.fixture
-def two_plugins(unit_home) -> dict[str, BaseModel]:
+def two_plugins(unit_home: Path) -> dict[str, BaseModel]:
     """One root's resolved bindings, with no ambient state."""
     configs: dict[str, BaseModel] = {}
     bind_plugin_config(PluginConfigOwner("alpha", _AlphaConfig, disk_image_path("alpha")), configs)

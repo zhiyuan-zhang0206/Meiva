@@ -29,7 +29,7 @@ os.environ["MEIVA_CONFIG_FETCH"] = (
 )
 
 
-def _fields() -> dict:
+def _fields() -> dict[str, dict[str, object]]:
     # meiva:note
     # The raw flat field registry (name -> _FieldRef with scope/capability).
     from base.config import FIELD_REFS, field_alias, schema_extra
@@ -49,14 +49,14 @@ def _aliases_with(
 ) -> frozenset[str]:
     # meiva:note
     # Independent recomputation of a scope/capability slice of the registry.
-    out = set()
+    out: set[str] = set()
     for _name, meta in _fields().items():
         if scope is not None and meta["scope"] not in scope:
             continue
         if capability is not None and meta["capability"] != capability:
             continue
-        out.add(meta["alias"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    return frozenset(out)  # pyright: ignore[reportUnknownArgumentType]
+        out.add(str(meta["alias"]))
+    return frozenset(out)
 
 
 class TestScopeDerivationRules:
