@@ -26,10 +26,10 @@ import json
 import shlex
 import socket
 import sys
-import time
 from pathlib import Path
 
 from base.agents.messages.external_caller import launch_caller_assignment
+from base.clock import SYSTEM_TIMERS
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.host.env.agent_env import AGENT_ID_ENV
 from base.lm.harness.codex.auth import SECRET_ENV_NAMES
@@ -94,9 +94,9 @@ def _config_overrides(workspace: Path) -> str:
 # Wait until Codex has finished MCP startup after publishing its handle. The TUI draws a frame while MCP is still starting, and a message sent then has its Enter swallowed, so "Starting MCP" counts as not ready until it disappears. A wait that runs out says so and lets the launch send anyway.
 def wait_for_ready(shell: ShellSessions, sid: int, pacing: Pacing) -> None:
     print(f"waiting for session {sid} to be ready (MCP startup + render)...")
-    deadline = time.monotonic() + pacing.timeout
+    deadline = SYSTEM_TIMERS.monotonic() + pacing.timeout
     rendered = False
-    while time.monotonic() < deadline:
+    while SYSTEM_TIMERS.monotonic() < deadline:
         match capture_screen(shell, sid):
             case SessionGone(reason=reason):
                 raise RuntimeError(f"Codex session {sid} ended before it was ready: {reason}")
@@ -104,12 +104,12 @@ def wait_for_ready(shell: ShellSessions, sid: int, pacing: Pacing) -> None:
                 state = ui_state(screen)
         if state != "blank":
             rendered = True
-            time.sleep(pacing.settle)
+            SYSTEM_TIMERS.sleep(pacing.settle)
             if state == "ready":
                 print("  -> ready (MCP startup finished)")
                 return
             continue
-        time.sleep(pacing.poll)
+        SYSTEM_TIMERS.sleep(pacing.poll)
     print(ready_timeout_line(pacing.timeout, rendered=rendered))
 
 
@@ -127,22 +127,22 @@ def _screen_or_warn(shell: ShellSessions, sid: int, action: str) -> str | None:
 # The bootstrap message must actually submit, not park in the composer. The submission signal is "Working" on the screen. If it does not appear within the window, one Enter is sent (Enter submits a single-line queued message; the historical "Tab submits" note is wrong, 2026-09-03 #5779 re-test) and the screen is checked again. Kept loud but not fatal: a dead session's refusal warns and returns, because an escaped ValueError would roll the launch back (the caller kills the session and terminates the generation on exceptions).
 def verify_submitted(shell: ShellSessions, sid: int, pacing: Pacing) -> None:
     print("verifying the bootstrap message was submitted...")
-    deadline = time.monotonic() + pacing.timeout
-    while time.monotonic() < deadline:
+    deadline = SYSTEM_TIMERS.monotonic() + pacing.timeout
+    while SYSTEM_TIMERS.monotonic() < deadline:
         output = _screen_or_warn(shell, sid, "capture")
         if output is None:
             return
         if is_working(output):
             print("  -> submitted (Working visible)")
             return
-        time.sleep(pacing.poll)
+        SYSTEM_TIMERS.sleep(pacing.poll)
     print("  -> not submitted within window; sending Enter once")
     try:
         shell.send_keys(sid, "Enter")
     except ValueError as exc:
         print(dead_session_warning("Enter retry", str(exc)))
         return
-    time.sleep(pacing.settle)
+    SYSTEM_TIMERS.sleep(pacing.settle)
     output = _screen_or_warn(shell, sid, "capture")
     if output is None:
         return
@@ -161,13 +161,13 @@ def verify_submitted(shell: ShellSessions, sid: int, pacing: Pacing) -> None:
 def read_session_id(shell: ShellSessions, sid: int, pacing: Pacing) -> str:
     shell.send(sid, "/status")
     for attempt in range(2):
-        deadline = time.monotonic() + pacing.timeout / 2
-        while time.monotonic() < deadline:
+        deadline = SYSTEM_TIMERS.monotonic() + pacing.timeout / 2
+        while SYSTEM_TIMERS.monotonic() < deadline:
             found = parse_session_id(shell.capture(sid, 80, scrollback=True))
             if found is not None:
                 print(f"  -> codex session {found}")
                 return found
-            time.sleep(pacing.poll)
+            SYSTEM_TIMERS.sleep(pacing.poll)
         if attempt == 0:
             shell.send_keys(sid, "Enter")
     raise RuntimeError(
@@ -299,8 +299,8 @@ def _app_server_log_path(owner: coding_session_owner.CodingSessionOwner) -> Path
 def wait_for_app_server(endpoint: str, pacing: Pacing, *, log_path: Path | None = None) -> None:
     path = endpoint.removeprefix("unix://")
     print(f"waiting for the shared codex app server at {endpoint}...")
-    deadline = time.monotonic() + pacing.timeout
-    while time.monotonic() < deadline:
+    deadline = SYSTEM_TIMERS.monotonic() + pacing.timeout
+    while SYSTEM_TIMERS.monotonic() < deadline:
         if Path(path).exists():
             with contextlib.suppress(OSError):
                 probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -311,7 +311,7 @@ def wait_for_app_server(endpoint: str, pacing: Pacing, *, log_path: Path | None 
                     probe.close()
                 print("  -> app server ready")
                 return
-        time.sleep(pacing.poll)
+        SYSTEM_TIMERS.sleep(pacing.poll)
     detail = f" (app-server log: {log_path})" if log_path is not None else ""
     raise RuntimeError(
         f"the shared codex app server did not become ready at {endpoint}{detail}; "

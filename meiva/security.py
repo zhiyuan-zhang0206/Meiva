@@ -6,7 +6,7 @@ A mitigation, not a boundary: a clean result means "no known pattern
 matched", not "safe".
 """
 
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from base.agents.messages import injection_scan
 from base.agents.messages.security_finding import SecurityFindingEntry as SecurityFindingEntry
@@ -27,6 +27,10 @@ __all_for_meiva__ = [
 
 # The graph-state channel a finding is appended to (`BaseAgentState.security_findings`).
 _FINDINGS_CHANNEL = "security_findings"
+
+
+def _is_state_dict(val: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(val, dict)
 
 
 # meiva:note
@@ -61,12 +65,11 @@ def deliver(delivery: FindingDelivery, findings: Findings) -> None:
     if not plan.append:
         return
     update = process_context.get_state_update()
-    if not isinstance(update, dict):
+    if not _is_state_dict(update):
         raise TypeError(
             f"meiva.state_update must stay a dict, got {type(update).__name__} (security finding)"
         )
-    state = cast("dict[str, Any]", update)
-    state[_FINDINGS_CHANNEL] = [*state.get(_FINDINGS_CHANNEL, []), *plan.append]
+    update[_FINDINGS_CHANNEL] = [*update.get(_FINDINGS_CHANNEL, []), *plan.append]
 
 
 # meiva:note

@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
+import json
+import os
+import sys
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any, cast
-from unittest import mock
 
 import pytest
 
 import meiva
 from base.agents.context.identity import AgentIdentity
-from base.native_process import loaded_commit
-from base.native_process.loaded_commit import LoadedCommit
-from base.telemetry.delivery.pipeline import EventPipeline
+from base.host.proc import run_bounded
 from base.telemetry.process_logging import message_to_params
 from meiva.sdk_surface import process_context
+
+_GATEWAY_BOOT_CHILD = Path(__file__).with_name("child_gateway_boot.py")
 
 
 class _FakeMessage:
@@ -69,68 +69,39 @@ def test_transport_source_preserves_usage_payload_source() -> None:
     assert payload["source"] == "web.fetch"
 
 
-def test_gateway_boot_retains_process_generation_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
-    import base.log.process as slog
-    import base.telemetry.process_logging as plog
-
-    def producer() -> EventPipeline:
-        raise AssertionError("the mocked sink must not construct a pipeline")
-
-    monkeypatch.setattr(slog, "init_done", False)
-    process_context.bind_context(replace(meiva.context, identity=AgentIdentity(42, True)))
-    with (
-        mock.patch.object(slog.logger, "add"),
-        mock.patch.object(slog, "add_file_sink"),
-        mock.patch.object(plog, "add_event_sink") as init_pipeline,
-        mock.patch.object(slog, "install_stdlib_intercept"),
-        mock.patch.object(slog.logger, "info") as boot_log,
-        mock.patch.object(slog.logger, "configure") as configure,
-    ):
-        plog.init_gateway_process(
-            name="agent_host",
-            producer=producer,
-            machine_reader=lambda: "machine-a",
-            image=LoadedCommit(Path(__file__).resolve().parents[4], "loaded-generation"),
-        )
-
-    configure.assert_called_once_with(extra={"agent_id": "-"})
-    assert init_pipeline.call_args.kwargs["process"] == "agent_host"
-    assert init_pipeline.call_args.kwargs["machine_reader"]() == "machine-a"
-    fields = boot_log.call_args.kwargs
-    assert fields["event"] == "service_started"
+def test_gateway_boot_retains_process_generation_evidence(unit_home: Path) -> None:
+    result = run_bounded(
+        [sys.executable, str(_GATEWAY_BOOT_CHILD), "loaded-commit"],
+        env={**os.environ, "MEIVA_HOME": str(unit_home), "MEIVA_CONFIG_FETCH": "skip"},
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["agent_id"] is None
+    assert payload["process"] == "agent_host"
+    assert payload["machine"] == "machine-a"
+    fields = payload["attributes"]
     assert fields["name"] == "agent_host"
     assert fields["sha"] == "loaded-generation"
     assert fields["host"] == "machine-a"
     assert fields["pid"] > 0
 
 
-def test_owned_gateway_boot_uses_loaded_image_and_original_producer(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import base.log.process as slog
-    import base.telemetry.process_logging as plog
-
-    monkeypatch.setattr(slog, "init_done", False)
-    producer = mock.Mock(side_effect=AssertionError("the logger must pass its root's factory"))
-    machine = mock.Mock(return_value="owned-machine")
-    image = cast(Any, SimpleNamespace(sha="already-loaded"))
-    with (
-        mock.patch.object(slog.logger, "add"),
-        mock.patch.object(slog, "add_file_sink"),
-        mock.patch.object(plog, "add_event_sink") as init_pipeline,
-        mock.patch.object(slog, "install_stdlib_intercept"),
-        mock.patch.object(
-            loaded_commit, "capture_commit", side_effect=AssertionError("no recapture")
-        ) as read_late_version,
-        mock.patch.object(slog.logger, "info") as boot_log,
-    ):
-        plog.init_gateway_process(
-            name="agent_host", producer=producer, machine_reader=machine, image=image
-        )
-    init_pipeline.assert_called_once_with(
-        process="agent_host", producer=producer, machine_reader=machine
+def test_owned_gateway_boot_uses_loaded_image_and_original_producer(unit_home: Path) -> None:
+    result = run_bounded(
+        [sys.executable, str(_GATEWAY_BOOT_CHILD), "owned-image"],
+        env={**os.environ, "MEIVA_HOME": str(unit_home), "MEIVA_CONFIG_FETCH": "skip"},
+        capture_output=True,
+        text=True,
+        timeout=15,
     )
-    producer.assert_not_called()
-    read_late_version.assert_not_called()
-    assert boot_log.call_args.kwargs["sha"] == "already-loaded"
-    assert boot_log.call_args.kwargs["host"] == "owned-machine"
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["process"] == "agent_host"
+    assert payload["machine"] == "owned-machine"
+    assert payload["producer_calls"] >= 1
+    fields = payload["attributes"]
+    assert fields["sha"] == "already-loaded"
+    assert fields["host"] == "owned-machine"

@@ -9,12 +9,21 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TypeGuard
 
 from base.lm.effort import ReasoningEffort
 from meiva.sdk_surface.pure.media.finding_plan import Findings, findings_of
 from meiva.web.configs import BraveConfig, JinaConfig
 from meiva.web.errors import FetchError, SearchError
+
+
+def _is_object_list(val: object) -> TypeGuard[list[object]]:
+    return isinstance(val, list)
+
+
+def _is_str_dict(val: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(val, dict)
+
 
 __all__ = [
     "AnswerRequest",
@@ -137,15 +146,25 @@ def brave_request(config: BraveConfig, query: str, count: int) -> HttpRequest:
 # meiva:note
 # The hits of every section of a Brave answer, in section order.
 def brave_hits(data: dict[str, object]) -> list[Hit]:
-    answer = cast("dict[str, Any]", data)
     hits: list[Hit] = []
     for section in _BRAVE_SECTIONS:
-        for result in answer.get(section, {}).get("results", []):
+        sec_obj = data.get(section)
+        if not _is_str_dict(sec_obj):
+            continue
+        results_obj = sec_obj.get("results")
+        if not _is_object_list(results_obj):
+            continue
+        for result in results_obj:
+            if not _is_str_dict(result):
+                continue
+            title = result.get("title")
+            url = result.get("url")
+            desc = result.get("description")
             hits.append(
                 Hit(
-                    title=result.get("title", ""),
-                    url=result.get("url", ""),
-                    snippet=result.get("description", ""),
+                    title=title if isinstance(title, str) else "",
+                    url=url if isinstance(url, str) else "",
+                    snippet=desc if isinstance(desc, str) else "",
                     kind=section,
                 )
             )
@@ -203,15 +222,18 @@ def _raise_if_wall(url: str, title: str, content: str) -> None:
 #     FetchError: Jina reports a business error (`code` other than 200), or the body is a
 #         bot-challenge or login wall instead of the page.
 def jina_page(data: dict[str, object], url: str, max_chars: int) -> Page:
-    answer = cast("dict[str, Any]", data)
-    code = answer.get("code")
+    code = data.get("code")
     if code != 200:
-        msg = answer.get("message") or answer.get("status") or "unknown"
+        msg = data.get("message") or data.get("status") or "unknown"
         raise FetchError(f"Jina Reader fetch failed (code={code}): {msg}")
-    payload = answer.get("data", {})
-    content = payload.get("content", "")
-    title = payload.get("title", "")
-    page_url = payload.get("url", url)
+    raw_payload = data.get("data")
+    payload = raw_payload if _is_str_dict(raw_payload) else {}
+    raw_content = payload.get("content", "")
+    content = raw_content if isinstance(raw_content, str) else ""
+    raw_title = payload.get("title", "")
+    title = raw_title if isinstance(raw_title, str) else ""
+    raw_url = payload.get("url", url)
+    page_url = raw_url if isinstance(raw_url, str) else url
     _raise_if_wall(url, title, content)
     truncated = len(content) > max_chars
     if truncated:

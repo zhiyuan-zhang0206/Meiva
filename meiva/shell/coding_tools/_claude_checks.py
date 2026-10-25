@@ -2,9 +2,9 @@
 # Claude Code launch checks: wait for the panel, then deliver the first message.
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
+from base.clock import SYSTEM_TIMERS
 from meiva.shell.coding_tools._common import SessionGone, capture_screen
 from meiva.shell.coding_tools.plans.claude_screen import (
     CLAUDE_NOT_FOUND,
@@ -56,18 +56,18 @@ def wait_for_ready(
     resumed: bool,
 ) -> None:
     print(f"waiting for session {sid} to be ready (polling capture)...")
-    deadline = time.monotonic() + pacing.timeout
-    while time.monotonic() < deadline:
+    deadline = SYSTEM_TIMERS.monotonic() + pacing.timeout
+    while SYSTEM_TIMERS.monotonic() < deadline:
         verdict = _look(shell, sid, failure_marker, resumed=resumed)
         _raise_if_failed(verdict, sid, settled=False)
         if verdict == "ready":
-            time.sleep(pacing.settle)
+            SYSTEM_TIMERS.sleep(pacing.settle)
             verdict = _look(shell, sid, failure_marker, resumed=resumed)
             _raise_if_failed(verdict, sid, settled=True)
             if verdict == "ready":
                 print("  -> ready (Claude Code UI)")
                 return
-        time.sleep(pacing.poll)
+        SYSTEM_TIMERS.sleep(pacing.poll)
     raise RuntimeError(
         f"Claude Code UI did not appear in session {sid} within {pacing.timeout:.0f} s; "
         "no text was delivered"

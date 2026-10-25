@@ -6,7 +6,6 @@ import builtins
 import contextlib
 from datetime import datetime
 from pathlib import Path
-from typing import cast
 
 from base.agents.context.clients import DatabaseHandle
 from base.cluster import session_name
@@ -165,8 +164,11 @@ def session_host() -> SessionHost:
 def open_sessions(agent_id: int) -> ShellSessions:
     from meiva.sdk_surface.settings import database
 
+    backend = get_shell_backend()
+    if not isinstance(backend, PtySessionBackend):
+        raise TypeError(f"shell sessions require PtySessionBackend, got {type(backend).__name__}")
     return ShellSessions(
-        backend=cast(PtySessionBackend, get_shell_backend()),
+        backend=backend,
         database=database(),
         agent_id=agent_id,
     )

@@ -20,26 +20,9 @@ exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "
 
 [roots]
 "boot.py" = { kinds = ["environ", "settings"], why = "launched_context() / has_launched_identity() read os.environ[\"MEIVA_AGENT_ID\"]; the env key is the only channel for child processes (shell sessions, watchers) to discover their parent agent; SDK process bootstrap constructs and binds process-owned contexts" }
-
-[debt.ambient-read]
-"files.py#home pathlib.Path.home" = 1
-"files.py#random uuid.uuid4" = 1
-"ui.py#clock time.monotonic" = 2
+"files.py" = { kinds = ["home", "random"], why = "workspace_base() reads Path.home() as the documented pre-bootstrap fallback for relative paths when no agent identity is bound, and _new_file_mode() generates a random UUID suffix for its temporary umask probe file" }
 
 [debt.any-collaborator]
-"__init__.py#any _SdkModule.DB.return" = 1
-"__init__.py#any _SdkModule.REDIS.return" = 1
 "__init__.py#any _SdkModule.state.return" = 1
-"__init__.py#any _SdkModule.state.value" = 1
 "__init__.py#any _SdkModule.state_update.return" = 1
-"__init__.py#any _SdkModule.state_update.value" = 1
 "__init__.py#any __getattr__.return" = 1
-"__init__.py#any attach.return" = 1
-"boot.py#any _gateway.return" = 1
-"boot.py#any database_factory.database.return" = 1
-"boot.py#any plugin_state_codec.return" = 1
-"boot.py#any process_clients.pipeline.return" = 1
-
-[debt.type-cast]
-"security.py#cast deliver" = 1
-"ui.py#cast _error_detail" = 1

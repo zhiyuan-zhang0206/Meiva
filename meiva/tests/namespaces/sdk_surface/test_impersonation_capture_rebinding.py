@@ -7,7 +7,6 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import psycopg
-import pytest
 
 import meiva
 from base.agents.context import MeivaContext
@@ -172,11 +171,16 @@ def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
             process_context.bind_context(prior)
 
 
+# meiva:note
+# A temporary `BEFORE INSERT` trigger on `agent_impersonation_entries` raises SQLSTATE `08006`
+# (`connection_failure`, mapped by psycopg to a retryable `psycopg.OperationalError`) so the
+# event-insert transaction fails while the follow-up failure-recording transaction against
+# `agent_impersonation_event_participants` and `agent_impersonations` succeeds on real Postgres.
+# meiva:link base/agents/impersonation/docs/impersonation.meiva.okf.md
 def test_known_capture_database_outage_retains_the_failed_receipt_recovery(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
     *,
     machine_identity: MachineIdentityReader,
@@ -186,16 +190,35 @@ def test_known_capture_database_outage_retains_the_failed_receipt_recovery(
         lease, owner.agent_id, "known-capture-outage", database_gate=database_gate
     )
     gate = capture.LocalCaptureGate(participant)
-
-    def unavailable(*_args: Any, **_kwargs: Any) -> None:
-        raise psycopg.OperationalError("temporary connection loss")
-
-    monkeypatch.setattr(capture, "append_source_event", unavailable)
-    with capture.admitted_local_sdk_call(gate.admit) as admission:
-        assert admission is not None
-        tagged = admission.capture(sdk_event(owner.agent_id, "known-outage"))
-        assert tagged.attributes["impersonation_session"] == f"{owner.agent_id}:0"
-        assert not close_local_participant_admission(gate, timeout=0)
+    with participant.db.write_transaction() as conn:
+        conn.execute(
+            """
+            CREATE OR REPLACE FUNCTION fail_impersonation_entry_insert() RETURNS trigger
+            LANGUAGE plpgsql AS $$
+            BEGIN
+                RAISE EXCEPTION 'temporary connection loss' USING ERRCODE = '08006';
+            END;
+            $$;
+            CREATE TRIGGER fail_impersonation_entry_insert_trig
+            BEFORE INSERT ON agent_impersonation_entries
+            FOR EACH ROW EXECUTE FUNCTION fail_impersonation_entry_insert();
+            """
+        )
+    try:
+        with capture.admitted_local_sdk_call(gate.admit) as admission:
+            assert admission is not None
+            tagged = admission.capture(sdk_event(owner.agent_id, "known-outage"))
+            assert tagged.attributes["impersonation_session"] == f"{owner.agent_id}:0"
+            assert not close_local_participant_admission(gate, timeout=0)
+    finally:
+        with participant.db.write_transaction() as conn:
+            conn.execute(
+                """
+                DROP TRIGGER IF EXISTS fail_impersonation_entry_insert_trig
+                ON agent_impersonation_entries;
+                DROP FUNCTION IF EXISTS fail_impersonation_entry_insert();
+                """
+            )
     assert gate.in_flight == 0
     assert capture_state(db_conn, participant) == ("failed",)
     assert capture_rows(db_conn, lease["id"], participant.source_key) == 0

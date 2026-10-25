@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from typing import Any
 
 from meiva import boot
 from meiva.sdk_surface import install as sdk_install
@@ -26,7 +25,7 @@ _STORE_NAMES = frozenset({"FileRegistrationStore", "default_store", "new_handle"
 _ATTACHMENT_NAMES = frozenset({"HarnessAttachment", "open_attachment", "resolve_registration"})
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> object:
     """Serve the kernel's names on first use, so `import meiva` stays light."""
     if name in _REGISTRATION_NAMES:
         from . import registration
@@ -73,7 +72,7 @@ def ensure_identity() -> object:
     return attachment
 
 
-def attach(handle: str | None = None) -> Any:
+def attach(handle: str | None = None) -> object:
     """Bind this external process to the Meiva agent identity it was started as.
 
     Call it with no argument: the handle comes from `MEIVA_HARNESS_HANDLE`, which the

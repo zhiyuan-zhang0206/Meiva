@@ -202,8 +202,9 @@ def _relative_time(dt: datetime) -> str:
     """Convert a datetime into a human-readable relative time string."""
     from meiva.sdk_surface.settings import clock
 
-    zone = clock().zone()
-    now = datetime.now().astimezone(zone)
+    current_clock = clock()
+    zone = current_clock.zone()
+    now = current_clock.now().astimezone(zone)
     return row_text.relative_age(dt.astimezone(zone), now=now)
 
 

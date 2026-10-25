@@ -29,7 +29,12 @@ from pathlib import Path
 from typing import Any, assert_never
 
 from base.agents.context import MeivaContext
-from base.agents.context.clients import ClientSet, DatabaseFactory
+from base.agents.context.clients import (
+    ClientSet,
+    DatabaseFactory,
+    DatabaseHandle,
+    GatewayHandle,
+)
 from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.external_caller import external_caller
@@ -92,7 +97,7 @@ def gateway_endpoint(config: ConfigBoot) -> Callable[[], str]:
     return endpoint
 
 
-def _gateway(url: str, *, config: ConfigBoot) -> Any:
+def _gateway(url: str, *, config: ConfigBoot) -> GatewayHandle:
     import httpx
 
     from base.cluster.machine import gateway_bearer
@@ -130,7 +135,7 @@ def database_factory(*, config: ConfigBoot, machine: MachineIdentityReader) -> D
 
     gate: Any = None
 
-    def database() -> Any:
+    def database() -> DatabaseHandle:
         nonlocal gate
         from base.cluster.dataplane.direct_url import ClusterDirectUrl
         from base.db import Database
@@ -167,7 +172,7 @@ def process_clients(
     database: DatabaseFactory,
     gateway_url: str | Callable[[], str],
 ) -> ClientSet:
-    def pipeline() -> Any:
+    def pipeline() -> object:
         from base.paths.home import resolve_meiva_home
         from base.telemetry import build_pipeline
 
@@ -749,9 +754,3 @@ def initialize_external(
             )
         case _:
             assert_never(boot)
-
-
-def plugin_state_codec() -> Any:
-    from base.agents.context.external_attachment import plugin_state_codec as _codec
-
-    return _codec

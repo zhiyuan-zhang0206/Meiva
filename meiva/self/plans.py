@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import LiteralString
 
 __all__ = [
     "SqlStatement",
@@ -43,7 +44,7 @@ _UPDATE_PAUSED_UNTIL = (
 # meiva:link meiva/self/docs/self.meiva.okf.md
 @dataclass(frozen=True, slots=True)
 class SqlStatement:
-    sql: str
+    sql: LiteralString
     params: tuple[object, ...]
 
 

@@ -86,12 +86,23 @@ def get(
     )
 
 
+# meiva:note
+# `use_client` accepts any HTTP client test double or `httpx.Client` and returns it unchanged so
+# callers keep the concrete type of the client they passed into the context manager.
+# meiva:link meiva/agents/docs/agents.meiva.okf.md
 @contextmanager
-def use_client(client: Any) -> Generator[Any]:
+def use_client[T](client: T) -> Generator[T]:
     """Route every SDK call in the block through *client* — a FastAPI `TestClient` for an
     in-process gateway, or any `httpx.Client` — then put back whichever client was there before."""
     bound = process_context.current_context()
-    derived = replace(bound, clients=bound.clients.with_gateway(lambda _url: client))
+
+    def _builder(_url: str) -> T:
+        return client
+
+    derived = replace(
+        bound,
+        clients=bound.clients.with_gateway(_builder),  # pyright: ignore[reportArgumentType]
+    )
     process_context.bind_context(derived)
     try:
         yield client

@@ -26,11 +26,10 @@ import meiva
 from base.agents.context.clients import ClientSet
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.host.proc import run_bounded
-from base.packages.plugin_config_contracts import PluginConfigImages
+from base.packages.plugin_config_contracts import ConfigImage, PluginConfigImages
 from base.packages.plugin_config_images import (
     DiskPluginConfigImages,
     PluginConfigChangedError,
-    PluginConfigOwner,
 )
 from base.packages.plugins import flags
 from base.packages.plugins.extensions import (
@@ -547,19 +546,26 @@ def test_invalid_core_dependency_rolls_back_the_plugin(
 
 
 @dataclass(frozen=True)
-class FailingImage(PluginConfigOwner):
+class FailingImage:
+    name: str
+    cls: type[BaseModel]
+    path: Path
     error: BaseException
 
     def read(self) -> str:
         raise self.error
 
+    def create_default(self) -> None:
+        return
+
 
 @dataclass(frozen=True)
-class FailingImages(DiskPluginConfigImages):
+class FailingImages:
+    home: Path
     error: BaseException
 
-    def owner(self, name: str, cls: type[BaseModel]) -> PluginConfigOwner:
-        image = super().owner(name, cls)
+    def owner(self, name: str, cls: type[BaseModel]) -> ConfigImage:
+        image = DiskPluginConfigImages(self.home).owner(name, cls)
         return FailingImage(image.name, image.cls, image.path, self.error)
 
 
