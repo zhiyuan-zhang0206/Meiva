@@ -39,10 +39,11 @@ class SpawnRequest:
     headers: dict[str, str]
 
 
+# meiva:note
+# The keyed spawn route is authenticated: present the machine API token (or the
+# cluster secret) as a Bearer token; without it the gateway rejects this spawn with 401.
 def build_spawn_request(access: GatewayAccess, *, idempotency_key: str) -> SpawnRequest:
     base = gateway_api_base(access.gateway_url)
-    # The keyed spawn route is authenticated: present the machine API token (or the
-    # cluster secret) as a Bearer token; without it the gateway rejects this spawn with 401.
     headers = {
         **gateway_auth_headers(access),
         "Idempotency-Key": idempotency_key,

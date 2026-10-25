@@ -12,10 +12,10 @@ from scripts.entrypoints import agent as mod
 
 
 def test_start_agent_posts_with_bearer() -> None:
-    secret = "sekret"
+    expected = "sekret"
     access = GatewayAccess(
         gateway_url="http://gw:8000",
-        cluster_secret=secret,
+        cluster_secret=expected,
         remote_plane=False,
         machine_token=None,
         launcher_profile=None,

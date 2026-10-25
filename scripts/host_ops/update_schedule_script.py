@@ -35,6 +35,9 @@ def require_agent_host_stopped(home: Path) -> None:
         raise RuntimeError("script repair requires the agent host to be stopped")
 
 
+# meiva:note
+# Verify the operator interpreter, home, environment and admitted source checkout.
+# A copied operator script must not import its containing development tree.
 def check_runtime_admission(
     home: Path,
     source: Path,
@@ -42,10 +45,8 @@ def check_runtime_admission(
     operator_home: Path,
     env: Mapping[str, str],
 ) -> None:
-    """Verify the operator interpreter, home, environment and admitted source checkout."""
     if Path(sys.prefix).resolve() != (source / ".venv").resolve():
         raise RuntimeError("run this tool with the source checkout's own .venv interpreter")
-    # A copied operator script must not import its containing development tree.
     sys.path.insert(0, str(source))
     from base.host.env.bootstrap import LAUNCHER_PROFILE_ENV_KEY
     from base.host.env.dotenv_boot import skip_config_fetch
@@ -110,12 +111,13 @@ def replace_script(
     return "updated"
 
 
+# meiva:note
+# The installed source supplied by the operator owns this image. A copied
+# adapter's __file__ must not lend its checkout identity to the installed writer.
 def source_version(source: Path) -> Callable[[], int]:
     from base.native_process.code_version import CodeVersion
     from base.native_process.loaded_commit import LoadedCommit
 
-    # The installed source supplied by the operator owns this image. A copied
-    # adapter's __file__ must not lend its checkout identity to the installed writer.
     image = LoadedCommit.capture(source_root=source)
     return CodeVersion(image).get
 

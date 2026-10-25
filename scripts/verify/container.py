@@ -284,9 +284,7 @@ def main() -> int:
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, _interrupted)
     args.evidence_root.mkdir(parents=True, exist_ok=True)
-    return run(
-        args.ref, args.evidence_root.resolve(), args.memory, args.shm_size, home=Path.home()
-    )
+    return run(args.ref, args.evidence_root.resolve(), args.memory, args.shm_size, home=Path.home())
 
 
 if __name__ == "__main__":

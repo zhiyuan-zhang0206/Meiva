@@ -696,9 +696,7 @@ def main(
 
     verify_files: list[str] | None = args.verify
     if verify_files is not None:
-        verification, scan = _verify_selected(
-            verify_files, repo_root=root, errors_fn=errors_fn
-        )
+        verification, scan = _verify_selected(verify_files, repo_root=root, errors_fn=errors_fn)
         _print_entries(scan.invalid, "invalid")
         print(_verification_json(verification))
         return 0

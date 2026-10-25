@@ -111,9 +111,10 @@ def test_the_object_store_of_a_linked_worktree_is_the_common_one(tmp_path: Path)
     linked = tmp_path / "linked"
     _git(main, "worktree", "add", "--detach", str(linked))
 
-    assert container.git_objects_dir(linked, home=tmp_path / "home") == (
-        main / ".git/objects"
-    ).resolve()
+    assert (
+        container.git_objects_dir(linked, home=tmp_path / "home")
+        == (main / ".git/objects").resolve()
+    )
 
 
 def test_a_ref_cannot_smuggle_a_git_option(tmp_path: Path) -> None:

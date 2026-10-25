@@ -88,8 +88,10 @@ def tccd_log_argv(start: datetime, window: int) -> list[str]:
     ]
 
 
+# meiva:note
+# `tccd_log_argv` builds a fixed `log show` argument list from formatted timestamps.
 def tccd_log(start: datetime, window: int) -> str:
-    done = subprocess.run(  # noqa: S603 — fixed log show argv
+    done = subprocess.run(  # noqa: S603
         tccd_log_argv(start, window),
         capture_output=True,
         text=True,
