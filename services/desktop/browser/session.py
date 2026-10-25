@@ -97,7 +97,7 @@ async def gateway_session_login(gateway_url: str, secret: str) -> tuple[str, str
     )
 
 
-async def http_json(url: str) -> Any | None:
+async def http_json(url: str) -> object:
     """GET ``url`` and return the parsed JSON body."""
     async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S) as client:
         resp = await client.get(url)
@@ -106,7 +106,7 @@ async def http_json(url: str) -> Any | None:
 
 
 async def cdp_call(
-    ws: ClientConnection | Any,
+    ws: ClientConnection,
     ids: Iterator[int],
     method: str,
     params: dict[str, Any],

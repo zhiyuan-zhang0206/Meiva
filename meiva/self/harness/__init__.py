@@ -43,7 +43,7 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def ensure_identity() -> Any | None:
+def ensure_identity() -> object:
     """Attach this process's harness identity the first time one is needed.
 
     Returns the attachment, or None when this process has no handle to use, already

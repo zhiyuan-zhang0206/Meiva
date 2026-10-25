@@ -313,7 +313,7 @@ async def test_inject_raises_when_browser_rejects_cookie() -> None:
 
 
 async def test_cdp_call_raises_on_protocol_error() -> None:
-    ws = FakeWS([{"id": 1, "error": {"code": -32601, "message": "not found"}}])
+    ws: Any = FakeWS([{"id": 1, "error": {"code": -32601, "message": "not found"}}])
     with pytest.raises(RuntimeError, match=r"CDP Network\.setCookie failed"):
         await sess.cdp_call(ws, itertools.count(1), "Network.setCookie", {})
 

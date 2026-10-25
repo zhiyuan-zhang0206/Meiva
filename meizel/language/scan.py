@@ -144,6 +144,15 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 
 
+def _unwrap_annotation_expr(expr: ast.expr) -> ast.expr | None:
+    if not (isinstance(expr, ast.Constant) and isinstance(expr.value, str)):
+        return expr
+    try:
+        return ast.parse(expr.value, mode="eval").body
+    except (SyntaxError, ValueError):
+        return None
+
+
 @dataclass(frozen=True, slots=True)
 class FileScan:
     path: str
@@ -350,22 +359,33 @@ class Scanner(AmbientAccess):
             self.visit(node.returns)
         self.scope = outer
 
-    def _is_direct_typing_any(self, expr: ast.expr) -> bool:
+    def _union_members(self, node: ast.Subscript) -> tuple[ast.expr, ...]:
+        if not isinstance(node.value, ast.Name | ast.Attribute):
+            return ()
+        target = self.dotted(node.value)
+        if target == "typing.Optional":
+            return (node.slice,)
+        if target == "typing.Union":
+            return tuple(node.slice.elts) if isinstance(node.slice, ast.Tuple) else (node.slice,)
+        return ()
+
+    def _contains_typing_any(self, expr: ast.expr) -> bool:
         if isinstance(expr, ast.Name | ast.Attribute):
             return self.dotted(expr) == "typing.Any"
-        if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
-            try:
-                parsed = ast.parse(expr.value, mode="eval").body
-            except (SyntaxError, ValueError):
-                return False
-            if isinstance(parsed, ast.Name | ast.Attribute):
-                return self.dotted(parsed) == "typing.Any"
+        if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.BitOr):
+            return self._contains_typing_any(expr.left) or self._contains_typing_any(expr.right)
+        if isinstance(expr, ast.Subscript):
+            return any(self._contains_typing_any(member) for member in self._union_members(expr))
         return False
+
+    def _is_any_annotation(self, expr: ast.expr) -> bool:
+        unwrapped = _unwrap_annotation_expr(expr)
+        return unwrapped is not None and self._contains_typing_any(unwrapped)
 
     def record_any_collaborator(
         self, expr: ast.expr | None, qualname: str, slot: str, role: str
     ) -> None:
-        if self.records_type_casts and expr is not None and self._is_direct_typing_any(expr):
+        if self.records_type_casts and expr is not None and self._is_any_annotation(expr):
             self.any_collaborators.append(
                 AnyCollaboratorSite(expr.lineno, expr.col_offset, qualname, slot, role)
             )

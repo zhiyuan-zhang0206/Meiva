@@ -192,7 +192,7 @@ def cdp_unreachable(port: int) -> CdpAnswer:
 
 # meiva:note
 # Read `(name, argv)` from a psutil.Process-like object, returning `("", None)` on `_UNREADABLE`.
-def read_process_facts(proc: psutil.Process | Any) -> tuple[str, list[str] | None]:
+def read_process_facts(proc: psutil.Process) -> tuple[str, list[str] | None]:
     try:
         return proc.name(), proc.cmdline()
     except _UNREADABLE:
@@ -234,7 +234,7 @@ def listener_pid(port: int) -> int | None:
 
 # meiva:note
 # Check whether a psutil.Process-like object holds a LISTEN socket on `port`, returning None on `_UNREADABLE`.
-def read_listens_on(proc: psutil.Process | Any, port: int) -> bool | None:
+def read_listens_on(proc: psutil.Process, port: int) -> bool | None:
     try:
         conns = proc.net_connections(kind="tcp")
     except _UNREADABLE:

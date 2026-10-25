@@ -89,7 +89,7 @@ async def _serve(*, timeout_reader: Callable[[], float]) -> None:
     link = ReconnectingSocketLink(timeout_reader=timeout_reader, agent_id=_agent_id())
 
     async def _list_tools(_ctx: object, _params: object) -> types.ListToolsResult:
-        tools = await link.request({"method": "list_tools"})
+        tools: Any = await link.request({"method": "list_tools"})
         return types.ListToolsResult(tools=[types.Tool.model_validate(t) for t in tools])
 
     async def _call_tool(_ctx: object, params: types.CallToolRequestParams) -> types.CallToolResult:

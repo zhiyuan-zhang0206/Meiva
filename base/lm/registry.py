@@ -371,8 +371,8 @@ class ResolvedSetting:
     value: Any
     source: str
     shared_default: Any
-    model_default: Any | None
-    explicit_value: Any | None
+    model_default: bool | int | float | str | None
+    explicit_value: bool | int | float | str | None
 
 
 def tuning_field_names() -> tuple[str, ...]:

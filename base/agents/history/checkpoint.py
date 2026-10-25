@@ -68,7 +68,7 @@ class CheckpointReadError(RuntimeError):
 
 @contextmanager
 def _checkpoint_read_connection(
-    db: Database, *, row_factory: Any | None = None
+    db: Database, *, row_factory: object = None
 ) -> Generator[Connection[Any]]:
     """Borrow one short-lived autocommit read connection from a pool of `db`."""
     db_pool = db.pool(autocommit=True, row_factory=row_factory)

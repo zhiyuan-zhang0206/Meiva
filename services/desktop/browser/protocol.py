@@ -39,7 +39,7 @@ class Request(TypedDict):
 class OkResponse(TypedDict):
     id: int | None  # echoes the request id
     ok: Literal[True]
-    result: Any | None  # tool dicts / CallToolResult dump / None
+    result: object  # tool dicts / CallToolResult dump / None
 
 
 class ErrResponse(TypedDict):

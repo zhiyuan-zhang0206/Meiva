@@ -80,11 +80,11 @@ PENDING_LAYOUT = "layout"
 class Chrome(Protocol):
     # meiva:note
     # GET one of CDP's HTTP endpoints (`/json/list`, `/json/version`).
-    async def json(self, path: str) -> Any | None: ...
+    async def json(self, path: str) -> object: ...
 
     # meiva:note
     # Evaluate `expression` in the tab-group extension's worker and return its value.
-    async def worker(self, expression: str) -> Any | None: ...
+    async def worker(self, expression: str) -> object: ...
 
 
 # meiva:note
@@ -518,7 +518,7 @@ class CdpChrome:
         self._cdp_port = cdp_port
         self._timers = timers
 
-    async def json(self, path: str) -> Any | None:
+    async def json(self, path: str) -> object:
         url = f"http://127.0.0.1:{self._cdp_port}{path}"
         return await asyncio.wait_for(http_json(url), LISTING_TIMEOUT_S)
 
@@ -532,7 +532,7 @@ class CdpChrome:
     #         live worker, and a failed attempt reloads the extension before the next
     #         one (measured on Chrome 156: the first call after a load always answers;
     #         later calls need this ladder).
-    async def worker(self, expression: str) -> Any | None:
+    async def worker(self, expression: str) -> object:
         last: BaseException | None = None
         for attempt in range(WORKER_ATTEMPTS):
             try:
@@ -542,7 +542,7 @@ class CdpChrome:
                 await self._timers.asleep(WORKER_RETRY_S)
         raise RuntimeError(f"extension call failed after {WORKER_ATTEMPTS} attempts: {last}")
 
-    async def _one_worker_call(self, expression: str, *, reload_first: bool) -> Any | None:
+    async def _one_worker_call(self, expression: str, *, reload_first: bool) -> object:
         version: Any = await self.json("/json/version")
         version_obj: object = version
         if type(version_obj) is not dict:
@@ -600,7 +600,7 @@ class CdpChrome:
 # Attach to one worker target and evaluate `expression` there (raises on failure).
 async def _attach_and_evaluate(
     ws: ClientConnection, ids: Iterator[int], target: str, expression: str
-) -> Any | None:
+) -> object:
     session_id = (
         await asyncio.wait_for(
             cdp_call(ws, ids, "Target.attachToTarget", {"targetId": target, "flatten": True}),
