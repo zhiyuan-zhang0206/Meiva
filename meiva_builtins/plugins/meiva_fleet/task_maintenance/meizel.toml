@@ -1,8 +1,9 @@
-exports = ["daemon.py", "tests"]
+exports = ["daemon.py", "routing.py", "tests"]
 
 [uses]
-"daemon.py" = ["escalation.py"]
-"tests" = ["daemon.py", "escalation.py"]
+"daemon.py" = ["escalation.py", "routing.py"]
+"escalation.py" = ["routing.py"]
+"tests" = ["daemon.py", "escalation.py", "routing.py"]
 
 [purity]
 "__init__.py" = "strict"

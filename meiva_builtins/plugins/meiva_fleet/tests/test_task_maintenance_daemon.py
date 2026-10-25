@@ -340,28 +340,41 @@ class TestRemind:
         assert run_reminders(pool, database, event_bus, 3600.0) == 0
         assert deliver.deliveries() == []
 
-    def test_terminated_owner_receives_inbound_without_resurrection(
+    def test_terminated_owner_reminder_reroutes_without_resurrection(
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
         database: Database,
         event_bus: EventBus,
     ) -> None:
+        # meiva:note
+        # A dead owner cannot act: the digest goes to its manager and the dead owner's
+        # queue stays empty (2026-10-25 user ruling).
+        manager = _make_agent(db_conn)
+        parent = _make_task(db_conn, owner=manager, remind_interval_seconds=None)
         dead = _make_agent(db_conn, status="terminated")
-        task_id = _make_task(db_conn, owner=dead, remind_interval_seconds=1800, updated_s_ago=3600)
+        task_id = _make_task(
+            db_conn,
+            owner=dead,
+            parent_id=parent,
+            remind_interval_seconds=1800,
+            updated_s_ago=3600,
+        )
+
         assert run_reminders(pool, database, event_bus, 3600.0) == 1
-        inbounds = _inbound_messages(db_conn, dead)
+
+        assert _inbound_messages(db_conn, dead) == []
+        inbounds = _inbound_messages(db_conn, manager)
         assert len(inbounds) == 1
         content, kind, source = inbounds[0]
-        assert f"#{task_id}" in content
-        # A reminder is a task system notification: delivered as a system-note
-        # inbound (NoteTag 'task'), never as peer chat (user ruling 2026-08-27).
         assert kind == "system_note"
         assert source == "system"
+        assert f"Agent #{dead} (terminated)" in content
+        assert f'#{task_id} "' in content
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT payload FROM inbound_messages WHERE agent_id = %s AND kind = 'system_note'",
-                (dead,),
+                (manager,),
             )
             payload = cur.fetchone()
             assert payload is not None and payload[0] == {
@@ -372,6 +385,11 @@ class TestRemind:
         with db_conn.cursor() as cur:
             cur.execute("SELECT status FROM agents_meta WHERE id = %s", (dead,))
             assert cur.fetchone() == ("terminated",)
+        row = _task_row(db_conn, task_id)
+        assert row is not None
+        _status, _owner, reminder_count, last_reminded_at = row
+        assert reminder_count == 1
+        assert last_reminded_at is not None
 
     def test_acceptance_failure_leaves_counters_untouched(
         self,

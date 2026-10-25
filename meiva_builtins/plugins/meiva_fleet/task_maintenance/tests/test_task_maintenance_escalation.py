@@ -40,13 +40,13 @@ def pool(db_url: str):
         p.close()
 
 
-def make_agent(db: psycopg.Connection) -> int:
+def make_agent(db: psycopg.Connection, *, status: str = "running") -> int:
     with db.cursor() as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
         aid = int(cur.fetchone()[0])  # type: ignore[index]
         cur.execute(
-            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running')",
-            (aid,),
+            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', %s)",
+            (aid, status),
         )
     db.commit()
     return aid
