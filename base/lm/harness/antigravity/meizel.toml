@@ -13,8 +13,6 @@ exports = ["handoff_rules.py", "mapping.py", "session.py", "tests", "transport.p
 
 [debt.ambient-read]
 "mapping.py#home pathlib.Path.home" = 1
-"session.py#clock datetime.datetime.now" = 2
-"session.py#random uuid.uuid4" = 1
 
 [debt.type-cast]
 "mapping.py#cast _mapping" = 1

@@ -25,7 +25,8 @@ only what Kimi Code decides differently.
   `permission_mode`, timeouts, queue bounds).
 - `KimiSession` (`base/lm/harness/kimi/session.py`) — one ACP connection and one
   session (`initialize` → `session/resume` or `session/new` → optional
-  `session/set_config_option`). Queues inbound turns one at a time, emits
+  `session/set_config_option`; a rejected `session/resume` fails fast instead of
+  falling back to `session/new`). Queues inbound turns one at a time, emits
   `BridgeEvent` records, handles `session/request_permission` callbacks, cancels
   turns via `session/cancel` with descendant reaping, and settles process-tree
   teardown on `close()`.

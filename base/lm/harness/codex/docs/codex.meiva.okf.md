@@ -26,9 +26,8 @@ directly: the uniform surface is this adapter, not a shared wire protocol.
 
 1. **Open the thread.** `CodexSession.start()` spawns `codex app-server --listen
    stdio://`, performs `initialize` + `initialized`, then `thread/start` — or
-   `thread/resume` with the recorded thread id. A rejected resume degrades to a
-   new thread and re-injects the handoff: the transcript is gone, so the agent
-   must be told what it is again.
+   `thread/resume` with the recorded thread id. A rejected `thread/resume` fails
+   fast instead of silently starting a fresh thread.
 2. **Inject the handoff as the first message.** `Handoff` renders the
    six-section document; a fresh thread submits it as its first turn. A resumed
    thread is not re-injected.

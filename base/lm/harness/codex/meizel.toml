@@ -13,27 +13,14 @@ exports = ["auth.py", "tests", "transport.py"]
 "__init__.py" = "strict"
 "mapping.py" = "strict"
 
-[debt.ambient-read]
-"session.py#clock datetime.datetime.now" = 2
-"session.py#random uuid.uuid4" = 1
-
 [debt.impure-call]
-"session.py#async def __aenter__" = 1
-"session.py#async def __aexit__" = 1
 "session.py#async def _begin" = 1
-"session.py#async def _cancel_children" = 1
 "session.py#async def _initialize" = 1
 "session.py#async def _on_request" = 1
 "session.py#async def _open_thread" = 1
 "session.py#async def close" = 1
-"session.py#async def events" = 1
-"session.py#async def expire" = 1
 "session.py#async def interrupt" = 1
-"session.py#async def outcome" = 1
 "session.py#async def start" = 1
-"session.py#datetime.now" = 2
-"session.py#time.monotonic" = 2
-"session.py#uuid.uuid4" = 1
 "transport.py#async def _answer" = 1
 "transport.py#async def _cancel_children" = 1
 "transport.py#async def _dispatch" = 1
@@ -47,7 +34,7 @@ exports = ["auth.py", "tests", "transport.py"]
 [debt.impure-edge]
 "config.py#base/host/env/harness_binaries.py" = 1
 "session.py#base/lm/harness/process.py" = 1
-"session.py#base/lm/harness/registry.py" = 1
+"types.py#base/lm/harness/base_session.py" = 1
 
 [debt.type-cast]
 "mapping.py#cast _arguments" = 1

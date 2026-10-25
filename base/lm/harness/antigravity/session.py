@@ -1,13 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import time
-from collections import OrderedDict, deque
-from collections.abc import AsyncIterator, Mapping
-from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any, cast
-from uuid import uuid4
 
 from base.host.env.harness_binaries import resolve_harness_binary
 from base.lm.harness.antigravity.config import AntigravityConfig
@@ -23,26 +19,29 @@ from base.lm.harness.antigravity.transport import (
     InterruptReport,
     TransportClosedError,
 )
+from base.lm.harness.base_session import (
+    EVENT_STREAM_END,
+    BaseHarnessSession,
+    InboundQueueFullError,
+    SessionClosedError,
+    SessionRegistry,
+    SessionTotals,
+    TurnOutcome,
+    TurnTicket,
+    add_cost,
+)
 from base.lm.harness.events import (
-    BridgeEvent,
-    HandoffInjected,
-    SessionBound,
-    SessionClosed,
     SessionFaulted,
     TurnCompleted,
     Usage,
-    is_droppable,
 )
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import (
     ChildProbe,
-    ExitStatus,
-    PsutilChildProbe,
     settle_close,
     snapshot,
     watch_tree,
 )
-from base.lm.harness.registry import SessionRecord, SessionRegistry
 
 # meiva:note
 # Same three boundaries as the Claude bridge — ordered inbound, one outbound
@@ -52,93 +51,12 @@ from base.lm.harness.registry import SessionRecord, SessionRegistry
 # the transcript survives even though the process does not.
 # meiva:link base/lm/harness/antigravity/docs/antigravity.meiva.okf.md
 CancelReport = InterruptReport
-EVENT_STREAM_END = object()
-
-
-class InboundQueueFullError(RuntimeError):
-    pass
-
-
-class SessionClosedError(RuntimeError):
-    pass
-
-
-@dataclass(frozen=True, slots=True)
-class SessionTotals:
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cache_creation_input_tokens: int = 0
-    cache_read_input_tokens: int = 0
-    cost_usd: float | None = None
-    turns: int = 0
-
-    def with_turn(self, usage: Usage, cost_usd: float | None) -> SessionTotals:
-        return SessionTotals(
-            input_tokens=self.input_tokens + usage.input_tokens,
-            output_tokens=self.output_tokens + usage.output_tokens,
-            cache_creation_input_tokens=(
-                self.cache_creation_input_tokens + usage.cache_creation_input_tokens
-            ),
-            cache_read_input_tokens=self.cache_read_input_tokens + usage.cache_read_input_tokens,
-            cost_usd=_add_cost(self.cost_usd, cost_usd),
-            turns=self.turns + 1,
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class TurnOutcome:
-    turn_id: str
-    text: str
-    subtype: str
-    is_error: bool
-    interrupted: bool
-    stop_reason: str | None
-    usage: Usage
-    cost_usd: float | None
-    permission_denials: tuple[str, ...]
-
-
-class TurnTicket:
-    def __init__(
-        self,
-        *,
-        turn_id: str,
-        text: str,
-        key: str | None,
-        future: asyncio.Future[TurnOutcome],
-        deduplicated: bool = False,
-    ) -> None:
-        self.turn_id = turn_id
-        self.text = text
-        self.key = key
-        self.deduplicated = deduplicated
-        self.submitted_at = time.monotonic()
-        self.started_at: float | None = None
-        self.interrupt_requested = False
-        self.parts: list[str] = []
-        self._future = future
-
-    async def outcome(self) -> TurnOutcome:
-        return await self._future
-
-    @property
-    def settled(self) -> bool:
-        return self._future.done()
-
-    def _settle(self, outcome: TurnOutcome) -> None:
-        if not self._future.done():
-            self._future.set_result(outcome)
-
-    def _fail(self, exc: BaseException) -> None:
-        if self._future.done():
-            return
-        self._future.set_exception(exc)
-        self._future.exception()
+_add_cost = add_cost
 
 
 # meiva:note
 # One `agy` conversation as a turn engine.
-class AgySession(ExitStatus):
+class AgySession(BaseHarnessSession[AntigravityConfig]):
     def __init__(
         self,
         config: AntigravityConfig,
@@ -149,35 +67,17 @@ class AgySession(ExitStatus):
         probe: ChildProbe | None = None,
         transport_factory: Any | None = None,
     ) -> None:
-        self.config = config
-        self.agent_id = agent_id
+        super().__init__(
+            config,
+            agent_id=agent_id,
+            registry=registry,
+            probe=probe,
+            totals=SessionTotals(cost_usd=None),
+        )
         self._environ = dict(environ) if environ else None
-        self._probe: ChildProbe = probe or PsutilChildProbe()
-        self._registry = registry
         self._factory = transport_factory or self._default_transport
-        self._events: asyncio.Queue[Any] = asyncio.Queue()
-        self._pending: deque[TurnTicket] = deque()
-        self._completed: OrderedDict[str, TurnOutcome] = OrderedDict()
-        self._active: TurnTicket | None = None
         self._transport: AgyTransport | None = None
         self._retired: AgyTransport | None = None
-        # meiva:note
-        # The CLI child's exit status once this session closed it (three states: None
-        # while running/never observed, 0 normal, non-zero abnormal). Task #5616.
-        self._reader: asyncio.Task[None] | None = None
-        self._deadlines: dict[str, asyncio.Task[None]] = {}
-        self._tasks = asyncio.TaskGroup()
-        self._children: set[asyncio.Task[Any]] = set()
-        self._tasks_entered = False
-        self._totals = SessionTotals()
-        self._session_id: str | None = None
-        self._model: str | None = None
-        self._baseline: dict[int, str] = {}
-        self._closed = False
-        self._dropped_deltas = 0
-        self._resumed_existing = False
-        self._record: SessionRecord | None = None
-        self._handoff_ticket: TurnTicket | None = None
         self._step_text: dict[int, list[str]] = {}
         self._turn_steps: list[Usage] = []
 
@@ -186,18 +86,11 @@ class AgySession(ExitStatus):
             raise RuntimeError("session already started")
         if self._closed:
             raise SessionClosedError("session is closed")
-        resume = resume or self._resume_from_registry()
-        if resume is not None:
-            # meiva:note
-            # A caller-supplied resume is still a resume: the transcript
-            # already carries the handoff, so it must not be injected again.
-            self._resumed_existing = True
+        resume = self._resolve_resume(resume)
         transport = self._factory()
         await transport.start(resume=resume)
         self._transport = transport
-        if not self._tasks_entered:
-            await self._tasks.__aenter__()
-            self._tasks_entered = True
+        await self._enter_tasks()
         self._reader = self._spawn(self._read_loop(transport))
         self._inject_handoff(handoff)
 
@@ -206,17 +99,7 @@ class AgySession(ExitStatus):
             return
         self._closed = True
         self._fail_pending(SessionClosedError("session closed"))
-        for task in list(self._deadlines.values()):
-            task.cancel()
-        self._deadlines.clear()
-        self._reader = None
-        await self._cancel_children()
-        if self._tasks_entered:
-            self._tasks_entered = False
-            try:
-                await self._tasks.__aexit__(None, None, None)
-            except ExceptionGroup as group:
-                self._emit(SessionFaulted(turn_id=None, error=f"session tasks failed: {group!r}"))
+        await self._close_tasks()
         transport, self._transport = self._transport, None
         watched = watch_tree(self._probe, transport.pid if transport is not None else None)
         if transport is not None:
@@ -232,80 +115,11 @@ class AgySession(ExitStatus):
         # After the child was reaped: `settle_close` above waited for its tree, and
         # `transport.close()` waited for the process itself, so this is final.
         self._exit_code = transport.returncode if transport is not None else None
-        self._emit(SessionClosed(turn_id=None, reason=reason))
-        self._events.put_nowait(EVENT_STREAM_END)
-
-    async def __aenter__(self) -> AgySession:
-        await self.start()
-        return self
-
-    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
-        await self.close(reason="context exit")
-        return False
-
-    def submit(self, text: str, *, key: str | None = None) -> TurnTicket:
-        if self._closed:
-            raise SessionClosedError("session is closed")
-        trimmed = text.strip()
-        if not trimmed:
-            raise ValueError("inbound message is empty")
-        if key is not None:
-            existing = self._recall(key)
-            if existing is not None:
-                return existing
-        if len(self._pending) >= self.config.max_pending_turns:
-            raise InboundQueueFullError(
-                f"{len(self._pending)} turns already queued "
-                f"(limit {self.config.max_pending_turns}); keep the message and retry"
-            )
-        ticket = TurnTicket(
-            turn_id=f"turn-{uuid4().hex[:12]}",
-            text=trimmed,
-            key=key,
-            future=asyncio.get_running_loop().create_future(),
-        )
-        if self._active is None:
-            self._active = ticket
-            self._spawn(self._begin(ticket))
-        else:
-            self._pending.append(ticket)
-        return ticket
-
-    @property
-    def active_turn_id(self) -> str | None:
-        return self._active.turn_id if self._active is not None else None
-
-    @property
-    def pending_turns(self) -> tuple[str, ...]:
-        return tuple(ticket.turn_id for ticket in self._pending)
-
-    @property
-    def session_id(self) -> str | None:
-        return self._session_id
-
-    @property
-    def handoff_ticket(self) -> TurnTicket | None:
-        return self._handoff_ticket
-
-    @property
-    def record(self) -> SessionRecord | None:
-        return self._record
-
-    @property
-    def resumed(self) -> bool:
-        return self._resumed_existing
+        self._finish_close(reason)
 
     @property
     def cli_pid(self) -> int | None:
         return self._transport.pid if self._transport is not None else None
-
-    @property
-    def totals(self) -> SessionTotals:
-        return self._totals
-
-    @property
-    def dropped_deltas(self) -> int:
-        return self._dropped_deltas
 
     async def interrupt(self) -> CancelReport:
         ticket = self._active
@@ -344,13 +158,6 @@ class AgySession(ExitStatus):
         self._retired = transport
         return await transport.interrupt(turn_id=ticket.turn_id, baseline=self._baseline)
 
-    async def events(self) -> AsyncIterator[BridgeEvent]:
-        while True:
-            event = await self._events.get()
-            if event is EVENT_STREAM_END:
-                return
-            yield event
-
     def _default_transport(self) -> AgyTransport:
         # meiva:note
         # A bare `agy` resolves against the child's PATH, and a harness child is handed an
@@ -382,68 +189,8 @@ class AgySession(ExitStatus):
         self._reader = self._spawn(self._read_loop(transport))
         return transport
 
-    def _resume_from_registry(self) -> str | None:
-        if self._registry is None or self.agent_id is None:
-            return None
-        record = self._registry.load(self.agent_id)
-        if record is None:
-            return None
-        self._resumed_existing = True
-        self._record = record
-        return record.session_id
-
-    def _inject_handoff(self, handoff: Handoff | None) -> None:
-        if handoff is None or self._resumed_existing:
-            return
-        key = f"handoff:{self.agent_id}" if self.agent_id is not None else None
-        ticket = self.submit(handoff.render(), key=key)
-        self._handoff_ticket = ticket
-        self._emit(
-            HandoffInjected(
-                agent_id=self.agent_id or 0,
-                turn_id=ticket.turn_id,
-                size_bytes=handoff.size_bytes(),
-            )
-        )
-
-    def _bind(self) -> None:
-        if self._registry is None or self.agent_id is None or not self._session_id:
-            return
-        previous = self._registry.load(self.agent_id)
-        now = datetime.now(UTC).isoformat(timespec="seconds")
-        self._record = SessionRecord(
-            agent_id=self.agent_id,
-            session_id=self._session_id,
-            cwd=str(self.config.cwd),
-            model=self._model or self.config.model,
-            created_at=previous.created_at if previous is not None else now,
-            updated_at=now,
-            resumes=(previous.resumes if previous is not None else 0)
-            + (1 if self._resumed_existing else 0),
-        )
-        self._registry.save(self._record)
-        self._emit(
-            SessionBound(
-                agent_id=self.agent_id, session_id=self._session_id, resumed=self._resumed_existing
-            )
-        )
-
-    def _touch(self) -> None:
-        if self._registry is None or self._record is None:
-            return
-        self._record = SessionRecord(
-            agent_id=self._record.agent_id,
-            session_id=self._record.session_id,
-            cwd=self._record.cwd,
-            model=self._record.model,
-            created_at=self._record.created_at,
-            updated_at=datetime.now(UTC).isoformat(timespec="seconds"),
-            resumes=self._record.resumes,
-        )
-        self._registry.save(self._record)
-
     async def _begin(self, ticket: TurnTicket) -> None:
-        ticket.started_at = time.monotonic()
+        ticket.started_at = self._monotonic()
         self._step_text = {}
         self._turn_steps = []
         try:
@@ -453,24 +200,6 @@ class AgySession(ExitStatus):
             await transport.send(ticket.text)
         except (TransportClosedError, OSError, RuntimeError) as exc:
             self._fail_turn(ticket, exc)
-
-    def _start_deadline(self, ticket: TurnTicket) -> None:
-        async def expire() -> None:
-            await asyncio.sleep(self.config.turn_timeout_seconds)
-            if self._active is not ticket:
-                return
-            self._emit(
-                SessionFaulted(
-                    turn_id=ticket.turn_id,
-                    error=f"turn exceeded {self.config.turn_timeout_seconds:.0f}s; interrupting",
-                )
-            )
-            try:
-                await self.interrupt()
-            except Exception as exc:
-                self._emit(SessionFaulted(turn_id=ticket.turn_id, error=f"interrupt failed: {exc}"))
-
-        self._deadlines[ticket.turn_id] = self._spawn(expire())
 
     async def _read_loop(self, transport: AgyTransport) -> None:
         try:
@@ -608,106 +337,15 @@ class AgySession(ExitStatus):
         )
         self._complete(ticket, outcome)
 
-    def _complete(self, ticket: TurnTicket, outcome: TurnOutcome) -> None:
-        self._cancel_deadline(ticket)
-        ticket._settle(outcome)
-        if ticket.key is not None:
-            self._remember(ticket.key, outcome)
-        self._touch()
-        if self._active is ticket:
-            self._active = None
-        self._promote()
 
-    def _promote(self) -> None:
-        if self._closed or self._active is not None or not self._pending:
-            return
-        ticket = self._pending.popleft()
-        self._active = ticket
-        self._spawn(self._begin(ticket))
-
-    def _fail_turn(self, ticket: TurnTicket, exc: BaseException) -> None:
-        self._cancel_deadline(ticket)
-        self._emit(SessionFaulted(turn_id=ticket.turn_id, error=f"turn failed: {exc}"))
-        ticket._fail(SessionClosedError(f"turn failed: {exc}"))
-        if self._active is ticket:
-            self._active = None
-        self._promote()
-
-    def _fail_active(self, exc: BaseException) -> None:
-        ticket = self._active
-        if ticket is not None:
-            self._fail_turn(ticket, exc)
-        self._fail_pending(SessionClosedError(f"session stream failed: {exc}"))
-
-    def _fail_pending(self, exc: BaseException) -> None:
-        queued = list(self._pending)
-        self._pending.clear()
-        for ticket in queued:
-            ticket._fail(exc)
-        active = self._active
-        if active is not None:
-            active._fail(exc)
-            self._active = None
-
-    def _recall(self, key: str) -> TurnTicket | None:
-        active = self._active
-        if active is not None and active.key == key:
-            return active
-        for ticket in self._pending:
-            if ticket.key == key:
-                return ticket
-        completed = self._completed.get(key)
-        if completed is None:
-            return None
-        future: asyncio.Future[TurnOutcome] = asyncio.get_running_loop().create_future()
-        future.set_result(completed)
-        return TurnTicket(
-            turn_id=completed.turn_id,
-            text=completed.text,
-            key=key,
-            future=future,
-            deduplicated=True,
-        )
-
-    def _remember(self, key: str, outcome: TurnOutcome) -> None:
-        self._completed[key] = outcome
-        while len(self._completed) > self.config.dedupe_window:
-            self._completed.popitem(last=False)
-
-    def _cancel_deadline(self, ticket: TurnTicket) -> None:
-        task = self._deadlines.pop(ticket.turn_id, None)
-        if task is not None:
-            task.cancel()
-
-    def _emit(self, event: BridgeEvent) -> None:
-        if is_droppable(event) and self._events.qsize() >= self.config.max_buffered_events:
-            self._dropped_deltas += 1
-            return
-        self._events.put_nowait(event)
-
-    def _spawn(self, coro: Any) -> asyncio.Task[Any]:
-        task = self._tasks.create_task(coro)
-        self._children.add(task)
-        task.add_done_callback(self._on_task_done)
-        return task
-
-    def _on_task_done(self, task: asyncio.Task[Any]) -> None:
-        self._children.discard(task)
-        if task.cancelled():
-            return
-        error = task.exception()
-        if error is not None:
-            self._emit(SessionFaulted(turn_id=None, error=f"background task failed: {error}"))
-
-    async def _cancel_children(self) -> None:
-        children = [task for task in self._children if not task.done()]
-        for task in children:
-            task.cancel()
-        if children:
-            await asyncio.gather(*children, return_exceptions=True)
-
-
-def _add_cost(left: float | None, right: float | None) -> float | None:
-    if left is None and right is None:
-        return None
-    return (left or 0.0) + (right or 0.0)
+__all__ = [
+    "EVENT_STREAM_END",
+    "AgySession",
+    "CancelReport",
+    "InboundQueueFullError",
+    "SessionClosedError",
+    "SessionTotals",
+    "TurnOutcome",
+    "TurnTicket",
+    "_add_cost",
+]

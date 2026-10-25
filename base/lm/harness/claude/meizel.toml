@@ -13,33 +13,20 @@ exports = ["tests"]
 "config.py" = "strict"
 "mapping.py" = "strict"
 
-[debt.ambient-read]
-"session.py#clock datetime.datetime.now" = 2
-"session.py#random uuid.uuid4" = 1
-
 [debt.impure-call]
-"session.py#async def __aenter__" = 1
-"session.py#async def __aexit__" = 1
 "session.py#async def _begin" = 1
-"session.py#async def _cancel_children" = 1
 "session.py#async def _handle" = 1
 "session.py#async def _read_loop" = 1
 "session.py#async def close" = 1
-"session.py#async def events" = 1
-"session.py#async def expire" = 1
 "session.py#async def interrupt" = 1
-"session.py#async def outcome" = 1
 "session.py#async def start" = 1
-"session.py#datetime.now" = 2
-"session.py#time.monotonic" = 2
-"session.py#uuid.uuid4" = 1
 
 [debt.impure-edge]
 "auth.py#base/host/env/registry.py" = 1
 "session.py#base/host/env/harness_binaries.py" = 1
 "session.py#base/host/env/registry.py" = 1
+"session.py#base/lm/harness/base_session.py" = 1
 "session.py#base/lm/harness/process.py" = 1
-"session.py#base/lm/harness/registry.py" = 1
 
 [debt.type-cast]
 "mapping.py#cast _as_dict" = 1
