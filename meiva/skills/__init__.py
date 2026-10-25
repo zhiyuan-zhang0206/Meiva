@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 import types
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from base.packages.skills.tree import Skill, flatten, identifier
 from base.paths import meiva_home, skills_dir
@@ -147,6 +147,10 @@ def record_skill_invoked_by_path(path: str | Path) -> bool:
     return False
 
 
+def _is_state_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 def _note_skill_read(skill_identifier: str) -> None:
     """Hand the identifier of a skill whose body was just read to the exec turn's state update,
     so the agent host knows which skills are already in this context window (skill recall
@@ -160,10 +164,9 @@ def _note_skill_read(skill_identifier: str) -> None:
     if not process_context.in_exec_turn():
         return
     update = process_context.get_state_update()
-    if not isinstance(update, dict):
+    if not _is_state_dict(update):
         return  # agent code replaced the slot; the exec child reports that at exit
-    state = cast("dict[str, Any]", update)
-    reads: list[str] = state.setdefault("skill_reads", [])
+    reads: list[str] = update.setdefault("skill_reads", [])
     if skill_identifier not in reads:
         reads.append(skill_identifier)
 

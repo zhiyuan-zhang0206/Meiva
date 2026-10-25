@@ -7,11 +7,5 @@
 "agent_plans.py" = "strict"
 "plans.py" = "strict"
 
-[debt.ambient-read]
-"__init__.py#random uuid.uuid4" = 3
-
-[debt.any-collaborator]
-"__init__.py#any use_client.client" = 1
-
-[debt.type-cast]
-"plans.py#cast spawn_receipt" = 2
+[roots]
+"__init__.py" = { kinds = ["random"], why = "The meiva.gateway_client SDK facade mints per-call idempotency UUIDs for send_message, register_page, and close_page before building pure request plans" }

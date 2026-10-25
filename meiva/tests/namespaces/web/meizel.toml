@@ -3,6 +3,3 @@
 "test_web_deepseek.py" = ["_web_helpers.py"]
 "test_web_injection.py" = ["_web_helpers.py"]
 "test_web_search.py" = ["_web_helpers.py"]
-
-[debt.test-subclass-override]
-"test_web_search.py#subclass base.config.service_read.ConfigAuthority.service_field_value" = 1

@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Literal, TypeGuard
 
 # meiva:note
 # Two dialogs break a non-interactive spawn on a fresh HOME: the bypass-permissions confirmation (>=2.1.274 defaults to No/exit, so a blind Enter kills the session) and the fullscreen upsell. Both answers persist in files, so presetting them is enough. `~/.claude/settings.json`: `skipDangerousModePermissionPrompt: true` ("whether the user has accepted the bypass permissions mode dialog"). `~/.claude.json`: `fullscreenUpsellSeenCount: 3`, since 2.1.278 shows the upsell while this is below its threshold of 3 (bundle: `<x8e`, x8e=3).
@@ -37,6 +37,10 @@ def preset_satisfied(current: object, desired: object) -> bool:
     return current == desired
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 def _parsed(raw: str | None, label: str) -> tuple[dict[str, object] | None, str]:
     if raw is None:
         return None, ""
@@ -47,9 +51,9 @@ def _parsed(raw: str | None, label: str) -> tuple[dict[str, object] | None, str]
             f"{label} is not valid JSON ({exc}); left as-is with a backup taken. "
             "Fix or remove it, then relaunch."
         )
-    if not isinstance(loaded, dict):
+    if not _is_str_dict(loaded):
         return None, f"{label} is not a JSON object; left as-is with a backup taken."
-    return cast(dict[str, object], loaded), ""
+    return loaded, ""
 
 
 # meiva:note
@@ -70,8 +74,10 @@ def plan_trust(raw: str | None, workspace_key: str, label: str) -> FilePlan:
     if problem:
         return FilePlan("refuse", {}, problem)
     config = dict(data or {})
-    projects = dict(cast(dict[str, object], config.get("projects") or {}))
-    project = dict(cast(dict[str, object], projects.get(workspace_key) or {}))
+    raw_projects = config.get("projects")
+    projects = dict(raw_projects) if _is_str_dict(raw_projects) else {}
+    raw_project = projects.get(workspace_key)
+    project = dict(raw_project) if _is_str_dict(raw_project) else {}
     if project.get("hasTrustDialogAccepted"):
         return FilePlan("keep", config, "")
     project["hasTrustDialogAccepted"] = True

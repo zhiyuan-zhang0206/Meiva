@@ -9,12 +9,12 @@ from __future__ import annotations
 import json
 import logging
 import threading
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
 
+from base.clock import SYSTEM_TIMERS
 from base.host.net.resilience import retry
 from meiva.web.errors import WebError
 from meiva.web.failures import connection_failed_message, http_failed_message, non_json_message
@@ -42,10 +42,10 @@ class RateLimiter:
         if not self._interval:
             return
         with self._lock:
-            slot = reserve(self._next_at, time.monotonic(), self._interval)
+            slot = reserve(self._next_at, SYSTEM_TIMERS.monotonic(), self._interval)
             self._next_at = slot.next_at
         if slot.wait > 0:
-            time.sleep(slot.wait)
+            SYSTEM_TIMERS.sleep(slot.wait)
 
 
 def _url(request: HttpRequest) -> str:

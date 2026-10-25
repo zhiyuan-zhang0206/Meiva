@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Protocol
 
 from redis.exceptions import ResponseError
 
@@ -23,7 +23,7 @@ class _RedisPublisher(Protocol):
 
 
 class _LazyRedis(Protocol):
-    def __getattr__(self, attr: str) -> Any: ...
+    def __getattr__(self, attr: str) -> object: ...
 
 
 # meiva:note
@@ -36,12 +36,13 @@ class _LazyRedis(Protocol):
 # is one) is logged as an ACL misconfiguration rather than swallowed - this agent's redis
 # ACL user is not granted its own `<prefix>:inbound:*` channel. The channel comes from
 # `inbound_channel`, so it matches `RedisInboundListener` and stays inside the ACL grant.
+# meiva:link meiva/self/docs/self.meiva.okf.md
 def publish_inbound_wake(
     redis: _RedisPublisher | _LazyRedis, agent_id: int, *, events_channel: str
 ) -> None:
     channel = inbound_channel(agent_id, events_channel)
     try:
-        redis.publish(channel, "0")
+        redis.publish(channel, "0")  # pyright: ignore[reportAttributeAccessIssue,reportUnknownMemberType,reportCallIssue]
     except ResponseError as exc:
         logger.warning(
             "self inbound wake publish to {ch!r} rejected by redis ({exc!r}) - "

@@ -4,7 +4,12 @@ import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol, TypeGuard
+
+
+def _is_str_dict(val: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(val, dict)
+
 
 # meiva:note
 # A harness registration is the record a bridge writes when it starts a provider
@@ -77,9 +82,9 @@ def handle_digest(handle: str) -> str:
 
 
 def decode_registration(raw: object, path: Path) -> HarnessRegistration:
-    if not isinstance(raw, dict):
+    if not _is_str_dict(raw):
         raise RegistrationError(f"harness registration at {path} is not an object")
-    payload = cast("dict[str, Any]", raw)
+    payload = raw
     unknown = set(payload) - _REQUIRED_FIELDS - _OPTIONAL_FIELDS
     missing = _REQUIRED_FIELDS - set(payload)
     if unknown or missing:

@@ -26,13 +26,15 @@ from __future__ import annotations
 
 import dataclasses
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Self, assert_never, cast
+from typing import Any, Self, assert_never
 
 import psutil
 
 from base.agents.context import MeivaContext
 from base.agents.context.external_attachment import ExternalAttachment
+from base.agents.context.external_attachment.state_schema import BaseAgentState
 from base.agents.context.identity import AgentIdentity, ExternalLease
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
@@ -49,7 +51,6 @@ from meiva.boot import (
     borrow_external_process,
     initialize_external,
     own_external_process,
-    plugin_state_codec,
 )
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.pure.caller.attachability import (
@@ -150,12 +151,14 @@ class HarnessAttachment(ExternalAttachment):
         self.open(inputs.bound)
 
     def _prepare(self) -> None:
+        from base.agents.context.external_attachment import plugin_state_codec
+
         self._require_registration()
         self._bind_borrowed_context()
         initialize_external(
             process_context.current_context(),
             self._boot,
-            validate_state=_codec_module().plugin_state_schema,
+            validate_state=plugin_state_codec.plugin_state_schema,
         )
 
     def _require_registration(self) -> HarnessRegistration:
@@ -206,7 +209,9 @@ class HarnessAttachment(ExternalAttachment):
             case _:
                 assert_never(boot)
 
-    def _resolve_config(self, overlay: Any, birth: Any) -> None:
+    def _resolve_config(
+        self, overlay: Mapping[str, Any] | None, birth: Mapping[str, Any] | None
+    ) -> None:
         from meiva.sdk_surface.installation import installed
 
         installation = installed()
@@ -219,11 +224,11 @@ class HarnessAttachment(ExternalAttachment):
             ),
         )
 
-    def _set_state(self, state: Any) -> None:
+    def _set_state(self, state: BaseAgentState) -> None:
         process_context.set_state(state)
         process_context.set_state_update({})
 
-    def _state_update(self) -> Any:
+    def _state_update(self) -> object:
         return process_context.get_state_update()
 
     def _clear_state_update(self) -> None:
@@ -251,7 +256,7 @@ class _RegistrationIdentity:
     def __init__(self, attachment: HarnessAttachment) -> None:
         self._attachment = attachment
 
-    def require(self) -> Any:
+    def require(self) -> Mapping[str, Any]:
         registration = self._attachment._require_registration()
         return {"agent_id": registration.agent_id, "applied_version": 0, "plugin_delta": []}
 
@@ -276,25 +281,35 @@ class _RegistrationCodec:
     def __init__(self, attachment: HarnessAttachment) -> None:
         self._attachment = attachment
 
-    def load_snapshot(self, agent_id: int) -> Any:
-        return _codec_module().load_snapshot(agent_id, database=self._attachment._database())
+    def load_snapshot(
+        self, agent_id: int
+    ) -> tuple[BaseAgentState, Mapping[str, Any] | None, Mapping[str, Any] | None]:
+        from base.agents.context.external_attachment import plugin_state_codec
 
-    def plugin_state_schema(self, state: Any) -> Any:
+        return plugin_state_codec.load_snapshot(agent_id, database=self._attachment._database())
+
+    def plugin_state_schema(self, state: BaseAgentState) -> object:
+        from base.agents.context.external_attachment import plugin_state_codec
+
         del state
-        return _codec_module().plugin_state_schema
+        return plugin_state_codec.plugin_state_schema
 
-    def encode_plugin_delta(self, update: Any, state_cls: type[Any]) -> dict[str, str]:
-        return cast("dict[str, str]", _codec_module().encode_plugin_delta(update, state_cls))
+    def encode_plugin_delta(
+        self, update: Mapping[str, Any], state_cls: type[Any]
+    ) -> dict[str, str]:
+        from base.agents.context.external_attachment import plugin_state_codec
 
-    def decode_plugin_delta(self, encoded: dict[str, str], state_cls: type[Any]) -> Any:
-        return _codec_module().decode_plugin_delta(encoded, state_cls)
+        return plugin_state_codec.encode_plugin_delta(dict(update), state_cls)
 
-    def apply_plugin_delta(self, state: Any, delta: Any) -> None:
-        _codec_module().apply_plugin_delta(state, delta)
+    def decode_plugin_delta(self, encoded: dict[str, str], state_cls: type[Any]) -> dict[str, Any]:
+        from base.agents.context.external_attachment import plugin_state_codec
 
+        return plugin_state_codec.decode_plugin_delta(encoded, state_cls)
 
-def _codec_module() -> Any:
-    return plugin_state_codec()
+    def apply_plugin_delta(self, state: BaseAgentState, delta: Mapping[str, Any]) -> None:
+        from base.agents.context.external_attachment import plugin_state_codec
+
+        plugin_state_codec.apply_plugin_delta(state, dict(delta))
 
 
 def resolve_registration(
