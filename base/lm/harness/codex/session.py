@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 import time
-from collections import OrderedDict, deque
-from collections.abc import AsyncIterator, Mapping
-from dataclasses import dataclass, replace
-from datetime import UTC, datetime
-from typing import Any
-from uuid import uuid4
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 from base.lm.harness.codex.auth import build_env
 from base.lm.harness.codex.config import CodexConfig
@@ -29,32 +24,33 @@ from base.lm.harness.codex.transport import (
     as_object,
     as_text,
 )
-from base.lm.harness.codex.types import SessionTotals, TurnOutcome
+from base.lm.harness.codex.types import (
+    EVENT_STREAM_END,
+    BaseHarnessSession,
+    InboundQueueFullError,
+    SessionClosedError,
+    SessionRegistry,
+    SessionTotals,
+    TurnOutcome,
+    TurnTicket,
+)
 from base.lm.harness.events import (
     AssistantText,
-    BridgeEvent,
-    HandoffInjected,
-    SessionBound,
-    SessionClosed,
     SessionFaulted,
     SessionStarted,
     TurnCompleted,
     Usage,
-    is_droppable,
 )
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import (
     ChildProbe,
-    ExitStatus,
     ProcessObservation,
-    PsutilChildProbe,
     describe,
     settle_close,
     snapshot,
     wait_gone,
     watch_tree,
 )
-from base.lm.harness.registry import SessionRecord, SessionRegistry
 
 # meiva:note
 # The three boundaries are the ones every harness bridge has, expressed in
@@ -68,7 +64,7 @@ from base.lm.harness.registry import SessionRecord, SessionRegistry
 CANCEL_POLL_SECONDS = 0.02
 _CLIENT_NAME = "meiva-codex-bridge"
 _CLIENT_VERSION = "1"
-_EVENT_STREAM_END = object()
+_EVENT_STREAM_END = EVENT_STREAM_END
 _INTERRUPT_METHODS = frozenset(
     {
         "item/commandExecution/requestApproval",
@@ -76,14 +72,6 @@ _INTERRUPT_METHODS = frozenset(
         "applyPatchApproval",
     }
 )
-
-
-class InboundQueueFullError(RuntimeError):
-    pass
-
-
-class SessionClosedError(RuntimeError):
-    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,46 +86,7 @@ class CancelReport:
     cli_alive: bool | None
 
 
-class TurnTicket:
-    def __init__(
-        self,
-        *,
-        turn_id: str,
-        text: str,
-        key: str | None,
-        future: asyncio.Future[TurnOutcome],
-        deduplicated: bool = False,
-    ) -> None:
-        self.turn_id = turn_id
-        self.text = text
-        self.key = key
-        self.deduplicated = deduplicated
-        self.submitted_at = time.monotonic()
-        self.started_at: float | None = None
-        self.interrupt_requested = False
-        self.parts: list[str] = []
-        self.denials: list[str] = []
-        self._future = future
-
-    async def outcome(self) -> TurnOutcome:
-        return await self._future
-
-    @property
-    def settled(self) -> bool:
-        return self._future.done()
-
-    def _settle(self, outcome: TurnOutcome) -> None:
-        if not self._future.done():
-            self._future.set_result(outcome)
-
-    def _fail(self, exc: BaseException) -> None:
-        if self._future.done():
-            return
-        self._future.set_exception(exc)
-        self._future.exception()
-
-
-class CodexSession(ExitStatus):
+class CodexSession(BaseHarnessSession[CodexConfig]):
     def __init__(
         self,
         config: CodexConfig,
@@ -148,41 +97,24 @@ class CodexSession(ExitStatus):
         transport: AppServerTransport | None = None,
         probe: ChildProbe | None = None,
     ) -> None:
-        self.config = config
-        self.agent_id = agent_id
-        self._probe: ChildProbe = probe or PsutilChildProbe()
-        self._registry = registry
+        super().__init__(
+            config,
+            agent_id=agent_id,
+            registry=registry,
+            probe=probe,
+            totals=SessionTotals(),
+        )
         self._transport: AppServerTransport = transport or StdioAppServer(
             config.command(config.resolved_binary(environ)),
             cwd=config.cwd,
             environ=build_env(environ, api_key_mode=config.api_key_mode),
             request_timeout=config.startup_timeout_seconds,
         )
-        # meiva:note
-        # The CLI child's exit status once this session closed it (three states: None
-        # while running/never observed, 0 normal, non-zero abnormal). Task #5616.
-        self._events: asyncio.Queue[Any] = asyncio.Queue()
-        self._pending: deque[TurnTicket] = deque()
-        self._completed: OrderedDict[str, TurnOutcome] = OrderedDict()
-        self._active: TurnTicket | None = None
-        self._deadlines: dict[str, asyncio.Task[None]] = {}
-        self._tasks = asyncio.TaskGroup()
-        self._children: set[asyncio.Task[Any]] = set()
-        self._tasks_entered = False
-        self._totals = SessionTotals()
         self._turn_ids: dict[str, str] = {}
         self._turn_usage: dict[str, Usage] = {}
         self._turn_steps: dict[str, list[Usage]] = {}
         self._final_parts: dict[str, list[str]] = {}
-        self._session_id: str | None = None
-        self._model: str | None = config.model
-        self._baseline: dict[int, str] = {}
-        self._closed = False
         self._started = False
-        self._dropped_deltas = 0
-        self._resumed_existing = False
-        self._record: SessionRecord | None = None
-        self._handoff_ticket: TurnTicket | None = None
 
     async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
         if self._started:
@@ -193,12 +125,10 @@ class CodexSession(ExitStatus):
         self._transport.on_request(self._on_request)
         self._transport.on_closed(self._on_transport_closed)
         await self._transport.start()
-        if not self._tasks_entered:
-            await self._tasks.__aenter__()
-            self._tasks_entered = True
+        await self._enter_tasks()
         self._started = True
         await self._initialize()
-        await self._open_thread(resume or self._resume_from_registry())
+        await self._open_thread(self._resolve_resume(resume))
         self._bind()
         self._inject_handoff(handoff)
 
@@ -208,16 +138,7 @@ class CodexSession(ExitStatus):
         self._closed = True
         watched = watch_tree(self._probe, self._transport.pid)
         self._fail_pending(SessionClosedError("session closed"))
-        for task in list(self._deadlines.values()):
-            task.cancel()
-        self._deadlines.clear()
-        await self._cancel_children()
-        if self._tasks_entered:
-            self._tasks_entered = False
-            try:
-                await self._tasks.__aexit__(None, None, None)
-            except ExceptionGroup as group:
-                self._emit(SessionFaulted(turn_id=None, error=f"session tasks failed: {group!r}"))
+        await self._close_tasks()
         await self._transport.close()
         await settle_close(
             self._probe,
@@ -227,80 +148,11 @@ class CodexSession(ExitStatus):
             agent_id=self.agent_id,
         )
         self._exit_code = self._transport.returncode
-        self._emit(SessionClosed(turn_id=None, reason=reason))
-        self._events.put_nowait(_EVENT_STREAM_END)
-
-    async def __aenter__(self) -> CodexSession:
-        await self.start()
-        return self
-
-    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
-        await self.close(reason="context exit")
-        return False
-
-    def submit(self, text: str, *, key: str | None = None) -> TurnTicket:
-        if self._closed:
-            raise SessionClosedError("session is closed")
-        trimmed = text.strip()
-        if not trimmed:
-            raise ValueError("inbound message is empty")
-        if key is not None:
-            existing = self._recall(key)
-            if existing is not None:
-                return existing
-        if len(self._pending) >= self.config.max_pending_turns:
-            raise InboundQueueFullError(
-                f"{len(self._pending)} turns already queued "
-                f"(limit {self.config.max_pending_turns}); keep the message and retry"
-            )
-        ticket = TurnTicket(
-            turn_id=f"turn-{uuid4().hex[:12]}",
-            text=trimmed,
-            key=key,
-            future=asyncio.get_running_loop().create_future(),
-        )
-        if self._active is None:
-            self._active = ticket
-            self._spawn(self._begin(ticket))
-        else:
-            self._pending.append(ticket)
-        return ticket
-
-    @property
-    def active_turn_id(self) -> str | None:
-        return self._active.turn_id if self._active is not None else None
-
-    @property
-    def pending_turns(self) -> tuple[str, ...]:
-        return tuple(ticket.turn_id for ticket in self._pending)
-
-    @property
-    def session_id(self) -> str | None:
-        return self._session_id
-
-    @property
-    def handoff_ticket(self) -> TurnTicket | None:
-        return self._handoff_ticket
-
-    @property
-    def record(self) -> SessionRecord | None:
-        return self._record
-
-    @property
-    def resumed(self) -> bool:
-        return self._resumed_existing
+        self._finish_close(reason)
 
     @property
     def cli_pid(self) -> int | None:
         return self._transport.pid
-
-    @property
-    def totals(self) -> SessionTotals:
-        return self._totals
-
-    @property
-    def dropped_deltas(self) -> int:
-        return self._dropped_deltas
 
     async def interrupt(self) -> CancelReport:
         ticket = self._active
@@ -356,13 +208,6 @@ class CodexSession(ExitStatus):
             cli_alive=self._probe.is_alive(pid),
         )
 
-    async def events(self) -> AsyncIterator[BridgeEvent]:
-        while True:
-            event = await self._events.get()
-            if event is _EVENT_STREAM_END:
-                return
-            yield event
-
     async def _initialize(self) -> None:
         info = {
             "clientInfo": {"name": _CLIENT_NAME, "version": _CLIENT_VERSION},
@@ -386,27 +231,17 @@ class CodexSession(ExitStatus):
 
     async def _open_thread(self, resume: str | None) -> None:
         if resume:
-            try:
-                result = await self._transport.request(
-                    "thread/resume",
-                    {"threadId": resume},
-                    timeout=self.config.startup_timeout_seconds,
-                )
-            except (JsonRpcError, TransportClosedError) as exc:
-                self._emit(
-                    SessionFaulted(
-                        turn_id=None,
-                        error=f"resume of thread {resume} failed: {exc}; starting a new thread",
-                    )
-                )
-                self._resumed_existing = False
-            else:
-                thread = as_object(result.get("thread"))
-                self._session_id = str(thread.get("id") or resume)
-                self._resumed_existing = True
-                self._emit_session_started(result, thread)
-                return
-        params: dict[str, Any] = {
+            result = await self._transport.request(
+                "thread/resume",
+                {"threadId": resume},
+                timeout=self.config.startup_timeout_seconds,
+            )
+            thread = as_object(result.get("thread"))
+            self._session_id = str(thread.get("id") or resume)
+            self._resumed_existing = True
+            self._emit_session_started(result, thread)
+            return
+        params: dict[str, object] = {
             "cwd": str(self.config.cwd),
             "approvalPolicy": self.config.approval_policy,
             "sandbox": self.config.sandbox,
@@ -421,57 +256,8 @@ class CodexSession(ExitStatus):
         self._session_id = str(thread.get("id") or "")
         self._emit_session_started(result, thread)
 
-    def _resume_from_registry(self) -> str | None:
-        if self._registry is None or self.agent_id is None:
-            return None
-        self._record = self._registry.load(self.agent_id)
-        return self._record.session_id if self._record is not None else None
-
-    def _inject_handoff(self, handoff: Handoff | None) -> None:
-        if handoff is None or self._resumed_existing:
-            return
-        ticket = self.submit(
-            handoff.render(),
-            key=f"handoff:{self.agent_id}" if self.agent_id is not None else None,
-        )
-        self._handoff_ticket = ticket
-        self._emit(
-            HandoffInjected(
-                agent_id=self.agent_id or 0,
-                turn_id=ticket.turn_id,
-                size_bytes=handoff.size_bytes(),
-            )
-        )
-
-    def _bind(self) -> None:
-        if self._registry is None or self.agent_id is None or not self._session_id:
-            return
-        previous = self._registry.load(self.agent_id)
-        now = datetime.now(UTC).isoformat(timespec="seconds")
-        self._record = SessionRecord(
-            agent_id=self.agent_id,
-            session_id=self._session_id,
-            cwd=str(self.config.cwd),
-            model=self._model or self.config.model or "",
-            created_at=previous.created_at if previous is not None else now,
-            updated_at=now,
-            resumes=(previous.resumes if previous is not None else 0) + int(self._resumed_existing),
-        )
-        self._registry.save(self._record)
-        self._emit(
-            SessionBound(
-                agent_id=self.agent_id, session_id=self._session_id, resumed=self._resumed_existing
-            )
-        )
-
-    def _touch(self) -> None:
-        if self._registry is not None and self._record is not None:
-            now = datetime.now(UTC).isoformat(timespec="seconds")
-            self._record = replace(self._record, updated_at=now)
-            self._registry.save(self._record)
-
     async def _begin(self, ticket: TurnTicket) -> None:
-        ticket.started_at = time.monotonic()
+        ticket.started_at = self._monotonic()
         self._baseline = snapshot(self._probe, self._transport.pid)
         self._start_deadline(ticket)
         params = {"threadId": self._session_id, "input": [{"type": "text", "text": ticket.text}]}
@@ -498,24 +284,6 @@ class CodexSession(ExitStatus):
             self._final_parts.pop(ticket.turn_id, None)
             ticket.parts.clear()
         self._turn_ids[codex_turn_id] = ticket.turn_id
-
-    def _start_deadline(self, ticket: TurnTicket) -> None:
-        async def expire() -> None:
-            await asyncio.sleep(self.config.turn_timeout_seconds)
-            if self._active is not ticket:
-                return
-            self._emit(
-                SessionFaulted(
-                    turn_id=ticket.turn_id,
-                    error=(f"turn exceeded {self.config.turn_timeout_seconds:.0f}s; interrupting"),
-                )
-            )
-            try:
-                await self.interrupt()
-            except Exception as exc:
-                self._emit(SessionFaulted(turn_id=ticket.turn_id, error=f"interrupt failed: {exc}"))
-
-        self._deadlines[ticket.turn_id] = self._spawn(expire())
 
     def _on_notification(self, method: str, params: JsonObject) -> None:
         if method == "item/agentMessage/delta":
@@ -676,93 +444,15 @@ class CodexSession(ExitStatus):
             self._active if self._active is not None and self._active.turn_id == turn_id else None
         )
 
-    def _complete(self, ticket: TurnTicket, outcome: TurnOutcome) -> None:
-        self._cancel_deadline(ticket)
-        ticket._settle(outcome)
-        if ticket.key is not None:
-            self._remember(ticket.key, outcome)
-        self._touch()
-        if self._active is ticket:
-            self._active = None
-        self._promote()
 
-    def _promote(self) -> None:
-        if self._closed or self._active is not None or not self._pending:
-            return
-        ticket = self._pending.popleft()
-        self._active = ticket
-        self._spawn(self._begin(ticket))
-
-    def _fail_turn(self, ticket: TurnTicket, exc: BaseException) -> None:
-        self._cancel_deadline(ticket)
-        self._emit(SessionFaulted(turn_id=ticket.turn_id, error=f"turn failed: {exc}"))
-        ticket._fail(SessionClosedError(f"turn failed: {exc}"))
-        if self._active is ticket:
-            self._active = None
-        self._promote()
-
-    def _fail_active(self, exc: BaseException) -> None:
-        ticket = self._active
-        if ticket is not None:
-            self._fail_turn(ticket, exc)
-        self._fail_pending(SessionClosedError(f"session failed: {exc}"))
-
-    def _fail_pending(self, exc: BaseException) -> None:
-        for ticket in (*self._pending, *([self._active] if self._active is not None else [])):
-            ticket._fail(exc)
-        self._pending.clear()
-        self._active = None
-
-    def _recall(self, key: str) -> TurnTicket | None:
-        if self._active is not None and self._active.key == key:
-            return self._active
-        if queued := next((t for t in self._pending if t.key == key), None):
-            return queued
-        if (completed := self._completed.get(key)) is None:
-            return None
-        future: asyncio.Future[TurnOutcome] = asyncio.get_running_loop().create_future()
-        future.set_result(completed)
-        return TurnTicket(
-            turn_id=completed.turn_id,
-            text=completed.text,
-            key=key,
-            future=future,
-            deduplicated=True,
-        )
-
-    def _remember(self, key: str, outcome: TurnOutcome) -> None:
-        self._completed[key] = outcome
-        while len(self._completed) > self.config.dedupe_window:
-            self._completed.popitem(last=False)
-
-    def _cancel_deadline(self, ticket: TurnTicket) -> None:
-        task = self._deadlines.pop(ticket.turn_id, None)
-        if task is not None:
-            task.cancel()
-
-    def _emit(self, event: BridgeEvent) -> None:
-        if is_droppable(event) and self._events.qsize() >= self.config.max_buffered_events:
-            self._dropped_deltas += 1
-            return
-        self._events.put_nowait(event)
-
-    def _spawn(self, coro: Any) -> asyncio.Task[Any]:
-        task = self._tasks.create_task(coro)
-        self._children.add(task)
-        task.add_done_callback(self._on_task_done)
-        return task
-
-    def _on_task_done(self, task: asyncio.Task[Any]) -> None:
-        self._children.discard(task)
-        if task.cancelled():
-            return
-        error = task.exception()
-        if error is not None:
-            self._emit(SessionFaulted(turn_id=None, error=f"background task failed: {error}"))
-
-    async def _cancel_children(self) -> None:
-        children = [task for task in self._children if not task.done()]
-        for task in children:
-            task.cancel()
-        if children:
-            await asyncio.gather(*children, return_exceptions=True)
+__all__ = [
+    "CANCEL_POLL_SECONDS",
+    "EVENT_STREAM_END",
+    "CancelReport",
+    "CodexSession",
+    "InboundQueueFullError",
+    "SessionClosedError",
+    "SessionTotals",
+    "TurnOutcome",
+    "TurnTicket",
+]

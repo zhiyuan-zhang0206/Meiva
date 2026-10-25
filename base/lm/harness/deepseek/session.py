@@ -5,12 +5,9 @@ import contextlib
 import os
 import signal
 import time
-from collections import OrderedDict, deque
-from collections.abc import AsyncIterator, Callable, Mapping
-from datetime import UTC, datetime
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
-from uuid import uuid4
 
 from base.lm.harness.acp.transport import (
     AcpClosedError,
@@ -24,35 +21,32 @@ from base.lm.harness.acp.transport import (
 from base.lm.harness.deepseek.config import BridgeConfig
 from base.lm.harness.deepseek.mapping import assistant_text, map_update, parse_prompt_result
 from base.lm.harness.deepseek.types import (
+    EVENT_STREAM_END,
+    BaseHarnessSession,
     CancelReport,
+    InboundQueueFullError,
+    SessionClosedError,
+    SessionRegistry,
     SessionTotals,
     TurnOutcome,
     TurnTicket,
 )
 from base.lm.harness.deepseek.usage import UsageSnapshot, read_usage
 from base.lm.harness.events import (
-    BridgeEvent,
-    HandoffInjected,
-    SessionBound,
-    SessionClosed,
     SessionFaulted,
     SessionStarted,
     TextDelta,
     TurnCompleted,
     Usage,
-    is_droppable,
 )
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import (
     ChildProbe,
-    ExitStatus,
     ProcessObservation,
-    PsutilChildProbe,
     describe,
     snapshot,
     wait_gone,
 )
-from base.lm.harness.registry import SessionRecord, SessionRegistry
 from base.lm.pricing import PriceBook, quote
 
 # meiva:note
@@ -75,18 +69,10 @@ from base.lm.pricing import PriceBook, quote
 # turn's parts before the answer text is computed, instead of racing the outcome.
 # meiva:link base/lm/harness/deepseek/docs/deepseek.meiva.okf.md
 CANCEL_POLL_SECONDS = 0.05
-_EVENT_STREAM_END = object()
+_EVENT_STREAM_END = EVENT_STREAM_END
 
 
-class InboundQueueFullError(RuntimeError):
-    pass
-
-
-class SessionClosedError(RuntimeError):
-    pass
-
-
-class DeepSeekSession(ExitStatus):
+class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
     def __init__(
         self,
         config: BridgeConfig,
@@ -99,39 +85,23 @@ class DeepSeekSession(ExitStatus):
         kill: Callable[[int, int], None] | None = None,
         prices: PriceBook | None = None,
     ) -> None:
-        self.config = config
+        super().__init__(
+            config,
+            agent_id=agent_id,
+            registry=registry,
+            probe=probe,
+            totals=SessionTotals(),
+        )
         self._prices = prices
-        self.agent_id = agent_id
         self._kill = kill or os.kill
         self._environ = dict(environ)
-        self._probe: ChildProbe = probe or PsutilChildProbe()
-        self._registry = registry
         self._connect = connect or self.open_connection
-        self._events: asyncio.Queue[Any] = asyncio.Queue(maxsize=config.max_buffered_events)
-        self._pending: deque[TurnTicket] = deque()
-        self._completed: OrderedDict[str, TurnOutcome] = OrderedDict()
-        self._active: TurnTicket | None = None
         self._connection: AcpConnection | None = None
-        # meiva:note
-        # The CLI child's exit status once this session closed it (three states:
-        # None while running/never observed, 0 normal, non-zero abnormal). Task #5616.
-        self._reader: asyncio.Task[None] | None = None
-        self._totals = SessionTotals()
-        self._session_id: str | None = None
         self._agent_pid: int | None = None
-        self._baseline: dict[int, str] = {}
-        self._closed = False
-        self._dropped_events = 0
-        self._resumed_existing = False
-        self._record: SessionRecord | None = None
-        self._handoff_ticket: TurnTicket | None = None
         self._permission_denials: list[str] = []
         self._usage: UsageSnapshot | None = None
         self._context_used: int | None = None
         self._context_size: int | None = None
-        self._tasks = asyncio.TaskGroup()
-        self._children: set[asyncio.Task[Any]] = set()
-        self._tasks_entered = False
         self._residue: tuple[ProcessObservation, ...] = ()
 
     async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
@@ -148,7 +118,7 @@ class DeepSeekSession(ExitStatus):
             {"protocolVersion": 1, "clientCapabilities": {}},
             timeout=self.config.startup_timeout_seconds,
         )
-        resume = resume or self._resume_from_registry()
+        resume = self._resolve_resume(resume)
         if resume:
             await connection.request(
                 "session/resume",
@@ -171,9 +141,7 @@ class DeepSeekSession(ExitStatus):
                 raise AcpError(f"session/new returned no sessionId: {created!r}")
             self._session_id = session_id
         await self._configure()
-        if not self._tasks_entered:
-            await self._tasks.__aenter__()
-            self._tasks_entered = True
+        await self._enter_tasks()
         self._reader = self._spawn(self._read_loop(connection))
         self._emit(
             SessionStarted(
@@ -206,72 +174,11 @@ class DeepSeekSession(ExitStatus):
         # meiva:note
         # `connection.close()` above waited for the child, so this is final.
         self._exit_code = connection.returncode if connection is not None else None
-        self._emit(SessionClosed(turn_id=None, reason=reason))
-        self._events.put_nowait(_EVENT_STREAM_END)
-
-    async def __aenter__(self) -> DeepSeekSession:
-        await self.start()
-        return self
-
-    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
-        await self.close(reason="context exit")
-        return False
-
-    def submit(self, text: str, *, key: str | None = None) -> TurnTicket:
-        if self._closed:
-            raise SessionClosedError("session is closed")
-        trimmed = text.strip()
-        if not trimmed:
-            raise ValueError("inbound message is empty")
-        if key is not None:
-            existing = self._recall(key)
-            if existing is not None:
-                return existing
-        if len(self._pending) >= self.config.max_pending_turns:
-            raise InboundQueueFullError(
-                f"{len(self._pending)} turns already queued "
-                f"(limit {self.config.max_pending_turns}); keep the message and retry"
-            )
-        ticket = TurnTicket(
-            turn_id=f"turn-{uuid4().hex[:12]}",
-            text=trimmed,
-            key=key,
-            future=asyncio.get_running_loop().create_future(),
-        )
-        if self._active is None:
-            self._active = ticket
-            self._spawn(self._begin(ticket))
-        else:
-            self._pending.append(ticket)
-        return ticket
-
-    @property
-    def active_turn_id(self) -> str | None:
-        return self._active.turn_id if self._active is not None else None
-
-    @property
-    def pending_turns(self) -> tuple[str, ...]:
-        return tuple(ticket.turn_id for ticket in self._pending)
-
-    @property
-    def session_id(self) -> str | None:
-        return self._session_id
+        self._finish_close(reason)
 
     @property
     def agent_pid(self) -> int | None:
         return self._agent_pid
-
-    @property
-    def resumed(self) -> bool:
-        return self._resumed_existing
-
-    @property
-    def record(self) -> SessionRecord | None:
-        return self._record
-
-    @property
-    def totals(self) -> SessionTotals:
-        return self._totals
 
     @property
     def usage(self) -> UsageSnapshot | None:
@@ -282,23 +189,8 @@ class DeepSeekSession(ExitStatus):
         return self._residue
 
     @property
-    def handoff_ticket(self) -> TurnTicket | None:
-        return self._handoff_ticket
-
-    @property
-    def dropped_events(self) -> int:
-        return self._dropped_events
-
-    @property
     def context_occupancy(self) -> tuple[int | None, int | None]:
         return (self._context_used, self._context_size)
-
-    async def events(self) -> AsyncIterator[BridgeEvent]:
-        while True:
-            event = await self._events.get()
-            if event is _EVENT_STREAM_END:
-                return
-            yield event
 
     async def interrupt(self) -> CancelReport:
         connection = self._require_connection()
@@ -324,8 +216,8 @@ class DeepSeekSession(ExitStatus):
         started = time.perf_counter()
         if self._session_id is not None:
             await connection.notify("session/cancel", {"sessionId": self._session_id})
-        settle_deadline = time.monotonic() + self.config.cancel_settle_seconds
-        while ticket is not None and not ticket.settled and time.monotonic() < settle_deadline:
+        settle_deadline = self._monotonic() + self.config.cancel_settle_seconds
+        while ticket is not None and not ticket.settled and self._monotonic() < settle_deadline:
             await asyncio.sleep(CANCEL_POLL_SECONDS)
         cancel_ms = (time.perf_counter() - started) * 1000.0
         reaped = await self._reap(spawned)
@@ -467,7 +359,7 @@ class DeepSeekSession(ExitStatus):
 
     async def _begin(self, ticket: TurnTicket) -> None:
         connection = self._require_connection()
-        ticket.started_at = time.monotonic()
+        ticket.started_at = self._monotonic()
         self._baseline = snapshot(self._probe, self._agent_pid)
         try:
             result = await connection.request(
@@ -516,13 +408,10 @@ class DeepSeekSession(ExitStatus):
             per_turn_usage=measured,
         )
         self._permission_denials.clear()
-        if self._active is ticket:
-            self._active = None
-        if ticket.key is not None:
-            self._remember(ticket.key, outcome)
         assistant = assistant_text(text, turn_id=ticket.turn_id)
         if assistant is not None:
             self._emit(assistant)
+        now_mono = self._monotonic()
         self._emit(
             TurnCompleted(
                 turn_id=ticket.turn_id,
@@ -533,18 +422,14 @@ class DeepSeekSession(ExitStatus):
                 interrupted=outcome.interrupted,
                 stop_reason=outcome.stop_reason,
                 num_turns=len(ticket.parts),
-                duration_ms=int(
-                    (time.monotonic() - (ticket.started_at or time.monotonic())) * 1000
-                ),
+                duration_ms=int((now_mono - (ticket.started_at or now_mono)) * 1000),
                 usage=usage,
                 cost_usd=cost,
                 cumulative_cost_usd=self._totals.cost_usd if self._totals.cost_known else None,
                 permission_denials=outcome.permission_denials,
             )
         )
-        ticket.settle(outcome)
-        self._touch()
-        self._promote()
+        self._complete(ticket, outcome)
 
     async def _turn_usage(self) -> tuple[Usage, bool]:
         session_id = self._session_id
@@ -580,156 +465,6 @@ class DeepSeekSession(ExitStatus):
         )
         return None if quoted is None else quoted.cost_usd
 
-    def _resume_from_registry(self) -> str | None:
-        if self._registry is None or self.agent_id is None:
-            return None
-        record = self._registry.load(self.agent_id)
-        if record is None:
-            return None
-        self._resumed_existing = True
-        self._record = record
-        return record.session_id
-
-    def _inject_handoff(self, handoff: Handoff | None) -> None:
-        if handoff is None or self._resumed_existing:
-            return
-        key = f"handoff:{self.agent_id}" if self.agent_id is not None else None
-        ticket = self.submit(handoff.render(), key=key)
-        self._handoff_ticket = ticket
-        self._emit(
-            HandoffInjected(
-                agent_id=self.agent_id or 0,
-                turn_id=ticket.turn_id,
-                size_bytes=handoff.size_bytes(),
-            )
-        )
-
-    def _bind(self) -> None:
-        if self._registry is None or self.agent_id is None or not self._session_id:
-            return
-        previous = self._registry.load(self.agent_id)
-        now = datetime.now(UTC).isoformat(timespec="seconds")
-        self._record = SessionRecord(
-            agent_id=self.agent_id,
-            session_id=self._session_id,
-            cwd=self.config.workspace,
-            model=self.config.model or "",
-            created_at=previous.created_at if previous is not None else now,
-            updated_at=now,
-            resumes=(previous.resumes if previous is not None else 0)
-            + (1 if self._resumed_existing else 0),
-        )
-        self._registry.save(self._record)
-        self._emit(
-            SessionBound(
-                agent_id=self.agent_id, session_id=self._session_id, resumed=self._resumed_existing
-            )
-        )
-
-    def _touch(self) -> None:
-        if self._registry is None or self._record is None:
-            return
-        self._record = SessionRecord(
-            agent_id=self._record.agent_id,
-            session_id=self._record.session_id,
-            cwd=self._record.cwd,
-            model=self._record.model,
-            created_at=self._record.created_at,
-            updated_at=datetime.now(UTC).isoformat(timespec="seconds"),
-            resumes=self._record.resumes,
-        )
-        self._registry.save(self._record)
-
-    def _recall(self, key: str) -> TurnTicket | None:
-        outcome = self._completed.get(key)
-        if outcome is None:
-            return None
-        future: asyncio.Future[TurnOutcome] = asyncio.get_running_loop().create_future()
-        future.set_result(outcome)
-        return TurnTicket(
-            turn_id=outcome.turn_id, text="", key=key, future=future, deduplicated=True
-        )
-
-    def _remember(self, key: str, outcome: TurnOutcome) -> None:
-        self._completed[key] = outcome
-        while len(self._completed) > self.config.dedupe_window:
-            self._completed.popitem(last=False)
-
-    def _promote(self) -> None:
-        if self._closed or self._active is not None or not self._pending:
-            return
-        ticket = self._pending.popleft()
-        self._active = ticket
-        self._spawn(self._begin(ticket))
-
-    def _fail_turn(self, ticket: TurnTicket, exc: BaseException) -> None:
-        self._emit(SessionFaulted(turn_id=ticket.turn_id, error=f"turn failed: {exc}"))
-        ticket.fail(SessionClosedError(f"turn failed: {exc}"))
-        if self._active is ticket:
-            self._active = None
-        self._promote()
-
-    def _fail_active(self, exc: BaseException) -> None:
-        ticket = self._active
-        if ticket is None:
-            return
-        self._active = None
-        ticket.fail(SessionClosedError(f"turn failed: {exc}"))
-        self._fail_pending(SessionClosedError(f"session failed: {exc}"))
-
-    def _fail_pending(self, exc: BaseException) -> None:
-        while self._pending:
-            self._pending.popleft().fail(exc)
-        active = self._active
-        if active is not None:
-            self._active = None
-            active.fail(exc)
-
-    def _emit(self, event: BridgeEvent) -> None:
-        try:
-            self._events.put_nowait(event)
-        except asyncio.QueueFull:
-            if is_droppable(event):
-                self._dropped_events += 1
-                return
-            if self._drain_one_droppable():
-                self._events.put_nowait(event)
-            else:
-                self._dropped_events += 1
-
-    def _drain_one_droppable(self) -> bool:
-        kept: list[Any] = []
-        found = False
-        while True:
-            try:
-                item = self._events.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-            if not found and is_droppable(item):
-                found = True
-                continue
-            kept.append(item)
-        for item in kept:
-            self._events.put_nowait(item)
-        return found
-
-    def _spawn(self, coro: Any) -> asyncio.Task[Any]:
-        task = self._tasks.create_task(coro)
-        self._children.add(task)
-        task.add_done_callback(self._children.discard)
-        return task
-
-    async def _close_tasks(self) -> None:
-        children = [task for task in self._children if not task.done()]
-        for task in children:
-            task.cancel()
-        if children:
-            await asyncio.gather(*children, return_exceptions=True)
-        if self._tasks_entered:
-            self._tasks_entered = False
-            with contextlib.suppress(ExceptionGroup):
-                await self._tasks.__aexit__(None, None, None)
-
     def _require_connection(self) -> AcpConnection:
         if self._connection is None:
             raise SessionClosedError("session not started")
@@ -738,3 +473,17 @@ class DeepSeekSession(ExitStatus):
 
 def dsh_home_for(workspace: Path) -> Path:
     return Path(workspace) / ".dsh"
+
+
+__all__ = [
+    "CANCEL_POLL_SECONDS",
+    "EVENT_STREAM_END",
+    "CancelReport",
+    "DeepSeekSession",
+    "InboundQueueFullError",
+    "SessionClosedError",
+    "SessionTotals",
+    "TurnOutcome",
+    "TurnTicket",
+    "dsh_home_for",
+]

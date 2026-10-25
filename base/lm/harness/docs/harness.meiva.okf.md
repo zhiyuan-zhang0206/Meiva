@@ -32,7 +32,9 @@ invariants the host relies on:
    prompt — cache reads and cache writes included, with those two fields as
    subsets — whatever shape the provider reports them in;
 7. the handoff is injected once, when the session is created, and never again on
-   resume;
+   resume; when a bound session id is supplied (`resume` is non-`None` or loaded from
+   the registry), a failed `session/resume` or `thread/resume` fails fast instead of
+   silently falling back to a fresh session (`session/new` / `thread/start`);
 8. a faulted or closed session stops being usable: the bridge retires it instead of
    submitting to it again;
 9. `close()` returns only after the session's process tree is gone, or raises when the
@@ -49,6 +51,7 @@ and open questions are recorded in
 
 | Module | Owns |
 |---|---|
+| `base_session.py` | `BaseHarnessSession`, `TurnTicket`, `TurnOutcome`, `SessionTotals`, `InboundQueueFullError`, `SessionClosedError`, and `EVENT_STREAM_END`: the shared session state machine (inbound queue, turn promotion, idempotency deduplication, bounded outbound event queue with delta-dropping backpressure, turn timeout watchdog, background `TaskGroup` management, `SessionRegistry` persistence, and injected `Clock`) |
 | `events.py` | `BridgeEvent` and its members, plus the droppable (text delta) versus control split |
 | `engine.py` | `HarnessSession` (the adapter contract), `TurnEngine` (what a graph run needs), and `HarnessTurn` (one turn's reply, usage and boundary, plus the `prelude` turns that completed before it) |
 | `handoff.py` | the six-section handoff document, `HANDOFF_VERSION`, and its rendered byte size |
