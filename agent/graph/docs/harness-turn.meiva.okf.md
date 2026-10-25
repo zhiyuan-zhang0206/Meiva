@@ -57,6 +57,15 @@ window is covered by committed harness turns.
   `tool_calls`, `ToolMessage`, final `AIMessage`), advancing `harness_cursor`
   over all sent and appended messages.
 
+The projector retains one required `Clock` resource for its stream. The turn root obtains it
+after the non-empty pending-text gate; every reasoning, text, tool and finish timestamp still
+calls `Clock.now()` at its original position among publication effects. These instants are UTC:
+projection does not use timezone or weekday rendering settings, so events do not reconstruct
+a clock to re-read those unused fields. A new turn obtains its own clock from the context;
+initial clock-construction failures still propagate, and the lifecycle timestamp policy keeps
+its separate configuration read. Unknown tool results, unstamped finish fallbacks and interrupt
+settlement do not gain a timestamp read.
+
 The cursor records committed graph turns, not durable provider acknowledgements;
 a crash or cancel before commit can re-submit pending input across sessions.
 
