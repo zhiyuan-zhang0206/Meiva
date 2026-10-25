@@ -52,3 +52,13 @@ async def written_nodes(pool: AsyncConnectionPool) -> list[tuple]:
             "SELECT agent_id, depth, span_start, span_end, text FROM understanding_nodes"
         )
         return await cur.fetchall()
+
+
+async def call_receipts(pool: AsyncConnectionPool) -> list[tuple]:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT job_id, agent_id, attempt, round, model, instruction, prefix_len,"
+            " start_offset, content, tool_calls, usage_metadata, response_metadata,"
+            " duration_ms, error FROM understanding_chunk_calls ORDER BY id"
+        )
+        return await cur.fetchall()

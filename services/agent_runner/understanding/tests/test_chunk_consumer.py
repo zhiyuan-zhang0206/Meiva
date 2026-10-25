@@ -30,19 +30,24 @@ from base.agents.history.hierarchy.chunks import (
 )
 from base.agents.history.hierarchy.generate import GenerateError
 from base.agents.history.hierarchy.leaf_groups import UnitGroup
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.config import ConfigBoot, settings
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from services.agent_runner.understanding import chunk_consumer as loop
-from services.agent_runner.understanding.tests.chunk_faults import chunk_result
+from services.agent_runner.understanding.tests.chunk_faults import chunk_result, run_rounds
 from services.agent_runner.understanding.tests.chunk_faults import chunk_seams as chunk_seams
+from services.agent_runner.understanding.tests.chunk_faults import (
+    chunk_timestamps as chunk_timestamps,
+)
 from services.agent_runner.understanding.tests.consumer_helpers import (
     consumer_config,
     lm_wiring,
 )
 from services.agent_runner.understanding.tests.consumer_history import (
+    call_receipts,
     inbound_history,
     job_spans,
     job_statuses,
@@ -57,13 +62,13 @@ async def test_round_describes_a_due_chunk_and_stores_its_node(
     # meiva:note
     # Request list [head, m0, m1, m2]; chunk [1, 3) = m0, m1.
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     assert await written_nodes(aops_pool) == [(5, 1, 0, 1, "what happened")]
     assert await job_statuses(aops_pool) == [("done", 1, None)]
     assert [m.id for m in chunk_seams["described"][0].messages] == ["m0", "m1"]
     # meiva:note
     # queue drained: nothing more to claim
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     assert await job_statuses(aops_pool) == [("done", 1, None)]
 
 
@@ -72,7 +77,7 @@ async def test_chunk_not_yet_checkpointed_goes_back_to_the_queue(
     aops_pool: AsyncConnectionPool,
 ) -> None:
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 9), end_msg_id="m8")
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, attempts, error)] = await job_statuses(aops_pool)
     # meiva:note
     # waiting spends no attempt
@@ -84,7 +89,7 @@ async def test_drifted_indices_fail_the_job_with_an_event(
     model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, emitted_events: EmittedEvents
 ) -> None:
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="not-m1")
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, _, error)] = await job_statuses(aops_pool)
     assert status == "failed" and "not-m1" in error
     assert "understanding_chunk_failed" in emitted_events.names()
@@ -105,7 +110,7 @@ async def test_a_database_blink_fails_the_job_with_an_event_and_is_not_retried(
 
     monkeypatch.setattr(loop, "load_segments", blink)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 2, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 2, model_catalog=model_catalog)
     [(status, attempts, error)] = await job_statuses(aops_pool)
     assert (status, attempts) == ("failed", 1) and "closed the connection" in error
     assert emitted_events.names() == ["understanding_chunk_failed"]
@@ -145,13 +150,13 @@ async def test_a_chunk_that_overlaps_existing_nodes_describes_only_what_is_left(
             " schema_version) VALUES (5, 1, 0, 0, 'k', 'old', 'h', 'i', 0, 'm', 'chunk-0.2', 'p', 1)"
         )
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     # meiva:note
     # m0 was already covered
     assert [m.id for m in chunk_seams["described"][0].messages] == ["m1"]
     assert await written_nodes(aops_pool) == [(5, 1, 0, 0, "old"), (5, 1, 1, 1, "what happened")]
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 2), end_msg_id="m0")
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     status = (await job_statuses(aops_pool))[-1]
     assert status[0] == "skipped" and "already described" in status[2]
 
@@ -172,7 +177,7 @@ async def test_existing_nodes_in_the_middle_leave_a_gap_that_is_reported_not_dro
             " schema_version) VALUES (5, 1, 1, 1, 'k', 'mid', 'h', 'i', 0, 'm', 'chunk-0.2', 'p', 1)"
         )
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 5), end_msg_id="m3")
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     assert [m.id for m in chunk_seams["described"][0].messages] == ["m0"]
     assert {r[2:4] for r in await written_nodes(aops_pool)} == {(0, 0), (1, 1)}
     [(name, attrs)] = [(event.event_name, event.attributes) for event in emitted_events]
@@ -255,7 +260,7 @@ async def test_a_job_that_never_becomes_describable_is_given_up_on_by_age(
         await conn.execute(
             "UPDATE understanding_chunk_jobs SET waiting_since = now() - interval '7 hours'"
         )
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, _, error)] = await job_statuses(aops_pool)
     assert status == "failed" and "gave up" in error
 
@@ -280,7 +285,7 @@ async def test_a_closing_chunk_past_its_snapshot_describes_what_exists_and_repor
         end_msg_id="m8",
         boundary_checkpoint_id="cp-1",
     )
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, _, error)] = await job_statuses(aops_pool)
     assert (status, error) == ("done", None)
     assert [m.id for m in chunk_seams["described"][0].messages] == ["m0", "m1", "m2", "m3"]
@@ -302,7 +307,7 @@ async def test_generation_error_fails_on_the_first_attempt_with_an_event(
 
     monkeypatch.setattr(loop, "describe", boom)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, attempts, error)] = await job_statuses(aops_pool)
     assert (status, attempts, error) == ("failed", 1, "provider down")
     assert emitted_events.names() == ["understanding_chunk_failed"]
@@ -312,7 +317,7 @@ async def test_generation_error_fails_on_the_first_attempt_with_an_event(
         await conn.execute(
             "UPDATE understanding_chunk_jobs SET claimed_at = now() - interval '1 hour'"
         )
-    await _run_rounds(aops_pool, 2, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 2, model_catalog=model_catalog)
     assert await job_statuses(aops_pool) == [("failed", 1, "provider down")]
 
 
@@ -331,7 +336,7 @@ async def test_a_claimer_that_died_fails_its_job_and_frees_the_agents_queue(
             " WHERE id = %s",
             (first.id,),
         )
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     assert [row[0] for row in await job_statuses(aops_pool)] == ["failed", "done"]
     assert emitted_events.names() == ["understanding_chunk_failed"]
 
@@ -348,7 +353,7 @@ async def test_gemini_chunk_is_described_with_its_original_prefix(
         lambda *_a, **_kw: ("gemini-3.8-flash", ModelOverrides.from_pins(None)),
     )
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     assert await job_statuses(aops_pool) == [("done", 1, None)]
     assert await written_nodes(aops_pool) == [(5, 1, 0, 1, "what happened")]
     located = chunk_seams["described"][0]
@@ -368,7 +373,7 @@ async def test_checkpoint_read_failure_fails_the_job(
 
     monkeypatch.setattr(loop, "load_segments", fail)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, _, error)] = await job_statuses(aops_pool)
     assert status == "failed" and "db blip" in error
 
@@ -436,17 +441,8 @@ def _call(round_: int, response: AIMessage | None, error: str | None = None) -> 
     )
 
 
-async def _calls(pool: AsyncConnectionPool) -> list[tuple]:
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(
-            "SELECT job_id, agent_id, attempt, round, model, instruction, prefix_len,"
-            " start_offset, content, tool_calls, usage_metadata, response_metadata,"
-            " duration_ms, error FROM understanding_chunk_calls ORDER BY id"
-        )
-        return await cur.fetchall()
-
-
 async def test_raw_calls_are_persisted_for_a_done_job(
+    chunk_timestamps: TimestampPolicy,
     model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
     chunk_seams: dict,
@@ -462,12 +458,12 @@ async def test_raw_calls_are_persisted_for_a_done_job(
         calls, located = args[5], args[3]
         assert isinstance(calls, list) and isinstance(located, LocatedChunk)
         calls.append(_call(0, reply))
-        return chunk_result(located)
+        return chunk_result(located, timeline_inputs=chunk_timestamps)
 
     monkeypatch.setattr(loop, "describe", describe)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
-    [row] = await _calls(aops_pool)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    [row] = await call_receipts(aops_pool)
     async with aops_pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("SELECT id FROM understanding_chunk_jobs")
         [(job_id,)] = await cur.fetchall()
@@ -492,13 +488,14 @@ async def test_a_failed_call_is_recorded_and_the_job_fails(
 
     monkeypatch.setattr(loop, "describe", boom)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
-    [row] = await _calls(aops_pool)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    [row] = await call_receipts(aops_pool)
     assert row[8] is None and row[13] == "provider down"
     assert (await job_statuses(aops_pool))[0][0] == "failed"
 
 
 async def test_a_record_write_failure_emits_an_event_and_spares_the_job(
+    chunk_timestamps: TimestampPolicy,
     model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
     chunk_seams: dict,
@@ -513,46 +510,39 @@ async def test_a_record_write_failure_emits_an_event_and_spares_the_job(
         calls, located = args[5], args[3]
         assert isinstance(calls, list) and isinstance(located, LocatedChunk)
         calls.append(_call(0, AIMessage(content="x")))
-        return chunk_result(located)
+        return chunk_result(located, timeline_inputs=chunk_timestamps)
 
     monkeypatch.setattr(loop, "describe", describe)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     assert emitted_events.names() == ["understanding_call_record_failed"]
     assert await job_statuses(aops_pool) == [("done", 1, None)]
     assert await written_nodes(aops_pool) == [(5, 1, 0, 1, "what happened")]
 
 
-async def _run_rounds(
-    pool: AsyncConnectionPool, count: int, *, model_catalog: ModelCatalog
-) -> None:
-    # meiva:note
-    # `count` times: claim at most one job and finish it (the loop's claim, one step at a time).
-    for _ in range(count):
-        async with asyncio.TaskGroup() as tg:
-            await loop.Consumer(
-                pool, MagicMock(), [], **lm_wiring(model_catalog), config=consumer_config()
-            ).claim(tg)
-
-
 async def test_each_group_is_a_node_covering_the_chunk_to_its_end(
-    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, chunk_seams: dict
+    chunk_timestamps: TimestampPolicy,
+    model_catalog: ModelCatalog,
+    aops_pool: AsyncConnectionPool,
+    chunk_seams: dict,
 ) -> None:
     # meiva:note
     # Request [head, m0..m3]; chunk [1, 5): four units in three groups.
     chunk_seams["answer"] = lambda located: chunk_result(
-        located, UnitGroup(0, 0, "first"), UnitGroup(1, 2, "second"), UnitGroup(3, 3, "third")
+        located,
+        UnitGroup(0, 0, "first"),
+        UnitGroup(1, 2, "second"),
+        UnitGroup(3, 3, "third"),
+        timeline_inputs=chunk_timestamps,
     )
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 5), end_msg_id="m3")
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     assert await written_nodes(aops_pool) == [
         (5, 1, 0, 0, "first"),
         (5, 1, 1, 2, "second"),
         (5, 1, 3, 3, "third"),
     ]
     assert await job_spans(aops_pool) == [("done", 1, 5)]
-    # meiva:note
-    # no open / closing arguments
     assert set(chunk_seams["kw"]) == {"config"}
     assert isinstance(chunk_seams["kw"]["config"], ConfigBoot)
 
@@ -562,7 +552,7 @@ async def test_each_chunk_starts_at_its_own_start_whatever_the_previous_one_did(
 ) -> None:
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(3, 5), end_msg_id="m3")
-    await _run_rounds(aops_pool, 2, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 2, model_catalog=model_catalog)
     assert [[m.id for m in loc.messages] for loc in chunk_seams["described"]] == [
         ["m0", "m1"],
         ["m2", "m3"],
@@ -581,7 +571,7 @@ async def test_a_refused_grouping_fails_the_job_at_once_without_nodes(
 
     monkeypatch.setattr(loop, "describe", refused)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, attempts, error)] = await job_statuses(aops_pool)
     assert (status, attempts) == ("failed", 1) and "refused" in error
     assert await written_nodes(aops_pool) == []
@@ -599,12 +589,8 @@ async def test_a_done_job_is_followed_by_the_upper_level_checks(
 
     monkeypatch.setattr(loop, "run_group_checks", standalone)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     assert asked == [5]
-
-
-# meiva:note
-# -- Concurrency: bounded, per agent in order, failures isolated --------------------------------
 
 
 async def _enqueue_ends(pool: AsyncConnectionPool, agent: int, *ends: str) -> None:
@@ -616,7 +602,10 @@ async def _enqueue_ends(pool: AsyncConnectionPool, agent: int, *ends: str) -> No
 
 
 async def test_different_agents_run_together_and_one_agents_jobs_in_order(
-    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, chunk_seams: dict
+    chunk_timestamps: TimestampPolicy,
+    model_catalog: ModelCatalog,
+    aops_pool: AsyncConnectionPool,
+    chunk_seams: dict,
 ) -> None:
     log: list[tuple[str, str]] = []
     lock = threading.Lock()
@@ -633,7 +622,7 @@ async def test_different_agents_run_together_and_one_agents_jobs_in_order(
         time.sleep(0.05)
         with lock:
             log.append(("end", tag))
-        return chunk_result(located)
+        return chunk_result(located, timeline_inputs=chunk_timestamps)
 
     chunk_seams["answer"] = answer
     # meiva:note
@@ -655,7 +644,10 @@ async def test_different_agents_run_together_and_one_agents_jobs_in_order(
 
 
 async def test_every_due_job_runs_at_once_each_on_its_own_thread(
-    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, chunk_seams: dict
+    chunk_timestamps: TimestampPolicy,
+    model_catalog: ModelCatalog,
+    aops_pool: AsyncConnectionPool,
+    chunk_seams: dict,
 ) -> None:
     barrier = threading.Barrier(5, timeout=10)
 
@@ -663,7 +655,7 @@ async def test_every_due_job_runs_at_once_each_on_its_own_thread(
         # meiva:note
         # passes only when all five jobs are inside their calls together
         barrier.wait()
-        return chunk_result(located)
+        return chunk_result(located, timeline_inputs=chunk_timestamps)
 
     chunk_seams["answer"] = answer
     for agent in range(1, 6):
@@ -672,19 +664,23 @@ async def test_every_due_job_runs_at_once_each_on_its_own_thread(
         aops_pool, MagicMock(), [], **lm_wiring(model_catalog), config=consumer_config()
     )
     await consumer.run_until_idle()
-    assert [s for s, *_ in await job_statuses(aops_pool)] == ["done"] * 5
+    jobs = await job_statuses(aops_pool)
+    assert [s for s, *_ in jobs] == ["done"] * 5, jobs
     assert consumer.in_flight == 0
 
 
 async def test_one_jobs_failure_touches_no_other_job(
-    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, chunk_seams: dict
+    chunk_timestamps: TimestampPolicy,
+    model_catalog: ModelCatalog,
+    aops_pool: AsyncConnectionPool,
+    chunk_seams: dict,
 ) -> None:
     def answer(located: LocatedChunk) -> ChunkResult:
         if located.messages[-1].id == "m2":
             # meiva:note
             # not a GenerateError: the crash path
             raise RuntimeError("bug in one job")
-        return chunk_result(located)
+        return chunk_result(located, timeline_inputs=chunk_timestamps)
 
     chunk_seams["answer"] = answer
     for agent, end in ((1, "m1"), (2, "m2"), (3, "m1")):
@@ -753,10 +749,12 @@ async def test_the_forever_loop_works_the_queue_and_stops_cleanly_on_cancel(
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert [s for s, *_ in await job_statuses(aops_pool)] == ["done"] * 3
+    jobs = await job_statuses(aops_pool)
+    assert [s for s, *_ in jobs] == ["done"] * 3, jobs
 
 
 async def test_a_replay_describes_one_agents_segments_together_and_skips_the_upper_checks(
+    chunk_timestamps: TimestampPolicy,
     model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
     chunk_seams: dict,
@@ -774,7 +772,7 @@ async def test_a_replay_describes_one_agents_segments_together_and_skips_the_upp
 
     def answer(located: LocatedChunk) -> ChunkResult:
         both.wait()
-        return chunk_result(located)
+        return chunk_result(located, timeline_inputs=chunk_timestamps)
 
     chunk_seams["answer"] = answer
     for segment in (0, 1):
@@ -794,7 +792,7 @@ async def test_a_chunk_of_only_framework_notes_is_skipped_without_a_call(
 ) -> None:
     chunk_seams["history"] = notes_history()
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await _run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, _, error)] = await job_statuses(aops_pool)
     assert status == "skipped" and "only framework notes" in error
     assert chunk_seams["described"] == [] and await written_nodes(aops_pool) == []
