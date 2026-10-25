@@ -198,6 +198,7 @@ def _format_patch_tool_use(tool_input: Mapping[str, Any]) -> str:
     return ""
 
 
+# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 class HarnessTurnProjector:
     def __init__(
         self,
@@ -206,14 +207,14 @@ class HarnessTurnProjector:
         agent_id: int,
         base_idx: int,
         turn_progress: TurnProgress,
-        clock_factory: Callable[[], Clock],
+        clock: Clock,
     ) -> None:
         self._publisher = event_publisher
         self._agent_id = agent_id
         self._msg_idx = base_idx
         self._turn_progress = turn_progress
-        self._clock_factory = clock_factory
-        self._step_started_at = self._clock_factory().now()
+        self._clock = clock
+        self._step_started_at = self._clock.now()
         self._reasoning_coalescer = DeltaCoalescer(self._emit_reasoning_delta)
         self._coalescer = DeltaCoalescer(self._emit_chat_delta)
         self._reasoning_started = False
@@ -262,13 +263,13 @@ class HarnessTurnProjector:
         if not self._streamed_reasoning:
             self._append_reasoning(event.text)
         self._streamed_reasoning = False
-        self._reasoning_ended_at = self._clock_factory().now()
+        self._reasoning_ended_at = self._clock.now()
 
     def _on_text_event(self, event: TextDelta | AssistantText) -> None:
         if self._text_completed and self._text_buf:
             self._flush_completed_text()
         if self._reasoning_started and self._reasoning_ended_at is None:
-            self._reasoning_ended_at = self._clock_factory().now()
+            self._reasoning_ended_at = self._clock.now()
         self._any_text_event = True
         if isinstance(event, TextDelta):
             self._streamed_text = True
@@ -325,7 +326,7 @@ class HarnessTurnProjector:
         return content, kwargs, reasoning_ms, code_ms
 
     def _flush_completed_text(self) -> None:
-        now = self._clock_factory().now()
+        now = self._clock.now()
         step_text = "".join(self._text_buf).strip()
         if step_text or "".join(self._reasoning_buf).strip():
             content, kwargs, _, _ = self._build_ai_content_and_kwargs(step_text, now)
@@ -360,7 +361,7 @@ class HarnessTurnProjector:
         self._coalescer.append(item_id, text)
 
     def _on_tool_use(self, event: ToolUse) -> None:
-        now = self._clock_factory().now()
+        now = self._clock.now()
         reasoning_text = "".join(self._reasoning_buf).strip()
         step_text = "".join(self._text_buf).strip()
         code_block_idx = (1 if reasoning_text else 0) + (1 if step_text else 0)
@@ -444,7 +445,7 @@ class HarnessTurnProjector:
         if (slot := self._tool_slots.get(event.tool_use_id)) is None:
             return
         slot_idx, exec_item_id, started_at = slot
-        now = self._clock_factory().now()
+        now = self._clock.now()
         self._step_started_at = now
         exec_ms = max(int((now - started_at).total_seconds() * 1000), 0)
         prev = self._messages[slot_idx]
@@ -500,7 +501,7 @@ class HarnessTurnProjector:
         if not final_text and not self._any_text_event:
             final_text = turns[-1].text
         if final_text or reasoning_text:
-            now = self._clock_factory().now()
+            now = self._clock.now()
             content, kwargs, _, _ = self._build_ai_content_and_kwargs(final_text, now)
             self._messages.append(AIMessage(content=content, additional_kwargs=kwargs))
         return list(self._messages)
@@ -601,7 +602,7 @@ async def _run_harness_turn(
         agent_id=agent_id,
         base_idx=len(effective_messages),
         turn_progress=ctx.turn_progress,
-        clock_factory=ctx.require_clock,
+        clock=ctx.require_clock(),
     )
     try:
         async with subscribe_interrupt(
