@@ -606,6 +606,43 @@ half, use the separate commands:
   version, and those processes exit when they next touch the database
   ([code version gate](#code-version-gate)).
 
+#### After the wave: the health checklist
+
+A wave is not finished when `up` exits 0: that only proves the new code started. The
+2026-10-24 wave (35 commits) turned seven schedules red inside seven minutes and the
+executor never looked (`#5622`). Run these five before writing the wave record, and tick
+each one in it.
+
+1. **Schedules** — `meiva schedules verify --no-notify` on the gateway host. Pass = `rc=0`
+   *and* every entry green (`checked=N green=N red=0`). A moved module or a renamed job
+   entry shows up here first (`#5621`: `checked=26 green=22 red=4`).
+2. **Fleet agreement** — `meiva cluster status`. Pass = every machine `online`, the `code`
+   column identical on every row, and no `paused=yes` left behind (a wave that paused to
+   drain must have resumed).
+3. **Each host's own units** — `meiva status` on every machine. Pass = every unit that ran
+   before the wave reads `root ✓ probe ✓`, plus anything the wave added; a `skipped` line is
+   acceptable only with the reason the host prints itself (`no display`, `macOS only`).
+4. **Agents** — the live roster after the wave holds the agents that were live before it, on
+   the same machines. A wave that brings back fewer agents than it stopped is a rollback,
+   not a success.
+5. **Fire the new path once** — for every service the wave switched, exercise its real path
+   instead of its socket check. The 2026-10-24 wave moved `execute_code` onto
+   `meiva-exec-host`; the evidence was an `execute_code` call that succeeded, because a
+   listening socket proves a process is bound, not that a request is served.
+
+Two traps this checklist exists to catch:
+
+- **Green but not working.** `verify` imports the schedule script; it cannot see a state
+   file written to a path that exists only on another machine (2026-10-05: `verify` green,
+   the schedule never woke). One real fire plus the state file actually written is the
+   judgement.
+- **A silent skip is not a pass.** A unit reported `skipped` because the caller's `PATH` had
+  no `npx` is a finding, not a tick (`#5478`).
+
+Browser decoupling is only observable under a root-only restart: a full `stop` → `start`
+also stops Chrome, so a dead browser after a wave is not evidence that the decoupling
+regressed.
+
 ### WAL-G archiving
 
 See [component operations](../../services/backup/walg/docs/operations.md).
