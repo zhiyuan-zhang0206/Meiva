@@ -32,12 +32,22 @@ default home and can target a running deployment.
 
 Implement a focused change with its related tests and current documentation.
 **The change record is the history itself.** The merge queue squashes a PR into
-one commit on `main`, so its title is the entry a reader meets in `git log`, in
-the release notes page generated from a commit range (`gh compare`), and in the
-commit `git blame` lands on. That title is therefore the change record a user
-sees: write it for whoever reads it months later — what changed, and for whom —
-and let the diff and the PR description carry the detail. There is no changelog
+one commit on `main`, and that commit's message is the entry a reader meets in
+`git log`, in the release notes page generated from a commit range (`gh compare`),
+and in the commit `git blame` lands on. The squash takes the **head commit's
+message**, not the PR title, so the head commit is the one that writes the
+record: `git commit --amend` before you push is how you make it the sentence you
+want months later. Write it for whoever reads it months later — what changed, and
+for whom — and let the diff and the PR description carry the detail. The PR title
+stays the human entry point beside the diff; a deliberate difference between the
+two is fine, as long as the head commit carries the record. There is no changelog
 file to append to and no per-entry file to add.
+
+```bash
+test "$(git log -1 --format=%s)" = "$(gh pr view --json title -q .title)" \
+  || echo "head commit subject differs from the PR title: say why in the PR body"
+```
+
 Keep shared facts in their owning module; use existing third-party capabilities
 rather than creating a second framework or registry. Resolve generated-file
 conflicts by regenerating from the source, not editing derived output.
