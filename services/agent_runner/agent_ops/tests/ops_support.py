@@ -23,7 +23,7 @@ from psycopg_pool import ConnectionPool
 from redis.client import PubSub
 
 from base.cluster import inbound_channel
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -70,7 +70,7 @@ class Ops:
     authority: ConfigAuthority
     database: Callable[[], Database]
     image: LoadedCommit
-    machine: MachineIdentity
+    machine: MachineIdentityReader
     host: Host
     active_ops: daemon.ActiveOps = field(default_factory=dict)
     workers: in_flight.WorkerFutures = field(default_factory=set)

@@ -13,7 +13,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import create_agent
@@ -489,7 +489,7 @@ def test_poll_reads_directly_from_db(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.agents.tests.units import spawn_agent
 
@@ -529,7 +529,7 @@ def test_list_queue_reads_directly_from_db(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.agents.tests.units import spawn_agent
 
@@ -555,7 +555,7 @@ def test_list_queue_limit_follows_config(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """The queue listing cap is cluster config, resolved per call: a shortened
     limit pushes only that many notices (task #3696)."""
@@ -584,7 +584,7 @@ def test_unaccepted_notices_caps_at_display_default(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """One source for the live-read cap: the DB-direct twin resolves the same
     display.notices_open_default_limit the gateway endpoint applies (task

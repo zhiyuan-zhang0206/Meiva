@@ -3,8 +3,7 @@
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machines import register_self
 from base.config import ConfigBoot, settings
 from base.db import Database
@@ -12,7 +11,7 @@ from base.db.code_version_gate import ProcessDbGate
 
 
 class MachineSetup:
-    def __init__(self, machine: MachineIdentity) -> None:
+    def __init__(self, machine: ConfiguredMachineIdentity) -> None:
         self.machine = machine
         self.home = "~/.meiva"
         self.gateway = "http://localhost:8000"
@@ -55,7 +54,7 @@ def truncate_machines(db_conn: None) -> None:
 @pytest.fixture
 def machine_setup(process_config: ConfigBoot) -> MachineSetup:
     """Provide one explicit registration owner; no process identity slot is changed."""
-    return MachineSetup(machine_from_boot(process_config))
+    return MachineSetup(ConfiguredMachineIdentity(process_config))
 
 
 def read_machine(name: str) -> tuple:

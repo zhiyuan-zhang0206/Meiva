@@ -11,7 +11,7 @@ import pytest
 
 import meiva
 from base.agents.observation.snapshot import select_one
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import settings
 from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
@@ -40,7 +40,9 @@ def seed_agent(db: psycopg.Connection) -> int:
 
 @pytest.fixture
 def sdk_via_inprocess_gateway(
-    gateway_data_plane: None, monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity
+    gateway_data_plane: None,
+    monkeypatch: pytest.MonkeyPatch,
+    machine_identity: MachineIdentityReader,
 ):
     """The notice SDK now goes through the unified gateway write API (R3 door
     ④): route the SDK's gateway client at the in-process app so notify /

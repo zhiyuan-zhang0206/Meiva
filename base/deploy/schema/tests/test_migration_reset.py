@@ -6,7 +6,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import (
     BASELINE_NAME,
@@ -27,7 +27,7 @@ from base.paths.home import resolve_meiva_home
 def test_apply_pending_squashes_orphaned_applied_names(
     db_conn: psycopg.Connection,
     tmp_path: Path,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     _ = db_conn
     orphan = "20260815T000001_synthetic-orphan"
@@ -56,7 +56,7 @@ def test_apply_pending_squashes_orphaned_applied_names(
 def test_apply_pending_squash_then_apply_pending(
     db_conn: psycopg.Connection,
     tmp_path: Path,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     _ = db_conn
     orphan = "20260815T000001_synthetic-orphan"
@@ -87,7 +87,7 @@ def test_apply_pending_squash_then_apply_pending(
 def test_squash_does_not_touch_baseline_or_pending(
     db_conn: psycopg.Connection,
     tmp_path: Path,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     _ = db_conn
     (tmp_path / f"{SYN}.sql").write_text("CREATE TABLE syn_keep_t (id int);")
@@ -117,7 +117,7 @@ def test_squash_does_not_touch_baseline_or_pending(
 def test_squash_authority_checked_even_without_pending(
     db_conn: psycopg.Connection,
     tmp_path: Path,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     _ = db_conn
     orphan = "20260815T000001_synthetic-orphan"
@@ -153,7 +153,7 @@ def test_squash_logs_the_converged_names(
     db_conn: psycopg.Connection,
     tmp_path: Path,
     loguru_records: list[dict[str, Any]],
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     _ = db_conn
     orphan = "20260815T000001_synthetic-orphan"
@@ -179,7 +179,7 @@ def test_squash_logs_the_converged_names(
 def test_squash_refuses_partial_pre_reset_history(
     db_conn: psycopg.Connection,
     tmp_path: Path,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.deploy.schema.migrations import V010_PRE_RESET_SET, MigrationHistoryGap
 
@@ -213,7 +213,7 @@ def test_squash_refuses_partial_pre_reset_history(
 def test_squash_converges_full_pre_reset_history(
     db_conn: psycopg.Connection,
     tmp_path: Path,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.deploy.schema.migrations import V010_PRE_RESET_SET
 
@@ -245,7 +245,7 @@ def test_squash_converges_full_pre_reset_history(
 def test_squash_ignores_pre_reset_names_outside_the_frozen_set(
     db_conn: psycopg.Connection,
     tmp_path: Path,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     _ = db_conn
     init_repo(tmp_path)
@@ -274,7 +274,7 @@ def test_squash_ignores_pre_reset_names_outside_the_frozen_set(
 def test_current_reset_refuses_missing_history_without_mutation(
     db_conn: psycopg.Connection,
     applied_count: int,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.deploy.schema.migration_history import PRE_RESET_SET
     from base.deploy.schema.migrations import MigrationHistoryGap, applied_migration_names
@@ -296,7 +296,7 @@ def test_current_reset_refuses_missing_history_without_mutation(
 
 def test_current_reset_converges_complete_history(
     db_conn: psycopg.Connection,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.deploy.schema.migration_history import PRE_RESET_SET, RESET_ANCHOR
     from base.deploy.schema.migrations import (
@@ -337,7 +337,7 @@ def test_current_reset_converges_complete_history(
 def test_integer_history_is_refused_without_conversion(
     db_conn: psycopg.Connection,
     apply: bool,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.deploy.schema.migrations import MigrationLayoutError, check_schema_version
     from base.deploy.schema.tests.migration_support import set_table_to
@@ -359,7 +359,7 @@ def test_integer_history_is_refused_without_conversion(
 def test_reset_anchor_and_history_deletion_roll_back_together(
     db_conn: psycopg.Connection,
     tmp_path: Path,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.deploy.schema import migrations
     from base.deploy.schema.migration_history import PRE_RESET_SET, RESET_ANCHOR
@@ -403,7 +403,7 @@ def test_reset_anchor_and_history_deletion_roll_back_together(
 def test_failed_reset_anchor_preserves_history_for_retry(
     db_conn: psycopg.Connection,
     tmp_path: Path,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.deploy.schema import migrations
     from base.deploy.schema.migration_history import PRE_RESET_SET, RESET_ANCHOR

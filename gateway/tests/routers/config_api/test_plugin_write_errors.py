@@ -7,7 +7,7 @@ import pytest
 from httpx2 import Response
 from pydantic import model_validator
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.host.system.tests.fake_commands import fake_host
@@ -70,7 +70,7 @@ def test_invalid_whole_candidate_is_rejected_without_writing(
     consumer: Literal["gateway", "host"],
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     saved = owned_image.read_bytes()
     result = write_request(
@@ -97,7 +97,7 @@ def test_concurrent_image_change_is_rejected_without_overwriting(
     consumer: Literal["gateway", "host"],
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     concurrent = ValidatedFleetConfig(task_escalate_n=19).model_dump_json().encode()
     original_lock = plugin_config_images.file_lock
@@ -131,7 +131,7 @@ def test_unexpected_persistence_failure_keeps_original_exception_and_bytes(
     consumer: Literal["gateway", "host"],
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     saved = owned_image.read_bytes()
     # meiva:note
@@ -157,7 +157,7 @@ def test_unexpected_owner_failure_keeps_original_exception_and_bytes(
     consumer: Literal["gateway", "host"],
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     saved = owned_image.read_bytes()
     with pytest.raises(ValueError, match="more than one declaration owner"):

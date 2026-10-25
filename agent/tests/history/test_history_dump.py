@@ -49,7 +49,7 @@ from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.domains.agent.settings import AgentCompactionSettings
@@ -452,7 +452,7 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """Enabled → the claim-node compact path (agent-written summary) dumps the
     pre-compact state.messages and parks the note after the summary in the
@@ -505,7 +505,7 @@ async def test_claim_compact_summary_no_note_when_disabled(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """Config off → claim-path compact tail is exactly today's (summary only)."""
     tid = spawn_agent(

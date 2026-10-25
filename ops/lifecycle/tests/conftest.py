@@ -5,7 +5,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.agents.birth.spawn import create_agent_row
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.config.tests.api_keys import mock_api_keys as mock_api_keys
@@ -25,7 +25,7 @@ from ops.lifecycle.tests.loopback.agent_host import ServedAgentHost, serve_agent
 def lifecycle_agent_id(
     database: Database,
     event_bus: EventBus,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
 ) -> int:

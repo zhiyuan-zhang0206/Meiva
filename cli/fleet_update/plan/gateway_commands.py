@@ -25,8 +25,8 @@ def smoke_command(machine: str, timeout_s: int) -> str:
 def machine_name_command() -> str:
     return (
         f'{PYTHON} -c "from base.config import ConfigBoot; '
-        "from base.cluster.machine.boot import machine_from_boot; "
-        'print(machine_from_boot(ConfigBoot()).name())"'
+        "from base.cluster.machine.configured import ConfiguredMachineIdentity; "
+        'print(ConfiguredMachineIdentity(ConfigBoot()).name())"'
     )
 
 

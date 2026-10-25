@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 import base.db
 from base.api_contracts.idempotency import keyed_headers
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db.code_version_gate import ProcessDbGate
 from gateway.schedules import router
@@ -23,7 +23,7 @@ def test_concurrent_restart_uses_one_desired_revision(
     db_conn: psycopg.Connection,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with schedule_client(machine=machine_identity) as client:
         sid = _create(client)
@@ -44,7 +44,10 @@ def test_concurrent_restart_uses_one_desired_revision(
 
 
 def test_delayed_restart_replay_cannot_undo_newer_stop(
-    gateway_data_plane: None, db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    gateway_data_plane: None,
+    db_conn: psycopg.Connection,
+    *,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with schedule_client(machine=machine_identity) as client:
         sid = _create(client)
@@ -61,7 +64,10 @@ def test_delayed_restart_replay_cannot_undo_newer_stop(
 
 
 def test_edit_receipt_replays_original_result_and_conflicts_on_changed_payload(
-    gateway_data_plane: None, db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    gateway_data_plane: None,
+    db_conn: psycopg.Connection,
+    *,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with schedule_client(machine=machine_identity) as client:
         sid = _create(client)
@@ -94,7 +100,7 @@ def test_malformed_operation_identity_does_not_change_schedule(
     db_conn: psycopg.Connection,
     headers: dict[str, str],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with schedule_client(machine=machine_identity) as client:
         sid = _create(client)
@@ -105,7 +111,10 @@ def test_malformed_operation_identity_does_not_change_schedule(
 
 
 def test_new_restart_identity_is_a_new_deliberate_rerun(
-    gateway_data_plane: None, db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    gateway_data_plane: None,
+    db_conn: psycopg.Connection,
+    *,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with schedule_client(machine=machine_identity) as client:
         sid = _create(client)

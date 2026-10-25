@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 from base import config
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import service_argv, storage_dir
 from cli.commands.observability import lgtm_native
@@ -40,7 +40,7 @@ def _render_configs(
     *,
     settings: LgtmSettings,
     producer: Callable[[], EventPipeline],
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
 ) -> None:
     lgtm_native.render_configs(
         repo,
@@ -60,7 +60,7 @@ def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_default
     tmp_path: Path,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     """The native Loki and Prometheus listeners are rendered from
     settings.observability.lgtm_listen_host; the loopback default reproduces the
@@ -160,7 +160,7 @@ def test_native_grafana_renders_from_the_repo_and_host_setting(
     tmp_path: Path,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     repo = Path(__file__).resolve().parents[3]
     home = tmp_path / "home"

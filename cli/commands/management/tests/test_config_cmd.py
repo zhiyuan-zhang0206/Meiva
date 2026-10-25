@@ -17,7 +17,8 @@ from base.api_contracts.config import (
     ConfigView,
     ConfigWriteResult,
 )
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.env.tests.env_files import unit_env_aliases
 from base.paths.tests.homes import unit_home as unit_home
@@ -542,7 +543,9 @@ def test_get_single_key(captured_put: ConfigGateway) -> None:
 
 
 def test_config_audit_local_reads_newest_first_and_filters(
-    local_env_home: Path, capsys: pytest.CaptureFixture[str], machine_identity: MachineIdentity
+    local_env_home: Path,
+    capsys: pytest.CaptureFixture[str],
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     from ops.env_audit import record_env_write
 
@@ -616,7 +619,7 @@ def test_config_audit_machine_fetches_via_gateway(captured_put: ConfigGateway) -
 
 
 def test_config_audit_rejects_out_of_range_last(
-    capsys: pytest.CaptureFixture[str], machine_identity: MachineIdentity
+    capsys: pytest.CaptureFixture[str], machine_identity: MachineIdentityReader
 ) -> None:
     assert cfg.cmd_config_audit(last=0, key=None, machine=None, identity=machine_identity) == 1
     assert "--last must be between 1 and 200" in capsys.readouterr().err

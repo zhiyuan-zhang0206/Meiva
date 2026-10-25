@@ -8,7 +8,7 @@ from agent.graph.prompt.context_notes import FRAMEWORK_NOTES
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
@@ -28,7 +28,7 @@ def memory_plugin() -> Any:
     return _plugin
 
 
-def _context(machine: MachineIdentity, agent_id: int | None = 1, **pins: Any) -> MeivaContext:
+def _context(machine: MachineIdentityReader, agent_id: int | None = 1, **pins: Any) -> MeivaContext:
     return MeivaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
         machine=machine,
@@ -146,7 +146,7 @@ def test_discipline_empty_only_when_both_stores_are_off(
 
 
 def test_context_notes_skips_the_stores_that_are_off(
-    memory_plugin: Any, machine_identity: MachineIdentity
+    memory_plugin: Any, machine_identity: MachineIdentityReader
 ) -> None:
     ctx = _context(
         machine_identity,
@@ -185,7 +185,7 @@ def test_memory_index_injection_guard(
     memory_plugin: Any,
     unit_home: Path,
     sdk_model_owner: None,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from meiva_builtins.plugins.meiva_memory.notes import memory_index_note
 
@@ -201,7 +201,7 @@ def test_memory_index_injection_guard(
 
 
 def test_memory_index_note_is_suppressed_for_eval_isolation(
-    memory_plugin: Any, unit_home: Path, machine_identity: MachineIdentity
+    memory_plugin: Any, unit_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     from meiva_builtins.plugins.meiva_memory import notes
 
@@ -213,7 +213,7 @@ def test_memory_index_note_is_suppressed_for_eval_isolation(
 
 
 def test_personal_index_uses_hosted_turn_identity(
-    unit_home: Path, machine_identity: MachineIdentity
+    unit_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     from meiva_builtins.plugins.meiva_memory import notes
 
@@ -232,7 +232,7 @@ def test_personal_index_uses_hosted_turn_identity(
 
 
 def test_personal_index_skips_unestablished_identity(
-    unit_home: Path, machine_identity: MachineIdentity
+    unit_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     from meiva_builtins.plugins.meiva_memory import notes
 
@@ -244,7 +244,7 @@ def test_personal_index_skips_unestablished_identity(
 
 
 def test_each_context_reads_its_own_index_switch(
-    unit_home: Path, machine_identity: MachineIdentity
+    unit_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     from meiva_builtins.plugins.meiva_memory import notes
 
@@ -270,7 +270,7 @@ def _write_index(agent_id: int, text: str) -> None:
     (mem_dir / "MEMORY.md").write_text(text, encoding="utf-8")
 
 
-def _per_agent_text(machine: MachineIdentity, *, cap: int | None = None) -> str:
+def _per_agent_text(machine: MachineIdentityReader, *, cap: int | None = None) -> str:
     from base.lm.system_note import unwrap_system_note
     from meiva_builtins.plugins.meiva_memory import notes
 
@@ -281,7 +281,7 @@ def _per_agent_text(machine: MachineIdentity, *, cap: int | None = None) -> str:
 
 
 def test_the_over_cap_index_keeps_the_full_body_and_gets_the_nudge(
-    unit_home: Path, machine_identity: MachineIdentity
+    unit_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     _write_index(17, "q\n" * 201)
 
@@ -292,7 +292,7 @@ def test_the_over_cap_index_keeps_the_full_body_and_gets_the_nudge(
 
 
 def test_the_index_at_the_cap_gets_no_nudge(
-    unit_home: Path, machine_identity: MachineIdentity
+    unit_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     _write_index(17, "q\n" * 200)
 
@@ -300,7 +300,7 @@ def test_the_index_at_the_cap_gets_no_nudge(
 
 
 def test_a_cap_of_zero_disables_the_nudge(
-    unit_home: Path, machine_identity: MachineIdentity
+    unit_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     _write_index(17, "q\n" * 201)
 
@@ -308,7 +308,7 @@ def test_a_cap_of_zero_disables_the_nudge(
 
 
 def test_the_cap_counts_lines_not_characters(
-    unit_home: Path, machine_identity: MachineIdentity
+    unit_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     _write_index(17, "q" * 5000)
     assert "[maintenance]" not in _per_agent_text(machine_identity, cap=5)

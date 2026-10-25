@@ -3,7 +3,7 @@ from collections.abc import Callable, Iterator
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.packages.tests.lm.providers.provider_plugin_support import (
     provider_plugin as provider_plugin,
@@ -18,7 +18,7 @@ def failed_provider_agent(
     provider_plugin: Callable[..., None],
     gateway_local_runner: RunnerOps,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> Iterator[tuple[GatewayTestClient, int]]:
     with gateway_test_client(machine=machine_identity) as client:
         born = spawn_via_http(client, {"prompt": "keep this agent", "prompt_source": "user"})
@@ -63,7 +63,7 @@ def test_normal_birth_pin_keeps_list_and_detail_capabilities_consistent(
     db_conn: psycopg.Connection,
     cluster_defaults_unset: None,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with gateway_test_client(machine=machine_identity) as client:
         chosen = client.put("/api/config/default-model", json={"model": "claude-sonnet-5"})

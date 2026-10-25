@@ -22,7 +22,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.db import create_agent
@@ -31,7 +31,7 @@ from gateway.tests.support.checkpoints.unreadable import put_unreadable_head
 
 
 @pytest.fixture
-def test_client(db_conn: psycopg.Connection, *, machine_identity: MachineIdentity):
+def test_client(db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader):
     """TestClient + lifespan. db_conn's TRUNCATE runs before lifespan — the
     DB pool reuses the same test database (settings.data_plane.db_url is swapped by the
     conftest)."""
@@ -331,7 +331,7 @@ def test_before_zero_returns_empty_window(
 #
 # The stored head cannot be deserialized, exercising the CheckpointReadError -> 503 path.
 def test_checkpoint_read_failure_returns_503(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     tid = create_agent(db_conn)
     put_unreadable_head(settings.data_plane.db_url, tid)

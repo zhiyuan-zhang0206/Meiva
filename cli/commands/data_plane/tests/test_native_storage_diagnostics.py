@@ -16,7 +16,7 @@ from unittest.mock import Mock
 import pytest
 
 from base import cluster
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.deploy.tests.containers import free_port, redis_server
@@ -77,7 +77,7 @@ def test_absent_native_redis_diagnostic_is_down(tmp_path: Path, redis_access: No
 async def test_native_pooler_diagnostic_authenticates_without_config_writes(
     native_pooler: tuple[OwnedPooler, str, str],
     monkeypatch: pytest.MonkeyPatch,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     custodian, _pooled, _direct = native_pooler
     ports = cluster.new_home_ports()

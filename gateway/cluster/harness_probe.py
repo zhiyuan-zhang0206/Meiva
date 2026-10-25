@@ -7,7 +7,7 @@ import time
 from fastapi import HTTPException
 
 from base.cluster import machines
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from gateway.cluster.ops_dispatch import dispatch_op
 from gateway.cluster.schemas import HarnessAvailability
@@ -50,7 +50,7 @@ class HarnessProbeCache:
 # `unknown` rather than a `launchable` option that leads nowhere.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
 async def probe_harnesses(
-    target: str, *, db: Database, local_machine: MachineIdentity
+    target: str, *, db: Database, local_machine: MachineIdentityReader
 ) -> HarnessProbeResult:
     if target == local_machine.name():
         role = local_machine.role()

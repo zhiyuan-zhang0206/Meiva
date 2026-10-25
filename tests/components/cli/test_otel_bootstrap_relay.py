@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from base import config, paths
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config.domains.observability.settings import ObservabilitySettings
 from base.config.service_read import ConfigAuthority
 from base.host.db_authority.api import telemetry_token
@@ -35,7 +35,7 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
     gateway_port: int,
     local_port: int,
     operator_database: Callable[[], Any],
-    command_machine: MachineIdentity,
+    command_machine: ConfiguredMachineIdentity,
 ) -> None:
     (tmp_path / ".env").write_text(
         "MEIVA_MACHINE_SERVE_GATEWAY=true\n"

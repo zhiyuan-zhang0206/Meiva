@@ -13,7 +13,7 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -34,7 +34,7 @@ from services.wake.heartbeat.tests.heartbeat_support import pool as pool
 
 @pytest.fixture
 def event_pipeline(
-    database: Database, machine_identity: MachineIdentity, unit_home: Path
+    database: Database, machine_identity: MachineIdentityReader, unit_home: Path
 ) -> Iterator[telemetry.EventPipeline]:
     """Own the process writer used by the service operation and mirror barrier."""
     pipeline = telemetry.build_pipeline(
@@ -101,7 +101,7 @@ class TestSendHeartbeatCheckin:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = spawn_agent(
             spawner="user",
@@ -153,7 +153,7 @@ class TestSendHeartbeatCheckin:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """A completed check-in must start a durable reminder interval.
 
@@ -187,7 +187,7 @@ class TestSendHeartbeatCheckin:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """The 15-second dispatcher step must not become the reminder cadence."""
         aid = make_idle(
@@ -229,7 +229,7 @@ class TestSendHeartbeatCheckin:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """The check-in publishes a Redis wake to the target agent's channel so an
         idle agent runs the heartbeat turn now instead of at its next SELECT
@@ -273,7 +273,7 @@ class TestConsecutiveFailureBackoff:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,
@@ -307,7 +307,7 @@ class TestConsecutiveFailureBackoff:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """The limit applies AFTER the backoff filter: a backed-off agent must
         not occupy a per-step wake-rate slot that a healthy due agent needs."""
@@ -349,7 +349,7 @@ class TestConsecutiveFailureBackoff:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """Use the actual PG result in pending state, as the dispatch loop does."""
         aid = make_idle(
@@ -388,7 +388,7 @@ class TestConsecutiveFailureBackoff:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """The check-in was sent when the agent had been idle ~6 minutes; a
         cycle later `last_active_at` has not moved (no turn ran) -> streak 1."""
@@ -419,7 +419,7 @@ class TestConsecutiveFailureBackoff:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """The check-in produced a turn (`last_active_at` advanced) -> streak
         reset (stays empty / drops)."""
@@ -455,7 +455,7 @@ class TestConsecutiveFailureBackoff:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """No check-in was sent this cycle (backoff active), but a real wake
         produced a turn — fresh `last_active_at` clears the streak so the
@@ -491,7 +491,7 @@ class TestConsecutiveFailureBackoff:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = make_idle(
             db_conn,

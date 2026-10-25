@@ -7,7 +7,7 @@ import pytest
 
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.inbound import InboundKind
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -35,7 +35,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """A repeated force creates a newer intent fence without changing the
         real status-transition epoch used to reopen pages on manual resurrect."""
@@ -115,7 +115,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """Even without a real status transition, a repeated explicit force
         fences every chat inbound that existed before that latest intent."""
@@ -162,7 +162,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """A watchdog task selected for one death must not revive a later
         explicit kill while its RPC was in flight."""
@@ -224,7 +224,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """A trigger claimed while the RPC is in flight no longer justifies
         launching the terminated owner."""
@@ -271,7 +271,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """A pending chat created after the current death still auto-wakes the
         agent, preserving the post-termination delivery contract."""
@@ -319,7 +319,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """UI compact is guarded work too: its exact durable id and expected
         kind qualify only while pending after the current death."""
@@ -367,7 +367,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """The caller's expected kind is part of the CAS, and a compact that
         has already been claimed no longer licenses a new process."""
@@ -427,7 +427,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """A force after compact enqueue fences that older work exactly like
         chat, even though no second status transition occurs."""

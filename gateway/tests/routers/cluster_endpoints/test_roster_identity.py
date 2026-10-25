@@ -14,7 +14,7 @@ import pytest
 
 import gateway.cluster.status as status_mod
 from base.api_contracts.status import MachineStatus
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from gateway.cluster.process_boot import LOADED_IMAGE
@@ -37,7 +37,7 @@ def _row(name: str, url: str | None, *roles: str, stopped: bool = False) -> Rost
 
 
 def _env(
-    database: Database, machine: MachineIdentity, home: Path, log: IdentityMismatchLog
+    database: Database, machine: MachineIdentityReader, home: Path, log: IdentityMismatchLog
 ) -> RosterEnv:
     return RosterEnv(
         db=database,
@@ -75,7 +75,7 @@ def test_a_runner_row_is_probed_over_its_registered_url(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     reply = _answer(
         "m1",
@@ -109,7 +109,7 @@ def test_the_probe_flags_identity_mismatch_when_the_responder_name_differs(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with runner_ops(db_conn, "air", {"status_probe": _answer("gateway-host")}) as runner:
         [m] = _gather(
@@ -134,7 +134,7 @@ def test_an_identity_mismatch_logs_once_per_episode(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     responder = {"name": "gateway-host"}
 
@@ -183,7 +183,7 @@ def test_an_identity_mismatch_on_a_stopped_machine_is_info_once(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     caplog.set_level(logging.DEBUG, logger="gateway.cluster.roster.roster_probe")
     env = _env(database, machine_identity, tmp_path, IdentityMismatchLog())
@@ -208,7 +208,7 @@ def test_a_pure_gateway_local_row_is_a_local_read_with_no_dial(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     name = machine_identity.name()
     with runner_ops(db_conn, "elsewhere", {}) as elsewhere:
@@ -239,7 +239,7 @@ def test_the_gather_returns_rows_sorted_by_name(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     rows = [
         _row("zz-runner", None),
@@ -262,7 +262,7 @@ def test_the_gather_carries_the_probe_paused_reason(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     reply = _answer("m1", paused=True, paused_reason="startup")
     with runner_ops(db_conn, "m1", {"status_probe": reply}) as runner:

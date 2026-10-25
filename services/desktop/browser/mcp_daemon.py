@@ -69,7 +69,7 @@ from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -716,7 +716,7 @@ def main() -> None:
     image = LoadedCommit.capture()
     config = ConfigBoot()
     config.boot()
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     process_home = meiva_home().resolve()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="browser-mcp")

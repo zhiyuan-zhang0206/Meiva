@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 
 from base.cluster.dataplane.redis_bridge import RedisBridgeEndpoint, redis_bridge_endpoint
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from services.supervision.roster.composition import build_services, redis_bridge_launch
 from services.supervision.roster.gate_plan import BridgeFact, gate_reason
@@ -27,7 +28,7 @@ def test_the_bridge_is_a_gateway_unit_run_by_the_system_interpreter() -> None:
 
 
 def test_a_macos_gateway_with_a_private_address_is_not_gated(
-    unit_home: Path, machine_identity: MachineIdentity
+    unit_home: Path, machine_identity: ConfiguredMachineIdentity
 ) -> None:
     (unit_home / "start-intent.json").write_text(
         json.dumps(
@@ -60,7 +61,9 @@ def test_the_unit_command_carries_the_recorded_listen_address() -> None:
     assert (host, port) == ("10.64.0.7", 16380)
 
 
-def test_a_non_macos_host_is_gated_out(unit_home: Path, machine_identity: MachineIdentity) -> None:
+def test_a_non_macos_host_is_gated_out(
+    unit_home: Path, machine_identity: MachineIdentityReader
+) -> None:
     endpoint = redis_bridge_endpoint(
         unit_home,
         machine_host=machine_identity.host,

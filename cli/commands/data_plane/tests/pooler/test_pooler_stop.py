@@ -23,7 +23,7 @@ import psycopg
 import pytest
 
 from base.cluster import port_preflight
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.native_process.ownership import OwnedProcess
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import maintenance_stop
@@ -165,7 +165,7 @@ def test_a_restart_cannot_replace_a_pooler_holding_a_transaction(
     native_pooler: tuple[OwnedPooler, str, str],
     unit_home: Path,
     capsys: pytest.CaptureFixture[str],
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     custodian, pooled, direct = native_pooler
     with psycopg.connect(pooled) as client:

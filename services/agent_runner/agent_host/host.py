@@ -53,7 +53,7 @@ from base.agents.messages.timestamp_policy import TimestampSource
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
 from base.api_contracts.agent_contract import Harness
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
 from base.events.live.announce import publish_agent_updated
@@ -133,7 +133,7 @@ class AgentHost:
         control_pool: AsyncConnectionPool[psycopg.AsyncConnection] | None = None,
         checkpointer: AsyncPostgresSaver,
         graph: _HostGraph,
-        machine: MachineIdentity,
+        machine: MachineIdentityReader,
         bus: EventBus,
         db: Database,
         catalog: ModelCatalog,

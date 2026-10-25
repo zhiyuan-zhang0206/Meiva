@@ -9,8 +9,7 @@ from pathlib import Path
 from typing import TextIO
 
 from base.clock import SYSTEM_TIMERS, Timers
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
@@ -79,7 +78,7 @@ class CommandRuntime:
     # same value for the init/start site and creates the directory: the runtime only holds it, so
     # nothing below the entry names the home a second way.
     home: Path
-    machine: MachineIdentity
+    machine: ConfiguredMachineIdentity
     # meiva:note
     # The permissions-helper factory, or None on a platform that has no helper (Linux). None is
     # only ever the answer to "does this platform have a helper": no setting, environment
@@ -111,7 +110,7 @@ class CommandRuntime:
         return cls(
             config=config,
             home=home,
-            machine=machine_from_boot(config),
+            machine=ConfiguredMachineIdentity(config),
             helper=helper_for(host.platform),
             host=host,
             session=UserSession.current(),

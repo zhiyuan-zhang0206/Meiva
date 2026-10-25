@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 
 from base import config
 from base.cluster import rate_limit
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.cluster.rate_limit import LoginRateLimitConfig, LoginRateLimiter
 from gateway.http.config import gateway_config_from_boot
@@ -63,7 +63,9 @@ def _wrong_login(
 # ── Endpoint contract ─────────────────────────────────────────────────
 
 
-def test_sixth_consecutive_failure_is_locked_out(*, machine_identity: MachineIdentity) -> None:
+def test_sixth_consecutive_failure_is_locked_out(
+    *, machine_identity: MachineIdentityReader
+) -> None:
     with gateway_test_client(machine=machine_identity) as client:
         for _ in range(config.settings.gateway.login_max_failures):
             _wrong_login(client)
@@ -79,7 +81,7 @@ def test_sixth_consecutive_failure_is_locked_out(*, machine_identity: MachineIde
 
 
 def test_correct_password_is_not_evaluated_while_locked(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     """While locked the credential never reaches the comparison — a correct
     password also gets 429, so the lockout cannot be probed away."""
@@ -90,7 +92,9 @@ def test_correct_password_is_not_evaluated_while_locked(
     assert resp.status_code == 429
 
 
-def test_successful_login_resets_failure_counter(*, machine_identity: MachineIdentity) -> None:
+def test_successful_login_resets_failure_counter(
+    *, machine_identity: MachineIdentityReader
+) -> None:
     with gateway_test_client(machine=machine_identity) as client:
         # A success after 4 failures clears the streak...
         for _ in range(config.settings.gateway.login_max_failures - 1):
@@ -103,7 +107,7 @@ def test_successful_login_resets_failure_counter(*, machine_identity: MachineIde
     assert resp.status_code == 429
 
 
-def test_lockout_expires_and_recovers(*, machine_identity: MachineIdentity) -> None:
+def test_lockout_expires_and_recovers(*, machine_identity: MachineIdentityReader) -> None:
     window_s = 60
     with gateway_test_client(
         machine=machine_identity, fields={"login_lockout_seconds": window_s}
@@ -120,7 +124,7 @@ def test_lockout_expires_and_recovers(*, machine_identity: MachineIdentity) -> N
     assert resp.status_code == 200
 
 
-def test_lockout_holds_until_it_expires(*, machine_identity: MachineIdentity) -> None:
+def test_lockout_holds_until_it_expires(*, machine_identity: MachineIdentityReader) -> None:
     window_s = 60
     with gateway_test_client(
         machine=machine_identity, fields={"login_lockout_seconds": window_s}
@@ -132,7 +136,7 @@ def test_lockout_holds_until_it_expires(*, machine_identity: MachineIdentity) ->
     assert locked.status_code == 429
 
 
-def test_lockout_is_per_ip(*, machine_identity: MachineIdentity) -> None:
+def test_lockout_is_per_ip(*, machine_identity: MachineIdentityReader) -> None:
     with gateway_test_client(client=("203.0.113.7", 40000), machine=machine_identity) as attacker:
         for _ in range(config.settings.gateway.login_max_failures):
             _wrong_login(attacker)
@@ -149,7 +153,7 @@ def test_lockout_is_per_ip(*, machine_identity: MachineIdentity) -> None:
 
 
 def test_login_lockout_is_isolated_between_application_lifespans(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     with gateway_test_process(machine=machine_identity) as process:
         app_config = gateway_config_from_boot(process.config)
@@ -176,7 +180,9 @@ def test_login_lockout_is_isolated_between_application_lifespans(
             )
 
 
-def test_lockout_threshold_and_window_follow_config(*, machine_identity: MachineIdentity) -> None:
+def test_lockout_threshold_and_window_follow_config(
+    *, machine_identity: MachineIdentityReader
+) -> None:
     """The lockout numbers resolve from config at call time — a cluster can
     tighten the policy without a new release (task #3696: every user-facing
     limit carries a config home)."""

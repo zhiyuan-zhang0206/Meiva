@@ -9,7 +9,9 @@ import pytest
 
 import meiva.self as self_mod
 from base.agents.context import MeivaContext
-from base.cluster.machine import MachineIdentity, MachineNameMissing
+from base.cluster.machine import MachineFacts, MachineNameMissing, MachineRoleMissing
+from base.cluster.machine.configured import ConfiguredMachineIdentity
+from base.config import ConfigBoot
 from meiva.sdk_surface import install as sdk_install
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.installation import installed
@@ -28,12 +30,12 @@ def restore_context() -> Iterator[None]:
             process_context.bind_context(prior)
 
 
-def _machine(name: str, description: str | None) -> MachineIdentity:
-    return MachineIdentity(
-        name=lambda: name,
-        role=lambda: frozenset({"gateway"}),
-        host=lambda: "localhost",
-        description=lambda: description,
+def _machine(name: str, description: str | None) -> MachineFacts:
+    return MachineFacts.of(
+        name=name,
+        role=frozenset({"gateway"}),
+        host="localhost",
+        description=description,
     )
 
 
@@ -64,39 +66,32 @@ def test_machine_reads_require_a_context() -> None:
 @pytest.mark.usefixtures("restore_context")
 def test_partial_context_has_no_machine_fallback() -> None:
     process_context.bind_context(MeivaContext())
-    with pytest.raises(RuntimeError, match="no MachineIdentity"):
+    with pytest.raises(RuntimeError, match="no MachineIdentityReader"):
         _ = self_mod.MACHINE_SPEC
 
 
 @pytest.mark.usefixtures("restore_context")
 def test_no_agent_machine_owner_stays_lazy_and_independent() -> None:
-    reads: list[str] = []
     installation_before = installed()
     load_attempted_before = sdk_install.load_attempted()
 
-    def name() -> str:
-        reads.append("name")
-        return "explicit"
-
-    def description() -> str:
-        reads.append("description")
-        return "owned"
-
-    def forbidden() -> object:
-        pytest.fail("a machine read must not resolve clients or plugins")
-
-    machine = MachineIdentity(
-        name=name,
-        description=description,
-        role=forbidden,  # type: ignore[arg-type]  # deliberate failing reader
-        host=forbidden,  # type: ignore[arg-type]  # deliberate failing reader
-    )
+    config = ConfigBoot()
+    config.read_process_environment()
+    config.set_field("machine_name", "")
+    config.set_field("machine_serve_gateway", False)
+    config.set_field("machine_serve_agent_runner", False)
+    config.set_field("machine_serve_observability_station", False)
+    machine = ConfiguredMachineIdentity(config)
     context = MeivaContext(machine=machine)
     process_context.bind_context(context)
-    assert reads == []
+    config.set_field("machine_name", "explicit")
+    config.set_field("machine_description", "owned")
     assert self_mod.MACHINE_SPEC == ("explicit", "owned")
+    config.set_field("machine_name", "")
+    config.set_field("machine_description", "mutated")
     assert self_mod.MACHINE_SPEC == ("explicit", "owned")
-    assert reads == ["name", "description"]
+    with pytest.raises(MachineRoleMissing):
+        machine.role()
     assert context.identity is None
     assert context.db is None
     process_context.bind_context(replace(context, machine=_machine("other", None)))

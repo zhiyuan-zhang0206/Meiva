@@ -17,7 +17,7 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.inbox.insert import insert_inbound_message
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -39,7 +39,7 @@ _HOST_STALENESS_S = 120.0
 
 @pytest.fixture
 def event_pipeline(
-    database: Database, machine_identity: MachineIdentity, unit_home: Path
+    database: Database, machine_identity: MachineIdentityReader, unit_home: Path
 ) -> Iterator[telemetry.EventPipeline]:
     """Own the process writer used by the service operation and mirror barrier."""
     pipeline = telemetry.build_pipeline(
@@ -69,7 +69,7 @@ def idling_agent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> int:
     """spawn_agent creates the agents_meta row (create_agent does not — that
     is the spawn path's job); the alert filter reads owner status, so tests
@@ -96,7 +96,7 @@ def terminated_agent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> int:
     aid = idling_agent(
         db,
@@ -121,7 +121,7 @@ def _make_running_agent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> int:
     from base.agents.tests.units import spawn_agent
 
@@ -173,7 +173,7 @@ def _set_host_verdict(
     agent_host: bool = True,
     age_s: float = 0.0,
     machine: str | None = None,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> None:
     """Upsert the `machine_probe` verdict the dispatch host gate reads."""
 
@@ -193,7 +193,9 @@ def _set_host_verdict(
 
 
 @pytest.fixture(autouse=True)
-def healthy_host_verdict(db_conn: psycopg.Connection, *, machine_identity: MachineIdentity) -> None:
+def healthy_host_verdict(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
+) -> None:
     """Normal dispatch condition: a fresh reachable machine with a live host.
 
     Host-gate tests override the verdict inside the test body."""
@@ -210,7 +212,7 @@ class TestSelectStalePending:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = idling_agent(
             db_conn,
@@ -246,7 +248,7 @@ class TestSelectStalePending:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = idling_agent(
             db_conn,
@@ -270,7 +272,7 @@ class TestSelectStalePending:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = idling_agent(
             db_conn,
@@ -291,7 +293,7 @@ class TestSelectStalePending:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         # meiva:note
         # A notice-expiry row is queued for a dead owner to read on a later life
@@ -322,7 +324,7 @@ class TestSelectStalePending:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         # meiva:note
         # A peer's chat means the delivery auto-resurrect was supposed to run and
@@ -352,7 +354,7 @@ class TestSelectStalePending:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         # meiva:note
         # A system notice is not evidence of a lost wake. Measured 2026-10-22 over 3
@@ -385,7 +387,7 @@ class TestSelectStalePending:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """A chat inbound queued behind a long in-flight turn (owner
         status='running') is normal, not a delivery stall — the turn-end SELECT
@@ -414,7 +416,7 @@ class TestScanOnce:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = idling_agent(
             db_conn,
@@ -443,7 +445,7 @@ class TestScanOnce:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = idling_agent(
             db_conn,
@@ -478,7 +480,7 @@ class TestScanOnce:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """The alert emits through the unified emitter: the canonical
         `events` row (telemetry/delivery_stalled). The legacy agent_events

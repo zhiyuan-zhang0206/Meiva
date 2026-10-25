@@ -648,9 +648,9 @@ def test_the_machine_name_is_asked_through_the_hosts_real_shell(shell: str, tmp_
         source / "base" / "cluster" / "machine",
     ):
         (package / "__init__.py").write_text("")
-    (source / "base" / "cluster" / "machine" / "boot.py").write_text(
+    (source / "base" / "cluster" / "machine" / "configured.py").write_text(
         'class Identity:\n    def name(self) -> str:\n        return "mac-mini"\n'
-        "def machine_from_boot(config) -> Identity:\n    return Identity()\n"
+        "def ConfiguredMachineIdentity(config) -> Identity:\n    return Identity()\n"
     )
     (source / "base" / "config.py").write_text("class ConfigBoot: pass\n")
     python = source / ".venv" / "bin" / "python"

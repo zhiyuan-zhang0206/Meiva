@@ -7,7 +7,7 @@ from psycopg_pool import ConnectionPool
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -31,7 +31,7 @@ async def test_failed_checkin_is_retried_after_backoff_across_ticks(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     idle_threshold = settings.daemon.heartbeat_idle_threshold_seconds
     aid = spawn_agent(

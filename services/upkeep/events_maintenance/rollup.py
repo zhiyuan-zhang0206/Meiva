@@ -33,7 +33,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import psycopg
 
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.db.code_version_gate import ProcessDbGate
 from base.events.contract import LLM_USAGE_KEYS, TURN_END_KEYS
@@ -212,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     first, last = parse_range(argv)
     config = ConfigBoot()
     config.boot()
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     image = LoadedCommit.capture()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process=process_name())

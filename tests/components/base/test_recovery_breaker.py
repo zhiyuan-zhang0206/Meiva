@@ -13,7 +13,7 @@ from base.agents.recovery.breaker import (
     record_permanent_reject_turn,
 )
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -34,7 +34,7 @@ async def test_record_increments_and_halt_suppresses_until_human(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     aid = spawn_agent(
         spawner="user",
@@ -74,7 +74,7 @@ async def test_halt_replaces_another_reasons_window(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     aid = spawn_agent(
         spawner="user",

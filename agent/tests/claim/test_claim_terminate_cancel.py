@@ -24,7 +24,7 @@ from agent.tests.claim.claim_status_support import await_status, set_agent_statu
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
@@ -42,7 +42,7 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
     aops_pool: AsyncConnectionPool,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """terminate inbound → claim appends lifecycle marker (HumanMessage containing
     'Termination was accepted from {source}' text + meiva_msg_type='lifecycle' metadata)
@@ -89,7 +89,7 @@ async def test_claim_turn_boundary_ends_invocation_instead_of_waiting(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """One graph invocation = one TURN: a claim pass that finds nothing to do
     AFTER this invocation already routed work (turn_active=True) ends the
@@ -122,7 +122,7 @@ async def test_claim_hosted_ends_turn_instead_of_parking(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """Hosted mode has no process to park: a fresh invocation (turn_active=False)
     that finds nothing must goto END with `turn_idle`, not enter the IDLING wait.
@@ -157,7 +157,7 @@ async def test_claim_hosted_never_enters_idling_status(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """The hosted claim branch never writes status: `_wait_for_batch` would flip
     to IDLING before it blocks, while the host owns running/idling around the
@@ -196,7 +196,7 @@ async def test_claim_hosted_still_dispatches_an_available_batch(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """Hosted mode changes only the empty-batch branch. When the first SELECT
     finds work, dispatch is byte-for-byte the process path — the turn runs, and
@@ -233,7 +233,7 @@ async def test_claim_cancel_kind_halts_to_idle_without_marker(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """cancel inbound → pause: halted=True + re-enter CLAIM (-> idle), NOT END
     (process stays alive). No lifecycle marker (a pause leaves no trace); a
@@ -273,7 +273,7 @@ async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """User sends a chat, then clicks Stop while the agent's code is executing;
     both land pending and are claimed in one batch (the interrupt aborts the
@@ -331,7 +331,7 @@ async def test_claim_cancel_before_chat_cobatch_wakes_to_process_chat(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """Same as above but the cancel is the OLDER row (user clicks Stop, then
     sends a new message while both are still pending). The wake decision is
@@ -372,7 +372,7 @@ async def test_claim_cancel_batched_with_terminate_terminate_wins(
     aops_pool: AsyncConnectionPool,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """cancel + terminate in the same claim batch (user clicks Stop then
     Terminate before claim runs) → terminate WINS: goto END (process exits), not
@@ -408,7 +408,7 @@ async def test_claim_lifecycle_marker_drops_timestamp_when_disabled(
     aops_pool: AsyncConnectionPool,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     # meiva:note
     # message_timestamps=False → no timestamp: the open tag leads, then the text, no stray space.
@@ -442,7 +442,7 @@ async def test_claim_terminate_self_renders_by_yourself(
     aops_pool: AsyncConnectionPool,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """source='self' (meiva.self.terminate() suicide) → marker text spells 'by yourself'
     instead of 'by self', more accurately expressing 'agent shuts itself down' semantics."""
@@ -470,7 +470,7 @@ async def test_claim_self_terminate_retains_peer_chat_for_successor(
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """Accepting self termination never acknowledges an unseen peer message."""
     tid = running_agent()
@@ -511,7 +511,7 @@ async def test_claim_self_terminate_retains_older_user_chat(
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """An older user chat remains durable without vetoing the accepted command."""
     tid = running_agent()
@@ -545,7 +545,7 @@ async def test_claim_external_terminate_retains_newer_chat(
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """Newer chat does not replace an accepted lifecycle command or get lost."""
     tid = running_agent()
@@ -579,7 +579,7 @@ async def test_claim_external_terminate_with_older_chat_still_dies(
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """Regression guard: a deliberate external kill is NOT vetoed by chats that
     predate it — the actor decided with the pending queue visible, so the
@@ -648,7 +648,7 @@ async def test_claim_restart_before_terminate_preserves_serial_order(
     aops_pool: AsyncConnectionPool,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """The active restart is not discarded by a later termination request."""
     tid = running_agent()
@@ -680,7 +680,7 @@ async def test_claim_cancel_batched_with_restart_idle_restart_silent(
     live_events: LiveEvents,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """cancel + restart in the same batch (user clicks Stop then Restart) → restart wins over cancel:
     exits normally via restart; the Cancelled event for cancel is still emitted (frontend clears
@@ -720,7 +720,7 @@ async def test_claim_terminate_then_restart_preserves_serial_order(
     aops_pool: AsyncConnectionPool,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """An owned runtime accepts the first lifecycle command, not latest-wins.
 
@@ -755,7 +755,7 @@ async def test_claim_terminate_external_source_renders_source_verbatim(
     aops_pool: AsyncConnectionPool,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """source='agent:42' (another agent triggering terminate) → marker uses 'by agent:42'
     as-is, does not go through _by_who's self special case."""

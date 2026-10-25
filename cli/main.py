@@ -42,7 +42,7 @@ from cli.startup.log_sinks import cli_log_name
 from cli.startup.settings_failure import settings_failure_text
 
 if TYPE_CHECKING:
-    from base.cluster.machine import MachineIdentity
+    from base.cluster.machine import MachineIdentityReader
     from cli.database import OpenDatabase, OperatorDatabaseFactory, OperatorEventPipeline
 
 __all__ = [
@@ -58,7 +58,7 @@ __all__ = [
 # meiva:note
 # Builds the command's telemetry producer from its database factory, machine identity and home.
 type ProducerFactory = Callable[
-    [OperatorDatabaseFactory, MachineIdentity, Path], OperatorEventPipeline
+    [OperatorDatabaseFactory, MachineIdentityReader, Path], OperatorEventPipeline
 ]
 
 # Settings-lite verbs — they must construct Settings while the gateway is down
@@ -241,7 +241,7 @@ def main(
 
 
 def _operator_producer(
-    database_factory: OperatorDatabaseFactory, machine: MachineIdentity, home: Path
+    database_factory: OperatorDatabaseFactory, machine: MachineIdentityReader, home: Path
 ) -> OperatorEventPipeline:
     from cli.database import operator_event_pipeline
 

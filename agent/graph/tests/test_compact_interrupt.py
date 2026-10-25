@@ -25,7 +25,7 @@ from agent.state import AgentState, CompactState, checkpoint_msgpack_allowlist
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
 from base.db import Database, create_agent
@@ -154,7 +154,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     model = ScriptedModel(
         AIMessage(content="the retained summary is still above the ceiling " * 30),

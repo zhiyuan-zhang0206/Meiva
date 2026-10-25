@@ -15,7 +15,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import has_pending_interrupt, pending_interrupt_reason
 from agent.graph.interrupt import subscribe_interrupt
 from base.agents.messages.inbound import InterruptReason
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import create_agent
 from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
@@ -119,7 +119,7 @@ class TestHasPendingInterrupt:
         assert await has_pending_interrupt(aops_pool, tid) is True
 
     async def test_false_on_unmarked_maintenance_restart(
-        self, db_conn, aops_pool: AsyncConnectionPool, *, machine_identity: MachineIdentity
+        self, db_conn, aops_pool: AsyncConnectionPool, *, machine_identity: MachineIdentityReader
     ):
         # meiva:note
         # The drain waits for the turn boundary: a restart younger than its grace never

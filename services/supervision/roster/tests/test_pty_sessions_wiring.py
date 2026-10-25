@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.system.tests.fake_commands import fake_host
 from services.agent_runner.pty_sessions import shutdown_budget
@@ -12,7 +12,7 @@ def _spec() -> service_spec.ServiceSpec:
 
 
 def test_both_a_gateway_host_and_a_runner_host_run_the_service(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     declared = _spec()
     assert declared.capabilities == frozenset({"gateway", "agent-runner"})

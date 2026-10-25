@@ -30,13 +30,13 @@ def test_machine_names_in_agents_all() -> None:
 def test_self_exports_machine_consts() -> None:
     assert "MACHINE_SPEC" in meiva.self.__all_for_meiva__
     from base.agents.context import MeivaContext
-    from base.cluster.machine import MachineIdentity
+    from base.cluster.machine import MachineFacts
 
-    machine = MachineIdentity(
-        name=lambda: "test",
-        role=lambda: frozenset({"gateway"}),
-        host=lambda: "localhost",
-        description=lambda: None,
+    machine = MachineFacts.of(
+        name="test",
+        role=frozenset({"gateway"}),
+        host="localhost",
+        description=None,
     )
     prior = getattr(meiva, "context", None)
     process_context.bind_context(MeivaContext(machine=machine))

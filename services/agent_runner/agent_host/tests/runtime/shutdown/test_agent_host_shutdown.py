@@ -23,7 +23,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from base.agents.sdk.call_policy import SamplingPolicyOwner
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineFacts
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
 from base.db import Database
@@ -206,11 +206,11 @@ def _run_shutdown(failure: str, *, database_gate: ProcessDbGate, home: Path) -> 
     ):
         daemon.install_graceful_shutdown("agent_host_test")
         try:
-            machine = MachineIdentity(
-                name=lambda: "shutdown-test",
-                role=lambda: frozenset({"agent-runner"}),
-                host=lambda: "localhost",
-                description=lambda: None,
+            machine = MachineFacts.of(
+                name="shutdown-test",
+                role=frozenset({"agent-runner"}),
+                host="localhost",
+                description=None,
             )
             asyncio.run(
                 daemon.run(

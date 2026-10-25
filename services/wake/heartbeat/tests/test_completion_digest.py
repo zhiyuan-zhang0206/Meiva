@@ -11,7 +11,7 @@ from psycopg import sql
 
 from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.daemon.schedules.completion_notices import (
     CompletionNotice,
@@ -39,7 +39,7 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
     db_conn: psycopg.Connection,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     import base.db
 
@@ -133,7 +133,7 @@ def test_unknown_digest_failure_propagates_to_service(
     db_conn: psycopg.Connection,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """An unknown failure ends this round rather than deferring poison work."""
     import base.db
@@ -200,7 +200,7 @@ def test_digest_postcommit_failure_keeps_events_unmarked_and_recovers_same_inbou
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     import base.db
     from base.agents.inbox.chat_delivery import ChatInboundCommittedError
@@ -267,7 +267,7 @@ def test_owned_digest_round_uses_its_clock_to_close_each_window_once(
     db_conn: psycopg.Connection,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     import base.db
 

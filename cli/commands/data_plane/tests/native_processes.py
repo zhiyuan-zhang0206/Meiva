@@ -28,7 +28,7 @@ from base.cluster import ownership
 from base.cluster.dataplane import pooler as pooler_files
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.cluster.dataplane.pg_tools import throwaway_postgres
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.deploy.tests.containers import free_port, wait_port
 from base.host.db_authority.delivery import POOLER_ADMIN
 from base.native_process.ownership import OwnedProcess
@@ -88,7 +88,7 @@ def pooler_binary() -> str:
 # test. The userlist carries the admin console entry whose password is `admin_password`, which
 # pgbouncer derives its SCRAM secret from; a test that needs more entries passes its own bytes.
 def pooler_spec(
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     *,
     listen_port: int,
     socket_dir: Path,

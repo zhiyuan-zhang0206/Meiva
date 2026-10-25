@@ -35,7 +35,7 @@ from __future__ import annotations
 from typing import assert_never
 
 from base.cluster.dataplane.redis_bridge import RedisBridgeUnconfiguredError, redis_bridge_endpoint
-from base.cluster.machine import MachineIdentity, MachineRoles
+from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.config import settings
 from base.host.env.registry import process_environment
 from base.host.system.hostport import Host
@@ -73,7 +73,7 @@ from services.supervision.roster.service_spec import (
 # The one fact the gate of a core session reads, collected from the world: the settings
 # flag, the platform probe or the marker file the session's kind names. `gate_plan` judges it.
 def _gate_fact(
-    kind: GateKind, session: str, *, machine: MachineIdentity, host: Host
+    kind: GateKind, session: str, *, machine: MachineIdentityReader, host: Host
 ) -> GateFact | None:
     match kind:
         case "flag":
@@ -132,7 +132,7 @@ def _flag_enabled(session: str) -> bool:
 # `MEIVA_TELEMETRY_OTLP_ENDPOINT` override) so the roster, `meiva start`, `meiva status`, the
 # root, rollout readiness and the cluster health probe agree about which gateway owns the
 # collector. Pure agent-runners retain their relay collector.
-def _collector_allowed(machine: MachineIdentity) -> bool:
+def _collector_allowed(machine: MachineIdentityReader) -> bool:
     home = meiva_home()
     return collector_allowed_for_home(
         gateway_observability_home(machine, home=home),
@@ -147,7 +147,7 @@ def _collector_allowed(machine: MachineIdentity) -> bool:
 # meiva:note
 # The relay exists only on a macOS gateway with a local data plane and a declared non-loopback
 # address; the same answer drives `meiva status` and the cluster health probe.
-def _bridge_fact(machine: MachineIdentity) -> BridgeFact:
+def _bridge_fact(machine: MachineIdentityReader) -> BridgeFact:
     try:
         endpoint = redis_bridge_endpoint(
             meiva_home(),
@@ -169,7 +169,7 @@ def _plugin_gate_reason(spec: ServiceSpec) -> str | None:
     return reason
 
 
-def gate_reason(spec: ServiceSpec, *, machine: MachineIdentity, host: Host) -> str | None:
+def gate_reason(spec: ServiceSpec, *, machine: MachineIdentityReader, host: Host) -> str | None:
     """Why a service is config/capability-gated OUT of the start roster, or None if
     it will run. The single place the gate's *reason* is computed, so the start
     path (drops it), ``meiva start`` (logs it), and ``meiva status`` (shows it) stay
@@ -192,7 +192,7 @@ def gate_reason(spec: ServiceSpec, *, machine: MachineIdentity, host: Host) -> s
 
 
 def services_for_capabilities_annotated(
-    roles: MachineRoles, *, machine: MachineIdentity, host: Host
+    roles: MachineRoles, *, machine: MachineIdentityReader, host: Host
 ) -> tuple[tuple[ServiceSpec, str | None], ...]:
     """The union of services this host's capability set runs, each paired with its
     gate reason (None = will start, a string = gated out + why).
@@ -217,7 +217,7 @@ def services_for_capabilities_annotated(
 
 
 def services_for_capabilities(
-    roles: MachineRoles, *, machine: MachineIdentity, host: Host
+    roles: MachineRoles, *, machine: MachineIdentityReader, host: Host
 ) -> tuple[ServiceSpec, ...]:
     """The start roster: the capability-union services that will actually launch
     (config/capability-gated ones dropped). ``services_for_capabilities_annotated``

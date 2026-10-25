@@ -33,7 +33,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from cli.commands.extensions._claude_code_plugin import Materialized
 from cli.commands.extensions._manifest_gate import gate_refuses
 from cli.commands.extensions.plans.source_binding import SourceBinding
@@ -151,7 +151,7 @@ def _install_bare_skill(
     *,
     accept_risk: bool,
     gateway: ExtensionGateway,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
 ) -> int:
     """Install a cloned bare-skill package into the load dir and register it.
 
@@ -315,7 +315,7 @@ def cmd_plugins_install(
     *,
     accept_risk: bool = False,
     gateway: ExtensionGateway,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     binding: SourceBinding,
 ) -> int:
     """`meiva plugins install <url> [--path SUBDIR] [--ref REF] [--accept-risk]` —

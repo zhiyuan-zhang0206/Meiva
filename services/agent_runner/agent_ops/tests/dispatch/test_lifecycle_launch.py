@@ -9,7 +9,7 @@ import pytest
 
 from base.agents.birth.spawn import create_agent_row
 from base.api_contracts.launch_retry import RetryLaunchRequest
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -25,7 +25,7 @@ def launch(
     database: Database,
     event_bus: EventBus,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> LaunchAgentRequest:
     """A freshly created agent row and the launch attempt its creation committed."""
     agent_id, birth_config, _inbound_id, attempt = create_agent_row(

@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from base.agents.impersonation import live_lease_on_machine
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import settings
 from base.daemon.health import DaemonProbe
 from base.db import Database
@@ -82,7 +82,7 @@ def redis_acl() -> DaemonProbe:
     return ping()
 
 
-def pgbouncer(*, machine: MachineIdentity) -> DaemonProbe:
+def pgbouncer(*, machine: MachineIdentityReader) -> DaemonProbe:
     from base.cluster import get_record
     from base.cluster.dataplane import pooler
     from base.host.db_authority.delivery import POOLER_ADMIN, read_pooler_admin
@@ -263,7 +263,7 @@ class LokiReport:
 
 
 def build_diagnostics(
-    requested: set[str], *, database: Callable[[], Database], machine: MachineIdentity
+    requested: set[str], *, database: Callable[[], Database], machine: MachineIdentityReader
 ) -> list[Diagnostic]:
     """Host policy is explicit; absent capabilities do not create fake samples."""
     checks: list[Diagnostic] = []

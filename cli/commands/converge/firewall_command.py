@@ -20,7 +20,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.host.system import macos_firewall as fw
 from base.host.system.hostport import Host
 from cli.commands.converge.firewall import (
@@ -36,7 +36,7 @@ from cli.commands.converge.plans.firewall_report import (
 
 
 def cmd_firewall_status(
-    *, home: Path, user_home: Path, machine: MachineIdentity, host: Host
+    *, home: Path, user_home: Path, machine: MachineIdentityReader, host: Host
 ) -> int:
     """`meiva firewall status` — audit the host and diff the manifest (read-only)."""
     from cli.commands import _repo
@@ -64,7 +64,9 @@ def cmd_firewall_status(
     return 0
 
 
-def cmd_firewall_sync(*, home: Path, user_home: Path, machine: MachineIdentity, host: Host) -> int:
+def cmd_firewall_sync(
+    *, home: Path, user_home: Path, machine: MachineIdentityReader, host: Host
+) -> int:
     """`meiva firewall sync` — apply the manifest now (repair + prune).
 
     Mutates directly first. On older macOS it retries with `sudo -n`; if both

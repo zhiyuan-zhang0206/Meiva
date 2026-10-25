@@ -25,7 +25,7 @@ from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_re
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -44,7 +44,7 @@ _MACHINE = "claim-test"
 
 @pytest.fixture
 def event_pipeline(
-    database: Database, machine_identity: MachineIdentity, unit_home: Path
+    database: Database, machine_identity: MachineIdentityReader, unit_home: Path
 ) -> Iterator[telemetry.EventPipeline]:
     """Own the process writer used by the operations under test."""
     pipeline = telemetry.build_pipeline(
@@ -94,7 +94,7 @@ async def test_a_reaped_handoff_receipt_lands_on_the_resurrected_agents_first_tu
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id = agent_row(db_conn)
     incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)

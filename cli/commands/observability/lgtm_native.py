@@ -25,7 +25,7 @@ import yaml
 from dotenv import dotenv_values
 
 from base.agents.context.clients import DatabaseFactory
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.host.net.ports import SYSTEM_URL_OPENER
 from base.host.net.resilience import Policy, retry
 from base.host.system.hostport import Host
@@ -365,7 +365,7 @@ def _render_warnings(settings: LgtmSettings) -> tuple[str, ...]:
 # libpq's parser is imported where it is used: the converge step table imports this module on
 # every CLI start, and only a station render needs it.
 def _grafana_endpoints(
-    settings: LgtmSettings, *, direct_db_url: str, machine: MachineIdentity
+    settings: LgtmSettings, *, direct_db_url: str, machine: MachineIdentityReader
 ) -> tuple[str, str, str, str]:
     obs = settings.observability
     base = validated_observability_base(obs.observability_url)
@@ -416,7 +416,7 @@ def render_configs(
     direct_db_url: str,
     dashboard: DashboardOutcome,
     producer: Callable[[], EventPipeline],
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
 ) -> None:
     source_dir = repo / "deploy/lgtm/native/config"
     obs = settings.observability
@@ -533,7 +533,7 @@ def ensure_lgtm_native(
     storage_dir: Path,
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     host: Host,
 ) -> None:
     require_backend_selection(services, BACKENDS)

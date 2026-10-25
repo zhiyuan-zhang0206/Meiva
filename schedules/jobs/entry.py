@@ -10,7 +10,7 @@ from base.agents.context.clients import ClientSet
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.daemon.schedules.inputs import ScheduleInputs, schedule_entry
 from base.db import Database
@@ -35,7 +35,7 @@ def fresh_schedule_entry(*, image: LoadedCommit, process: str) -> Generator[Sche
 
     config = ConfigBoot()
     config.boot()
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     home = resolve_meiva_home()
     gate = ProcessDbGate(process=process, version=CodeVersion(image).get)
 

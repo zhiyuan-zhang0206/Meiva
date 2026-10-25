@@ -13,26 +13,19 @@ def main() -> None:
     sys.path.insert(0, sys.argv[1])
     import meiva
     from base.agents.context import MeivaContext
-    from base.cluster.machine import MachineIdentity
+    from base.cluster.machine.configured import ConfiguredMachineIdentity
+    from base.config import ConfigBoot
     from meiva.sdk_surface import install, process_context
     from meiva.sdk_surface.installation import installed
 
-    def unreachable_role() -> frozenset[str]:
-        raise AssertionError("a machine read must not resolve the machine role")
-
-    def unreachable_host() -> str:
-        raise AssertionError("a machine read must not resolve the machine host")
-
-    machine = MachineIdentity(
-        name=lambda: "explicit",
-        description=lambda: "owned",
-        role=unreachable_role,
-        host=unreachable_host,
-    )
+    config = ConfigBoot()
+    machine = ConfiguredMachineIdentity(config)
+    machine.set(name="explicit", description="owned")
     process_context.bind_context(MeivaContext(machine=machine))
     spec = meiva.self.MACHINE_SPEC
     report = {
         "spec": list(spec),
+        "config_prepared": config.prepared,
         "load_attempted": install.load_attempted(),
         "installed": installed() is not None,
         "db_stack_loaded": "psycopg" in sys.modules,

@@ -6,8 +6,7 @@ from pathlib import Path
 import pytest
 
 from base.clock.tests.manual_timers import ManualTimers
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
 from base.host.system.tests.fake_commands import fake_host
@@ -32,7 +31,7 @@ def command_runtime(tmp_path: Path) -> CommandRuntime:
     return CommandRuntime(
         config=config,
         home=meiva_home(),
-        machine=machine_from_boot(config),
+        machine=ConfiguredMachineIdentity(config),
         helper=refuse_helper,
         host=fake_host(),
         session=UserSession(user_home=tmp_path / "user", login_shell="/bin/zsh", interactive=False),
@@ -43,7 +42,7 @@ def command_runtime(tmp_path: Path) -> CommandRuntime:
 
 
 @pytest.fixture
-def command_machine(command_runtime: CommandRuntime) -> MachineIdentity:
+def command_machine(command_runtime: CommandRuntime) -> ConfiguredMachineIdentity:
     """Borrow only the machine capability from this invocation's existing owner."""
     return command_runtime.machine
 
@@ -51,6 +50,6 @@ def command_machine(command_runtime: CommandRuntime) -> MachineIdentity:
 @pytest.fixture
 def command_config_machine(
     command_runtime: CommandRuntime,
-) -> tuple[ConfigBoot, MachineIdentity]:
+) -> tuple[ConfigBoot, ConfiguredMachineIdentity]:
     """Borrow both capabilities together from the same invocation owner."""
     return command_runtime.config, command_runtime.machine

@@ -5,7 +5,7 @@ import psycopg
 import pytest
 
 from base.api_contracts.agent_contract import GatewayUnavailable
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.tests.auth.gateway_config import gateway_test_client
@@ -24,7 +24,7 @@ def test_same_sdk_intent_after_lost_response_and_gateway_restart(
     db_conn: psycopg.Connection,
     rotate: bool,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with gateway_test_client(
         cluster_secret=SECRET,

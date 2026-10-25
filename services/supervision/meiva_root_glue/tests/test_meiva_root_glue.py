@@ -15,7 +15,7 @@ from typing import Any, cast
 import pytest
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.tests.configuration import snapshot_process_config
 from base.daemon.health import DaemonProbe
 from base.db import Database
@@ -70,7 +70,7 @@ def _context(tmp_path: Path, registry: UnitRegistry) -> WiringContext:
 @pytest.fixture(autouse=True)
 def _no_host_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
     def empty(
-        _requested: set[str], *, database: Callable[[], Database], machine: MachineIdentity
+        _requested: set[str], *, database: Callable[[], Database], machine: MachineIdentityReader
     ) -> list[Diagnostic]:
         return []
 
@@ -304,7 +304,7 @@ async def test_reference_station_and_writer_share_one_entry_gate(
     gates: list[ProcessDbGate] = []
 
     readers: list[Callable[[], str]] = []
-    machines: list[MachineIdentity] = []
+    machines: list[MachineIdentityReader] = []
 
     def make_database(
         config: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
@@ -314,7 +314,7 @@ async def test_reference_station_and_writer_share_one_entry_gate(
         return database
 
     def diagnostics(
-        _requested: set[str], *, database: Callable[[], Database], machine: MachineIdentity
+        _requested: set[str], *, database: Callable[[], Database], machine: MachineIdentityReader
     ) -> list[Diagnostic]:
         machines.append(machine)
         assert database() is database_handle

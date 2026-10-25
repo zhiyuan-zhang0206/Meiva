@@ -22,7 +22,7 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -38,7 +38,7 @@ _THRESHOLD_S = 300.0
 
 @pytest.fixture
 def event_pipeline(
-    database: Database, machine_identity: MachineIdentity, unit_home: Path
+    database: Database, machine_identity: MachineIdentityReader, unit_home: Path
 ) -> Iterator[telemetry.EventPipeline]:
     """Own the process writer used by the service operation and mirror barrier."""
     pipeline = telemetry.build_pipeline(
@@ -74,7 +74,7 @@ def _make_idle(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> int:
     """Spawn an agent and park it. `status_changed_s_ago` backdates
     status_changed_at via a timestamp-only UPDATE (the BEFORE-UPDATE-OF-status
@@ -210,7 +210,7 @@ class TestNudgeBackoffB7:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """last_heartbeat_at 10 min ago is due at the default 5 min cadence
         but not at level 2 (5 min * 4 = 20 min)."""
@@ -243,7 +243,7 @@ class TestNudgeBackoffB7:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = _make_idle(
             db_conn,
@@ -285,7 +285,7 @@ class TestNudgeBackoffB7:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = _make_idle(
             db_conn,
@@ -330,7 +330,7 @@ class TestNudgeBackoffB7:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = _make_idle(
             db_conn,
@@ -364,7 +364,7 @@ class TestNudgeBackoffB7:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         from services.wake.heartbeat.daemon import backoff_max_level
 
@@ -406,7 +406,7 @@ class TestNudgeBackoffB7:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = _make_idle(
             db_conn,
@@ -451,7 +451,7 @@ class TestNudgeBackoffB7:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = _make_idle(
             db_conn,

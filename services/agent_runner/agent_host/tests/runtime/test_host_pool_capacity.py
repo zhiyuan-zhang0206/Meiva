@@ -11,7 +11,7 @@ from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.db import Database
@@ -156,7 +156,7 @@ async def test_more_than_twenty_workload_leases_share_bounded_backends(
     record_property: Callable[[str, object], None],
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
     with (
@@ -307,7 +307,7 @@ async def test_six_host_pools_settle_one_thousand_short_requests_through_pgbounc
     record_property: Callable[[str, object], None],
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
     started = time.monotonic()

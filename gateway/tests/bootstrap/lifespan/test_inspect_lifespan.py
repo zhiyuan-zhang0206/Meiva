@@ -5,7 +5,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.tests.auth.gateway_config import gateway_test_app, gateway_test_process
 
@@ -13,7 +13,7 @@ from gateway.tests.auth.gateway_config import gateway_test_app, gateway_test_pro
 async def test_lifespan_waits_for_cancelled_request_sql_before_pool_close(
     db_conn: psycopg.Connection[Any],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     del db_conn
     ready = asyncio.Event()

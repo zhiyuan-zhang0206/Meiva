@@ -12,7 +12,7 @@ from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import ExtensionRegistry
@@ -38,7 +38,7 @@ pytestmark = pytest.mark.usefixtures("unit_home")
 
 def _context(
     clients: ClientSet | None,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     agent_id: int | None = 1,
     **pins: Any,
 ) -> MeivaContext:
@@ -240,7 +240,7 @@ def test_guardrails_can_be_disabled() -> None:
 
 
 def test_a_layer_that_is_off_reads_nothing(
-    wire: GatewayWire, machine_identity: MachineIdentity
+    wire: GatewayWire, machine_identity: MachineIdentityReader
 ) -> None:
     _chain(wire, 1, _row(600301, machine_identity.name()))
     clients = wire.context.clients
@@ -255,7 +255,7 @@ def test_a_layer_that_is_off_reads_nothing(
 
 
 def test_an_empty_chain_and_a_local_ancestor_without_a_store_yield_no_note(
-    wire: GatewayWire, machine_identity: MachineIdentity
+    wire: GatewayWire, machine_identity: MachineIdentityReader
 ) -> None:
     ctx = _context(wire.context.clients, machine_identity)
 
@@ -267,7 +267,7 @@ def test_an_empty_chain_and_a_local_ancestor_without_a_store_yield_no_note(
 
 
 def test_direct_parent_blocks_are_injected(
-    wire: GatewayWire, machine_identity: MachineIdentity
+    wire: GatewayWire, machine_identity: MachineIdentityReader
 ) -> None:
     _write_entry(600311, "family-rules", f"private\n\n{_wrap('Report in Chinese.')}\n")
     _chain(wire, 1, _row(600311, machine_identity.name(), label="Parent"))
@@ -285,7 +285,7 @@ def test_direct_parent_blocks_are_injected(
 
 
 def test_blocks_render_nearest_first_with_sorted_entries(
-    wire: GatewayWire, machine_identity: MachineIdentity
+    wire: GatewayWire, machine_identity: MachineIdentityReader
 ) -> None:
     here = machine_identity.name()
     _write_entry(600321, "b-entry", _wrap("b block"))
@@ -306,7 +306,7 @@ def test_blocks_render_nearest_first_with_sorted_entries(
 
 
 def test_remote_ancestors_are_skipped_and_footered(
-    wire: GatewayWire, machine_identity: MachineIdentity
+    wire: GatewayWire, machine_identity: MachineIdentityReader
 ) -> None:
     _write_entry(600341, "local", _wrap("local block"))
     _chain(
@@ -331,7 +331,7 @@ def test_remote_ancestors_are_skipped_and_footered(
 
 
 def test_an_unrouted_chain_read_degrades_and_is_not_cached(
-    wire: GatewayWire, machine_identity: MachineIdentity
+    wire: GatewayWire, machine_identity: MachineIdentityReader
 ) -> None:
     ctx = _context(wire.context.clients, machine_identity)
 
@@ -342,7 +342,7 @@ def test_an_unrouted_chain_read_degrades_and_is_not_cached(
 
 
 def test_a_refused_chain_read_degrades_and_is_not_cached(
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
@@ -355,7 +355,7 @@ def test_a_refused_chain_read_degrades_and_is_not_cached(
 
 
 def test_chain_is_read_at_each_establishment(
-    wire: GatewayWire, machine_identity: MachineIdentity
+    wire: GatewayWire, machine_identity: MachineIdentityReader
 ) -> None:
     _write_entry(600351, "rules", _wrap("fresh block"))
     _chain(wire, 1, _row(600351, machine_identity.name()))
@@ -367,7 +367,9 @@ def test_chain_is_read_at_each_establishment(
     assert [r.path for r in wire.stub.received] == ["/api/agents/1/born-chain"] * 2
 
 
-def test_content_is_deterministic(wire: GatewayWire, machine_identity: MachineIdentity) -> None:
+def test_content_is_deterministic(
+    wire: GatewayWire, machine_identity: MachineIdentityReader
+) -> None:
     _write_entry(600361, "rules", _wrap("stable block"))
     _chain(wire, 1, _row(600361, machine_identity.name()))
     ctx = _context(wire.context.clients, machine_identity)
@@ -380,7 +382,7 @@ def test_content_is_deterministic(wire: GatewayWire, machine_identity: MachineId
 
 
 def test_the_size_caps_come_from_the_agents_slices(
-    wire: GatewayWire, machine_identity: MachineIdentity
+    wire: GatewayWire, machine_identity: MachineIdentityReader
 ) -> None:
     entry = _write_entry(600371, "big", _wrap("x" * 200))
     _chain(wire, 1, _row(600371, machine_identity.name()))
@@ -394,7 +396,7 @@ def test_the_size_caps_come_from_the_agents_slices(
 
 
 def test_the_fork_graft_builds_the_new_agents_own_chain(
-    wire: GatewayWire, machine_identity: MachineIdentity
+    wire: GatewayWire, machine_identity: MachineIdentityReader
 ) -> None:
     from meiva_builtins.plugins.meiva_memory import agent_runtime
 

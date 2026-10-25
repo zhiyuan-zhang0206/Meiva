@@ -48,7 +48,7 @@ from psycopg_pool import ConnectionPool
 import base.log
 import base.telemetry.process_logging
 from base import db, telemetry
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.config.tests.config_authority import config_authority as config_authority
 from base.db.code_version_gate import ProcessDbGate
@@ -168,7 +168,7 @@ def test_borrowed_connection_arms_the_kernel_keepalive(
 
 
 def test_log_sink_pipeline_drain_thread_stays_alive(
-    database: db.Database, machine_identity: MachineIdentity, unit_home: Path
+    database: db.Database, machine_identity: MachineIdentityReader, unit_home: Path
 ) -> None:
     """The real log adapter uses its entry's writer and acknowledges a drain marker.
 
@@ -214,7 +214,7 @@ def test_log_sink_import_of_base_db_stays_deferred() -> None:
 
 
 def test_gateway_pool_carries_keepalives(
-    gateway_data_plane: None, machine_identity: MachineIdentity
+    gateway_data_plane: None, machine_identity: MachineIdentityReader
 ) -> None:
     """`gateway/app.py`'s request-serving pool, asserted on the object the real
     lifespan builds. Sizing (max_size=8) is the site's own business; the posture

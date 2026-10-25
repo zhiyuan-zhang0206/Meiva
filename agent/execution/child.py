@@ -504,13 +504,13 @@ def main() -> None:
     try:
         line_buffered_output()
         _install_signal_handlers()
-        from base.cluster.machine.boot import machine_from_boot
+        from base.cluster.machine.configured import ConfiguredMachineIdentity
         from base.config import ConfigBoot
         from meiva.boot import derived_clients
 
         config = ConfigBoot()
         config.boot()
-        machine = machine_from_boot(config)
+        machine = ConfiguredMachineIdentity(config)
         clients = derived_clients(config, machine)
         context = MeivaContext(clients=clients, machine=machine)
         run_child(request_path, result_path, boot_started_at, config=config, context=context)

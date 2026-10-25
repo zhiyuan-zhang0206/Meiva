@@ -11,7 +11,7 @@ import httpx
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.tests.config_authority import config_authority as config_authority
 from base.db import Database
 from base.packages.tests.model_catalog import model_catalog as model_catalog
@@ -47,7 +47,7 @@ def _evaluate_module() -> ModuleType:
 )
 @pytest.mark.usefixtures("sdk_model_owner")
 def test_launch_spawns_eval_isolated_agents(
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     model: str | None,
     expected_overlay: dict[str, object],
 ) -> None:

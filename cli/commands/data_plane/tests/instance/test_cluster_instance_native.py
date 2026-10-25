@@ -29,7 +29,7 @@ from base.cluster import provision_database
 from base.cluster.checkpoint_schema import PostgresCheckpointSchema
 from base.cluster.dataplane.pg_admin import pg_admin_url
 from base.cluster.dataplane.pg_tools import pg_shm_args, pg_start_env, pg_tool
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.bringup import ensure_gateway_data_plane
 from cli.commands.data_plane.tests.native_cluster import (
@@ -55,7 +55,7 @@ from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
-def _storage(cluster_: NativeCluster, machine: MachineIdentity) -> int:
+def _storage(cluster_: NativeCluster, machine: MachineIdentityReader) -> int:
     return instance.ensure_cluster_storage(
         cluster_.plane,
         home=cluster_.home,
@@ -81,7 +81,7 @@ def _admin(cluster_: NativeCluster, database: str) -> psycopg.Connection[tuple[o
 
 
 def test_per_cluster_instance_bringup(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     assert _storage(native_cluster, command_machine) == 0
     admin_url = pg_admin_url(native_cluster.pg_port)
@@ -145,7 +145,7 @@ def test_per_cluster_instance_bringup(
 # meiva:note
 # A second ensure on an already-running instance is a no-op success (the warm `meiva start` path).
 def test_bringup_is_idempotent(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     for _ in range(2):
         assert _storage(native_cluster, command_machine) == 0
@@ -157,7 +157,7 @@ def test_bringup_is_idempotent(
 # restores Redis's own ACL after a real RDB-only shutdown.
 def test_the_entry_brings_up_the_instance_on_the_recorded_ports_with_the_url_identities(
     native_cluster: NativeCluster,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
     operator_database: OperatorDatabaseFactory,
 ) -> None:
     native_cluster.born()
@@ -205,7 +205,7 @@ def test_the_entry_brings_up_the_instance_on_the_recorded_ports_with_the_url_ide
 # runtime ACL user and the admin user authenticate.
 def test_a_fresh_single_box_redis_refuses_unauthenticated_connections(
     native_cluster: NativeCluster,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
     operator_database: OperatorDatabaseFactory,
 ) -> None:
     native_cluster.born()
@@ -240,7 +240,7 @@ def test_a_fresh_single_box_redis_refuses_unauthenticated_connections(
 # meiva:note
 # TCP ownership does not make another directory's equal Unix port ours.
 def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     assert (
         instance.start_pg(
@@ -334,7 +334,7 @@ def _active_hba(cluster_: NativeCluster) -> list[tuple[str, str]]:
 # only (no reachable/cidr reach) and the running server refuses a password-less TCP dial even for
 # the OS-user superuser.
 def test_birth_hba_of_a_single_box_has_loopback_lines_only(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     assert _storage(native_cluster, command_machine) == 0
     assert _active_hba(native_cluster) == [
@@ -366,7 +366,7 @@ def _legacy_trust_loaded(cluster_: NativeCluster) -> None:
 # trust hba must, after `start_pg` rewrites the file, enforce passwords before the start proceeds:
 # the loaded proof, not the file on disk.
 def test_a_rewritten_hba_is_reloaded_into_the_running_server(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     assert _storage(native_cluster, command_machine) == 0
     _legacy_trust_loaded(native_cluster)
@@ -400,7 +400,7 @@ def test_a_rewritten_hba_is_reloaded_into_the_running_server(
 # The loaded-hba proof is behavioral: a postmaster that still admits a password-less dial (a trust
 # line loaded) fails the proof, whatever file is on disk.
 def test_the_hba_proof_refuses_a_postmaster_still_serving_trust(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     assert _storage(native_cluster, command_machine) == 0
     socket_dir = instance.pg_socket_dir(native_cluster.home)
@@ -415,7 +415,7 @@ def test_the_hba_proof_refuses_a_postmaster_still_serving_trust(
 
 
 def test_redis_is_reachable_with_the_admin_password_only(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     assert _storage(native_cluster, command_machine) == 0
     port = native_cluster.redis_port

@@ -1,4 +1,1 @@
-exports = ["gateway_stubs.py", "identity.py"]
-
-[debt.test-subclass-override]
-"test_owned_machine.py#subclass base.config._lite.ConfigBoot.get_field" = 1
+exports = ["faults.py", "gateway_stubs.py", "identity.py"]

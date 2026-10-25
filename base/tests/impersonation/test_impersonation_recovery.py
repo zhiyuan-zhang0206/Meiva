@@ -9,7 +9,7 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -33,7 +33,7 @@ def test_termination_atomically_revokes_but_restart_preserves(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -65,7 +65,7 @@ def test_expiry_between_driver_read_and_activation_returns_control(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -99,7 +99,7 @@ def test_renew_replaces_ttl(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -124,7 +124,7 @@ def test_reaper_expires_offline_lease_and_keeps_unconsumed_handoff(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     from base.agents.impersonation import maintenance as maintenance
@@ -217,7 +217,7 @@ def test_operator_force_expire_closes_only_observed_session(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     from base.agents.impersonation import maintenance as maintenance
@@ -300,7 +300,7 @@ def test_operator_force_expire_automatic_session_has_no_manual_end_note(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     from base.agents.impersonation.maintenance import force_expire_impersonation

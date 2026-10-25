@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from base.clock import SYSTEM_TIMERS
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
@@ -59,7 +59,7 @@ def _ctx(
     *,
     operator_database: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> converge_host.ConvergeCtx:
     config, machine = command_config_machine
     meiva_home = home / ".meiva"
@@ -105,7 +105,7 @@ def _run(
     *,
     operator_database: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
     skill_names: tuple[str, ...] = (SKILL_NAME,),
 ) -> None:
     _converge(
@@ -142,7 +142,7 @@ def test_absent_client_homes_are_not_created(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
 
@@ -164,7 +164,7 @@ def test_present_codex_and_claude_homes_receive_complete_managed_copy(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = _write_source(repo)
@@ -204,7 +204,7 @@ def test_second_converge_is_byte_and_timestamp_idempotent(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     _write_source(repo)
@@ -249,7 +249,7 @@ def test_unmodified_managed_copy_updates_and_removes_only_stale_target_content(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = _write_source(repo)
@@ -298,7 +298,7 @@ def test_unmanaged_preexisting_target_is_preserved_and_reported(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     _write_source(repo)
@@ -328,7 +328,7 @@ def test_user_modified_managed_copy_is_preserved_and_reported(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = _write_source(repo)
@@ -373,7 +373,7 @@ def test_failed_update_restores_previous_copy_and_cleans_only_its_staging_dir(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = _write_source(repo)
@@ -454,7 +454,7 @@ def test_both_operator_skills_install_and_update_independently(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     operate = _write_source(repo)
@@ -508,7 +508,7 @@ def test_operator_conflict_does_not_block_deployment_update(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     _write_source(repo)
@@ -548,7 +548,7 @@ def test_deployment_publication_crash_is_reported_without_changing_operator(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     _write_source(repo)
@@ -651,7 +651,7 @@ def test_client_homes_are_found_under_the_sessions_user_home(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     _write_source(repo)

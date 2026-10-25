@@ -12,7 +12,7 @@ from base.agents.birth.spawn import create_agent_row
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.inbound import InboundKind
 from base.api_contracts.agent_contract import ResurrectError
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -62,7 +62,7 @@ async def test_terminated_row_resurrects_unowned_and_admits_a_fresh_generation(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     aid = terminated(
         db_conn,
@@ -107,7 +107,7 @@ def test_trigger_must_be_newer_than_every_terminate_command(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     aid = terminated(
         db_conn,
@@ -164,7 +164,7 @@ async def test_unknown_auto_resurrect_failure_propagates(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     aid = terminated(
         db_conn,
@@ -207,7 +207,7 @@ class _Arrange(Protocol):
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> Awaitable[int]: ...
 
 
@@ -225,7 +225,7 @@ async def admit_hosted_incarnation(
     aid: int,
     database_gate: ProcessDbGate,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> RuntimeIncarnation:
     owner = await admit_hosted_runtime(
         pool,
@@ -245,7 +245,7 @@ async def _spawned(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> int:
     aid, _, _, _ = create_agent_row(
         Database.from_settings(gate=database_gate),
@@ -265,7 +265,7 @@ async def _resurrected(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> int:
     aid = await _spawned(
         db,
@@ -299,7 +299,7 @@ async def restarted(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> int:
     aid = await _spawned(
         db,
@@ -343,7 +343,7 @@ async def test_a_row_this_runtime_left_and_ended_unowned_resurrects(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     aid = await arrange(
         db_conn,

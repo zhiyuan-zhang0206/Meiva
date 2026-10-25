@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
@@ -33,7 +33,7 @@ from ops import cluster_status
 
 
 def _snapshot(
-    database: Database, machine: MachineIdentity, image: LoadedCommit
+    database: Database, machine: MachineIdentityReader, image: LoadedCommit
 ) -> cluster_status.ClusterStatus:
     return cluster_status.status_snapshot(database, image=image, local_machine=machine)
 
@@ -44,7 +44,7 @@ def test_snapshot_reflects_the_serving_gate_and_role(
     database: Database,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     set_machine_identity(role="agent-runner", name="runner-a")
     image = LoadedCommit(source_root=tmp_path, sha=None)
@@ -71,7 +71,7 @@ def test_snapshot_includes_head_sha(
     unit_home: Path,
     database: Database,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     set_machine_identity(role="agent-runner", name="runner-a")
     head = prod_source_checkout(unit_home)
@@ -91,7 +91,7 @@ def test_snapshot_includes_running_sha(
     database: Database,
     sha: str | None,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     set_machine_identity(role="agent-runner", name="runner-a")
     prod_source_checkout(unit_home)
@@ -116,7 +116,7 @@ def test_snapshot_ignores_the_start_bookmark(
     unit_home: Path,
     database: Database,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     set_machine_identity(role="agent-runner", name="runner-a")
     head = prod_source_checkout(unit_home)
@@ -141,7 +141,7 @@ def test_supervisor_online_when_the_root_answers(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     set_machine_identity(role="agent-runner", name="test-host")
     point_home(monkeypatch, short_tmp)
@@ -157,7 +157,7 @@ def test_supervisor_status_stays_unknown_when_no_root_listens(
     unit_home: Path,
     database: Database,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     set_machine_identity(role="agent-runner", name="test-host")
     snap = _snapshot(database, machine_identity, LoadedCommit(source_root=unit_home, sha=None))

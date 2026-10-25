@@ -29,7 +29,7 @@ from urllib.parse import unquote
 
 from base.agents.context.clients import DatabaseFactory
 from base.clock import Timers
-from base.cluster.machine import MachineIdentity, MachineRoles
+from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.deploy.release import collector_artifact
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.paths import otel_collector_config, otel_collector_dir
@@ -246,7 +246,7 @@ def generate_config(
     *,
     settings: CollectorSettings,
     database_factory: DatabaseFactory,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
 ) -> str:
     from base.cluster import home_label
     from base.host.db_authority.unit import telemetry_bearer
@@ -316,7 +316,7 @@ def ensure_otel_collector(
     *,
     settings: CollectorSettings,
     database_factory: DatabaseFactory,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     timers: Timers,
     open_url: UrlOpener,
     tag: str | None,

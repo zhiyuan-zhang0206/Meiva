@@ -16,7 +16,8 @@ import psycopg
 import pytest
 
 from base.api_contracts.status import MachineStatus, SchemaMismatchKind, SchemaMismatchStatus
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.db import Database
 from base.deploy.schema.migration_errors import MigrationLayoutError
 from base.deploy.schema.migrations import applied_migration_names
@@ -90,7 +91,7 @@ def test_status_and_cli_expose_current_diagnosis_only(
     kind: SchemaMismatchKind,
     detail: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(name="gateway")
     with db_conn.transaction(force_rollback=True):
@@ -113,7 +114,7 @@ def test_malformed_real_catalog_is_invalid_in_status_and_cli(
     db_conn: psycopg.Connection,
     database: Database,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     original = applied_migration_names(db_conn)
     assert (
@@ -142,7 +143,7 @@ def test_malformed_real_catalog_is_invalid_in_status_and_cli(
 
 
 def test_a_closed_connection_is_explicitly_unavailable(
-    db_url: str, database: Database, *, machine_identity: MachineIdentity
+    db_url: str, database: Database, *, machine_identity: MachineIdentityReader
 ) -> None:
     conn = psycopg.connect(db_url)
     conn.close()
@@ -163,7 +164,7 @@ def test_a_query_the_server_cancels_is_explicitly_unavailable(
     db_conn: psycopg.Connection,
     database: Database,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with psycopg.connect(db_url) as holder:
         holder.execute("LOCK TABLE schema_migrations IN ACCESS EXCLUSIVE MODE")
@@ -184,7 +185,7 @@ def test_invalid_image_layout_is_not_a_set_divergence(
     db_conn: psycopg.Connection,
     database: Database,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     status = schema_mismatch.status(
         database,

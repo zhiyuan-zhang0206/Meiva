@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+import os
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -25,27 +26,20 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag
-from base.cluster import machine
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineFacts, MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
+from base.config import ConfigBoot
 from base.config.tests.configuration import defaults
 from base.db import Database
 from base.host.env.agent_slices import AgentSlices
-
-
-def _machine(reader: Callable[[], str]) -> MachineIdentity:
-    return MachineIdentity(
-        name=reader,
-        role=lambda: frozenset({"agent-runner"}),
-        host=lambda: "localhost",
-        description=lambda: None,
-    )
+from base.paths.tests.homes import point_home
 
 
 def _context(
     clients: ClientSet,
     *,
     agent_id: int | None = 29,
-    runner: MachineIdentity | None = None,
+    runner: MachineIdentityReader | None = None,
     workspace: bool = False,
 ) -> MeivaContext:
     return MeivaContext(
@@ -185,7 +179,7 @@ def test_workspace_facts_report_a_workspace_that_cannot_be_read(tmp_path: Path) 
 
 @pytest.mark.usefixtures("labelled_agent")
 def test_note_states_the_stored_label_and_the_machine(clients: ClientSet) -> None:
-    context = _context(clients, runner=_machine(lambda: "runner-a"))
+    context = _context(clients, runner=MachineFacts.of(name="runner-a", role="agent-runner"))
 
     note = agent_id_note(context)
 
@@ -258,7 +252,7 @@ def test_note_propagates_a_label_failure() -> None:
 
 
 def test_machine_clause_states_the_machine_name() -> None:
-    context = _context(ClientSet(), runner=_machine(lambda: "runner-a"))
+    context = _context(ClientSet(), runner=MachineFacts.of(name="runner-a", role="agent-runner"))
 
     assert machine_clause(context) == "runner-a"
 
@@ -267,13 +261,24 @@ def test_context_without_a_machine_has_no_machine_clause() -> None:
     assert machine_clause(_context(ClientSet())) is None
 
 
-def test_unset_machine_name_drops_only_the_machine_clause() -> None:
-    def unset() -> str:
-        raise machine.MachineNameMissing("unset")
+def test_unset_machine_name_drops_only_the_machine_clause(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    unset = MachineFacts.of(name=" ", role="agent-runner")
+    assert machine_clause(_context(ClientSet(), runner=unset)) is None
 
-    def broken() -> str:
-        raise RuntimeError("settings unreadable")
-
-    assert machine_clause(_context(ClientSet(), runner=_machine(unset))) is None
-    with pytest.raises(RuntimeError, match="settings unreadable"):
-        machine_clause(_context(ClientSet(), runner=_machine(broken)))
+    loop_home = tmp_path / "loop_home"
+    loop_home.symlink_to(loop_home)
+    try:
+        with monkeypatch.context() as m:
+            for key, value in list(os.environ.items()):
+                m.setenv(key, value)
+            point_home(m, loop_home)
+            with pytest.raises(RuntimeError, match="Symlink loop"):
+                ConfiguredMachineIdentity(ConfigBoot()).name()
+            broken = ConfiguredMachineIdentity(ConfigBoot())
+            broken.set(role="agent-runner", host="localhost", description=None)
+            with pytest.raises(RuntimeError, match="Symlink loop"):
+                machine_clause(_context(ClientSet(), runner=broken))
+    finally:
+        loop_home.unlink(missing_ok=True)

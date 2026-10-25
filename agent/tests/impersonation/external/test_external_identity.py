@@ -19,7 +19,7 @@ from agent import state as state_module
 from agent.tests.impersonation.external.runtime import Takeover, assert_detached, borrowed_agent_id
 from agent.tests.impersonation.external.sample_plugin import ExamplePlugin
 from base.agents.context.external_attachment.plugin_state_codec import load_snapshot
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config.tests.configuration import snapshot_process_config
 from meiva import impersonation
 from meiva.sdk_surface import agent_identity, process_context
@@ -90,7 +90,7 @@ def test_attach_refuses_inside_an_exec_turn(
 def test_attach_on_another_machine_binds_no_identity(attached_runtime: Takeover) -> None:
     elsewhere = snapshot_process_config()
     elsewhere.set_field("machine_name", "another-runner")
-    pin_agent(None, owns_loop=True, machine=machine_from_boot(elsewhere))
+    pin_agent(None, owns_loop=True, machine=ConfiguredMachineIdentity(elsewhere))
     with pytest.raises(RuntimeError, match="another-runner"):
         impersonation.attach(attached_runtime.lease_id)
     assert borrowed_agent_id() is None

@@ -21,7 +21,7 @@ from psycopg_pool import ConnectionPool
 from base.agents.birth.harness import probe_local_harnesses
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.api_contracts.agent_contract import ShellKillMode
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machines import mark_stopping
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
@@ -80,7 +80,7 @@ def cluster_status_op(
     pool: ConnectionPool | None = None,
     *,
     image: LoadedCommit,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> ClusterStatus:
     return status_snapshot(db, pool=pool, image=image, local_machine=local_machine)
 

@@ -22,7 +22,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import MachineIdentitySetter
 from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 from gateway.tests.support.runner_ops.local_runner import executed_ops
@@ -41,7 +41,7 @@ _OVERLAY_PROBE = Path(__file__).with_name("child_restart_overlay.py")
 @pytest.fixture
 def local_machine(
     set_machine_identity: MachineIdentitySetter, gateway_local_runner: RunnerOps
-) -> MachineIdentity:
+) -> MachineIdentityReader:
     """The gateway's own machine, serving as an agent-runner through its in-process ops route."""
     return set_machine_identity(role="agent-runner")
 
@@ -70,7 +70,7 @@ class TestTerminateRouting:
     # executes the termination: it INSERTs the terminate inbound.
     def test_local_graceful_takes_local_path(
         self,
-        local_machine: MachineIdentity,
+        local_machine: MachineIdentityReader,
         gateway_local_runner: RunnerOps,
         db_conn: psycopg.Connection,
     ) -> None:
@@ -89,7 +89,7 @@ class TestTerminateRouting:
 
     def test_local_force_takes_local_path(
         self,
-        local_machine: MachineIdentity,
+        local_machine: MachineIdentityReader,
         gateway_local_runner: RunnerOps,
         db_conn: psycopg.Connection,
     ) -> None:
@@ -105,7 +105,7 @@ class TestTerminateRouting:
         assert resp.json()["status"] == "enqueued"
 
     def test_remote_graceful_forwards(
-        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         """machine != local + force=false → forward, local does not INSERT inbound."""
         with (
@@ -132,7 +132,7 @@ class TestTerminateRouting:
         assert _terminate_inbound_count(db_conn, agent_id) == 0
 
     def test_remote_force_forwards(
-        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         """machine != local + force=true → forward, local does not touch sessions / pid."""
         with (
@@ -156,7 +156,7 @@ class TestTerminateRouting:
     # meiva:note
     # A failed op that names a wire reason is re-raised as that error on the gateway.
     def test_a_runners_wire_error_keeps_its_status_and_reason(
-        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         refusal = failed(
             {
@@ -178,7 +178,7 @@ class TestTerminateRouting:
     # meiva:note
     # A home machine the registry has never seen cannot be dialed: 502, named.
     def test_an_unregistered_home_machine_is_a_gateway_error(
-        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         with gateway_test_client(machine=local_machine) as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
@@ -189,7 +189,7 @@ class TestTerminateRouting:
         assert "ghost-mac" in resp.json()["detail"]
 
     def test_cross_machine_gateway_unavailable_propagates_502(
-        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         with (
             runner_ops(db_conn, "remote-mac", {"lifecycle": refused(404, "no ops server here")}),
@@ -201,7 +201,7 @@ class TestTerminateRouting:
         assert resp.status_code == 502
         assert resp.json()["reason"] == "cross_machine_gateway_unavailable"
 
-    def test_nonexistent_agent_404(self, local_machine: MachineIdentity) -> None:
+    def test_nonexistent_agent_404(self, local_machine: MachineIdentityReader) -> None:
         """Nonexistent → helper itself raises AgentNotFound (404)."""
         with gateway_test_client(machine=local_machine) as client:
             resp = client.post("/api/agents/9999/terminate")
@@ -209,7 +209,7 @@ class TestTerminateRouting:
 
 
 def test_remote_home_machine_is_forwarded(
-    local_machine: MachineIdentity, db_conn: psycopg.Connection
+    local_machine: MachineIdentityReader, db_conn: psycopg.Connection
 ) -> None:
     """A remote agents_meta.machine row is always forwarded to that host's ops
     server — there is no deployment gate on the lifecycle path. Single box is
@@ -229,7 +229,7 @@ def test_remote_home_machine_is_forwarded(
 # A restart's overlay is validated at the gateway: a valid one rides to the home runner
 # unchanged, an invalid one is a 422 and never leaves the gateway.
 def test_restart_overlay_is_validated_before_it_is_forwarded(
-    local_machine: MachineIdentity, db_conn: psycopg.Connection
+    local_machine: MachineIdentityReader, db_conn: psycopg.Connection
 ) -> None:
     with (
         runner_ops(db_conn, "remote-runner", {"lifecycle": completed({"status": "enqueued"})}) as (
@@ -311,7 +311,7 @@ class TestTerminateOpenTasksHint:
 
     def test_no_open_tasks_reports_null(
         self,
-        local_machine: MachineIdentity,
+        local_machine: MachineIdentityReader,
         gateway_local_runner: RunnerOps,
         db_conn: psycopg.Connection,
     ) -> None:
@@ -324,7 +324,7 @@ class TestTerminateOpenTasksHint:
 
     def test_open_tasks_reported_newest_first(
         self,
-        local_machine: MachineIdentity,
+        local_machine: MachineIdentityReader,
         gateway_local_runner: RunnerOps,
         db_conn: psycopg.Connection,
     ) -> None:
@@ -358,7 +358,7 @@ class TestTerminateOpenTasksHint:
 
     def test_more_than_five_truncates_to_the_five_newest(
         self,
-        local_machine: MachineIdentity,
+        local_machine: MachineIdentityReader,
         gateway_local_runner: RunnerOps,
         db_conn: psycopg.Connection,
     ) -> None:
@@ -404,7 +404,7 @@ class TestTerminateShellSessions:
     the sessions it reports killed (the runner holds no DELETE on them)."""
 
     def test_forwards_the_option_and_drops_killed_sessions_ttl_rows(
-        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         report = completed(
             {"status": "enqueued", "shell_sessions": {"when": "now", "killed": [0, 1]}}
@@ -428,7 +428,7 @@ class TestTerminateShellSessions:
         assert _shell_ttl_ids(db_conn, agent_id) == [2]
 
     def test_at_exit_kill_leaves_ttl_rows_to_the_reaper(
-        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         report = completed(
             {"status": "enqueued", "shell_sessions": {"when": "at_exit", "killed": []}}

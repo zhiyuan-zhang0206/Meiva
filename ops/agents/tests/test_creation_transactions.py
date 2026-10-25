@@ -9,7 +9,7 @@ from base.agents.model.birth_config import set_cluster_default_model
 from base.agents.tasks.creation import create_task_in_transaction
 from base.agents.tasks.model import Task
 from base.api_contracts.agent_contract import InvalidModelConfig
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -41,7 +41,7 @@ def test_actual_birth_model_effort_failure_rolls_back_every_effect(
     cluster_defaults_unset: None,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     before = _counts(db_conn)
     with (
@@ -69,7 +69,7 @@ def test_caller_owns_birth_task_audit_and_inbound_commit(
     commit: bool,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     parent = _seed_parent(db_conn)
     with database.connect(autocommit=True) as observer:
@@ -116,7 +116,7 @@ def test_task_validation_failure_rolls_back_birth_and_prompt(
     database: Database,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     _seed_parent(db_conn)
     row = db_conn.execute(
@@ -158,7 +158,7 @@ def test_cursor_birth_replay_returns_original_attempt_without_new_effects(
     db_conn: psycopg.Connection,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with db_conn.transaction(), db_conn.cursor() as cur:
         original = insert_agent_birth(

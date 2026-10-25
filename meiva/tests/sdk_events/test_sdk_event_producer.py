@@ -17,8 +17,8 @@ from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.sdk import call_policy
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner, sampling_owner_serving
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.paths import logs_dir
 from base.telemetry import emit
@@ -134,8 +134,8 @@ def test_context_switch_in_body_does_not_change_the_captured_producer_or_identit
 
     first = ClientSet(pipeline_factory=producer)
     second = ClientSet(pipeline_factory=forbidden)
-    first_machine = machine_from_boot(process_config)
-    second_machine = machine_from_boot(process_config)
+    first_machine = ConfiguredMachineIdentity(process_config)
+    second_machine = ConfiguredMachineIdentity(process_config)
     first_machine.set(name="first-sdk-owner")
     second_machine.set(name="second-sdk-owner")
     old_context = MeivaContext(
@@ -184,7 +184,7 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
     bare_context: None,
     sampling: call_policy.SamplingPolicyOwner,
     process_config: ConfigBoot,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from meiva.sdk_surface import install
     from meiva.sdk_surface.installation import installed

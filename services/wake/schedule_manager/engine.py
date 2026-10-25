@@ -51,7 +51,7 @@ from loguru import logger
 
 import base.host.proc
 from base.agents.context.clients import ClientSet
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
@@ -89,7 +89,7 @@ from services.wake.schedule_manager.stall_policy import (
 @dataclass(frozen=True)
 class PluginInputs:
     config: ConfigBoot
-    machine: MachineIdentity
+    machine: MachineIdentityReader
     clients: ClientSet
 
 

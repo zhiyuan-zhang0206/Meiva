@@ -8,7 +8,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.tests.api_keys import mock_api_keys as mock_api_keys
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -61,7 +61,7 @@ def integration_data_plane(database: Database, event_bus: EventBus) -> None:
 def gateway_client(
     gateway_data_plane: None,
     db_conn: psycopg.Connection,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> Iterator[httpx.Client]:
     """Point the SDK's gateway client at the in-process gateway app (a TestClient transport)."""
     with gateway_test_client(machine=machine_identity) as test_client:

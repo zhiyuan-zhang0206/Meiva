@@ -18,7 +18,7 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation import relay as lease_relay
 from base.agents.impersonation.status import ImpersonationStatus
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -67,7 +67,7 @@ def test_the_relay_command_runs_a_claude_relay_to_the_leases_expiry(
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, mid = active
     stdout = io.StringIO()
@@ -100,7 +100,7 @@ def test_the_relay_command_reports_a_host_that_refuses_to_be_steered(
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, mid = active
     stdout = io.StringIO()
@@ -126,7 +126,7 @@ def test_unresolvable_destination_exits_before_any_lease_work(
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, _ = active
     stdout = io.StringIO()
@@ -154,7 +154,7 @@ def test_agent_mismatch_refuses_inbox_before_subscription(
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, _ = active
     stdout = io.StringIO()
@@ -174,7 +174,7 @@ def test_the_relay_command_refuses_a_credential_the_lease_did_not_mint(
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, _ = active
     code = cmd_relay(
@@ -204,7 +204,7 @@ def test_wire_lease_status_restores_shared_enum(
     database: Database,
     event_bus: EventBus,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     pending_consent = (ImpersonationStatus.REQUESTED, ImpersonationStatus.ACCEPTED)
     lease, _, mid = lease_at(status if status in pending_consent else ImpersonationStatus.ACTIVE)
@@ -245,7 +245,7 @@ def test_a_rolled_back_acceptance_is_read_as_rejected_with_its_reason(
     database: Database,
     event_bus: EventBus,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, owner, _ = lease_at(ImpersonationStatus.ACCEPTED)
     lease_relay.fail_acceptance(database, event_bus, lease["id"], owner, "relay would not start")
@@ -268,7 +268,7 @@ def test_write_heartbeat_stops_at_a_terminal_lease(
     database: Database,
     event_bus: EventBus,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, _ = active
     name = machine_identity.name()

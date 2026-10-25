@@ -20,7 +20,7 @@ from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
@@ -112,7 +112,7 @@ def main() -> None:
 
     config = ConfigBoot()
     config.boot()
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     process_home = meiva_home().resolve()
     assert_schema_current(config.view.data_plane.db_url)
     version = CodeVersion(image)

@@ -23,7 +23,7 @@ from pathlib import Path
 import psycopg
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.deploy.git.cluster_drift import checkout_head_sha
@@ -171,7 +171,7 @@ def status_snapshot(
     pool: ConnectionPool | None = None,
     *,
     image: LoadedCommit,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> ClusterStatus:
     machine_name = local_machine.name()
     roles = local_machine.role()

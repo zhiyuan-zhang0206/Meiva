@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
@@ -144,7 +144,11 @@ def test_command_pipeline_is_lazy_and_retains_the_same_database_factory(
     seen: list[DatabaseFactory] = []
 
     def build(
-        *, database: DatabaseFactory, machine: MachineIdentity, home: Path, flush_interval_s: float
+        *,
+        database: DatabaseFactory,
+        machine: MachineIdentityReader,
+        home: Path,
+        flush_interval_s: float,
     ) -> telemetry.EventPipeline:
         assert machine is command_runtime.machine
         assert home == command_home

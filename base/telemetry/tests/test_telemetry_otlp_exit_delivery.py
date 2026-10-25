@@ -79,7 +79,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.config import ConfigBoot
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.paths import meiva_home
 
 MARKER = {marker!r}
@@ -89,7 +89,7 @@ version = CodeVersion(image)
 gate = ProcessDbGate(process="exit-seam-probe", version=version.get)
 config = ConfigBoot()
 config.read_process_environment()
-pipeline = telemetry.build_pipeline(database=partial(Database.from_settings, gate=gate), machine=machine_from_boot(config), home=meiva_home())
+pipeline = telemetry.build_pipeline(database=partial(Database.from_settings, gate=gate), machine=ConfiguredMachineIdentity(config), home=meiva_home())
 telemetry.init_telemetry(process="exit-seam-probe", pipeline=pipeline)
 telemetry.emit("log", "log", attributes={{"seq": "early", "marker": MARKER}})
 telemetry.sync()

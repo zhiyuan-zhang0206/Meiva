@@ -5,7 +5,7 @@ from typing import LiteralString, cast
 import psycopg
 from psycopg import sql
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import apply_pending_migrations
 from base.deploy.schema.tests.migration_support import SCHEMA_SQL, throwaway_database
@@ -21,7 +21,7 @@ _TIMELINE_TABLES = (
 
 def test_timeline_projection_upgrade_is_discovered_and_preserves_history(
     db_url: str,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     _ = db_url
     with throwaway_database("timeline_upgrade") as url:

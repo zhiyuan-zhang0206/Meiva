@@ -38,7 +38,7 @@ from base.agents.impersonation.delivery import reserve_delivery
 from base.agents.impersonation.history import resolve
 from base.agents.impersonation.status import OPEN, ImpersonationStatus
 from base.agents.impersonation.terminal_notices import notice_text
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
@@ -438,7 +438,7 @@ def cmd_relay(
     *,
     inputs: RelayInputs,
     database_factory: DatabaseFactory,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
 ) -> int:
     token = inputs.token
     try:

@@ -38,7 +38,7 @@ from agent.execution.protocol import (
     write_request,
     write_result,
 )
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.paths import meiva_home
@@ -147,7 +147,7 @@ def test_request_envelope_round_trip(tmp_path: Path) -> None:
 
 
 def test_request_envelope_transfers_emit_size_and_serialize_time(
-    tmp_path: Path, database: Database, machine_identity: MachineIdentity
+    tmp_path: Path, database: Database, machine_identity: MachineIdentityReader
 ) -> None:
     """Request writes and reads record the final envelope size and their own
     serialization cost in the durable event stream."""

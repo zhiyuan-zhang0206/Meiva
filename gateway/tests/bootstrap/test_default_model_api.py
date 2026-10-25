@@ -16,7 +16,7 @@ from dataclasses import replace
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -44,7 +44,7 @@ def _spawn_agent(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> int:
     """Setup helper — a row with a stamped birth_config (the #1236 split: the
     row is created by create_agent_row; nothing launches, these tests only read
@@ -163,7 +163,7 @@ class TestPut:
         *,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """The panel control is safe to use on a live cluster."""
         agent_id = _spawn_agent(

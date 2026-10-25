@@ -10,7 +10,7 @@ import pytest
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.dataplane import pg_runtime, runtime_binaries
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
@@ -154,7 +154,7 @@ def test_pg_admission_uses_each_owners_live_remote_verdict(
                 config=config,
                 database_factory=operator_database,
                 producer=operator_pipeline,
-                machine=machine_from_boot(config),
+                machine=ConfiguredMachineIdentity(config),
                 helper=refuse_helper,
                 host=fake_host(),
                 session=UserSession(user_home=tmp_path, login_shell="/bin/zsh", interactive=False),

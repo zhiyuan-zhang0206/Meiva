@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from base.clock import SYSTEM_TIMERS
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
@@ -31,7 +31,7 @@ def skill_ctx(
     *,
     operator_database: Callable[[], Any],
     producer: Callable[[], EventPipeline],
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> ConvergeCtx:
     config, machine = command_config_machine
     meiva_home = tmp_path / "meiva-home"

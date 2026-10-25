@@ -4,7 +4,7 @@ from typing import LiteralString, cast
 
 import psycopg
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import apply_pending_migrations
 from base.deploy.schema.tests.migration_support import SCHEMA_SQL, throwaway_database
@@ -24,7 +24,7 @@ CREATE TABLE checkpoints (
 
 def test_compact_boundary_index_upgrade_indexes_the_upstream_table(
     db_url: str,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     # meiva:note
     # The boundary index is a migration on a table the saver owns. `checkpoints` is
@@ -63,7 +63,7 @@ def test_compact_boundary_index_upgrade_indexes_the_upstream_table(
 
 def test_compact_boundary_index_is_skipped_without_the_upstream_table(
     db_url: str,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     # meiva:note
     # A schema-only database has no `checkpoints`; the migration must not fail.

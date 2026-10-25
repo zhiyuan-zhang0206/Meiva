@@ -3,7 +3,7 @@ from uuid import uuid4
 import psycopg
 
 from base.api_contracts.idempotency import keyed_headers
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.support.db_faults.insert_fault import failing_insert
 from meiva.tests.fixtures.pin_agent import pin_agent
@@ -18,7 +18,7 @@ def test_gateway_enqueue_failure_rolls_back_assignment(
     redis_url: str,
     db_conn: psycopg.Connection,
     root_task_id: int,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     actor = seed_agent(db_conn)
     old_owner = seed_agent(db_conn)

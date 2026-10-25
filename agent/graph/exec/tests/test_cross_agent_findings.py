@@ -34,7 +34,7 @@ from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
@@ -178,7 +178,7 @@ async def test_interleaved_turns_deliver_each_finding_to_its_own_agent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """Agent A's SECURITY note is in A's messages and in no other agent's,
     whichever way the two agents' claim and exec nodes interleave."""

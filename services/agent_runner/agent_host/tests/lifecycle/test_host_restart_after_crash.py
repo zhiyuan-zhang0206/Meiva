@@ -4,7 +4,7 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import settle_running_rows_at_start
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import create_agent
 
@@ -22,7 +22,7 @@ def _agent_on(conn: psycopg.Connection[Any], *, machine_name: str) -> int:
 async def test_boot_settles_only_this_machines_running_rows(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local = machine_identity.name()
     running_here = _agent_on(db_conn, machine_name=local)

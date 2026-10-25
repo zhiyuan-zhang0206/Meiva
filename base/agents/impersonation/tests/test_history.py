@@ -14,7 +14,7 @@ from base.agents.impersonation.tests.impersonation_support import (
     legacy_session,
     recorded_tree,
 )
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
@@ -25,7 +25,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 @pytest.fixture
 def owner(
-    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentityReader
 ) -> RuntimeIncarnation:
     local_machine = machine_identity.name()
     agent_id = create_agent(db_conn)
@@ -98,7 +98,7 @@ def test_numbers_are_agent_scoped_and_permanent(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     first = start(
@@ -161,7 +161,7 @@ def test_concurrent_requests_cannot_share_control(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
 
@@ -192,7 +192,7 @@ def test_say_ack_and_file_preserve_all_message_bodies(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     lease = start(
@@ -283,7 +283,7 @@ def test_legacy_empty_events_never_certify_a_zero_call_claim(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     lease = legacy_session(db_conn, owner, local_machine=local_machine)
@@ -321,7 +321,7 @@ def test_export_handoff_rebuilds_a_cached_v1_document(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     from psycopg.types.json import Jsonb
@@ -358,7 +358,7 @@ def test_message_retry_does_not_replace_newer_preview(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     lease = start(
@@ -401,7 +401,7 @@ def test_public_session_exposes_handoff_applied_at(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     lease = start(
@@ -431,7 +431,7 @@ def test_resolve_names_both_machines_when_the_session_lives_elsewhere(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     lease = start(

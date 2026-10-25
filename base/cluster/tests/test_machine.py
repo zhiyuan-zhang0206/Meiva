@@ -1,11 +1,12 @@
-"""`base.cluster.machine` contracts — explicitly owned resolution and validation.
-
-MachineIdentity.role is derived from independent capability booleans
-(serve_gateway / serve_agent_runner / serve_observability_station), each the settings
-bool of its `MEIVA_MACHINE_SERVE_*` key (None = off). The home's `.env` is the only source:
-identity files in the home are not read (`test_identity_files_in_the_home_are_not_read`).
-Role injection is exercised through the public MachineIdentity.set/role contract.
-"""
+# meiva:note
+# `base.cluster.machine` contracts — explicitly owned resolution and validation.
+#
+# `ConfiguredMachineIdentity.role` is derived from independent capability booleans
+# (serve_gateway / serve_agent_runner / serve_observability_station), each the settings
+# bool of its `MEIVA_MACHINE_SERVE_*` key (None = off). The home's `.env` is the only source:
+# identity files in the home are not read (`test_identity_files_in_the_home_are_not_read`).
+# Role injection is exercised through the public `ConfiguredMachineIdentity.set/role` contract.
+# meiva:link base/cluster/machine/docs/machine.meiva.okf.md
 
 from __future__ import annotations
 
@@ -17,73 +18,86 @@ from base.cluster import machine as _machine
 from base.cluster.machine import (
     GatewayAccess,
     MachineFacts,
-    MachineIdentity,
     MachineNameMissing,
     MachineRoleInvalid,
     MachineRoleMissing,
-    MachineRoles,
     format_capabilities,
     roles_from_flags,
 )
 from base.cluster.machine.ambient import gateway_access_from_settings
-from base.cluster.machine.boot import gateway_access_from_boot, machine_from_boot
+from base.cluster.machine.boot import gateway_access_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
+from base.cluster.machine.tests.faults import InvalidRoleIdentity
 from base.config import ConfigBoot, settings
+from base.paths.tests.homes import point_home
 
 _SECRET = "cluster-" + "s" * 24
 
 
-def test_owned_identity_reads_fields_independently_and_caches_absence() -> None:
-    reads: list[str] = []
+def test_owned_identity_reads_fields_independently_and_caches_absence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bad_home = tmp_path / "bad_utf8"
+    bad_home.mkdir()
+    (bad_home / ".env").write_bytes(b"\xff")
+    with monkeypatch.context() as m:
+        point_home(m, bad_home)
+        poisoned = ConfiguredMachineIdentity(ConfigBoot())
+        poisoned.set(role="agent-runner", host="localhost", description=None)
+        assert poisoned.role() == frozenset({"agent-runner"})
+        assert poisoned.host() == "localhost"
+        assert poisoned.description() is None
+        with pytest.raises(UnicodeDecodeError):
+            poisoned.name()
 
-    def name() -> str:
-        reads.append("name")
-        raise MachineNameMissing("not configured")
+    config = ConfigBoot()
+    config.read_process_environment()
+    config.set_field("machine_name", "")
+    config.set_field("machine_serve_gateway", False)
+    config.set_field("machine_serve_agent_runner", True)
+    config.set_field("machine_serve_observability_station", False)
+    config.set_field("machine_host", "  ")
+    config.set_field("machine_description", "")
 
-    def role() -> frozenset[str]:
-        reads.append("role")
-        return roles_from_flags(
-            serve_gateway=False,
-            serve_agent_runner=True,
-            serve_observability_station=False,
-        )
-
-    def host() -> str:
-        reads.append("host")
-        return "  "
-
-    def description() -> None:
-        reads.append("description")
-
-    owner = MachineIdentity(name=name, role=role, host=host, description=description)
-    assert reads == []
+    owner = ConfiguredMachineIdentity(config)
     assert owner.role() == owner.role() == frozenset({"agent-runner"})
     assert owner.description() is owner.description() is None
     assert owner.host() == owner.host() == "localhost"
-    assert reads == ["role", "description", "host"]
     with pytest.raises(MachineNameMissing):
         owner.name()
-    assert reads[-1] == "name"
+    config.set_field("machine_description", "later")
+    config.set_field("machine_name", "repaired")
+    assert owner.description() is None
+    assert owner.name() == "repaired"
 
 
 def test_owned_identity_reset_reloads_only_its_own_readers() -> None:
-    names = [" initial-a ", "initial-b"]
-    first = MachineIdentity(
-        name=lambda: names[0],
-        role=lambda: frozenset({"gateway"}),
-        host=lambda: " host-a ",
-        description=lambda: " details ",
-    )
-    second = MachineIdentity(
-        name=lambda: names[1],
-        role=lambda: frozenset({"agent-runner"}),
-        host=lambda: "host-b",
-        description=lambda: None,
-    )
+    first_config = ConfigBoot()
+    first_config.read_process_environment()
+    first_config.set_field("machine_name", " initial-a ")
+    first_config.set_field("machine_serve_gateway", True)
+    first_config.set_field("machine_serve_agent_runner", False)
+    first_config.set_field("machine_serve_observability_station", False)
+    first_config.set_field("machine_host", " host-a ")
+    first_config.set_field("machine_description", " details ")
+
+    second_config = ConfigBoot()
+    second_config.read_process_environment()
+    second_config.set_field("machine_name", "initial-b")
+    second_config.set_field("machine_serve_gateway", False)
+    second_config.set_field("machine_serve_agent_runner", True)
+    second_config.set_field("machine_serve_observability_station", False)
+    second_config.set_field("machine_host", "host-b")
+    second_config.set_field("machine_description", "")
+
+    first = ConfiguredMachineIdentity(first_config)
+    second = ConfiguredMachineIdentity(second_config)
     assert first.name() == "initial-a"
     assert second.name() == "initial-b"
     assert first.host() == "host-a"
     assert first.description() == "details"
-    names[:] = ["changed-a", "changed-b"]
+    first_config.set_field("machine_name", "changed-a")
+    second_config.set_field("machine_name", "changed-b")
     first.set(role="observability-station", description=None)
     assert first.role() == frozenset({"observability-station"})
     assert first.description() is None
@@ -97,16 +111,14 @@ def test_owned_identity_reset_reloads_only_its_own_readers() -> None:
 
 
 def test_owned_identity_rejects_invalid_supplied_facts() -> None:
-    owner = MachineIdentity(
-        name=lambda: " ",
-        role=lambda: frozenset({"typo"}),
-        host=lambda: "",
-        description=lambda: None,
-    )
+    config = ConfigBoot()
+    config.read_process_environment()
+    config.set_field("machine_name", " ")
+    owner = ConfiguredMachineIdentity(config)
     with pytest.raises(MachineNameMissing):
         owner.name()
     with pytest.raises(MachineRoleInvalid):
-        owner.role()
+        owner.set(role="typo")
     with pytest.raises(MachineRoleMissing):
         roles_from_flags(
             serve_gateway=False,
@@ -168,7 +180,7 @@ def test_captured_facts_do_not_follow_a_legacy_owners_repair_and_reset() -> None
         "machine_serve_observability_station": False,
     }.items():
         config.set_field(field, value)
-    owner = machine_from_boot(config)
+    owner = ConfiguredMachineIdentity(config)
     snapshot = MachineFacts.capture(owner, host="snapshot-host")
     recorded = {snapshot: "captured"}
     config.set_field("machine_name", "after")
@@ -188,17 +200,14 @@ def test_captured_facts_do_not_follow_a_legacy_owners_repair_and_reset() -> None
 def test_explicit_capture_preserves_missing_facts_and_overrides_before_reading_invalid_ones() -> (
     None
 ):
-    invalid = MachineIdentity(
-        name=lambda: " ",
-        role=lambda: frozenset({"typo"}),
-        host=lambda: "h",
-        description=lambda: None,
+    invalid = InvalidRoleIdentity(
+        MachineFacts.of(name=" ", role="gateway", host="h", description=None)
     )
     repaired = MachineFacts.capture(invalid, role="gateway")
     assert repaired.role() == frozenset({"gateway"}) and repaired.host() == "h"
     with pytest.raises(MachineNameMissing):
         repaired.name()
-    with pytest.raises(MachineRoleInvalid, match="typo"):
+    with pytest.raises(MachineRoleInvalid, match="fixed test fault"):
         MachineFacts.capture(invalid)
 
     config = ConfigBoot()
@@ -210,22 +219,31 @@ def test_explicit_capture_preserves_missing_facts_and_overrides_before_reading_i
         "machine_serve_observability_station",
     ]:
         config.set_field(flag, False)
-    missing = MachineFacts.capture(machine_from_boot(config))
+    missing = MachineFacts.capture(ConfiguredMachineIdentity(config))
     assert missing.name() == "configured-name"
     with pytest.raises(MachineRoleMissing):
         missing.role()
 
 
-def test_capture_does_not_convert_unrelated_reader_failures_to_missing_facts() -> None:
-    def unavailable_role() -> MachineRoles:
-        raise OSError("identity source is unavailable")
-
-    owner = MachineIdentity(
-        name=lambda: "m", role=unavailable_role, host=lambda: "h", description=lambda: None
-    )
-    with pytest.raises(OSError, match="identity source is unavailable"):
-        MachineFacts.capture(owner)
-    assert MachineFacts.capture(owner, role="gateway").role() == frozenset({"gateway"})
+def test_capture_does_not_convert_unrelated_reader_failures_to_missing_facts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    chmod_home = tmp_path / "chmod_home"
+    chmod_home.mkdir()
+    env_file = chmod_home / ".env"
+    env_file.write_text("MEIVA_MACHINE_NAME=m\n", encoding="utf-8")
+    env_file.chmod(0o000)
+    try:
+        point_home(monkeypatch, chmod_home)
+        with pytest.raises(PermissionError):
+            ConfiguredMachineIdentity(ConfigBoot()).role()
+        owner = ConfiguredMachineIdentity(ConfigBoot())
+        owner.set(name="m", host="h", description=None)
+        assert MachineFacts.capture(owner, role="gateway").role() == frozenset({"gateway"})
+        with pytest.raises(PermissionError):
+            MachineFacts.capture(owner)
+    finally:
+        env_file.chmod(0o600)
 
 
 @pytest.fixture
@@ -243,12 +261,14 @@ def machine_config() -> ConfigBoot:
 
 
 @pytest.fixture
-def machine_identity(machine_config: ConfigBoot) -> MachineIdentity:
-    return machine_from_boot(machine_config)
+def machine_identity(machine_config: ConfigBoot) -> ConfiguredMachineIdentity:
+    return ConfiguredMachineIdentity(machine_config)
 
 
 def test_machine_role_follows_each_settings_flag(
-    monkeypatch: pytest.MonkeyPatch, machine_config: ConfigBoot, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch,
+    machine_config: ConfigBoot,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_config.set_field("machine_serve_gateway", True)
     machine_config.set_field("machine_serve_agent_runner", False)
@@ -256,7 +276,9 @@ def test_machine_role_follows_each_settings_flag(
 
 
 def test_machine_role_single_box(
-    monkeypatch: pytest.MonkeyPatch, machine_config: ConfigBoot, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch,
+    machine_config: ConfigBoot,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     """Both capability flags true -> single-box gateway,agent-runner set."""
     machine_config.set_field("machine_serve_gateway", True)
@@ -265,7 +287,9 @@ def test_machine_role_single_box(
 
 
 def test_machine_role_observability_station(
-    monkeypatch: pytest.MonkeyPatch, machine_config: ConfigBoot, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch,
+    machine_config: ConfigBoot,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     """The observability-station capability resolves from its own flag —
     a second machine can declare the station without gateway or agent-runner."""
@@ -274,7 +298,9 @@ def test_machine_role_observability_station(
 
 
 def test_is_observability_station_helper(
-    monkeypatch: pytest.MonkeyPatch, machine_config: ConfigBoot, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch,
+    machine_config: ConfigBoot,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     """is_observability_station() mirrors is_gateway()/is_agent_runner()."""
 
@@ -290,14 +316,16 @@ def test_is_observability_station_helper(
     assert ("gateway" in machine_identity.role()) is True
 
 
-def test_machine_role_raises_when_neither(machine_identity: MachineIdentity) -> None:
+def test_machine_role_raises_when_neither(machine_identity: ConfiguredMachineIdentity) -> None:
     # every flag unset -> no capability -> Missing.
     with pytest.raises(MachineRoleMissing):
         machine_identity.role()
 
 
 def test_machine_role_raises_when_both_false(
-    monkeypatch: pytest.MonkeyPatch, machine_config: ConfigBoot, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch,
+    machine_config: ConfigBoot,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     """Explicit false in both flags -> no capability -> Missing (not a silent
     empty set)."""
@@ -311,7 +339,7 @@ def test_identity_files_in_the_home_are_not_read(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     machine_config: ConfigBoot,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     """The home's `.env` is the only identity source: the `machine_*`, `gateway_url`
     and `memory_remote` files older homes kept are not read by any resolver."""
@@ -337,9 +365,9 @@ def test_identity_files_in_the_home_are_not_read(
     assert machine_identity.host() == "localhost"
 
 
-def test_owned_identity_set_coerces_string_and_iterable(machine_identity: MachineIdentity) -> None:
-    """MachineIdentity.set accepts a comma string or an iterable; both validate to a set."""
-
+def test_owned_identity_set_coerces_string_and_iterable(
+    machine_identity: ConfiguredMachineIdentity,
+) -> None:
     machine_identity.set(role="gateway,agent-runner")
     try:
         assert machine_identity.role() == frozenset({"gateway", "agent-runner"})
@@ -356,30 +384,34 @@ def test_owned_identity_set_coerces_string_and_iterable(machine_identity: Machin
 # guarding invalid-token and empty-set rejections without accessing its private parser.
 
 
-def test_parse_roles_comma_set(machine_identity: MachineIdentity) -> None:
+def test_parse_roles_comma_set(machine_identity: ConfiguredMachineIdentity) -> None:
     """A comma capability set parses to a 2-element frozenset (single box)."""
     machine_identity.set(role="gateway,agent-runner")
     assert machine_identity.role() == frozenset({"gateway", "agent-runner"})
 
 
-def test_parse_roles_tolerates_whitespace(machine_identity: MachineIdentity) -> None:
+def test_parse_roles_tolerates_whitespace(machine_identity: ConfiguredMachineIdentity) -> None:
     machine_identity.set(role=" gateway , agent-runner ")
     assert machine_identity.role() == frozenset({"gateway", "agent-runner"})
 
 
-def test_parse_roles_empty_after_split_raises(machine_identity: MachineIdentity) -> None:
+def test_parse_roles_empty_after_split_raises(machine_identity: ConfiguredMachineIdentity) -> None:
     """An all-comma / blank value yields no valid token -> MachineRoleInvalid,
     not a silent empty 'no capability' set."""
     with pytest.raises(MachineRoleInvalid):
         machine_identity.set(role=",,")
 
 
-def test_parse_roles_one_bad_token_rejects_whole_set(machine_identity: MachineIdentity) -> None:
+def test_parse_roles_one_bad_token_rejects_whole_set(
+    machine_identity: ConfiguredMachineIdentity,
+) -> None:
     with pytest.raises(MachineRoleInvalid):
         machine_identity.set(role="gateway,bogus")
 
 
-def test_parse_roles_accepts_observability_station(machine_identity: MachineIdentity) -> None:
+def test_parse_roles_accepts_observability_station(
+    machine_identity: ConfiguredMachineIdentity,
+) -> None:
     """The station token parses alongside the classic capabilities."""
     machine_identity.set(role="gateway,observability-station")
     assert machine_identity.role() == frozenset({"gateway", "observability-station"})
@@ -388,7 +420,9 @@ def test_parse_roles_accepts_observability_station(machine_identity: MachineIden
 
 
 def test_machine_description_comes_from_settings(
-    monkeypatch: pytest.MonkeyPatch, machine_config: ConfigBoot, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch,
+    machine_config: ConfigBoot,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
 
     machine_config.set_field("machine_description", " voice IO + browser \n")
@@ -396,7 +430,9 @@ def test_machine_description_comes_from_settings(
 
 
 def test_machine_description_none_when_empty(
-    monkeypatch: pytest.MonkeyPatch, machine_config: ConfigBoot, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch,
+    machine_config: ConfigBoot,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
 
     machine_config.set_field("machine_description", "")
@@ -425,7 +461,7 @@ def test_gateway_api_base_unset_raises(configured: str) -> None:
 
 
 def test_owned_identity_set_overrides_resolution(
-    tmp_path: Path, machine_identity: MachineIdentity
+    tmp_path: Path, machine_identity: ConfiguredMachineIdentity
 ) -> None:
 
     machine_identity.set(name="injected", role="gateway", description="desc")
@@ -438,7 +474,9 @@ def test_owned_identity_set_overrides_resolution(
 
 
 def test_owned_identity_set_is_per_field_independent(
-    monkeypatch: pytest.MonkeyPatch, machine_config: ConfigBoot, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch,
+    machine_config: ConfigBoot,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     """Injecting only role must not force name resolution (a role-only test
     should never hit MachineNameMissing)."""
@@ -454,7 +492,9 @@ def test_owned_identity_set_is_per_field_independent(
 
 
 def test_owned_identity_reset_reresolves(
-    monkeypatch: pytest.MonkeyPatch, machine_config: ConfigBoot, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch,
+    machine_config: ConfigBoot,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
 
     machine_identity.set(role="gateway")
@@ -466,7 +506,7 @@ def test_owned_identity_reset_reresolves(
 
 
 def test_owned_identity_set_description_none_is_explicit(
-    tmp_path: Path, machine_identity: MachineIdentity
+    tmp_path: Path, machine_identity: ConfiguredMachineIdentity
 ) -> None:
     """description=None injects None (resolved), not 'leave unset'."""
 
@@ -478,14 +518,18 @@ def test_owned_identity_set_description_none_is_explicit(
 
 
 def test_reachable_host_comes_from_settings(
-    monkeypatch: pytest.MonkeyPatch, machine_config: ConfigBoot, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch,
+    machine_config: ConfigBoot,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_config.set_field("machine_host", " 10.0.0.1 ")
     assert machine_identity.host() == "10.0.0.1"
 
 
 def test_reachable_host_defaults_to_localhost(
-    monkeypatch: pytest.MonkeyPatch, machine_config: ConfigBoot, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch,
+    machine_config: ConfigBoot,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     """Empty -> `localhost` (single-box zero-config). A remote runner that lands
     here is rejected at registration time, not by this resolver."""
@@ -493,7 +537,7 @@ def test_reachable_host_defaults_to_localhost(
     assert machine_identity.host() == "localhost"
 
 
-def test_owned_identity_set_host_injection(machine_identity: MachineIdentity) -> None:
+def test_owned_identity_set_host_injection(machine_identity: ConfiguredMachineIdentity) -> None:
 
     machine_identity.set(host="10.0.0.5")
     try:

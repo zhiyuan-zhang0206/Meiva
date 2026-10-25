@@ -107,7 +107,7 @@ def test_unit_dial_url_gateway_only_defaults_port_when_url_unresolvable() -> Non
 
 
 def test_unit_dial_url_agrees_across_both_writers() -> None:
-    from base.cluster.machine.boot import machine_from_boot
+    from base.cluster.machine.configured import ConfiguredMachineIdentity
     from base.config.tests.configuration import snapshot_process_config
 
     config = snapshot_process_config()
@@ -116,7 +116,7 @@ def test_unit_dial_url_agrees_across_both_writers() -> None:
     config.set_field("machine_serve_agent_runner", True)
     config.set_field("machine_serve_observability_station", False)
     config.set_field("machine_host", "10.0.0.7")
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     from_start = machines.unit_dial_url(
         frozenset({"agent-runner"}),
         host=machine.host(),

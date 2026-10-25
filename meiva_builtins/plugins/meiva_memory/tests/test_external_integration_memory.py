@@ -18,7 +18,7 @@ from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import snapshot_process_config
@@ -52,7 +52,7 @@ def native_checkpoint(
     db_conn: psycopg.Connection,
     request: pytest.FixtureRequest,
     model_installation: Installation,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> Iterator[RuntimeIncarnation]:
     pin_no_identity()
     process_context.unbind_exec_turn()
@@ -109,7 +109,7 @@ def test_external_personal_path_uses_borrowed_identity(
     event_bus: EventBus,
     config_authority: ConfigAuthority,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     owner = native_checkpoint
     stale_id = owner.agent_id + 1000
@@ -169,7 +169,7 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
     event_bus: EventBus,
     config_authority: ConfigAuthority,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from meiva_builtins.plugins.meiva_memory import notes, sdk
 

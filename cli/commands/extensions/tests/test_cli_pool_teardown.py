@@ -16,7 +16,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.packages.extensions import install_registry
 from base.packages.extensions import registry as cluster_registry
 from base.packages.extensions.install_registry import tree_hash
@@ -91,7 +91,7 @@ def test_a_destination_that_cannot_hold_skills_is_reported_and_the_pool_is_close
 def test_a_local_install_is_adopted_into_the_cluster_and_the_pool_is_closed(
     db_conn: psycopg.Connection,
     operator_database: OperatorDatabaseFactory,
-    installed_machine_identity: MachineIdentity,
+    installed_machine_identity: MachineIdentityReader,
     unit_home: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -113,7 +113,7 @@ def test_a_local_install_is_adopted_into_the_cluster_and_the_pool_is_closed(
 def test_an_unreadable_local_registry_stops_the_adoption_and_the_pool_is_closed(
     db_url: str,
     operator_database: OperatorDatabaseFactory,
-    installed_machine_identity: MachineIdentity,
+    installed_machine_identity: MachineIdentityReader,
     unit_home: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:

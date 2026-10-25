@@ -15,15 +15,15 @@ tags:
 Two labels define a host in a multi-machine deployment, both resolved by
 `base.cluster.machine`:
 
-- **`MachineIdentity.name()`** — the stable identifier. The memory git branch
+- **`MachineIdentityReader.name()`** — the stable identifier. The memory git branch
   (`machine-<name>`), `agents_meta.machine`, and the `machines` table PK all read
   from it. Deliberately **not** `socket.gethostname()`, which drifts on macOS
   when switching wifi.
-- **`MachineIdentity.role()`** — a **frozenset** of capabilities, not a single role.
+- **`MachineIdentityReader.role()`** — a **frozenset** of capabilities, not a single role.
   Test the required capability with membership in this owner's set.
 
 Source for both: the composition root's `ConfigBoot`, supplied by
-`base.cluster.machine.boot.machine_from_boot(config)`, else fail loud
+`base.cluster.machine.configured.ConfiguredMachineIdentity(config)`, else fail loud
 (`MachineNameMissing` / `MachineRoleMissing`); there is no second channel. The role comes from three
 *independent* booleans — `MEIVA_MACHINE_SERVE_GATEWAY` /
 `MEIVA_MACHINE_SERVE_AGENT_RUNNER` / `MEIVA_MACHINE_SERVE_OBSERVABILITY_STATION` —
@@ -35,15 +35,15 @@ missing value prints an actionable error and exits 1. An agent calling `meiva`
 
 ## The capabilities
 
-`MachineIdentity` accepts four explicit lazy readers for name, capabilities,
-reachable host, and description. Construction performs no configuration reads.
-Its value module is settings-free; only the explicit startup factory imports
-`ConfigBoot`, so importing a machine or pipeline type does not admit a home.
+`ConfiguredMachineIdentity(config)` wraps a composition root's `ConfigBoot` and lazily
+reads name, capabilities, reachable host, and description. Construction performs no configuration reads.
+The value module (`base.cluster.machine.identity`) is settings-free; only the configured owner
+(`base.cluster.machine.configured`) imports `ConfigBoot`, so importing a machine or pipeline type does not admit a home.
 Each field has its own cache; resolving capabilities does not require a machine
 name, and an absent description is cached too. `reset()` invalidates only that
 owner, so a configuration repair can take effect without touching another
-process context. `roles_from_flags` owns capability validation for roots that
-provide configuration readers.
+process context. `roles_from_flags` owns capability validation for configuration flag reads,
+and `roles_from_input` validates explicit overrides in `set(role=...)`.
 
 `MachineFacts.of(name=, role=, host=, description=)` freezes declared facts. It copies
 capability iterables and rejects unknown nonempty tokens immediately; an explicitly empty name
@@ -57,9 +57,9 @@ unreplaced fields once, preserves only the two documented Missing states, and pr
 roles and other read failures. Overrides are selected before reads, so an overridden invalid
 field is not fetched. A later owner repair/reset cannot change the captured value.
 
-`MachineIdentityReader` is the shared read-only contract of facts and the legacy `MachineIdentity`
-owner. The legacy reader constructor and its cache/set/reset behavior remain for live command
-repair; `CommandRuntime.machine` retains that concrete mutation-capable type. Read-only consumers
+`MachineIdentityReader` is the shared read-only contract of `MachineFacts` and the `ConfiguredMachineIdentity`
+owner. The configured owner and its cache/set/reset behavior remain for live command
+repair; `CommandRuntime.machine` and `OwnedBoot.machine` retain that concrete mutation-capable type. Read-only consumers
 accept the shared contract, without treating a reader owner as a frozen value.
 
 `MeivaContext.machine` carries the exact root-owned identity. SDK machine reads use

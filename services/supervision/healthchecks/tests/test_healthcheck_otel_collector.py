@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -11,23 +11,14 @@ from pathlib import Path
 import pytest
 
 from base.cluster.machine import (
-    MachineIdentity,
+    MachineFacts,
     MachineRoleInvalid,
-    MachineRoleMissing,
-    MachineRoles,
 )
+from base.cluster.machine.configured import ConfiguredMachineIdentity
+from base.cluster.machine.tests.faults import InvalidRoleIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from services.supervision.healthchecks import otel_collector as hc
 from services.supervision.healthchecks.plans.collector_metrics import CollectorPressure
-
-
-def _role_machine(read_role: Callable[[], MachineRoles]) -> MachineIdentity:
-    return MachineIdentity(
-        name=lambda: "collector",
-        role=read_role,
-        host=lambda: "localhost",
-        description=lambda: None,
-    )
 
 
 # meiva:note
@@ -91,26 +82,19 @@ def test_collector_health_is_the_otlp_answer() -> None:
 
 
 def test_collector_serves_this_home_fails_closed_without_machine_role(tmp_path: Path) -> None:
-    def missing() -> MachineRoles:
-        raise MachineRoleMissing
-
-    def invalid() -> MachineRoles:
-        raise MachineRoleInvalid("bad")
+    missing = MachineFacts.of(name="collector", role=())
+    invalid = InvalidRoleIdentity(MachineFacts.of(name="collector", role="agent-runner"))
 
     assert (
-        hc.collector_serves_this_home(
-            machine=_role_machine(missing), home=tmp_path, endpoint_explicit=False
-        )
+        hc.collector_serves_this_home(machine=missing, home=tmp_path, endpoint_explicit=False)
         is False
     )
-    with pytest.raises(MachineRoleInvalid, match="bad"):
-        hc.collector_serves_this_home(
-            machine=_role_machine(invalid), home=tmp_path, endpoint_explicit=False
-        )
+    with pytest.raises(MachineRoleInvalid, match="fixed test fault"):
+        hc.collector_serves_this_home(machine=invalid, home=tmp_path, endpoint_explicit=False)
 
 
 def test_collector_serves_this_home_keeps_runner_behavior(
-    tmp_path: Path, *, machine_identity: MachineIdentity
+    tmp_path: Path, *, machine_identity: ConfiguredMachineIdentity
 ) -> None:
     machine_identity.set(role=frozenset({"agent-runner"}))
 
@@ -123,7 +107,7 @@ def test_collector_serves_this_home_keeps_runner_behavior(
 
 
 def test_collector_serves_this_home_requires_gateway_lgtm_marker(
-    tmp_path: Path, *, machine_identity: MachineIdentity
+    tmp_path: Path, *, machine_identity: ConfiguredMachineIdentity
 ) -> None:
     machine_identity.set(role=frozenset({"gateway", "agent-runner"}))
 
@@ -137,7 +121,7 @@ def test_collector_serves_this_home_requires_gateway_lgtm_marker(
 
 
 def test_collector_serves_this_home_with_explicit_endpoint_skips_marker(
-    tmp_path: Path, *, machine_identity: MachineIdentity
+    tmp_path: Path, *, machine_identity: ConfiguredMachineIdentity
 ) -> None:
     """An explicit MEIVA_TELEMETRY_OTLP_ENDPOINT opens the healthcheck's
     collector responsibility on a non-LGTM gateway (marker OR override)."""

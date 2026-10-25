@@ -7,7 +7,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -61,7 +61,7 @@ def _make_agent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> int:
     aid = spawn_agent(
         spawner="user",
@@ -170,7 +170,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         register_machine(db_conn)
         aid = _make_agent(
@@ -193,7 +193,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         register_machine(db_conn)
         aid = _make_agent(
@@ -226,7 +226,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         register_machine(db_conn)
         aid = _make_agent(
@@ -268,7 +268,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         register_machine(db_conn)
         aid = _make_agent(
@@ -301,7 +301,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         register_machine(db_conn)
         _set_machine_probe(db_conn, MACHINE, online=False, failures=OFFLINE_AFTER_FAILURES)
@@ -335,7 +335,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         register_machine(db_conn)
         _set_machine_probe(db_conn, MACHINE, online=False, failures=1)
@@ -360,7 +360,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         register_machine(db_conn)
         aid = _make_agent(
@@ -444,7 +444,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         register_machine(db_conn)
         aid = _make_agent(
@@ -538,7 +538,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         register_machine(db_conn)
         aid = _make_agent(
@@ -571,7 +571,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         register_machine(db_conn)
         aid = _make_agent(
@@ -610,7 +610,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         aid = _make_agent(
             db_conn,
@@ -643,7 +643,7 @@ class TestLivenessPass:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         register_machine(db_conn)
         aid = _make_agent(

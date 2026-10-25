@@ -13,7 +13,7 @@ from pathlib import Path
 
 import psycopg
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
@@ -48,7 +48,7 @@ def claimed_slots(conn: psycopg.Connection, schedule_id: int) -> list[datetime]:
 def borrowed_inputs(
     database: Database,
     producer: Callable[[], EventPipeline],
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     source_root: Path,
 ) -> ScheduleInputs:
     return ScheduleInputs(

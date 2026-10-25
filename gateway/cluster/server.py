@@ -17,7 +17,7 @@ import uvicorn
 from fastapi import FastAPI
 from uvicorn.config import STARTUP_FAILURE
 
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.port_preflight import serves_off_box
 from base.cluster.transport_encryption import verify_transport_encryption_declaration
 from base.config import ConfigBoot
@@ -77,7 +77,7 @@ def serve(kwargs: dict[str, Any]) -> None:
 # owned app in the new worker through the environment factory. The caller
 # boots `config`; the decisions that follow are `serve_plan`'s.
 def main(*, config: ConfigBoot, build_app: Callable[[GatewayProcess], FastAPI]) -> None:
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     plan = serve_plan(
         serves_gateway="gateway" in machine.role(),
         off_box=serves_off_box(machine=machine),

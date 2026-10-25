@@ -10,7 +10,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.tests.configuration import snapshot_process_config
 from meiva import boot
 from meiva.sdk_surface.installation import Installation, Loading, slot
@@ -71,7 +71,7 @@ def test_an_owned_boot_carries_the_roots_of_its_configuration() -> None:
 
 
 def test_a_borrowed_boot_takes_the_machine_and_database_of_the_bound_context(
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     bound = MeivaContext(machine=machine_identity, clients=ClientSet())
     borrowed = boot.borrow_external_process(bound)
@@ -81,7 +81,7 @@ def test_a_borrowed_boot_takes_the_machine_and_database_of_the_bound_context(
 
 
 def test_an_attachment_is_dated_by_the_clock_of_what_it_boots_from(
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     config = snapshot_process_config()
     owned = boot.own_external_process(config)
@@ -97,7 +97,7 @@ def test_an_attachment_is_dated_by_the_clock_of_what_it_boots_from(
 
 
 def test_a_borrowed_context_without_a_clock_fails_before_an_attachment_exists(
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     bound = MeivaContext(machine=machine_identity, clients=ClientSet())
     borrowed = boot.borrow_external_process(bound)

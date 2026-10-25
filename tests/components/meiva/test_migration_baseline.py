@@ -10,7 +10,7 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import settings
 from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import (
@@ -30,7 +30,7 @@ from base.paths.home import resolve_meiva_home
 _MIGRATIONS = SCHEMA_SQL.parents[1] / "migrations"
 
 
-def test_fresh_schema_sql_bootstrap_is_baselined(machine_identity: MachineIdentity) -> None:
+def test_fresh_schema_sql_bootstrap_is_baselined(machine_identity: MachineIdentityReader) -> None:
     """The real fresh-DB bootstrap: apply db/schema.sql to an empty database and
     assert it lands in the baselined applied-set state (new shape + baseline row,
     presets seeded), and apply_pending is then a no-op. Isolated throwaway DB, so
@@ -112,7 +112,7 @@ def test_schema_sql_has_birth_config_column() -> None:
 # What a live process still does against the surviving `deployment_state` row and the
 # tightened `agents_meta` status CHECK.
 def test_the_version_gate_and_the_agent_status_check_survive_the_contraction(
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with throwaway_database("retire_paths") as url, psycopg.connect(url) as conn:
         conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
@@ -146,7 +146,7 @@ _POSTURE_STATE = "20261020T151143_drop-host-deploy-state"
 # An older cluster still carries the per-host posture table; the migration removes it
 # and replays as a no-op.
 def test_the_migration_drops_the_posture_table_of_an_upgraded_cluster(
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with throwaway_database("posture_upgrade") as url:
         with psycopg.connect(url, autocommit=True) as conn:
@@ -213,7 +213,7 @@ def _watchdog_state_present(conn: psycopg.Connection) -> tuple[list[str], list[s
 
 
 def test_a_fresh_database_has_none_of_the_dead_watchdog_state(
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with throwaway_database("watchdog_fresh") as url, psycopg.connect(url) as conn:
         conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
@@ -229,7 +229,7 @@ def test_a_fresh_database_has_none_of_the_dead_watchdog_state(
 
 
 def test_the_contraction_drops_the_state_of_an_upgraded_cluster_and_keeps_its_rows(
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """An older cluster carries the objects (and rows in them); the migration removes
     them, keeps every other inbound column, and replays as a no-op."""
@@ -341,7 +341,7 @@ def _fencing_state_present(conn: psycopg.Connection) -> tuple[list[str], list[st
 # An older cluster carries the fencing columns, receipt table and done guard; the
 # migration removes them, keeps `last_admission_at` and every row, and replays as a no-op.
 def test_the_fencing_retirement_drops_an_upgraded_clusters_storage_and_keeps_its_rows(
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with throwaway_database("fencing_upgrade") as url:
         with psycopg.connect(url, autocommit=True) as conn:

@@ -12,7 +12,7 @@ from psycopg.conninfo import conninfo_to_dict
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import MIN_REFRESH_INTERVAL_S, ProcessDbGate
@@ -32,7 +32,10 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_scram_client_auth_and_pooled_select(
-    *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
+    *,
+    postgres_access: None,
+    machine_identity: MachineIdentityReader,
+    throwaway_config: ThrowawayConfig,
 ) -> None:
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
@@ -44,7 +47,10 @@ def test_scram_client_auth_and_pooled_select(
 
 
 def test_wrong_secret_is_rejected(
-    *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
+    *,
+    postgres_access: None,
+    machine_identity: MachineIdentityReader,
+    throwaway_config: ThrowawayConfig,
 ) -> None:
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
@@ -56,7 +62,10 @@ def test_wrong_secret_is_rejected(
 
 
 def test_transaction_pooling_never_prepare(
-    *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
+    *,
+    postgres_access: None,
+    machine_identity: MachineIdentityReader,
+    throwaway_config: ThrowawayConfig,
 ) -> None:
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
@@ -93,7 +102,7 @@ def test_write_transaction_overrides_a_read_only_default_on_connect(
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
     from base import config
@@ -119,7 +128,7 @@ def test_schedule_provision_overrides_a_read_only_default(
     monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
     from base import config
@@ -143,7 +152,7 @@ def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
     from base import config
@@ -177,7 +186,10 @@ def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
 
 
 def test_session_touch_overrides_a_read_only_default(
-    *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
+    *,
+    postgres_access: None,
+    machine_identity: MachineIdentityReader,
+    throwaway_config: ThrowawayConfig,
 ) -> None:
     from gateway.http.auth.session_store import touch_session
 
@@ -211,7 +223,10 @@ def test_session_touch_overrides_a_read_only_default(
 
 
 def test_async_write_transaction_overrides_a_read_only_default(
-    *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
+    *,
+    postgres_access: None,
+    machine_identity: MachineIdentityReader,
+    throwaway_config: ThrowawayConfig,
 ) -> None:
     from base.db.transaction import async_write_transaction
 
@@ -244,7 +259,7 @@ def test_plain_autocommit_write_still_fails_under_a_read_only_default(
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
     from base import config
@@ -265,7 +280,10 @@ def test_plain_autocommit_write_still_fails_under_a_read_only_default(
 
 
 def test_pooler_isolates_one_clients_read_only_posture_from_another(
-    *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
+    *,
+    postgres_access: None,
+    machine_identity: MachineIdentityReader,
+    throwaway_config: ThrowawayConfig,
 ) -> None:
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
@@ -290,7 +308,10 @@ def _statement_timeout(conn: psycopg.Connection) -> str:
 
 
 def test_connect_query_bounds_pooled_backends_at_birth(
-    *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
+    *,
+    postgres_access: None,
+    machine_identity: MachineIdentityReader,
+    throwaway_config: ThrowawayConfig,
 ) -> None:
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
@@ -305,7 +326,7 @@ def test_base_connect_applies_statement_timeout_on_pooled_dial(
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
     from base import config
@@ -328,7 +349,7 @@ def test_base_pool_applies_statement_timeout_on_pooled_dial(
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
     from base import config
@@ -351,7 +372,10 @@ def test_base_pool_applies_statement_timeout_on_pooled_dial(
 
 
 def test_langgraph_saver_setup_and_roundtrip_through_pgbouncer(
-    *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
+    *,
+    postgres_access: None,
+    machine_identity: MachineIdentityReader,
+    throwaway_config: ThrowawayConfig,
 ) -> None:
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.base import empty_checkpoint
@@ -372,7 +396,10 @@ def test_langgraph_saver_setup_and_roundtrip_through_pgbouncer(
 
 
 def test_admin_probe_reaches_the_bound_address_only(
-    *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
+    *,
+    postgres_access: None,
+    machine_identity: MachineIdentityReader,
+    throwaway_config: ThrowawayConfig,
 ) -> None:
     import sys
 
@@ -407,7 +434,7 @@ def test_pooled_borrow_scrubs_a_poisoned_backend(
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
     import base.db as base_db
@@ -439,7 +466,7 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
     publish_wake: Callable[[int, str], bool],
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
     import base.db as base_db
@@ -492,7 +519,7 @@ def test_pooled_dial_names_its_process_and_code_version_and_keeps_the_ceiling(
     postgres_access: None,
     monkeypatch: pytest.MonkeyPatch,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     throwaway_config: ThrowawayConfig,
 ) -> None:
     from base import config

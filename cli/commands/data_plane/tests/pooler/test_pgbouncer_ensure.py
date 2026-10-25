@@ -28,7 +28,8 @@ import pytest
 
 from base.cluster import port_preflight
 from base.cluster.dataplane import pooler as pooler_files
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.deploy.tests.containers import free_port
 from base.host.db_authority.delivery import POOLER_ADMIN
 from base.native_process.ownership import OwnedProcess
@@ -85,7 +86,7 @@ def _assigned_reachable_address() -> str:
 
 
 def test_a_fresh_start_writes_private_files_and_brings_up_a_pooler_that_answers(
-    unit_home: Path, command_machine: MachineIdentity, capsys: pytest.CaptureFixture[str]
+    unit_home: Path, command_machine: MachineIdentityReader, capsys: pytest.CaptureFixture[str]
 ) -> None:
     spec = pooler_spec(command_machine, listen_port=free_port(), socket_dir=unit_home)
 
@@ -106,7 +107,7 @@ def test_a_fresh_start_writes_private_files_and_brings_up_a_pooler_that_answers(
 # The reachable address is not up within the bound: a fresh start must NOT birth a pooler that
 # would silently degrade to loopback-only. TEST-NET-1 is never assigned to an interface.
 def test_a_reachable_address_that_never_appears_launches_nothing(
-    unit_home: Path, command_machine: MachineIdentity, capsys: pytest.CaptureFixture[str]
+    unit_home: Path, command_machine: ConfiguredMachineIdentity, capsys: pytest.CaptureFixture[str]
 ) -> None:
     command_machine.set(host="192.0.2.1")
     spec = pooler_spec(command_machine, listen_port=free_port(), socket_dir=unit_home)
@@ -121,7 +122,7 @@ def test_a_reachable_address_that_never_appears_launches_nothing(
 
 
 def test_an_unchanged_running_pooler_is_reloaded_and_keeps_its_process(
-    unit_home: Path, command_machine: MachineIdentity, capsys: pytest.CaptureFixture[str]
+    unit_home: Path, command_machine: MachineIdentityReader, capsys: pytest.CaptureFixture[str]
 ) -> None:
     spec = pooler_spec(command_machine, listen_port=free_port(), socket_dir=unit_home)
     assert pgbouncer.ensure_pgbouncer(spec) == 0
@@ -140,7 +141,7 @@ def test_an_unchanged_running_pooler_is_reloaded_and_keeps_its_process(
 # A SIGHUP reload keeps a removed user that already authenticated and still admits its new
 # sessions, so changed userlist bytes restart a healthy pooler; only a fresh process revokes.
 def test_a_changed_userlist_restarts_the_pooler_instead_of_reloading_it(
-    unit_home: Path, command_machine: MachineIdentity, capsys: pytest.CaptureFixture[str]
+    unit_home: Path, command_machine: MachineIdentityReader, capsys: pytest.CaptureFixture[str]
 ) -> None:
     port = free_port()
     assert (
@@ -168,7 +169,7 @@ def test_a_changed_userlist_restarts_the_pooler_instead_of_reloading_it(
 # A pooler born without the reachable address answers on loopback, so a loopback probe reads it
 # healthy. Bring-up finds its public listener missing, ends it and starts one that binds both.
 def test_a_pooler_without_its_reachable_listener_is_restarted_into_a_double_bind(
-    unit_home: Path, command_machine: MachineIdentity, capsys: pytest.CaptureFixture[str]
+    unit_home: Path, command_machine: ConfiguredMachineIdentity, capsys: pytest.CaptureFixture[str]
 ) -> None:
     port = free_port()
     assert (
@@ -200,7 +201,7 @@ def test_a_pooler_without_its_reachable_listener_is_restarted_into_a_double_bind
 
 
 def test_a_missing_binary_fails_before_anything_is_written(
-    unit_home: Path, command_machine: MachineIdentity, capsys: pytest.CaptureFixture[str]
+    unit_home: Path, command_machine: MachineIdentityReader, capsys: pytest.CaptureFixture[str]
 ) -> None:
     spec = pooler_spec(
         command_machine,
@@ -223,7 +224,7 @@ def test_a_missing_binary_fails_before_anything_is_written(
 )
 def test_the_install_hint_of_a_missing_binary_is_the_platforms_the_spec_names(
     unit_home: Path,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
     capsys: pytest.CaptureFixture[str],
     macos: bool,
     install: str,
@@ -248,7 +249,7 @@ def test_the_install_hint_of_a_missing_binary_is_the_platforms_the_spec_names(
 # before any file is written or signal sent: native readiness never authorizes changes to a
 # foreign listener.
 def test_a_foreign_listener_on_the_pooler_port_refuses_before_any_file_is_written(
-    unit_home: Path, command_machine: MachineIdentity
+    unit_home: Path, command_machine: MachineIdentityReader
 ) -> None:
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as foreign:
         foreign.bind(("127.0.0.1", 0))
@@ -270,7 +271,7 @@ def test_a_foreign_listener_on_the_pooler_port_refuses_before_any_file_is_writte
 # stranger, start nothing and never rewrite the pidfile. This process is the stranger: a real
 # live pid that is definitely not a pgbouncer.
 def test_a_recycled_pid_in_the_pidfile_is_refused_before_any_file_is_written(
-    unit_home: Path, command_machine: MachineIdentity
+    unit_home: Path, command_machine: MachineIdentityReader
 ) -> None:
     pidfile = unit_home / "pgbouncer" / "pgbouncer.pid"
     pidfile.parent.mkdir()
@@ -289,7 +290,7 @@ def test_a_recycled_pid_in_the_pidfile_is_refused_before_any_file_is_written(
 # process, and a daemon would keep them until it restarts. The environment of the running
 # daemon is read back from the process table.
 def test_the_pooler_daemon_is_born_with_exactly_the_environment_it_is_given(
-    unit_home: Path, command_machine: MachineIdentity
+    unit_home: Path, command_machine: MachineIdentityReader
 ) -> None:
     assert "MEIVA_HOME" in os.environ, "the test process carries a MEIVA_ variable to withhold"
     env = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}
@@ -332,7 +333,7 @@ def test_a_reload_refuses_a_birth_that_is_not_the_recorded_one() -> None:
 # neither restart it nor write over it nor start a second one on its port; it refuses with
 # custody retained, and the pooler goes on draining.
 def test_a_pooler_draining_a_held_client_keeps_custody_and_is_not_replaced(
-    unit_home: Path, command_machine: MachineIdentity
+    unit_home: Path, command_machine: MachineIdentityReader
 ) -> None:
     port = free_port()
     spec = pooler_spec(command_machine, listen_port=port, socket_dir=unit_home)

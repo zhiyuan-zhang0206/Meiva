@@ -9,7 +9,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 from gateway.tests.support.db_faults.insert_fault import failing_insert
@@ -42,7 +42,7 @@ def _assert_failed_birth_visible(client: TestClient, body: dict[str, Any], agent
 
 @pytest.fixture
 def offline_runner(
-    db_conn: psycopg.Connection, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, machine_identity: MachineIdentityReader
 ) -> Generator[RunnerOps]:
     """The gateway's own machine, whose ops server does not answer a launch."""
     with runner_ops(
@@ -70,7 +70,7 @@ def test_failed_plain_launch_persists_prompt_and_advertises_guarded_recovery(
 
 
 def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
-    db_conn: psycopg.Connection, db_url: str, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, db_url: str, machine_identity: MachineIdentityReader
 ) -> None:
     with vanishing_table(db_url, "agents_meta") as store:
 
@@ -101,7 +101,7 @@ def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
 
 @pytest.mark.usefixtures("gateway_local_runner")
 def test_failed_fork_launch_keeps_marker_and_prompt_in_one_birth(
-    db_conn: psycopg.Connection, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, machine_identity: MachineIdentityReader
 ) -> None:
     with gateway_test_client() as client:
         # meiva:note
@@ -132,7 +132,7 @@ def test_failed_fork_launch_keeps_marker_and_prompt_in_one_birth(
 
 
 def test_admission_winning_dispatch_failure_returns_accepted_receipt(
-    db_conn: psycopg.Connection, db_url: str, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, db_url: str, machine_identity: MachineIdentityReader
 ) -> None:
     def admit_then_fail(call: OpsCall) -> OpsReply:
         # meiva:note

@@ -24,7 +24,7 @@ from pydantic import JsonValue
 from base.agents import impersonation as leases
 from base.agents.impersonation.host_transport import AntigravityServer, write_antigravity_endpoint
 from base.agents.impersonation.status import ImpersonationStatus
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -219,7 +219,7 @@ def test_claude_request_reports_the_relay_handoff(
     capsys: pytest.CaptureFixture[str],
     *,
     command_runtime: CommandRuntime,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id, _ = idle_agent
     code = _run(
@@ -280,7 +280,7 @@ def test_dsh_request_writes_the_plugin_stub_and_never_prints_the_credential(
     capsys: pytest.CaptureFixture[str],
     *,
     command_runtime: CommandRuntime,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id, _ = idle_agent
     stub = tmp_path / "session-1.env"

@@ -18,7 +18,7 @@ from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row
 from base.agents.context import MeivaContext
 from base.agents.history.checkpoint import load_checkpoint_messages_by_trace
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.tests.configuration import defaults
@@ -42,7 +42,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(name="test")
     async with hosted_scope() as resources:

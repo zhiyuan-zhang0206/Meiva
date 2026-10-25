@@ -23,7 +23,7 @@ import pytest
 import yaml
 from dotenv import dotenv_values
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.host.proc import run_bounded
 from base.host.system.hostport import Host
 from base.native_process.os_platform import Platform
@@ -69,7 +69,7 @@ LOOPBACK_DB = "postgresql://reader@127.0.0.1:5433/meiva"
 @dataclass(frozen=True)
 class LgtmUnit:
     home: Path
-    machine: MachineIdentity
+    machine: ConfiguredMachineIdentity
     producer: Callable[[], EventPipeline]
 
     @property

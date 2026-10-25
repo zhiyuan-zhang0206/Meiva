@@ -23,7 +23,7 @@ def main() -> None:
     from base.agents.context.clients import ClientSet
     from base.agents.context.identity import AgentIdentity
     from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
-    from base.cluster.machine.boot import machine_from_boot
+    from base.cluster.machine.configured import ConfiguredMachineIdentity
     from base.config import ConfigBoot
     from meiva.sdk_surface import metering, process_context
     from meiva.sdk_surface.installation import installed
@@ -34,7 +34,7 @@ def main() -> None:
     process_context.bind_context(
         MeivaContext(clients=attachment, identity=AgentIdentity(agent_id=6111, owns_loop=False))
     )
-    meiva.ensure_plugins_loaded(config=config, machine=machine_from_boot(config))
+    meiva.ensure_plugins_loaded(config=config, machine=ConfiguredMachineIdentity(config))
     installation = installed()
     if installation is None or installation.clients is None:
         raise RuntimeError("the plugin load installed no client set")

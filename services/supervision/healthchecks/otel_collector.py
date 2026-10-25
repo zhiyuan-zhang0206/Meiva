@@ -4,7 +4,7 @@ import urllib.request
 from http.client import HTTPException
 from pathlib import Path
 
-from base.cluster.machine import MachineIdentity, MachineRoleMissing
+from base.cluster.machine import MachineIdentityReader, MachineRoleMissing
 from base.config import settings
 from base.daemon.health import DaemonProbe
 from base.telemetry.observability import (
@@ -22,7 +22,7 @@ from services.supervision.healthchecks.plans.collector_metrics import (
 # facts the answer needs: this unit's `home` and whether the operator explicitly set
 # `MEIVA_TELEMETRY_OTLP_ENDPOINT`.
 def collector_serves_this_home(
-    *, machine: MachineIdentity, home: Path, endpoint_explicit: bool
+    *, machine: MachineIdentityReader, home: Path, endpoint_explicit: bool
 ) -> bool:
     try:
         roles = machine.role()

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from threading import Event, Lock
 
 from base.agents.context.clients import ClientSet
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.daemon.health import DaemonProbe, ProbeVerdict
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
@@ -192,7 +192,7 @@ class RoundsInputs:
     diagnostics: DiagnosticMonitor
     clients: ClientSet
     image: LoadedCommit
-    machine: MachineIdentity
+    machine: MachineIdentityReader
 
 
 class RootHealthRounds:
@@ -205,7 +205,7 @@ class RootHealthRounds:
         *,
         clients: ClientSet,
         image: LoadedCommit,
-        machine: MachineIdentity,
+        machine: MachineIdentityReader,
         interval_s: float = 60.0,
         tasks: asyncio.TaskGroup | None = None,
     ) -> None:

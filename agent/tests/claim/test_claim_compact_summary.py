@@ -10,7 +10,7 @@ from agent.graph.hooks.compact import compose_summary_message
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import committed_publishes, compact_tail
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -27,7 +27,7 @@ async def test_claim_compact_summary_alone_does_not_publish_committed(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """compact_summary alone → does not publish InboundCommitted (it goes through state replace
     not inbound append; frontend reload should be triggered by llm_done)."""
@@ -60,7 +60,7 @@ async def test_claim_compact_summary_with_no_existing_system_message(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """state.messages empty (first round) + compact_summary arrives → claim simultaneously
     injects SystemMessage into new_msgs[0] AND takes it out as sys_msg to prepend again
@@ -102,7 +102,7 @@ async def test_claim_compact_summary_returns_before_llm_with_halted_false(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """compact_summary path → returns Command(goto=before_llm, halted=False).
 

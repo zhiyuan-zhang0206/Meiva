@@ -41,7 +41,7 @@ from agent.tests.claim.claim_status_support import compact_tail
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -71,7 +71,7 @@ async def test_claim_resurrect_kind_appends_marker_and_continues(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """resurrect inbound (delivered to the new process by resurrect_agent) → claim appends
     lifecycle marker 'You have been resurrected by {source}' + goto BEFORE_LLM."""
@@ -109,7 +109,7 @@ async def test_claim_resurrect_batch_appends_only_latest_marker(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """Repeated failed recoveries are consumed together but render one marker."""
     tid = spawn_agent(
@@ -153,7 +153,7 @@ async def test_unowned_resurrect_notification_cannot_cancel_pending_terminate(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """A newer notification is not admission or proof that prior intent completed."""
     tid = spawn_agent(
@@ -189,7 +189,7 @@ async def test_claim_resurrect_then_terminate_still_dies(
     aops_pool: AsyncConnectionPool,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """An owned terminate dispatches alone; an older notification is not lost."""
     tid = running_agent()
@@ -221,7 +221,7 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """Auto-resurrect-on-compact path: a /compact delivered to a terminated agent
     inserts the compact_request then a resurrect (newer id). The resurrect wins the
@@ -304,7 +304,7 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """fork inbound (delivered to the new process by spawn_agent on fork) → claim appends
     identity marker: contains the fork source from source (agent:M) + new agent's own id (N) +
@@ -359,7 +359,7 @@ async def test_claim_fork_preserves_the_inherited_prefix(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     tid = spawn_agent(
         catalog=model_catalog,

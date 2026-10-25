@@ -15,7 +15,8 @@ from pathlib import Path
 import pytest
 
 import base.packages.mcp_config as mcp_cfg_mod
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.proc import run_bounded
 from base.host.system.tests.fake_commands import fake_host
@@ -30,7 +31,7 @@ def _write_machine_mcp(unit_home: Path, servers: Mapping[str, Mapping[str, objec
 
 
 @pytest.fixture
-def runner_home(unit_home: Path, machine_identity: MachineIdentity) -> Path:
+def runner_home(unit_home: Path, machine_identity: ConfiguredMachineIdentity) -> Path:
     machine_identity.set(name="test-machine", role=frozenset({"agent-runner"}))
     return unit_home
 
@@ -39,7 +40,7 @@ def runner_home(unit_home: Path, machine_identity: MachineIdentity) -> Path:
 # The repo's real built-in plugins (meiva_code and the others) appear, each with an enabled flag
 # and a description, and none has a static host gate.
 def test_inventory_read_op_lists_real_plugins(
-    runner_home: Path, machine_identity: MachineIdentity
+    runner_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     result = inventory_read_op(local_machine=machine_identity, host=fake_host())
 
@@ -55,7 +56,7 @@ def test_inventory_read_op_lists_real_plugins(
 # meiva:note
 # A machine-config server with no overlay entry shows enabled and a one-line description.
 def test_inventory_read_op_mcp_server_default_on(
-    runner_home: Path, machine_identity: MachineIdentity
+    runner_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     _write_machine_mcp(runner_home, {"fs": {"command": "run-fs", "args": ["--root", "/"]}})
 
@@ -72,7 +73,7 @@ def test_inventory_read_op_mcp_server_default_on(
 # meiva:note
 # A server the per-host overlay marks disabled reads back as not enabled.
 def test_inventory_read_op_overlay_reflected(
-    runner_home: Path, machine_identity: MachineIdentity
+    runner_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     _write_machine_mcp(runner_home, {"X": {"command": "x"}})
     mcp_enabled.set_mcp_enabled("X", enabled=False)
@@ -84,7 +85,7 @@ def test_inventory_read_op_overlay_reflected(
 
 @pytest.mark.parametrize("requires", [[], {"gpu": False}, {"display": "false"}])
 def test_inventory_rejects_invalid_requirements_before_read_or_write(
-    runner_home: Path, requires: object, machine_identity: MachineIdentity
+    runner_home: Path, requires: object, machine_identity: MachineIdentityReader
 ) -> None:
     # meiva:note
     # A malformed `requires` fails the read and the write loudly, and the write leaves both the
@@ -110,7 +111,7 @@ def test_inventory_rejects_invalid_requirements_before_read_or_write(
 # meiva:note
 # Disabling a server whose requirements are malformed is always allowed: nothing needs judging.
 def test_inventory_can_disable_server_with_invalid_requirements(
-    runner_home: Path, machine_identity: MachineIdentity
+    runner_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     spec = {"command": "x", "requires": {"display": "false"}}
     _write_machine_mcp(runner_home, {"broken": spec})
@@ -128,7 +129,7 @@ def test_inventory_can_disable_server_with_invalid_requirements(
 # meiva:note
 # Disabling a present plugin applies, and the local plugin config reflects it.
 def test_inventory_write_op_plugin_happy_path(
-    runner_home: Path, machine_identity: MachineIdentity
+    runner_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     result = inventory_write_op(
         plugins={"meiva_code": False},
@@ -147,7 +148,7 @@ def test_inventory_write_op_plugin_happy_path(
 # A payload mixing a present plugin toggle with an unknown plugin is rejected atomically:
 # nothing is applied and the plugin file is not even created.
 def test_inventory_write_op_atomic_rejects_unknown_plugin(
-    runner_home: Path, machine_identity: MachineIdentity
+    runner_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     result = inventory_write_op(
         plugins={"meiva_code": False, "does-not-exist": True},
@@ -166,7 +167,7 @@ def test_inventory_write_op_atomic_rejects_unknown_plugin(
 # meiva:note
 # An MCP name that is not in the merged map is rejected with a reason.
 def test_inventory_write_op_rejects_unknown_mcp_server(
-    runner_home: Path, machine_identity: MachineIdentity
+    runner_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     result = inventory_write_op(
         plugins={}, mcp_servers={"ghost": True}, local_machine=machine_identity, host=fake_host()
@@ -213,7 +214,7 @@ def test_inventory_write_op_mcp_capability_rejected(runner_home: Path) -> None:
 # meiva:note
 # An empty payload is trivially applied and writes nothing.
 def test_inventory_write_op_empty_payload_trivially_applied(
-    runner_home: Path, machine_identity: MachineIdentity
+    runner_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     result = inventory_write_op(
         plugins={}, mcp_servers={}, local_machine=machine_identity, host=fake_host()
@@ -229,7 +230,7 @@ def test_inventory_write_op_empty_payload_trivially_applied(
 # meiva:note
 # A mixed payload (a present plugin and a known MCP server, both passing) writes both.
 def test_inventory_write_op_applies_both_plugin_and_mcp(
-    runner_home: Path, machine_identity: MachineIdentity
+    runner_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     _write_machine_mcp(runner_home, {"fs": {"command": "x"}})
 
@@ -249,7 +250,7 @@ def test_inventory_write_op_applies_both_plugin_and_mcp(
 # meiva:note
 # On a gateway both ops raise before touching any local file: inventory is agent-runner-only, made
 # loud rather than silently surfacing the gateway checkout's built-in plugins and MCP servers.
-def test_inventory_ops_reject_gateway(machine_identity: MachineIdentity) -> None:
+def test_inventory_ops_reject_gateway(machine_identity: ConfiguredMachineIdentity) -> None:
     machine_identity.set(role=frozenset({"gateway"}))
 
     with pytest.raises(RuntimeError, match="only on an agent-runner"):

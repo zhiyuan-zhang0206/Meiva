@@ -16,8 +16,8 @@ from pathlib import Path
 
 from base import telemetry
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
@@ -235,7 +235,7 @@ async def run(
 # meiva:note
 # The lazy log-database handle: the config as its owner holds it when the handle is built.
 def scheduler_database(
-    config: ConfigBoot, machine: MachineIdentity, gate: ProcessDbGate
+    config: ConfigBoot, machine: MachineIdentityReader, gate: ProcessDbGate
 ) -> Database:
     return Database(
         db_config_from_boot(config),
@@ -252,7 +252,7 @@ def main() -> None:
 
     config = ConfigBoot()
     config.boot()
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     process_home = meiva_home().resolve()
     image = LoadedCommit.capture()
     assert_schema_current(config.view.data_plane.db_url)

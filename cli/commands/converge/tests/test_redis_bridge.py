@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 import pytest
 import redis
 
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.ports import new_home_ports
 from base.config import ConfigBoot
 from base.deploy.tests.containers import free_port, redis_server
@@ -210,7 +210,7 @@ def test_ping_names_why_nothing_answered(redis_access: None) -> None:
 
 def test_an_unsupported_platform_does_not_read_the_relay_owner(tmp_path: Path) -> None:
     config = ConfigBoot()
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
 
     status = bridge.probe_bridge_on("linux", tmp_path, machine=machine, config=config)
 

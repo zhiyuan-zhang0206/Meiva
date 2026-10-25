@@ -5,7 +5,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.tests.configuration import snapshot_process_config
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
@@ -29,7 +29,7 @@ def run_schedule(
     schedule_id: int,
     revision: int | None = None,
     *,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     policy: StallPolicy = UNHURRIED,
 ) -> int:
     image = process_context.loaded_code_image()

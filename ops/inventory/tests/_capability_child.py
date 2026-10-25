@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import sys
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineFacts
 from base.host.system.tests.fake_commands import fake_host
 from base.packages.plugins import mcp_enabled
 from ops.inventory import inventory_read_op, inventory_write_op
@@ -16,11 +16,11 @@ from ops.inventory import inventory_read_op, inventory_write_op
 
 def main() -> None:
     host = fake_host(programs={"npx": "/test/npx"})
-    machine = MachineIdentity(
-        name=lambda: "test-machine",
-        role=lambda: frozenset({"agent-runner"}),
-        host=lambda: "localhost",
-        description=lambda: None,
+    machine = MachineFacts.of(
+        name="test-machine",
+        role=frozenset({"agent-runner"}),
+        host="localhost",
+        description=None,
     )
     inventory = inventory_read_op(local_machine=machine, host=host)
     enable = inventory_write_op(

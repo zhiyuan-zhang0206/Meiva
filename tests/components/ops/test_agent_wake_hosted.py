@@ -8,7 +8,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from base.agents.birth.spawn import create_agent_row
 from base.agents.messages.inbound import InboundKind
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -39,7 +39,7 @@ def _park(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> int:
     aid, _birth, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
@@ -90,7 +90,7 @@ def test_resurrect_agent_hosted_flips_and_wakes(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     aid = _park(
         db_conn,
@@ -121,7 +121,7 @@ def test_resurrect_agent_hosted_clears_the_corpse_marker(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     aid = _park(
         db_conn,
@@ -157,7 +157,7 @@ def test_resurrect_agent_hosted_keeps_trigger_guard(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     aid = _park(
         db_conn,
@@ -191,7 +191,7 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from uuid import uuid4
 
@@ -271,7 +271,7 @@ def _reaped_crash_park(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> tuple[int, int]:
     from base.agents.inbox.insert import insert_inbound_message
 
@@ -303,7 +303,7 @@ def _reaped_crash_park(
 
 
 def _guarded_resurrect(
-    aid: int, trigger: int, database_gate: ProcessDbGate, *, machine_identity: MachineIdentity
+    aid: int, trigger: int, database_gate: ProcessDbGate, *, machine_identity: MachineIdentityReader
 ) -> None:
     wake.resurrect_agent(
         Database.from_settings(gate=database_gate),
@@ -324,7 +324,7 @@ def test_reaped_crash_row_refuses_leftover_work(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from ops.agents.resurrection_retry import ResurrectTriggerStaleError
 
@@ -357,7 +357,7 @@ def test_operator_death_still_refuses_leftover_work(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.agents.inbox.insert import insert_inbound_message
 
@@ -394,7 +394,7 @@ def test_suppressed_wakes_refuse_the_reaped_crash_trigger(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     aid, trigger = _reaped_crash_park(
         db_conn,
@@ -424,7 +424,7 @@ def test_tripped_recovery_breaker_refuses_the_reaped_crash_trigger(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     aid, trigger = _reaped_crash_park(
         db_conn,
@@ -452,7 +452,7 @@ def test_system_resurrect_is_not_capped_by_unconsumed_resurrect_rows(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.agents.inbox.insert import insert_inbound_message
 
@@ -487,7 +487,7 @@ def test_manual_resurrect_stays_exempt_from_the_gates(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     aid = _park(
         db_conn,
@@ -536,7 +536,7 @@ def test_any_terminated_row_resurrects_with_a_cleared_runtime_identity(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.agents.inbox.insert import insert_inbound_message
 

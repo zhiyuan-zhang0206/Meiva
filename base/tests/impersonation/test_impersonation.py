@@ -11,7 +11,7 @@ import pytest
 
 from base.agents import impersonation as leases
 from base.agents.inbox.insert import insert_inbound_message
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -36,7 +36,7 @@ def test_controller_read_that_expires_lease_refreshes_roster(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -95,7 +95,7 @@ def test_native_without_lease_does_not_contend_with_agent_writes(
     short_lock_timeout: Database,
     event_bus: EventBus,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -110,7 +110,7 @@ def test_external_identity_read_does_not_contend_with_lease_writes(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -132,7 +132,7 @@ def test_existing_lease_still_serializes_native_reconciliation(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -162,7 +162,7 @@ def test_native_without_lease_still_requires_current_ownership(
     database: Database,
     event_bus: EventBus,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -182,7 +182,7 @@ def test_accept_requires_a_nonempty_start_message(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -222,7 +222,7 @@ def test_request_needs_preparation_then_native_checkpoint_ack(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -262,7 +262,7 @@ def test_preparation_and_activation_cannot_use_another_incarnation(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -305,7 +305,7 @@ def test_inbox_ack_and_atomic_real_sender_handoff(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -377,7 +377,7 @@ def test_external_inbox_preserves_cancel_until_explicit_processing_ack(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -421,7 +421,7 @@ def test_cancel_ack_publishes_committed_completion_once(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -506,7 +506,7 @@ def test_ttl_revokes_all_borrower_operations_and_preserves_pending(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -566,7 +566,7 @@ def test_plugin_journal_blocks_new_lease_until_checkpoint_receipt(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -636,7 +636,7 @@ def test_competing_requests_have_one_winner(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)
@@ -664,7 +664,7 @@ def test_attestation_and_same_machine_checks(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner = create_native_owner(db_conn, local_machine=local_machine)

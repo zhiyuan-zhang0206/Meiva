@@ -16,7 +16,7 @@ import numpy as np
 from base.clock import SYSTEM_TIMERS, Timers
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineRoles
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import Liveness, start_health_server, stop_health_server
@@ -596,7 +596,7 @@ def main() -> None:
     """
     config = ConfigBoot()
     config.boot()
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     process_home = meiva_home().resolve()
     image = LoadedCommit.capture()
     version = CodeVersion(image)

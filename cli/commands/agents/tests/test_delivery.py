@@ -14,7 +14,7 @@ from base.agents import impersonation as leases
 from base.agents.impersonation import delivery as delivery
 from base.agents.inbox.insert import insert_inbound_message
 from base.cluster import inbound_channel
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -29,7 +29,7 @@ def reserve(
     message_id: int,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> frozenset[int]:
     return delivery.reserve_delivery(
         Database.from_settings(gate=database_gate),
@@ -58,7 +58,7 @@ def _assert_exhaustion_preserved(
     db_conn: psycopg.Connection,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     assert ended["status"] == "active"
     assert f"message {mid} exhausted" in ended["relay_degraded_reason"]
@@ -77,7 +77,7 @@ def test_two_attempts_keep_lease_active_and_late_receipt_possible(
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, owner, mid = active
     assert (lease["ack_window_seconds"], lease["max_delivery_attempts"]) == (180, 2)
@@ -168,7 +168,7 @@ def test_delivery_reservation_that_expires_lease_refreshes_roster(
     redis_url: str,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, owner, message_id = active
     db_conn.execute(
@@ -207,7 +207,7 @@ def test_ack_in_final_window_prevents_expiry(
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, mid = active
     reserve(lease, mid, database_gate=database_gate, machine_identity=machine_identity)
@@ -243,7 +243,7 @@ def test_rotating_relay_does_not_reset_budget(
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, owner, mid = active
     reserve(lease, mid, database_gate=database_gate, machine_identity=machine_identity)
@@ -276,7 +276,7 @@ def test_concurrent_relays_only_reserve_once(
     database: Database,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, mid = active
     with ThreadPoolExecutor(2) as pool:
@@ -302,7 +302,7 @@ def test_ack_after_read_before_reservation_cannot_be_pushed(
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, mid = active
     leases.ack(
@@ -324,7 +324,7 @@ def test_release_wins_timeout_race_without_being_overwritten(
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, mid = active
     reserve(lease, mid, database_gate=database_gate, machine_identity=machine_identity)
@@ -360,7 +360,7 @@ def test_exhausted_message_outside_page_remains_visible_without_ending_lease(
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, first = active
     other = insert_inbound_message(

@@ -20,7 +20,7 @@ from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import MeivaMsgType
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -116,7 +116,7 @@ async def test_claim_drains_before_turn_boundary_wait(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     image = tmp_path / "render.png"
     _write_png(image)
@@ -151,7 +151,7 @@ async def test_claim_does_not_drain_mid_turn(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     image = tmp_path / "render.png"
     _write_png(image)

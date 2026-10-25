@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import settings
 from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
@@ -26,7 +26,7 @@ def test_entry_shares_the_captured_gate_with_logging_and_actions(
     gates: list[ProcessDbGate] = []
     reads: list[tuple[Path, str]] = []
     factories: list[Callable[[], Database]] = []
-    machines: list[MachineIdentity] = []
+    machines: list[MachineIdentityReader] = []
     readers: list[Callable[[], str]] = []
     pipeline = object()
 
@@ -45,7 +45,9 @@ def test_entry_shares_the_captured_gate_with_logging_and_actions(
         reads.append((root, commit))
         return 42
 
-    def build(*, database: Callable[[], Database], machine: MachineIdentity, home: Path) -> object:
+    def build(
+        *, database: Callable[[], Database], machine: MachineIdentityReader, home: Path
+    ) -> object:
         stages.append("producer")
         assert gates == []
         factories.append(database)

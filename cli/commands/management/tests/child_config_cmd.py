@@ -22,13 +22,16 @@ if __name__ == "__main__":
         elif verb == "remote-get":
             result = config.cmd_config_get(sys.argv[3], sys.argv[2] or None)
         elif verb == "remote-audit":
-            from base.cluster.machine.boot import machine_from_boot
+            from base.cluster.machine.configured import ConfiguredMachineIdentity
             from base.config import ConfigBoot
 
             boot = ConfigBoot()
             boot.read_process_environment()
             result = config.cmd_config_audit(
-                int(sys.argv[3]), None, sys.argv[2] or None, identity=machine_from_boot(boot)
+                int(sys.argv[3]),
+                None,
+                sys.argv[2] or None,
+                identity=ConfiguredMachineIdentity(boot),
             )
         else:
             raise SystemExit(f"unknown verb {verb!r}")

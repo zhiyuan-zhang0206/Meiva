@@ -26,7 +26,7 @@ from base.agents.context import HostedTurnResources, MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
 from base.db.code_version_gate import ProcessDbGate
@@ -407,7 +407,7 @@ async def test_a_completed_turn_stamps_the_reply_as_the_last_message(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id = spawn_agent(
         catalog=model_catalog,
@@ -435,7 +435,7 @@ async def test_the_handoff_prelude_is_not_the_last_message(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id = spawn_agent(
         catalog=model_catalog,

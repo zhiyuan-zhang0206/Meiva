@@ -20,7 +20,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from base.api_contracts.agent_contract import CrossMachineGatewayUnavailable
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -46,7 +46,7 @@ from gateway.tests.support.runner_ops.ops_stub import (
 @pytest.fixture
 def local_machine(
     set_machine_identity: MachineIdentitySetter, gateway_local_runner: RunnerOps
-) -> MachineIdentity:
+) -> MachineIdentityReader:
     """The gateway's own machine, serving as an agent-runner through its in-process ops route."""
     return set_machine_identity(role="agent-runner")
 
@@ -62,7 +62,7 @@ def _set_agent_machine(db_conn: psycopg.Connection, agent_id: int, machine: str)
 
 class TestResurrectRouting:
     def test_remote_machine_forwards(
-        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         """machine != local → forward entire body to home machine's ops server,
         local does not touch DB / does not spawn a session."""
@@ -88,7 +88,7 @@ class TestResurrectRouting:
         assert status.fetchone() == ("terminated",)
 
     def test_bare_resurrect_forwards_with_defaults(
-        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         """Bare lifecycle wake with no body (frontend resurrect button) → forward,
         prompt=None, resurrected_by defaults to 'user'. This is the scenario
@@ -111,7 +111,7 @@ class TestResurrectRouting:
     # meiva:note
     # A failed op that names a wire reason is re-raised as that error on the gateway.
     def test_a_runners_wire_error_keeps_its_status_and_reason(
-        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         refusal = failed(
             {
@@ -133,7 +133,7 @@ class TestResurrectRouting:
     # meiva:note
     # A home machine the registry has never seen cannot be dialed: 502, named.
     def test_an_unregistered_home_machine_is_a_gateway_error(
-        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         with gateway_test_client(machine=local_machine) as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
@@ -144,7 +144,7 @@ class TestResurrectRouting:
         assert "ghost-mac" in resp.json()["detail"]
 
     def test_cross_machine_gateway_unavailable_propagates_502(
-        self, local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         """target ops server transport error → CrossMachineGatewayUnavailable → 502."""
         with (
@@ -157,7 +157,7 @@ class TestResurrectRouting:
         assert resp.status_code == 502
         assert resp.json()["reason"] == "cross_machine_gateway_unavailable"
 
-    def test_nonexistent_agent_404(self, local_machine: MachineIdentity) -> None:
+    def test_nonexistent_agent_404(self, local_machine: MachineIdentityReader) -> None:
         """Nonexistent → helper's own SELECT hits AgentNotFound (404), does not query machines table."""
         with gateway_test_client(machine=local_machine) as client:
             resp = client.post("/api/agents/9999/resurrect")
@@ -169,7 +169,7 @@ class TestResurrectRouting:
 # no local shortcut. Single box is just the special case where the ops server
 # happens to be on localhost.
 def test_local_home_machine_is_dialed_like_any_other(
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
     gateway_local_runner: RunnerOps,
     db_conn: psycopg.Connection,
 ) -> None:

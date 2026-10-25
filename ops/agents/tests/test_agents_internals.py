@@ -34,7 +34,7 @@ from psycopg.types.json import Jsonb
 from base.agents.birth.spawn import create_agent_row
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.observation.snapshot import select_one
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -75,7 +75,7 @@ def spawn_agent(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> int:
     bus = EventBus.from_settings()
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
@@ -116,7 +116,7 @@ class TestSpawnAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         new_id = spawn_agent(
             config_authority=config_authority,
@@ -136,7 +136,7 @@ class TestSpawnAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         parent_id = spawn_agent(
             config_authority=config_authority,
@@ -166,7 +166,7 @@ class TestSpawnAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         new_id = spawn_agent(
             label="auth worker",
@@ -198,7 +198,7 @@ class TestSpawnAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         from base.config import settings
 
@@ -226,7 +226,7 @@ class TestSpawnAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         from dataclasses import replace
 
@@ -301,7 +301,7 @@ class TestSpawnAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         born_vision = spawn_agent(
             config_authority=config_authority,
@@ -401,7 +401,7 @@ class TestSpawnerValidation:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         with pytest.raises(ValueError, match="spawner has agent: prefix"):
             spawn_agent(
@@ -418,7 +418,7 @@ class TestSpawnerValidation:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         with pytest.raises(ValueError, match="spawner has agent: prefix"):
             spawn_agent(
@@ -435,7 +435,7 @@ class TestSpawnerValidation:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         with pytest.raises(ValueError, match="spawner has agent: prefix"):
             spawn_agent(
@@ -452,7 +452,7 @@ class TestSpawnerValidation:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         with pytest.raises(ValueError, match="spawner has agent: prefix"):
             spawn_agent(
@@ -471,7 +471,7 @@ class TestSpawnerValidation:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         new_id = spawn_agent(
             spawner="agent:42",
@@ -492,7 +492,7 @@ class TestSpawnerValidation:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         new_id = spawn_agent(
             spawner="user",
@@ -513,7 +513,7 @@ class TestSpawnerValidation:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         new_id = spawn_agent(
             spawner="claude-code",
@@ -532,7 +532,7 @@ class TestSpawnerValidation:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         with pytest.raises(ValueError, match="spawner has agent: prefix"):
             spawn_agent(

@@ -27,8 +27,8 @@ from psycopg_pool import ConnectionPool
 
 from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, settings
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup, LoopProgress
@@ -452,7 +452,7 @@ async def reconcile_loop(
     config: PageServerConfig,
     bus: EventBus,
     *,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> None:
     """Run page-shell reconciliation at the configured poll interval."""
     host = local_machine.host()
@@ -488,7 +488,7 @@ async def run(
     runtime: Path,
     database: Callable[[], Database],
     image: LoadedCommit,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> None:
     """Start the daemon and keep its health endpoint alive while it reconciles."""
     if resources.is_running(process_config, runtime=runtime):
@@ -536,7 +536,7 @@ def main() -> None:
     image = LoadedCommit.capture()
     machine_config = ConfigBoot()
     machine_config.boot()
-    machine = machine_from_boot(machine_config)
+    machine = ConfiguredMachineIdentity(machine_config)
     process_home = meiva_home().resolve()
     assert_schema_current(machine_config.view.data_plane.db_url)
     version = CodeVersion(image)

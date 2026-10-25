@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import NamedTuple
 
-from base.cluster.machine import MachineIdentity, MachineRoles
+from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.db import Database
 from base.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S
 from base.sessions.env_forwarding import frontend_toolchain_env
@@ -25,7 +25,7 @@ from cli.commands._setup import SetupValues
 from cli.database.runtime import CommandRuntime
 
 
-def roles_or_none(*, machine: MachineIdentity) -> MachineRoles | None:
+def roles_or_none(*, machine: MachineIdentityReader) -> MachineRoles | None:
     """Read the capability set; on missing or invalid value return None — the
     explicit "this host's role is not resolvable yet" state, distinct from a
     (never-valid) empty capability set. stop/status/converge should not be

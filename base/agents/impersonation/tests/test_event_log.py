@@ -24,7 +24,7 @@ from base.agents.impersonation.manifest import (
 )
 from base.agents.impersonation.status import pending_reason
 from base.agents.impersonation.tests import test_history as history_cases
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
@@ -37,7 +37,7 @@ from base.telemetry.audit_events import prepare_event_log
 
 @pytest.fixture
 def owner(
-    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentityReader
 ) -> RuntimeIncarnation:
     local_machine = machine_identity.name()
     agent_id = create_agent(db_conn)
@@ -58,7 +58,7 @@ def lease(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> dict[str, Any]:
     local_machine = machine_identity.name()
     return history_cases.start(
@@ -168,7 +168,7 @@ def test_central_event_commits_with_its_transaction_and_survives_a_lost_emit(
     database: Database,
     event_bus: EventBus,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     event = _central_event(db_conn, owner.agent_id)
@@ -257,7 +257,7 @@ def test_central_append_stops_once_admission_closes(
     event_bus: EventBus,
     database_gate: ProcessDbGate,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     participant = _participant(owner, lease, "closing", database_gate=database_gate)
@@ -291,7 +291,7 @@ def test_local_events_are_recorded_sealed_and_complete_at_release(
     event_bus: EventBus,
     database_gate: ProcessDbGate,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     participant = _participant(owner, lease, "local-happy", database_gate=database_gate)
@@ -327,7 +327,7 @@ def test_release_waits_for_an_open_source(
     event_bus: EventBus,
     database_gate: ProcessDbGate,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     participant = _participant(owner, lease, "still-open", database_gate=database_gate)
@@ -352,7 +352,7 @@ def test_expiry_with_an_open_source_stays_pending_until_it_seals(
     database: Database,
     database_gate: ProcessDbGate,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     participant = _participant(owner, lease, "late-seal", database_gate=database_gate)
@@ -407,7 +407,7 @@ def test_a_capture_failure_keeps_the_lease_pending_for_good(
     loguru_records: list[dict[str, Any]],
     database_gate: ProcessDbGate,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     db_conn.execute(
@@ -456,7 +456,7 @@ def test_an_ended_lease_with_an_open_source_signals_by_state_until_it_seals(
     loguru_records: list[dict[str, Any]],
     database_gate: ProcessDbGate,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     participant = _participant(owner, lease, "stuck", database_gate=database_gate)
@@ -481,7 +481,7 @@ def test_agent_termination_completes_a_fully_sealed_lease(
     database: Database,
     database_gate: ProcessDbGate,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     participant = _participant(owner, lease, "terminated", database_gate=database_gate)
@@ -502,7 +502,7 @@ def test_the_handoff_lists_events_in_call_order_not_write_order(
     event_bus: EventBus,
     database_gate: ProcessDbGate,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     participant = _participant(owner, lease, "call-order", database_gate=database_gate)
@@ -539,7 +539,7 @@ def test_a_late_seal_rewrites_the_already_delivered_handoff_file(
     database: Database,
     database_gate: ProcessDbGate,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     from psycopg.types.json import Jsonb
@@ -571,7 +571,7 @@ def test_the_reaper_pass_signals_a_stuck_source_until_it_seals(
     loguru_records: list[dict[str, Any]],
     database_gate: ProcessDbGate,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     from base.agents.impersonation import maintenance

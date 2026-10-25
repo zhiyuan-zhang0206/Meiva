@@ -13,7 +13,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.gateway_client import transport
 from base.agents.context.identity import AgentIdentity
 from base.api_contracts.agent_contract import GatewayUnavailable
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
 from meiva.boot import derived_clients
@@ -34,7 +34,7 @@ def lost_response(gateway_stub: GatewayStub) -> Iterator[Event]:
 
 @pytest.fixture
 def retry_gateway(
-    gateway_stub: GatewayStub, lost_response: Event, machine_identity: MachineIdentity
+    gateway_stub: GatewayStub, lost_response: Event, machine_identity: MachineIdentityReader
 ) -> Iterator[GatewayStub]:
     config = ConfigBoot()
     config.set_field("gateway_url", gateway_stub.url)

@@ -7,7 +7,7 @@ from base.agents.messages.envelope import wrap_inbound
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.agent_contract import AgentNotFound, ResurrectAlreadyAlive, ResurrectError
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -39,7 +39,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         agent_id = hosted_agent(
             db_conn,
@@ -76,7 +76,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         agent_id = hosted_agent(
             db_conn,
@@ -108,7 +108,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         agent_id = hosted_agent(
             db_conn,
@@ -144,7 +144,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         agent_id = hosted_agent(
             db_conn,
@@ -181,7 +181,7 @@ class TestResurrectAgent:
         database: Database,
         event_bus: EventBus,
         *,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         with pytest.raises(AgentNotFound, match="does not exist"):
             resurrect_agent(
@@ -206,7 +206,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         agent_id = hosted_agent(
             db_conn,
@@ -241,7 +241,7 @@ class TestResurrectAgent:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         agent_id = hosted_agent(
             db_conn,
@@ -270,7 +270,7 @@ class TestResurrectAgent:
         database: Database,
         event_bus: EventBus,
         *,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         with pytest.raises(ResurrectError):
             resurrect_agent(

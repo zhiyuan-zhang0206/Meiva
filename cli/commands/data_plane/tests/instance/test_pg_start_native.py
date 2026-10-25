@@ -16,7 +16,8 @@ import pytest
 
 from base.cluster import ownership
 from base.cluster.dataplane.pg_tools import pg_tool
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.cluster_instance import StartTuning
 from cli.commands.data_plane.tests.native_cluster import NativeCluster
@@ -35,7 +36,9 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 _UNASSIGNED = "192.0.2.1"
 
 
-def _start(cluster: NativeCluster, machine: MachineIdentity, *, bind_wait_s: float = 0.0) -> int:
+def _start(
+    cluster: NativeCluster, machine: MachineIdentityReader, *, bind_wait_s: float = 0.0
+) -> int:
     return instance.start_pg(
         cluster.plane,
         cluster.pg_port,
@@ -55,7 +58,7 @@ def _setting(cluster: NativeCluster, name: str) -> str:
 
 
 def test_the_running_server_carries_the_planned_launch_settings(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: ConfiguredMachineIdentity
 ) -> None:
     command_machine.set(host="localhost")
     assert _start(native_cluster, command_machine) == 0
@@ -72,7 +75,7 @@ def test_the_running_server_carries_the_planned_launch_settings(
 
 
 def test_the_socket_directory_is_owner_only(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     assert _start(native_cluster, command_machine) == 0
     socket_dir = instance.pg_socket_dir(native_cluster.home)
@@ -84,7 +87,7 @@ def test_the_socket_directory_is_owner_only(
 # guaranteed bind failure; authentication is already written.
 def test_a_declared_reach_that_never_appears_fails_fast_before_launching(
     native_cluster: NativeCluster,
-    command_machine: MachineIdentity,
+    command_machine: ConfiguredMachineIdentity,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     command_machine.set(host=_UNASSIGNED)
@@ -105,14 +108,14 @@ def test_a_declared_reach_that_never_appears_fails_fast_before_launching(
 # meiva:note
 # A box whose reachable address is loopback binds loopback only and starts at once.
 def test_a_single_box_start_probes_no_address(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: ConfiguredMachineIdentity
 ) -> None:
     command_machine.set(host="localhost")
     assert _start(native_cluster, command_machine, bind_wait_s=0.0) == 0
 
 
 def test_a_second_start_re_affirms_the_same_postmaster(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     assert _start(native_cluster, command_machine) == 0
     first = ownership.postgres(native_cluster.pg_data)
@@ -129,7 +132,7 @@ def test_a_second_start_re_affirms_the_same_postmaster(
 # spawns it holds this process's environment: the test home is in it (`MEIVA_HOME`), and none of it
 # crosses to the postmaster.
 def test_the_postmaster_inherits_no_meiva_authority(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     assert _start(native_cluster, command_machine) == 0
     owner = ownership.postgres(native_cluster.pg_data)
@@ -140,7 +143,7 @@ def test_the_postmaster_inherits_no_meiva_authority(
 
 
 def test_a_passwordless_dial_over_tcp_is_asked_for_a_password(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     assert _start(native_cluster, command_machine) == 0
     for user in (getpass.getuser(), native_cluster.identity):
@@ -156,7 +159,7 @@ def test_a_passwordless_dial_over_tcp_is_asked_for_a_password(
 
 
 def test_pg_isready_answers_for_the_running_server_and_not_after_it_stops(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     isready = str(pg_tool("pg_isready"))
     assert not instance.pg_running(isready, native_cluster.pg_port, "127.0.0.1")

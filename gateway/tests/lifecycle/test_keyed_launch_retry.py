@@ -9,7 +9,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client, spawn_via_http
 from gateway.tests.lifecycle.creation.test_guarded_creation import SECRET
@@ -164,7 +164,7 @@ def test_native_repeat_rejects_superseded_target(
     db_conn: psycopg.Connection[Any],
     changed: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.api_contracts.launch_retry import LaunchReconcileRequest
     from ops.lifecycle import launch_reconcile
@@ -211,7 +211,7 @@ def test_native_crash_before_wake_and_result_ack_loss_preserve_attempt(
     client: GatewayTestClient,
     db_conn: psycopg.Connection[Any],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.api_contracts.launch_retry import LaunchReconcileRequest
     from ops.lifecycle import launch_reconcile
@@ -254,7 +254,7 @@ def test_reconcile_holds_row_fence_until_publication(
     client: GatewayTestClient,
     db_conn: psycopg.Connection[Any],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.api_contracts.launch_retry import LaunchReconcileRequest
     from ops.lifecycle import launch_reconcile

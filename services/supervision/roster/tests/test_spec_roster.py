@@ -10,7 +10,7 @@ from typing import cast
 
 import pytest
 
-from base.cluster.machine import MachineIdentity, MachineRole
+from base.cluster.machine import MachineIdentityReader, MachineRole
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.daemon.endpoints import ServiceEndpoints
@@ -109,7 +109,7 @@ def test_capability_partition() -> None:
     [("gateway", _GATEWAY_SESSIONS), ("agent-runner", _AGENT_RUNNER_SESSIONS)],
 )
 def test_annotated_roster_membership_per_capability(
-    role: str, expected: set[str], *, machine_identity: MachineIdentity
+    role: str, expected: set[str], *, machine_identity: MachineIdentityReader
 ) -> None:
     got = {
         s.session
@@ -125,7 +125,7 @@ def test_gateway_roster_ordering_is_load_bearing() -> None:
     assert order.index("memory-search") < order.index("memory-indexer")
 
 
-def test_agent_runner_roster_ordering(*, machine_identity: MachineIdentity) -> None:
+def test_agent_runner_roster_ordering(*, machine_identity: MachineIdentityReader) -> None:
     order = [
         s.session
         for s, _r in spec.services_for_capabilities_annotated(
@@ -144,7 +144,7 @@ def test_application_roster_has_one_supervision_authority() -> None:
 
 
 def test_station_roster_contains_only_lgtm_with_host_enablement_gate(
-    unit_home: Path, *, machine_identity: MachineIdentity
+    unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     rows = spec.services_for_capabilities_annotated(
         frozenset({"observability-station"}), machine=machine_identity, host=fake_host()
@@ -163,7 +163,7 @@ def test_station_roster_contains_only_lgtm_with_host_enablement_gate(
 
 
 def test_browser_family_is_gated_by_the_platform_when_enabled(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     host = fake_host()
     expected = probes.browser_incapability(settings.services.chrome_binary, host=host)

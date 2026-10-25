@@ -8,7 +8,9 @@ import pytest
 
 from agent.process_boot import init_process_scope, land_cluster_extensions, process_trace_config
 from base import db, paths
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
+from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -91,15 +93,9 @@ def test_process_scope_passes_its_machine_and_home_without_reading_identity(
 ) -> None:
     from base.telemetry import tracing
 
-    def unexpected_name() -> str:
-        pytest.fail("process scope eagerly read the machine name")
-
-    machine = MachineIdentity(
-        name=unexpected_name,
-        role=lambda: frozenset({"agent-runner"}),
-        host=lambda: "localhost",
-        description=lambda: None,
-    )
+    (unit_home / ".env").write_bytes(b"\xff")
+    config = ConfigBoot()
+    machine = ConfiguredMachineIdentity(config)
     trace = TraceConfig(
         enabled=True,
         strip_content=True,
@@ -109,17 +105,24 @@ def test_process_scope_passes_its_machine_and_home_without_reading_identity(
         disk_watermark=0.9,
         endpoint_explicit=False,
     )
-    calls: list[tuple[MachineIdentity, Path, TraceConfig, TraceReadiness]] = []
+    calls: list[tuple[MachineIdentityReader, Path, TraceConfig, TraceReadiness]] = []
 
     def initialize(
-        *, machine: MachineIdentity, home: Path, config: TraceConfig, readiness: TraceReadiness
+        *,
+        machine: MachineIdentityReader,
+        home: Path,
+        config: TraceConfig,
+        readiness: TraceReadiness,
     ) -> None:
         calls.append((machine, home, config, readiness))
 
     monkeypatch.setattr(tracing, "initialize_tracing", initialize)
     init_process_scope(machine=machine, home=unit_home, trace=trace)
+    assert not config.prepared
     assert calls == [(machine, unit_home, trace, PROCESS_RECORDING)]
     assert calls[0][3] is PROCESS_RECORDING
+    with pytest.raises(UnicodeDecodeError):
+        machine.name()
 
 
 @pytest.mark.parametrize(

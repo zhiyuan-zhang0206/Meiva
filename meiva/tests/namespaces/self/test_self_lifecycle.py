@@ -16,7 +16,7 @@ import meiva
 from base.agents.lifecycle import AgentRestart, AgentTermination
 from base.agents.tests.units import spawn_agent
 from base.cluster import inbound_channel
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -38,7 +38,7 @@ def _spawned(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> int:
     agent_id = spawn_agent(
         catalog=model_catalog,
@@ -56,7 +56,7 @@ def test_terminate_queues_its_inbound_row_and_wakes_the_agents_own_channel(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id = _spawned(model_catalog, config_authority, database_gate, machine_identity)
     listener = open_sync_redis(redis_url, decode_responses=True)
@@ -80,7 +80,7 @@ def test_restart_without_an_overlay_queues_a_bare_restart_row(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id = _spawned(model_catalog, config_authority, database_gate, machine_identity)
 
@@ -101,7 +101,7 @@ def test_pause_heartbeat_logs_the_pause_and_sets_the_agents_paused_until(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id = _spawned(model_catalog, config_authority, database_gate, machine_identity)
 
@@ -126,7 +126,7 @@ def test_pause_heartbeat_above_the_agents_limit_writes_nothing(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id = _spawned(model_catalog, config_authority, database_gate, machine_identity)
 

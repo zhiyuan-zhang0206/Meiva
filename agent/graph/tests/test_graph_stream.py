@@ -32,7 +32,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -165,7 +165,7 @@ async def test_llm_node_stamps_last_active_at_with_text(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """A completed turn that produced text writes both last_active_at (the
     heartbeat idle clock's real-activity anchor) and last_message_text in one
@@ -218,7 +218,7 @@ async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """A tool-only turn (code, no text) is still real work: it writes
     last_active_at (without last_message_text, since there is no AI text)."""

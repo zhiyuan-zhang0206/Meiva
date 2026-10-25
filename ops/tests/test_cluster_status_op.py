@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.native_process.loaded_commit import LoadedCommit
@@ -29,7 +29,11 @@ def pool(db_url: str) -> Iterator[ConnectionPool]:
 
 @pytest.mark.usefixtures("unit_home")
 def test_cluster_status_op_returns_this_hosts_snapshot(
-    database: Database, pool: ConnectionPool, tmp_path: Path, *, machine_identity: MachineIdentity
+    database: Database,
+    pool: ConnectionPool,
+    tmp_path: Path,
+    *,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(name="runner-a", role=frozenset({"agent-runner"}))
     image = LoadedCommit(source_root=tmp_path, sha="abc1234")
@@ -46,7 +50,7 @@ def test_cluster_status_op_returns_this_hosts_snapshot(
 
 @pytest.mark.usefixtures("unit_home")
 def test_cluster_status_op_without_a_pool_reads_through_a_direct_connection(
-    database: Database, tmp_path: Path, *, machine_identity: MachineIdentity
+    database: Database, tmp_path: Path, *, machine_identity: ConfiguredMachineIdentity
 ) -> None:
     machine_identity.set(name="runner-a", role=frozenset({"agent-runner"}))
     image = LoadedCommit(source_root=tmp_path, sha=None)

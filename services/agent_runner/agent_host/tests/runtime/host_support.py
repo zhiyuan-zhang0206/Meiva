@@ -24,7 +24,8 @@ from redis.asyncio.client import PubSub
 
 from agent.db import claim_inbound_batch
 from base.agents.context import MeivaContext
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -42,7 +43,11 @@ from services.agent_runner.agent_host.tests.runtime.observation import (
 
 
 def build_agent_host(
-    *, catalog: ModelCatalog, database_gate: ProcessDbGate, machine: MachineIdentity, **kwargs: Any
+    *,
+    catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
+    machine: MachineIdentityReader,
+    **kwargs: Any,
 ) -> AgentHost:
     """An `AgentHost` on this box with the handles the tests share."""
     return AgentHost(
@@ -378,7 +383,7 @@ class BuildWith(Protocol):
 class Rig:
     pools: HostPools
     stored: AgentRows
-    machine: MachineIdentity
+    machine: MachineIdentityReader
     plugins: dict[str, BaseModel]
     catalog: ModelCatalog
     gate: ProcessDbGate
@@ -413,7 +418,7 @@ class Rig:
 
 @pytest.fixture
 def rig(
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
     host_plugin: dict[str, BaseModel],
     model_catalog: ModelCatalog,
     host_pools: HostPools,

@@ -25,7 +25,7 @@ from typing import Any
 
 import httpx
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.host.db_authority.unit import telemetry_bearer
 from base.telemetry.trace_mirror import mirror_day, mirror_sort_key
@@ -61,7 +61,7 @@ def resolve_ship_target(
     observability: ObservabilityConfig,
     *,
     cluster_secret: str,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     home: Path,
 ) -> ShipTarget:
     roles = machine.role()
@@ -244,7 +244,7 @@ def cmd_trace_ship(
     since: str | None,
     until: str | None,
     dry_run: bool,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     traces_dir: Path,
     config: ConfigBoot,
     home: Path,

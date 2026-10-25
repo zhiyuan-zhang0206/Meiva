@@ -9,7 +9,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.paths.private_dir import ensure_private_dir
 from gateway.routers.upload import batches as upload_batches
@@ -52,7 +52,7 @@ def test_hard_death_recovers_fixed_objects(
     batch_target: Path,
     phase: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     child = subprocess.run(  # noqa: S603 -- fixed Python program against isolated test DB
         [sys.executable, str(_CHILD)],
@@ -89,7 +89,7 @@ def test_hard_death_recovers_fixed_objects(
 # Another writer recovers the batch first. The old one then links the same objects: create-only
 # publication verifies the finals already there and leaves every one of them in place.
 def test_disconnected_writer_can_finish_after_recovery_without_overwriting(
-    db_conn: psycopg.Connection, batch_target: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, batch_target: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     with ConnectionPool[psycopg.Connection](db_conn.info.dsn, min_size=1, max_size=3) as pool:
         old_writer = upload_batches.claim_batch(
@@ -118,7 +118,7 @@ def test_disconnected_writer_can_finish_after_recovery_without_overwriting(
 
 
 def test_independent_processes_share_quota(
-    db_conn: psycopg.Connection, batch_target: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, batch_target: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     children: list[subprocess.Popen[str]] = []
     try:
@@ -163,7 +163,7 @@ def test_independent_processes_share_quota(
 
 
 def test_receipts_use_explicit_writable_transactions(
-    db_conn: psycopg.Connection, batch_target: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, batch_target: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     with ConnectionPool[psycopg.Connection](
         db_conn.info.dsn,

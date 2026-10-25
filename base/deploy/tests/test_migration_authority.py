@@ -26,7 +26,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.deploy.schema.migration_layout import MIGRATIONS_DIR
@@ -87,7 +87,7 @@ def _register_gateway_unit(machine: str, home: str) -> None:
         )
 
 
-def _claim_checkout(identity: MachineIdentity, machine: str, home: str) -> Path:
+def _claim_checkout(identity: ConfiguredMachineIdentity, machine: str, home: str) -> Path:
     """Make the executing process claim `machine:home`."""
     identity.set(name=machine)
     return Path(home)
@@ -130,7 +130,7 @@ def _synthetic_table_exists() -> bool:
 
 def test_refuses_when_another_unit_owns_the_cluster(
     tmp_path: Path,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     """The incident itself: the runner's checkout has a migration the gateway
     lacks, and applying it would strand the gateway behind the schema."""
@@ -158,7 +158,7 @@ def test_refuses_when_another_unit_owns_the_cluster(
 
 def test_allows_a_fresh_birth_with_no_recorded_identity(
     tmp_path: Path,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     """A brand-new cluster migrates at `meiva start` step 2.5, before step 3 writes
     machine_units — an empty table means "no owner yet", not "not you"."""
@@ -177,7 +177,7 @@ def test_allows_a_fresh_birth_with_no_recorded_identity(
 
 def test_allows_the_gateway_unit(
     tmp_path: Path,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     """The sanctioned path — the fleet update's migrate step on the cluster's own
     gateway — is unaffected."""
@@ -207,7 +207,7 @@ def test_allows_the_gateway_unit(
 # the migration reader at an empty dir instead would make every applied migration a
 # squash candidate — a mutation, which the guard is supposed to refuse.
 def test_allows_a_non_gateway_host_with_nothing_to_apply(
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     _register_gateway_unit(*_GATEWAY)
     claimed_home = _claim_checkout(machine_identity, *_RUNNER)
@@ -226,7 +226,7 @@ def test_allows_a_non_gateway_host_with_nothing_to_apply(
 
 def test_refuses_a_foreign_checkout_even_at_the_owning_home(
     tmp_path: Path,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     """A dev worktree that inherited the gateway's `MEIVA_HOME` resolves the very
     home the database names, yet its `migrations/` are not the ones the home's own

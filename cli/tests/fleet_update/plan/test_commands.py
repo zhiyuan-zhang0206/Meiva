@@ -88,7 +88,7 @@ def test_the_gateway_programs_are_asked_by_verb() -> None:
 
 def test_the_machine_name_is_what_the_host_itself_boots_into() -> None:
     command = machine_name_command()
-    assert "machine_from_boot(ConfigBoot()).name()" in command
+    assert "ConfiguredMachineIdentity(ConfigBoot()).name()" in command
     assert command.count("python") == 1 and command.endswith('.name())"')
 
 

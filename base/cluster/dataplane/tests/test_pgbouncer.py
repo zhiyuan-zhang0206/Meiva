@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from base.cluster import port_preflight
 from base.cluster.dataplane import pooler as base_pooler
-from base.cluster.machine import MachineFacts, MachineIdentity, MachineIdentityReader
+from base.cluster.machine import MachineFacts, MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
+from base.config import ConfigBoot
+from base.paths.tests.homes import point_home
 
 
 @pytest.fixture
@@ -24,18 +29,20 @@ def _fail_admin_dial(
 
 def test_public_probe_is_a_noop_for_loopback_only_bind(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     probe_machine: MachineFacts,
 ) -> None:
     """A loopback-only pooler has no public listener, so the fast path calls nothing."""
+    point_home(monkeypatch, tmp_path)
+    (tmp_path / ".env").write_bytes(b"\xff")
+    with pytest.raises(UnicodeDecodeError):
+        ConfiguredMachineIdentity(ConfigBoot()).host()
 
-    def _fail_host_lookup() -> str:
-        pytest.fail("loopback-only probe must not resolve the reachable host")
-
-    owner = MachineIdentity(
-        name=probe_machine.name,
-        role=probe_machine.role,
-        host=_fail_host_lookup,
-        description=probe_machine.description,
+    owner = ConfiguredMachineIdentity(ConfigBoot())
+    owner.set(
+        name=probe_machine.name(),
+        role=probe_machine.role(),
+        description=probe_machine.description(),
     )
 
     def loopback(*, machine: MachineIdentityReader) -> list[str]:
@@ -52,6 +59,8 @@ def test_public_probe_is_a_noop_for_loopback_only_bind(
     assert (
         base_pooler.pgbouncer_public_listener_reachable(6433, "meiva_main", machine=owner) is True
     )
+    with pytest.raises(UnicodeDecodeError):
+        owner.host()
 
 
 def test_public_probe_accepts_the_exact_reachable_host_in_the_socket_table(

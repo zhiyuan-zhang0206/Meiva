@@ -12,7 +12,7 @@ from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.inbox.chat_delivery import insert_chat_inbound_once
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
@@ -27,7 +27,7 @@ def session(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> dict[str, Any]:
     local_machine = machine_identity.name()
     agent_id = create_agent(db_conn)
@@ -99,7 +99,7 @@ def peer_chats(
     event_bus: EventBus,
     publish_wake: Callable[[int, str], bool],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> int:
     """Send real chats through the chat emitter; return the executor's recipient."""
     local_machine = machine_identity.name()
@@ -150,7 +150,7 @@ def test_recipient_statistics_follow_real_chat_event_direction(
     peer_chats: int,
     database: Database,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     # Both incoming and outgoing peer messages belong to the conversation;
     # only the outgoing message is evidence of a recipient of this executor.
