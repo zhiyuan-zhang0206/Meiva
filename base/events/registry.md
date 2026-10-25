@@ -264,9 +264,9 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `ci_runs_daily` | daily CI-run aggregates | observation | repo, day, runs, instant_skip_runs, watchdog_runs, proof_runs, cancelled_runs, superseded_runs, superseded_zero_runs, failed_runs, retried_failed_runs, self_healed_runs, abandoned_runs, zombie_runs, prs_completed, prs_with_runs, per_pr_duration_median_minutes, per_pr_duration_p90_minutes, per_pr_runs_median, per_pr_runs_p90, per_pr_runs_executed_median, white_run_share, retry_share, noise_run_share, first_pass_pr_share | — | events | — |
 | `ci_workflow_window` | trailing workflow fragility | observation | repo, workflow, runs, failed_runs, self_healed_runs, retried_failed_runs, cancelled_runs, superseded_runs, instant_skip_runs, prs_appeared_on, pr_appearance_share, retry_share, exec_median_seconds, exec_p90_seconds | — | events | — |
 | `ci_runs_run` | CI-run sampler breadcrumb | observation | repo, window_days, window_runs, window_prs, api_requests | — | events | — |
-| `task_reminder_digest` | overdue-task owner digest | noise | owner_id, task_count, task_ids | — | events | — |
-| `task_reminder_rerouted` | overdue-task reminder delivered to a terminated owner's manager, or to the human queue when no live agent owns an ancestor task | noise | owner_id, leg, recipient, task_count, task_ids | — | events | — |
-| `task_escalation` | stalled-task escalation | observation | owner_id, task_count, task_ids, leg | — | events | — |
+| `task_reminder_digest` | overdue-task owner digest | noise | owner_id, task_count, task_ids | — | events | ✓ |
+| `task_reminder_rerouted` | overdue-task reminder delivered to a terminated owner's manager, or to the human queue when no live agent owns an ancestor task | noise | owner_id, leg, recipient, task_count, task_ids | — | events | ✓ |
+| `task_escalation` | stalled-task escalation | observation | owner_id, task_count, task_ids, leg | — | events | ✓ |
 | `label_generated` | label auto-generated | noise | — | — | events | — |
 | `label_generate_failed` | label generation failed | anomaly | — | — | events | — |
 | `label_generate_skipped` | label generation skipped | noise | — | — | events | — |

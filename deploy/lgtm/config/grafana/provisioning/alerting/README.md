@@ -307,6 +307,7 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-root-unit-unowned-alive` | `root_unit_unowned_alive` per machine and unit | 0m | error | nothing: a unit could read "state stopped / probe alive" for a day with every rule green (2026-10-20) |
 | `meiva-ops-root-unit-left-behind-stuck` | `root_unit_left_behind_stuck` per machine and unit | 0m | error | nothing: a leftover that survives TERM and KILL blocks its own replacement |
 | `meiva-ops-root-diagnostic-venv` / `-brew-pin` / `-browser-reach` | `root_diagnostic` non-alive, >1 / >1 / >2 samples | 0m | warning | the per-probe consecutive-failure thresholds |
+| `meiva-ops-root-diagnostic-task-telemetry` | `root_diagnostic` verdict `down`, >1 hourly sample in 6h | 0m | warning | nothing: the daemon delivered over 100 reminder digests a day while a storage filter dropped every task_reminder_digest / task_escalation row (2026-10-03 → 10-25). Only `down` counts — an unreadable database is the recovery probe's finding, not this one |
 
 Unhealthy-for-3-minutes and unhealthy-for-10-minutes are two coexisting rules per condition
 (Grafana's file provisioning has no inhibition rules), so a long outage holds a warning and an

@@ -44,6 +44,7 @@ fails, and root teardown preserves its primary and secondary errors.
 | `browser-reach` | selected root browser unit | Temporary browser fetch, contrasted with a host HTTP request. Failed host baseline or unusable CDP is unavailable; browser-only failure is DOWN. |
 | `observatory-station` | gateway with remote observability URL | Authenticated remote OTLP protocol request. Missing credential or unresolved target is unavailable. A failure is episode-logged only: the station hosts the observability backends, so no alert can carry it. |
 | `lgtm-write-path` | selected root Loki unit | Unique Loki write/read probe. Failed and persistently throttled paths retain their registered events; no backend restart. |
+| `task-telemetry` | gateway | One bounded read of the reminder record: the task check-in notices the daemon delivered in the last 24 hours, against the `task_reminder_digest` / `task_reminder_rerouted` / `task_escalation` rows those deliveries emit. Deliveries without stored rows are DOWN — the stall diagnostics then read nothing — while a fleet with nothing due stays UP, and an unreadable database is UNAVAILABLE. Sampled hourly; no write, no reminder behaviour. |
 
 Redis and PgBouncer diagnostics use their configured endpoints and existing
 credentials without native process custody inspection. Neither diagnostic
