@@ -26,6 +26,7 @@ import base.packages.plugins.enable_config as pc
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.system.tests.fake_commands import fake_host
+from base.log.tests.log_records import LogRecords
 from services.supervision.roster import composition, service_spec, spec
 from services.supervision.roster import plugin_services as roster_plugins
 
@@ -96,7 +97,7 @@ def test_session_collision_fails_fast() -> None:
 
 
 def test_services_py_without_declare_reports_and_raises(
-    tmp_path: Path, loguru_records: list[dict]
+    tmp_path: Path, loguru_records: LogRecords
 ) -> None:
     """A present malformed face is not optional absence."""
     plugin_dir = tmp_path / "brokenplugin"
@@ -112,7 +113,7 @@ def test_services_py_without_declare_reports_and_raises(
 
 
 def test_broken_services_py_reports_and_aborts_roster(
-    tmp_path: Path, loguru_records: list[dict]
+    tmp_path: Path, loguru_records: LogRecords
 ) -> None:
     """An import error cannot produce a successful partial roster."""
     good_dir = tmp_path / "goodplugin"
@@ -214,7 +215,7 @@ def test_failed_service_import_does_not_publish_partial_module(
 )
 def test_invalid_service_face_propagates_to_roster_operation(
     tmp_path: Path,
-    loguru_records: list[dict],
+    loguru_records: LogRecords,
     body: str,
     error: type[Exception],
     match: str,
@@ -237,7 +238,7 @@ def test_absent_optional_service_face_does_not_fail_discovery(tmp_path: Path) ->
 
 @pytest.mark.parametrize("diagnostic", [False, True])
 def test_failed_gate_never_produces_a_start_or_status_roster(
-    loguru_records: list[dict],
+    loguru_records: LogRecords,
     diagnostic: bool,
     machine_identity: MachineIdentityReader,
 ) -> None:
