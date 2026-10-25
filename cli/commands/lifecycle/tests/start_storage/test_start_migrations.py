@@ -9,11 +9,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import psycopg
 import pytest
-from langgraph.checkpoint.postgres import PostgresSaver
 
 from base.cluster import ensure_checkpoint_schema, provision_database
 from base.cluster.checkpoint_schema import PostgresCheckpointSchema
@@ -57,16 +58,22 @@ def test_an_owned_plane_converges_over_its_owner_socket(plane: Plane) -> None:
     assert plane.migrate(identity) == [], "a second step finds nothing pending"
 
 
+@dataclass(frozen=True)
+class _DriftedCheckpointSchema:
+    migrations: Sequence[str]
+
+    def setup(self, *, base_admin_url: str, identity: str, expected_data_dir: Path | None) -> None:
+        raise AssertionError(f"setup is not called for {identity} on {base_admin_url}")
+
+
 # meiva:note
 # A new upstream checkpoint migration must first be mirrored in a Meiva migration. The gate
 # runs before the database is dialed at all: the plane's database does not even exist yet.
-def test_dependency_drift_fails_before_any_database_change(
-    plane: Plane, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(PostgresSaver, "MIGRATIONS", [*PostgresSaver.MIGRATIONS, "SELECT 1"])
+def test_dependency_drift_fails_before_any_database_change(plane: Plane) -> None:
+    drifted = _DriftedCheckpointSchema([*PostgresCheckpointSchema().migrations, "SELECT 1"])
 
     with pytest.raises(CheckpointDependencyDriftError, match="Meiva timestamp migration"):
-        plane.migrate("meiva_drift")
+        plane.migrate("meiva_drift", checkpoint_schema=drifted)
 
     with psycopg.connect(plane.admin_on("postgres")) as conn:
         databases = {row[0] for row in conn.execute("SELECT datname FROM pg_database")}

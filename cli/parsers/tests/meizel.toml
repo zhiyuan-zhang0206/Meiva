@@ -1,5 +1,2 @@
 [uses]
 "test_parser_contract.py" = ["child_public_queries.py"]
-
-[debt.first-party-patch]
-"test_walg_cmd.py#monkeypatch.setattr services.backup.walg.probe.admin_connection" = 1

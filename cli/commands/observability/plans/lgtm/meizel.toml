@@ -14,8 +14,3 @@ exports = ["archive.py", "dashboard_checks.py", "dashboard_plan.py", "download_r
 [uses]
 "dashboard_checks.py" = ["dashboard_plan.py"]
 "download_report.py" = ["download_retry.py"]
-
-[debt.type-cast]
-"dashboard_checks.py#cast _object" = 1
-"dashboard_checks.py#cast _objects" = 1
-"dashboard_checks.py#cast _objects.<listcomp>" = 1

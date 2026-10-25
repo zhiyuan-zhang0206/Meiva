@@ -30,9 +30,9 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
@@ -186,7 +186,11 @@ def cmd_skill_trust(name: str, *, revoke: bool = False) -> int:
         )
         return 1
     entry.trust = "unreviewed" if revoke else "reviewed"
-    entry.updated_at = datetime.now(UTC).isoformat(timespec="seconds")
+    entry.updated_at = (
+        Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+        .now()
+        .isoformat(timespec="seconds")
+    )
     install_registry.register(entry)
     print(f"[meiva skill trust] {name} -> trust={entry.trust}.")
     return 0
@@ -283,7 +287,11 @@ def cmd_skill_register(name: str, *, accept_risk: bool = False) -> int:
         print(e.report, file=sys.stderr)
         print(_REFUSAL_ADVICE.replace("install", "register"), file=sys.stderr)
         return 1
-    now = datetime.now(UTC).isoformat(timespec="seconds")
+    now = (
+        Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+        .now()
+        .isoformat(timespec="seconds")
+    )
     install_registry.register(
         install_registry.InstalledPackage(
             name=name,
@@ -586,8 +594,6 @@ def _report_update(
 def cmd_skill_update(
     names: list[str] | None, *, config: ConfigBoot, repo: Path, binding: SourceBinding
 ) -> int:
-    from datetime import UTC, datetime
-
     from base import paths
     from base.packages.extensions import install_registry as reg
     from cli.commands.extensions.skills_sync import assert_repo_source_bound
@@ -601,7 +607,11 @@ def cmd_skill_update(
     sources = _selected_sources(repo, names)
     skills_root = paths.skills_dir(paths.meiva_home())
     skills_root.mkdir(parents=True, exist_ok=True)
-    now = datetime.now(UTC).isoformat(timespec="seconds")
+    now = (
+        Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+        .now()
+        .isoformat(timespec="seconds")
+    )
     landed: list[str] = []
     updated: list[str] = []
     unchanged: list[str] = []
@@ -697,9 +707,11 @@ def cmd_skill_upgrade(name: str) -> int:
             # path does.
             shutil.copytree(pkg_dir, dest, ignore=shutil.ignore_patterns(".git", ".venv"))
 
-        from datetime import UTC, datetime
-
-        pkg.updated_at = datetime.now(UTC).isoformat(timespec="seconds")
+        pkg.updated_at = (
+            Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+            .now()
+            .isoformat(timespec="seconds")
+        )
         pkg.installed_hash = install_registry.tree_hash(dest)
         install_registry.register(pkg)
         print(f"[meiva skill upgrade] re-fetched '{name}' from {pkg.source}.")

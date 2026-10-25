@@ -16,8 +16,9 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config import ConfigBoot
 from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import InstalledPackage, UpdateMode
@@ -108,12 +109,21 @@ def _fmt_due(next_check_at: str | None) -> str:
         due = datetime.fromisoformat(next_check_at)
     except ValueError:
         return "due"
-    remaining = due - datetime.now(UTC)
+    remaining = (
+        due
+        - Clock(
+            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+        ).now()
+    )
     if remaining.total_seconds() <= 0:
         return "due"
     hours, rest = divmod(int(remaining.total_seconds()), 3600)
     minutes = rest // 60
     return f"in {hours}h{minutes:02d}m" if hours else f"in {minutes}m"
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 def _fmt_range(manifest: dict[str, object] | None, manifest_error: str | None) -> str:
@@ -123,9 +133,8 @@ def _fmt_range(manifest: dict[str, object] | None, manifest_error: str | None) -
         return "-"
     engines = manifest["engines"]
     parts: list[str] = []
-    if isinstance(engines, dict):
-        typed_engines = cast("dict[str, str]", engines)
-        parts = [f"{host} {rng}" for host, rng in typed_engines.items()]
+    if _is_object_dict(engines):
+        parts = [f"{host} {rng}" for host, rng in engines.items()]
     commit = manifest.get("requires_commit")
     if isinstance(commit, str) and commit:
         parts.append(f"commit {commit[:7]}")
@@ -421,7 +430,11 @@ def cmd_packages_rollback(name: str) -> int:
             "applied content; replacing it"
         )
     dest = _swap_trees_with_prev(skills, row.name, skip)
-    stamp = datetime.now(UTC).isoformat(timespec="seconds")
+    stamp = (
+        Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+        .now()
+        .isoformat(timespec="seconds")
+    )
     with install_registry.mutate() as reg:
         fresh = next((p for p in reg.packages if match_key(p.name) == match_key(row.name)), None)
         if fresh is not None:
@@ -436,14 +449,23 @@ def cmd_packages_rollback(name: str) -> int:
     return 0
 
 
+def _parse_update_mode(update_mode: str | None) -> UpdateMode | None:
+    match update_mode:
+        case None:
+            return None
+        case "auto" | "notify" | "off":
+            return update_mode
+        case _:
+            raise ValueError(f"unknown update mode {update_mode!r} (auto | notify | off)")
+
+
 def _policy_interval(update_mode: str | None, check_every: str | None) -> int | None:
     """Validate a policy request; the new check interval in seconds, if one was given."""
     from cli.commands.duration import parse_duration
 
     if update_mode is None and check_every is None:
         raise ValueError("pass --update-mode and/or --check-every")
-    if update_mode is not None and update_mode not in ("auto", "notify", "off"):
-        raise ValueError(f"unknown update mode {update_mode!r} (auto | notify | off)")
+    _parse_update_mode(update_mode)
     return parse_duration(check_every) if check_every else None
 
 
@@ -457,6 +479,7 @@ def cmd_packages_policy(
     from base.packages.skills.names import match_key
 
     try:
+        parsed_mode = _parse_update_mode(update_mode)
         interval = _policy_interval(update_mode, check_every)
     except ValueError as exc:
         print(f"[meiva packages policy] {exc}", file=sys.stderr)
@@ -477,8 +500,8 @@ def cmd_packages_policy(
                 f"[meiva packages policy] '{row.name}' vanished from the registry", file=sys.stderr
             )
             return 1
-        if update_mode is not None:
-            fresh.update.mode = cast("UpdateMode", update_mode)
+        if parsed_mode is not None:
+            fresh.update.mode = parsed_mode
         if interval is not None:
             fresh.update.interval_seconds = interval
     updated = install_registry.get(row.name)

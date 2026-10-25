@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import grp
-import os
 import pwd
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from cli.commands.converge.plans.ownership_plan import (
     Account,
     OwnedPath,
@@ -54,17 +53,24 @@ def _key_paths(meiva_home: Path) -> tuple[Path, ...]:
 # meiva:note
 # The names `chown` takes for `uid`, or the numeric ids when the system has no entry.
 def _account(uid: int) -> Account:
-    gid = os.getgid()
     try:
-        return Account(uid, pwd.getpwuid(uid).pw_name, grp.getgrgid(gid).gr_name)
+        pw = pwd.getpwuid(uid)
     except KeyError:
-        return Account(uid, str(uid), str(gid))
+        return Account(uid, str(uid), str(uid))
+    gid = pw.pw_gid
+    try:
+        return Account(uid, pw.pw_name, grp.getgrgid(gid).gr_name)
+    except KeyError:
+        return Account(uid, pw.pw_name, str(gid))
 
 
 def _append_warnings(path: Path, warnings: tuple[str, ...]) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(UTC).isoformat(timespec="seconds")
+        now = Clock(
+            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+        ).now()
+        stamp = now.isoformat(timespec="seconds")
         with path.open("a", encoding="utf-8") as output:
             for line in log_lines(stamp, warnings):
                 output.write(f"{line}\n")

@@ -13,11 +13,11 @@ import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TextIO, assert_never
 
 from base.agents.context.clients import DatabaseFactory
+from base.clock import Clock, ClockConfig
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.status_journal import phase as journal_phase
 from base.telemetry import EventPipeline
@@ -133,7 +133,13 @@ def _perform(
         case ClearServing():
             start_serving.clear_serving(command.home)
         case Announce(window):
-            announce_stopping(command, window, now=datetime.now(UTC))
+            announce_stopping(
+                command,
+                window,
+                now=Clock(
+                    ClockConfig("UTC", None, message_timestamp_weekday=False), timers=command.timers
+                ).now(),
+            )
         case RecordBrowserSession():
             browser.record_browser_session(command)
         case StopServices(preserve, force, _phase):

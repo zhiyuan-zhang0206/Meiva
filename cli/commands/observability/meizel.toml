@@ -13,14 +13,3 @@ exports = ["grafana_render.py", "inputs.py", "lgtm.py", "lgtm_native.py", "logs.
 "tests" = ["_lgtm_provisioning.py", "grafana_render.py", "inputs.py", "lgtm_native.py", "otel_collector.py", "plans", "trace.py", "url_split.py"]
 "trace.py" = ["inputs.py", "plans", "url_split.py"]
 "url_split.py" = ["plans"]
-
-[debt.any-collaborator]
-"trace.py#any _correct_span_ids.request" = 1
-
-[debt.type-cast]
-"_lgtm_assets.py#cast load_versions" = 4
-"_lgtm_provisioning.py#cast _recorded_hashes" = 1
-"_lgtm_provisioning.py#cast dashboard_document" = 1
-"_lgtm_provisioning.py#cast dashboard_facts" = 1
-"grafana_render.py#cast _panels_by_identity" = 1
-"lgtm_native.py#cast render_configs" = 1

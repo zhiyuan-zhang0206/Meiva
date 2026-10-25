@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import json
 import sys
-import time
 import uuid
 from typing import Any
 
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import gateway_api_base, gateway_auth_headers
 from base.cluster.machine.boot import gateway_access_from_boot
 from base.config import ConfigBoot
@@ -67,9 +67,9 @@ def main(argv: list[str]) -> int:
         post(
             f"{base}/api/agents/{agent}/messages", headers=headers, json=message, timeout=60
         ).raise_for_status()
-        deadline = time.monotonic() + float(argv[2])
-        while not out["completed"] and time.monotonic() < deadline:
-            time.sleep(4)
+        deadline = SYSTEM_TIMERS.monotonic() + float(argv[2])
+        while not out["completed"] and SYSTEM_TIMERS.monotonic() < deadline:
+            SYSTEM_TIMERS.sleep(4)
             items = get(f"{base}/api/agents/{agent}/timeline", headers=headers, timeout=60).json()[
                 "items"
             ]

@@ -5,6 +5,3 @@ exports = ["context_inputs.py"]
 "test_converge_browser.py" = ["context_inputs.py"]
 "test_converge_helper_steps.py" = ["context_inputs.py"]
 "test_converge_transfer_backend.py" = ["context_inputs.py"]
-
-[debt.test-subclass-override]
-"test_converge_browser.py#subclass base.config._lite.ConfigBoot.read_process_environment" = 1

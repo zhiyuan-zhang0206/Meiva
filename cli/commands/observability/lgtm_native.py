@@ -19,7 +19,7 @@ import time
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import assert_never, cast
+from typing import TypeGuard, assert_never
 
 import yaml
 from dotenv import dotenv_values
@@ -87,6 +87,10 @@ from cli.commands.observability.plans.lgtm.urls import (
     pg_datasource,
 )
 from cli.commands.observability.url_split import split_url
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 # meiva:note
@@ -464,9 +468,9 @@ def render_configs(
         for name in CONFIG_TEMPLATES
     }
     loki_config = yaml.safe_load(rendered["loki.yaml"])
-    if not isinstance(loki_config, dict):
+    if not _is_object_dict(loki_config):
         raise TypeError("native Loki config must render to a mapping")
-    validate_loki_deploy_config(cast(dict[str, object], loki_config))
+    validate_loki_deploy_config(loki_config)
     for name, content in rendered.items():
         write_if_changed(native_dir / "config" / name, content)
     rendered_run_script = native_dir / "grafana" / "run.sh"

@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from psycopg.conninfo import make_conninfo
 
+from base.cluster.checkpoint_schema import CheckpointSchema, PostgresCheckpointSchema
 from base.cluster.dataplane.pg_admin import pg_admin_url
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.host.env import port_lease
@@ -76,6 +77,9 @@ def owned_pg(
             child.wait(timeout=1)
 
 
+_DEFAULT_CHECKPOINT_SCHEMA: CheckpointSchema = PostgresCheckpointSchema()
+
+
 # meiva:note
 # One home-owned Postgres and the values a start prepares it with.
 @dataclasses.dataclass(frozen=True)
@@ -103,12 +107,18 @@ class Plane:
     def admin_on(self, database: str) -> str:
         return make_conninfo(pg_admin_url(self.port), dbname=database)
 
-    def migrate(self, identity: str) -> list[str]:
+    def migrate(
+        self,
+        identity: str,
+        *,
+        checkpoint_schema: CheckpointSchema = _DEFAULT_CHECKPOINT_SCHEMA,
+    ) -> list[str]:
         return cmd_migrations_apply(
             database_factory=self.database,
             machine=self.command.machine,
             config=self.config_for(identity),
             home=self.home,
+            checkpoint_schema=checkpoint_schema,
         )
 
 

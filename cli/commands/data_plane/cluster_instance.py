@@ -40,19 +40,18 @@ from __future__ import annotations
 
 import getpass
 import os
-import secrets
 import shlex
 import shutil
 import socket
 import subprocess
 import sys
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
 
 import psycopg
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import ensure_cluster_redis_acl, ownership, port_preflight
 from base.cluster import postgres as owned_postgres
 from base.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
@@ -195,18 +194,18 @@ def addr_assigned(addr: str) -> bool:
 def wait_for_reachable_bind(*, host: str, timeout_s: float) -> bool:
     if host in port_preflight.LOOPBACK_ALIASES:
         return True
-    started = time.monotonic()
+    started = SYSTEM_TIMERS.monotonic()
     while True:
         verdict = wait_verdict(
             satisfied=addr_assigned(host),
-            elapsed_s=time.monotonic() - started,
+            elapsed_s=SYSTEM_TIMERS.monotonic() - started,
             timeout_s=timeout_s,
         )
         if verdict is Wait.DONE:
             return True
         if verdict is Wait.EXPIRED:
             return False
-        time.sleep(_BIND_WAIT_INTERVAL_S)
+        SYSTEM_TIMERS.sleep(_BIND_WAIT_INTERVAL_S)
 
 
 # meiva:note
@@ -238,11 +237,11 @@ def _identity() -> pg_plan.PgIdentity:
 # loopback TCP and over the owner-only socket (`pg_plan.hba_dial_verdict`). Bounded; raises
 # RuntimeError naming each path that did not demand a password.
 def require_authenticated_hba(pg_port: int, dial_host: str, *, socket_dir: Path) -> None:
-    probe = f"meiva_hba_probe_{secrets.token_hex(4)}"
+    probe = f"meiva_hba_probe_{pg_port}"
     # meiva:note
     # A path that never exists: no ~/.pgpass entry can answer the challenge.
     passfile = str(socket_dir / "no-passfile")
-    started = time.monotonic()
+    started = SYSTEM_TIMERS.monotonic()
     while True:
         unproven: list[str] = []
         for host in (dial_host, str(socket_dir)):
@@ -264,7 +263,7 @@ def require_authenticated_hba(pg_port: int, dial_host: str, *, socket_dir: Path)
                 unproven.append(reason)
         verdict = wait_verdict(
             satisfied=not unproven,
-            elapsed_s=time.monotonic() - started,
+            elapsed_s=SYSTEM_TIMERS.monotonic() - started,
             timeout_s=_HBA_PROOF_TIMEOUT_S,
         )
         if verdict is Wait.DONE:
@@ -274,7 +273,7 @@ def require_authenticated_hba(pg_port: int, dial_host: str, *, socket_dir: Path)
                 "postgres does not enforce password authentication after its pg_hba "
                 "rewrite: " + "; ".join(unproven)
             )
-        time.sleep(_HBA_PROOF_INTERVAL_S)
+        SYSTEM_TIMERS.sleep(_HBA_PROOF_INTERVAL_S)
 
 
 # meiva:note
@@ -628,18 +627,18 @@ def _launch_redis(
 # meiva:note
 # `redis-server --daemonize` returns at once; poll until the port answers PING.
 def _await_redis(redis_cli: str, admin: str, redis_port: int, dial_host: str) -> bool:
-    started = time.monotonic()
+    started = SYSTEM_TIMERS.monotonic()
     while True:
         verdict = wait_verdict(
             satisfied=redis_running(redis_cli, admin, redis_port, dial_host),
-            elapsed_s=time.monotonic() - started,
+            elapsed_s=SYSTEM_TIMERS.monotonic() - started,
             timeout_s=_REDIS_READY_TIMEOUT_S,
         )
         if verdict is Wait.DONE:
             return True
         if verdict is Wait.EXPIRED:
             return False
-        time.sleep(_REDIS_READY_INTERVAL_S)
+        SYSTEM_TIMERS.sleep(_REDIS_READY_INTERVAL_S)
 
 
 # meiva:note

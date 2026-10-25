@@ -8,8 +8,3 @@ exports = ["data_plane_records.py", "native_cluster.py", "native_processes.py"]
 "native_processes.py" = ["_sleeping_child.py"]
 "pooler" = ["native_processes.py"]
 "test_native_storage_diagnostics.py" = ["native_cluster.py", "native_processes.py", "redis_diagnostic_child.py"]
-
-[debt.first-party-patch]
-"test_native_storage_diagnostics.py#monkeypatch.setattr base.cluster.get_record" = 1
-"test_native_storage_diagnostics.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 1
-"test_native_storage_diagnostics.py#monkeypatch.setattr base.host.db_authority.delivery.read_pooler_admin" = 1

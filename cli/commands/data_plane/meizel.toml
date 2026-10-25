@@ -17,15 +17,5 @@ exports = ["bringup.py", "cluster_instance.py", "completion.py", "config.py", "h
 "__init__.py" = "strict"
 "stop_budget.py" = "strict"
 
-[debt.ambient-read]
-"_pooler_stop.py#clock time.monotonic" = 1
-"cluster_instance.py#clock time.monotonic" = 6
-"cluster_instance.py#random secrets.token_hex" = 1
-"completion.py#environ os.environ" = 2
-"maintenance_stop.py#pid os.getuid" = 1
-"pgbouncer.py#clock time.monotonic" = 2
-"stop_waits.py#clock time.monotonic" = 1
-"walg.py#clock datetime.datetime.now" = 1
-
-[debt.type-cast]
-"maintenance_stop.py#cast _redis_command" = 1
+[roots]
+"completion.py" = { kinds = ["environ"], why = "Publishes adopted gateway database login into process environment for subsequent start phases" }

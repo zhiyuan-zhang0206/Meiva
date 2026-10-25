@@ -13,6 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from base import telemetry
+from base.clock import SYSTEM_TIMERS
 from base.cluster import postgres as owned_postgres
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from base.telemetry import EventPipeline
@@ -79,13 +80,13 @@ def wait_for_exit(tracked: set[OwnedProcess], deadline: float) -> None:
             return
         for identity in living:
             retain_processes(tracked, capture_tree(identity))
-        delay = poll_delay(time_left(deadline, time.monotonic()), _POLL_INTERVAL_S)
+        delay = poll_delay(time_left(deadline, SYSTEM_TIMERS.monotonic()), _POLL_INTERVAL_S)
         if delay is None:
             raise TimeoutError(
                 "maintenance kept its hold; processes did not exit: "
                 f"{sorted(identity.pid for identity in living)}"
             )
-        time.sleep(delay)
+        SYSTEM_TIMERS.sleep(delay)
 
 
 # meiva:note

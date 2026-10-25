@@ -80,7 +80,13 @@ _OPENER_CHECKOUT = {
 def _read_rows(checkout: Path, out: Path) -> subprocess.CompletedProcess[str]:
     # meiva:note
     # Execute the read step's source under the OLD checkout's import path.
-    env = {"PATH": os.environ["PATH"], "PYTHONPATH": str(checkout), "PYTHONDONTWRITEBYTECODE": "1"}
+    env = {
+        "PATH": os.environ["PATH"],
+        "PYTHONPATH": str(checkout),
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "MEIVA_HOME": str(checkout),
+        "MEIVA_CONFIG_FETCH": "skip",
+    }
     return subprocess.run(
         [
             sys.executable,

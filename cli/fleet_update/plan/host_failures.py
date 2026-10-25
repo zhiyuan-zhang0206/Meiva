@@ -8,12 +8,16 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import cast
+from typing import TypeGuard
 
 # meiva:note
 # Exit code 2 already means "refused before doing anything"; a run where some hosts came up and
 # others did not is its own outcome, so automation can tell a partial up from a rejected one.
 PARTIAL_FAILURE_EXIT = 3
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 @dataclass(frozen=True)
@@ -31,7 +35,9 @@ class HostFailure:
 # host whose converge aborted leaves the rest of the cluster running: the report names its step.
 def start_failure(alias: str, incomplete: str | None, exit_reason: str) -> HostFailure:
     try:
-        recorded = cast("dict[str, object]", json.loads(incomplete or ""))
+        recorded: object = json.loads(incomplete or "")
+        if not _is_object_dict(recorded):
+            raise TypeError("incomplete converge record must be a mapping")
         return HostFailure(alias, str(recorded["step"]), str(recorded["error"]))
     except (KeyError, TypeError, ValueError):
         return HostFailure(alias, "start", exit_reason)

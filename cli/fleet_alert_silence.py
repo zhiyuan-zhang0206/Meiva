@@ -28,7 +28,7 @@ import sys
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, TypeGuard
 
 CREATED_BY = "meiva-fleet-update"
 SILENCES = "/api/alertmanager/grafana/api/v2/silences"
@@ -48,7 +48,15 @@ class GrafanaError(RuntimeError):
     """Grafana could not be reached or refused the call."""
 
 
-def _call(base: str, credential: str, method: str, path: str, body: object = None) -> Any:
+def _is_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _call(base: str, credential: str, method: str, path: str, body: object = None) -> object:
     token = base64.b64encode(f"admin:{credential}".encode()).decode()
     headers = {"Authorization": f"Basic {token}"}
     data = None if body is None else json.dumps(body).encode()
@@ -68,10 +76,14 @@ def _call(base: str, credential: str, method: str, path: str, body: object = Non
 def _owned(base: str, credential: str) -> list[dict[str, Any]]:
     """Every live silence this program created."""
     rows = _call(base, credential, "GET", SILENCES)
+    items = rows if _is_object_list(rows) else []
     return [
         row
-        for row in rows
-        if row.get("createdBy") == CREATED_BY and row["status"]["state"] in _LIVE_STATES
+        for row in items
+        if _is_any_dict(row)
+        and row.get("createdBy") == CREATED_BY
+        and _is_any_dict(row.get("status"))
+        and row["status"]["state"] in _LIVE_STATES
     ]
 
 
@@ -90,6 +102,8 @@ def open_window(base: str, credential: str, *, hours: float, comment: str, now: 
         silence["id"] = owned[0]["id"]
         silence["startsAt"] = owned[0]["startsAt"]
     created = _call(base, credential, "POST", SILENCES, silence)
+    if not _is_any_dict(created):
+        raise GrafanaError(f"POST {SILENCES}: unexpected response payload")
     return str(created["silenceID"])
 
 

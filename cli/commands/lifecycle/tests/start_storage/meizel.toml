@@ -4,6 +4,3 @@
 "test_start_host_dependencies.py" = ["_host_dependencies_path_child.py"]
 "test_start_migrations.py" = ["owned_postgres.py"]
 "test_remote_data_plane.py" = ["owned_postgres.py"]
-
-[debt.third-party-patch]
-"test_start_migrations.py#monkeypatch.setattr langgraph.checkpoint.postgres.PostgresSaver.MIGRATIONS" = 1

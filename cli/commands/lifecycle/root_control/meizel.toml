@@ -10,9 +10,3 @@ exports = ["generation.py", "launch_plan.py", "poll_plan.py", "reconcile_plan.py
 "poll_plan.py" = "strict"
 "reconcile_plan.py" = "strict"
 "snapshot.py" = "strict"
-
-[debt.type-cast]
-"snapshot.py#cast _object" = 1
-"snapshot.py#cast _root_block" = 1
-"snapshot.py#cast _unit_row" = 1
-"snapshot.py#cast parse_snapshot" = 1

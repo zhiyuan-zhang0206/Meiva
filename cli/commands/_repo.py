@@ -12,11 +12,11 @@ import hashlib
 import json
 import subprocess
 import sys
-import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import NamedTuple
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.db import Database
 from base.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S
@@ -246,7 +246,7 @@ def probe_gateway_or_die(
     A non-200 the gateway *chose* to send (401/403/404) is terminal on the first dial
     as before: a credential or route mismatch is not a timing problem.
     """
-    deadline = time.monotonic() + budget_s
+    deadline = SYSTEM_TIMERS.monotonic() + budget_s
     attempt = 0
     while True:
         attempt += 1
@@ -260,7 +260,7 @@ def probe_gateway_or_die(
                 file=sys.stderr,
             )
             return 1
-        remaining = deadline - time.monotonic()
+        remaining = deadline - SYSTEM_TIMERS.monotonic()
         if remaining <= 0:
             if probe.status is None:
                 print(
@@ -285,7 +285,7 @@ def probe_gateway_or_die(
             f"retrying in {wait_s:.0f}s…",
             file=sys.stderr,
         )
-        time.sleep(wait_s)
+        SYSTEM_TIMERS.sleep(wait_s)
 
 
 def register_machine_or_die(
@@ -306,12 +306,13 @@ def register_machine_or_die(
 
     from base.cluster.machines import LoopbackDialUrlRefused, register_self, unit_dial_url
     from base.daemon.endpoints import ServiceEndpoints
-    from base.paths import meiva_home
+    from base.paths import meiva_home, run_dir
 
+    endpoints = ServiceEndpoints.from_boot(command.config, runtime=run_dir(command.home))
     url = unit_dial_url(
         roles,
         host=command.machine.host(),
-        ops_port=ServiceEndpoints.from_settings().of("ops").health_port,
+        ops_port=endpoints.of("ops").health_port,
         gateway_port=command.config.view.gateway.gateway_port,
         telemetry_otlp_port=command.config.view.observability.telemetry_otlp_port,
         gateway=command.config.view.gateway.gateway_url,

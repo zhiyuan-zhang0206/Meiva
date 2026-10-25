@@ -5,7 +5,7 @@ import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import assert_never, cast
+from typing import TypeGuard, assert_never
 
 import httpx
 
@@ -168,6 +168,14 @@ def _install_dashboard_fallback(
     )
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 # meiva:note
 # The parsed JSON object at `path`, or an empty mapping when it is missing, unreadable or not an
 # object. The reason is logged: a dashboard that is not provisioned this pass must not vanish
@@ -183,14 +191,14 @@ def dashboard_document(path: Path) -> dict[str, object]:
             event="lgtm_dashboard",
         )
         return {}
-    if not isinstance(document, dict):
+    if not _is_object_dict(document):
         logger.warning(
             "dashboard {path} is not a JSON object; it is not provisioned this pass",
             path=str(path),
             event="lgtm_dashboard",
         )
         return {}
-    return cast("dict[str, object]", document)
+    return document
 
 
 # meiva:note
@@ -201,7 +209,7 @@ def dashboard_facts(path: Path) -> DashboardFacts:
     panels = document.get("panels")
     return DashboardFacts(
         uid=uid if isinstance(uid, str) else "",
-        has_panels=isinstance(panels, list) and len(cast("list[object]", panels)) > 0,
+        has_panels=_is_object_list(panels) and len(panels) > 0,
     )
 
 
@@ -318,7 +326,7 @@ def _recorded_hashes(hashes_path: Path) -> dict[str, object]:
         recorded: object = json.loads(hashes_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    return cast("dict[str, object]", recorded) if isinstance(recorded, dict) else {}
+    return recorded if _is_object_dict(recorded) else {}
 
 
 def _grafana_get(url: str) -> GrafanaReply:

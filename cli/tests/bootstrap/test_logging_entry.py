@@ -63,13 +63,14 @@ def test_fresh_cli_executables_stay_quiet(executable: str, tmp_path: Path) -> No
     env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
     home = tmp_path / "home"
     env["MEIVA_HOME"] = str(home)
-    argv = (
-        [str(_ROOT / ".venv/bin/meiva")]
-        if executable == "console"
-        else [sys.executable, "-m", executable]
-    )
+    if executable == "console":
+        argv = [str(_ROOT / ".venv/bin/meiva"), "--help"]
+    elif executable == "cli":
+        argv = [sys.executable, "-m", "cli", "--help"]
+    else:
+        argv = [sys.executable, "-m", "cli.main", "--help"]
     child = subprocess.run(  # noqa: S603 — fixed actual entry and help arguments
-        [*argv, "--help"],
+        argv,
         cwd=_ROOT,
         env=env,
         capture_output=True,

@@ -10,7 +10,15 @@ from __future__ import annotations
 import json
 from collections.abc import Collection
 from dataclasses import dataclass
-from typing import cast
+from typing import TypeGuard
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
 
 
 @dataclass(frozen=True)
@@ -40,7 +48,9 @@ class RosterSnapshot:
 
 
 def _row(item: object) -> RosterRow:
-    raw = cast("dict[str, object]", item)
+    if not _is_object_dict(item):
+        raise TypeError("a roster row must be a mapping")
+    raw = item
     name, head, running = raw["name"], raw["head_sha"], raw["running_sha"]
     if not isinstance(name, str):
         raise TypeError("a roster row is named by text")
@@ -62,7 +72,10 @@ def parse_roster(output: str) -> tuple[RosterRow, ...]:
     if not lines:
         raise ValueError("the roster program printed nothing")
     try:
-        return tuple(_row(item) for item in cast("list[object]", json.loads(lines[-1])))
+        decoded: object = json.loads(lines[-1])
+        if not _is_object_list(decoded):
+            raise TypeError("roster payload must be a list")
+        return tuple(_row(item) for item in decoded)
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"the roster reply is not a roster ({type(exc).__name__}: {exc})") from exc
 

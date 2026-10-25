@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 import httpx
 
@@ -56,12 +56,15 @@ class HttpExtensionGateway:
         )
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 def _detail(response: httpx.Response) -> str:
     try:
         payload: object = response.json()
     except ValueError:
         return response.text
-    if isinstance(payload, dict):
-        fields = cast(dict[str, object], payload)
-        return str(fields.get("detail", fields))
+    if _is_object_dict(payload):
+        return str(payload.get("detail", payload))
     return str(payload)

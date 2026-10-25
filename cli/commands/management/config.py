@@ -19,7 +19,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from pydantic_core import PydanticUndefined
 
@@ -188,9 +188,16 @@ class _LocalConfigField:
     restart_required: str
 
 
-def _field_extra(field_info: Any) -> dict[str, Any]:
-    extra = field_info.json_schema_extra
-    return cast("dict[str, Any]", extra) if isinstance(extra, dict) else {}
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
 
 
 def _local_fields() -> dict[str, _LocalConfigField]:
@@ -199,7 +206,8 @@ def _local_fields() -> dict[str, _LocalConfigField]:
 
     fields: dict[str, _LocalConfigField] = {}
     for name, info in FIELD_INFOS.items():
-        extra = _field_extra(info)
+        raw_extra: object = info.json_schema_extra
+        extra = raw_extra if _is_any_dict(raw_extra) else {}
         default = info.get_default(call_default_factory=True)
         if default is PydanticUndefined:
             default = None
@@ -322,7 +330,7 @@ def field_editable(field: ConfigFieldView, *, remote: bool) -> bool:
     return field.remote_writable if remote and field.scope == "host" else field.writable
 
 
-def _coerce(field_type: str, raw: str) -> Any:
+def _coerce(field_type: str, raw: str) -> str | int | float | bool:
     """Coerce a CLI string value to the field's type so the gateway validator and
     typed consumers see the right shape."""
     if field_type == "int":
@@ -359,13 +367,13 @@ def _audit_touches_key(record: dict[str, object], key: str) -> bool:
     names: set[str] = set()
     for field in ("keys_written", "keys_removed"):
         value = record.get(field)
-        if isinstance(value, list):
-            names.update(str(item) for item in cast("list[object]", value))
+        if _is_object_list(value):
+            names.update(str(item) for item in value)
     changed = record.get("changed")
-    if isinstance(changed, list):
-        for entry in cast("list[object]", changed):
-            if isinstance(entry, dict):
-                alias = cast("dict[str, object]", entry).get("alias")
+    if _is_object_list(changed):
+        for entry in changed:
+            if _is_object_dict(entry):
+                alias = entry.get("alias")
                 if alias is not None:
                     names.add(str(alias))
     return key in names
@@ -382,23 +390,22 @@ def _print_audit_record(record: dict[str, object]) -> None:
     )
     for label, field in (("wrote", "keys_written"), ("removed", "keys_removed")):
         value = record.get(field)
-        if isinstance(value, list) and value:
-            print(f"    {label}: {', '.join(str(item) for item in cast('list[object]', value))}")
+        if _is_object_list(value) and value:
+            print(f"    {label}: {', '.join(str(item) for item in value)}")
     changed = record.get("changed")
-    if not isinstance(changed, list):
+    if not _is_object_list(changed):
         return
-    for entry in cast("list[object]", changed):
-        if not isinstance(entry, dict):
+    for entry in changed:
+        if not _is_object_dict(entry):
             continue
-        fields = cast("dict[str, object]", entry)
-        alias = fields.get("alias")
-        if fields.get("sensitive") is not False:
+        alias = entry.get("alias")
+        if entry.get("sensitive") is not False:
             # Sensitive or unregistered alias — the record keeps the name only.
             print(f"    changed: {alias}: (withheld)")
         else:
             print(
-                f"    changed: {alias}: {_shown_value(fields.get('old'))}"
-                f" -> {_shown_value(fields.get('new'))}"
+                f"    changed: {alias}: {_shown_value(entry.get('old'))}"
+                f" -> {_shown_value(entry.get('new'))}"
             )
 
 

@@ -9,13 +9,6 @@ exports = ["health_port_guard.py", "test_single_box.py"]
 "test_single_box.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_single_box.py#monkeypatch.setitem os.environ" = 1
 "test_single_box.py#monkeypatch.setitem os.environ.MEIVA_DB_URL" = 1
-"test_single_box.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
 "health_port_guard.py#monkeypatch.setattr cli.commands.probe.occupied_health_ports" = 1
-
-[debt.test-subclass-override]
-"test_permissions_cmd.py#subclass services.desktop.permissions_helper.onboarding.GateService.check" = 1
-"test_permissions_cmd.py#subclass services.desktop.permissions_helper.onboarding.GateService.defer" = 1
-"test_permissions_cmd.py#subclass services.desktop.permissions_helper.onboarding.GateService.onboard" = 1
-"test_permissions_cmd.py#subclass services.desktop.permissions_helper.onboarding.GateService.restart_helper" = 1
