@@ -3,9 +3,22 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
 from base.telemetry.observability import cluster_label
+from base.telemetry.otlp.plans import (
+    ProviderBuildPlan as ProviderBuildPlan,
+)
+from base.telemetry.otlp.plans import (
+    provider_build_plan as provider_build_plan,
+)
+from base.telemetry.otlp.plans import (
+    strip_unit_suffix as strip_unit_suffix,
+)
+from base.telemetry.otlp.plans import (
+    unit_for as unit_for,
+)
 
 # Metrics export cadence (PeriodicExportingMetricReader). 15 s keeps Grafana
 # near-live without a per-batch network round-trip; the reader thread owns the
@@ -80,27 +93,6 @@ class EventDimensionResourceExporter:
         self._exporter.shutdown()
 
 
-def unit_for(field: str) -> str:
-    """OTel unit for a payload field, from its name. Durations say what they
-    are; everything else is a dimensionless count ("1")."""
-    if field.endswith("_ms"):
-        return "ms"
-    if field.endswith("_seconds") or field in ("duration", "latency"):
-        return "s"
-    return "1"
-
-
-def strip_unit_suffix(field: str) -> str:
-    """Instrument name for a payload field: the unit suffix comes off, because
-    the OTel unit supplies it on export — `latency_ms` + unit "ms" would
-    otherwise render as `meiva_..._latency_ms_milliseconds_*` in Prometheus
-    (the unit stated twice)."""
-    for suffix in ("_ms", "_seconds"):
-        if field.endswith(suffix):
-            return field[: -len(suffix)]
-    return field
-
-
 def metric_views() -> list[Any]:
     """Shape long LLM latencies and recovered gateway event-loop stalls.
 
@@ -130,7 +122,7 @@ def metric_views() -> list[Any]:
     return views
 
 
-def metrics_resource(cluster_label_fn: Callable[[], str] | None = None) -> Any:
+def metrics_resource(*, home: Path | None = None) -> Any:
     """The metrics-side OTel Resource: `service.name=meiva-<process>` (the
     bounded process dimension) + a per-process-instance `service.instance.id`.
     Without it every series lands as job="unknown_service" and two same-named
@@ -151,14 +143,16 @@ def metrics_resource(cluster_label_fn: Callable[[], str] | None = None) -> Any:
 
     from base.telemetry.delivery.state import process_name
 
-    read_cluster = cluster_label if cluster_label_fn is None else cluster_label_fn
+    if home is not None and not home.is_dir():
+        raise RuntimeError(f"metrics resource home is not a directory: {home}")
+
     return Resource.create(
         {
             "service.namespace": "meiva",
             "service.name": f"meiva-{process_name()}",
             "service.instance.id": str(uuid.uuid4()),
             "service.version": version("meiva"),
-            "cluster": read_cluster(),
+            "cluster": cluster_label(home),
         }
     )
 
@@ -169,6 +163,7 @@ def build_providers(
     keep_logs: Callable[[Any], None] | None = None,
     keep_reader: Callable[[Any], None] | None = None,
     keep_metrics: Callable[[Any], None] | None = None,
+    home: Path | None = None,
 ) -> tuple[Any, Any]:
     """Build the production (LoggerProvider, MeterProvider) pair exporting
     OTLP/HTTP to ``endpoint`` (signal paths /v1/logs, /v1/metrics are appended
@@ -184,6 +179,11 @@ def build_providers(
     from base.telemetry.delivery.loss import install_exporter_drop_observer
 
     install_exporter_drop_observer()
+    plan = provider_build_plan(
+        endpoint,
+        http_timeout_s=OTLP_HTTP_TIMEOUT_S,
+        metrics_interval_s=_METRICS_INTERVAL_S,
+    )
     # `shutdown_on_exit=False` on both providers: the SDK default registers a
     # provider shutdown on atexit at bring-up (mid-life), which sits AFTER
     # `base.telemetry.drain_on_exit` (registered at import) in the LIFO exit
@@ -193,26 +193,26 @@ def build_providers(
     # process's tail record — stays mirror-only (task #4314 triage / #4320).
     # `_drain_on_exit` is the single ordered exit seam: it flushes the emitter
     # and this queue, then force-flushes these still-live providers.
-    logs = LoggerProvider(shutdown_on_exit=False)
+    logs = LoggerProvider(shutdown_on_exit=plan.shutdown_on_exit)
     if keep_logs is not None:
         keep_logs(logs)
     log_exporter: Any = EventDimensionResourceExporter(
-        OTLPLogExporter(endpoint=f"{endpoint}/v1/logs", timeout=OTLP_HTTP_TIMEOUT_S)
+        OTLPLogExporter(endpoint=plan.logs_endpoint, timeout=plan.http_timeout_s)
     )
     logs.add_log_record_processor(
-        BatchLogRecordProcessor(log_exporter, export_timeout_millis=OTLP_HTTP_TIMEOUT_S * 1000)
+        BatchLogRecordProcessor(log_exporter, export_timeout_millis=plan.export_timeout_millis)
     )
     reader = PeriodicExportingMetricReader(
-        OTLPMetricExporter(endpoint=f"{endpoint}/v1/metrics", timeout=OTLP_HTTP_TIMEOUT_S),
-        export_interval_millis=_METRICS_INTERVAL_S * 1000,
-        export_timeout_millis=OTLP_HTTP_TIMEOUT_S * 1000,
+        OTLPMetricExporter(endpoint=plan.metrics_endpoint, timeout=plan.http_timeout_s),
+        export_interval_millis=plan.metrics_interval_millis,
+        export_timeout_millis=plan.export_timeout_millis,
     )
     if keep_reader is not None:
         keep_reader(reader)
     metrics = MeterProvider(
-        shutdown_on_exit=False,
+        shutdown_on_exit=plan.shutdown_on_exit,
         metric_readers=[reader],
-        resource=metrics_resource(),
+        resource=metrics_resource(home=home),
         views=metric_views(),
     )
     if keep_metrics is not None:

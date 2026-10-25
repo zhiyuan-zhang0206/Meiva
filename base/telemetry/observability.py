@@ -29,7 +29,7 @@ def cluster_label(home: Path | None = None) -> str:
         _report_label_fallback("home resolution", exc)
         return ".unknown"
     try:
-        return cluster.home_label(resolved_home)
+        return _resolve_non_empty_home_label(resolved_home)
     except Exception as exc:
         _report_label_fallback("home label", exc)
         try:
@@ -37,6 +37,15 @@ def cluster_label(home: Path | None = None) -> str:
         except Exception as slug_exc:
             _report_label_fallback("home slug", slug_exc)
             return ".unknown"
+
+
+def _resolve_non_empty_home_label(resolved_home: Path) -> str:
+    from base import cluster
+
+    label = cluster.home_label(resolved_home)
+    if not label:
+        raise ValueError("empty home label")
+    return label
 
 
 def _report_label_fallback(stage: str, exc: BaseException) -> None:

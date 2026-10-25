@@ -48,12 +48,9 @@ def owned_writer() -> None:
 
 def cold_emit() -> None:
     logger.add(sys.stderr, enqueue=False)
-
-    def forbidden_thread(*args: object, **kwargs: object) -> None:
-        raise AssertionError("emit must not construct a writer")
-
-    threading.Thread = forbidden_thread
+    prior_threads = set(threading.enumerate())
     telemetry.emit("log", "log", attributes={"cold": True})
+    assert set(threading.enumerate()) == prior_threads, "emit must not construct a writer"
     assert telemetry.flush().status is telemetry.DrainStatus.COMPLETED
 
 

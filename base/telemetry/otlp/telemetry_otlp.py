@@ -55,7 +55,8 @@ import queue
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -71,8 +72,12 @@ from base.telemetry.delivery.reporting import (
 )
 from base.telemetry.emitter import emit, pipeline_bound
 from base.telemetry.metrics import ci_runs_metrics
-from base.telemetry.observability import cluster_label, gateway_observability_home
+from base.telemetry.observability import gateway_observability_home
 from base.telemetry.otlp import telemetry_otlp_metrics
+from base.telemetry.otlp.plans import (
+    BASE_METRIC_DISPOSITION,
+    select_metric_attributes,
+)
 from base.telemetry.otlp.telemetry_otlp_defer import ChildDeferral
 from base.telemetry.otlp.telemetry_otlp_gauges import (
     GaugeValues,
@@ -102,6 +107,8 @@ from base.telemetry.otlp.telemetry_otlp_worker import OtlpWorker
 __all__ = [
     "COLLECTOR_RETRY_INTERVAL_S",
     "OtlpBackend",
+    "bind_exporter",
+    "default_exporter",
     "endpoint_reachable",
     "observability_export_allowed",
     "remaining_time",
@@ -126,88 +133,12 @@ _QUEUE_MAXSIZE = 2048
 # every five minutes, not on every batch, so a missing sidecar cannot turn event
 # volume into connection-probe volume.
 COLLECTOR_RETRY_INTERVAL_S = 300
-# Metric-attribute guard rails: payload keys that never become metric
-# attributes, and the max length of a string attribute. The `body` key is
-# exec/code payload content — as a Prometheus label it would leak code into
-# series cardinality. Strings longer than the cap are dropped on the same
-# reasoning as the trace content guard (metadata is small).
-_NO_METRIC_ATTRS = frozenset({"body"})
-_MAX_METRIC_ATTR_CHARS = 64
-# Per-field metric disposition overrides. The default rule (int -> Counter,
-# float -> Histogram) fits counts and durations; fields where the type is the
-# wrong signal declare themselves here. None = no metric at all (the field
-# stays in the Loki/JSONL event body — exclusion here never touches the
-# event stream).
-#   llm_usage.price_*  — the usage-time price snapshot: a RATE (USD per 1M
-#     tokens), not a measurement. As default-bucket histograms they minted
-#     ~50 series per (agent, model) and their distribution is meaningless.
-#   llm_usage.cost_usd — money is summed, never percentiled: a float Counter
-#     (OTel Counter.add takes floats; Prometheus counters are float64), so
-#     `increase(meiva_llm_usage_cost_usd_total[...])` is the exact windowed
-#     spend at usage-time rates.
-METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
-    ("event_log_drop", "last_dropped_at"): "gauge",
-    ("llm_usage", "price_miss"): None,
-    ("llm_usage", "price_hit"): None,
-    ("llm_usage", "price_out"): None,
-    ("llm_usage", "cost_usd"): "counter",
-    # A compaction's source and replacement sizes are independent samples,
-    # not cumulative byte counts. Its explicit `compactions=1` field remains
-    # the counter used for frequency.
-    ("compaction_completed", "history_chars"): "histogram",
-    ("compaction_completed", "summary_chars"): "histogram",
-    # Absolute unresolved/dismissed counts are non-monotonic. An
-    # ObservableGauge holds the last value rather than adding each
-    # five-minute sample forever.
-    ("resolution_status", "unresolved_warnings"): "gauge",
-    ("resolution_status", "unresolved_errors"): "gauge",
-    ("resolution_status", "dismissed_warnings"): "gauge",
-    ("resolution_status", "dismissed_errors"): "gauge",
-    # PR-flow daily aggregates (task #2139): the macmini sampler re-emits its
-    # whole trailing window on every run, so every numeric field is per-day
-    # absolute state — a gauge replaces the value; a counter/histogram default
-    # would accrue across re-emissions. queue_depth is a point-in-time
-    # reading of the Trunk queue, same class.
-    ("pr_flow_daily", "merged_count"): "gauge",
-    ("pr_flow_daily", "ready_to_merge_median_seconds"): "gauge",
-    ("pr_flow_daily", "ready_to_merge_p90_seconds"): "gauge",
-    ("pr_flow_daily", "flake_new_quarantines"): "gauge",
-    ("pr_flow_run", "queue_depth"): "gauge",
-    # CI-run state is re-emitted absolute state, so every numeric field is a gauge (task #4014).
-    **ci_runs_metrics.CI_RUN_GAUGE_DISPOSITIONS,
-    # The agent registry max id is an absolute high-water mark, not a sum —
-    # as an int it would default to a Counter and accrue value on every
-    # sample. A gauge holds the latest sample (task #2010).
-    ("agent_registry", "max_id"): "gauge",
-    # The memory-search store's absolute state (task #2088): rows is an int
-    # that would otherwise default to a Counter and accrue on every 60s
-    # sample; last_save_seconds is a float duration that would default to a
-    # Histogram — both are latest-value gauges.
-    ("memory_search_stats", "rows"): "gauge",
-    ("memory_search_stats", "last_save_seconds"): "gauge",
-    # A root health timestamp is absolute freshness state. Summing it or
-    # histogramming it would hide the age alert's only input.
-    ("root_health_tick", "last_tick_timestamp_seconds"): "gauge",
-    ("root_health_expected", "expected_since_timestamp_seconds"): "gauge",
-    # The hourly maintenance pass refreshes these table high-water marks; a
-    # gauge preserves the latest measurement between samples. The *_live
-    # fields are the live tuple counts, emitted alongside so physical size can
-    # be decomposed into live growth vs dead-tuple bloat.
-    ("checkpoint_table_sizes", "blobs_bytes"): "gauge",
-    ("checkpoint_table_sizes", "checkpoints_bytes"): "gauge",
-    ("checkpoint_table_sizes", "writes_bytes"): "gauge",
-    ("checkpoint_table_sizes", "blobs_live"): "gauge",
-    ("checkpoint_table_sizes", "checkpoints_live"): "gauge",
-    ("checkpoint_table_sizes", "writes_live"): "gauge",
-    # Gateway process resources and SSE connection depth are absolute state.
-    # Repeated samples replace the old value rather than accumulating it.
-    ("sse", "active_connections"): "gauge",
-    ("gateway_process", "cpu_percent"): "gauge",
-    ("gateway_process", "rss_bytes"): "gauge",
-    ("gateway_process", "fd_count"): "gauge",
-}
-
 NO_EMITTER = "_no_emitter"
+
+METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
+    **BASE_METRIC_DISPOSITION,
+    **ci_runs_metrics.CI_RUN_GAUGE_DISPOSITIONS,
+}
 
 
 # meiva:note
@@ -311,9 +242,18 @@ class OtlpBackend:
         providers: tuple[Any, Any] | None = None,
         queue_maxsize: int = _QUEUE_MAXSIZE,
         enabled: Callable[[], bool] | None = None,
+        endpoint: str | None = None,
+        retry_interval_s: float = COLLECTOR_RETRY_INTERVAL_S,
+        defer_enabled: bool | None = None,
+        mirror_dir: Path | None = None,
+        home: Path | None = None,
     ) -> None:
         self._export_allowed = export_allowed
         self._enabled_flag = enabled
+        self._endpoint_override = endpoint
+        self._retry_interval_s = retry_interval_s
+        self._mirror_dir = mirror_dir
+        self._home = home
         self._export_decision: bool | None = None
         self._eligibility_lock = threading.Lock()
         self._queue: queue.Queue[Any] = queue.Queue(maxsize=queue_maxsize)
@@ -348,6 +288,7 @@ class OtlpBackend:
             bring_up=lambda: self._enabled() and self._ensure(),
             record_metrics=lambda event: self._record_metrics(event),  # noqa: PLW0108 — per-call lookup keeps owner seams live
             export_live=lambda events: self._export_live(events),  # noqa: PLW0108 — per-call lookup keeps owner seams live
+            enabled=defer_enabled,
         )
 
     # ── public surface (called by base.telemetry) ─────────────────────────
@@ -415,7 +356,7 @@ class OtlpBackend:
             report = report_loss(example, lost, "otlp", record_metric=self.record_loss)
             # The alarm itself bypasses both queues. Metrics can still export
             # while the log lane is full; the local mirror retains the evidence.
-            append_jsonl([report])
+            append_jsonl([report], target_dir=self._mirror_dir)
         for event in events:
             with failure_isolated("otlp metric mapping"):
                 self._record_metrics(event)
@@ -494,18 +435,25 @@ class OtlpBackend:
 
     # ── child deferral (task #3816 M4b) ─────────────────────────────────────
 
-    def defer_until_exit(self) -> None:
+    def defer_until_exit(
+        self,
+        *,
+        enabled: bool | None = None,
+        max_age_s: float | None = None,
+    ) -> None:
         """Arm a cold child hold; flag-off and already-live backends are no-ops."""
         if self._logs is not None:
             return
-        self._deferral.arm()
+        self._deferral.arm(enabled=enabled, max_age_s=max_age_s)
 
-    def finalize(self) -> None:
+    def finalize(self, *, finalizing: bool = False) -> None:
         """Complete an ordinary deferred hold, then observe its FIFO flush.
 
         Failed bring-up preserves the hold under the existing retry gate; an
         empty hold constructs no SDK resources. Shutdown has its finite seam.
         """
+        if finalizing or sys.is_finalizing():
+            return
         if self._deferral.is_active():
             self._deferral.complete("finalize")
         self.flush()
@@ -552,13 +500,18 @@ class OtlpBackend:
         """Module-level ``endpoint_reachable`` — see its docstring."""
         return endpoint_reachable(endpoint)
 
-    def _ensure(self) -> bool:
+    def _ensure(self, *, finalizing: bool = False) -> bool:
         """Resolve one lazy exporter attempt; a real stop wakes a stuck init waiter."""
-        worker = self._get_worker()
+        worker = self._get_worker(finalizing=finalizing)
         return worker is not None and worker.wait_ready()
 
-    def _get_worker(self) -> OtlpWorker | None:
-        if self._closed.is_set() or sys.is_finalizing() or self._start_error is not None:
+    def _get_worker(self, *, finalizing: bool = False) -> OtlpWorker | None:
+        if (
+            self._closed.is_set()
+            or finalizing
+            or sys.is_finalizing()
+            or self._start_error is not None
+        ):
             return None
         with self._init_lock, self._admission_lock:
             if self._closed.is_set():
@@ -571,7 +524,7 @@ class OtlpBackend:
                     return self._worker  # retain uncertain SDK resources across retry opportunities
             if (
                 self._init_failed_at is not None
-                and time.monotonic() - self._init_failed_at < COLLECTOR_RETRY_INTERVAL_S
+                and time.monotonic() - self._init_failed_at < self._retry_interval_s
             ):
                 return None
             try:
@@ -594,29 +547,41 @@ class OtlpBackend:
 
     def _initialize_worker(self, worker: OtlpWorker) -> bool:
         """Keep the existing named SDK init isolation and every partial resource."""
-        endpoint: str | None = None
+        endpoint: str | None = self._endpoint_override
         disabled_at = self._init_failed_at
         try:
             if self._providers is not None:
                 worker.logs, worker.metrics = self._providers
             else:
-                from base.config import settings
+                if endpoint is None:
+                    from base.config import settings
 
-                endpoint = settings.observability.telemetry_otlp_endpoint
+                    endpoint = settings.observability.telemetry_otlp_endpoint
                 if not self._endpoint_reachable(endpoint):
                     self._init_failed_at = time.monotonic()
                     self._report(
-                        f"OTLP endpoint {endpoint} not answering — OTLP export disabled; retrying in {COLLECTOR_RETRY_INTERVAL_S}s"
+                        f"OTLP endpoint {endpoint} not answering — OTLP export disabled; retrying in {self._retry_interval_s}s"
                     )
                     _emit_backend_event(
                         "otlp_backend_disabled", reason="endpoint not answering", endpoint=endpoint
                     )
                     return False
+
+                def keep_logs(provider: object) -> None:
+                    worker.logs = provider
+
+                def keep_reader(reader: object) -> None:
+                    worker.metric_reader = reader
+
+                def keep_metrics(provider: object) -> None:
+                    worker.metrics = provider
+
                 worker.logs, worker.metrics = build_providers(
                     endpoint,
-                    keep_logs=lambda provider: setattr(worker, "logs", provider),
-                    keep_reader=lambda reader: setattr(worker, "metric_reader", reader),
-                    keep_metrics=lambda provider: setattr(worker, "metrics", provider),
+                    keep_logs=keep_logs,
+                    keep_reader=keep_reader,
+                    keep_metrics=keep_metrics,
+                    home=self._home,
                 )
             meter = worker.metrics.get_meter("meiva.telemetry")
             self._logs, self._metric_provider, self._meter = worker.logs, worker.metrics, meter
@@ -632,7 +597,7 @@ class OtlpBackend:
                 return False
             self._init_failed_at = time.monotonic()
             self._report(
-                f"OTLP backend init failed — OTLP side disabled; retrying in {COLLECTOR_RETRY_INTERVAL_S}s: {exc!r}"
+                f"OTLP backend init failed — OTLP side disabled; retrying in {self._retry_interval_s}s: {exc!r}"
             )
             _emit_backend_event(
                 "otlp_backend_disabled", reason=f"init failed: {exc!r}", endpoint=endpoint
@@ -715,18 +680,13 @@ class OtlpBackend:
         contributes no extra attributes."""
         from base.events.contract import payload_keys
 
-        attrs: dict[str, Any] = {"machine": event.machine, "process": event.process}
-        if event.agent_id is not None:
-            attrs["agent_id"] = event.agent_id
-        payload = payload_keys(event.event_name)
-        for key, value in event.attributes.items():
-            if key in _NO_METRIC_ATTRS or not payload or key not in payload:
-                continue
-            if (isinstance(value, bool)) or (
-                isinstance(value, str) and len(value) <= _MAX_METRIC_ATTR_CHARS
-            ):
-                attrs[key] = value
-        return attrs
+        return select_metric_attributes(
+            machine=event.machine,
+            process=event.process,
+            agent_id=event.agent_id,
+            attributes=event.attributes,
+            allowed_keys=payload_keys(event.event_name),
+        )
 
     def _instrument(self, event_name: str, field: str, kind: str) -> Any:
         """Lazily create (and cache) the instrument for one (event, field).
@@ -777,7 +737,31 @@ class OtlpBackend:
         Best-effort: never raises, falls back to stderr."""
         report_no_pipeline(f"[otlp-exporter] {message}")
 
+    _bound_default: OtlpBackend | None = None
 
-def metrics_resource() -> Any:
-    """Build the metric resource through the legacy monkeypatch seam."""
-    return telemetry_otlp_metrics.metrics_resource(cluster_label)
+
+# meiva:note
+# Temporarily bind ``exporter`` as the default backend for new pipelines.
+@contextmanager
+def bind_exporter(exporter: OtlpBackend) -> Generator[None]:
+    previous = OtlpBackend._bound_default
+    OtlpBackend._bound_default = exporter
+    try:
+        yield
+    finally:
+        OtlpBackend._bound_default = previous
+
+
+# meiva:note
+# Return the bound exporter override if active, otherwise construct ``OtlpBackend``.
+def default_exporter(*, export_allowed: Callable[[], bool]) -> OtlpBackend:
+    bound = OtlpBackend._bound_default
+    if bound is not None:
+        return bound
+    return OtlpBackend(export_allowed=export_allowed)
+
+
+# meiva:note
+# Build the metric resource for ``home`` (or the active cluster home).
+def metrics_resource(*, home: Path | None = None) -> Any:
+    return telemetry_otlp_metrics.metrics_resource(home=home)

@@ -14,23 +14,11 @@ from typing import Any
 
 import pytest
 
-from base import config
 from base.telemetry.delivery.receipts import Event
 from base.telemetry.otlp import telemetry_otlp
-from base.telemetry.tests.otlp.identity_inputs import allow_identity
+from base.telemetry.otlp.plans import parse_defer_flag, parse_defer_seconds
 
 _AGENT = 8902
-
-
-@pytest.fixture(autouse=True)
-def _clean_deferral_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MEIVA_TELEMETRY_OTLP_CHILD_DEFER", raising=False)
-    monkeypatch.delenv("MEIVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S", raising=False)
-
-
-@pytest.fixture(autouse=True)
-def production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity, raising=False)
 
 
 def _event(**overrides: Any) -> Event:
@@ -70,8 +58,10 @@ def _make_backend(*, queue_maxsize: int = 8) -> tuple[Any, Any, Any]:
     metric_provider = MeterProvider(metric_readers=[metric_reader])
     backend = telemetry_otlp.OtlpBackend(
         export_allowed=lambda: True,
+        enabled=lambda: True,
         providers=(logger_provider, metric_provider),
         queue_maxsize=queue_maxsize,
+        defer_enabled=True,
     )
     return backend, log_exporter, metric_reader
 
@@ -88,25 +78,10 @@ def _metrics(metric_reader: Any) -> dict[str, Any]:
     return out
 
 
-def _spy_calls(monkeypatch: pytest.MonkeyPatch, backend: Any, name: str) -> list[Any]:
-    """Wrap backend.<name> with a call counter (the deferral looks methods up
-    per call, so instance-level patches stay live)."""
-    calls: list[Any] = []
-    original = getattr(backend, name)
-
-    def spy(*args: Any, **kwargs: Any) -> Any:
-        calls.append(args or None)
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(backend, name, spy)
-    return calls
-
-
 @pytest.fixture
-def otlp_backend(monkeypatch: pytest.MonkeyPatch) -> Any:
+def otlp_backend() -> Any:
     """An `OtlpBackend` with in-memory providers, retained by this test
     owner (so module-level wrappers hit it); not yet armed."""
-    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
     backend, log_exporter, metric_reader = _make_backend()
 
     yield backend, log_exporter, metric_reader
@@ -121,18 +96,16 @@ def deferred_backend(otlp_backend: Any) -> Any:
     return backend, log_exporter, metric_reader
 
 
-def test_hold_without_bringup(deferred_backend: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hold_without_bringup(deferred_backend: Any) -> None:
     """Held batches touch neither the settings chain nor the OTel stack."""
     backend, log_exporter, _ = deferred_backend
-    ensure_calls = _spy_calls(monkeypatch, backend, "_ensure")
-    enabled_calls = _spy_calls(monkeypatch, backend, "_enabled")
 
     for i in range(3):
         backend.export_batch([_event(attributes={"n": i})])
 
     assert backend._logs is None  # pyright: ignore[reportUnknownMemberType]
-    assert ensure_calls == []
-    assert enabled_calls == []
+    assert backend._worker is None
+    assert backend._export_decision is None
     assert backend._queue.qsize() == 3  # pyright: ignore[reportUnknownMemberType]
     assert not log_exporter.get_finished_logs()
 
@@ -167,25 +140,27 @@ def test_finalize_completes_hold_and_replays_metrics_once(deferred_backend: Any)
     assert len(log_exporter.get_finished_logs()) == 2
 
 
-def test_saturation_goes_live_once(deferred_backend: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    backend, log_exporter, _ = deferred_backend
-    backend._queue.maxsize = 4  # shrink the bound for a cheap saturation
-    ensure_calls = _spy_calls(monkeypatch, backend, "_ensure")
+def test_saturation_goes_live_once() -> None:
+    backend, log_exporter, _ = _make_backend(queue_maxsize=4)
+    try:
+        backend.defer_until_exit()
+        backend.export_batch([_event() for _ in range(4)])
+        assert backend._deferral.is_active()  # pyright: ignore[reportUnknownMemberType]
+        assert backend._worker is None
+        backend.export_batch([_event()])  # saturates -> bring-up -> live
 
-    backend.export_batch([_event() for _ in range(4)])
-    assert backend._deferral.is_active()  # pyright: ignore[reportUnknownMemberType]
-    backend.export_batch([_event()])  # saturates -> bring-up -> live
-
-    assert not backend._deferral.is_active()  # pyright: ignore[reportUnknownMemberType]
-    assert len(ensure_calls) == 1
-    backend.flush()
-    assert len(log_exporter.get_finished_logs()) >= 4
+        assert not backend._deferral.is_active()  # pyright: ignore[reportUnknownMemberType]
+        assert backend._worker is not None
+        backend.flush()
+        assert len(log_exporter.get_finished_logs()) >= 4
+    finally:
+        backend.shutdown()
 
 
-def test_max_age_clock_goes_live(deferred_backend: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    backend, log_exporter, _ = deferred_backend
-    monkeypatch.setenv("MEIVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S", "0.15")
-    ensure_calls = _spy_calls(monkeypatch, backend, "_ensure")
+def test_max_age_clock_goes_live(otlp_backend: Any) -> None:
+    assert parse_defer_seconds("0.15", default=30.0) == 0.15
+    backend, log_exporter, _ = otlp_backend
+    backend.defer_until_exit(max_age_s=0.15)
     backend.export_batch([_event()])
 
     deadline = time.monotonic() + 5.0
@@ -193,22 +168,19 @@ def test_max_age_clock_goes_live(deferred_backend: Any, monkeypatch: pytest.Monk
         time.sleep(0.02)
 
     assert not backend._deferral.is_active(), "max-age clock must complete the deferral"  # pyright: ignore[reportUnknownMemberType]
-    assert len(ensure_calls) == 1
+    assert backend._worker is not None
     backend.flush()
     assert len(log_exporter.get_finished_logs()) == 1
 
 
-def test_empty_hold_finalize_skips_bringup(
-    deferred_backend: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_empty_hold_finalize_skips_bringup(deferred_backend: Any) -> None:
     """A deferred child whose records never arrived completes for free."""
     backend, _, _ = deferred_backend
-    ensure_calls = _spy_calls(monkeypatch, backend, "_ensure")
 
     backend.finalize()
 
     assert not backend._deferral.is_active()  # pyright: ignore[reportUnknownMemberType]
-    assert ensure_calls == []
+    assert backend._worker is None
     assert backend._thread is None  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -226,12 +198,12 @@ def test_explicit_backend_arms_and_completes(otlp_backend: Any) -> None:
     assert len(log_exporter.get_finished_logs()) == 1
 
 
-def test_flag_off_disables_defer(otlp_backend: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_flag_off_disables_defer(otlp_backend: Any) -> None:
     """MEIVA_TELEMETRY_OTLP_CHILD_DEFER=0 restores the eager first-record bring-up."""
+    assert parse_defer_flag("0", default=True) is False
     backend, log_exporter, _ = otlp_backend
-    monkeypatch.setenv("MEIVA_TELEMETRY_OTLP_CHILD_DEFER", "0")
 
-    backend.defer_until_exit()
+    backend.defer_until_exit(enabled=False)
 
     assert not backend._deferral.is_active()  # pyright: ignore[reportUnknownMemberType]
     backend.export_batch([_event()])
@@ -255,48 +227,35 @@ def test_env_defaults_locked_to_settings_fields() -> None:
     )
 
 
-def test_ensure_refuses_during_finalization(
-    otlp_backend: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_ensure_refuses_during_finalization(otlp_backend: Any) -> None:
     """A first SDK construction during interpreter shutdown is refused.
 
     The old eager warmup() existed to keep construction off the shutdown path;
     exec children now defer instead, and `_ensure()` enforces the invariant at
     the single construction point — the record path degrades to unsent (the
     JSONL mirror retains it)."""
-    import sys
-
     backend, log_exporter, _ = otlp_backend
-    monkeypatch.setattr(sys, "is_finalizing", lambda: True)
 
-    assert backend._ensure() is False
-    backend.export_batch([_event()])
+    assert backend._ensure(finalizing=True) is False
     assert backend._logs is None  # pyright: ignore[reportUnknownMemberType]
     assert backend._thread is None  # pyright: ignore[reportUnknownMemberType]
     assert not log_exporter.get_finished_logs()
 
 
-def test_deferred_completion_during_finalization_keeps_hold(
-    deferred_backend: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_deferred_completion_during_finalization_keeps_hold(deferred_backend: Any) -> None:
     """The deferral's shutdown fallback must not construct during finalization:
     the hold stays intact instead (JSONL-only), never a shutdown-time bring-up."""
-    import sys
-
     backend, log_exporter, _ = deferred_backend
-    monkeypatch.setattr(sys, "is_finalizing", lambda: True)
     backend.export_batch([_event()])
 
-    backend.finalize()
+    backend.finalize(finalizing=True)
 
     assert backend._deferral.is_active()  # pyright: ignore[reportUnknownMemberType]
     assert backend._logs is None  # pyright: ignore[reportUnknownMemberType]
     assert not log_exporter.get_finished_logs()
 
 
-def test_invalid_eligibility_preserves_deferred_records_and_propagates(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_invalid_eligibility_preserves_deferred_records_and_propagates() -> None:
     from base.cluster.machine import MachineRoleInvalid
 
     error = MachineRoleInvalid("invalid configured role")
@@ -304,8 +263,9 @@ def test_invalid_eligibility_preserves_deferred_records_and_propagates(
     def invalid() -> bool:
         raise error
 
-    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
-    backend = telemetry_otlp.OtlpBackend(export_allowed=invalid)
+    backend = telemetry_otlp.OtlpBackend(
+        export_allowed=invalid, enabled=lambda: True, defer_enabled=True
+    )
     backend.defer_until_exit()
     backend.export_batch([_event()])
     try:

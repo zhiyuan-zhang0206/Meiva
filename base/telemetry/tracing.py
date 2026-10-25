@@ -27,7 +27,9 @@ from base.paths import traces_dir
 from base.telemetry.delivery.reporting import report_no_pipeline
 from base.telemetry.observability import cluster_label
 from base.telemetry.otlp.telemetry_otlp import (
-    COLLECTOR_RETRY_INTERVAL_S,
+    COLLECTOR_RETRY_INTERVAL_S as COLLECTOR_RETRY_INTERVAL_S,
+)
+from base.telemetry.otlp.telemetry_otlp import (
     endpoint_reachable,
     observability_export_allowed,
 )
@@ -213,9 +215,18 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
     stripping (defensive layer 2) and the bounded POST itself.
     """
 
-    def __init__(self, endpoint: str, *, strip_content: bool) -> None:
+    def __init__(
+        self,
+        endpoint: str,
+        *,
+        strip_content: bool,
+        cooldown_s: float = TRACE_EXPORT_COOLDOWN_S,
+        timeout_s: float = TRACE_EXPORT_TIMEOUT_S,
+    ) -> None:
         self._endpoint = f"{endpoint.rstrip('/')}/v1/traces"
         self._strip_content = strip_content
+        self._cooldown_s = cooldown_s
+        self._timeout_s = timeout_s
         self._consecutive_failures = 0
         self._circuit_open_until = 0.0
         self._probe_in_flight = False
@@ -223,13 +234,13 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
         self._dropped_spans = 0
         self._circuit_lock = threading.Lock()
 
-    def _circuit_drops(self, span_count: int) -> bool:
+    def _circuit_drops(self, span_count: int, *, now: float | None = None) -> bool:
         """Shed during cooldown, admitting only one probe after it expires."""
-        now = time.monotonic()
+        current_time = time.monotonic() if now is None else now
         with self._circuit_lock:
             if self._circuit_open_until == 0.0:
                 return False
-            if now >= self._circuit_open_until and not self._probe_in_flight:
+            if current_time >= self._circuit_open_until and not self._probe_in_flight:
                 self._probe_in_flight = True
                 return False
             self._dropped_batches += 1
@@ -247,8 +258,10 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
             )
         return True
 
-    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        if self._circuit_drops(len(spans)):
+    def export(
+        self, spans: Sequence[ReadableSpan], *, now: float | None = None
+    ) -> SpanExportResult:
+        if self._circuit_drops(len(spans), now=now):
             return SpanExportResult.FAILURE
         # Imported lazily: the OTLP encoder pulls in the protobuf stack, which
         # the no-tracing path should not pay for.
@@ -270,18 +283,18 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
                 self._endpoint,
                 content=req.SerializeToString(),
                 headers={"Content-Type": "application/x-protobuf"},
-                timeout=TRACE_EXPORT_TIMEOUT_S,
+                timeout=self._timeout_s,
             )
             resp.raise_for_status()
         except Exception as exc:  # exporter failures must never escape into the SDK
-            now = time.monotonic()
+            current_time = time.monotonic() if now is None else now
             with self._circuit_lock:
                 self._consecutive_failures += 1
                 failures = self._consecutive_failures
                 circuit_opened = self._probe_in_flight or failures >= TRACE_EXPORT_FAILURE_THRESHOLD
                 self._probe_in_flight = False
                 if circuit_opened:
-                    self._circuit_open_until = now + TRACE_EXPORT_COOLDOWN_S
+                    self._circuit_open_until = current_time + self._cooldown_s
             if failures == 1 or circuit_opened:
                 logger.warning(
                     "OTLP trace export failed",
@@ -330,9 +343,22 @@ def start_collector_retry(
                 machine=machine, home=home, config=config, readiness=readiness
             ),
             resolved=lambda: readiness.resolved,
-            interval=lambda: COLLECTOR_RETRY_INTERVAL_S,
+            interval=lambda: config.retry_interval_s,
         )
         state["retry_owner"] = owner
+
+
+# meiva:note
+# Reset process-level trace state and content capture environment variable.
+def reset_tracing_state() -> None:
+    os.environ.pop("TRACELOOP_TRACE_CONTENT", None)
+    state.clear()
+    state.update(
+        closed=False,
+        collector_offline_reported=False,
+        retry_owner=None,
+        arm_owner=None,
+    )
 
 
 # meiva:note
@@ -577,7 +603,12 @@ def _serialized_initialize[**P](function: Callable[P, None]) -> Callable[P, None
 #   + exporter-side re-strip, so the mirror holds metadata only.
 @_serialized_initialize
 def initialize_tracing(
-    *, machine: MachineIdentityReader, home: Path, config: TraceConfig, readiness: TraceReadiness
+    *,
+    machine: MachineIdentityReader,
+    home: Path,
+    config: TraceConfig,
+    readiness: TraceReadiness,
+    disk_stats: tuple[float, int] | None = None,
 ) -> None:
     if state.get("closed") or readiness.resolved:
         return
@@ -594,7 +625,10 @@ def initialize_tracing(
     # skipping it there would let an over-watermark disk stay full.
     mirror_dir = traces_dir(home)
     mirror_dir.mkdir(parents=True, exist_ok=True)
-    gzip_old_mirror(traces_dir=mirror_dir)
+    if config.gzip_grace_s is None:
+        gzip_old_mirror(traces_dir=mirror_dir)
+    else:
+        gzip_old_mirror(grace_seconds=config.gzip_grace_s, traces_dir=mirror_dir)
     prune_old_mirror(config.retention_days, traces_dir=mirror_dir)
     enforce_dir_cap(config.max_dir_mb, traces_dir=mirror_dir)
 
@@ -602,7 +636,7 @@ def initialize_tracing(
     # recording entirely (auto-degrade) instead of letting the mirror grow
     # the disk toward full. Logged as a warning event so the degradation is
     # visible; a later agent start re-checks.
-    usage = disk_usage(traces_dir=mirror_dir)
+    usage = disk_usage(traces_dir=mirror_dir) if disk_stats is None else disk_stats
     if usage is not None and usage[0] > config.disk_watermark:
         # Auto-degrade: skip recording so the mirror can never fill the disk.
         # The loguru events sink lands this in the unified event stream

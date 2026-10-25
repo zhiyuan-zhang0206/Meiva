@@ -12,23 +12,18 @@ import pytest
 from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
-from base import config, telemetry
+from base import telemetry
+from base.config import settings
 from base.db import Database
 from base.telemetry.delivery.receipts import Category, Event, Level
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
-from base.telemetry.tests.otlp.identity_inputs import allow_identity, machine_identity
+from base.telemetry.tests.otlp.identity_inputs import machine_identity
 
 OtlpFixture = tuple[telemetry_otlp.OtlpBackend, InMemoryLogRecordExporter, InMemoryMetricReader]
 
 AGENT = 8902
-
-
-@pytest.fixture(autouse=True)
-def production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MEIVA_EXEC_REQUEST_FILE", raising=False)
-    monkeypatch.setattr(telemetry_otlp, "production_identity", allow_identity, raising=False)
 
 
 def otlp_test_event(
@@ -59,7 +54,7 @@ def otlp_test_event(
 
 
 @pytest.fixture
-def otlp_backend(monkeypatch: pytest.MonkeyPatch) -> Iterator[OtlpFixture]:
+def otlp_backend() -> Iterator[OtlpFixture]:
     from opentelemetry.sdk._logs import LoggerProvider
     from opentelemetry.sdk._logs.export import (
         SimpleLogRecordProcessor,
@@ -73,9 +68,10 @@ def otlp_backend(monkeypatch: pytest.MonkeyPatch) -> Iterator[OtlpFixture]:
     metric_reader = InMemoryMetricReader()
     metric_provider = MeterProvider(metric_readers=[metric_reader])
 
-    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
     backend = telemetry_otlp.OtlpBackend(
-        export_allowed=lambda: True, providers=(logger_provider, metric_provider)
+        export_allowed=lambda: True,
+        enabled=lambda: True,
+        providers=(logger_provider, metric_provider),
     )
 
     telemetry.process_state["pipeline"]._exporter = backend
@@ -290,10 +286,11 @@ def test_compaction_completed_maps_size_samples_and_frequency_counter(
     assert ratio.sum == 0.3
 
 
-def test_metrics_resource_carries_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(telemetry_otlp, "cluster_label", lambda: ".meiva-preview")
+def test_metrics_resource_carries_cluster(tmp_path: Path) -> None:
+    home = tmp_path / ".meiva-preview"
+    home.mkdir()
 
-    resource = telemetry_otlp.metrics_resource()
+    resource = telemetry_otlp.metrics_resource(home=home)
 
     assert resource.attributes["cluster"] == ".meiva-preview"
 
@@ -591,11 +588,21 @@ def test_flush_without_init_is_noop() -> None:
     assert backend._queue.empty()
 
 
-def test_flag_off_disables_export(
-    otlp_backend: Any, monkeypatch: pytest.MonkeyPatch, emitted_events: EmittedEvents
-) -> None:
-    backend, log_exporter, metric_reader = otlp_backend
-    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", False)
+def test_flag_off_disables_export(emitted_events: EmittedEvents) -> None:
+    from opentelemetry.sdk._logs import LoggerProvider
+    from opentelemetry.sdk._logs.export import SimpleLogRecordProcessor
+    from opentelemetry.sdk.metrics import MeterProvider
+
+    log_exporter = InMemoryLogRecordExporter()
+    logger_provider = LoggerProvider()
+    logger_provider.add_log_record_processor(SimpleLogRecordProcessor(log_exporter))
+    metric_reader = InMemoryMetricReader()
+    metric_provider = MeterProvider(metric_readers=[metric_reader])
+    backend = telemetry_otlp.OtlpBackend(
+        export_allowed=lambda: True,
+        enabled=lambda: False,
+        providers=(logger_provider, metric_provider),
+    )
 
     backend.export_batch([otlp_test_event()])
     assert len(emitted_events) == 0, "flag-off must not emit backend status events"
@@ -605,12 +612,10 @@ def test_flag_off_disables_export(
     assert metric_reader.get_metrics_data() is None
 
 
-def test_flag_defaults_on_with_standard_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.config import settings
-
-    monkeypatch.setattr(config.settings.observability, "telemetry_otlp_enabled", True)
-    assert settings.observability.telemetry_otlp_enabled is True
-    assert settings.observability.telemetry_otlp_endpoint == "http://127.0.0.1:4318"
+def test_flag_defaults_on_with_standard_endpoint() -> None:
+    fields = type(settings.observability).model_fields
+    assert fields["telemetry_otlp_enabled"].default is True
+    assert fields["telemetry_otlp_endpoint"].default == "http://127.0.0.1:4318"
 
 
 @pytest.fixture(autouse=True)

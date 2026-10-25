@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import time
+import socket
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -12,9 +12,12 @@ import psycopg
 import pytest
 
 from base.db import Database
-from base.db.connections import NoDatabaseAuthorityError
+from base.db.code_version_gate import ProcessDbGate
+from base.db.config import DbConfig
 from base.telemetry import event_store
 from base.telemetry.emitter import Event, category_for_kind
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
 
 @pytest.fixture
@@ -156,39 +159,42 @@ def test_a_nul_character_is_replaced_not_fatal(
     assert row[3]["body"] == "a�b"
 
 
+def _closed_local_port() -> int:
+    with socket.create_server(("127.0.0.1", 0)) as sock:
+        return int(sock.getsockname()[1])
+
+
 def test_a_failed_batch_is_reported_once_then_backs_off_and_recovers(
     _fresh_sink: None,
     db_conn: psycopg.Connection[Any],
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
+    emitted_events: EmittedEvents,
 ) -> None:
     marker = uuid4().hex
-    emitted: list[dict[str, Any]] = []
-    attempts: list[int] = []
-    real_write = event_store.write
+    closed_port = _closed_local_port()
+    unreachable_db = Database(
+        DbConfig(
+            db_url=f"postgresql://meiva:x@127.0.0.1:{closed_port}/meiva?connect_timeout=1",
+            db_sslmode="",
+            db_pool_min_size=1,
+            db_pool_max_size=1,
+            pgbouncer_enabled=False,
+        ),
+        gate=ProcessDbGate(process="test-unreachable", version=lambda: 1),
+    )
+    event_store.store_events(unreachable_db, [_event("llm_usage", marker)], now=100.0)
+    # meiva:note
+    # While inside the backoff window (100.5 < 102.0), even passing the live database skips dialing.
+    event_store.store_events(database, [_event("llm_usage", marker)], now=100.5)
 
-    def failing_write(_db: Database, records: list[dict[str, Any]]) -> None:
-        attempts.append(len(records))
-        raise psycopg.OperationalError("database is down")
-
-    monkeypatch.setattr(event_store, "write", failing_write)
-
-    def capture_emit(*_args: object, **kwargs: Any) -> None:
-        emitted.append(kwargs["attributes"])
-
-    monkeypatch.setattr(event_store, "emit", capture_emit)
-    event_store.store_events(database, [_event("llm_usage", marker)])
-    event_store.store_events(database, [_event("llm_usage", marker)])
-
-    assert attempts == [1]
-    assert [(e["rows"], e["consecutive_failures"], e["error_class"]) for e in emitted] == [
-        (1, 1, "OperationalError")
+    failed_attrs = emitted_events.attributes("telemetry_store_failed")
+    assert [(e["rows"], e["consecutive_failures"], e["error_class"]) for e in failed_attrs] == [
+        (1, 1, "PoolTimeout")
     ]
     assert _rows(db_conn, marker) == []
 
-    monkeypatch.setattr(event_store, "write", real_write)
-    event_store.retry_at = time.monotonic() - 1
-    event_store.store_events(database, [_event("llm_usage", marker)])
+    event_store.close_store()
+    event_store.store_events(database, [_event("llm_usage", marker)], now=105.0)
 
     assert len(_rows(db_conn, marker)) == 1
     assert event_store.failures == 0
@@ -196,17 +202,25 @@ def test_a_failed_batch_is_reported_once_then_backs_off_and_recovers(
 
 def test_a_process_without_database_authority_turns_the_sink_off(
     _fresh_sink: None,
-    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection[Any],
     database: Database,
 ) -> None:
-    attempts: list[int] = []
+    marker = uuid4().hex
+    unadmitted_db = Database(
+        DbConfig(
+            db_url="postgresql://meiva@127.0.0.1:5432/meiva",
+            db_sslmode="",
+            db_pool_min_size=1,
+            db_pool_max_size=1,
+            pgbouncer_enabled=False,
+            db_authority_refusal="no login for this home",
+        ),
+        gate=ProcessDbGate(process="test-unadmitted", version=lambda: 1),
+    )
+    event_store.store_events(unadmitted_db, [_event("llm_usage", marker)])
+    assert event_store.set_enabled(enabled=False) is False
+    # meiva:note
+    # Subsequent calls are skipped even when given a valid database.
+    event_store.store_events(database, [_event("llm_usage", marker)])
 
-    def refused(_db: Database, records: list[dict[str, Any]]) -> None:
-        attempts.append(len(records))
-        raise NoDatabaseAuthorityError("no login for this home")
-
-    monkeypatch.setattr(event_store, "write", refused)
-    event_store.store_events(database, [_event("llm_usage", "x")])
-    event_store.store_events(database, [_event("llm_usage", "x")])
-
-    assert attempts == [1]
+    assert _rows(db_conn, marker) == []

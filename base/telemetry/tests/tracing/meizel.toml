@@ -1,18 +1,3 @@
-[debt.first-party-patch]
-"test_arm_thread_base_exception_marks_attempt_spent.py#monkeypatch.setattr base.telemetry.tracing.time.monotonic" = 1
-"test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr base.config.settings.observability.telemetry_otlp_endpoint" = 1
-"test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr base.telemetry.trace_mirror.shutil.disk_usage" = 1
-"test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr base.telemetry.tracing.disk_usage" = 2
-"test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr base.telemetry.tracing.endpoint_reachable" = 1
-"test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr base.telemetry.tracing.enforce_dir_cap" = 1
-"test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr base.telemetry.tracing.gzip_old_mirror" = 1
-"test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr base.telemetry.tracing.start_collector_retry" = 1
-
-[debt.stdlib-patch]
-"test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr pathlib.Path.stat" = 1
-
 [debt.third-party-patch]
-"test_arm_thread_base_exception_marks_attempt_spent.py#monkeypatch.setattr httpx.post" = 2
 "test_arm_thread_base_exception_marks_attempt_spent.py#monkeypatch.setattr traceloop.sdk.Traceloop.init" = 1
-"test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr httpx.post" = 2
 "test_strip_content_removes_llm_content_keeps_metadata.py#monkeypatch.setattr traceloop.sdk.Traceloop.init" = 4
