@@ -73,6 +73,14 @@
       "description": "Operator sentinel for a stalled database write path (#5310): reads pgBouncer's per-minute stats line from $MEIVA_HOME/pgbouncer/pgbouncer.log and wakes the cluster operator after three consecutive minutes under 20 xacts/s with an average query time above 300 ms. Thresholds come from 29 days of history (40,375 minutes), where the rule marked only the two real incidents; an agent-host crash wave is the consequence it precedes, not the signal.",
       "script": "db-write-stall-watch-schedule.py",
       "command": "python db-write-stall-watch-schedule.py"
+    },
+    {
+      "name": "qa-keepalive",
+      "class": "operator",
+      "default_enabled": false,
+      "description": "Operator sentinel for one agent's page and inbound watcher on a remote host: the gateway-hosted runner probes an HTTP health URL and a remote process every ten minutes, wakes the owning agent only after two consecutive failed rounds (one bad round is a rollout), then holds a one-hour cool-down and clears the streak on the first healthy round. Ships disabled: the health URL, the probed hosts and the owner are site values in the template.",
+      "script": "qa-keepalive-schedule.py",
+      "command": "python qa-keepalive-schedule.py"
     }
   ]
 }
