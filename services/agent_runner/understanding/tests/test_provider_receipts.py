@@ -27,7 +27,7 @@ from services.agent_runner.understanding.tests.provider_wire import (
 )
 
 
-def _checkpoint(database: Database, *, compact_note: bool) -> None:
+def _checkpoint(database: Database, db_url: str, *, compact_note: bool) -> None:
     checkpoint = empty_checkpoint()
     checkpoint["channel_values"] = {
         "messages": [
@@ -61,7 +61,7 @@ def _checkpoint(database: Database, *, compact_note: bool) -> None:
             "INSERT INTO agents_meta (id, status, config_overlay) VALUES (7, 'idling', %s::jsonb)",
             (json.dumps({"llm_model": "deepseek-flash", "reasoning_effort": "high"}),),
         )
-        saver = PostgresSaver(conn)
+    with PostgresSaver.from_conn_string(db_url) as saver:
         saver.setup()
         saver.put(
             {"configurable": {"thread_id": "7", "checkpoint_ns": ""}},
@@ -109,11 +109,12 @@ def _assert_job_outcome(
 async def test_real_chunk_provider_receipt_survives_success_and_failure(
     kind: str,
     database: Database,
+    db_url: str,
     aops_pool: AsyncConnectionPool,
     model_catalog: ModelCatalog,
     emitted_events: EmittedEvents,
 ) -> None:
-    _checkpoint(database, compact_note=False)
+    _checkpoint(database, db_url, compact_note=False)
     config = consumer_config()
     # meiva:note
     # replay deliberately bypasses admission
@@ -174,13 +175,14 @@ async def test_real_chunk_provider_receipt_survives_success_and_failure(
 
 async def test_generation_does_not_reuse_the_matter_filter_rendering_policy(
     database: Database,
+    db_url: str,
     aops_pool: AsyncConnectionPool,
     model_catalog: ModelCatalog,
     emitted_events: EmittedEvents,
 ) -> None:
     from base.lm.provider_api import BuildContext
 
-    _checkpoint(database, compact_note=True)
+    _checkpoint(database, db_url, compact_note=True)
     config = consumer_config()
     config.set_field("understanding_group_corrections", 0)
     config.set_field("message_timestamps", True)
