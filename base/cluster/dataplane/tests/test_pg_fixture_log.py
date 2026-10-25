@@ -19,23 +19,18 @@ from pathlib import Path
 
 import pytest
 
-from base.cluster.dataplane import pg_throwaway_base, pg_tools
+from base.cluster.dataplane import pg_tools
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 
 
 @pytest.fixture
-def scratch_tmpfs(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+def scratch_tmpfs() -> Iterator[Path]:
     """Pin the throwaway root at a short scratch dir. The Postgres socket
     path (`<dir>/.s.PGSQL.<port>`) is capped at 103 bytes, so the root must
     be short (same constraint as base/cluster/dataplane/tests/test_pg_throwaway_sweep.py).
     Teardown force-stops anything still running under the root and deletes
     it, so a failing test cannot leak a cluster."""
     root = Path(tempfile.mkdtemp(prefix="meiva-pglog-", dir="/tmp"))
-    monkeypatch.setattr(pg_throwaway_base, "default_base", lambda: root)
-    # Pin the other throwaway roots the same way (the sweep runs over all of them):
-    # the disk fallback at this scratch dir and the override cleared, so a host's
-    # configured base cannot redirect an instance out from under the teardown.
-    monkeypatch.setattr(pg_throwaway_base, "disk_fallback_base", lambda: root)
     yield root
     for data in root.glob("meiva-pg-*/data"):
         if (data / "PG_VERSION").is_file():
@@ -48,17 +43,13 @@ def scratch_tmpfs(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
 
 @pytest.fixture
-def artifact_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Redirect preserved logs into this test's own dir. The real location is
-    derived from the repo root, so patch the deriving function — writing into
-    <repo>/tmp/ from a test would leave artifacts behind."""
-    target = tmp_path / "artifacts"
-    monkeypatch.setattr(pg_tools, "fixture_log_artifact_dir", lambda: target)
-    return target
+def artifact_dir(tmp_path: Path) -> Path:
+    """Redirect preserved logs into this test's own dir."""
+    return tmp_path / "artifacts"
 
 
 def test_failed_start_preserves_pg_log_into_artifacts(
-    scratch_tmpfs: Path, artifact_dir: Path, monkeypatch: pytest.MonkeyPatch
+    scratch_tmpfs: Path, artifact_dir: Path
 ) -> None:
     """initdb succeeds, then `pg_ctl start` fails because the port is taken
     (the exact failure mode from the issue: 738 errors, one pg_ctl refusal).
@@ -69,10 +60,16 @@ def test_failed_start_preserves_pg_log_into_artifacts(
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as blocker:
         blocker.bind(("127.0.0.1", 0))
         blocker.listen(1)
-        monkeypatch.setattr(pg_tools, "free_port", lambda: blocker.getsockname()[1])
+        port = int(blocker.getsockname()[1])
+        config = ThrowawayConfig(
+            None,
+            default_root=scratch_tmpfs,
+            artifact_dir=artifact_dir,
+            candidate_ports=(port, port, port),
+        )
         with pytest.raises(subprocess.CalledProcessError) as excinfo:
             # __enter__() runs the generator body — the bare call only builds it.
-            pg_tools.throwaway_postgres(config=ThrowawayConfig(None)).__enter__()
+            pg_tools.throwaway_postgres(config=config).__enter__()
         # The raised error names the preserved artifact and shows the tail.
         assert "pg.log artifact" in str(excinfo.value)
         assert "Address already in use" in str(excinfo.value)
@@ -85,25 +82,27 @@ def test_failed_start_preserves_pg_log_into_artifacts(
 
 
 def test_failure_before_any_pg_log_still_writes_an_artifact(
-    scratch_tmpfs: Path, artifact_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    scratch_tmpfs: Path, artifact_dir: Path, tmp_path: Path
 ) -> None:
     """postgres can fail before it ever opens the log `-l` names: here initdb
     itself refuses, so `pg_ctl start` never runs and no pg.log is created. The
     artifact must still be written, saying that — an absent artifact is
     indistinguishable from the capture being broken, which is the state #1037
     was reported from."""
-    stub_initdb = tmp_path / "failing-initdb"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub_initdb = bin_dir / "initdb"
     stub_initdb.write_text("#!/bin/sh\necho 'initdb: error: synthetic failure' >&2\nexit 1\n")
     stub_initdb.chmod(0o755)
-    real_pg_tool = pg_tools.pg_tool
-    monkeypatch.setattr(
-        pg_tools,
-        "pg_tool",
-        lambda name: stub_initdb if name == "initdb" else real_pg_tool(name),  # pyright: ignore[reportUnknownArgumentType]
+    config = ThrowawayConfig(
+        None,
+        default_root=scratch_tmpfs,
+        artifact_dir=artifact_dir,
+        bin_dir=bin_dir,
     )
 
     with pytest.raises(subprocess.CalledProcessError) as excinfo:
-        pg_tools.throwaway_postgres(config=ThrowawayConfig(None)).__enter__()
+        pg_tools.throwaway_postgres(config=config).__enter__()
 
     assert pg_tools.NO_PG_LOG_NOTE in str(excinfo.value)
     saved = list(artifact_dir.glob("*.pg.log"))

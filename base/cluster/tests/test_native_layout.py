@@ -7,11 +7,8 @@ import pytest
 from base.cluster import ownership
 
 
-def test_redis_data_dir_is_redis_under_the_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
-    assert ownership.redis_data_dir() == tmp_path / "redis"
+def test_redis_data_dir_is_redis_under_the_home(tmp_path: Path) -> None:
+    assert ownership.redis_data_dir(tmp_path) == tmp_path / "redis"
 
 
 @pytest.mark.parametrize(

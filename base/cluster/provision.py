@@ -21,11 +21,40 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
-from types import MappingProxyType
+from typing import assert_never
 
 from base.cluster.checkpoint_schema import CheckpointSchema, PostgresCheckpointSchema
+from base.cluster.dataplane.provision_plan import (
+    CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS,
+    CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION,
+    CheckpointDependencyDriftError,
+    CheckpointSchemaError,
+    CheckpointSchemaMismatchError,
+    expected_checkpoint_schema_versions,
+    plan_checkpoint_schema,
+    plan_database_provision,
+    plan_pgvector_extension,
+    verify_checkpoint_dependency_pinned,
+    verify_checkpoint_schema_versions,
+)
 from base.cluster.derive import swap_db
 from base.log import logger
+
+__all__ = [
+    "CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS",
+    "CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION",
+    "CheckpointDependencyDriftError",
+    "CheckpointSchemaError",
+    "CheckpointSchemaMismatchError",
+    "assert_checkpoint_dependency_pinned",
+    "assert_checkpoint_schema_current",
+    "checkpoint_schema_versions",
+    "drop_database",
+    "ensure_checkpoint_schema",
+    "ensure_cluster_role",
+    "ensure_pgvector_extension",
+    "provision_database",
+]
 
 
 def _schema_applied(admin_url: str, target: str, *, expected_data_dir: Path | None = None) -> bool:
@@ -75,7 +104,7 @@ def ensure_cluster_role(
 
     with connect(base_admin_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
         row = conn.execute("SELECT oid FROM pg_roles WHERE rolname = %s", (identity,)).fetchone()
-        if row is not None and row[0] == 10:  # BOOTSTRAP_SUPERUSER_OID
+        if row is not None and int(row[0]) == 10:
             raise RuntimeError(
                 f"schema owner {identity!r} is the initdb bootstrap superuser; the owner "
                 "must be a NOLOGIN role distinct from the OS user"
@@ -153,32 +182,44 @@ def provision_database(
         exists = conn.execute(
             "SELECT 1 FROM pg_database WHERE datname = %s", (identity,)
         ).fetchone()
-    if exists:
-        if _schema_applied(base_admin_url, identity, expected_data_dir=expected_data_dir):
-            return False  # role already re-affirmed and ownership adopted
-        if not resume_initialization:
-            raise RuntimeError(
-                f"database {identity!r} has an incomplete schema without initialization authority"
-            )
-        # A durable fresh-home intent owns this incomplete baseline. SQL executes
-        # transactionally; resume an empty database, never delete unknown objects.
+    db_exists = exists is not None
+    applied = (
+        _schema_applied(base_admin_url, identity, expected_data_dir=expected_data_dir)
+        if db_exists
+        else False
+    )
+    table_count: int | None = None
+    if db_exists and not applied and resume_initialization:
         with connect(
             swap_db(base_admin_url, identity), expected_data_dir=expected_data_dir
         ) as conn:
             row = conn.execute(
                 "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'"
             ).fetchone()
-        if row is None or row[0] != 0:
-            raise RuntimeError("incomplete initialization contains unknown database objects")
-
-    if not exists:
-        with connect(base_admin_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
-            # db and role share the identifier; sql.Identifier quotes it.
-            conn.execute(
-                pgsql.SQL("CREATE DATABASE {} OWNER {}").format(
-                    pgsql.Identifier(identity), pgsql.Identifier(identity)
+        table_count = None if row is None else int(row[0])
+    action = plan_database_provision(
+        identity,
+        db_exists=db_exists,
+        schema_applied=applied,
+        resume_initialization=resume_initialization,
+        public_table_count=table_count,
+    )
+    match action:
+        case "noop":
+            return False
+        case "create_and_apply":
+            with connect(
+                base_admin_url, expected_data_dir=expected_data_dir, autocommit=True
+            ) as conn:
+                conn.execute(
+                    pgsql.SQL("CREATE DATABASE {} OWNER {}").format(
+                        pgsql.Identifier(identity), pgsql.Identifier(identity)
+                    )
                 )
-            )
+        case "resume_apply":
+            pass
+        case _:
+            assert_never(action)
     schema_sql = (Path(__file__).resolve().parents[2] / "db" / "schema.sql").read_text()
     try:
         # Apply the schema as the administrator ACTING AS the cluster role, so
@@ -229,6 +270,7 @@ def ensure_pgvector_extension(
     when the data plane is genuinely gone.
     """
     import psycopg
+    from psycopg import sql as pgsql
 
     from base.cluster.dataplane.pg_admin import connect
 
@@ -237,12 +279,13 @@ def ensure_pgvector_extension(
             available = conn.execute(
                 "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'"
             ).fetchone()
-        if available is None:
+        ddl = plan_pgvector_extension(extension_available=available is not None)
+        if ddl is None:
             return
         with connect(
             swap_db(base_admin_url, identity), expected_data_dir=expected_data_dir, autocommit=True
         ) as conn:
-            conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            conn.execute(pgsql.SQL("CREATE EXTENSION IF NOT EXISTS vector"))
     except psycopg.OperationalError as exc:
         logger.warning(
             "[pgvector] pre-create skipped: cluster Postgres unreachable over the "
@@ -274,69 +317,6 @@ def drop_database(
         conn.execute(pgsql.SQL("DROP ROLE IF EXISTS {}").format(pgsql.Identifier(identity)))
 
 
-# Frozen at the upstream schema present when Meiva adopted mirrored checkpoint
-# migrations. Never bump this baseline: future versions belong in the manifest
-# below and must name their mirroring Meiva migration.
-CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION = 9
-CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS: Mapping[int, str] = MappingProxyType({})
-
-
-class CheckpointSchemaError(RuntimeError):
-    """The LangGraph checkpoint schema cannot safely serve this checkout."""
-
-
-class CheckpointDependencyDriftError(CheckpointSchemaError):
-    """The dependency added schema migrations without an Meiva timestamp migration."""
-
-
-class CheckpointSchemaMismatchError(CheckpointSchemaError):
-    """The database checkpoint migration set is not exactly current."""
-
-
-def _check_checkpoint_manifest_shape(manifest: Mapping[int, str]) -> list[int]:
-    """The manifest's versions, contiguous after the baseline and named in version order."""
-    declared_versions = sorted(manifest)
-    expected_declared = list(
-        range(
-            CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION + 1,
-            CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION + 1 + len(declared_versions),
-        )
-    )
-    if declared_versions != expected_declared:
-        raise CheckpointDependencyDriftError(
-            "checkpoint migration manifest must be contiguous after the frozen "
-            f"upstream baseline {CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION}: "
-            f"declared={declared_versions}, expected={expected_declared}"
-        )
-
-    declared_names = [manifest[version] for version in declared_versions]
-    if declared_names != sorted(declared_names):
-        raise CheckpointDependencyDriftError(
-            "checkpoint migration manifest names must follow upstream version order: "
-            f"declared={declared_names}, sorted={sorted(declared_names)}"
-        )
-    return declared_versions
-
-
-def _expected_checkpoint_schema_versions(
-    upstream_migrations: Sequence[str], manifest: Mapping[int, str]
-) -> frozenset[int]:
-    """The upstream versions explicitly approved by Meiva's checkpoint migration manifest."""
-    declared_versions = _check_checkpoint_manifest_shape(manifest)
-    approved_target = CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION + len(declared_versions)
-    dependency_target = len(upstream_migrations) - 1
-    if dependency_target != approved_target:
-        raise CheckpointDependencyDriftError(
-            "LangGraph checkpoint migrations changed without an Meiva migration: "
-            f"dependency target={dependency_target}, "
-            f"approved target={approved_target}. Mirror every new "
-            "upstream migration in an Meiva timestamp migration (including the "
-            "checkpoint_migrations row), then add it to "
-            "CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS."
-        )
-    return frozenset(range(approved_target + 1))
-
-
 # meiva:note
 # Fail before any DB work when the dependency schema contract drifted.
 #
@@ -353,14 +333,11 @@ def assert_checkpoint_dependency_pinned(
     manifest: Mapping[int, str],
     upstream_migrations: Sequence[str],
 ) -> None:
-    _check_checkpoint_manifest_shape(manifest)
-    for version, name in manifest.items():
-        if name not in tracked_migrations:
-            raise CheckpointDependencyDriftError(
-                f"checkpoint version {version} must name a git-tracked Meiva "
-                f"migration: name={name!r}, tracked={name in tracked_migrations}"
-            )
-    _expected_checkpoint_schema_versions(upstream_migrations, manifest)
+    verify_checkpoint_dependency_pinned(
+        tracked_migrations,
+        manifest=manifest,
+        upstream_migrations=upstream_migrations,
+    )
 
 
 def checkpoint_schema_versions(
@@ -386,18 +363,11 @@ def assert_checkpoint_schema_current(db_url: str, *, expected_data_dir: Path | N
     acquiring DDL capability.  Ahead is also refused: upstream gives no old-
     runtime/new-schema compatibility guarantee.
     """
-    expected = _expected_checkpoint_schema_versions(
+    expected = expected_checkpoint_schema_versions(
         PostgresCheckpointSchema().migrations, CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS
     )
     actual = checkpoint_schema_versions(db_url, expected_data_dir=expected_data_dir)
-    if actual != expected:
-        found: frozenset[int] = frozenset() if actual is None else actual
-        raise CheckpointSchemaMismatchError(
-            "checkpoint schema is not current: "
-            f"missing={sorted(expected - found)}, unexpected={sorted(found - expected)}, "
-            f"table_present={actual is not None}. Run `meiva start --all-services` (or this unit's own service selection) on the gateway; "
-            "do not grant schema CREATE to runtime roles."
-        )
+    verify_checkpoint_schema_versions(actual, expected)
 
 
 def ensure_checkpoint_schema(
@@ -409,43 +379,32 @@ def ensure_checkpoint_schema(
     resume_partial: bool = False,
     expected_data_dir: Path | None = None,
 ) -> None:
-    """Create the LangGraph checkpoint tables (idempotent) AS the cluster role.
-
-    Runs `PostgresSaver.setup()` acting as the cluster's schema owner
-    (`owner_session`), so the owner owns the tables and the capability groups
-    reach them through grants. Called during first-start initialization BEFORE
-    the group grants (`base.cluster.authority.ensure_groups`): table grants
-    can only target existing tables, and an application login never runs
-    setup(): Postgres refuses `CREATE TABLE IF NOT EXISTS` for a role without
-    CREATE on the schema even when the tables exist (no group holds CREATE, by
-    design — any DDL must fail under an application login).
-
-    Setup requires fresh initialization authority. ``database_created`` is the exact result of this
-    birth's ``provision_database`` call, not registry state. Upstream setup is
-    autocommit, so a failure can leave a contiguous prefix; when this call owns
-    the newly-created DB it drops that DB and role, making retry start clean.
-    ``resume_partial`` is separate, explicit first-start authority: a hard
-    process death cannot run cleanup, so an idempotent birth retry may continue
-    only an exact contiguous prefix. Existing cluster/operator paths leave it
-    off and never repair, resume, or drop a partial/older/newer schema. Gaps and
-    unknown versions are never resumable.
-    """
     from base.cluster.dataplane.pg_admin import owner_conninfo
 
+    # meiva:note
     # Act as the schema owner and retain the validated native connection
     # throughout setup; PostgresSaver must not open an unchecked second dial.
     owner_dsn = owner_conninfo(base_admin_url, database=identity, owner=identity)
-    expected = _expected_checkpoint_schema_versions(
+    expected = expected_checkpoint_schema_versions(
         schema.migrations, CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS
     )
     actual = checkpoint_schema_versions(owner_dsn, expected_data_dir=expected_data_dir)
-    if actual == expected:
-        return
-    may_setup = database_created or resume_partial
-    resumable = actual is None or actual == frozenset(range(len(actual)))
-    if not may_setup or not resumable:
-        assert_checkpoint_schema_current(owner_dsn, expected_data_dir=expected_data_dir)
-        return
+    action = plan_checkpoint_schema(
+        actual,
+        expected,
+        database_created=database_created,
+        resume_partial=resume_partial,
+    )
+    match action:
+        case "noop":
+            return
+        case "verify_only":
+            assert_checkpoint_schema_current(owner_dsn, expected_data_dir=expected_data_dir)
+            return
+        case "setup":
+            pass
+        case _:
+            assert_never(action)
     try:
         schema.setup(
             base_admin_url=base_admin_url, identity=identity, expected_data_dir=expected_data_dir

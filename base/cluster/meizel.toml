@@ -3,27 +3,26 @@ exports = ["authority", "checkpoint_schema.py", "dataplane", "derive.py", "front
 [uses]
 "__init__.py" = ["derive.py", "ports.py", "provision.py", "record.py", "redis_acl.py"]
 "checkpoint_schema.py" = ["dataplane"]
-"dataplane" = ["derive.py", "machine", "ownership.py", "port_preflight.py", "ports.py", "record.py"]
+"dataplane" = ["derive.py", "listener_plan.py", "machine", "ownership.py", "port_preflight.py", "ports.py", "record.py"]
 "derive.py" = ["machine", "record.py"]
 "machines.py" = ["machine"]
 "ownership.py" = ["port_preflight.py", "postgres.py"]
-"port_preflight.py" = ["machine"]
+"port_preflight.py" = ["listener_plan.py", "machine"]
 "postgres.py" = ["port_preflight.py"]
 "provision.py" = ["checkpoint_schema.py", "dataplane", "derive.py"]
 "record.py" = ["ports.py"]
 "redis_acl.py" = ["ownership.py", "port_preflight.py"]
-"tests" = ["__init__.py", "checkpoint_schema.py", "dataplane", "derive.py", "frontend_build.py", "machine", "machines.py", "ownership.py", "port_preflight.py", "ports.py", "postgres.py", "provision.py", "rate_limit.py", "transport_encryption.py"]
+"tests" = ["__init__.py", "checkpoint_schema.py", "dataplane", "derive.py", "frontend_build.py", "listener_plan.py", "machine", "machines.py", "ownership.py", "port_preflight.py", "ports.py", "postgres.py", "provision.py", "rate_limit.py", "transport_encryption.py"]
 
 [purity]
+"listener_plan.py" = "strict"
+"rate_limit.py" = "strict"
 "transport_encryption.py" = "strict"
 
 [debt.ambient-read]
 "postgres.py#clock time.monotonic" = 6
 "postgres.py#pid os.getuid" = 1
 "postgres.py#platform sys.platform" = 3
-
-[debt.any-collaborator]
-"postgres.py#any ProcessView.uids.return" = 1
 
 [debt.type-cast]
 "derive.py#cast derive_env" = 1

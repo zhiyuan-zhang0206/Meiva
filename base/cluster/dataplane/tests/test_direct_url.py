@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import dataclasses
+import json
 from pathlib import Path
 from typing import cast
 
 import pytest
 
-from base.cluster.dataplane import direct_url
 from base.cluster.dataplane.direct_url import ClusterDirectUrl, resolve_direct_url
 from base.cluster.ports import ClusterPorts
-from base.cluster.record import ClusterRecord
+from base.cluster.record import INTENT_NAME, ClusterRecord
 from base.config import DataPlaneSettings
 from base.db import Database, DbConfig
 from base.db.code_version_gate import ProcessDbGate
@@ -36,20 +37,19 @@ _PG_REC = _rec(_HOME, {"gateway": 8000, "postgres": 5433, "redis": 6380, "pgboun
 
 
 def _serve_record(
-    monkeypatch: pytest.MonkeyPatch,
+    home: Path,
     rec: ClusterRecord | None = None,
     *,
     must_not_be_read: bool = False,
-) -> None:
-    def read(home: Path) -> ClusterRecord | None:
-        if must_not_be_read:
-            raise AssertionError("this resolution must not read this home's cluster record")
-        return rec if rec is not None and str(home) == _HOME else None
-
-    from base import paths
-
-    monkeypatch.setattr(direct_url, "get_record", read)
-    monkeypatch.setattr(paths, "meiva_home", lambda: Path(_HOME))
+) -> Path:
+    intent = home / INTENT_NAME
+    if must_not_be_read:
+        intent.write_bytes(b"\xff")
+    elif rec is None:
+        intent.unlink(missing_ok=True)
+    else:
+        intent.write_text(json.dumps({"record": dataclasses.asdict(rec)}))
+    return home
 
 
 def _config(url: str, *, pooling: bool = True) -> DbConfig:
@@ -68,9 +68,9 @@ def _unused_reader() -> str:
 
 def test_direct_handle_uses_the_owned_lazy_host_reader_and_preserves_short_circuits(
     database_gate: ProcessDbGate,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    _serve_record(monkeypatch, _PG_REC)
+    home = _serve_record(tmp_path, _PG_REC)
     reads: list[str] = []
 
     def local_host() -> str:
@@ -80,7 +80,7 @@ def test_direct_handle_uses_the_owned_lazy_host_reader_and_preserves_short_circu
     def handle(url: str) -> Database:
         return Database(
             _config(url),
-            direct_url=ClusterDirectUrl(local_host),
+            direct_url=ClusterDirectUrl(local_host, home=home),
             gate=database_gate,
         )
 
@@ -104,19 +104,21 @@ def test_direct_handle_uses_the_owned_lazy_host_reader_and_preserves_short_circu
     ],
 )
 def test_a_url_that_cannot_name_a_pooler_is_direct_and_reads_no_dependency(
-    url: str, monkeypatch: pytest.MonkeyPatch
+    url: str, tmp_path: Path
 ) -> None:
-    _serve_record(monkeypatch, must_not_be_read=True)
-    resolution = resolve_direct_url(_config(url), local_host=_unused_reader)
+    home = _serve_record(tmp_path, must_not_be_read=True)
+    resolution = resolve_direct_url(_config(url), local_host=_unused_reader, home=home)
     assert resolution == DirectResolution(url=url, is_direct=True)
 
 
 def test_pooling_off_makes_the_access_url_direct_without_reading_anything(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    _serve_record(monkeypatch, must_not_be_read=True)
+    home = _serve_record(tmp_path, must_not_be_read=True)
     url = "postgresql://meiva:dev@db.example:5432/meiva"
-    resolution = resolve_direct_url(_config(url, pooling=False), local_host=_unused_reader)
+    resolution = resolve_direct_url(
+        _config(url, pooling=False), local_host=_unused_reader, home=home
+    )
     assert resolution == DirectResolution(url=url, is_direct=True)
 
 
@@ -126,36 +128,34 @@ def test_host_comparison_requires_an_explicit_reader() -> None:
 
 
 @pytest.mark.parametrize("url, expected", [(_POOLED, _DIRECT), (_DIRECT, _DIRECT)])
-def test_a_local_record_resolves_the_port_it_names(
-    monkeypatch: pytest.MonkeyPatch, url: str, expected: str
-) -> None:
-    _serve_record(monkeypatch, _PG_REC)
-    assert resolve_direct_url(_config(url), local_host=_unused_reader) == DirectResolution(
-        url=expected, is_direct=True
-    )
+def test_a_local_record_resolves_the_port_it_names(tmp_path: Path, url: str, expected: str) -> None:
+    home = _serve_record(tmp_path, _PG_REC)
+    assert resolve_direct_url(
+        _config(url), local_host=_unused_reader, home=home
+    ) == DirectResolution(url=expected, is_direct=True)
 
 
 @pytest.mark.parametrize("pg_port, pooler_port", [(18011, 18013), (19011, 19013)])
 def test_direct_url_uses_the_ports_the_record_names(
-    monkeypatch: pytest.MonkeyPatch, pg_port: int, pooler_port: int
+    tmp_path: Path, pg_port: int, pooler_port: int
 ) -> None:
     rec = _rec(
         "/x/.meiva-other",
         {"gateway": 18000, "postgres": pg_port, "redis": 18012, "pgbouncer": pooler_port},
     )
-    _serve_record(monkeypatch, rec)
+    home = _serve_record(tmp_path, rec)
     url = f"postgresql://meiva:sek@127.0.0.1:{pooler_port}/meiva?sslmode=prefer"
-    assert resolve_direct_url(_config(url), local_host=_unused_reader).url == (
+    assert resolve_direct_url(_config(url), local_host=_unused_reader, home=home).url == (
         f"postgresql://meiva:sek@127.0.0.1:{pg_port}/meiva?sslmode=prefer"
     )
 
 
 def test_a_local_port_the_record_does_not_name_is_not_direct(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    _serve_record(monkeypatch, _PG_REC)
+    home = _serve_record(tmp_path, _PG_REC)
     url = "postgresql://meiva:dev@localhost:5000/meiva"
-    resolution = resolve_direct_url(_config(url), local_host=_unused_reader)
+    resolution = resolve_direct_url(_config(url), local_host=_unused_reader, home=home)
     assert resolution.url == url
     assert resolution.is_direct is False
     assert "localhost:5000" in resolution.reason
@@ -164,10 +164,10 @@ def test_a_local_port_the_record_does_not_name_is_not_direct(
 
 
 def test_a_home_without_a_record_cannot_tell_whether_the_port_is_a_pooler(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    _serve_record(monkeypatch)
-    resolution = resolve_direct_url(_config(_POOLED), local_host=_unused_reader)
+    home = _serve_record(tmp_path)
+    resolution = resolve_direct_url(_config(_POOLED), local_host=_unused_reader, home=home)
     assert resolution.url == _POOLED
     assert resolution.is_direct is False
     assert "127.0.0.1:6433" in resolution.reason
@@ -175,10 +175,10 @@ def test_a_home_without_a_record_cannot_tell_whether_the_port_is_a_pooler(
 
 
 @pytest.mark.parametrize("host", ["10.0.0.9", "DB.EXAMPLE", "[2001:db8::9]"])
-def test_a_foreign_host_is_never_resolved_here(monkeypatch: pytest.MonkeyPatch, host: str) -> None:
-    _serve_record(monkeypatch, _PG_REC)
+def test_a_foreign_host_is_never_resolved_here(tmp_path: Path, host: str) -> None:
+    home = _serve_record(tmp_path, _PG_REC)
     url = f"postgresql://meiva_main:sek@{host}:6433/meiva_main"
-    resolution = ClusterDirectUrl(lambda: "owned-host")(_config(url))
+    resolution = ClusterDirectUrl(lambda: "owned-host", home=home)(_config(url))
     assert resolution.url == url
     assert resolution.is_direct is False
     assert "which is another machine" in resolution.reason
@@ -186,11 +186,11 @@ def test_a_foreign_host_is_never_resolved_here(monkeypatch: pytest.MonkeyPatch, 
 
 
 def test_the_handle_refuses_a_direct_dial_it_cannot_resolve(
-    database_gate: ProcessDbGate, monkeypatch: pytest.MonkeyPatch
+    database_gate: ProcessDbGate, tmp_path: Path
 ) -> None:
-    _serve_record(monkeypatch)
+    home = _serve_record(tmp_path)
     handle = Database(
-        _config(_POOLED), direct_url=ClusterDirectUrl(_unused_reader), gate=database_gate
+        _config(_POOLED), direct_url=ClusterDirectUrl(_unused_reader, home=home), gate=database_gate
     )
     with pytest.raises(DirectUnavailableError) as caught:
         handle.direct_url()
@@ -199,23 +199,27 @@ def test_the_handle_refuses_a_direct_dial_it_cannot_resolve(
     assert handle.direct_resolution().url == _POOLED
 
 
-def test_every_refused_resolution_carries_a_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_every_refused_resolution_carries_a_reason(tmp_path: Path) -> None:
     cases: list[DirectResolution] = []
-    _serve_record(monkeypatch)
-    cases.append(resolve_direct_url(_config(_POOLED), local_host=_unused_reader))
-    _serve_record(monkeypatch, _PG_REC)
+    home = _serve_record(tmp_path)
+    cases.append(resolve_direct_url(_config(_POOLED), local_host=_unused_reader, home=home))
+    home = _serve_record(tmp_path, _PG_REC)
     cases.append(
-        resolve_direct_url(_config("postgresql://127.0.0.1:5000/m"), local_host=_unused_reader)
+        resolve_direct_url(
+            _config("postgresql://127.0.0.1:5000/m"), local_host=_unused_reader, home=home
+        )
     )
-    cases.append(ClusterDirectUrl(lambda: "owned-host")(_config("postgresql://10.0.0.9:6433/m")))
+    cases.append(
+        ClusterDirectUrl(lambda: "owned-host", home=home)(_config("postgresql://10.0.0.9:6433/m"))
+    )
     for resolution in cases:
         assert resolution.is_direct is False
         assert resolution.reason
     assert len({resolution.reason for resolution in cases}) == 3
 
 
-def test_the_resolution_keeps_the_login_out_of_its_repr(monkeypatch: pytest.MonkeyPatch) -> None:
-    _serve_record(monkeypatch, _PG_REC)
-    resolution = resolve_direct_url(_config(_POOLED), local_host=_unused_reader)
+def test_the_resolution_keeps_the_login_out_of_its_repr(tmp_path: Path) -> None:
+    home = _serve_record(tmp_path, _PG_REC)
+    resolution = resolve_direct_url(_config(_POOLED), local_host=_unused_reader, home=home)
     assert "sek" not in repr(resolution)
     assert resolution.url == _DIRECT

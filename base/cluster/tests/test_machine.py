@@ -345,7 +345,7 @@ def test_identity_files_in_the_home_are_not_read(
     and `memory_remote` files older homes kept are not read by any resolver."""
     from base.cluster.machine import MachineNameMissing
 
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+    point_home(monkeypatch, tmp_path)
     machine_config.set_field("machine_name", "")
     machine_config.set_field("machine_host", "")
     machine_config.set_field("machine_description", "")

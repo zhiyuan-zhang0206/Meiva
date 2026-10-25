@@ -163,8 +163,11 @@ def require_postgres_connection(
         raise RuntimeError("connected PostgreSQL backend is not owned by this home")
 
 
-def redis_data_dir() -> Path:
+def redis_data_dir(home: Path | None = None) -> Path:
     """This home's native Redis data directory (`$MEIVA_HOME/redis`)."""
+    if home is not None:
+        return home / "redis"
+    # meiva:note
     # Lazy: `import base.cluster` stays free of Settings and the home (the restricted
     # restore worker imports it before either exists).
     from base.paths import meiva_home

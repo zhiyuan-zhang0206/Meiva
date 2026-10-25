@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import os
-import threading
 import time
+from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import psycopg
 import pytest
@@ -13,7 +12,14 @@ from psycopg import sql
 from base.cluster import drop_database, provision_database
 from base.cluster.checkpoint_schema import PostgresCheckpointSchema
 from base.cluster.dataplane.pg_admin import owner_conninfo
+from base.cluster.dataplane.provision_plan import (
+    CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS,
+    expected_checkpoint_schema_versions,
+    plan_checkpoint_schema,
+    plan_pgvector_extension,
+)
 from base.cluster.derive import swap_db
+from base.cluster.provision import ensure_checkpoint_schema, ensure_pgvector_extension
 from base.config import settings
 
 
@@ -160,87 +166,32 @@ def _drop_db_and_role(admin_url: str, name: str) -> None:
         conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(name)))
 
 
-class _FakePgConn:
-    def __init__(self, url: str, *, first_row: tuple[object, ...] | None) -> None:
-        self.url = url
-        self.first_row = first_row
-        self.executed: list[str] = []
-
-    def __enter__(self) -> _FakePgConn:
-        return self
-
-    def __exit__(self, *_a: object) -> bool:
-        return False
-
-    def execute(self, sql: str, params: tuple[object, ...] | None = None) -> _FakePgConn:
-        self.executed.append(sql)
-        return self
-
-    def fetchone(self) -> tuple[object, ...] | None:
-        row, self.first_row = self.first_row, None
-        return row
+def test_ensure_pgvector_extension_noop_when_binaries_absent() -> None:
+    assert plan_pgvector_extension(extension_available=False) is None
 
 
-def _patch_pg_connect(
-    monkeypatch: pytest.MonkeyPatch, rows: list[tuple[object, ...] | None]
-) -> tuple[list[str], list[_FakePgConn]]:
-    urls: list[str] = []
-    conns: list[_FakePgConn] = []
-    owner = threading.current_thread()
-
-    def fake_connect(url: str, **_: object) -> _FakePgConn:
-        if threading.current_thread() is not owner:
-            return _FakePgConn(url, first_row=None)
-        urls.append(url)
-        conn = _FakePgConn(url, first_row=rows.pop(0))
-        conns.append(conn)
-        return conn
-
-    monkeypatch.setattr(psycopg, "connect", fake_connect)
-    return urls, conns
-
-
-def test_ensure_pgvector_extension_noop_when_binaries_absent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from base.cluster.provision import ensure_pgvector_extension
-
-    urls, conns = _patch_pg_connect(monkeypatch, [None])
-    ensure_pgvector_extension("meiva_ident", base_admin_url="postgresql://admin@/postgres")
-    assert urls == ["postgresql://admin@/postgres"]
-    assert conns[0].executed == ["SELECT 1 FROM pg_available_extensions WHERE name = 'vector'"]
-
-
-def test_ensure_pgvector_extension_precreates_in_cluster_db(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from base.cluster.provision import ensure_pgvector_extension
-
-    urls, conns = _patch_pg_connect(monkeypatch, [(1,), None])
-    ensure_pgvector_extension(
-        "meiva_ident", base_admin_url="postgresql://admin@/postgres?host=/tmp/x"
+def test_ensure_pgvector_extension_precreates_in_cluster_db(db_conn: object) -> None:
+    assert (
+        plan_pgvector_extension(extension_available=True) == "CREATE EXTENSION IF NOT EXISTS vector"
     )
-    assert len(urls) == 2
-    assert urlsplit(urls[1]).path == "/meiva_ident"
-    assert conns[1].executed == ["CREATE EXTENSION IF NOT EXISTS vector"]
+    identity = _fresh_identity()
+    admin_url = _admin_url()
+    try:
+        provision_database(identity, base_admin_url=admin_url)
+        ensure_pgvector_extension(identity, base_admin_url=admin_url)
+    finally:
+        _drop_db_and_role(admin_url, identity)
 
 
 def test_ensure_pgvector_extension_noop_on_connect_failure(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+    tmp_path: Path,
+    postgres_access: None,
+    loguru_records: list[dict[str, Any]],
 ) -> None:
-    from base.cluster.provision import ensure_pgvector_extension
-
-    owner = threading.current_thread()
-
-    def boom(url: str, **_kw: object) -> _FakePgConn:
-        if threading.current_thread() is not owner:
-            return _FakePgConn(url, first_row=None)
-        raise psycopg.OperationalError("connection is bad")
-
-    monkeypatch.setattr(psycopg, "connect", boom)
-    ensure_pgvector_extension("meiva_ident", base_admin_url="postgresql://admin@/postgres")
+    dead_socket_url = f"postgresql://admin@/postgres?host={tmp_path}"
+    ensure_pgvector_extension("meiva_ident", base_admin_url=dead_socket_url)
     [warning] = [r for r in loguru_records if "[pgvector] pre-create skipped" in r["message"]]
-    assert "(connection is bad)" in warning["message"]
+    assert "cluster Postgres unreachable over the admin connection" in warning["message"]
 
 
 def test_interrupted_empty_database_requires_initialization_authority(db_conn: object) -> None:
@@ -289,29 +240,49 @@ def test_interrupted_database_with_unknown_objects_is_preserved(db_conn: object)
         _drop_db_and_role(admin_url, identity)
 
 
-def test_default_schema_check_never_setup_after_concurrent_repair(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from langgraph.checkpoint.postgres import PostgresSaver
+class _RefusingSchema:
+    @property
+    def migrations(self) -> tuple[str, ...]:
+        return tuple(PostgresCheckpointSchema().migrations)
 
-    from base.cluster import provision
+    def setup(
+        self,
+        *,
+        base_admin_url: str,
+        identity: str,
+        expected_data_dir: Path | None = None,
+    ) -> None:
+        raise AssertionError("setup must not run when schema is already current")
 
-    expected = frozenset(range(len(PostgresSaver.MIGRATIONS)))
-    observed = iter((expected - {9}, expected))
 
-    def checkpoint_versions(_db_url: str, *, expected_data_dir: object = None) -> frozenset[int]:
-        return next(observed)
-
-    def setup_must_not_run(_self: PostgresSaver) -> None:
-        raise AssertionError("a successful read-only recheck must return before setup")
-
-    monkeypatch.setattr(provision, "checkpoint_schema_versions", checkpoint_versions)
-    monkeypatch.setattr(PostgresSaver, "setup", setup_must_not_run)
-
-    from langgraph.checkpoint.postgres import PostgresSaver
-
-    provision.ensure_checkpoint_schema(
-        "meiva_repaired", base_admin_url=_admin_url(), schema=PostgresCheckpointSchema()
+def test_default_schema_check_never_setup_after_concurrent_repair(db_conn: object) -> None:
+    expected = expected_checkpoint_schema_versions(
+        PostgresCheckpointSchema().migrations, CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS
     )
-    with pytest.raises(StopIteration):
-        next(observed)
+    assert (
+        plan_checkpoint_schema(
+            expected - {9}, expected, database_created=False, resume_partial=False
+        )
+        == "verify_only"
+    )
+    assert (
+        plan_checkpoint_schema(expected, expected, database_created=False, resume_partial=False)
+        == "noop"
+    )
+    identity = _fresh_identity()
+    admin_url = _admin_url()
+    try:
+        provision_database(identity, base_admin_url=admin_url)
+        ensure_checkpoint_schema(
+            identity,
+            base_admin_url=admin_url,
+            schema=PostgresCheckpointSchema(),
+            database_created=True,
+        )
+        ensure_checkpoint_schema(
+            identity,
+            base_admin_url=admin_url,
+            schema=_RefusingSchema(),
+        )
+    finally:
+        _drop_db_and_role(admin_url, identity)

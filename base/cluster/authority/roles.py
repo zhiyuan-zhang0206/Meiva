@@ -20,12 +20,12 @@ from psycopg import sql
 
 from base.cluster.authority.catalog import (
     Conn,
-    RoleFacts,
     group_members,
     memberships,
     require_admin,
     role_facts,
 )
+from base.cluster.authority.checks import check_login_role_facts
 from base.host.db_authority.ledger import begin_mint, read_secret, require_ledger
 from base.host.db_authority.model import (
     CLASSES,
@@ -45,41 +45,11 @@ def scram_verifier(conn: Conn, name: str, password: str) -> str:
     return conn.pgconn.encrypt_password(password.encode(), name.encode(), b"scram-sha-256").decode()
 
 
-def _shape_violations(fact: RoleFacts, verifier: str) -> list[str]:
-    name = fact.name
-    violations: list[str] = []
-    if not fact.login:
-        violations.append(f"{name} cannot log in")
-    if fact.elevated:
-        violations.append(f"{name} holds {', '.join(fact.elevated)}")
-    if not fact.inherit:
-        violations.append(f"{name} is NOINHERIT")
-    if fact.connection_limit != -1 or fact.valid_until is not None:
-        violations.append(f"{name} carries a connection limit or expiry")
-    if fact.password != verifier:
-        violations.append(f"{name} stored verifier differs from its secret")
-    if fact.configured:
-        violations.append(f"{name} carries role settings")
-    if fact.depended:
-        violations.append(f"{name} owns objects or holds direct grants")
-    return violations
-
-
 def login_violations(conn: Conn, secret: RoleSecret, group: str) -> list[str]:
     """Why ``secret.name`` is not exactly a generation login of ``group``."""
     fact = role_facts(conn, (secret.name,)).get(secret.name)
-    if fact is None:
-        return [f"{secret.name} does not exist"]
-    violations = _shape_violations(fact, secret.verifier)
-    rows = memberships(conn, (secret.name,))
-    held = [
-        (row.role, row.admin, row.inherit, row.set) for row in rows if row.member == secret.name
-    ]
-    if held != [(group, False, True, False)]:
-        violations.append(f"{secret.name} memberships {held} differ from INHERIT-only {group}")
-    if any(row.role == secret.name for row in rows):
-        violations.append(f"{secret.name} has members")
-    return violations
+    rows = memberships(conn, (secret.name,)) if fact is not None else ()
+    return check_login_role_facts(secret.name, secret.verifier, group, fact, rows)
 
 
 def verify_generation(conn: Conn, home: Path) -> VerifiedGeneration:

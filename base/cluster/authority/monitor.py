@@ -25,17 +25,21 @@ from psycopg import sql
 
 from base.cluster.authority.catalog import (
     Conn,
-    RoleFacts,
     memberships,
     require_admin,
     role_facts,
 )
+from base.cluster.authority.checks import (
+    MONITOR_MAP,
+    MONITOR_ROLE,
+    check_monitor_facts,
+)
+from base.cluster.authority.checks import (
+    STATS_ROLE as _STATS_ROLE,
+)
 from base.host.db_authority.model import AuthorityRefusedError, CatalogRefusedError
 
-MONITOR_ROLE = "meiva_monitor"
-# The pg_ident map pg_hba names for the monitor's peer line.
-MONITOR_MAP = "meiva_monitor"
-_STATS_ROLE = "pg_read_all_stats"
+__all__ = ["MONITOR_MAP", "MONITOR_ROLE", "ensure_monitor", "monitor_violations"]
 
 _DIRECT_GRANTS = """
 SELECT d.dbid, d.classid::regclass::text, d.objid, d.deptype
@@ -45,43 +49,21 @@ ORDER BY 1, 2, 3, 4
 """
 
 
-def _attribute_violations(fact: RoleFacts) -> list[str]:
-    name = fact.name
-    violations: list[str] = []
-    if not fact.login:
-        violations.append(f"{name} cannot log in")
-    if fact.password is not None:
-        violations.append(f"{name} has a password; it authenticates only by peer")
-    if fact.elevated or not fact.inherit or fact.configured:
-        violations.append(f"{name} holds attributes, NOINHERIT or settings")
-    if fact.connection_limit != -1 or fact.valid_until is not None:
-        violations.append(f"{name} carries a connection limit or expiry")
-    return violations
-
-
-def _grant_violations(conn: Conn, database: str) -> list[str]:
-    name = MONITOR_ROLE
-    violations: list[str] = []
-    rows = memberships(conn, (name,))
-    held = [(row.role, row.admin, row.inherit, row.set) for row in rows if row.member == name]
-    if held != [(_STATS_ROLE, False, True, False)]:
-        violations.append(f"{name} memberships {held} differ from INHERIT-only {_STATS_ROLE}")
-    if any(row.role == name for row in rows):
-        violations.append(f"{name} has members")
-    row = conn.execute("SELECT oid FROM pg_database WHERE datname = %s", (database,)).fetchone()
-    expected = [(0, "pg_database", None if row is None else row[0], "a")]
-    grants = [tuple(grant) for grant in conn.execute(_DIRECT_GRANTS, (name,)).fetchall()]
-    if grants != expected:
-        violations.append(f"{name} owns objects or holds grants beyond CONNECT on {database}")
-    return violations
-
-
 def monitor_violations(conn: Conn, *, database: str) -> list[str]:
     """Why the existing monitor role is not exactly its shape (absent: none)."""
     fact = role_facts(conn, (MONITOR_ROLE,)).get(MONITOR_ROLE)
     if fact is None:
         return []
-    return _attribute_violations(fact) + _grant_violations(conn, database)
+    rows = memberships(conn, (MONITOR_ROLE,))
+    row = conn.execute("SELECT oid FROM pg_database WHERE datname = %s", (database,)).fetchone()
+    grants = [tuple(grant) for grant in conn.execute(_DIRECT_GRANTS, (MONITOR_ROLE,)).fetchall()]
+    return check_monitor_facts(
+        fact,
+        database=database,
+        database_oid=None if row is None else row[0],
+        memberships=rows,
+        grants=grants,
+    )
 
 
 def ensure_monitor(conn: Conn, *, database: str) -> None:

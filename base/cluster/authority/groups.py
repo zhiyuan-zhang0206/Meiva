@@ -14,6 +14,7 @@ from base.cluster.authority.catalog import (
     require_admin,
     role_facts,
 )
+from base.cluster.authority.checks import check_group_facts
 from base.cluster.authority.event_grants import grant_event_log_runner_access
 from base.host.db_authority.model import AuthorityRefusedError, CatalogRefusedError, Groups
 
@@ -65,19 +66,7 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
 
 def group_violations(conn: Conn, groups: Groups) -> list[str]:
     names = (groups.gateway, groups.runner)
-    facts = role_facts(conn, names)
-    violations: list[str] = []
-    for name, fact in facts.items():
-        if fact.login or fact.password is not None:
-            violations.append(f"group {name} can log in")
-        if fact.elevated or fact.owns or fact.configured:
-            violations.append(f"group {name} holds attributes, ownership or settings")
-        if not fact.inherit:
-            violations.append(f"group {name} is NOINHERIT")
-    for row in memberships(conn, names):
-        if row.member in names:
-            violations.append(f"group {row.member} is a member of {row.role}")
-    return violations
+    return check_group_facts(names, role_facts(conn, names), memberships(conn, names))
 
 
 def _create_missing(conn: Conn, groups: Groups) -> None:

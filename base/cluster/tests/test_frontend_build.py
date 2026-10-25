@@ -2,82 +2,61 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 
 from base.cluster import frontend_build
 
 
-def _recording_build(calls: list[Path]) -> Callable[[Path], int]:
-    def build(frontend_dir: Path) -> int:
-        calls.append(frontend_dir)
-        return 0
-
-    return build
-
-
-def _fixed_key(value: str | None) -> Callable[..., str | None]:
-    def key(_dir: Path, *, gateway_port: int, browser_origin: str) -> str | None:
-        return value
-
-    return key
-
-
 def test_a_matching_key_skips_the_build(tmp_path: Path) -> None:
-    calls: list[Path] = []
     frontend_build.record(tmp_path, "k")
-    code = frontend_build.ensure_build(
+    decision = frontend_build.plan_frontend_build(
         tmp_path,
-        gateway_port=8000,
-        browser_origin="",
-        build=_recording_build(calls),
-        key=_fixed_key("k"),
+        current_key="k",
+        recorded=frontend_build.recorded_key(tmp_path),
     )
 
-    assert code == 0
-    assert calls == []
+    assert decision.action == "reuse"
+    assert "reusing .next" in decision.message
 
 
 def test_a_changed_key_rebuilds_and_records(tmp_path: Path) -> None:
-    calls: list[Path] = []
     frontend_build.record(tmp_path, "old")
-    code = frontend_build.ensure_build(
+    decision = frontend_build.plan_frontend_build(
         tmp_path,
-        gateway_port=8000,
-        browser_origin="",
-        build=_recording_build(calls),
-        key=_fixed_key("new"),
+        current_key="new",
+        recorded=frontend_build.recorded_key(tmp_path),
     )
+    assert decision.action == "build"
+    code = frontend_build.finalize_frontend_build(tmp_path, current_key="new", exit_code=0)
 
-    assert (code, calls) == (0, [tmp_path])
+    assert code == 0
     assert frontend_build.recorded_key(tmp_path) == "new"
 
 
 def test_a_failed_build_records_nothing(tmp_path: Path) -> None:
     frontend_build.record(tmp_path, "old")
-
-    def failing(_dir: Path) -> int:
-        return 3
-
-    code = frontend_build.ensure_build(
-        tmp_path, gateway_port=8000, browser_origin="", build=failing, key=_fixed_key("new")
+    decision = frontend_build.plan_frontend_build(
+        tmp_path,
+        current_key="new",
+        recorded=frontend_build.recorded_key(tmp_path),
     )
+    assert decision.action == "build"
+    code = frontend_build.finalize_frontend_build(tmp_path, current_key="new", exit_code=3)
 
     assert code == 3
     assert frontend_build.recorded_key(tmp_path) == "old"
 
 
 def test_an_unprovable_key_always_builds(tmp_path: Path) -> None:
-    calls: list[Path] = []
-    code = frontend_build.ensure_build(
+    decision = frontend_build.plan_frontend_build(
         tmp_path,
-        gateway_port=8000,
-        browser_origin="",
-        build=_recording_build(calls),
-        key=_fixed_key(None),
+        current_key=None,
+        recorded=frontend_build.recorded_key(tmp_path),
     )
+    assert decision.action == "build"
+    code = frontend_build.finalize_frontend_build(tmp_path, current_key=None, exit_code=0)
 
-    assert (code, calls) == (0, [tmp_path])
+    assert code == 0
     assert frontend_build.recorded_key(tmp_path) is None
 
 

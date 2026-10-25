@@ -1,9 +1,14 @@
 exports = ["event_grants.py", "groups.py", "monitor.py", "roles.py", "tests"]
 
+
 [uses]
 "__init__.py" = ["groups.py", "invariant.py", "monitor.py", "roles.py"]
-"groups.py" = ["catalog.py", "event_grants.py"]
-"invariant.py" = ["catalog.py", "groups.py", "monitor.py", "roles.py"]
-"monitor.py" = ["catalog.py"]
-"roles.py" = ["catalog.py"]
+"catalog.py" = ["checks.py"]
+"groups.py" = ["catalog.py", "checks.py", "event_grants.py"]
+"invariant.py" = ["catalog.py", "checks.py", "groups.py", "monitor.py", "roles.py"]
+"monitor.py" = ["catalog.py", "checks.py"]
+"roles.py" = ["catalog.py", "checks.py"]
 "tests" = ["__init__.py"]
+
+[purity]
+"checks.py" = "strict"

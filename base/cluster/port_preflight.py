@@ -1,99 +1,71 @@
-"""Listener discovery — who holds a TCP port on this host.
-
-The storage ownership checks (`base.cluster.ownership`), the PgBouncer bind wait
-and the OTLP collector healthcheck need the same facts about a port:
-
-- `strict_listeners_on` — the pids listening on a port, raising
-  `ListenerDiscoveryError` when the socket table cannot establish absence (psutil
-  first; lsof when macOS denies the global scan; two disagreeing inspections prove
-  nothing);
-- `listener_addrs` — the local addresses listening on a port, best-effort.
-"""
-
 from __future__ import annotations
 
 import os
 import shutil
+from collections.abc import Collection
 
 import base.host.proc
+from base.cluster.listener_plan import (
+    LOOPBACK_ALIASES,
+    LSOF_CANDIDATE_PATHS,
+    ListenerDiscoveryError,
+    parse_lsof_listener_addrs,
+    parse_lsof_pids,
+    parse_psutil_listener_addrs,
+    reconcile_strict_listeners,
+    resolve_lsof_argv,
+)
 from base.cluster.machine import MachineIdentityReader
 from base.native_process.ownership import OwnedProcess, capture_tree
 
-
-class ListenerDiscoveryError(RuntimeError):
-    """The socket table could not establish listener ownership."""
-
-
-# Restricted contexts (cron, forced ssh commands, minimal login shells)
-# carry a PATH that often omits the platform's lsof location — macOS keeps
-# lsof in /usr/sbin, which cron's /usr/bin:/bin PATH never reaches — so PATH
-# lookup alone cannot be trusted. PATH wins when it resolves (fast, and it
-# honours an operator's own binary), then these candidates, in order.
-LSOF_CANDIDATE_PATHS = (
-    "/usr/sbin/lsof",  # macOS and most Linux distros
-    "/usr/bin/lsof",
-    "/sbin/lsof",
-    "/bin/lsof",
-    "/usr/local/bin/lsof",
-    "/usr/local/sbin/lsof",
-    "/opt/homebrew/bin/lsof",  # Homebrew on Apple Silicon
-)
+__all__ = [
+    "LOOPBACK_ALIASES",
+    "LSOF_CANDIDATE_PATHS",
+    "ListenerDiscoveryError",
+    "bind_addrs",
+    "listener_addrs",
+    "lsof_argv",
+    "require_listener",
+    "serves_off_box",
+    "strict_listeners_on",
+    "verify_listener_custody",
+]
 
 
 def lsof_argv(*args: str) -> list[str] | None:
-    """Resolved lsof argv for `args`, or None when no lsof is reachable.
-
-    None means the inspection cannot run at all — the caller reports a
-    discovery failure rather than reading the missing inspection as absence.
-    """
-    binary = shutil.which("lsof")
-    if binary is None:
-        for candidate in LSOF_CANDIDATE_PATHS:
-            if os.access(candidate, os.X_OK):
-                binary = candidate
-                break
-    if binary is None:
-        return None
-    return [binary, *args]
+    path_binary = shutil.which("lsof")
+    executable_candidates = (
+        [c for c in LSOF_CANDIDATE_PATHS if os.access(c, os.X_OK)] if path_binary is None else ()
+    )
+    return resolve_lsof_argv(
+        *args,
+        path_binary=path_binary,
+        executable_candidates=executable_candidates,
+    )
 
 
-def _psutil_listeners_on(port: int) -> tuple[list[int], bool] | None:
-    """`(pids, conclusive)` from the psutil scan, or None when the scan failed.
-
-    conclusive=True means the table was read and every LISTEN socket on
-    `port` was attributed — including the empty case, where `port` is absent
-    from the table. conclusive=False means a LISTEN socket on `port` exists
-    but psutil could not name its pid (the `pid is None` rows a restricted
-    /proc or socket table yields) — the caller must not read that as absence.
-    """
+def _psutil_listeners_on(
+    port: int,
+) -> tuple[list[int], bool, list[tuple[str, tuple[object, ...], int | None]]] | None:
     import psutil
 
     try:
         conns = psutil.net_connections(kind="tcp")
     except (psutil.Error, OSError):
         return None
+    rows: list[tuple[str, tuple[object, ...], int | None]] = [
+        (conn.status, tuple(conn.laddr), conn.pid) for conn in conns
+    ]
     pids: list[int] = []
-    for conn in conns:
-        if conn.status != "LISTEN":
-            continue
-        addr = conn.laddr
-        if len(addr) < 2:
-            continue
-        if addr[1] == port:  # psutil addr = (ip, port); `addr.port` is
-            if conn.pid is None:  # un-narrowable against `tuple[()]`
-                return [], False
-            pids.append(conn.pid)
-    return list(dict.fromkeys(pids)), True
+    for status, addr, pid in rows:
+        if status == "LISTEN" and len(addr) >= 2 and addr[1] == port:
+            if pid is None:
+                return [], False, rows
+            pids.append(pid)
+    return list(dict.fromkeys(pids)), True, rows
 
 
 def _lsof_listeners_on(port: int) -> list[int]:
-    """Listener PIDs from lsof, raising ListenerDiscoveryError on failure.
-
-    lsof's exit 1 with no diagnostics is its "no match" answer — genuine
-    absence. Anything else (unreachable binary, timeout, non-empty stderr,
-    or exit 1 WITH output) is an inspection failure the caller must not
-    read as absence.
-    """
     import subprocess
 
     argv = lsof_argv("-nP", "-Fp", "-sTCP:LISTEN", f"-iTCP:{port}")
@@ -103,148 +75,96 @@ def _lsof_listeners_on(port: int) -> list[int]:
             "and not in the standard locations"
         )
     try:
-        # S603: static argv; the only interpolated piece is an int port.
         out = base.host.proc.run_bounded(argv, capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ListenerDiscoveryError(f"listener discovery failed on port {port}: {exc}") from exc
-    if out.returncode not in (0, 1) or out.stderr.strip() or (out.returncode == 1 and out.stdout):
-        raise ListenerDiscoveryError(
-            f"listener discovery failed on port {port}: lsof exit {out.returncode}: {out.stderr.strip()}"
-        )
-    pids: list[int] = []
-    for line in out.stdout.splitlines():
-        if line.startswith("p"):
-            try:
-                pids.append(int(line[1:]))
-            except ValueError:
-                continue
-    return list(dict.fromkeys(pids))
+    return parse_lsof_pids(port, out.returncode, out.stdout, out.stderr)
 
 
 def strict_listeners_on(port: int) -> list[int]:
-    """Return listener PIDs, raising when discovery cannot establish absence.
-
-    The psutil scan is trusted only when conclusive: a read failure (macOS
-    denies the global scan) or an unattributed LISTEN socket both fall back
-    to lsof. A psutil sighting that lsof cannot confirm is an inspection
-    failure — two disagreeing inspections prove nothing, and "saw a
-    listener, cannot name it" must never be reported as "nothing listens".
-    """
     scan = _psutil_listeners_on(port)
     if scan is not None and scan[1]:
         return scan[0]
     lsof_pids = _lsof_listeners_on(port)
-    if scan is not None and not lsof_pids:
-        raise ListenerDiscoveryError(
-            f"listener discovery failed on port {port}: the socket table shows "
-            "a listener that neither psutil nor lsof could attribute to a pid"
-        )
-    return lsof_pids
+    return reconcile_strict_listeners(port, scan[2] if scan is not None else None, lsof_pids)
 
 
 def listener_addrs(port: int) -> set[str]:
-    """Local addresses with a TCP listener on `port`, best-effort.
-
-    psutil is the primary, cross-platform socket-table scan. As with
-    `listeners_on`, macOS may reject the whole scan when any process is
-    unreadable, so POSIX hosts fall back to lsof's machine-readable name fields.
-    An empty set means no listener address could be proven — either none exists
-    or both inspection paths failed — and callers must treat that uncertainty
-    conservatively rather than as proof that no listener exists.
-    """
     import psutil
 
     try:
         conns = psutil.net_connections(kind="tcp")
     except (psutil.Error, OSError):
         return _lsof_listener_name_addrs(port)
-    addrs: set[str] = set()
-    for conn in conns:
-        if conn.status != "LISTEN" or len(conn.laddr) < 2:
-            continue
-        if conn.laddr[1] == port:
-            addrs.add(conn.laddr[0])
-    return addrs
+    rows = [(conn.status, tuple(conn.laddr), conn.pid) for conn in conns]
+    return parse_psutil_listener_addrs(port, rows)
 
 
 def _lsof_listener_name_addrs(port: int) -> set[str]:
-    """`listener_addrs` fallback: lsof's machine-readable name fields (POSIX only)."""
     import subprocess
 
     argv = lsof_argv("-nP", "-Fpn", "-sTCP:LISTEN", f"-iTCP:{port}")
     if argv is None:
         return set()
     try:
-        # S603: static argv; the only interpolated piece is an int port.
         out = base.host.proc.run_bounded(argv, capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired):
         return set()
-    if out.returncode != 0:
-        return set()
-
-    addrs: set[str] = set()
-    for line in out.stdout.splitlines():
-        if not line.startswith("n"):
-            continue
-        host, separator, port_text = line[1:].rpartition(":")
-        if not separator:
-            continue
-        try:
-            if int(port_text) != port:
-                continue
-        except ValueError:
-            continue
-        if host.startswith("[") and host.endswith("]"):
-            host = host[1:-1]
-        if host:
-            addrs.add(host)
-    return addrs
-
-
-LOOPBACK_ALIASES = frozenset({"127.0.0.1", "::1", "localhost", "ip6-localhost"})
+    return parse_lsof_listener_addrs(port, out.returncode, out.stdout)
 
 
 def serves_off_box(*, machine: MachineIdentityReader) -> bool:
-    """Whether this host declares a reachable address other machines can dial.
-
-    The single predicate behind every off-box listener decision (data plane,
-    gateway, ops): the operator's declared `MEIVA_MACHINE_HOST` (`meiva init
-    --machine-host`) is not a loopback alias. The default `localhost` is the
-    single box, which listens on loopback alone.
-    """
     return machine.host() not in LOOPBACK_ALIASES
 
 
 def bind_addrs(*, machine: MachineIdentityReader) -> list[str]:
-    """Loopback plus this host's reachable address, de-duplicated (loopback alone
-    when reachable resolves to localhost — the single-box default).
-
-    The network posture is the operator's declared reachable address
-    (`MEIVA_MACHINE_HOST`, `meiva init --machine-host`), nothing else: the default
-    `localhost` keeps every data-plane listener on loopback, and declaring a
-    private-network address adds that one address. Postgres and its pooler
-    authenticate (SCRAM) whatever they bind. The reachable address is an identity
-    field of the caller-supplied `machine`, never read from a parent process's
-    environment."""
-    host = machine.host()
     out = ["127.0.0.1"]
+    host = machine.host()
     if host not in LOOPBACK_ALIASES:
         out.append(host)
     return out
 
 
-def require_listener(
-    identity: OwnedProcess | None, port: int, *, required: bool = True
+def verify_listener_custody(
+    port: int,
+    *,
+    has_identity: bool,
+    owner_live: bool,
+    owned_pids: Collection[int],
+    listener_pids: Collection[int],
+    required: bool = True,
 ) -> frozenset[int]:
-    """Return the observed listeners only after validating their native owner."""
-    listeners = frozenset(strict_listeners_on(port))
-    if identity is None:
+    listeners = frozenset(listener_pids)
+    if not has_identity:
         if listeners or required:
             raise RuntimeError(f"no owned data-plane process for listener :{port}")
         return listeners
     if required and not listeners:
         raise RuntimeError(f"recorded data-plane process has no listener :{port}; custody retained")
-    owned = {process.pid for process in capture_tree(identity)}
-    if not identity.live() or not listeners <= owned:
+    if not owner_live or not listeners <= set(owned_pids):
         raise RuntimeError(f"data-plane listener :{port} does not belong to the recorded process")
     return listeners
+
+
+def require_listener(
+    identity: OwnedProcess | None, port: int, *, required: bool = True
+) -> frozenset[int]:
+    listeners = strict_listeners_on(port)
+    if identity is None:
+        return verify_listener_custody(
+            port,
+            has_identity=False,
+            owner_live=False,
+            owned_pids=frozenset(),
+            listener_pids=listeners,
+            required=required,
+        )
+    owned = {process.pid for process in capture_tree(identity)}
+    return verify_listener_custody(
+        port,
+        has_identity=True,
+        owner_live=identity.live(),
+        owned_pids=owned,
+        listener_pids=listeners,
+        required=required,
+    )
