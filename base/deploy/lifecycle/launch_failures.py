@@ -24,10 +24,14 @@ from __future__ import annotations
 import json
 from contextlib import suppress
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 import base.paths
 from base.log import logger
+
+
+def _is_obj_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
 
 
 def record(home: Path, sessions: list[str]) -> None:
@@ -80,10 +84,10 @@ def take(home: Path) -> list[str]:
     except json.JSONDecodeError as exc:
         _report_unreadable(target, exc)
         return []
-    if not isinstance(parsed, list):
+    if not _is_obj_list(parsed):
         _report_unreadable(target, ValueError(f"expected a list, got {type(parsed).__name__}"))
         return []
-    return [str(name) for name in cast(list[object], parsed)]
+    return [str(name) for name in parsed]
 
 
 def _report_unreadable(target: object, error: BaseException) -> None:

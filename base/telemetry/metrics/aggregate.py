@@ -206,6 +206,10 @@ def fetch_aggregate(
     )
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 def fetch_agent_rollups(
     conn: psycopg.Connection[Any],
     days: int,
@@ -219,7 +223,7 @@ def fetch_agent_rollups(
     """
     data = read_agent_window(conn, days, since_compact=since_compact, now=now)
     raw: dict[int | None, dict[str, Any]] = data["per_agent"]
-    per_agent = _per_agent_aggs(raw, datetime.now(UTC))
+    per_agent = _per_agent_aggs(raw, _utc_now())
     total = sum(int(r["events"]) for r in raw.values())
     return total, agent_rollups(
         per_agent, _llm_by_agent(data["llm_per_agent"]), data["llm_costs"], data["llm_cache_input"]
@@ -409,7 +413,7 @@ def build_report_from_aggregate(
     names = [s.name for s in sections]
     if len(names) != len(set(names)):
         raise ValueError(f"duplicate metric section names would clobber the JSON: {names}")
-    generated_at = datetime.now(UTC).isoformat()
+    generated_at = _utc_now().isoformat()
     meta: dict[str, Any] = {
         "window_days": days,
         "agent_filter": agent_id,

@@ -3,12 +3,24 @@ from __future__ import annotations
 import errno
 import json
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import Any, TypedDict, TypeGuard
 
 from base.host.runtime_interpreter import external_plugin_read_root
 from base.host.system.hostport import Host
 from base.host.system.probes import display_available
 from base.paths import mcps_dir, meiva_home, repo_root
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
+def _is_server_map(value: object) -> TypeGuard[dict[str, dict[str, Any]]]:
+    return isinstance(value, dict)
 
 
 # meiva:link meiva/mcps/docs/mcps.meiva.okf.md
@@ -48,13 +60,13 @@ class ToolInfo(TypedDict):
 
 # meiva:link meiva/mcps/docs/mcps.meiva.okf.md
 def validate_requirements(spec: dict[str, Any]) -> dict[str, bool]:
-    requires = spec.get("requires")
+    requires: object = spec.get("requires")
     if requires is None:
         return {}
-    if not isinstance(requires, dict):
+    if not _is_object_dict(requires):
         raise MCPError("server 'requires' must be an object or null")
     validated: dict[str, bool] = {}
-    for key, want in cast(dict[object, object], requires).items():
+    for key, want in requires.items():
         if not isinstance(key, str) or key != "display":
             raise MCPError(f"unknown requires key {key!r} in MCP server config")
         if not isinstance(want, bool):
@@ -90,13 +102,10 @@ def server_url(spec: dict[str, Any]) -> str | None:
         raise MCPError(f"server 'url' must be an http(s) endpoint, got {url!r} (expected a string)")
     if spec.get("command") is not None:
         raise MCPError("server declares both 'url' and 'command' — pick one transport")
-    headers = spec.get("headers")
+    headers: object = spec.get("headers")
     if headers is not None and not (
-        isinstance(headers, dict)
-        and all(
-            isinstance(k, str) and isinstance(v, str)
-            for k, v in cast(dict[object, object], headers).items()
-        )
+        _is_object_dict(headers)
+        and all(isinstance(k, str) and isinstance(v, str) for k, v in headers.items())
     ):
         raise MCPError(f"server 'headers' must be a dict of str -> str, got {headers!r}")
     oauth = spec.get("oauth")
@@ -117,20 +126,17 @@ def read_servers(path: Path) -> dict[str, dict[str, Any]]:
     if not path.is_file():
         return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data: object = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
         raise MCPError(f"Failed to read {path}: {type(e).__name__}: {e}") from e
-    if not isinstance(data, dict):
+    if not _is_str_dict(data):
         raise MCPError(f"`{path}` is not a JSON object (got {type(data).__name__})")
-    typed_data = cast(dict[str, Any], data)
-    section = typed_data.get("mcpServers")
+    section: object = data.get("mcpServers")
     if section is None:
         return {}
-    if not isinstance(section, dict):
-        raise MCPError(
-            f"`{path}` mcpServers field is not a dict (got {type(cast(object, section)).__name__})"
-        )
-    return cast(dict[str, dict[str, Any]], section)
+    if not _is_server_map(section):
+        raise MCPError(f"`{path}` mcpServers field is not a dict (got {type(section).__name__})")
+    return section
 
 
 # meiva:link meiva/mcps/docs/mcps.meiva.okf.md

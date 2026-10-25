@@ -40,7 +40,7 @@ import copy
 import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from base.telemetry.metrics.plugin_metrics import MetricSpec, render_targets, render_title
 
@@ -183,6 +183,10 @@ _LOGS_OPTIONS: dict[str, Any] = {"showTime": True, "sortOrder": "Descending"}
 _DEFAULT_SIZE = {"stat": (8, 4)}
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 def _merge(base: dict[str, Any], overrides: dict[str, Any] | None) -> dict[str, Any]:
     """Recursive merge of a look override onto a profile: dict values merge
     key-wise, everything else replaces. Returns a fresh dict."""
@@ -192,8 +196,8 @@ def _merge(base: dict[str, Any], overrides: dict[str, Any] | None) -> dict[str, 
     copied: dict[str, Any] = copy.deepcopy(overrides)
     for key, value in copied.items():
         existing = merged.get(key)
-        if isinstance(value, dict) and isinstance(existing, dict):
-            merged[key] = _merge(cast("dict[str, Any]", existing), cast("dict[str, Any]", value))
+        if _is_str_dict(value) and _is_str_dict(existing):
+            merged[key] = _merge(existing, value)
         else:
             merged[key] = value
     return merged

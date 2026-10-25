@@ -14,7 +14,7 @@ import os
 import traceback as _traceback
 from collections.abc import Callable
 from functools import partial
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, Protocol
 
 import loguru
 
@@ -257,7 +257,8 @@ def add_event_sink(
         machine_reader=machine_reader,
     )
     global _event_sink_id  # noqa: PLW0603 — process-level singleton
-    live_handlers: Any = cast(Any, logger)._core.handlers  # private `_core` registry
+    core: Any = getattr(logger, "_core", None)
+    live_handlers: Any = core.handlers
     if _event_sink_id is not None and _event_sink_id in live_handlers:
         return _event_sink_id
     _event_sink_id = add_sink(

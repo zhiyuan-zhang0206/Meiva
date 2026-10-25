@@ -1,5 +1,2 @@
 [uses]
 "test_override_resolution.py" = ["factory_support.py"]
-
-[debt.first-party-patch]
-"test_provider_construction.py#monkeypatch.setattr base.config.settings.lm.dashscope_base_url" = 1

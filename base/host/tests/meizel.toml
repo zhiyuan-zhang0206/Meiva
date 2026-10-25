@@ -6,7 +6,6 @@ exports = ["daemon_shutdown.py", "daemon_shutdown_child.py", "short_tmp.py"]
 "test_proc.py" = ["_hosting_child.py"]
 
 [debt.first-party-patch]
-"test_private_storage.py#monkeypatch.setattr base.host.private_storage.is_foreign_owned" = 1
 "test_private_storage.py#patch.object base.host.private_storage.is_foreign_owned" = 1
 "test_proc.py#monkeypatch.setattr base.host.proc.capture_tree" = 2
 "test_proc.py#monkeypatch.setattr base.host.proc.wait_owned" = 1
@@ -15,11 +14,7 @@ exports = ["daemon_shutdown.py", "daemon_shutdown_child.py", "short_tmp.py"]
 "test_proc.py#monkeypatch.setattr base.native_process.ownership.pidfd.send_signal" = 1
 "test_proc.py#monkeypatch.setattr base.native_process.ownership.sys" = 1
 
-[debt.restricted-python]
-"test_proc.py#python -c" = 9
-"test_proc.py#python subprocess that runs something other than a literal repository file" = 1
-
 [debt.third-party-patch]
 "test_proc.py#monkeypatch.setattr psutil.Process" = 2
 "test_proc.py#monkeypatch.setattr psutil.Process.children" = 1
-"test_proc.py#monkeypatch.setattr psutil.Process.create_time" = 2
+"test_proc.py#monkeypatch.setattr psutil.Process.create_time" = 1

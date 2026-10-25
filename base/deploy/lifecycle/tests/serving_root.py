@@ -1,10 +1,17 @@
 """Shared root-observation fixture owned by the serving lifecycle package."""
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from base.deploy.lifecycle.start_serving import RootBirth
+
+_override: list[Callable[[Path], RootBirth]] = []
+
+
+def override_observed_root(fn: Callable[[Path], RootBirth]) -> None:
+    _override[:] = [fn]
 
 
 @pytest.fixture
@@ -32,8 +39,11 @@ def serving_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> RootBirth:
         launch_digest="b" * 64,
         runtime=runtime,
     )
+    _override.clear()
 
-    def observed(_home: Path) -> start_serving.RootBirth:
+    def observed(home: Path) -> start_serving.RootBirth:
+        if _override:
+            return _override[0](home)
         return birth
 
     monkeypatch.setattr(start_serving, "observe_root", observed)

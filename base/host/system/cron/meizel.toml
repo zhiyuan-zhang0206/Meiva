@@ -6,7 +6,3 @@ exports = ["health_content.py", "health_job.py", "mechanics.py"]
 [purity]
 "__init__.py" = "strict"
 "health_content.py" = "strict"
-
-[debt.ambient-read]
-"health_job.py#home pathlib.Path.home" = 1
-"mechanics.py#home pathlib.Path.home" = 1

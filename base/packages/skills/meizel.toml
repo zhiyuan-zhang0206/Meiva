@@ -14,10 +14,9 @@ exports = ["index.py", "names.py", "scan.py", "tree.py"]
 "tree.py" = "strict"
 
 [debt.impure-call]
-"index.py#Path.is_dir" = 4
-"index.py#Path.is_file" = 2
+"index.py#Path.is_dir" = 2
 "index.py#Path.read_text" = 2
-"index.py#Path.stat" = 2
+"index.py#Path.stat" = 1
 "project_roots.py#Path.exists" = 1
 "project_roots.py#Path.is_dir" = 2
 "project_roots.py#Path.is_file" = 1

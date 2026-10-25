@@ -8,7 +8,8 @@ import pytest
 
 from base import cluster
 from base.cluster import ports as cluster_ports
-from base.config import FIELD_INFOS, get_field
+from base.config import get_field
+from base.config.config_registry import field_infos
 from base.host.env import port_lease, registry
 from base.host.env.port_table import FIXED_PORTS
 
@@ -32,7 +33,7 @@ def test_the_watchdog_slots_no_daemon_binds_are_not_in_the_table(slot: str, port
     assert port not in FIXED_PORTS.values()
     assert slot not in get_type_hints(cluster.ClusterPorts)
     assert slot not in registry.health_port_env_aliases()
-    assert f"{slot}_health_port" not in FIELD_INFOS
+    assert f"{slot}_health_port" not in field_infos()
 
 
 def test_fixed_ports_are_unique() -> None:
@@ -56,7 +57,7 @@ def test_no_declared_port_default_lands_in_the_lease_band() -> None:
     band = range(port_lease.BAND_FIRST, port_lease.BAND_LAST + 1)
     landed = {
         name: info.default
-        for name, info in FIELD_INFOS.items()
+        for name, info in field_infos().items()
         if name.endswith(("_port", "_url", "_uri")) and _declared_port(info.default) in band
     }
     assert not landed, f"settings defaults inside the lease band: {landed}"
@@ -83,6 +84,7 @@ def test_a_new_home_records_the_table_as_its_own_copy() -> None:
 
 
 def test_settings_defaults_match_the_table() -> None:
+    infos = field_infos()
     port_fields = {
         "gateway_port": "gateway",
         "browser_cdp_port": "browser",
@@ -90,14 +92,14 @@ def test_settings_defaults_match_the_table() -> None:
         "memory_search_port": "memory_search",
     }
     for field, slot in port_fields.items():
-        assert FIELD_INFOS[field].default == FIXED_PORTS[slot], field
+        assert infos[field].default == FIXED_PORTS[slot], field
     url_fields = {
         "gateway_health_url": "gateway",
         "frontend_healthcheck_url": "frontend",
         "memory_search_uri": "memory_search",
     }
     for field, slot in url_fields.items():
-        default = FIELD_INFOS[field].default
+        default = infos[field].default
         assert isinstance(default, str)
         assert urlsplit(default).port == FIXED_PORTS[slot], field
 
@@ -105,7 +107,7 @@ def test_settings_defaults_match_the_table() -> None:
 def test_the_session_holds_no_table_port_in_any_setting(process_config: object) -> None:
     table = set(FIXED_PORTS.values())
     holders: dict[str, object] = {}
-    for name in sorted(FIELD_INFOS):
+    for name in sorted(field_infos()):
         value = get_field(name)
         if isinstance(value, int) and not isinstance(value, bool) and value in table:
             holders[name] = value

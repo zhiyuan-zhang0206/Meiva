@@ -4,7 +4,6 @@ import hashlib
 import io
 import json
 import lzma
-import platform
 import shutil
 import tarfile
 import urllib.error
@@ -15,6 +14,7 @@ from pathlib import Path
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.host.net.resilience import Policy, retry
 from base.log import logger
+from base.native_process.os_platform import Platform
 
 __all__ = [
     "DOWNLOAD_ATTEMPTS",
@@ -32,6 +32,7 @@ __all__ = [
     "pgvector_extension_files",
     "pgvector_platform_key",
     "platform_key",
+    "resolve_host_platform",
     "runtime_root",
     "vendored_pg_bin_dir",
     "vendored_pg_dir",
@@ -71,9 +72,21 @@ PGVECTOR_ARTIFACTS: dict[str, tuple[str, str]] = {
 }
 
 
+def resolve_host_platform(
+    *, system: str | None = None, machine: str | None = None
+) -> tuple[str, str]:
+    if system is not None and machine is not None:
+        return system, machine
+    current = Platform.current()
+    default_system = "Darwin" if current.system == "darwin" else "Linux"
+    return (
+        system if system is not None else default_system,
+        machine if machine is not None else current.machine,
+    )
+
+
 def platform_key(*, system: str | None = None, machine: str | None = None) -> str:
-    sys_name = system if system is not None else platform.system()
-    arch = machine if machine is not None else platform.machine()
+    sys_name, arch = resolve_host_platform(system=system, machine=machine)
     if sys_name == "Darwin":
         return "darwin"
     if sys_name == "Linux":
@@ -232,8 +245,7 @@ def _extract_pg(jar_bytes: bytes, target: Path) -> None:
 
 
 def pgvector_platform_key(*, system: str | None = None, machine: str | None = None) -> str:
-    sys_name = system if system is not None else platform.system()
-    arch = machine if machine is not None else platform.machine()
+    sys_name, arch = resolve_host_platform(system=system, machine=machine)
     if sys_name == "Darwin":
         if arch == "arm64":
             return "darwin-arm64"

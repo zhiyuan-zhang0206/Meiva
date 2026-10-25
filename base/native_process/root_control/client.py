@@ -17,10 +17,11 @@ import struct
 import sys
 from collections.abc import Mapping
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 import psutil
 
+from base.native_process.os_platform import is_linux, is_macos
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import (
     MAX_MESSAGE_BYTES,
@@ -53,12 +54,15 @@ class RootClientError(RuntimeError):
     """The root supervisor could not be reached, or answered with garbage."""
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 def native_identity(value: object) -> OwnedProcess:
     """Validate a persisted native birth from a root status row."""
-    if not isinstance(value, dict):
+    if not _is_object_dict(value):
         raise RootClientError("root status omitted native identity")
-    row = cast("dict[str, object]", value)
-    pid, birth, starttime = row.get("pid"), row.get("create_time"), row.get("starttime")
+    pid, birth, starttime = value.get("pid"), value.get("create_time"), value.get("starttime")
     if (
         isinstance(pid, bool)
         or not isinstance(pid, int)
@@ -78,9 +82,9 @@ def native_identity(value: object) -> OwnedProcess:
 
 def peer_pid(sock: socket.socket) -> int:
     """Kernel-reported peer; a JSON PID cannot authenticate a local socket."""
-    if sys.platform == "darwin":
+    if is_macos():
         return sock.getsockopt(0, 2)  # SOL_LOCAL / LOCAL_PEERPID
-    if sys.platform == "linux":
+    if is_linux():
         return struct.unpack("3i", sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[0]
     raise RootClientError("native Unix peer identity is unavailable on this platform")
 
@@ -90,10 +94,10 @@ def validate_status_peer(raw: bytes, peer: OwnedProcess) -> None:
     if not response["ok"]:
         return
     body = response.get("result")
-    if not isinstance(body, dict):
+    if not _is_object_dict(body):
         raise RootClientError("root status omitted its native identity")
-    root = native_identity(cast("dict[str, object]", body).get("root"))
-    if sys.platform == "linux" and (root.starttime is None or peer.starttime is None):
+    root = native_identity(body.get("root"))
+    if is_linux() and (root.starttime is None or peer.starttime is None):
         raise RootClientError("exact native IPC peer requires observed Linux start ticks")
     if not root.same_birth(peer) or not peer.live():
         raise RootClientError("root status does not name the exact native IPC peer")
@@ -105,10 +109,9 @@ def root_process(*, home: Path, timeout: float = 2.0) -> OwnedProcess | None:
 
     response = RootClient(root_run_dir(home) / "meiva-root.sock", timeout=timeout).status()
     raw = response.get("result")
-    if response["ok"] is not True or not isinstance(raw, dict):
+    if response["ok"] is not True or not _is_object_dict(raw):
         raise RootClientError("root refused its native status")
-    body = cast("dict[str, object]", raw)
-    root = native_identity(body.get("root"))
+    root = native_identity(raw.get("root"))
     return root if root.live() else None
 
 

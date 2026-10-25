@@ -7,13 +7,13 @@ off-box Redis clients through a relay on that address (`services/redis_bridge`).
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
 from base.cluster.record import get_record
 from base.host.net.predicates import is_loopback_host
+from base.native_process.os_platform import is_macos
 
 
 class RedisBridgeEndpoint(NamedTuple):
@@ -37,7 +37,8 @@ def redis_bridge_endpoint(
     Raises:
         RedisBridgeUnconfiguredError: the relay is needed but `home` has no cluster record.
     """
-    if (platform or sys.platform) != "darwin" or remote_data_plane():
+    on_macos = is_macos() if platform is None else platform == "darwin"
+    if not on_macos or remote_data_plane():
         return None
     listen_host = machine_host()
     if is_loopback_host(listen_host):

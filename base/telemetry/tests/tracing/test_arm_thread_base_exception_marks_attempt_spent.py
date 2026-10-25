@@ -14,6 +14,7 @@ from base.telemetry.tests.capture.trace_process import run_trace_scenario
 from base.telemetry.tests.otlp.identity_inputs import machine_identity
 from base.telemetry.tests.test_tracing import (
     CollectorStubServer,
+    stub_traceloop_init,
     trace_config,
     wait_init_resolved,
 )
@@ -49,7 +50,7 @@ def test_arm_thread_base_exception_marks_attempt_spent(
         calls.append(1)
         raise SystemExit("sdk guard exit")
 
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", _exit_sdk)
+    stub_traceloop_init(monkeypatch, _exit_sdk)
 
     initialize_tracing(
         machine=machine_identity(),

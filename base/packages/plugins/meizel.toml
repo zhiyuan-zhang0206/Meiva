@@ -33,7 +33,7 @@ exports = ["activation.py", "config_face.py", "config_registration.py", "config_
 "extensions.py#any GraphHook.__call__.state" = 1
 
 [debt.impure-edge]
-"config_registration.py#base/config/__init__.py" = 2
+"config_registration.py#base/config/__init__.py" = 1
 "config_registration.py#base/config/service_read.py" = 1
 "config_registration.py#base/packages/plugin_config_images.py" = 1
 "config_registration.py#base/packages/plugins/config_face.py" = 1

@@ -11,11 +11,4 @@ exports = ["home_lifecycle_locks.py", "launch_failures.py", "pause_markers.py", 
 "home_lifecycle_locks.py#clock datetime.datetime.now" = 1
 "home_lifecycle_locks.py#pid os.getpid" = 1
 "start_serving.py#random uuid.uuid4" = 1
-"status_journal.py#pid os.getpid" = 3
-
-[debt.type-cast]
-"launch_failures.py#cast take" = 1
-"start_serving.py#cast observe_root" = 2
-"status_journal.py#cast _parse_phases" = 2
-"status_journal.py#cast _parse_resumed_from" = 1
-"status_journal.py#cast read" = 1
+"status_journal.py#pid os.getpid" = 1

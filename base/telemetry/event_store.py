@@ -26,10 +26,11 @@ import threading
 import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any, LiteralString, cast
+from typing import Any, LiteralString, TypeGuard
 
 import psycopg
 from psycopg.types.json import Jsonb
+from psycopg_pool import ConnectionPool
 
 from base.db import Database
 from base.events.contract import EVENTS
@@ -129,14 +130,14 @@ def ensure_partitions(conn: psycopg.Connection[Any]) -> None:
 
 
 _lock = threading.Lock()
-_pool: Any = None
+_pool: ConnectionPool[Any] | None = None
 _disabled = False
 failures = 0
 retry_at = 0.0
 _ensured_month: tuple[int, int] | None = None
 
 
-def _open_pool(db: Database) -> Any:
+def _open_pool(db: Database) -> ConnectionPool[Any]:
     global _pool  # noqa: PLW0603
     if _pool is None:
         _pool = db.pool(min_size=0, max_size=1, timeout=_POOL_TIMEOUT_S)
@@ -263,11 +264,18 @@ def set_enabled(*, enabled: bool) -> bool:
     return previous
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 def jsonl_rows(lines: Sequence[bytes]) -> list[dict[str, Any]]:
     """Insert records for complete mirror lines."""
     records: list[dict[str, Any]] = []
     for raw in lines:
-        row = cast("dict[str, Any]", json.loads(raw))
+        parsed = json.loads(raw)
+        if not _is_str_dict(parsed):
+            continue
+        row = parsed
         if row["category"] not in STORED_CATEGORIES or not is_persisted(
             row["event_name"], row["level"]
         ):

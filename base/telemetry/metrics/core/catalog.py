@@ -36,8 +36,9 @@ are "core".
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from types import ModuleType
-from typing import Any, cast
+from typing import Protocol, TypeGuard
 
 from base.telemetry.metrics.core import (
     ci,
@@ -85,6 +86,14 @@ def validate_core_metric(spec: MetricSpec) -> MetricSpec:
     return spec.model_copy(update={"plugin": "core"})
 
 
+class _CoreMetricsModule(Protocol):
+    def core_metrics(self) -> Sequence[MetricSpec]: ...
+
+
+def _is_core_metrics_module(module: ModuleType) -> TypeGuard[_CoreMetricsModule]:
+    return hasattr(module, "core_metrics")
+
+
 def collect_core_metrics(
     modules: tuple[ModuleType, ...] = CORE_DEFINITION_MODULES,
 ) -> list[MetricSpec]:
@@ -96,7 +105,9 @@ def collect_core_metrics(
     """
     collected: dict[str, MetricSpec] = {}
     for module in modules:
-        for spec in cast("Any", module).core_metrics():
+        if not _is_core_metrics_module(module):
+            raise TypeError(f"core metric module {module!r} has no core_metrics()")
+        for spec in module.core_metrics():
             if spec.name in collected:
                 raise DuplicateMetric(
                     f"core metric {spec.name!r} already registered — names are global across core metrics."

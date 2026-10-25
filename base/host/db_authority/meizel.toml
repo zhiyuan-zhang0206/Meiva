@@ -8,13 +8,4 @@ exports = ["api.py", "delivery.py", "ledger.py", "model.py", "tests", "unit.py"]
 "unit.py" = ["api.py", "delivery.py", "ledger.py", "model.py"]
 
 [debt.ambient-read]
-"delivery.py#random secrets.token_urlsafe" = 1
-"ledger.py#pid os.geteuid" = 1
-"ledger.py#random secrets.token_urlsafe" = 2
-"ledger.py#random uuid.uuid4" = 1
-"unit.py#clock time.time" = 2
-"unit.py#random secrets.token_bytes" = 2
-"unit.py#random secrets.token_hex" = 1
-
-[debt.any-collaborator]
-"ledger.py#any replace_ledger_fields.updates" = 1
+"unit.py#clock time.time" = 1

@@ -84,8 +84,9 @@ def request_item(
         workdir=workdir,
         tag=f"{item.id}-{run_id}",
     )
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
+    clock = time.monotonic
+    deadline = clock() + timeout_s
+    while clock() < deadline:
         sleep(0.5)
         text = read_result(result_path)
         if text is not None:

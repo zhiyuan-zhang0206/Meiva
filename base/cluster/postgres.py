@@ -11,14 +11,13 @@ import math
 import os
 import signal
 import subprocess
-import sys
 import time
 from collections.abc import Callable, Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, Protocol
 
 import psutil
 from pydantic import Field, model_validator
@@ -29,7 +28,7 @@ from base.host.verified_file import regular_bytes
 from base.log import logger
 from base.native_process.evidence import EvidenceModel, ExpectedProcess
 from base.native_process.kernel_identity import native_boot_id
-from base.native_process.os_platform import file_lock
+from base.native_process.os_platform import Platform, file_lock
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from base.paths.private_dir import ensure_private_dir
 
@@ -81,8 +80,7 @@ def _inode(path: Path) -> tuple[int, int]:
 
 
 def boot_id() -> str:
-    if sys.platform not in {"linux", "darwin"}:
-        raise RuntimeError("owned PostgreSQL requires a supported POSIX platform")
+    Platform.current()
     boot = native_boot_id()
     if boot is None:
         raise RuntimeError("cannot observe PostgreSQL native boot scope")
@@ -105,7 +103,7 @@ def read_receipt(data: Path) -> Receipt | None:
     except FileNotFoundError:
         return None
     receipt = Receipt.model_validate_json(raw)
-    if receipt.data != str(data) or receipt.platform != sys.platform:
+    if receipt.data != str(data) or receipt.platform != Platform.current().system:
         raise RuntimeError("PostgreSQL custody names another data directory or platform")
     return receipt
 
@@ -464,7 +462,7 @@ def start(
                 data=str(data),
                 directory=_inode(data),
                 port=port,
-                platform=cast("Literal['linux', 'darwin']", sys.platform),
+                platform=Platform.current().system,
                 boot_id=boot_id(),
                 state="pending",
             ),
@@ -575,17 +573,11 @@ def stop(
         require_listener(owner, receipt.port, required=False)
         tree = capture_tree(owner)
         owner.send_signal(signal.SIGINT)  # PostgreSQL fast, checkpointed shutdown.
-        deadline = time.monotonic() + timeout
         escalation: Escalation | None = None
-        while any(member.live() for member in tree):
-            if time.monotonic() >= deadline:
-                if immediate_wait is None or kill_wait is None:
-                    raise RuntimeError(
-                        "PostgreSQL native shutdown did not complete; custody retained"
-                    )
-                escalation = _escalate(owner, tree, timeout, immediate_wait, kill_wait)
-                break
-            time.sleep(0.05)
+        if not _wait_all_gone(tree, timeout):
+            if immediate_wait is None or kill_wait is None:
+                raise RuntimeError("PostgreSQL native shutdown did not complete; custody retained")
+            escalation = _escalate(owner, tree, timeout, immediate_wait, kill_wait)
         require_closed(data, receipt, processes=live_processes())
         require_listener(None, receipt.port, required=False)
         if retained_children is not None:

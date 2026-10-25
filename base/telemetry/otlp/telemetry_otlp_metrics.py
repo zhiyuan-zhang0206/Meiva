@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from base.telemetry.observability import cluster_label
 from base.telemetry.otlp.plans import (
@@ -52,6 +52,21 @@ EVENT_LOOP_LAG_BUCKETS_MS = (
 )
 
 
+class _LogExporter(Protocol):
+    @property
+    def export(self) -> Callable[..., Any]: ...
+
+    def shutdown(self) -> None: ...
+
+
+class MetricsResource(Protocol):
+    @property
+    def attributes(self) -> Mapping[str, Any]: ...
+
+    @property
+    def schema_url(self) -> str: ...
+
+
 class EventDimensionResourceExporter:
     """Give each event its own OTLP resource dimensions before serialization.
 
@@ -63,10 +78,10 @@ class EventDimensionResourceExporter:
     individual record; the encoder then emits resource-homogeneous groups.
     """
 
-    def __init__(self, exporter: Any) -> None:
-        self._exporter = exporter
+    def __init__(self, exporter: _LogExporter) -> None:
+        self._exporter: Any = exporter
 
-    def export(self, batch: Sequence[Any]) -> Any:
+    def export(self, batch: Sequence[Any]) -> object:
         from opentelemetry.sdk._logs import ReadableLogRecord
         from opentelemetry.sdk.resources import Resource
 
@@ -122,7 +137,7 @@ def metric_views() -> list[Any]:
     return views
 
 
-def metrics_resource(*, home: Path | None = None) -> Any:
+def metrics_resource(*, home: Path | None = None) -> MetricsResource:
     """The metrics-side OTel Resource: `service.name=meiva-<process>` (the
     bounded process dimension) + a per-process-instance `service.instance.id`.
     Without it every series lands as job="unknown_service" and two same-named
@@ -209,10 +224,11 @@ def build_providers(
     )
     if keep_reader is not None:
         keep_reader(reader)
+    resource: Any = metrics_resource(home=home)
     metrics = MeterProvider(
         shutdown_on_exit=plan.shutdown_on_exit,
         metric_readers=[reader],
-        resource=metrics_resource(home=home),
+        resource=resource,
         views=metric_views(),
     )
     if keep_metrics is not None:

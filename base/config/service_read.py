@@ -54,7 +54,7 @@ class _DeferredReadModel:
         self._model: Any = None
         self._lock = threading.Lock()
 
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name: str) -> object:
         with self._lock:
             if self._build is not None:
                 model = self._build()
@@ -85,7 +85,7 @@ class ConfigAuthority:
 
     @classmethod
     def deferred(
-        cls, *, runtime: Any, build_all_domains: Callable[[], Any], env_path: Path
+        cls, *, runtime: _ProfiledModel, build_all_domains: Callable[[], Any], env_path: Path
     ) -> ConfigAuthority:
         """Retain a root's complete-model factory without forcing a lite process to upgrade.
 

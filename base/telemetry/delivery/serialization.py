@@ -3,11 +3,53 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from hashlib import sha256
-from typing import Any
+from typing import Any, Protocol
 
 
-def event_payload(event: Any) -> dict[str, Any]:
+class _SerializableEvent(Protocol):
+    @property
+    def ts(self) -> datetime: ...
+
+    @property
+    def trace_id(self) -> str | None: ...
+
+    @property
+    def span_id(self) -> str | None: ...
+
+    @property
+    def agent_id(self) -> int | None: ...
+
+    @property
+    def machine(self) -> str: ...
+
+    @property
+    def cluster(self) -> str: ...
+
+    @property
+    def process(self) -> str: ...
+
+    @property
+    def category(self) -> str: ...
+
+    @property
+    def event_name(self) -> str: ...
+
+    @property
+    def level(self) -> str: ...
+
+    @property
+    def source(self) -> str: ...
+
+    @property
+    def target_agent_id(self) -> int | None: ...
+
+    @property
+    def attributes(self) -> dict[str, Any]: ...
+
+
+def event_payload(event: _SerializableEvent) -> dict[str, Any]:
     """Return the persistent shape without its derived surrogate id."""
     return {
         "ts": event.ts.isoformat(),
@@ -26,11 +68,11 @@ def event_payload(event: Any) -> dict[str, Any]:
     }
 
 
-def event_line(event: Any) -> str:
+def event_line(event: _SerializableEvent) -> str:
     """Serialize the one byte representation used by JSONL, OTLP, and Loki."""
     return json.dumps(event_payload(event), default=str, separators=(",", ":"), ensure_ascii=False)
 
 
-def event_line_digest(event: Any) -> str:
+def event_line_digest(event: _SerializableEvent) -> str:
     """Return the full byte digest retained by producer receipts."""
     return sha256(event_line(event).encode()).hexdigest()

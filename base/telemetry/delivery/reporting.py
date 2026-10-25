@@ -11,7 +11,6 @@ from __future__ import annotations
 import contextlib
 import sys
 from collections.abc import Generator
-from typing import Any
 
 # Loguru extra key marking the emitter's own diagnostics. Records carrying it
 # are filtered OUT of the emitter adapter's sink (see
@@ -22,7 +21,7 @@ NO_EMITTER = "_no_emitter"
 
 
 def report_no_pipeline(
-    message: str, *, level: str = "warning", exc: BaseException | None = None, **extra: Any
+    message: str, *, level: str = "warning", exc: BaseException | None = None, **extra: object
 ) -> None:
     """Log a drain-thread diagnostic through loguru, marked `NO_EMITTER` so
     the emitter adapter skips it; `exc` attaches that exception's traceback.

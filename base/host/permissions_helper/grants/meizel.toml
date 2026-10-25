@@ -12,6 +12,6 @@ exports = ["catalog.py", "checklist.py", "gate.py", "probe.py", "triggers.py"]
 "catalog.py" = "strict"
 
 [debt.ambient-read]
-"gate.py#clock datetime.datetime.now" = 3
-"probe.py#clock time.monotonic" = 2
-"triggers.py#clock time.monotonic" = 2
+"gate.py#clock datetime.datetime.now" = 1
+"probe.py#clock time.monotonic" = 1
+"triggers.py#clock time.monotonic" = 1

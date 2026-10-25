@@ -50,9 +50,10 @@ def platform_tag() -> str | None:
     arch = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "amd64", "amd64": "amd64"}.get(machine)
     if arch is None:
         return None
-    if platform.system() == "Darwin":
+    sys_name = platform.system()
+    if sys_name == "Darwin":
         return f"darwin_{arch}"
-    if platform.system() == "Linux":
+    if sys_name == "Linux":
         return f"linux_{arch}"
     return None
 

@@ -22,12 +22,11 @@ import shlex
 import shutil
 import socket
 import subprocess
-import sys
 import tempfile
 from collections.abc import Generator, Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
-from typing import NamedTuple, TypedDict, cast
+from typing import NamedTuple, TypedDict, TypeGuard
 
 from base.cluster.dataplane import pg_throwaway_base as _throwaway_base
 from base.cluster.dataplane.pg_foreground import (
@@ -96,8 +95,9 @@ def pg_tool(
     found = shutil.which(name) if path_env is None else shutil.which(name, path=path_env)
     if found:
         return Path(found)
+    host = "darwin" if is_macos() else "linux"
     raise RuntimeError(
-        f"Cannot locate pg tool {name!r} on {sys.platform} — "
+        f"Cannot locate pg tool {name!r} on {host} — "
         "install PostgreSQL 17 or set MEIVA_PG_* (MEIVA_PG_BIN etc.) for a custom pg install"
     )
 
@@ -266,6 +266,10 @@ class _OwnerRecord(TypedDict):
     port: int
 
 
+def _is_owner_record(value: object) -> TypeGuard[_OwnerRecord]:
+    return isinstance(value, dict)
+
+
 def _read_lock_body(fd: int) -> _OwnerRecord | None:
     """The JSON owner record from a lock fd, or None when unreadable. A run killed
     between creating the lock and writing it leaves a truncated body; that is a
@@ -276,9 +280,9 @@ def _read_lock_body(fd: int) -> _OwnerRecord | None:
         rec = json.loads(os.read(fd, 4096))
     except (ValueError, UnicodeDecodeError):
         return None
-    if not isinstance(rec, dict):
+    if not _is_owner_record(rec):
         return None
-    return cast(_OwnerRecord, rec)
+    return rec
 
 
 def _owner_detail(fd: int) -> str:

@@ -22,10 +22,11 @@ from collections.abc import Generator
 from pathlib import Path
 
 import base.paths
-from base.host.atomic_io import fsync_parent, write_text_atomic
+from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.native_process.os_platform import LockTimeoutError, file_lock
 
 _RESOURCE_LOCK_TIMEOUT_S = 30.0
+_WRITER = AtomicWriter(SYSTEM_FS)
 
 _log = logging.getLogger("base.deploy.lifecycle.home_lifecycle_locks")
 
@@ -51,19 +52,15 @@ def _last_holder(path: Path) -> str:
         return "unknown"
 
 
-def _fsync_parent(path: Path) -> None:
-    fsync_parent(path)
-
-
-def write_atomic(path: Path, payload: dict[str, object]) -> None:
+def write_atomic(path: Path, payload: dict[str, object], *, writer: AtomicWriter) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_text_atomic(
+    writer.write_text(
         path,
         json.dumps(payload, separators=(",", ":"), sort_keys=True),
         prefix=".deploy-state-",
     )
     try:
-        _fsync_parent(path)
+        writer.fsync_parent(path)
     except OSError:
         # os.replace is the visible commit point; durability is degraded, but
         # the committed sidecar stays truthful.
@@ -89,14 +86,14 @@ def _diagnostic_lock(path: Path, *, purpose: str, timeout_s: float) -> Generator
                 "since": dt.datetime.now(dt.UTC).isoformat(),
             }
             try:
-                write_atomic(holder_path(path), {**holder, "state": "held"})
+                write_atomic(holder_path(path), {**holder, "state": "held"}, writer=_WRITER)
             except OSError:
                 _log.warning("[home-lifecycle-locks] could not record lock holder", exc_info=True)
             try:
                 yield
             finally:
                 try:
-                    write_atomic(holder_path(path), {**holder, "state": "released"})
+                    write_atomic(holder_path(path), {**holder, "state": "released"}, writer=_WRITER)
                 except OSError:
                     _log.warning(
                         "[home-lifecycle-locks] could not mark released lock holder", exc_info=True

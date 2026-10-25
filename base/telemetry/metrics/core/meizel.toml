@@ -8,6 +8,3 @@ exports = ["catalog.py"]
 
 [purity]
 "." = "strict"
-
-[debt.type-cast]
-"catalog.py#cast collect_core_metrics" = 1

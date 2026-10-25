@@ -124,33 +124,21 @@ def test_hosting_exec_domain_follows_the_session_through_a_broken_parent_chain(
 # process Python spawns is a *launcher* that starts the real work and then goes
 # to sleep. Killing only the top process leaves the work running.
 
-_PARENT_SRC = """
-import pathlib, subprocess, sys, time
-child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
-pathlib.Path(sys.argv[1]).write_text(str(child.pid))
-time.sleep(300)
-"""
+_PARENT_SCENARIO = "parent_long"
 
 # A parent whose grandchild exits on its own and is never reaped: the grandchild
 # is a zombie child by the time the timeout enumerates the tree, which is the
 # "descendant went away before the kill" case in its deterministic form.
-_PARENT_SHORTLIVED_CHILD_SRC = """
-import pathlib, subprocess, sys, time
-child = subprocess.Popen([sys.executable, "-c", ""])
-pathlib.Path(sys.argv[1]).write_text(str(child.pid))
-time.sleep(300)
-"""
+_PARENT_SHORTLIVED_CHILD_SCENARIO = "parent_short"
 
 _TIMEOUT_S = 3.0
 
 
-def _fixture(tmp_path: Path, src: str) -> tuple[list[str], Path]:
+def _fixture(tmp_path: Path, scenario: str) -> tuple[list[str], Path]:
     """Write a parent script; return its argv and the path it reports its
     grandchild's pid to."""
-    script = tmp_path / "parent.py"
-    script.write_text(src)
     pid_file = tmp_path / "grandchild.pid"
-    return [sys.executable, str(script), str(pid_file)], pid_file
+    return [sys.executable, str(_HOSTING_CHILD), scenario, str(pid_file)], pid_file
 
 
 def _grandchild_pid(pid_file: Path) -> int:
@@ -188,7 +176,7 @@ def test_plain_subprocess_run_leaks_the_grandchild(tmp_path: Path) -> None:
     This is the leak. If a future CPython ever tree-kills, this test fails — and
     that failure is the news, not a break.
     """
-    argv, pid_file = _fixture(tmp_path, _PARENT_SRC)
+    argv, pid_file = _fixture(tmp_path, _PARENT_SCENARIO)
     with pytest.raises(subprocess.TimeoutExpired):
         subprocess.run(argv, timeout=_TIMEOUT_S, check=False)  # noqa: S603 — fixture argv
     gpid = _grandchild_pid(pid_file)
@@ -202,7 +190,7 @@ def test_run_bounded_kills_the_whole_tree(tmp_path: Path) -> None:
     """`run_bounded` on the same fixture: parent AND grandchild are gone, and
     `TimeoutExpired` still propagates so a caller that treats a timeout as a
     fetch failure is unaffected."""
-    argv, pid_file = _fixture(tmp_path, _PARENT_SRC)
+    argv, pid_file = _fixture(tmp_path, _PARENT_SCENARIO)
     with pytest.raises(subprocess.TimeoutExpired) as caught:
         run_bounded(argv, timeout=_TIMEOUT_S, capture_output=True, text=True)
     gpid = _grandchild_pid(pid_file)
@@ -216,7 +204,7 @@ def test_run_bounded_kills_the_whole_tree(tmp_path: Path) -> None:
 def test_run_bounded_tolerates_a_descendant_that_already_exited(tmp_path: Path) -> None:
     """A descendant gone before the kill is normal, not an error: the timeout
     still surfaces as `TimeoutExpired` and the tree still ends up dead."""
-    argv, pid_file = _fixture(tmp_path, _PARENT_SHORTLIVED_CHILD_SRC)
+    argv, pid_file = _fixture(tmp_path, _PARENT_SHORTLIVED_CHILD_SCENARIO)
     with pytest.raises(subprocess.TimeoutExpired):
         run_bounded(argv, timeout=_TIMEOUT_S, capture_output=True, text=True)
     assert _wait_dead(_grandchild_pid(pid_file))
@@ -244,11 +232,13 @@ def test_kill_process_tree_skips_stale_ancestry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A stale children() map must not authorize signalling an unrelated PID."""
-    argv, pid_file = _fixture(tmp_path, _PARENT_SRC)
+    argv, pid_file = _fixture(tmp_path, _PARENT_SCENARIO)
     real_children = psutil.Process.children
     with (
         subprocess.Popen(argv) as parent,  # noqa: S603 - test-owned interpreter and script
-        subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"]) as unrelated,
+        subprocess.Popen(
+            [sys.executable, "base/host/tests/_hosting_child.py", "sleep"]
+        ) as unrelated,
     ):
         try:
             deadline = time.monotonic() + 5
@@ -324,13 +314,8 @@ def test_tree_escalation_survives_birth_wall_clock_step(
 ) -> None:
     """The captured process ignores TERM; changing its wall reading cannot spare it."""
     ready, terminated = tmp_path / "ready", tmp_path / "term"
-    source = (
-        "import pathlib,signal,time,sys; "
-        "signal.signal(signal.SIGTERM,lambda *_: pathlib.Path(sys.argv[2]).touch()); "
-        "pathlib.Path(sys.argv[1]).touch(); time.sleep(30)"
-    )
     child = subprocess.Popen(  # noqa: S603 -- test-owned interpreter and fixed fixture source.
-        [sys.executable, "-I", "-c", source, str(ready), str(terminated)]
+        [sys.executable, "-I", str(_HOSTING_CHILD), "ignore_term", str(ready), str(terminated)]
     )
     shifted = threading.Event()
     real_birth = psutil.Process.create_time
@@ -360,7 +345,6 @@ def test_tree_escalation_survives_birth_wall_clock_step(
     finally:
         if watcher.ident is not None:
             watcher.join(timeout=6)
-        monkeypatch.setattr(psutil.Process, "create_time", real_birth)
         child.kill()
         child.wait(timeout=5)
 
@@ -372,7 +356,7 @@ def test_run_bounded_returns_a_completed_process() -> None:
     """The happy path is `subprocess.run`'s: returncode + captured output, and no
     exception on a non-zero exit."""
     result = run_bounded(
-        [sys.executable, "-c", "import sys; print('out'); sys.exit(3)"],
+        [sys.executable, str(_HOSTING_CHILD), "exit_with", "out", "3"],
         timeout=30.0,
         capture_output=True,
         text=True,
@@ -385,14 +369,14 @@ def test_run_bounded_rejects_check() -> None:
     """There is deliberately no `check=`; a caller assuming run's semantics gets
     a TypeError rather than a silently ignored kwarg."""
     with pytest.raises(TypeError):
-        run_bounded([sys.executable, "-c", ""], timeout=30.0, check=True)
+        run_bounded([sys.executable, str(_HOSTING_CHILD), "noop"], timeout=30.0, check=True)
 
 
 def test_run_bounded_rejects_capture_output_with_explicit_pipes() -> None:
     """`capture_output` must not silently overwrite a caller's own stdout."""
     with pytest.raises(ValueError, match="capture_output"):
         run_bounded(
-            [sys.executable, "-c", ""],
+            [sys.executable, str(_HOSTING_CHILD), "noop"],
             timeout=30.0,
             capture_output=True,
             stdout=subprocess.DEVNULL,
@@ -448,7 +432,7 @@ def test_timeout_stderr_tail_bounds_the_number_of_lines() -> None:
 
 
 def test_child_state_attached_for_a_live_child() -> None:
-    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    proc = subprocess.Popen([sys.executable, "base/host/tests/_hosting_child.py", "sleep"])
     try:
         assert child_state(proc.pid, os.getpid()) == "attached"
     finally:
@@ -457,7 +441,7 @@ def test_child_state_attached_for_a_live_child() -> None:
 
 
 def test_child_state_detached_for_a_live_non_child() -> None:
-    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    proc = subprocess.Popen([sys.executable, "base/host/tests/_hosting_child.py", "sleep"])
     try:
         # The child's parent is THIS process, never this process's own parent.
         assert child_state(proc.pid, os.getppid()) == "detached"
@@ -467,13 +451,13 @@ def test_child_state_detached_for_a_live_non_child() -> None:
 
 
 def test_child_state_missing_for_a_reaped_pid() -> None:
-    proc = subprocess.Popen([sys.executable, "-c", "import sys; sys.exit(0)"])
+    proc = subprocess.Popen([sys.executable, "base/host/tests/_hosting_child.py", "noop"])
     proc.wait()
     assert child_state(proc.pid, os.getpid()) == "missing"
 
 
 def test_child_state_missing_for_a_zombie() -> None:
-    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    proc = subprocess.Popen([sys.executable, "base/host/tests/_hosting_child.py", "sleep"])
     proc.kill()
     handle = psutil.Process(proc.pid)
     deadline = time.monotonic() + 5.0

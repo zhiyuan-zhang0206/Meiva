@@ -15,8 +15,6 @@ exports = ["auth.py", "http_dial.py", "ports.py", "predicates.py", "resilience.p
 "resilience.py#random random.uniform" = 1
 
 [debt.any-collaborator]
-"http_dial.py#any _PinnedStream.get_extra_info.return" = 1
-"http_dial.py#any _PinnedStream.start_tls.ssl_context" = 1
 "http_dial.py#any delete.kwargs" = 1
 "http_dial.py#any get.kwargs" = 1
 "http_dial.py#any patch.kwargs" = 1

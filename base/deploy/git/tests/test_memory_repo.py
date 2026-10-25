@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -184,42 +183,23 @@ def test_memory_remote_requires_explicit_nonempty_value() -> None:
 
 
 def test_run_git_is_bounded_and_kills_the_tree_on_expiry(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    seen: list[dict[str, object]] = []
-
-    def _fake_run_bounded(
-        argv: Sequence[str], *, timeout: float, **_kwargs: object
-    ) -> subprocess.CompletedProcess[str]:
-        seen.append({"argv": list(argv), "timeout": timeout})
-        return subprocess.CompletedProcess(list(argv), 0, "abc123\n", "")
-
-    monkeypatch.setattr(memory_repo, "run_bounded", _fake_run_bounded)
-
-    assert memory_repo.run_git("rev-parse", "HEAD", cwd=tmp_path) == "abc123"
-    assert seen[0]["argv"] == ["git", "rev-parse", "HEAD"]
-    assert seen[0]["timeout"] == memory_repo.GIT_TIMEOUT_S
-    assert isinstance(seen[0]["timeout"], float)
+    memory_repo.init_local_repo("main", tmp_path)
+    sha = memory_repo.run_git("rev-parse", "HEAD", cwd=tmp_path)
+    assert len(sha) == 40
+    assert isinstance(memory_repo.GIT_TIMEOUT_S, float)
 
 
-def test_run_git_raises_on_non_zero_exit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-
-    def _fails(argv: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(list(argv), 1, "", "fatal: no remote")
-
-    monkeypatch.setattr(memory_repo, "run_bounded", _fails)
+def test_run_git_raises_on_non_zero_exit(tmp_path: Path) -> None:
+    memory_repo.init_local_repo("main", tmp_path)
     with pytest.raises(subprocess.CalledProcessError) as exc:
         memory_repo.run_git("fetch", "origin", "main", cwd=tmp_path)
-    assert exc.value.returncode == 1
-    assert exc.value.stderr == "fatal: no remote"
+    assert exc.value.returncode != 0
+    assert "origin" in exc.value.stderr
 
 
-def test_run_git_propagates_the_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-
-    def _expire(argv: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        raise subprocess.TimeoutExpired(list(argv), memory_repo.GIT_TIMEOUT_S)
-
-    monkeypatch.setattr(memory_repo, "run_bounded", _expire)
+def test_run_git_propagates_the_timeout(tmp_path: Path) -> None:
+    memory_repo.init_local_repo("main", tmp_path)
     with pytest.raises(subprocess.TimeoutExpired):
-        memory_repo.run_git("fetch", "origin", "main", cwd=tmp_path)
+        memory_repo.run_git("-c", "alias.hang=!sleep 10", "hang", cwd=tmp_path, timeout=0.05)

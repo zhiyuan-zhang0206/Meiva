@@ -5,7 +5,7 @@ from __future__ import annotations
 import http.server
 import socket
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -199,6 +199,10 @@ def warned_fields(records: LogRecords) -> list[dict[str, Any]]:
     return [r["extra"] for r in records if r["level"].name == "WARNING"]
 
 
+def stub_traceloop_init(monkeypatch: pytest.MonkeyPatch, init_fn: Callable[..., None]) -> None:
+    monkeypatch.setattr("traceloop.sdk.Traceloop.init", init_fn)
+
+
 def test_enabled_inits_traceloop_with_otlp_exporter(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -214,7 +218,11 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
     home.mkdir()
 
     calls: list[dict[str, Any]] = []
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+
+    def record_init(**kw: Any) -> None:
+        calls.append(kw)
+
+    stub_traceloop_init(monkeypatch, record_init)
 
     initialize_tracing(
         machine=machine_identity(),
@@ -265,7 +273,7 @@ def test_gateway_trace_recording_skips_without_lgtm_marker(
     def record_init(**kw: object) -> None:
         calls.append(kw)
 
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", record_init)
+    stub_traceloop_init(monkeypatch, record_init)
 
     machine = machine_identity(name="test-gateway", roles=frozenset({"gateway"}))
     initialize_tracing(
@@ -288,7 +296,7 @@ def test_gateway_trace_recording_arms_with_lgtm_marker(
     def record_init(**kw: object) -> None:
         calls.append(kw)
 
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", record_init)
+    stub_traceloop_init(monkeypatch, record_init)
 
     machine = machine_identity(name="test-gateway", roles=frozenset({"gateway"}))
     initialize_tracing(
@@ -321,7 +329,7 @@ def test_sdk_initialize_failure_logs_and_state_unchanged(
     def _raise(**_kw: object) -> None:
         raise RuntimeError("boom: init failed")
 
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", _raise)
+    stub_traceloop_init(monkeypatch, _raise)
     initialize_tracing(
         machine=machine_identity(),
         home=home,
@@ -352,7 +360,7 @@ def test_arm_failure_blocks_rearming(
         calls.append(1)
         raise RuntimeError("boom")
 
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", _fail_then_record)
+    stub_traceloop_init(monkeypatch, _fail_then_record)
 
     initialize_tracing(
         machine=machine_identity(),
@@ -380,7 +388,11 @@ def test_idempotent_second_call_is_noop(
     home = tmp_path / ".meiva"
     home.mkdir()
     calls: list[dict[str, Any]] = []
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", lambda **kw: calls.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+
+    def record_init(**kw: Any) -> None:
+        calls.append(kw)
+
+    stub_traceloop_init(monkeypatch, record_init)
 
     initialize_tracing(
         machine=machine_identity(),
@@ -421,7 +433,7 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
     def init_traceloop(**_kwargs: object) -> None:
         initialized.set()
 
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", init_traceloop)
+    stub_traceloop_init(monkeypatch, init_traceloop)
 
     initialize_tracing(
         machine=machine_identity(),
@@ -473,7 +485,7 @@ def test_arming_runs_off_the_caller_thread(
         entered.set()
         assert release.wait(timeout=5.0), "test released the arm thread"
 
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", _slow_init)
+    stub_traceloop_init(monkeypatch, _slow_init)
 
     initialize_tracing(
         machine=machine_identity(),
@@ -506,7 +518,7 @@ def test_teardown_drains_pending_arm_thread(
     def _slow_init(**_kw: object) -> None:
         release.wait(timeout=1.0)
 
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", _slow_init)
+    stub_traceloop_init(monkeypatch, _slow_init)
 
     initialize_tracing(
         machine=machine_identity(),
