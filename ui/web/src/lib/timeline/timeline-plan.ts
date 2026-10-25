@@ -1,0 +1,68 @@
+import type { BackendTimelineItem, SystemEvent } from "../contracts/types";
+import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "../fold";
+
+export type OlderSegmentLoadResult = "loaded" | "exhausted" | "unready" | "aborted" | "failed";
+
+export function startsTurn(event: SystemEvent): boolean {
+  return (
+    event.role === "inbound_arrived" ||
+    event.role === "chat_start" ||
+    event.role === "code_start" ||
+    event.role === "reasoning_start" ||
+    event.role === "exec_start"
+  );
+}
+
+export function hasUnsettledClock(items: readonly BackendTimelineItem[]): boolean {
+  for (const it of items) {
+    if (
+      (it.reasoningStartedAt != null && it.reasoning_ms == null) ||
+      it.codeStartedAt != null ||
+      (it.execStartedAt != null && it.exec_ms == null)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function isStreamingDelta(ev: SystemEvent): boolean {
+  return (
+    ev.role === "code_delta" ||
+    ev.role === "chat_delta" ||
+    ev.role === "reasoning_delta" ||
+    ev.role === "exec_output_chunk"
+  );
+}
+
+export function findOldestTimelineCursor(
+  items: readonly BackendTimelineItem[],
+): BackendTimelineItem | undefined {
+  const headNoteIds = standingHeadNoteIds(items);
+  const isRealCursor = (it: BackendTimelineItem): boolean => {
+    const parts = parseItemIdParts(it.item_id);
+    if (parts === null) return false;
+    if (headNoteIds.has(it.item_id)) return false;
+    return (
+      !isReattachedTimelineContext(it) ||
+      (parts.rank > 0 && it.kind === "inbound_compact_summary")
+    );
+  };
+  let oldest = items.find(isRealCursor);
+  oldest ??= items.find((it, idx) => {
+    if (it.kind !== "inbound_compact_summary") return false;
+    if (parseItemIdParts(it.item_id)?.rank !== 0) return false;
+    return items
+      .slice(0, idx)
+      .every((prev) => isReattachedTimelineContext(prev) || headNoteIds.has(prev.item_id));
+  });
+  return oldest;
+}
+
+export function computeOlderPageLimit(olderBaseLimit: number, olderFetchCount: number): number {
+  return Math.min(olderBaseLimit * Math.pow(2, olderFetchCount), 1000);
+}
+
+export function normalizeCompactHistorySessions(raw: unknown): number {
+  return typeof raw === "number" && Number.isInteger(raw) && raw >= -1 ? raw : 1;
+}

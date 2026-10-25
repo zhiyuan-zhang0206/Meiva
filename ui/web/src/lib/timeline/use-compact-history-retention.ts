@@ -11,20 +11,16 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
+import {
+  normalizeCompactHistorySessions,
+  type OlderSegmentLoadResult,
+} from "./timeline-plan";
 import { useTimelineStore } from "./timeline-store";
 import { useUserSettings } from "../state/use-user-settings";
 
-/** Retention gives up after this many consecutive attempts that load
- * nothing: a miss means the cursor is absent, a fetch failed, or the window
- * is not loadable yet — and every window change (live traffic bumps the item
- * count) re-invokes the retry path. 5 gives a transient failure room to
- * retry, then abandons a permanent absence instead of re-attempting on every
- * streamed item. */
 const RETENTION_MAX_ATTEMPTS = 5;
 
-/** A successful terminal page is distinct from an unavailable window: the
- * post-compact timeline GET may not have supplied has_more yet. */
-export type OlderSegmentLoadResult = "loaded" | "exhausted" | "unready" | "aborted" | "failed";
+export type { OlderSegmentLoadResult } from "./timeline-plan";
 
 export function useCompactHistoryRetention(options: {
   /** Open thread; null when no agent is selected. */
@@ -50,12 +46,9 @@ export function useCompactHistoryRetention(options: {
   // Retention knob: how many older pages to restore after a compact rewrites
   // the active history. Default 1; 0 clears, -1 restores all available pages.
   const { settings } = useUserSettings();
-  const configuredCompactSessions = settings["display.compact_history_sessions"];
-  const compactHistorySessions =
-    typeof configuredCompactSessions === "number" &&
-    Number.isInteger(configuredCompactSessions) && configuredCompactSessions >= -1
-      ? configuredCompactSessions
-      : 1;
+  const compactHistorySessions = normalizeCompactHistorySessions(
+    settings["display.compact_history_sessions"],
+  );
   useLayoutEffect(() => {
     useTimelineStore.getState().setCompactHistoryPages(compactHistorySessions);
   }, [compactHistorySessions]);

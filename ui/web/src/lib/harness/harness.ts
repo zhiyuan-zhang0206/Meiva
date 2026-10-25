@@ -4,7 +4,7 @@ import {
   type Harness,
   type HarnessAvailability,
   type HarnessStatus,
-} from "@/lib/contracts/models";
+} from "../contracts/models";
 
 export {
   DEFAULT_HARNESS,

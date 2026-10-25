@@ -53,7 +53,7 @@ interface Subscriber {
   systemBatch?: (events: SystemEvent[]) => void;
 }
 
-interface EventStreamContextValue {
+export interface EventStreamContextValue {
   subscribe: (
     onSystem: (ev: SystemEvent) => void,
     onConnection: (ev: ConnectionEvent) => void,
@@ -273,7 +273,7 @@ function useSubscribeEffect(
 // Global broadcast — cross-agent, low-frequency GLOBAL_ROLES for all agents.
 // ---------------------------------------------------------------------------
 
-const EventStreamContext = createContext<EventStreamContextValue | null>(null);
+export const EventStreamContext = createContext<EventStreamContextValue | null>(null);
 
 /**
  * Provider for the global `/api/system` broadcast. The profile leader's
@@ -349,7 +349,7 @@ export function useEventStream(
 // Active-agent events — full roles, throttled + authenticated-only.
 // ---------------------------------------------------------------------------
 
-const AgentEventStreamContext = createContext<EventStreamContextValue | null>(null);
+export const AgentEventStreamContext = createContext<EventStreamContextValue | null>(null);
 
 /** The detailed feed belongs exclusively to the selected, visible agent. */
 export function AgentEventStreamProvider({ children }: { children: React.ReactNode }) {

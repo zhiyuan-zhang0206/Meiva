@@ -24,6 +24,8 @@ import {
 import { createQueryRepairScheduler } from "./repair";
 import type { ConnectionEvent, SystemEvent } from "../contracts/types";
 
+export { createQueryRepairScheduler } from "./repair";
+
 export interface FoldOwner {
   onSystemEvent: (ev: SystemEvent) => void;
   onConnectionEvent: (ev: ConnectionEvent) => void;

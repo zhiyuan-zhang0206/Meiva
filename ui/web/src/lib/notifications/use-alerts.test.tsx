@@ -1,25 +1,28 @@
 // SSE notifications reconcile authoritative snapshots, including capped pages.
 
+// meiva:note
+// @vitest-environment happy-dom
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AuthProvider, notifySessionInvalid, useAuth } from "@/lib/auth/auth-context";
+import { AuthProvider, notifySessionInvalid, useAuth } from "../auth/auth-context";
 import {
   ALERTS_QUERY_KEY,
   ALERTS_SECTION_QUERY_KEY,
   AlertsProvider,
   useAlerts,
   useAlertsSection,
-} from "@/lib/notifications/use-alerts";
-import type { Alert, AlertsResponse } from "@/lib/contracts/types";
-import { StreamHub } from "@/lib/transport/stream/stream-hub";
-import { startGateway, type TestGateway } from "@/lib/transport/tests/api/api-provider";
-import { gatewayRig, type HttpRig } from "@/lib/transport/tests/api/api-provider";
-import { FakeNetwork, FakeTab, READY, type FakeEventSource } from "@/lib/transport/stream/tests/fake-stream";
-import { ScriptedAuth } from "@/lib/transport/stream/tests/scripted-auth";
-import { ApiProvider, StreamHubProvider } from "@/lib/transport/transport-context";
+} from "./use-alerts";
+import type { Alert, AlertsResponse } from "../contracts/types";
+import { StreamHub } from "../transport/stream/stream-hub";
+import { startGateway, type TestGateway } from "../transport/tests/api/api-provider";
+import { gatewayRig, type HttpRig } from "../transport/tests/api/api-provider";
+import { FakeNetwork, FakeTab, READY, type FakeEventSource } from "../transport/stream/tests/fake-stream";
+import { ScriptedAuth } from "../transport/stream/tests/scripted-auth";
+import { ApiProvider, StreamHubProvider } from "../transport/transport-context";
 
 // meiva:note
 // AuthProvider and the user-settings read behind the merged-channel switch still
@@ -30,7 +33,7 @@ const unmigrated = vi.hoisted(() => ({
   checkAuth: (): Promise<{ authenticated: boolean }> =>
     Promise.reject(new Error("the test did not install a session probe")),
 }));
-vi.mock("@/lib/transport/api", () => ({
+vi.mock("../transport/api", () => ({
   API_BASE: "",
   api: {
     checkAuth: () => unmigrated.checkAuth(),

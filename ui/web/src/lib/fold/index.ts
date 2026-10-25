@@ -51,7 +51,6 @@ export {
   standingHeadNoteIds,
   type ItemIdParts,
 } from "./item-id";
-export { createQueryRepairScheduler } from "./repair";
 
 export interface FoldContext {
   /** Current cache value for a key (undefined = never fetched — never seed). */

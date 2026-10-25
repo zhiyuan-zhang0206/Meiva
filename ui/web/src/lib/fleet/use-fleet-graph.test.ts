@@ -8,6 +8,9 @@
 //   3. if the query errors (404 / gateway down) -> an empty graph, loading=false,
 //      error=true (no retry).
 
+// meiva:note
+// @vitest-environment happy-dom
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";

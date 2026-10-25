@@ -9,6 +9,9 @@
 //   phone must not yank the desktop panel open, and closing it there must not
 //   close the desktop one.
 
+// meiva:note
+// @vitest-environment happy-dom
+
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

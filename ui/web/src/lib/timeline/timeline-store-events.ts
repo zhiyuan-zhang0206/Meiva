@@ -64,9 +64,9 @@ export interface TimelineState {
   invalidateCompactEpoch: () => void;
   finishCompactTransition: (threadId: number, epoch: number) => void;
 
-  processSseEvent: (ev: SystemEvent) => void;
+  processSseEvent: (ev: SystemEvent, nowMs?: number) => void;
 
-  processSseEventBatch: (events: SystemEvent[]) => void;
+  processSseEventBatch: (events: SystemEvent[], nowMs?: number) => void;
 
   processConnectionEvent: (ev: { type: ConnectionState }) => void;
 
@@ -84,7 +84,7 @@ export interface TimelineState {
 
   beginLoadOlder: () => void;
 
-  settleTurn: () => void;
+  settleTurn: (nowMs?: number) => void;
 
   prependOlder: (older: BackendTimelineItem[], hasMoreOlder: boolean) => void;
 
@@ -133,7 +133,7 @@ export function retireLiveCompact(
  * ({} = nothing changed). Pure: both entry points route through it, so the
  * batch path can never diverge from the per-event path.
  */
-export function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineState> {
+export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1): Partial<TimelineState> {
   // Only selected-agent token events write the context bar. Selection resets
   // these fields; useTokenUsage supplies the newly selected HTTP snapshot.
   // agent_id=0 system resets follow the shared event-routing rule.
@@ -228,6 +228,7 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<Ti
         resetPending: state.resetPending,
       },
       ev,
+      nowMs,
     );
     // Unchanged fields keep their references (foldEvent carries them via
     // ...t / no-op reducers), so per-field Zustand selectors short-circuit.

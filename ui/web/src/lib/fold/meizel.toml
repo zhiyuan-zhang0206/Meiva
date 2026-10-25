@@ -4,7 +4,7 @@ exports = ["agents.ts", "notices.ts", "owner.ts", "timeline.ts"]
 "agents.ts" = ["types.ts"]
 "fold.test.ts" = ["agents.ts", "graph.ts", "index.ts", "notices.ts", "tasks.ts"]
 "graph.ts" = ["types.ts"]
-"index.ts" = ["agents.ts", "graph.ts", "item-id.ts", "notices.ts", "repair.ts", "tasks.ts", "types.ts"]
+"index.ts" = ["agents.ts", "graph.ts", "item-id.ts", "notices.ts", "tasks.ts", "types.ts"]
 "notices.ts" = ["types.ts"]
 "owner.ts" = ["index.ts", "repair.ts"]
 "repair.test.ts" = ["repair.ts"]
@@ -19,6 +19,7 @@ exports = ["agents.ts", "notices.ts", "owner.ts", "timeline.ts"]
 "item-id.ts" = "strict"
 "notices.ts" = "strict"
 "tasks.ts" = "strict"
+"timeline.ts" = "strict"
 "types.ts" = "strict"
 
 [debt.impure-call]
@@ -28,15 +29,3 @@ exports = ["agents.ts", "notices.ts", "owner.ts", "timeline.ts"]
 "owner.ts#useFoldOwner#useRef" = 1
 "repair.ts#createQueryRepairScheduler#clearTimeout" = 1
 "repair.ts#createQueryRepairScheduler#setTimeout" = 1
-"timeline.ts#appendDeltaById#Date.now" = 1
-"timeline.ts#appendDeltaById#new Date()" = 1
-"timeline.ts#applySystemEvent#Date.now" = 1
-"timeline.ts#applySystemEvent#new Date()" = 1
-"timeline.ts#clearCodeClocks#Date.now" = 1
-"timeline.ts#createStartItem#Date.now" = 1
-"timeline.ts#createStartItem#new Date()" = 1
-"timeline.ts#freezeExecClocks#Date.now" = 1
-"timeline.ts#freezeReasoningClocks#Date.now" = 1
-
-[debt.stdlib-patch]
-"repair.test.ts#vi.spyOn client.invalidateQueries" = 2

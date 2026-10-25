@@ -327,7 +327,11 @@ export function isColorFamily(v: unknown): v is ColorFamily {
 // calls resolve on every render (any settings write replaces the settings
 // object); this keeps the result reference-stable while no color value
 // changed, which the timeline's per-row config memo relies on.
-let lastResolved: { signature: string; colors: TimelineColors } | null = null;
+const resolutionCache: {
+  last: { signature: string; colors: TimelineColors } | null;
+} = {
+  last: null,
+};
 
 /** Read the 15 color values as one signature string. Only a stored family
  *  string is meaningful; anything else reads as empty and resolves to the
@@ -346,8 +350,8 @@ function colorSignature(settings: Record<string, unknown>): string {
  *  unchanged input returns the same reference (pure for callers). */
 export function resolveTimelineColors(settings: Record<string, unknown>): TimelineColors {
   const signature = colorSignature(settings);
-  if (lastResolved !== null && lastResolved.signature === signature) {
-    return lastResolved.colors;
+  if (resolutionCache.last !== null && resolutionCache.last.signature === signature) {
+    return resolutionCache.last.colors;
   }
   const out = {} as Record<ColorSlotId, ResolvedColorClasses>;
   for (const id of COLOR_SLOT_IDS) {
@@ -360,7 +364,7 @@ export function resolveTimelineColors(settings: Record<string, unknown>): Timeli
       text: spec.text ? classes[spec.text] : null,
     };
   }
-  lastResolved = { signature, colors: out };
+  resolutionCache.last = { signature, colors: out };
   return out;
 }
 

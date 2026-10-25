@@ -1,3 +1,6 @@
+// meiva:note
+// @vitest-environment happy-dom
+
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, useEffect } from "react";

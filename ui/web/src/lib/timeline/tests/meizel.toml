@@ -1,7 +1,5 @@
 exports = ["use-timeline-context.ts", "use-timeline-pagination.ts"]
 
-purity = "strict"
-
 [uses]
 "use-timeline-compact.ts" = ["use-timeline-context.ts"]
 "use-timeline-ownership.ts" = ["use-timeline-context.ts"]
@@ -9,3 +7,12 @@ purity = "strict"
 "use-timeline-sse.ts" = ["use-timeline-context.ts"]
 "use-timeline-streaming.ts" = ["use-timeline-context.ts"]
 "use-timeline-switch.ts" = ["use-timeline-context.ts"]
+
+[purity]
+"timeline-apply.test.ts" = "strict"
+"timeline-merge.test.ts" = "strict"
+"timeline-reinforcement.test.ts" = "strict"
+"timeline-store-batch.test.ts" = "strict"
+"timeline-store-compact.test.ts" = "strict"
+"timeline-store-dispatch.test.ts" = "strict"
+"timeline-store-sse.test.ts" = "strict"
