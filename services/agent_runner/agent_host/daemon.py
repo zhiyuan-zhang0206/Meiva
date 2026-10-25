@@ -65,7 +65,6 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 from agent.llm import execute_code
 from agent.ownership.hosted import settle_running_rows_at_start
 from base.agents.context.clients import ClientSet
-from base.agents.history.hierarchy.chunk_consumer import understanding_loop_forever
 from base.agents.observation.turn_progress import TurnProgress
 from base.cluster.machine import MachineIdentity
 from base.config import ConfigBoot
@@ -93,6 +92,7 @@ from meiva import skills as meiva_skills
 from meiva.boot import clients_over
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.installation import Installation
+from services.agent_runner.understanding.chunk_consumer import understanding_loop_forever
 
 from ...pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from .dispatcher import InboundWakeDispatcher, TurnScheduler
@@ -107,7 +107,6 @@ from .lifecycle.configuration import (
     initialize_logging,
     load_installation,
     pool_bounds,
-    understanding_inputs,
 )
 from .lifecycle.graceful_exit import serve_until_exit, write_exit_restart
 from .lifecycle.instance import release_instance_lock, take_instance_lock
@@ -405,7 +404,7 @@ def background_loops(
             catalog=installation.require_catalog(),
             keys=installation.require_provider_keys(),
             llm_override=config.view.lm.llm_override,
-            inputs=understanding_inputs(config),
+            config=config,
         ),
     }
 

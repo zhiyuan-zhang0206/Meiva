@@ -12,18 +12,24 @@ tags:
 
 A cluster has dozens of agents, nearly always one compacting or crossing a chunk, and one chunk call
 takes 1 to 5 minutes, so a consumer that works one job at a time falls behind for good. The loop of
-`chunk_consumer.py` ([[base/agents/history/hierarchy/docs/chunks.meiva.okf.md|Chunk-triggered Understanding]])
+`services/agent_runner/understanding/chunk_consumer.py` ([[base/agents/history/hierarchy/docs/chunks.meiva.okf.md|Chunk-triggered Understanding]])
 therefore claims every due job and runs it at once; there is no cap setting.
 
 ## Model
 
-The hierarchy consumer's composition root supplies `UnderstandingReadInputs`:
-lazy readers for model defaults, grouping cadence and generation policy, feature
-admission and a clock factory. Construction evaluates none of them. Feature
-admission stays at loop start; each job or group check reads policy at its
-original decision point, including repeated cadence checks under a lease.
-`GroupingModels` is the public model-cache contract shared by grouping and
-rebuild: it carries the explicit catalog and resolves models with their overrides.
+The agent-host operation root lives in `services/agent_runner/understanding/`.
+It holds the host's `ConfigBoot` and captures only the policy needed at each existing phase;
+base planning and generation receive values and explicit model, clock and database resources.
+Feature admission stays at the resident loop's first execution. Replay bypasses that gate.
+A group check reads cadence before its lease, under the lease and after model construction for
+`must_close`; each level and each rebuild horizon repeat those phases. Group generation reads
+reasoning before model construction, then corrections, the clock and cadence. A chunk mints
+separate `TimestampPolicy` values for matter filtering and generation, with the latter after
+model construction. One generation conversation keeps its captured correction budget.
+
+The source remains the host's next-start configuration. A later explicit change to this same
+owner is observed at the next phase; this is not a configuration-file watcher or automatic hot
+reload. `GroupingModels` remains the model-cache contract shared by root grouping and rebuild.
 
 - The loop owns one `TaskGroup`. While a job is due it claims and starts the job as a task of that
   group; a finishing job wakes the loop (else it polls every 2 s). A job is in flight from claim

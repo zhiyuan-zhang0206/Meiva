@@ -7,7 +7,6 @@ from pathlib import Path
 
 from base import paths
 from base.agents.context.clients import ClientSet
-from base.agents.history.hierarchy.group_consumer import UnderstandingReadInputs
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
@@ -33,7 +32,6 @@ __all__ = [
     "initialize_logging",
     "load_installation",
     "pool_bounds",
-    "understanding_inputs",
 ]
 
 
@@ -82,21 +80,6 @@ def pool_bounds(config: ConfigBoot) -> PoolBounds:
         control_max_size=config.view.daemon.host_control_pool_max_size,
         acquire_timeout_s=config.view.agent.db_pool_acquire_timeout_seconds,
         slow_acquire_warn_s=config.view.agent.db_pool_slow_acquire_warn_seconds,
-    )
-
-
-def understanding_inputs(config: ConfigBoot) -> UnderstandingReadInputs:
-    return UnderstandingReadInputs(
-        enabled=lambda: config.view.agent.understanding_enabled,
-        default_model=lambda: config.view.lm.llm_model,
-        hierarchy_model=lambda: config.view.lm.hierarchy_model,
-        group_model=lambda: config.view.agent.understanding_group_model,
-        check_open=lambda: config.view.agent.understanding_group_check_open,
-        check_decay=lambda: config.view.agent.understanding_group_check_decay,
-        reasoning=lambda: config.view.agent.understanding_group_reasoning,
-        corrections=lambda: config.view.agent.understanding_group_corrections,
-        clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
-        timestamps_enabled=lambda: config.view.general.message_timestamps,
     )
 
 

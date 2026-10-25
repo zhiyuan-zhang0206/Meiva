@@ -16,7 +16,7 @@ units themselves
 Everything above is grouping, one standalone call per check, because a chunk call sees only its
 own segment's messages: a level's **open** nodes (no `parent_id`) are grouped into nodes of the
 next level. Code: `group.py` (prompt, reply rules,
-conversation), `group_store.py` (cursor, groups, call record), `group_consumer.py`
+conversation), `group_store.py` (cursor, groups, call record), `services/agent_runner/understanding/group_consumer.py`
 (when, and the run). The run-timeline serves every level as it does the leaves.
 
 ## Trigger

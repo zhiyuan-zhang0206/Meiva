@@ -1,6 +1,7 @@
-exports = ["agent_host", "agent_ops", "exec_host", "page_server", "pty_sessions", "tests"]
+exports = ["agent_host", "agent_ops", "exec_host", "page_server", "pty_sessions", "tests", "understanding"]
 
 [uses]
+"agent_host" = ["understanding"]
 "exec_host/tests/test_startup_preserves_exec.py" = ["agent_host/daemon.py"]
 "agent_ops" = ["tests"]
 "page_server" = ["tests"]

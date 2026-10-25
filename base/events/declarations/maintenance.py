@@ -273,21 +273,21 @@ EVENTS: dict[str, EventSpec] = {
         "a queued understanding chunk failed (attempted once, never retried) and stays undescribed",
         payload=UnderstandingChunkFailed,
         tier="anomaly",
-        site="base/agents/history/hierarchy/chunk_consumer.py:settle_chunk_job",
+        site="services/agent_runner/understanding/chunk_consumer.py:settle_chunk_job",
     ),
     "understanding_chunk_skipped": telemetry_event(
         "understanding_chunk_skipped",
         "a queued understanding chunk was closed without a node (unsupported provider path or an empty chunk)",
         payload=UnderstandingChunkSkipped,
         tier="anomaly",
-        site="base/agents/history/hierarchy/chunk_consumer.py:settle_chunk_job",
+        site="services/agent_runner/understanding/chunk_consumer.py:settle_chunk_job",
     ),
     "understanding_chunk_gap": telemetry_event(
         "understanding_chunk_gap",
         "a chunk was described only in part: the listed stretches (overlap leftovers, turns missing from a closing snapshot) have no node",
         payload=UnderstandingChunkGap,
         tier="anomaly",
-        site="base/agents/history/hierarchy/chunk_consumer.py:_report_gaps",
+        site="services/agent_runner/understanding/chunk_consumer.py:_report_gaps",
     ),
     "understanding_snapshot_lag": telemetry_event(
         "understanding_snapshot_lag",
@@ -301,7 +301,7 @@ EVENTS: dict[str, EventSpec] = {
         "an upper-level understanding grouping check failed; the level's open nodes stay ungrouped until its next check threshold of new nodes arrives",
         payload=UnderstandingGroupFailed,
         tier="anomaly",
-        site="base/agents/history/hierarchy/group_consumer.py:_check_level",
+        site="services/agent_runner/understanding/group_consumer.py:_check_level",
     ),
     "understanding_call_record_failed": telemetry_event(
         "understanding_call_record_failed",
@@ -315,7 +315,7 @@ EVENTS: dict[str, EventSpec] = {
         "an understanding rebuild failed on its last allowed attempt and was closed as failed",
         payload=UnderstandingRebuildFailed,
         tier="anomaly",
-        site="base/agents/history/hierarchy/chunk_consumer.py:_process_rebuild",
+        site="services/agent_runner/understanding/chunk_consumer.py:Consumer._process_rebuild",
     ),
     "understanding_leaf_out_of_order": telemetry_event(
         "understanding_leaf_out_of_order",
@@ -328,6 +328,6 @@ EVENTS: dict[str, EventSpec] = {
         "understanding_backlog",
         "one sample of the understanding chunk queue per consumer round: pending, running and the oldest pending age",
         payload=UnderstandingBacklog,
-        site="base/agents/history/hierarchy/chunk_consumer.py:understanding_loop_forever",
+        site="services/agent_runner/understanding/chunk_consumer.py:Consumer.emit_backlog",
     ),
 }

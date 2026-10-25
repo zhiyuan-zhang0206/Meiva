@@ -1,8 +1,11 @@
+# meiva:note
+# These existing fault tests use heterogeneous spy state at precise failure boundaries.
 # pyright: reportUnknownMemberType = warning
 # pyright: reportUnknownArgumentType = warning
 # pyright: reportUnknownLambdaType = warning
 # pyright: reportUnknownVariableType = warning
-"""The upper-level rebuild: its queue (claim order, who blocks whom) and the replay."""
+# meiva:note
+# The upper-level rebuild: its queue (claim order, who blocks whom) and the replay.
 
 from __future__ import annotations
 
@@ -15,8 +18,6 @@ import pytest
 from langchain_core.messages import AIMessage
 from psycopg_pool import AsyncConnectionPool
 
-from base.agents.history.hierarchy import chunk_consumer as loop
-from base.agents.history.hierarchy import group_consumer as gc
 from base.agents.history.hierarchy.chunks import (
     Chunk,
     ChunkJob,
@@ -32,19 +33,24 @@ from base.agents.history.hierarchy.rebuild import (
     finish_rebuild,
     rebuild_pending,
     release_rebuild,
-    run_rebuild,
 )
-from base.agents.history.hierarchy.tests.consumer_helpers import read_inputs
 from base.config import settings
 from base.config.service_read import ConfigAuthority
+from base.db import Database
 from base.lm.catalog import ModelCatalog
 from base.packages.tests.model_catalog import inert_keys
 from base.telemetry.tests.capture.event_capture import EmittedEvents
+from services.agent_runner.understanding import chunk_consumer as loop
+from services.agent_runner.understanding import group_consumer as gc
+from services.agent_runner.understanding.rebuild import run_rebuild
+from services.agent_runner.understanding.tests.consumer_helpers import consumer_config
 
 AGENT = 7
 
 
 async def _rows(pool: AsyncConnectionPool, sql: str, *params: object) -> list[tuple[Any, ...]]:
+    # meiva:note
+    # These fixture statements use psycopg parameter binding and return the stored row tuples.
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(sql, params)  # pyright: ignore[reportArgumentType]
         return await cur.fetchall() if cur.description else []
@@ -134,14 +140,20 @@ async def test_the_rebuild_replays_leaves_in_order_and_replaces_the_old_upper_le
 
     assert (
         await run_rebuild(
-            aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, inputs=read_inputs()
+            aops_pool,
+            MagicMock(),
+            MagicMock(catalog=model_catalog),
+            AGENT,
+            config=consumer_config(),
         )
         == 12
     )
 
+    # meiva:note
     # Each check saw only the leaves that had "landed" by then (the replay horizon), though all
     # twelve exist: the first five; then, with two left open and five more arrived, seven.
     assert _groups == [leaves[:5], leaves[3:10]]
+    # meiva:note
     # Non-overlapping parents whose range is their children's: three leaves each.
     assert await _tree(aops_pool) == [(2, 0, 29, 3), (2, 30, 59, 3)]
     assert await _rows(aops_pool, "SELECT 1 FROM understanding_nodes WHERE id = %s", stale) == []
@@ -164,11 +176,11 @@ async def test_rebuilding_twice_gives_the_same_tree(
     for i in range(12):
         await _leaf(aops_pool, i)
     await run_rebuild(
-        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, inputs=read_inputs()
+        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, config=consumer_config()
     )
     once = await _tree(aops_pool)
     await run_rebuild(
-        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, inputs=read_inputs()
+        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, config=consumer_config()
     )
     assert await _tree(aops_pool) == once and len(once) == 2
 
@@ -186,7 +198,7 @@ async def test_a_rebuild_touches_only_its_own_agent(
         " 'm', 'group-0.1', 'p', 1) RETURNING id",
     )
     await run_rebuild(
-        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, inputs=read_inputs()
+        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, config=consumer_config()
     )
     assert await _rows(aops_pool, "SELECT 1 FROM understanding_nodes WHERE id = %s", other[0][0])
 
@@ -197,10 +209,14 @@ async def test_the_claim_waits_for_the_agents_chunk_jobs_and_chunk_jobs_wait_for
     await enqueue_chunk(aops_pool, AGENT, compact_version=0, chunk=Chunk(0, 10), end_msg_id="m10")
     rebuild_id = await _enqueue_rebuild(aops_pool)
     assert await rebuild_pending(aops_pool, AGENT)
-    assert await claim_rebuild(aops_pool) is None  # a chunk job of the agent is live
+    # meiva:note
+    # a chunk job of the agent is live
+    assert await claim_rebuild(aops_pool) is None
     job = await claim_job(aops_pool)
     assert job is not None
-    assert await claim_rebuild(aops_pool) is None  # running counts as live
+    # meiva:note
+    # running counts as live
+    assert await claim_rebuild(aops_pool) is None
     await finish_job(aops_pool, job.id, status="done")
 
     claimed = await claim_rebuild(aops_pool)
@@ -210,6 +226,7 @@ async def test_the_claim_waits_for_the_agents_chunk_jobs_and_chunk_jobs_wait_for
         1,
     )
     assert not await rebuild_pending(aops_pool, AGENT)
+    # meiva:note
     # While it runs, the agent's next chunk job is held back; another agent's is not.
     await enqueue_chunk(aops_pool, AGENT, compact_version=0, chunk=Chunk(10, 20), end_msg_id="m20")
     assert await claim_job(aops_pool) is None
@@ -225,12 +242,18 @@ async def test_a_rebuild_handed_back_waits_out_the_spacing_and_one_rebuild_runs_
     aops_pool: AsyncConnectionPool,
 ) -> None:
     first = await _enqueue_rebuild(aops_pool)
-    second = await _enqueue_rebuild(aops_pool)  # a build that found the first already running
+    # meiva:note
+    # a build that found the first already running
+    second = await _enqueue_rebuild(aops_pool)
     claimed = await claim_rebuild(aops_pool)
     assert claimed is not None and claimed.id == first
-    assert await claim_rebuild(aops_pool) is None  # the agent has one running
+    # meiva:note
+    # the agent has one running
+    assert await claim_rebuild(aops_pool) is None
     await release_rebuild(aops_pool, first, error="boom")
-    again = await claim_rebuild(aops_pool)  # the handed-back one waits out the spacing
+    # meiva:note
+    # the handed-back one waits out the spacing
+    again = await claim_rebuild(aops_pool)
     assert again is not None and again.id == second
     await finish_rebuild(aops_pool, second, status="done")
     assert await claim_rebuild(aops_pool) is None
@@ -267,7 +290,7 @@ async def test_the_consumer_runs_a_claimed_rebuild_and_settles_it(
         catalog=model_catalog,
         keys=inert_keys(model_catalog),
         llm_override=config_authority.runtime.lm.llm_override,
-        inputs=read_inputs(),
+        config=consumer_config(),
     ).run_until_idle()
     assert ran == [AGENT]
     assert await _rows(
@@ -295,7 +318,7 @@ async def test_a_failing_rebuild_is_retried_then_failed(
         catalog=model_catalog,
         keys=inert_keys(model_catalog),
         llm_override=config_authority.runtime.lm.llm_override,
-        inputs=read_inputs(),
+        config=consumer_config(),
     )
     for attempt in (1, 2, 3):
         await _rows(
@@ -316,7 +339,8 @@ async def test_a_failing_rebuild_is_retried_then_failed(
 
 
 async def _land(pool: AsyncConnectionPool, i: int) -> None:
-    """Land leaf `i` the way a chunk job does (same spans as `_leaf`)."""
+    # meiva:note
+    # Land leaf `i` the way a chunk job does (same spans as `_leaf`).
     at = datetime(2026, 10, 5, tzinfo=UTC) + timedelta(hours=i)
     job = ChunkJob(1, AGENT, 0, i * 10, i * 10 + 9, "m", None, 1)
     node = GroupNode((i * 10, i * 10 + 9), at, at + timedelta(minutes=30), f"leaf {i}")
@@ -341,16 +365,20 @@ async def test_a_leaf_landing_before_a_grouped_one_is_reported_and_only_a_queued
     *,
     model_catalog: ModelCatalog,
 ) -> None:
-    """The later segment lands first and is grouped; the earlier one arrives afterwards."""
+    # meiva:note
+    # The later segment lands first and is grouped; the earlier one arrives afterwards.
     for i in range(5, 10):
         await _land(aops_pool, i)
     await gc.run_group_checks(
-        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, inputs=read_inputs()
+        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, config=consumer_config()
     )
-    assert emitted_events.names() == []  # in order so far
+    # meiva:note
+    # in order so far
+    assert emitted_events.names() == []
 
     for i in range(5):
         await _land(aops_pool, i)
+    # meiva:note
     # Reported, and nothing is queued: the gap stays until a person builds.
     assert emitted_events.names() and set(emitted_events.names()) == {
         "understanding_leaf_out_of_order"
@@ -361,7 +389,7 @@ async def test_a_leaf_landing_before_a_grouped_one_is_reported_and_only_a_queued
 
     await _rows(aops_pool, "INSERT INTO understanding_rebuilds (agent_id) VALUES (%s)", AGENT)
     await run_rebuild(
-        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, inputs=read_inputs()
+        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, config=consumer_config()
     )
     assert await _open_before_parented(aops_pool) == []
 
@@ -376,9 +404,66 @@ async def test_leaves_landing_in_order_queue_no_rebuild(
     for i in range(10):
         await _land(aops_pool, i)
         await gc.run_group_checks(
-            aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, inputs=read_inputs()
+            aops_pool,
+            MagicMock(),
+            MagicMock(catalog=model_catalog),
+            AGENT,
+            config=consumer_config(),
         )
     assert await _rows(aops_pool, "SELECT 1 FROM understanding_rebuilds") == []
-    await _land(aops_pool, 9)  # a rewrite of an existing, grouped span is not out of order
+    # meiva:note
+    # a rewrite of an existing, grouped span is not out of order
+    await _land(aops_pool, 9)
     assert await _rows(aops_pool, "SELECT 1 FROM understanding_rebuilds") == []
     assert emitted_events.names() == []
+
+
+async def test_each_rebuild_horizon_observes_the_same_owners_current_cadence(
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    model_catalog: ModelCatalog,
+    emitted_events: EmittedEvents,
+) -> None:
+    import asyncio
+    from dataclasses import replace
+
+    from base.lm.provider_api import ProviderBinding
+    from services.agent_runner.understanding.tests.provider_wire import (
+        ProviderWire,
+        completion,
+    )
+
+    _ = emitted_events
+    for i in range(12):
+        await _leaf(aops_pool, i)
+    config = consumer_config()
+    config.set_field("understanding_group_model", "deepseek-flash")
+    config.set_field("understanding_group_reasoning", "high")
+    config.set_field("understanding_group_corrections", 0)
+    config.set_field("understanding_group_check_open", 6)
+    config.set_field("understanding_group_check_decay", 1)
+    with ProviderWire(200, completion("no groups")) as wire:
+        wire.release.clear()
+        binding = ProviderBinding(
+            prefix="deepseek-",
+            display_name="Local SDK transport",
+            key_env="DEEPSEEK_API_KEY",
+            build=wire.build,
+            effort_levels=("high", "max"),
+            provider_key="openai",
+        )
+        catalog = replace(model_catalog, bindings={**model_catalog.bindings, "deepseek-": binding})
+        models = loop.ModelCache(catalog, inert_keys(catalog), "")
+        async with asyncio.TaskGroup() as tasks:
+            rebuild = tasks.create_task(
+                run_rebuild(aops_pool, database, models, AGENT, config=config)
+            )
+            assert await asyncio.to_thread(wire.arrived.wait, 5)
+            config.set_field("understanding_group_check_open", 60)
+            wire.release.set()
+            assert await rebuild == 12
+        assert len(wire.requests) == 1
+        assert await _rows(
+            aops_pool, "SELECT last_checked_open, claimed_at FROM understanding_group_state"
+        ) == [(6, None)]
+        assert await _rows(aops_pool, "SELECT count(*) FROM understanding_group_calls") == [(1,)]
