@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import NamedTuple, TypedDict, cast
+from typing import NamedTuple, TypedDict
 
 from audit import LeakPaths
 
@@ -59,6 +59,18 @@ class EventFact(NamedTuple):
     activation_skipped: bool = False
 
 
+def _to_float(value: object) -> float:
+    if isinstance(value, (int, float, str)):
+        return float(value)
+    raise TypeError(f"expected float or str, got {type(value).__name__}")
+
+
+def _to_int(value: object) -> int:
+    if isinstance(value, (int, float, str)):
+        return int(value)
+    raise TypeError(f"expected int or str, got {type(value).__name__}")
+
+
 def event_facts(events: Sequence[Event]) -> tuple[EventFact, ...]:
     facts: list[EventFact] = []
     for name, payload in events:
@@ -67,7 +79,7 @@ def event_facts(events: Sequence[Event]) -> tuple[EventFact, ...]:
                 facts.append(
                     EventFact(
                         name,
-                        duration_s=float(cast(float | str, payload.get("duration_seconds", 0))),
+                        duration_s=_to_float(payload.get("duration_seconds", 0)),
                     )
                 )
             case "llm_usage":
@@ -75,8 +87,8 @@ def event_facts(events: Sequence[Event]) -> tuple[EventFact, ...]:
                     EventFact(
                         name,
                         model=str(payload.get("model", "")),
-                        tokens_in=int(cast(int | str, payload.get("in_total", 0))),
-                        tokens_out=int(cast(int | str, payload.get("out_total", 0))),
+                        tokens_in=_to_int(payload.get("in_total", 0)),
+                        tokens_out=_to_int(payload.get("out_total", 0)),
                     )
                 )
             case "code":

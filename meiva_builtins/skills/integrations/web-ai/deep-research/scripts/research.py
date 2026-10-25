@@ -149,7 +149,7 @@ def _read_report(site: str) -> str:
         "  return '';"
         "}"
     )
-    return webchat.evaluate(js)
+    return str(webchat.evaluate(js))
 
 
 def _save(site: str, url: str, report: str, places: webchat.Places) -> Path:

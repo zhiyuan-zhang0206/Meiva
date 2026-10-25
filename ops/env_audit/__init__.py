@@ -22,7 +22,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import assert_never, cast
+from typing import TypeGuard, assert_never
 
 import psutil
 
@@ -263,6 +263,14 @@ class EnvWriteAudit:
         )
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
 # meiva:note
 # Read only the final JSONL line: the config-read hot path never loads the whole history.
 def _last_audit_line(audit_path: Path) -> str | None:
@@ -297,10 +305,10 @@ def read_env_write_records(limit: int, env_path: Path) -> list[dict[str, object]
         except json.JSONDecodeError:
             corrupt += 1
             continue
-        if not isinstance(record, dict):
+        if not _is_str_dict(record):
             corrupt += 1
             continue
-        records.append(cast("dict[str, object]", record))
+        records.append(record)
         if len(records) >= limit:
             break
     if corrupt:
@@ -327,9 +335,9 @@ def _read_history(audit_path: Path) -> History:
         record = json.loads(line)
     except (OSError, ValueError):
         return UnreadableHistory()
-    if not isinstance(record, dict):
+    if not _is_str_dict(record):
         return UnreadableHistory()
-    return recorded_history(cast("dict[str, object]", record))
+    return recorded_history(record)
 
 
 # meiva:note

@@ -8,7 +8,3 @@
 "model.py" = "strict"
 "report.py" = "strict"
 "verdicts.py" = "strict"
-
-[debt.type-cast]
-"__init__.py#cast _parse_args" = 4
-"model.py#cast validate_manifest" = 1

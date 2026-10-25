@@ -10,17 +10,7 @@ exports = ["agent_runtime.py", "plugin.py"]
 [purity]
 "__init__.py" = "strict"
 
-[debt.ambient-read]
-"_state.py#home pathlib.Path.home" = 1
-"agent_runtime.py#clock datetime.datetime.now" = 2
-"agent_runtime.py#home pathlib.Path.home" = 1
-"plugin.py#clock datetime.datetime.now" = 1
-"plugin.py#home pathlib.Path.home" = 1
-
-[debt.any-collaborator]
-"_state_access.py#any _handle.return" = 1
-"_state_access.py#any read_state.return" = 1
-"plugin.py#any wrapped_serve.return" = 1
-
-[debt.type-cast]
-"plugin.py#cast _wrapped_read" = 1
+[roots]
+"_state.py" = { kinds = ["home"], why = "Plugin state factory resolves current agent workspace or user home as default logical cwd" }
+"agent_runtime.py" = { kinds = ["clock", "home"], why = "Plugin runtime hooks stamp emitted notes with UTC time and resolve home boundary for AGENTS.md walk" }
+"plugin.py" = { kinds = ["clock", "home"], why = "SDK surface wrappers resolve home boundary for AGENTS.md walk and stamp context notes with UTC time" }

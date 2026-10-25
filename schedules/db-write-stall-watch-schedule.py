@@ -7,6 +7,7 @@
 # agent-host crash wave is the consequence of.
 # meiva:link schedules/README.md
 
+import time
 from zoneinfo import ZoneInfo
 
 from base.paths.home import resolve_meiva_home
@@ -24,5 +25,6 @@ if __name__ == "__main__":
             state=home / "run" / "db-write-stall-watch.json",
             zone=ZoneInfo(cluster_timezone()),
             report_agents=REPORT_AGENTS,
-        )
+        ),
+        clock=time.time,
     )

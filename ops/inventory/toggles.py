@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import cast
+from typing import TypeGuard
 
 __all__ = [
     "ToggleVerdicts",
@@ -22,6 +22,18 @@ __all__ = [
     "require_agent_runner",
     "servers_to_probe",
 ]
+
+
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
 
 
 # meiva:note
@@ -40,17 +52,13 @@ def require_agent_runner(roles: frozenset[str]) -> None:
 # A local copy of the cli list-view helper, because `gateway` must not import `cli`. A value that
 # is not a mapping is reported as malformed instead of failing the whole listing.
 def mcp_summary(spec: object) -> str:
-    if not isinstance(spec, dict):
+    if not _is_str_dict(spec):
         return "(malformed entry)"
-    entry = cast("dict[str, object]", spec)
-    if "url" in entry:
-        return str(entry["url"])
-    command = entry.get("command", "")
-    args = entry.get("args", [])
-    if isinstance(args, list):
-        parts = [str(command), *(str(arg) for arg in cast("list[object]", args))]
-    else:
-        parts = [str(command)]
+    if "url" in spec:
+        return str(spec["url"])
+    command = spec.get("command", "")
+    args = spec.get("args", [])
+    parts = [str(command), *(str(arg) for arg in args)] if _is_object_list(args) else [str(command)]
     return " ".join(part for part in parts if part)
 
 

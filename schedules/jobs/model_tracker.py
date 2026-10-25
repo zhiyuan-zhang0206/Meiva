@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import assert_never
 
@@ -41,7 +41,7 @@ class ModelTracker:
     recipient: ReportRecipient
 
 
-def run_tracker(_slot: datetime, _payload: str | None, *, tracker: ModelTracker) -> None:
+def run_tracker(slot: datetime, _payload: str | None, *, tracker: ModelTracker) -> None:
     try:
         done = run_bounded(
             tracker.command,
@@ -54,7 +54,7 @@ def run_tracker(_slot: datetime, _payload: str | None, *, tracker: ModelTracker)
         verdict = plan_tracker_exit(done.returncode, done.stdout + done.stderr)
         match verdict:
             case Quiet():
-                print(f"[{datetime.now(UTC).isoformat()}] model update tracker: no new candidates")
+                print(f"[{slot.isoformat()}] model update tracker: no new candidates")
             case ReadCandidates():
                 report = json.loads((tracker.report_dir / "last-report.json").read_text())
                 message = candidate_message(report, str(tracker.report_dir / "last-report.md"))

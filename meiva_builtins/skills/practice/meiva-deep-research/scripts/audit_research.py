@@ -32,7 +32,7 @@ import sys
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 CONFIDENCE = {"consensus", "single", "contradicted", "unverified"}
 VERIFICATION = {"formal", "process", "rubric", "self"}
@@ -43,30 +43,37 @@ _CODE_FENCE_RE = re.compile(r"```.*?```", re.S)
 _INLINE_CODE_RE = re.compile(r"`[^`]*`")
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _load(path: str) -> dict[str, Any]:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
+    data: object = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not _is_str_dict(data):
         raise TypeError(f"{path}: top level must be a JSON object")
-    return cast(dict[str, Any], data)
+    return data
 
 
 def _check_question_plan(state: dict[str, Any], out: list[str]) -> None:
-    question = state["question"]
-    if not isinstance(question, dict):
+    question: object = state["question"]
+    if not _is_str_dict(question):
         out.append("question must be an object")
     else:
-        fields = cast(dict[str, object], question)
         for field in ("three_part", "so_what"):
-            value = fields.get(field)
+            value = question.get(field)
             if not isinstance(value, str) or not value:
                 out.append(f"question.{field} must be a non-empty string")
 
-    plan = state["plan"]
-    if not isinstance(plan, list) or not plan:
+    plan: object = state["plan"]
+    if not _is_object_list(plan) or not plan:
         out.append("plan must be a non-empty list of sub-questions")
         return
-    for i, sub in enumerate(cast(list[object], plan)):
-        if not isinstance(sub, dict) or not cast(dict[str, object], sub).get("sub_question"):
+    for i, sub in enumerate(plan):
+        if not _is_str_dict(sub) or not sub.get("sub_question"):
             out.append(f"plan[{i}]: missing sub_question")
 
 
@@ -74,20 +81,20 @@ def _object_rows(
     rows: list[object], section: str, out: list[str]
 ) -> Iterator[tuple[int, dict[str, Any]]]:
     for i, row in enumerate(rows):
-        if not isinstance(row, dict):
+        if not _is_str_dict(row):
             out.append(f"{section}[{i}]: must be an object")
             continue
-        yield i, cast(dict[str, Any], row)
+        yield i, row
 
 
 def _check_sources(state: dict[str, Any], out: list[str]) -> dict[int, dict[str, Any]]:
-    sources = state["sources"]
-    if not isinstance(sources, list):
+    sources: object = state["sources"]
+    if not _is_object_list(sources):
         out.append("sources must be a list")
         return {}
     source_by_id: dict[int, dict[str, Any]] = {}
     urls: set[str] = set()
-    for i, s in _object_rows(cast(list[object], sources), "sources", out):
+    for i, s in _object_rows(sources, "sources", out):
         sid = s.get("id")
         if not isinstance(sid, int):
             out.append(f"sources[{i}]: id must be an integer, got {sid!r}")
@@ -119,23 +126,22 @@ def _check_sources(state: dict[str, Any], out: list[str]) -> dict[int, dict[str,
 def _check_learnings(
     state: dict[str, Any], source_by_id: dict[int, dict[str, Any]], out: list[str]
 ) -> None:
-    learnings = state["learnings"]
-    if not isinstance(learnings, list):
+    learnings: object = state["learnings"]
+    if not _is_object_list(learnings):
         out.append("learnings must be a list")
         return
-    for i, learning in _object_rows(cast(list[object], learnings), "learnings", out):
+    for i, learning in _object_rows(learnings, "learnings", out):
         if not isinstance(learning.get("fact"), str) or not learning["fact"]:
             out.append(f"learnings[{i}]: missing fact")
         conf = learning.get("confidence")
         if conf not in CONFIDENCE:
             out.append(f"learnings[{i}]: confidence {conf!r} not in {sorted(CONFIDENCE)}")
-        ids = learning.get("source_ids")
-        if not isinstance(ids, list) or not ids:
+        ids: object = learning.get("source_ids")
+        if not _is_object_list(ids) or not ids:
             out.append(f"learnings[{i}]: source_ids must be a non-empty list")
             continue
-        ids_list = cast(list[object], ids)
         distinct_ids: set[int] = set()
-        for sid in ids_list:
+        for sid in ids:
             if not isinstance(sid, int) or sid not in source_by_id:
                 out.append(f"learnings[{i}]: source_id {sid!r} not in sources")
             else:
@@ -170,13 +176,13 @@ def _check_budget(state: dict[str, Any], out: list[str]) -> None:
 def _check_claims(
     state: dict[str, Any], source_by_id: dict[int, dict[str, Any]], out: list[str]
 ) -> None:
-    claims = state.get("claims")
+    claims: object = state.get("claims")
     if claims is None:
         return
-    if not isinstance(claims, list):
+    if not _is_object_list(claims):
         out.append("claims must be a list")
         return
-    for i, c in _object_rows(cast(list[object], claims), "claims", out):
+    for i, c in _object_rows(claims, "claims", out):
         if not isinstance(c.get("claim"), str) or not c["claim"]:
             out.append(f"claims[{i}]: missing claim")
         ver = c.get("verification")

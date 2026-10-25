@@ -7,10 +7,5 @@ exports = ["operations.py", "rpc.py", "rpc_plans.py"]
 "__init__.py" = "strict"
 "rpc_plans.py" = "strict"
 
-[debt.ambient-read]
-"rpc.py#random random.uniform" = 1
-"rpc.py#random uuid.uuid4" = 1
-"rpc.py#settings base.config.settings" = 1
-
-[debt.type-cast]
-"operations.py#cast agent_skill_view_inputs" = 4
+[roots]
+"rpc.py" = { kinds = ["random", "settings"], why = "Cluster RPC transport root reads gateway timeout/retry settings and draws retry jitter and fallback UUID idempotency keys" }

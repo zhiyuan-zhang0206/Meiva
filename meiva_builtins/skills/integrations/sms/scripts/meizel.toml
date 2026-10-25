@@ -1,6 +1,5 @@
 [purity]
 "sms_messages.py" = "strict"
 
-[debt.ambient-read]
-"query.py#clock datetime.datetime.now" = 1
-"query.py#home pathlib.Path.home" = 1
+[roots]
+"query.py" = { kinds = ["clock", "home"], why = "SMS CLI entry resolves ~/Library/Messages/chat.db and current UTC timestamp in __main__" }

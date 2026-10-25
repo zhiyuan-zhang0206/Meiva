@@ -23,7 +23,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 from base.api_contracts.agent_contract import ShellKillMode
-from base.clock import Clock
 from base.cluster import session_name
 from base.sessions.backend import get_shell_backend
 from base.sessions.page_session import is_page_label
@@ -44,7 +43,6 @@ __all__ = [
     "ShellNotFoundError",
     "agent_shell_sessions",
     "capture_shell",
-    "cluster_now",
     "collect_sessions",
     "kill_agent_shells",
     "kill_shell",
@@ -52,6 +50,7 @@ __all__ = [
 ]
 
 _log = logging.getLogger(__name__)
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 # meiva:note
@@ -72,14 +71,6 @@ _KILL_ALL_WORKERS = 8
 # No live shell with this session id exists on this host.
 class ShellNotFoundError(LookupError):
     pass
-
-
-# meiva:note
-# The instant a snapshot is taken at, in the cluster's wall-clock zone (the host's own zone
-# only when the process holds no authoritative cluster timezone). The ambient read of the
-# zone setting lives here, once per snapshot; the listing rows take the instant as a value.
-def cluster_now() -> datetime:
-    return datetime.now().astimezone(Clock.from_settings().zone())
 
 
 def _starts_of(backend: SessionBackend, names: list[str]) -> tuple[SessionStart, ...]:
@@ -193,7 +184,7 @@ def kill_with_verdict(backend: SessionBackend, name: str) -> tuple[bool, bool]:
 # optional display name.
 def kill_shell(agent_id: int, session_id: int) -> tuple[ShellKillMode, bool, str | None]:
     backend = get_shell_backend()
-    target = find_shell(_agent_shells(backend, agent_id, datetime.now(UTC)), session_id)
+    target = find_shell(_agent_shells(backend, agent_id, _EPOCH), session_id)
     if target is None:
         return ShellKillMode.ABSENT, False, None
     ok, interrupted = kill_with_verdict(backend, target.session_name)
@@ -217,7 +208,7 @@ def kill_shell(agent_id: int, session_id: int) -> tuple[ShellKillMode, bool, str
 # naming those ids after the others ran.
 def kill_agent_shells(agent_id: int, *, before_session_index: int) -> list[int]:
     backend = get_shell_backend()
-    listed = _agent_shells(backend, agent_id, datetime.now(UTC))
+    listed = _agent_shells(backend, agent_id, _EPOCH)
     page_ids = frozenset(entry.shell.id for entry in listed if is_page_label(entry.shell.name))
     targets = kill_all_targets(listed, before_session_index, page_ids)
     if not targets:

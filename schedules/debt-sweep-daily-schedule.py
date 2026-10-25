@@ -32,8 +32,9 @@ if __name__ == "__main__":
         tz=schedule.timezone,
         worker_label=parse_worker_label(os.environ.get(_WORKER_LABEL_ENV)),
     )
+    now = datetime.now(UTC)
     if cli.dry_run:
-        dry_run(sweep, datetime.now(UTC))
+        dry_run(sweep, now)
     else:
         recipient = report_recipient(
             "debt-sweep-daily",
@@ -47,5 +48,5 @@ if __name__ == "__main__":
                 schedule,
                 partial(sweep_day, job=sweep, recipient=recipient, inputs=inputs),
                 schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
-                started_at=datetime.now(UTC),
+                started_at=now,
             )
