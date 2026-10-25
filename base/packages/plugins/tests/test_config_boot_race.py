@@ -1,6 +1,7 @@
 import asyncio
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -73,15 +74,23 @@ def test_bind_rereads_image_created_after_the_missing_read(unit_home: Path) -> N
     configs: dict[str, BaseModel] = {}
     image = disk_image_path("read-race")
 
-    class CompetingRead(PluginConfigOwner):
+    @dataclass(frozen=True)
+    class CompetingRead:
+        name: str
+        cls: type[BaseModel]
+        path: Path
+
         def read(self) -> str:
             try:
-                return super().read()
+                return self.path.read_text()
             except FileNotFoundError:
                 write_config_image(
                     self, BootConfig(marker="winner"), expected_digest=image_revision(None)
                 )
                 raise
+
+        def create_default(self) -> None:
+            write_config_image(self, self.cls(), expected_digest=image_revision(None))
 
     undo = bind_plugin_config(CompetingRead("read-race", BootConfig, image), configs)
     try:
@@ -118,11 +127,19 @@ def test_bind_rejects_invalid_winning_image(
     configs: dict[str, BaseModel] = {}
     image = disk_image_path("invalid-winner")
 
-    class InvalidWinner(PluginConfigOwner):
+    @dataclass(frozen=True)
+    class InvalidWinner:
+        name: str
+        cls: type[BaseModel]
+        path: Path
+
+        def read(self) -> str:
+            return self.path.read_text()
+
         def create_default(self) -> None:
             self.path.parent.mkdir(parents=True)
             self.path.write_text(content)
-            super().create_default()
+            write_config_image(self, self.cls(), expected_digest=image_revision(None))
 
     with pytest.raises(expected_error):
         bind_plugin_config(
@@ -148,7 +165,15 @@ def test_bind_propagates_unknown_creation_errors(
     configs: dict[str, BaseModel] = {}
     error = error_type("unexpected create failure")
 
-    class FailedCreation(PluginConfigOwner):
+    @dataclass(frozen=True)
+    class FailedCreation:
+        name: str
+        cls: type[BaseModel]
+        path: Path
+
+        def read(self) -> str:
+            return self.path.read_text()
+
         def create_default(self) -> None:
             raise error
 
@@ -189,7 +214,15 @@ def test_bind_does_not_replace_a_disappearing_winner_with_defaults(unit_home: Pa
     configs: dict[str, BaseModel] = {}
     image = disk_image_path("missing-winner")
 
-    class DisappearingWinner(PluginConfigOwner):
+    @dataclass(frozen=True)
+    class DisappearingWinner:
+        name: str
+        cls: type[BaseModel]
+        path: Path
+
+        def read(self) -> str:
+            return self.path.read_text()
+
         def create_default(self) -> None:
             self.path.parent.mkdir(parents=True)
             self.path.write_text(BootConfig(marker="winner").model_dump_json())
@@ -221,11 +254,19 @@ def test_bind_propagates_unknown_winning_image_errors(
     error = error_type("unexpected winning image failure")
     image = disk_image_path("unknown-read-error")
 
-    class FailedWinningRead(PluginConfigOwner):
+    @dataclass(frozen=True)
+    class FailedWinningRead:
+        name: str
+        cls: type[BaseModel]
+        path: Path
+
         def read(self) -> str:
             if self.path.exists():
                 raise error
-            return super().read()
+            return self.path.read_text()
+
+        def create_default(self) -> None:
+            write_config_image(self, self.cls(), expected_digest=image_revision(None))
 
     with pytest.raises(error_type) as captured:
         bind_plugin_config(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from pydantic import BaseModel, ValidationError
 
@@ -100,6 +100,10 @@ def overlay_config_classes(
     }
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
 def read_service_config[C: BaseModel](plugin: str, cls: type[C]) -> C | None:
     from base.host.env.bootstrap import service_plugin_config_packet
@@ -112,9 +116,8 @@ def read_service_config[C: BaseModel](plugin: str, cls: type[C]) -> C | None:
         data: object = json.loads(packet)
     except json.JSONDecodeError as exc:
         raise InvalidConfigData(f"invalid service plugin config JSON: {exc}") from exc
-    if not isinstance(data, dict):
+    if not _is_object_dict(data):
         raise InvalidConfigData("service plugin config requires a JSON object")
-    data = cast("dict[str, object]", data)
     if set(data) != {"plugin", "config"}:
         raise InvalidConfigData("service plugin config requires exactly plugin and config")
     if data["plugin"] != plugin:
@@ -122,9 +125,7 @@ def read_service_config[C: BaseModel](plugin: str, cls: type[C]) -> C | None:
             f"service plugin config names {data['plugin']!r}, expected {plugin!r}"
         )
     values = data["config"]
-    if not isinstance(values, dict) or set(cast("dict[str, object]", values)) != set(
-        cls.model_fields
-    ):
+    if not _is_object_dict(values) or set(values) != set(cls.model_fields):
         raise SchemaDriftError(
             f"service plugin config {plugin!r} field set differs from declaration"
         )

@@ -2,7 +2,7 @@ import operator
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, TypeGuard
 
 from langchain_core.messages import AnyMessage
 from langgraph.channels.delta import DeltaChannel
@@ -129,15 +129,19 @@ def validate_plugin_state_keys(update: dict[str, Any], state_cls: type[Any]) -> 
 _MESSAGES_REDUCER = object()
 
 
+def _is_object_list(value: object) -> TypeGuard[list[Any]]:
+    return isinstance(value, list)
+
+
 # meiva:link agent/docs/state.meiva.okf.md
-def is_messages_reducer_form(m: Any) -> bool:
+def is_messages_reducer_form(m: object) -> bool:
     if m is add_messages or m is guarded_add_messages:
         return True
     return isinstance(m, DeltaChannel) and m.reducer is guarded_delta_reducer
 
 
 # meiva:link agent/docs/state.meiva.okf.md
-def messages_annotation_key(annotation: Any) -> tuple[Any, ...]:
+def messages_annotation_key(annotation: object) -> tuple[Any, ...]:
     meta = getattr(annotation, "__metadata__", None)
     if meta:
         origin = getattr(annotation, "__origin__", None)
@@ -161,10 +165,10 @@ def resolve_reducer(field: FieldInfo) -> Callable[[Any, Any], Any]:
 
 
 # meiva:link agent/docs/state.meiva.okf.md
-def accumulate_delta(acc: Any, new: Any, reducer: Callable[[Any, Any], Any]) -> Any:
+def accumulate_delta(acc: object, new: object, reducer: Callable[[Any, Any], Any]) -> object:
     if is_messages_reducer_form(reducer):
-        acc_list: list[Any] = cast(list[Any], acc) if isinstance(acc, list) else [acc]
-        new_list: list[Any] = cast(list[Any], new) if isinstance(new, list) else [new]
+        acc_list: list[Any] = acc if _is_object_list(acc) else [acc]
+        new_list: list[Any] = new if _is_object_list(new) else [new]
         return acc_list + new_list
     return reducer(acc, new)
 

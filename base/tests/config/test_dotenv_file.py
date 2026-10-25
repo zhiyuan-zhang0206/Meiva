@@ -7,7 +7,6 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-import base.host.private_storage
 from base.host.env.dotenv_file import (
     ENV_BACKUP_KEEP,
     remove_env,
@@ -164,40 +163,24 @@ def test_upsert_env_snapshots_before_write(tmp_path: Path):
     assert backups[0].read_text() == "SECRET=orig\n"
 
 
-def test_upsert_atomically_replaces_the_complete_env(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_upsert_atomically_replaces_the_complete_env(tmp_path: Path) -> None:
     env = tmp_path / ".env"
     env.write_text("SECRET=old\nKEEP=1\n")
-    real_replace = base.host.private_storage.os.replace
-    replaced: list[Path] = []
-
-    def _replace(source: str | Path, destination: str | Path) -> None:
-        assert Path(destination) == env
-        assert env.read_text() == "SECRET=old\nKEEP=1\n"
-        assert Path(source).read_text() == "SECRET=new\nKEEP=1\n"
-        real_replace(source, destination)
-        replaced.append(Path(destination))
-
-    monkeypatch.setattr(base.host.private_storage.os, "replace", _replace)
+    old_inode = env.stat().st_ino
 
     upsert_env(env, {"SECRET": "new"})
 
-    assert replaced == [env]
+    assert env.read_text() == "SECRET=new\nKEEP=1\n"
+    assert env.stat().st_ino != old_inode
+    assert list(tmp_path.glob(".*.tmp")) == []
 
 
-def test_upsert_noop_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_upsert_noop_writes_nothing(tmp_path: Path) -> None:
     from base.host.env import dotenv_file
 
     f = tmp_path / ".env"
     f.write_text("A=1\nKEEP=2\n")
-    stamp = f.stat().st_mtime_ns
-    writes: list[bytes] = []
-
-    def _record_write(_path: Path, data: bytes) -> None:
-        writes.append(data)
-
-    monkeypatch.setattr(dotenv_file, "write_private_bytes", _record_write)
+    before = f.stat()
 
     class _NoRecord:
         def prepare(self, changes: Sequence[Mapping[str, object]]) -> object:
@@ -210,9 +193,9 @@ def test_upsert_noop_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     dotenv_file.upsert_env(f, {"A": "1"}, audit=_NoRecord())
 
-    assert writes == []
+    after = f.stat()
     assert f.read_text() == "A=1\nKEEP=2\n"
-    assert f.stat().st_mtime_ns == stamp
+    assert (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
     assert _backups(f) == []
     assert not (tmp_path / ".env.audit.jsonl").exists()
 

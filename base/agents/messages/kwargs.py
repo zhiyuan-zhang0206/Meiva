@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict, TypeGuard
 
 from base.lm.content import message_addl_kwargs
 from base.lm.system_note import SYSTEM_NOTE_LEAD
@@ -101,8 +101,15 @@ class MeivaMessageKwargs(TypedDict, total=False):
     meiva_usage: MeivaUsage
 
 
+def _is_meiva_kwargs(value: dict[str, object]) -> TypeGuard[MeivaMessageKwargs]:
+    return isinstance(value, dict)
+
+
 def read_meiva_kwargs(msg: BaseMessage) -> MeivaMessageKwargs:
-    return cast("MeivaMessageKwargs", message_addl_kwargs(msg))
+    kwargs = message_addl_kwargs(msg)
+    if _is_meiva_kwargs(kwargs):
+        return kwargs
+    raise TypeError("message additional_kwargs must be a dict")
 
 
 def kwargs_read_time(kwargs: MeivaMessageKwargs) -> str | None:

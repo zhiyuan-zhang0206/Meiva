@@ -8,7 +8,3 @@
 "test_home_resolution.py#monkeypatch.delenv os.environ.MEIVA_HOME" = 1
 "test_home_resolution.py#monkeypatch.setenv os.environ.HOME" = 1
 "test_home_resolution.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 3
-
-[debt.first-party-patch]
-"test_dotenv_file.py#monkeypatch.setattr base.host.env.dotenv_file.write_private_bytes" = 1
-"test_dotenv_file.py#monkeypatch.setattr base.host.private_storage.os.replace" = 1

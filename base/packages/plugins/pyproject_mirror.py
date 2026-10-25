@@ -18,7 +18,7 @@ from __future__ import annotations
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from base.host.git.host_version import Version, parse_version
 from base.packages.plugins.manifest import (
@@ -130,6 +130,10 @@ def _strictest_upper(bounds: list[_Bounds]) -> _Bounds | None:
     return best
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def pyproject_dependency_specs(pkg_dir: Path) -> dict[str, str]:
     """Direct `[project].dependencies` of the pyproject in `pkg_dir`, as
     `{name: specifier_string}` ("" = no specifier, i.e. any version).
@@ -149,8 +153,8 @@ def pyproject_dependency_specs(pkg_dir: Path) -> dict[str, str]:
     project: dict[str, Any] | None = data.get("project")
     if project is None:
         raise ManifestError(f"{pyproject}: [project] section missing or not a table")
-    deps = cast(list[Any], project.get("dependencies", []))
-    if not isinstance(deps, list):
+    deps = project.get("dependencies", [])
+    if not _is_object_list(deps):
         raise ManifestError(f"{pyproject}: [project].dependencies is not a list")
     specs: dict[str, str] = {}
     for raw_entry in deps:

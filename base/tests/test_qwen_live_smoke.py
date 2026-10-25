@@ -78,6 +78,7 @@ fixture injects it with `monkeypatch.setattr`, which is the pattern
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 
 import pytest
 from langchain_core.messages import (
@@ -88,7 +89,7 @@ from langchain_core.messages import (
 )
 from pydantic import SecretStr
 
-from base.config import settings
+from base.config import get_field, set_field
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.content import content_blocks, message_addl_kwargs, message_content
@@ -111,10 +112,10 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture(autouse=True)
-def _live_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+def _live_provider() -> Iterator[None]:
     """Point the real provider at the opt-in key for the duration of the test.
 
-    `setattr` on the settings singleton rather than `setenv`: the env is read
+    `set_field` on `base.config` rather than `setenv`: the env is read
     once at import, so a late `setenv` would silently no-op (the trap
     `no_os_environ.py` Rule 2 exists to catch). The override is also pinned
     empty — a stray `MEIVA_LLM_OVERRIDE` in the operator's shell would otherwise
@@ -122,10 +123,19 @@ def _live_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     DashScope at all.
     """
     assert _LIVE_KEY is not None  # guaranteed by pytestmark; narrows for the type checker
-    monkeypatch.setattr(settings.lm, "dashscope_api_key", SecretStr(_LIVE_KEY))
-    monkeypatch.setattr(settings.lm, "llm_override", "")
+    old_key = get_field("dashscope_api_key")
+    old_override = get_field("llm_override")
+    old_url = get_field("dashscope_base_url")
+    set_field("dashscope_api_key", SecretStr(_LIVE_KEY))
+    set_field("llm_override", "")
     if _LIVE_BASE_URL:
-        monkeypatch.setattr(settings.lm, "dashscope_base_url", _LIVE_BASE_URL)
+        set_field("dashscope_base_url", _LIVE_BASE_URL)
+    try:
+        yield
+    finally:
+        set_field("dashscope_api_key", old_key)
+        set_field("llm_override", old_override)
+        set_field("dashscope_base_url", old_url)
 
 
 def _stream(

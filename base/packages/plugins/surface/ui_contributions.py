@@ -38,7 +38,7 @@ Three vocabularies are closed, each for its own reason:
 from __future__ import annotations
 
 import re
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 # Contribution types (v1). Closed — see the module docstring.
 UI_KEYS = ("agentInspect", "nav", "stats", "themes")
@@ -190,6 +190,14 @@ _HEX_RE = re.compile(r"^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
 _PATH_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._~-]+$")
 
 
+def _is_any_list(value: object) -> TypeGuard[list[Any]]:
+    return isinstance(value, list)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 def _entry_fields(
     entry: object,
     what: str,
@@ -205,10 +213,10 @@ def _entry_fields(
     known for the unknown-field report and is never required.
     """
     known = required + optional
-    if not isinstance(entry, dict):
+    if not _is_str_dict(entry):
         errors.append(f"{what}: expected an object with {', '.join(required)}")
         return None
-    data = cast(dict[str, Any], entry)
+    data = entry
     for field in data:
         if field not in known:
             errors.append(f"{what}: unknown field {field!r} (one of {', '.join(known)})")
@@ -277,11 +285,11 @@ def _color_literal(value: object, what: str, errors: list[str]) -> str | None:
 
 def _validate_agent_inspect(value: object, errors: list[str]) -> list[dict[str, Any]]:
     """`agentInspect` — sections appended to the agent-inspect view."""
-    if not isinstance(value, list):
+    if not _is_any_list(value):
         errors.append("contributions.ui.agentInspect: expected a list of sections")
         return []
     sections: list[dict[str, Any]] = []
-    for i, entry in enumerate(cast(list[Any], value)):
+    for i, entry in enumerate(value):
         what = f"contributions.ui.agentInspect[{i}]"
         data = _entry_fields(entry, what, ("title", "source", "render"), errors)
         if data is None:
@@ -297,11 +305,11 @@ def _validate_agent_inspect(value: object, errors: list[str]) -> list[dict[str, 
 
 def _validate_nav(value: object, errors: list[str]) -> list[dict[str, Any]]:
     """`nav` — entries opening the plugin's own page in a sandboxed iframe."""
-    if not isinstance(value, list):
+    if not _is_any_list(value):
         errors.append("contributions.ui.nav: expected a list of nav entries")
         return []
     entries: list[dict[str, Any]] = []
-    for i, entry in enumerate(cast(list[Any], value)):
+    for i, entry in enumerate(value):
         what = f"contributions.ui.nav[{i}]"
         data = _entry_fields(entry, what, ("location", "label", "icon", "page"), errors)
         if data is None:
@@ -326,12 +334,12 @@ def _validate_stats(value: object, errors: list[str]) -> list[dict[str, Any]]:
     the declaration the right place for the card's existence — a machine with
     the plugin installed but no credentials shows the card, not nothing.
     """
-    if not isinstance(value, list):
+    if not _is_any_list(value):
         errors.append("contributions.ui.stats: expected a list of stat cards")
         return []
     cards: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for i, entry in enumerate(cast(list[Any], value)):
+    for i, entry in enumerate(value):
         what = f"contributions.ui.stats[{i}]"
         data = _entry_fields(entry, what, ("id", "label"), errors)
         if data is None:
@@ -355,10 +363,10 @@ def _validate_stats(value: object, errors: list[str]) -> list[dict[str, Any]]:
 
 
 def _validate_theme_tokens(value: object, what: str, errors: list[str]) -> dict[str, str] | None:
-    if not isinstance(value, dict):
+    if not _is_str_dict(value):
         errors.append(f"{what}: expected an object of token -> color literal")
         return None
-    tokens = cast(dict[str, Any], value)
+    tokens = value
     if not tokens:
         errors.append(f"{what}: a theme must set at least one token")
         return None
@@ -391,12 +399,12 @@ def _validate_themes(value: object, errors: list[str]) -> list[dict[str, Any]]:
     sets. Both halves validate identically: same closed token vocabulary, same
     color-literal rule.
     """
-    if not isinstance(value, list):
+    if not _is_any_list(value):
         errors.append("contributions.ui.themes: expected a list of token packs")
         return []
     themes: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for i, entry in enumerate(cast(list[Any], value)):
+    for i, entry in enumerate(value):
         what = f"contributions.ui.themes[{i}]"
         data = _entry_fields(entry, what, ("name", "tokens"), errors, optional=("darkTokens",))
         if data is None:
@@ -430,11 +438,11 @@ def validate_ui_contributions(value: object, errors: list[str]) -> dict[str, obj
     manifest validator raises on a non-empty `errors`, so a partially parsed
     return is never handed to a consumer.
     """
-    if not isinstance(value, dict):
+    if not _is_str_dict(value):
         errors.append(f"contributions.ui must be an object with {'/'.join(UI_KEYS)}")
         return {}
     parsed: dict[str, object] = {}
-    for key, raw in cast(dict[str, Any], value).items():
+    for key, raw in value.items():
         if key not in UI_KEYS:
             errors.append(
                 f"contributions.ui: unknown contribution type {key!r} (one of {', '.join(UI_KEYS)})"

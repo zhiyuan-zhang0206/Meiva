@@ -55,7 +55,16 @@ import secrets
 import socket
 import tempfile
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
 
 # meiva:note
 # The band. 21000 is the documented start of the private range (`port_table` and
@@ -240,9 +249,9 @@ def _ports_of(path: Path) -> list[int]:
 
 def _ports_from(fd: int) -> list[int]:
     ports = _body(fd).get("ports")
-    if not isinstance(ports, list):
+    if not _is_object_list(ports):
         return []
-    return [port for port in cast("list[object]", ports) if isinstance(port, int)]
+    return [port for port in ports if isinstance(port, int)]
 
 
 def _pid_from(fd: int) -> int:
@@ -259,10 +268,10 @@ def _pid_from(fd: int) -> int:
 def _body(fd: int) -> dict[str, object]:
     os.lseek(fd, 0, os.SEEK_SET)
     try:
-        body = json.loads(os.read(fd, 1 << 20))
+        body: object = json.loads(os.read(fd, 1 << 20))
     except (ValueError, UnicodeDecodeError):
         return {}
-    return cast("dict[str, object]", body) if isinstance(body, dict) else {}
+    return body if _is_object_dict(body) else {}
 
 
 # meiva:note

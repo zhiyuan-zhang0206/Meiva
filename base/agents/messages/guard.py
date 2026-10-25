@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from langchain_core.messages import (
     AnyMessage,
+    BaseMessage,
+    MessageLikeRepresentation,
     RemoveMessage,
     convert_to_messages,
 )
@@ -23,16 +25,31 @@ class MessagesMutationError(RuntimeError):
     pass
 
 
+def _is_object_list(value: object) -> TypeGuard[list[Any]]:
+    return isinstance(value, list)
+
+
+def _as_any_message(msg: BaseMessage) -> TypeGuard[AnyMessage]:
+    return isinstance(msg, BaseMessage)
+
+
+def _is_message_seq(value: object) -> TypeGuard[Sequence[MessageLikeRepresentation]]:
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes))
+
+
 # meiva:note
 # Coerces message-likes the same way `add_messages` does so validation fingerprints
 # compare the exact objects the reducer merged.
 # meiva:link agent/messages/docs/messages.meiva.okf.md
-def _coerce(messages: Any) -> list[AnyMessage]:
-    return [cast(AnyMessage, message_chunk_to_message(m)) for m in convert_to_messages(messages)]
+def _coerce(messages: object) -> list[AnyMessage]:
+    if not _is_message_seq(messages):
+        raise TypeError(f"Expected a sequence of messages, got {type(messages).__name__}")
+    converted = [message_chunk_to_message(m) for m in convert_to_messages(messages)]
+    return [m for m in converted if _as_any_message(m)]
 
 
-def _contains_remove_all(delta: Any) -> bool:
-    msgs: list[Any] = cast(list[Any], delta) if isinstance(delta, list) else [delta]
+def _contains_remove_all(delta: object) -> bool:
+    msgs: list[Any] = delta if _is_object_list(delta) else [delta]
     return any(isinstance(m, RemoveMessage) and m.id == REMOVE_ALL_MESSAGES for m in msgs)
 
 
@@ -41,8 +58,8 @@ def _contains_remove_all(delta: Any) -> bool:
 # `current` means the hook runner is merging sibling deltas rather than validating a
 # committed history.
 # meiva:link agent/messages/docs/messages.meiva.okf.md
-def _is_delta(current: Any) -> bool:
-    msgs: list[Any] = cast(list[Any], current) if isinstance(current, list) else [current]
+def _is_delta(current: object) -> bool:
+    msgs: list[Any] = current if _is_object_list(current) else [current]
     return any(isinstance(m, RemoveMessage) for m in msgs)
 
 
@@ -73,7 +90,7 @@ def validate_messages_mutation(before: Sequence[AnyMessage], after: Sequence[Any
     after = _coerce(after)
     if not before:
         return
-    before_by_id: dict[str, int] = {cast(str, m.id): i for i, m in enumerate(before)}
+    before_by_id: dict[str | None, int] = {m.id: i for i, m in enumerate(before)}
     last_before = len(before) - 1
     seen_new = False
     for i, m in enumerate(after):
@@ -126,8 +143,8 @@ def validate_rebuild(before: Sequence[AnyMessage], after: Sequence[AnyMessage]) 
     after = _coerce(after)
     if not before:
         return
-    before_by_id: dict[str, int] = {cast(str, m.id): i for i, m in enumerate(before)}
-    after_idx: dict[str, int] = {cast(str, m.id): i for i, m in enumerate(after)}
+    before_by_id: dict[str | None, int] = {m.id: i for i, m in enumerate(before)}
+    after_idx: dict[str | None, int] = {m.id: i for i, m in enumerate(after)}
     prev = -1
     for m in after:
         mid = m.id
@@ -160,8 +177,8 @@ def validate_rebuild(before: Sequence[AnyMessage], after: Sequence[AnyMessage]) 
 # back to `None` whenever missing/duplicate/remove shapes need the full diff check.
 # meiva:link agent/messages/docs/messages.meiva.okf.md
 def _try_pure_append(
-    current: Any,
-    delta: Any,
+    current: object,
+    delta: object,
     cached: tuple[list[AnyMessage], set[str]] | None = None,
 ) -> tuple[list[AnyMessage], set[str]] | None:
     if current is None or delta is None:
@@ -201,42 +218,44 @@ def _try_pure_append(
     return merged, current_ids
 
 
+# meiva:note
+# Validate and apply a message delta to committed history or an intermediate delta.
 # meiva:link agent/messages/docs/messages.meiva.okf.md
-def guarded_add_messages(current: Any, delta: Any) -> Any:
+def guarded_add_messages(current: Any, delta: Any) -> list[AnyMessage]:
     if _is_delta(current):
-        return add_messages(current, delta)
+        return add_messages(current, delta)  # pyright: ignore[reportArgumentType, reportReturnType]
     fast = _try_pure_append(current, delta)
     if fast is not None:
-        return fast[0]
-    merged: Any = add_messages(current, delta)
+        return list(fast[0])
+    merged = add_messages(current, delta)  # pyright: ignore[reportArgumentType]
     before = _coerce(current)
     after = _coerce(merged)
     if _contains_remove_all(delta):
         validate_rebuild(before, after)
     else:
         validate_messages_mutation(before, after)
-    return merged
+    return after
 
 
 # meiva:note
 # Replays stored `DeltaChannel` writes in order through `guarded_add_messages` so
 # validation stays batching-invariant when reads combine writes into larger batches.
 # meiva:link agent/messages/docs/messages.meiva.okf.md
-def guarded_delta_reducer(state: Any, writes: Sequence[Any]) -> Any:
-    result: Any = state
+def guarded_delta_reducer(state: object, writes: Sequence[object]) -> list[AnyMessage]:
+    result: object = state
     cached: tuple[list[AnyMessage], set[str]] | None = None
     markers = _is_delta(state)
     for write in writes:
-        delta: list[Any] = cast(list[Any], write) if isinstance(write, list) else [write]
+        delta: list[Any] = write if _is_object_list(write) else [write]
         if not markers:
             fast = _try_pure_append(result, delta, cached)
             if fast is not None:
-                result = fast[0]
+                result = list(fast[0])
                 cached = fast
                 continue
-        result = guarded_add_messages(
-            normalize_stored_message_ids(result), normalize_stored_message_ids(delta)
-        )
+        norm_state = normalize_stored_message_ids(result)
+        norm_delta = normalize_stored_message_ids(delta)
+        result = guarded_add_messages(norm_state, norm_delta)
         cached = None
         markers = _is_delta(result)
-    return result
+    return result  # pyright: ignore[reportReturnType]

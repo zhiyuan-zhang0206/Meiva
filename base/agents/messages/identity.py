@@ -1,6 +1,6 @@
 """Qualify checkpoint message identities without creating another ID owner."""
 
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from langchain_core.messages import RemoveMessage, convert_to_messages
 from langchain_core.messages.utils import message_chunk_to_message
@@ -10,6 +10,10 @@ from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.types import Overwrite
 
 from base.agents.messages.kwargs import read_meiva_kwargs
+
+
+def _is_object_list(value: object) -> TypeGuard[list[Any]]:
+    return isinstance(value, list)
 
 
 def normalize_stored_message_ids(value: Any) -> Any:
@@ -27,7 +31,7 @@ def normalize_stored_message_ids(value: Any) -> Any:
         return _DeltaSnapshot(normalize_stored_message_ids(value.value))
     if isinstance(value, Overwrite):
         return Overwrite(normalize_stored_message_ids(value.value))
-    group = cast("list[Any]", value) if isinstance(value, list) else [value]
+    group: list[Any] = value if _is_object_list(value) else [value]
     messages = [message_chunk_to_message(m) for m in convert_to_messages(group)]
     for message in messages:
         if message.id is None and not isinstance(message, RemoveMessage):

@@ -33,7 +33,7 @@ import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 from uuid import UUID
 
 import psutil
@@ -255,7 +255,7 @@ def read_antigravity_endpoint_file(path: Path) -> AntigravityServer | None:
         parsed: object = json.loads(raw)
     except ValueError as exc:
         raise RuntimeError(f"Antigravity endpoint record {path} is not JSON") from exc
-    record = cast("dict[str, object]", parsed if isinstance(parsed, dict) else {})
+    record = _as_mapping(parsed) or {}
     address = str(record.get("address") or "").strip()
     token = str(record.get("csrf_token") or "").strip()
     if not address or not token:
@@ -451,9 +451,13 @@ def _request(
             raise TimeoutError(f"no {method} reply within the deadline")
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 def _as_mapping(value: object) -> dict[str, Any] | None:
     """One JSON-RPC message as a mapping, when it is one at all."""
-    return cast("dict[str, Any]", value) if isinstance(value, dict) else None
+    return value if _is_str_dict(value) else None
 
 
 def _error_summary(error: object) -> str:

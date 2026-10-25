@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from langchain_core.messages import AIMessage, BaseMessage
 
@@ -19,6 +19,10 @@ NON_AI_MESSAGE_OVERHEAD_TOKENS = 15.0
 AI_MESSAGE_OVERHEAD_TOKENS = 2.0
 
 _CJK = re.compile(r"[\u3000-\u9fff\uac00-\ud7af\uff00-\uffef]")
+
+
+def _is_object_list(value: object) -> TypeGuard[list[Any]]:
+    return isinstance(value, list)
 
 
 def estimate_text_tokens(text: str) -> float:
@@ -38,14 +42,13 @@ def estimate_message_tokens(msg: BaseMessage) -> float:
 def content_text(content: object) -> str:
     if isinstance(content, str):
         return content
-    if isinstance(content, list):
+    if _is_object_list(content):
         parts: list[str] = []
-        for b in content_blocks(cast(list[Any], content)):
+        for b in content_blocks(content):
             if isinstance(b, dict):
-                d = cast(dict[str, Any], b)
-                if isinstance(text := d.get("text"), str):
+                if isinstance(text := b.get("text"), str):
                     parts.append(text)
-                elif isinstance(thinking := d.get("thinking"), str):
+                elif isinstance(thinking := b.get("thinking"), str):
                     parts.append(thinking)
             elif isinstance(b, str):
                 parts.append(b)
@@ -58,12 +61,11 @@ def ai_message_texts(msg: AIMessage) -> dict[str, str]:
     content: Any = msg.content
     if isinstance(content, str):
         out["output"] += content
-    elif isinstance(content, list):
-        for b in content_blocks(cast(list[Any], content)):
+    elif _is_object_list(content):
+        for b in content_blocks(content):
             if not isinstance(b, dict):
                 continue
-            d = cast(dict[str, Any], b)
-            if isinstance(thinking := d.get("thinking"), str):
+            if isinstance(thinking := b.get("thinking"), str):
                 out["reasoning"] += thinking
             elif b.get("type") == "text" and isinstance(text := b.get("text"), str):
                 out["output"] += text

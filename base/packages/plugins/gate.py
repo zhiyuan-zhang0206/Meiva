@@ -12,12 +12,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 from base.packages.plugins.extensions import PluginContributions
 from base.packages.plugins.manifest import load_manifest
 
 _CONFIG_IDENTIFIER = "<declared>"
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
 
 
 class ContributionMismatch(Exception):  # noqa: N818 — a load failure of one plugin, not an error class family
@@ -43,14 +47,12 @@ def check_manifest(
             )
     problems: list[str] = []
     for key in gated:
-        declared = cast(object, manifest.contributions.get(key))
+        declared = manifest.contributions.get(key)
         if key == "config":
             declared_ids = {_CONFIG_IDENTIFIER} if isinstance(declared, dict) else set[str]()
         else:
             declared_ids = (
-                {str(item) for item in cast(list[object], declared)}
-                if isinstance(declared, list)
-                else set[str]()
+                {str(item) for item in declared} if _is_object_list(declared) else set[str]()
             )
         for identifier in sorted(declared_ids - delivered[key]):
             problems.append(f"{key}: {identifier!r} is declared but the plugin does not provide it")

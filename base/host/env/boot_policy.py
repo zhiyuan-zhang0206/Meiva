@@ -10,11 +10,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TypeGuard
 
 __all__ = ["BootstrapFetch", "fetch_backoff", "serve_flag", "validated_bootstrap_payload"]
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
 
 
 # meiva:note
@@ -79,13 +83,14 @@ def serve_flag(env_key: str, env: Mapping[str, str], env_file: Mapping[str, str]
 # ``os.environ.__setitem__`` or (for a str-able scalar) writes a value the
 # recipient never round-trips. Fail loud at the trust boundary instead.
 def validated_bootstrap_payload(payload: object) -> dict[str, str]:
-    if not isinstance(payload, dict):
+    if not _is_object_dict(payload):
         raise TypeError(f"/api/bootstrap returned {type(payload).__name__}, expected a JSON object")
-    raw = cast("dict[str, Any]", payload)
-    for key, value in raw.items():
+    out: dict[str, str] = {}
+    for key, value in payload.items():
         if not isinstance(key, str) or not isinstance(value, str):
             raise TypeError(
                 "/api/bootstrap must be a flat {str: str} map; got "
                 f"{type(key).__name__} key -> {type(value).__name__} value for {key!r}"
             )
-    return raw
+        out[key] = value
+    return out
