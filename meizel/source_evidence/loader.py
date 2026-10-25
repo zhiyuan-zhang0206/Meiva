@@ -9,7 +9,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
-from typing import cast
+from typing import TypeGuard
 
 from meizel.graph.model import MeizelError
 from meizel.lint_common import read_utf8_text, tracked_files
@@ -80,15 +80,23 @@ def _dependencies(index: Index, tool: Path) -> dict[str, str]:
     return contents
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
 def _version(text: str, keys: tuple[str, ...]) -> str:
     try:
         value: object = json.loads(text)
     except ValueError as error:
         raise MeizelError("invalid TS compiler installation metadata") from error
     for key in keys:
-        if not isinstance(value, dict) or key not in value:
+        if not _is_table(value) or key not in value:
             raise MeizelError("invalid TS compiler installation metadata")
-        value = cast("dict[str, object]", value)[key]
+        value = value[key]
     if not isinstance(value, str):
         raise MeizelError("invalid TS compiler version")
     return value

@@ -29,8 +29,3 @@ exports = ["fixtures.py", "no_script_sibling_imports.py", "path_imports.py", "sc
 "purity.py#Path.is_file" = 1
 "purity.py#Path.read_text" = 1
 "scan.py#Path.read_bytes" = 1
-
-[debt.type-cast]
-"patching.py#cast PatchForms.builtin_attribute_call" = 1
-"patching.py#cast PatchForms.monkeypatch_call" = 1
-"scan.py#cast Scanner.children" = 1

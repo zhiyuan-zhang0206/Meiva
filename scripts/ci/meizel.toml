@@ -9,32 +9,6 @@ exports = ["cli.py", "pull_requests", "refresh_test_durations.py", "shard_counts
 
 [roots]
 "coverage_gates.py" = { kinds = ["environ"], why = "BACKEND_COVERAGE_THRESHOLD is a ci.yml workflow knob for the pre-merge gate, not runtime config — Settings models the deployed runtime, and importing base.config would drag the settings singleton into a pure CI report parser" }
+"host_marks_census.py" = { kinds = ["platform"], why = "CLI census entrypoint records the host OS it ran on in the artifact" }
 "migration_smoke.py" = { kinds = ["environ", "settings"], why = "builds a psql subprocess env (PGHOST/PGPORT/... from a throwaway native Postgres); PG* are libpq plumbing, not Meiva runtime config; Tool entry composes its process resources from the launch configuration" }
-
-"pgvector_runtime_smoke.py" = { kinds = ["settings"], why = "Tool entry composes its process resources from the launch configuration" }
-
-[debt.ambient-read]
-"host_marks_census.py#platform platform.system" = 1
-"pgvector_runtime_smoke.py#platform platform.machine" = 1
-"pgvector_runtime_smoke.py#platform platform.system" = 1
-
-[debt.any-collaborator]
-"dependency_audit.py#any _fetch_json.return" = 1
-"dependency_audit.py#any _gh_api.return" = 1
-"dependency_audit.py#any _no_forward_fix.fix" = 1
-
-[debt.type-cast]
-"coverage_gates.py#cast _line_counts" = 2
-"coverage_gates.py#cast main" = 2
-"dependency_audit.py#cast main" = 2
-"dependency_audit.py#cast osv_severity" = 2
-"dependency_audit.py#cast run_json" = 1
-"file_shard_shadow.py#cast _check" = 2
-"file_shard_shadow.py#cast _durations" = 1
-"file_shard_shadow.py#cast _load_group" = 1
-"file_shard_shadow.py#cast _plan" = 1
-"file_shard_shadow.py#cast _report_path" = 1
-"file_shard_shadow.py#cast _worker" = 1
-"file_shard_shadow.py#cast pytest_configure" = 2
-"file_shard_shadow.py#cast pytest_sessionfinish" = 1
-"refresh_test_durations.py#cast load_durations" = 1
+"pgvector_runtime_smoke.py" = { kinds = ["platform", "settings"], why = "Tool entry checks supported host OS/arch and composes its process resources from the launch configuration" }

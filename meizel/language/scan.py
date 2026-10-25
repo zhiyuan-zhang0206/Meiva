@@ -6,7 +6,7 @@ import ast
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from meizel import allowances
 from meizel.graph.imports import (
@@ -140,6 +140,10 @@ _COMPREHENSION_NAMES = {
 }
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 @dataclass(frozen=True, slots=True)
 class FileScan:
     path: str
@@ -269,8 +273,8 @@ class Scanner(AmbientAccess):
         handlers = self._handlers
         for name in node._fields:
             value = getattr(node, name, None)
-            if isinstance(value, list):
-                for child in cast("list[object]", value):
+            if _is_object_list(value):
+                for child in value:
                     if isinstance(child, ast.AST) and type(child) not in _LEAVES:
                         handler = handlers.get(type(child))
                         handler(child) if handler else self.children(child)

@@ -55,7 +55,7 @@ import sys
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal, Protocol, cast
+from typing import Literal, Protocol, TypeGuard
 
 from base.host.atomic_io import write_text_atomic
 
@@ -88,6 +88,14 @@ class SuiteProcess(Protocol):
     ) -> subprocess.CompletedProcess[bytes]: ...
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
 def load_durations(path: Path) -> dict[str, float]:
     """Load a pytest-split durations file; missing or corrupt -> empty dict."""
     try:
@@ -100,10 +108,10 @@ def load_durations(path: Path) -> dict[str, float]:
             file=sys.stderr,
         )
         return {}
-    if not isinstance(data, dict):
+    if not _is_table(data):
         raise SystemExit(f"unexpected durations shape in {path}: {type(data).__name__}")
     durations: dict[str, float] = {}
-    for nodeid, value in cast("dict[str, object]", data).items():
+    for nodeid, value in data.items():
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             raise SystemExit(f"non-numeric duration in {path}")
         durations[nodeid] = float(value)

@@ -13,7 +13,6 @@ import os
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import cast
 
 _EDITABLE_PTH_NAME = "_editable_impl_meiva.pth"
 _EDITABLE_DIST_INFO_GLOB = "meiva-*.dist-info/direct_url.json"
@@ -72,25 +71,25 @@ def _editable_pth_violations(checkout: Path) -> list[str]:
     return violations
 
 
+class _JsonObject(dict[str, object]):
+    pass
+
+
 def _direct_url_violations(checkout: Path) -> list[str]:
     violations: list[str] = []
     expected_url = _resolved(checkout).as_uri()
     for path in _record_paths(checkout, _DIRECT_URL_PATTERNS):
         try:
-            payload = json.loads(path.read_text())
+            payload: object = json.loads(path.read_text(), object_hook=_JsonObject)
         except (OSError, json.JSONDecodeError) as exc:
             violations.append(f"{path} has unreadable direct_url.json: {exc}")
             continue
-        if not isinstance(payload, dict):
+        if not isinstance(payload, _JsonObject):
             violations.append(f"{path} records {payload!r}, not editable checkout {expected_url}")
             continue
-        payload = cast("dict[str, object]", payload)
         url = payload.get("url")
         dir_info = payload.get("dir_info")
-        editable = (
-            isinstance(dir_info, dict)
-            and cast("dict[str, object]", dir_info).get("editable") is True
-        )
+        editable = isinstance(dir_info, _JsonObject) and dir_info.get("editable") is True
         if url != expected_url or not editable:
             violations.append(f"{path} records {payload!r}, not editable checkout {expected_url}")
     return violations

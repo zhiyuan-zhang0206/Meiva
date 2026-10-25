@@ -14,7 +14,9 @@ import hashlib
 import re
 import sys
 from pathlib import Path
-from typing import Any
+
+from psycopg import Connection
+from psycopg_pool import ConnectionPool
 
 
 def script_sha256(script: str) -> str:
@@ -63,7 +65,9 @@ def load_installed_runtime(home: Path, source: Path) -> None:
 # The caller holds the home's lifecycle mutex and has proved no agent host serves
 # the home. Per-row commits are deliberate: after an interruption, the prepared
 # text is a no-op and any third text is refused.
-def replace_script(pool: Any, schedule_id: int, script: str, expected_sha256: str) -> str:
+def replace_script(
+    pool: ConnectionPool[Connection], schedule_id: int, script: str, expected_sha256: str
+) -> str:
     # First-generation bootstrap must use the already installed versioned writer.
     # Calling a newly introduced public owner would require deploying it first.
     # This narrow coupling is covered on 44d and current source; no SQL is copied.

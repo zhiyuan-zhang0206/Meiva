@@ -46,7 +46,7 @@ def _gh_output(argv: list[str], *, operation: str, host: Host) -> str:
 
 
 # meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
-def _gh_api(path: str, *, host: Host) -> Any:
+def _gh_api(path: str, *, host: Host) -> object:
     output = _gh_output(["gh", "api", path], operation=path, host=host)
     try:
         return json.loads(output)

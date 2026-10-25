@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 from meizel.allowances import POLICY, Policy, parse, parse_snapshot
 from meizel.contracts.manifest import Manifest
@@ -111,13 +111,17 @@ def policy_at(root: Path, ref: str) -> Policy:
     return policy
 
 
+def _is_object_tuple(value: object) -> TypeGuard[tuple[object, ...]]:
+    return isinstance(value, tuple)
+
+
 def changes(old: Policy, new: Policy) -> list[str]:
     """A line per entry added, removed or changed between two policies."""
     lines: list[str] = []
 
     def text(value: object) -> str:
-        if isinstance(value, tuple):
-            return "[" + ", ".join(cast("tuple[str, ...]", value)) + "]"
+        if _is_object_tuple(value):
+            return "[" + ", ".join(str(item) for item in value) + "]"
         return str(value)
 
     def show(key: str, value: object) -> str:

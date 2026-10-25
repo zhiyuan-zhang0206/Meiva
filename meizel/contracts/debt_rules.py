@@ -26,7 +26,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 from meizel.allowances import RETIRED_AMBIENT_SECTIONS, Policy
 from meizel.contracts.analysis import Analysis, analyze
@@ -185,6 +185,22 @@ def regenerated(base_root: Path, ref: str, jobs: int | None) -> Baselines:
     return read_baselines(load_universe(base_root))
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_list(value: object) -> TypeGuard[list[str]]:
+    return _is_object_list(value) and all(isinstance(item, str) for item in value)
+
+
 def _strict_to_be_targets(text: str) -> set[str]:
     try:
         doc = tomllib.loads(text)
@@ -193,9 +209,8 @@ def _strict_to_be_targets(text: str) -> set[str]:
     purity = doc.get("purity")
     if purity == "strict-to-be":
         return {"."}
-    if isinstance(purity, dict):
-        table = cast("dict[str, object]", purity)
-        return {k for k, v in table.items() if v == "strict-to-be"}
+    if _is_table(purity):
+        return {k for k, v in purity.items() if v == "strict-to-be"}
     return set()
 
 
@@ -258,13 +273,9 @@ def _historical_root_modules(
     held = {AmbientKind.SETTINGS, AmbientKind.DB, AmbientKind.BUS, AmbientKind.ENDPOINTS}
     if kind not in held:
         raise MeizelError(f"{path}: unknown historical root kind {name!r}")
-    if (
-        not isinstance(value, list)
-        or not all(isinstance(item, str) for item in cast("list[object]", value))
-        or (not value and kind is AmbientKind.SETTINGS)
-    ):
+    if not _is_str_list(value) or (not value and kind is AmbientKind.SETTINGS):
         raise MeizelError(f"{path}: {name} must be a list of modules")
-    return kind, tuple(cast("list[str]", value))
+    return kind, tuple(value)
 
 
 def _legacy_roots(

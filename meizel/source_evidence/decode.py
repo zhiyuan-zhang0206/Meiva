@@ -6,24 +6,35 @@
 from __future__ import annotations
 
 import json
-from typing import cast
+from typing import TypeGuard
 
 from meizel.source_evidence.model import Declaration, Identity, Index, Observation, Source
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _object(value: object, fields: str) -> dict[str, object]:
-    if not isinstance(value, dict):
+    if not _is_table(value):
         raise TypeError(f"expected TS index object: {fields}")
-    record = cast("dict[str, object]", value)
-    if set(record) != set(fields.split()):
+    if set(value) != set(fields.split()):
         raise ValueError(f"expected exactly these TS index fields: {fields}")
-    return record
+    return value
 
 
 def _sequence(value: object) -> list[object]:
-    if not isinstance(value, list):
+    if not _is_object_list(value):
         raise TypeError("TS index sequence must be an array")
-    return cast("list[object]", value)
+    return value
 
 
 def _string(value: object, *, empty: bool = False) -> str:

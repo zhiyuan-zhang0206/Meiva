@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from functools import partial
 from http.client import HTTPResponse
 from pathlib import Path
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, Protocol, TypeGuard
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 MARKER = "<!-- weekly-dependency-audit -->"
@@ -70,7 +70,15 @@ def _version_key(version: str) -> tuple[int, ...]:
     return tuple(int(part) for part in re.findall(r"\d+", version.lstrip("v")))
 
 
-def _fetch_json(url: str, *, open_url: UrlOpener) -> Any:
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, Any]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
+def _fetch_json(url: str, *, open_url: UrlOpener) -> object:
     request = urllib.request.Request(url, headers={"Accept": "application/json"})
     with open_url(request, 30) as response:
         return json.load(response)
@@ -81,7 +89,7 @@ def _fetch_text(url: str, *, open_url: UrlOpener) -> str:
         return response.read().decode()
 
 
-def _gh_api(path: str, *, run: AuditProcess) -> Any:
+def _gh_api(path: str, *, run: AuditProcess) -> object:
     return json.loads(_gh(["api", path], run=run))
 
 
@@ -91,13 +99,13 @@ def _gh_api(path: str, *, run: AuditProcess) -> Any:
 def osv_severity(advisory_ids: list[str], fetch: Fetch) -> str:
     for advisory_id in advisory_ids:
         try:
-            record = fetch(f"https://api.osv.dev/v1/vulns/{advisory_id}")
+            record: object = fetch(f"https://api.osv.dev/v1/vulns/{advisory_id}")
         except OSError:
             continue
-        if not isinstance(record, dict):
+        if not _is_table(record):
             continue
-        record_json = cast("dict[str, Any]", record)
-        specific = cast("dict[str, Any]", record_json.get("database_specific") or {})
+        raw_specific: object = record.get("database_specific")
+        specific = raw_specific if _is_table(raw_specific) else {}
         severity = specific.get("severity")
         if isinstance(severity, str) and severity.lower() in _SEVERITY_RANK:
             return severity.lower()
@@ -133,10 +141,10 @@ def _dev_only(nodes: list[str], packages: dict[str, Any]) -> bool:
     return True
 
 
-def _no_forward_fix(fix: Any, packages: dict[str, Any]) -> bool:
+def _no_forward_fix(fix: object, packages: dict[str, Any]) -> bool:
     if fix is False:
         return True
-    if not isinstance(fix, dict):
+    if not _is_table(fix):
         return False
     name = fix.get("name")
     suggested = fix.get("version")
@@ -186,16 +194,16 @@ def npm_vulnerabilities(
 def run_json(argv: list[str], cwd: Path, *, run: AuditProcess) -> dict[str, Any]:
     result = run(argv, capture_output=True, text=True, cwd=cwd, timeout=600)
     try:
-        parsed: Any = json.loads(result.stdout)
+        parsed: object = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError(
             f"{argv[0]} produced no JSON (rc={result.returncode}): {result.stderr[-400:]}"
         ) from exc
-    if not isinstance(parsed, dict):
+    if not _is_table(parsed):
         raise TypeError(f"{argv[0]} JSON is not an object")
     if "error" in parsed or result.returncode not in (0, 1):
         raise RuntimeError(f"{argv[0]} reported an audit error (rc={result.returncode})")
-    return cast("dict[str, Any]", parsed)
+    return parsed
 
 
 # meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
@@ -439,11 +447,12 @@ def main(argv: list[str], *, run: AuditProcess, open_url: UrlOpener) -> int:
         _REPO_ROOT / "ui/web",
         run=run,
     )
-    lockfile = cast(
-        "dict[str, Any]",
-        json.loads((_REPO_ROOT / "ui/web" / "package-lock.json").read_text(encoding="utf-8")),
+    raw_lockfile: object = json.loads(
+        (_REPO_ROOT / "ui/web" / "package-lock.json").read_text(encoding="utf-8")
     )
-    packages = cast("dict[str, Any]", lockfile.get("packages") or {})
+    lockfile = raw_lockfile if _is_table(raw_lockfile) else {}
+    raw_packages: object = lockfile.get("packages")
+    packages = raw_packages if _is_table(raw_packages) else {}
     vulnerabilities = [
         *python_vulnerabilities(uv_json, partial(_fetch_json, open_url=open_url)),
         *npm_vulnerabilities(npm_json, packages),

@@ -70,20 +70,3 @@ exports = ["analysis.py", "cli.py", "enumerations.py", "sync.py"]
 "sync.py#Path.read_text" = 1
 "sync.py#Path.unlink" = 1
 "sync.py#Path.write_text" = 1
-
-[debt.type-cast]
-"debt.py#cast parse_debt" = 2
-"debt_report.py#cast _tables_in" = 1
-"debt_report.py#cast _tables_in.<dictcomp>" = 1
-"debt_report.py#cast _totals_in" = 2
-"debt_rules.py#cast _historical_root_modules" = 2
-"debt_rules.py#cast _strict_to_be_targets" = 1
-"enumerations.py#cast _arrays" = 2
-"manifest.py#cast _Reader.names" = 2
-"manifest.py#cast _Reader.read_external" = 1
-"manifest.py#cast _Reader.read_purity" = 1
-"manifest.py#cast _Reader.read_root" = 1
-"manifest.py#cast _Reader.read_roots" = 1
-"manifest.py#cast _Reader.read_state" = 1
-"manifest.py#cast _Reader.read_table" = 1
-"policy.py#cast changes.text" = 1

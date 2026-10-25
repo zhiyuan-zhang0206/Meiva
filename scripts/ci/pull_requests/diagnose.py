@@ -4,7 +4,7 @@ import json
 import re
 import subprocess
 import sys
-from typing import NotRequired, TypedDict, cast
+from typing import NotRequired, TypedDict, TypeGuard
 
 from base.host.net.ports import UrlOpener
 from base.host.system.hostport import Host
@@ -29,12 +29,22 @@ class Diagnosis(TypedDict):
     mergeable: NotRequired[object]
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _object_rows(raw: object) -> list[dict[str, object]]:
-    if not isinstance(raw, list):
+    if not _is_object_list(raw):
         return []
-    return [
-        cast("dict[str, object]", row) for row in cast("list[object]", raw) if isinstance(row, dict)
-    ]
+    return [row for row in raw if _is_table(row)]
 
 
 # meiva:note
@@ -83,7 +93,7 @@ def _pr_view(pr: str, repo: str, fields: str, *, host: Host) -> dict[str, object
         data: object = json.loads(result.stdout)
     except json.JSONDecodeError:
         return None
-    return cast("dict[str, object]", data) if isinstance(data, dict) else None
+    return data if _is_table(data) else None
 
 
 def _job_log_tail(job_id: int, repo: str, *, host: Host) -> str:
@@ -112,9 +122,9 @@ def classify_check(name: str, log: str) -> tuple[str, str]:
 
 def _pull_head_ref(pull: dict[str, object]) -> str:
     head = pull.get("head")
-    if not isinstance(head, dict):
+    if not _is_table(head):
         return ""
-    return str(cast("dict[object, object]", head).get("ref") or "")
+    return str(head.get("ref") or "")
 
 
 def _synthetic_test_prs(pr: str, repo: str, *, host: Host) -> list[dict[str, object]]:
