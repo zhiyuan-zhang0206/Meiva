@@ -90,14 +90,29 @@ def test_manifest_quotes_the_asset_name_in_the_url(tmp_path: Path) -> None:
 
 
 def test_manifest_defaults_built_at_to_utc_now(tmp_path: Path) -> None:
-    manifest = release.build_manifest(
-        version_code=1_000_009,
-        version_name="0.4.2",
-        apk=_apk(tmp_path),
-        commit="c" * 40,
-        repo="owner/Meiva",
+    apk = _apk(tmp_path)
+    out = tmp_path / "android-latest.json"
+
+    exit_code = release.main(
+        [
+            "manifest",
+            "--version-code",
+            "1000009",
+            "--version-name",
+            "0.4.2",
+            "--apk",
+            str(apk),
+            "--commit",
+            "c" * 40,
+            "--repo",
+            "owner/Meiva",
+            "--out",
+            str(out),
+        ]
     )
 
+    assert exit_code == 0
+    manifest = json.loads(out.read_text(encoding="utf-8"))
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", manifest["builtAt"])
 
 

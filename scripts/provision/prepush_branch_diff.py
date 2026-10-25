@@ -7,7 +7,6 @@ import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import TextIO, cast
 
 _HOOK_ID = re.compile(r"^- hook id: (\S+)$")
 _FAILURE = re.compile(r"^- (?:exit code: \d+|files were modified by this hook)$")
@@ -147,11 +146,12 @@ def _run(
         command, cwd=directory, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
     )
     output: list[str] = []
-    for line in cast(TextIO, process.stdout):
-        output.append(line)
-        if stream:
-            sys.stdout.write(line)
-            sys.stdout.flush()
+    if process.stdout is not None:
+        for line in process.stdout:
+            output.append(line)
+            if stream:
+                sys.stdout.write(line)
+                sys.stdout.flush()
     return process.wait() == 0, "".join(output)
 
 

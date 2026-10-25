@@ -64,7 +64,6 @@ Timeline failures degrade to cached or partial records and are counted in
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
 import subprocess
 import sys
@@ -85,12 +84,12 @@ if str(_REPO_ROOT) not in sys.path:
 # meiva:note
 # The script-mode root guard must run before importing the checkout-owned API.
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener  # noqa: E402 — script path guard
+from base.telemetry import EventPipeline  # noqa: E402
 from scripts.ci.pull_requests.gh_process import GhProcess  # noqa: E402
 
 DEFAULT_REPO = "zhiyuan-zhang0206/Meiva"
 DEFAULT_WINDOW_DAYS = 30
 PROCESS_NAME = "pr-flow"
-TRUNK_TOKEN_PATH = Path.home() / ".trunk" / "api-token"
 
 _GH_TIMEOUT_S = 60.0
 _TRUNK_REQUEST_TIMEOUT_S = 30.0
@@ -365,7 +364,7 @@ def compute_days(
     return payload
 
 
-def load_trunk_token() -> str | None:
+def load_trunk_token(token_path: Path) -> str | None:
     """The Trunk API token from `~/.trunk/api-token`; None when absent.
 
     The file is the design's credential location (the macmini fact this job
@@ -373,24 +372,17 @@ def load_trunk_token() -> str | None:
     with a logged reason and never fails the run.
     """
     try:
-        token = TRUNK_TOKEN_PATH.read_text(encoding="utf-8").strip()
+        token = token_path.read_text(encoding="utf-8").strip()
     except OSError:
         return None
     return token or None
 
 
-@contextlib.contextmanager
-def trunk_client() -> Any:
-    """The repo's Trunk API channel (`scripts/ci/pull_requests/trunk_api.py`), imported lazily."""
-    from scripts.ci.pull_requests import trunk_api
-
-    yield trunk_api
-
-
 def fetch_queue_depth(repo: str, token: str, stats: RunStats, *, open_url: UrlOpener) -> int | None:
     """The Trunk merge queue's pending depth right now; None on any failure."""
-    with trunk_client() as trunk:
-        data, error = trunk.post("getQueue", trunk.target_payload(repo), token, open_url=open_url)
+    from scripts.ci.pull_requests import trunk_api as trunk
+
+    data, error = trunk.post("getQueue", trunk.target_payload(repo), token, open_url=open_url)
     stats.trunk_calls += 1
     if error is not None or data is None:
         stats.trunk_error = error or "no data"
@@ -410,44 +402,45 @@ def fetch_quarantined(
     ``_MAX_FLAKY_PAGES`` pages; hitting the cap is logged rather than
     silently truncating the counts.
     """
+    from scripts.ci.pull_requests import trunk_api as trunk
+
     owner, name = repo.split("/", maxsplit=1)
-    with trunk_client() as trunk:
-        collected: list[dict[str, Any]] = []
-        page_token: str | None = None
-        for _ in range(_MAX_FLAKY_PAGES):
-            page_query: dict[str, object] = {"page_size": _PAGE_SIZE}
-            if page_token is not None:
-                page_query["page_token"] = page_token
-            payload: dict[str, object] = {
-                "repo": {"host": "github.com", "owner": owner, "name": name},
-                "org_url_slug": trunk.ORG_SLUG,
-                "page_query": page_query,
-            }
-            data, error = trunk.post(
-                "flaky-tests/list-quarantined-tests",
-                payload,
-                token,
-                open_url=open_url,
-            )
-            stats.trunk_calls += 1
-            if error is not None or data is None:
-                stats.trunk_error = error or "no data"
-                return None
-            batch = data.get("quarantined_tests") or []
-            if not isinstance(batch, list):
-                stats.trunk_error = "unexpected quarantined_tests payload"
-                return None
-            collected.extend(item for item in batch if isinstance(item, dict))
-            page = data.get("page") or {}
-            page_token = page.get("next_page_token") if isinstance(page, dict) else None
-            if not batch or not page_token:
-                return collected
-        print(
-            f"pr-flow: quarantined walk capped at {_MAX_FLAKY_PAGES} pages; "
-            "day counts are a lower bound",
-            file=sys.stderr,
+    collected: list[dict[str, Any]] = []
+    page_token: str | None = None
+    for _ in range(_MAX_FLAKY_PAGES):
+        page_query: dict[str, object] = {"page_size": _PAGE_SIZE}
+        if page_token is not None:
+            page_query["page_token"] = page_token
+        payload: dict[str, object] = {
+            "repo": {"host": "github.com", "owner": owner, "name": name},
+            "org_url_slug": trunk.ORG_SLUG,
+            "page_query": page_query,
+        }
+        data, error = trunk.post(
+            "flaky-tests/list-quarantined-tests",
+            payload,
+            token,
+            open_url=open_url,
         )
-        return collected
+        stats.trunk_calls += 1
+        if error is not None or data is None:
+            stats.trunk_error = error or "no data"
+            return None
+        batch = data.get("quarantined_tests") or []
+        if not isinstance(batch, list):
+            stats.trunk_error = "unexpected quarantined_tests payload"
+            return None
+        collected.extend(item for item in batch if isinstance(item, dict))
+        page = data.get("page") or {}
+        page_token = page.get("next_page_token") if isinstance(page, dict) else None
+        if not batch or not page_token:
+            return collected
+    print(
+        f"pr-flow: quarantined walk capped at {_MAX_FLAKY_PAGES} pages; "
+        "day counts are a lower bound",
+        file=sys.stderr,
+    )
+    return collected
 
 
 def count_quarantined_by_day(
@@ -610,14 +603,14 @@ def build_snapshot(
     }
 
 
-def emit_snapshot(snapshot: dict[str, Any], *, dry_run: bool, pipeline: Any) -> None:
+def emit_snapshot(snapshot: dict[str, Any], *, dry_run: bool, pipeline: EventPipeline) -> None:
     """Emit the daily + run events through the unified telemetry pipeline."""
     if dry_run:
         return
     emit_events(snapshot, pipeline=pipeline)
 
 
-def emit_events(snapshot: dict[str, Any], *, pipeline: Any) -> None:
+def emit_events(snapshot: dict[str, Any], *, pipeline: EventPipeline) -> None:
     """The pipeline write (separate seam so tests can assert dry-run silence)."""
     from base import telemetry
 
@@ -687,7 +680,7 @@ def main(argv: list[str] | None = None, *, run_process: GhProcess, open_url: Url
 
     records = collect_records(prs, days, tz, args.repo, cache, stats, run_process=run_process)
 
-    token = load_trunk_token()
+    token = load_trunk_token(Path.home() / ".trunk" / "api-token")
     queue_depth: int | None = None
     flake_counts: dict[date, int] | None = None
     if token is None:

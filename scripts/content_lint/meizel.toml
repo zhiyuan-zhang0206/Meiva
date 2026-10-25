@@ -3,9 +3,5 @@ exports = ["lint_no_cjk.py", "lint_no_tailnet.py"]
 [uses]
 "tests" = ["check_cross_branch_migrations.py", "check_doc_references.py", "lint_audit_record.py", "lint_meiva_okf.py", "lint_core_content_manifests.py", "lint_doc_anchors.py", "lint_doc_roster.py", "lint_doc_symbols.py", "lint_migrations.py", "lint_no_cjk.py", "lint_no_tailnet.py", "lint_skill_descriptions.py", "lint_skill_md_size.py"]
 
-[debt.ambient-read]
-"lint_meiva_okf.py#cwd pathlib.Path.cwd" = 1
-
-[debt.type-cast]
-"lint_meiva_okf.py#cast _tags_errors" = 1
-"lint_meiva_okf.py#cast parse_frontmatter" = 1
+[roots]
+"lint_meiva_okf.py" = { kinds = ["cwd"], why = "CLI OKF linter defaults to the current checkout directory when invoked from the command line" }

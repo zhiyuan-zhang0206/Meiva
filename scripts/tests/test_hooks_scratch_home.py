@@ -187,13 +187,7 @@ def test_a_hook_script_exempt_from_the_scratch_home_runs_without_a_third_party_p
     env = {k: v for k, v in os.environ.items() if not k.startswith("MEIVA_")}
     env["HOME"] = str(tmp_path)
     result = subprocess.run(  # noqa: S603 — fixed argv, repository script, no shell
-        [
-            sys.executable,
-            "-S",
-            "-c",
-            "import runpy, sys; runpy.run_path(sys.argv[1], run_name='bare_import_check')",
-            rel,
-        ],
+        [sys.executable, "-S", "-m", "doctest", rel],
         cwd=_REPO,
         env=env,
         capture_output=True,

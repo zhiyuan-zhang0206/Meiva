@@ -198,14 +198,6 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _dsn(args: argparse.Namespace) -> str:
-    if args.dsn is not None:
-        return str(args.dsn)
-    from base.config import settings
-
-    return settings.data_plane.db_url
-
-
 def _allowlisted(drift: Drift, allow: Path | None) -> Drift:
     if allow is None or not allow.exists():
         return drift
@@ -244,8 +236,14 @@ def _is_dirty(drift: Drift) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    if args.dsn is not None:
+        dsn = str(args.dsn)
+    else:
+        from base.config import settings
+
+        dsn = settings.data_plane.db_url
     schema = schema_columns(args.schema.read_text(encoding="utf-8"))
-    with psycopg.connect(_dsn(args)) as conn:
+    with psycopg.connect(dsn) as conn:
         conn.read_only = True
         live = _live_columns(conn)
     declared = {name.lower() for name in schema}

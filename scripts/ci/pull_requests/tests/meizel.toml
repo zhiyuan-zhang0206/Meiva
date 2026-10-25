@@ -3,10 +3,3 @@
 "ci_monitor" = ["ci_evidence.py", "test_ci_monitor.py"]
 "test_ci_monitor.py" = ["ci_evidence.py"]
 "test_ci_owner_operations.py" = ["ci_evidence.py"]
-
-[debt.first-party-patch]
-"test_export_process.py#monkeypatch.setattr base.db.Database.from_settings" = 1
-"test_export_process.py#monkeypatch.setattr base.native_process.loaded_commit.LoadedCommit.capture" = 1
-"test_export_process.py#monkeypatch.setattr scripts.ci.pull_requests.export_process.ConfigBoot" = 1
-"test_export_process.py#monkeypatch.setattr scripts.ci.pull_requests.export_process.build_pipeline" = 3
-"test_export_process.py#monkeypatch.setattr scripts.ci.pull_requests.export_process.meiva_home" = 1

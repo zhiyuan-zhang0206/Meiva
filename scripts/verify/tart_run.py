@@ -200,7 +200,7 @@ def run(ref: str, evidence_root: Path, *, repo: Path, golden: str, tart: Tart) -
         tart.require_stopped(golden)
         tart.require_capacity()
         with evidence.action("export"):
-            export_commit(repo, commit, export)
+            export_commit(repo, commit, export, home=tart.home)
         evidence.step("clone", tart.argv("clone", golden, vm))
         with evidence.action("boot"):
             tart.require_capacity()
@@ -243,12 +243,13 @@ def _interrupted(_signum: int, _frame: FrameType | None) -> None:
 
 
 def main() -> int:
+    user_home = Path.home()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ref", required=True, help="branch, tag or commit of this repository")
     parser.add_argument("--golden", default=GOLDEN, help="the stopped golden image to clone")
     parser.add_argument(
         "--tart",
-        default=shutil.which("tart") or str(Path.home() / ".local/bin/tart"),
+        default=shutil.which("tart") or str(user_home / ".local/bin/tart"),
         help="the Tart binary (default: tart on PATH, else ~/.local/bin/tart)",
     )
     parser.add_argument(
@@ -265,7 +266,7 @@ def main() -> int:
         args.evidence_root.resolve(),
         repo=REPO,
         golden=args.golden,
-        tart=Tart(args.tart),
+        tart=Tart(args.tart, home=user_home),
     )
 
 

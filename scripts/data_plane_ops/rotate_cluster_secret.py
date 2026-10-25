@@ -38,7 +38,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal, TypeGuard
 
 from dotenv import dotenv_values
 
@@ -59,6 +59,14 @@ class RotationRefusedError(RuntimeError):
     """The home's bearer, staged secret or pin contradicts the rotation record."""
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
 @dataclass(frozen=True)
 class Rotation:
     """One rotation's journal record: fingerprints only, never a secret."""
@@ -70,7 +78,7 @@ class Rotation:
 
     @classmethod
     def parse(cls, raw: object) -> Rotation:
-        record = cast("dict[str, object]", raw) if isinstance(raw, dict) else {}
+        record = raw if _is_str_object_dict(raw) else {}
         state, old, new, pin = (record.get(key) for key in ("state", "old", "new", "pin"))
         if (
             set(record) != {"state", "old", "new", "pin"}

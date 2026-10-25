@@ -46,7 +46,7 @@ def build_manifest(
     apk: Path,
     commit: str,
     repo: str,
-    built_at: str | None = None,
+    built_at: str,
 ) -> dict[str, Any]:
     if _COMMIT.fullmatch(commit) is None:
         raise ValueError(f"'{commit}' is not a full commit SHA")
@@ -97,8 +97,8 @@ def _checked_version_name(version_name: str) -> str:
     return version_name
 
 
-def _utc_timestamp(value: str | None) -> str:
-    moment = datetime.now(UTC) if value is None else datetime.fromisoformat(value)
+def _utc_timestamp(value: str) -> str:
+    moment = datetime.fromisoformat(value)
     if moment.tzinfo is None:
         raise ValueError(f"'{value}' must carry a UTC offset")
     return moment.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -147,13 +147,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"versionCode {args.version_code} advances android-latest")
         return 0
 
+    built_at = (
+        args.built_at
+        if args.built_at is not None
+        else datetime.now(UTC).isoformat(timespec="seconds")
+    )
     body = build_manifest(
         version_code=args.version_code,
         version_name=args.version_name,
         apk=args.apk,
         commit=args.commit,
         repo=args.repo,
-        built_at=args.built_at,
+        built_at=built_at,
     )
     text = json.dumps(body, indent=2) + "\n"
     args.out.write_text(text, encoding="utf-8")

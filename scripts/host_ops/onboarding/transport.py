@@ -53,10 +53,18 @@ class Result:
 
 
 class Host:
-    def __init__(self, name: str) -> None:
+    def __init__(
+        self,
+        name: str,
+        *,
+        path_preamble: str = PATH_PREAMBLE,
+        agent_path: str = AGENT_PATH,
+    ) -> None:
         if not name:
             raise ValueError("a host needs a name ('local' for this machine)")
         self.name = name
+        self.path_preamble = path_preamble
+        self.agent_path = agent_path
 
     @property
     def is_local(self) -> bool:
@@ -73,7 +81,7 @@ class Host:
         timeout: float = 300.0,
         agent_path: bool = False,
     ) -> Result:
-        preamble = f'export PATH="{AGENT_PATH}"' if agent_path else PATH_PREAMBLE
+        preamble = f'export PATH="{self.agent_path}"' if agent_path else self.path_preamble
         script = f"{preamble}\n{command}\n"
         if self.is_local:
             argv = ["bash", "-c", script]

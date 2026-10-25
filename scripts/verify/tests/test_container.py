@@ -22,8 +22,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DOCKERFILE = _REPO_ROOT / "scripts/verify/Dockerfile"
 
 
-def _run_argv(objects: Path) -> list[str]:
-    return container.docker_run_argv("meiva-verify-test", "meiva-verify:test", objects, "8g", "1g")
+def _run_argv(objects: Path, *, home: Path) -> list[str]:
+    return container.docker_run_argv(
+        "meiva-verify-test", "meiva-verify:test", objects, "8g", "1g", home=home
+    )
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -42,37 +44,31 @@ def _git(repo: Path, *args: str) -> str:
     "relative",
     [".", "..", ".meiva", ".meiva/source", ".ssh", ".gnupg", ".aws", ".docker"],
 )
-def test_host_home_and_its_sealed_directories_are_refused(
-    relative: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_host_home_and_its_sealed_directories_are_refused(relative: str, tmp_path: Path) -> None:
     home = tmp_path / "home"
     (home / ".meiva/source").mkdir(parents=True)
     for name in (".ssh", ".gnupg", ".aws", ".docker"):
         (home / name).mkdir()
-    monkeypatch.setenv("HOME", str(home))
 
     with pytest.raises(ValueError, match="refusing to mount host state"):
-        boundary.refuse_host_state(home / relative)
+        boundary.refuse_host_state(home / relative, home=home)
     with pytest.raises(ValueError, match="refusing to mount host state"):
-        _run_argv(home / relative)
+        _run_argv(home / relative, home=home)
 
 
 def test_the_container_runtime_socket_is_refused(tmp_path: Path) -> None:
     socket = tmp_path / "docker.sock"
     socket.touch()
     with pytest.raises(ValueError, match="refusing to mount host state"):
-        boundary.refuse_host_state(socket)
+        boundary.refuse_host_state(socket, home=tmp_path / "home")
 
 
-def test_a_repository_object_store_inside_home_is_allowed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_repository_object_store_inside_home_is_allowed(tmp_path: Path) -> None:
     home = tmp_path / "home"
     objects = home / "Meiva/.git/objects"
     objects.mkdir(parents=True)
-    monkeypatch.setenv("HOME", str(home))
 
-    boundary.refuse_host_state(objects)
+    boundary.refuse_host_state(objects, home=home)
 
 
 # ----------------------------------------------------------------- the one docker run
@@ -83,7 +79,7 @@ def test_the_run_publishes_nothing_and_carries_no_environment_or_credential(
 ) -> None:
     objects = tmp_path / "repo/.git/objects"
     objects.mkdir(parents=True)
-    argv = _run_argv(objects)
+    argv = _run_argv(objects, home=tmp_path / "home")
     joined = " ".join(argv)
 
     assert argv[:4] == ["docker", "run", "-d", "--init"]
@@ -100,7 +96,7 @@ def test_the_run_publishes_nothing_and_carries_no_environment_or_credential(
 def test_the_only_bind_mount_is_the_object_store_read_only(tmp_path: Path) -> None:
     objects = tmp_path / "repo/.git/objects"
     objects.mkdir(parents=True)
-    argv = _run_argv(objects)
+    argv = _run_argv(objects, home=tmp_path / "home")
 
     mounts = [argv[i + 1] for i, arg in enumerate(argv) if arg == "--mount"]
     assert mounts == [f"type=bind,src={objects},dst={container.OBJECTS_MOUNT},ro"]
@@ -115,7 +111,10 @@ def test_the_object_store_of_a_linked_worktree_is_the_common_one(tmp_path: Path)
     linked = tmp_path / "linked"
     _git(main, "worktree", "add", "--detach", str(linked))
 
-    assert container.git_objects_dir(linked) == (main / ".git/objects").resolve()
+    assert (
+        container.git_objects_dir(linked, home=tmp_path / "home")
+        == (main / ".git/objects").resolve()
+    )
 
 
 def test_a_ref_cannot_smuggle_a_git_option(tmp_path: Path) -> None:

@@ -11,7 +11,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, NoReturn, cast
+from typing import Any, NoReturn, TypeGuard
 
 ROOT_SOCKET = "meiva-root.sock"
 ROOT_WAIT_S = 30.0
@@ -123,13 +123,17 @@ def run(
     return proc
 
 
+def _pause(seconds: float) -> None:
+    time.sleep(seconds)
+
+
 def wait_for(what: str, predicate, timeout: float, phase: str):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         result = predicate()
         if result:
             return result
-        time.sleep(_POLL_S)
+        _pause(_POLL_S)
     fail(phase, f"timed out after {timeout:.0f}s waiting for {what}")
 
 
@@ -152,12 +156,12 @@ def save(evidence: Path, name: str, text: str) -> None:
     (evidence / name).write_text(text + "\n")
 
 
-def launchctl_domain() -> str:
-    return f"gui/{os.getuid()}"
+def launchctl_domain(uid: int) -> str:
+    return f"gui/{uid}"
 
 
-def bootout(label: str) -> None:
-    run(["launchctl", "bootout", f"{launchctl_domain()}/{label}"], check=False, timeout=30)
+def bootout(label: str, *, uid: int) -> None:
+    run(["launchctl", "bootout", f"{launchctl_domain(uid)}/{label}"], check=False, timeout=30)
 
 
 def job_pid(label: str) -> int | None:
@@ -254,6 +258,10 @@ def ppid_of(pid: int) -> int:
     return int(proc.stdout.strip())
 
 
+def is_object_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict) and all(isinstance(key, str) for key in value)
+
+
 def root_call(run_dir: Path, verb: str) -> dict[str, Any]:
     """Send one K1 verb over the raw control socket (stdlib only).
 
@@ -268,4 +276,7 @@ def root_call(run_dir: Path, verb: str) -> dict[str, Any]:
     response = json.loads(line)
     if not response.get("ok"):
         fail("root", f"{verb} refused: {response}")
-    return cast("dict[str, Any]", response["result"])
+    result = response.get("result")
+    if not is_object_dict(result):
+        fail("root", f"{verb} returned non-object result: {response}")
+    return result
