@@ -134,8 +134,7 @@ def test_ref_resolution_is_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         calls.append(ref)
         return real_resolve(ref)
 
-    monkeypatch.setattr(probes, "resolve_ref", counting)
-    registry = ProbeRegistry()
+    registry = ProbeRegistry(resolver=counting)
     registry.register_ref("alpha", "tmp_probe_cached:probe")
     assert registry.resolve("alpha") is registry.resolve("alpha")
     assert calls == ["tmp_probe_cached:probe"]

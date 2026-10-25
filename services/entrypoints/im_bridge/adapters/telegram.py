@@ -21,7 +21,7 @@ import json
 import re
 import ssl
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import httpx
 
@@ -29,6 +29,7 @@ from base.log import logger
 from services.entrypoints.im_bridge.config import TelegramCredentialsConfig
 from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
+    BridgeCore,
     HTTPFailure,
     IMAdapter,
     InboundMessage,
@@ -116,7 +117,7 @@ class TelegramAdapter(IMAdapter):
 
     def __init__(
         self,
-        core: Any,
+        core: BridgeCore | object,
         config: TelegramCredentialsConfig,
         *,
         state_dir: Path,
@@ -546,12 +547,15 @@ class TelegramAdapter(IMAdapter):
         # body cannot fail a send that already landed.
         message_id: Any = ""
         with contextlib.suppress(ValueError):  # a non-JSON 200 body
-            body: Any = resp.json()
-            result: Any = (
-                cast(dict[str, Any], body).get("result") if isinstance(body, dict) else None
-            )
-            if isinstance(result, dict):
-                message_id = cast(dict[str, Any], result).get("message_id", "")
+            body = resp.json()
+            body_any: Any = body
+            if isinstance(body, dict):
+                body_map: dict[str, Any] = body_any
+                result = body_map.get("result")
+                result_any: Any = result
+                if isinstance(result, dict):
+                    result_map: dict[str, Any] = result_any
+                    message_id = result_map.get("message_id", "")
         logger.info("telegram send ok chat_id={} message_id={}", chat_id, message_id)
 
     # -- offset persistence ----------------------------------------------

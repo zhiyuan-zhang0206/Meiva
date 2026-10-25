@@ -14,12 +14,57 @@ delivery and save does not become a second inbound.
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any
 
 import requests
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from services.entrypoints.im_bridge.types import RetryableTransportError, raise_http_failure
+
+
+class FeishuRawResponse:
+    status_code: int
+
+
+class FeishuResponseData:
+    items: list[Any] | None
+    chat_id: str
+    message_id: str
+
+
+class FeishuMessageResponse:
+    raw: FeishuRawResponse | None
+    code: int
+    msg: str
+    data: FeishuResponseData | None
+
+    def success(self) -> bool:
+        raise NotImplementedError
+
+
+class FeishuMessageResource:
+    def list(self, request: object) -> FeishuMessageResponse:
+        raise NotImplementedError
+
+    def create(self, request: object) -> FeishuMessageResponse:
+        raise NotImplementedError
+
+
+class FeishuImV1:
+    message: FeishuMessageResource
+
+
+class FeishuImNamespace:
+    v1: FeishuImV1
+
+
+class FeishuRestConfig:
+    timeout: float
+
+
+class FeishuRestClient:
+    im: FeishuImNamespace
+    _config: FeishuRestConfig
 
 
 class FeishuListRejected(RuntimeError):  # noqa: N818 — reads as the outcome, like its log message "Feishu list rejected"
@@ -43,10 +88,11 @@ def idempotency_key(message_id: str | None) -> str | None:
 
 
 def now_ms() -> int:
-    return int(time.time() * 1000)
+    clock = Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+    return int(clock.now().timestamp() * 1000)
 
 
-def create_ms(item: Any) -> int | None:
+def create_ms(item: object) -> int | None:
     """A listed message's create time in epoch ms; None when absent/garbled."""
 
     try:
@@ -103,13 +149,15 @@ def pending_after(
     return fresh, stale
 
 
-async def list_chat(rest_client: Any, chat_id: str) -> list[Any]:
-    """The chat's newest page of messages (20), ascending; failed list calls raise."""
+# meiva:note
+# The chat's newest page of messages (20), ascending; failed list calls raise.
+async def list_chat(rest_client: FeishuRestClient | object, chat_id: str) -> list[Any]:
+    from lark_oapi.api.im.v1 import ListMessageRequest  # pyright: ignore[reportUnknownVariableType]
 
-    from lark_oapi.api.im.v1 import ListMessageRequest
-
-    request = (
-        ListMessageRequest.builder()
+    rest_any: Any = rest_client
+    client_ref: FeishuRestClient = rest_any
+    request: object = (
+        ListMessageRequest.builder()  # pyright: ignore[reportUnknownMemberType]
         .container_id_type("chat")
         .container_id(chat_id)
         .page_size(20)
@@ -117,7 +165,7 @@ async def list_chat(rest_client: Any, chat_id: str) -> list[Any]:
         .build()
     )
     try:
-        response = await asyncio.to_thread(rest_client.im.v1.message.list, request)
+        response = await asyncio.to_thread(client_ref.im.v1.message.list, request)
     except (requests.exceptions.SSLError, requests.exceptions.ProxyError):
         raise
     except (requests.ConnectionError, requests.Timeout) as exc:

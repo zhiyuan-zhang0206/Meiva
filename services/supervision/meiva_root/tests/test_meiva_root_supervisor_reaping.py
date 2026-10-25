@@ -21,11 +21,13 @@ import psutil
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
 
+_CHILD = Path(__file__).with_name("child_unit.py")
+
 
 def _supervisor(run_dir: Path) -> Supervisor:
     unit = UnitManifest(
         "worker",
-        (sys.executable, "-c", "import time; time.sleep(60)"),
+        (sys.executable, str(_CHILD), "sleep"),
         RestartPolicy.ALWAYS,
         "root",
     )
@@ -39,13 +41,8 @@ def _holder(pgid: int, reap: Path) -> subprocess.Popen[str]:
     return subprocess.Popen(  # noqa: S603 - disposable interpreter and private test paths
         [
             sys.executable,
-            "-c",
-            "import pathlib,subprocess,sys,time\n"
-            "member=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'],"
-            " process_group=int(sys.argv[1]))\n"
-            "print(member.pid,flush=True)\n"
-            "while not pathlib.Path(sys.argv[2]).exists(): time.sleep(0.01)\n"
-            "member.wait()\n",
+            str(_CHILD),
+            "hold_group_member",
             str(pgid),
             str(reap),
         ],

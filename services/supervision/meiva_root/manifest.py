@@ -19,7 +19,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import cast
+from typing import Any
 
 from base.deploy.progress_timeout import ROOT_HEALTH_INTERVAL_S
 from services.supervision.meiva_root.inputs import InputSeal, parse_inputs
@@ -142,10 +142,12 @@ class UnitManifest:
 
 
 def _parse_exec(raw: object, origin: str) -> tuple[str, ...]:
+    raw_any: Any = raw
     if not isinstance(raw, list) or not raw:
         raise ManifestError(f"{origin}: exec must be a non-empty argv list")
+    items: list[Any] = raw_any
     argv: list[str] = []
-    for index, part in enumerate(cast("list[object]", raw)):
+    for index, part in enumerate(items):
         if not isinstance(part, str) or not part:
             raise ManifestError(f"{origin}: exec[{index}] must be a non-empty string")
         argv.append(part)
@@ -171,17 +173,23 @@ def _parse_stop_timeout(raw: object, origin: str, field: str = "stop_timeout_s")
 
 
 def _parse_environment(raw: object, origin: str) -> tuple[tuple[str, str], ...]:
-    if not isinstance(raw, dict) or any(
-        not isinstance(key, str)
-        or not key
-        or "=" in key
-        or "\0" in key
-        or not isinstance(value, str)
-        or "\0" in value
-        for key, value in cast("dict[object, object]", raw).items()
-    ):
+    raw_any: Any = raw
+    if not isinstance(raw, dict):
         raise ManifestError(f"{origin}: env must contain valid string keys and values")
-    return tuple(sorted(cast("dict[str, str]", raw).items()))
+    env_map: dict[Any, Any] = raw_any
+    pairs: list[tuple[str, str]] = []
+    for key, value in env_map.items():
+        if (
+            not isinstance(key, str)
+            or not key
+            or "=" in key
+            or "\0" in key
+            or not isinstance(value, str)
+            or "\0" in value
+        ):
+            raise ManifestError(f"{origin}: env must contain valid string keys and values")
+        pairs.append((key, value))
+    return tuple(sorted(pairs))
 
 
 def _require_str(raw: Mapping[str, object], field: str, origin: str) -> str:
@@ -286,24 +294,25 @@ def load_manifests(path: Path) -> UnitRegistry:
         root = json.loads(text)
     except json.JSONDecodeError as exc:
         raise ManifestError(f"{path}: not valid JSON: {exc}") from exc
+    root_any: Any = root
     if not isinstance(root, dict):
         raise ManifestError(f"{path}: top level must be an object with a 'units' list")
-    document = cast("dict[str, object]", root)
+    document: dict[str, Any] = root_any
     unknown = set(document) - _FILE_FIELDS
     if unknown:
         raise ManifestError(f"{path}: unknown top-level field(s) {sorted(unknown)}")
     units_raw = document.get("units")
+    units_any: Any = units_raw
     if not isinstance(units_raw, list):
         raise ManifestError(f"{path}: 'units' must be a list")
+    units_list: list[Any] = units_any
     manifests: list[UnitManifest] = []
-    for index, item in enumerate(cast("list[object]", units_raw)):
+    for index, item in enumerate(units_list):
+        item_any: Any = item
         if not isinstance(item, dict):
             raise ManifestError(f"{path}: units[{index}] must be an object")
-        manifests.append(
-            UnitManifest.from_mapping(
-                cast("dict[str, object]", item), origin=f"{path}: units[{index}]"
-            )
-        )
+        item_map: dict[str, Any] = item_any
+        manifests.append(UnitManifest.from_mapping(item_map, origin=f"{path}: units[{index}]"))
     digest = document.get("launch_digest")
     if digest is not None and not isinstance(digest, str):
         raise ManifestError("launch_digest must be a string")

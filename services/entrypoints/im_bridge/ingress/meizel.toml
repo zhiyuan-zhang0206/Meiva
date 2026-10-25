@@ -2,10 +2,7 @@ exports = ["identity.py", "runtime.py", "store.py", "types.py"]
 
 [purity]
 "__init__.py" = "strict"
-"commands.py" = "strict-to-be"
-"identity.py" = "strict-to-be"
-"runtime.py" = "strict-to-be"
-"store.py" = "strict-to-be"
+"identity.py" = "strict"
 "types.py" = "strict"
 
 [uses]
@@ -14,43 +11,3 @@ exports = ["identity.py", "runtime.py", "store.py", "types.py"]
 "runtime.py" = ["commands.py", "identity.py", "store.py", "types.py"]
 "store.py" = ["types.py"]
 "tests" = ["store.py", "types.py"]
-
-[debt.ambient-read]
-"store.py#random uuid.uuid4" = 2
-
-[debt.any-collaborator]
-"runtime.py#any WeixinIngress.__init__.core" = 1
-
-[debt.impure-call]
-"commands.py#async def execute_ingress_command" = 1
-"commands.py#async def notice_reply_verdict" = 1
-"commands.py#async def spawn_verdict" = 1
-"identity.py#import urllib" = 1
-"runtime.py#async def accept" = 1
-"runtime.py#async def capture_route" = 1
-"runtime.py#async def check_adapter" = 1
-"runtime.py#async def dispatch" = 1
-"runtime.py#async def initialize" = 1
-"runtime.py#async def recover_after_accept" = 1
-"runtime.py#async def recover_subscriptions" = 1
-"runtime.py#async def selection_scope" = 1
-"store.py#import psycopg" = 2
-"store.py#import psycopg_pool" = 1
-"store.py#uuid.uuid4" = 2
-
-[debt.impure-edge]
-"commands.py#services/entrypoints/im_bridge/timeline_acceptance.py" = 1
-"commands.py#services/entrypoints/im_bridge/types.py" = 1
-"runtime.py#base/log/__init__.py" = 1
-"runtime.py#services/entrypoints/im_bridge/timeline_acceptance.py" = 1
-"runtime.py#services/entrypoints/im_bridge/types.py" = 1
-"store.py#base/agents/inbox/chat_delivery.py" = 1
-"store.py#base/db/transaction.py" = 1
-"store.py#base/telemetry/__init__.py" = 3
-
-[debt.type-cast]
-"commands.py#cast execute_ingress_command" = 1
-"commands.py#cast notice_reply_verdict" = 1
-"commands.py#cast spawn_verdict" = 1
-"identity.py#cast poll_update_fields" = 2
-"identity.py#cast validate_message_items" = 1

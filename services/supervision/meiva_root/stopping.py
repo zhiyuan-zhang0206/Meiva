@@ -10,6 +10,7 @@ import asyncio
 import math
 import os
 import signal
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from time import monotonic
 
@@ -59,8 +60,18 @@ class StoppingMixin:
     """Stop known direct children, without durable custody or descendant discovery."""
 
     _config: SupervisorConfig
+    _signal_owned_fn: Callable[..., bool]
+    _stop_unit_override: Callable[..., Awaitable[None]] | None = None
 
     async def _stop_unit(
+        self, runtime: UnitRuntime, *, force: bool = False, escalate: bool = True
+    ) -> None:
+        if self._stop_unit_override is not None:
+            await self._stop_unit_override(runtime, force=force, escalate=escalate)
+            return
+        await self._stop_unit_default(runtime, force=force, escalate=escalate)
+
+    async def _stop_unit_default(
         self, runtime: UnitRuntime, *, force: bool = False, escalate: bool = True
     ) -> None:
         generation = runtime.generation
@@ -80,8 +91,9 @@ class StoppingMixin:
         began = monotonic()
         generation.closing = True
         identity = generation.identity
+        signal_fn = getattr(self, "_signal_owned_fn", self._signal_owned)
         if identity is not None:
-            self._signal_owned(identity, force=False)
+            signal_fn(identity, force=False)
         window = 0.0 if force else self._stop_window(runtime)
         if await self._wait_exit(generation, window):
             self._log_stopped(runtime, generation, began)
@@ -108,7 +120,7 @@ class StoppingMixin:
                 f"unit {runtime.manifest.id} outlived its {window:g}s window and root never "
                 f"captured its leader identity, so it did not kill it (pid {generation.proc.pid})"
             )
-        if not self._signal_owned(identity, force=True):
+        if not signal_fn(identity, force=True):
             if generation.exited.is_set():
                 return
             self._emit_stop_event(
@@ -186,7 +198,12 @@ class StoppingMixin:
         return self._config.stop_timeout_s if declared is None else declared
 
     @staticmethod
-    def _signal_owned(identity: OwnedProcess, *, force: bool) -> bool:
+    def _signal_owned(
+        identity: OwnedProcess,
+        *,
+        force: bool,
+        killpg_fn: Callable[[int, int], None] = os.killpg,
+    ) -> bool:
         # meiva:note
         # Attempt the captured leader's group only while that leader still lives.
         #
@@ -200,7 +217,7 @@ class StoppingMixin:
             if not identity.live():
                 return False
             if group == identity.pid and group != os.getpgrp():
-                os.killpg(group, signum)
+                killpg_fn(group, signum)
             else:
                 identity.send_signal(signum)
         except ProcessLookupError:

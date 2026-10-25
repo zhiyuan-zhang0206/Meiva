@@ -12,7 +12,6 @@ from base.cluster.machine import MachineFacts, MachineRoleInvalid
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.faults import InvalidRoleIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
 from base.paths.tests.homes import unit_home as unit_home
 from services.supervision.healthchecks import lgtm as hc
 from services.supervision.healthchecks.tests.loki_stub import BackendStub
@@ -28,20 +27,18 @@ def test_readiness_probes_exclude_remote_tempo() -> None:
     )
 
 
-def test_readiness_probes_ignore_remote_query_urls(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_readiness_probes_ignore_remote_query_urls() -> None:
     """Remote read endpoints cannot falsely mark a local native service alive."""
-    monkeypatch.setattr(
-        settings.observability, "telemetry_loki_url", "http://loki.example:3100/loki/"
-    )
-    monkeypatch.setattr(
-        settings.observability, "telemetry_prometheus_url", "http://prom.example:9090/"
-    )
-    monkeypatch.setattr(
-        settings.observability, "telemetry_grafana_url", "http://grafana.example:3003"
-    )
-    assert hc.readiness_probes() == (
+    from base.config import get_field
+
+    overrides: dict[str, str | int] = {
+        "telemetry_loki_url": "http://loki.example:3100/loki/",
+        "telemetry_prometheus_url": "http://prom.example:9090/",
+        "telemetry_grafana_url": "http://grafana.example:3003",
+    }
+    assert hc.readiness_probes(
+        read_field=lambda name: overrides[name] if name in overrides else get_field(name)
+    ) == (
         ("loki", "http://127.0.0.1:3100/ready"),
         ("prometheus", "http://127.0.0.1:9090/-/ready"),
         ("grafana", "http://127.0.0.1:3003/api/health"),

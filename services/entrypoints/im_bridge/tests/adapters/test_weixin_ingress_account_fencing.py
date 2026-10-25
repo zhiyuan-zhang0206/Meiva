@@ -12,7 +12,6 @@ from services.entrypoints.im_bridge.tests.adapters.test_weixin_ingress_recovery 
 )
 from services.entrypoints.im_bridge.tests.adapters.weixin_native import (
     NativeWeixin,
-    QuietCore,
     message,
 )
 from services.entrypoints.im_bridge.tests.support import held_table_lock
@@ -118,7 +117,6 @@ async def test_native_selection_restores_fresh_core_derived_subscription(
     native_weixin: NativeWeixin,
 ) -> None:
     core = native_weixin.core
-    assert isinstance(core, QuietCore)
     core.chats.clear()
     core.ensured = []
     runtime, binding = await native_weixin.adapter._ensure_ingress()

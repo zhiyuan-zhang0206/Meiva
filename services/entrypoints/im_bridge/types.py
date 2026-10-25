@@ -165,6 +165,54 @@ class ChatState:
     spawn_draft: SpawnDraft | None = None
 
 
+class NoticeBridgeOwner:
+    def initialize_poll(self) -> None:
+        raise NotImplementedError
+
+    async def poll_once(self) -> None:
+        raise NotImplementedError
+
+    async def handle_inbound(self, chat_id: str, text: str) -> str | None:
+        raise NotImplementedError
+
+    def clear_reply_target(
+        self, chat_id: str, agent_id: int, notice_id: int, *, account_id: str
+    ) -> bool:
+        raise NotImplementedError
+
+    async def resolve_frozen_reply(
+        self, agent_id: int, notice_id: int, text: str
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    async def handle_callback(
+        self, chat_id: str, data: str, *, account_id: str | None = None
+    ) -> str | None:
+        raise NotImplementedError
+
+    async def list_queue(self) -> str | None:
+        raise NotImplementedError
+
+    def cmd_notice(self, args: str) -> str:
+        raise NotImplementedError
+
+    def reply_context_held(self, chat_id: str, text: str, account_id: str) -> bool:
+        raise NotImplementedError
+
+    def reply_target(self, chat_id: str, text: str, *, account_id: str) -> tuple[int, int] | None:
+        raise NotImplementedError
+
+
+class BridgeCore(ABC):
+    adapters: dict[str, IMAdapter]
+    chats: dict[tuple[str, str], ChatState]
+    _switch_state: dict[str, int]
+    _subscriptions: dict[tuple[str, str], asyncio.Task[Any]]
+
+    @abstractmethod
+    async def handle_inbound(self, msg: InboundMessage) -> None: ...
+
+
 class IMAdapter(ABC):
     """Contract every IM channel adapter implements.
 
@@ -177,10 +225,8 @@ class IMAdapter(ABC):
     selection_requires_account_proof: bool = False
     """Native account-bound selection must never bootstrap from legacy peer-only state."""
 
-    def __init__(self, core: Any) -> None:
-        # Any: adapters are also constructed with test doubles; the core
-        # contract (async handle_inbound / adapters dict) is duck-typed.
-        self.core = core
+    def __init__(self, core: BridgeCore | object) -> None:
+        self.core: Any = core
 
     @abstractmethod
     async def start(self, tasks: asyncio.TaskGroup) -> None:

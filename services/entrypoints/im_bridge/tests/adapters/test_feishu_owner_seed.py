@@ -23,6 +23,11 @@ import pytest
 
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
 from services.entrypoints.im_bridge.config import FeishuCredentialsConfig
+from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
+    FakeRestClient,
+    FakeWsClient,
+    websocket_ready,
+)
 from services.entrypoints.im_bridge.tests.slices import feishu_config
 from services.entrypoints.im_bridge.tests.support import owned_tasks
 from services.entrypoints.im_bridge.types import InboundMessage
@@ -39,32 +44,6 @@ class FakeCore:
         self.received.append(message)
 
 
-class BootAdapter(FeishuAdapter):
-    """Adapter with the ws worker and the poller stubbed out: ``start()``'s seed
-    is the only real work under test (no lark import, no network)."""
-
-    def _run_ws(self) -> None:
-        main_loop = self._main_loop
-        assert main_loop is not None
-        main_loop.call_soon_threadsafe(self._record_ws_started)
-
-    def _start_poller(self, tasks: asyncio.TaskGroup) -> None:
-        pass
-
-
-# meiva:note
-# Records the owner send at the adapter's own `send` seam instead of reaching Feishu.
-class _OwnerSendAdapter(FeishuAdapter):
-    sent: list[tuple[str, str]]
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.sent = []
-
-    async def send(self, chat_id: str, text: str, **_: Any) -> None:
-        self.sent.append((chat_id, text))
-
-
 def _write_switch_state(state_dir: Path, state: dict[str, int]) -> None:
     path = state_dir / "switch_state.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -76,9 +55,18 @@ def _seed_events(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _boot_adapter(
-    config: FeishuCredentialsConfig, state_dir: Path, core: FakeCore | None = None
-) -> BootAdapter:
-    return BootAdapter(core or FakeCore(), config, state_dir=state_dir, proxy_configured=False)
+    config: FeishuCredentialsConfig,
+    state_dir: Path,
+    core: FakeCore | None = None,
+    ws_client: FakeWsClient | None = None,
+) -> FeishuAdapter:
+    return FeishuAdapter(
+        core or FakeCore(),
+        config,
+        state_dir=state_dir,
+        proxy_configured=False,
+        ws_client=ws_client,
+    )
 
 
 # -- boot path (start) ------------------------------------------------------
@@ -90,13 +78,21 @@ async def test_start_seeds_owner_open_id_from_switch_state(tmp_path: Path, state
     async with owned_tasks() as _owned_tasks:
         _write_switch_state(state_dir, {"feishu:ou_owner_1": 405, "telegram:12345": 405})
         core = FakeCore()
+        ws_client = FakeWsClient()
         adapter = _boot_adapter(
-            feishu_config(feishu_app_id="cli_x", feishu_app_secret="secret_x"),  # noqa: S106
+            feishu_config(
+                feishu_app_id="cli_x",
+                feishu_app_secret="secret_x",  # noqa: S106
+                feishu_poll_interval_seconds=0,
+            ),
             state_dir,
             core,
+            ws_client,
         )
 
         await asyncio.wait_for(adapter.start(_owned_tasks), timeout=5)
+        adapter.begin_shutdown()
+        ws_client.disconnected.set()
 
         assert adapter._last_open_id == "ou_owner_1"
 
@@ -121,18 +117,29 @@ async def test_start_without_credentials_does_not_seed_or_alert(
 # -- seed semantics ---------------------------------------------------------
 
 
+# meiva:note
+# Positive case: after the seed, send_to_owner resolves the owner instead of raising
+# 'no known user chat' (send call stubbed at the seam).
 async def test_seed_lets_send_to_owner_reach_the_seeded_owner(state_dir: Path) -> None:
-    """Positive case: after the seed, send_to_owner resolves the owner instead
-    of raising 'no known user chat' (send call stubbed at the seam)."""
     _write_switch_state(state_dir, {"feishu:ou_owner_1": 405})
-    adapter = _OwnerSendAdapter(
-        FakeCore(), feishu_config(), state_dir=state_dir, proxy_configured=False
+    rest = FakeRestClient()
+    adapter = FeishuAdapter(
+        FakeCore(),
+        feishu_config(),
+        state_dir=state_dir,
+        proxy_configured=False,
+        rest_client=rest,
     )
+    adapter._app_id = "cli_x"
+    adapter._app_secret = "secret_x"  # noqa: S105
     await adapter._seed_owner_from_switch_state()
 
-    await adapter.send_to_owner("hi")
+    async with websocket_ready(adapter):
+        await adapter.send_to_owner("hi")
 
-    assert adapter.sent == [("ou_owner_1", "hi")]
+    assert len(rest.created) == 1
+    assert rest.created[0].request_body.receive_id == "ou_owner_1"
+    assert json.loads(rest.created[0].request_body.content)["text"] == "hi"
 
 
 async def test_seed_never_overwrites_a_known_owner(state_dir: Path) -> None:

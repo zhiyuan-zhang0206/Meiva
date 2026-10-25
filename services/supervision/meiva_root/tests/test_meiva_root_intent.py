@@ -4,6 +4,7 @@ import asyncio
 import logging
 import signal
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import Mock
@@ -12,7 +13,6 @@ import pytest
 
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
-from base.native_process.ownership import OwnedProcess
 from services.supervision.meiva_root import intent_store
 from services.supervision.meiva_root.inputs import InputSeal
 from services.supervision.meiva_root.intent_store import (
@@ -71,10 +71,12 @@ def _supervisor(run_dir: Path, units: list[UnitManifest]) -> Supervisor:
 
 
 def _up_failure_supervisor(
-    run_dir: Path, units: list[UnitManifest], monkeypatch: pytest.MonkeyPatch
+    run_dir: Path,
+    units: list[UnitManifest],
+    *,
+    signal_owned: Callable[..., bool] | None = None,
 ) -> Supervisor:
-    owner = _supervisor(run_dir, units)
-    stop = owner._stop_unit
+    owner_ref: list[Supervisor] = []
 
     async def stop_after_exit(
         runtime: UnitRuntime, *, force: bool = False, escalate: bool = True
@@ -86,9 +88,16 @@ def _up_failure_supervisor(
             identity.send_signal(signal.SIGKILL)
             await generation.exited.wait()
             assert generation.proc.returncode is not None
-        await stop(runtime, force=force)
+        await owner_ref[0]._stop_unit_default(runtime, force=force, escalate=escalate)
 
-    monkeypatch.setattr(owner, "_stop_unit", stop_after_exit)
+    owner = Supervisor(
+        UnitRegistry(units),
+        run_dir=run_dir,
+        config=SupervisorConfig(stop_timeout_s=0.2),
+        signal_owned=signal_owned,
+        stop_unit_fn=stop_after_exit,
+    )
+    owner_ref.append(owner)
     return owner
 
 
@@ -231,10 +240,10 @@ async def test_boot_supersedes_a_stored_root_stop(tmp_path: Path) -> None:
 
 
 async def test_restart_up_half_failure_records_explicit_state(
-    tmp_path: Path, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, recorder: _Recorder
 ) -> None:
     input_path, seal = _sealed_input(tmp_path)
-    owner = _up_failure_supervisor(tmp_path, [_unit(*_SLEEP_FOREVER, inputs=(seal,))], monkeypatch)
+    owner = _up_failure_supervisor(tmp_path, [_unit(*_SLEEP_FOREVER, inputs=(seal,))])
     await owner.start()
     try:
         input_path.write_text("v2")
@@ -256,12 +265,15 @@ async def test_restart_up_half_failure_records_explicit_state(
 
 
 async def test_restart_up_half_failure_retry_replaces_and_clears(
-    tmp_path: Path, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, recorder: _Recorder
 ) -> None:
     input_path, seal = _sealed_input(tmp_path)
-    owner = _up_failure_supervisor(tmp_path, [_unit(*_SLEEP_FOREVER, inputs=(seal,))], monkeypatch)
-    live_stop = Mock(wraps=owner._signal_owned)
-    monkeypatch.setattr(owner, "_signal_owned", live_stop)
+    live_stop = Mock(wraps=StoppingMixin._signal_owned)
+    owner = _up_failure_supervisor(
+        tmp_path,
+        [_unit(*_SLEEP_FOREVER, inputs=(seal,))],
+        signal_owned=live_stop,
+    )
     await owner.start()
     original = owner._units["svc"].generation
     assert original is not None
@@ -293,26 +305,22 @@ async def test_restart_up_half_failure_retry_replaces_and_clears(
         await owner.shutdown()
 
 
-class _NeverSignal(Supervisor):
-    # meiva:note
-    # A supervisor whose leader identity never matches: it never signals.
-    @staticmethod
-    def _signal_owned(identity: OwnedProcess, *, force: bool) -> bool:  # noqa: ARG004
-        # meiva:note
-        # The override keeps the parent signature, so both parameters stay unused.
-        return False
-
-
 async def test_restart_down_abort_records_stage_down_and_retry_settles(
-    tmp_path: Path, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, recorder: _Recorder
 ) -> None:
     ready = tmp_path / "ready"
     release = tmp_path / "release"
     unit = _unit("restart_down", str(ready), str(release))
-    owner = _NeverSignal(
+
+    def never_signal(_identity: object, *, force: bool = False) -> bool:
+        del force
+        return False
+
+    owner = Supervisor(
         UnitRegistry([unit]),
         run_dir=tmp_path,
         config=SupervisorConfig(stop_timeout_s=0.4, stop_kill_reap_s=0.1),
+        signal_owned=never_signal,
     )
     await owner.start()
     try:
@@ -336,23 +344,23 @@ async def test_restart_down_abort_records_stage_down_and_retry_settles(
         status = await _entry(owner)
         assert (status["restart_failed"], status["state"]) == (None, "running")
     finally:
-        _NeverSignal._signal_owned = staticmethod(StoppingMixin._signal_owned)
+        owner._signal_owned_fn = StoppingMixin._signal_owned
         await owner.shutdown()
 
 
 async def test_boot_carries_recorded_failure_until_a_generation_proves_it_gone(
-    tmp_path: Path, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, recorder: _Recorder
 ) -> None:
     input_path, seal = _sealed_input(tmp_path)
     unit = _unit(*_SLEEP_FOREVER, inputs=(seal,))
-    first = _up_failure_supervisor(tmp_path, [unit], monkeypatch)
+    first = _up_failure_supervisor(tmp_path, [unit])
     await first.start()
     input_path.write_text("v2")
     await first.restart("svc")
     stored = intent_store.read(tmp_path, "svc")
     assert stored is not None and stored.restart_failed is not None
     since = stored.restart_failed.since
-    second = _up_failure_supervisor(tmp_path, [unit], monkeypatch)
+    second = _up_failure_supervisor(tmp_path, [unit])
     await second.start()
     try:
         entry = await _entry(second)

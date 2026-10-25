@@ -13,13 +13,23 @@ import json
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Iterator
-from typing import Any, NamedTuple, cast
+from collections.abc import Callable, Coroutine, Iterator, Mapping
+from typing import Any, NamedTuple
 
 import websockets
 
 from base.log import logger
 from services.desktop.browser.probe import cdp_url
+
+
+# meiva:note
+# Structural collaborator surface for a CDP websocket connection.
+class CdpSocket:
+    async def send(self, data: str) -> object:
+        raise NotImplementedError
+
+    async def recv(self) -> str | bytes:
+        raise NotImplementedError
 
 
 class CanaryResult(NamedTuple):
@@ -37,41 +47,58 @@ class HostResult(NamedTuple):
 
 def read_json(url: str, timeout_s: float) -> dict[str, Any]:
     with urllib.request.urlopen(url, timeout=timeout_s) as response:  # noqa: S310 — loopback CDP URL
-        parsed: object = json.loads(response.read())
+        parsed = json.loads(response.read())
+    parsed_any: Any = parsed
     if not isinstance(parsed, dict):
         return {}
-    return cast("dict[str, Any]", parsed)
+    typed_parsed: dict[str, Any] = parsed_any
+    return typed_parsed
 
 
 async def _cdp_call(
-    ws: Any, ids: Iterator[int], method: str, params: dict[str, Any], timeout_s: float
+    ws: CdpSocket | object,
+    ids: Iterator[int],
+    method: str,
+    params: dict[str, Any],
+    timeout_s: float,
 ) -> dict[str, Any]:
     """Send one CDP request and return its ``result``; raises on a protocol error."""
-    await ws.send(json.dumps({"id": next(ids), "method": method, "params": params}))
-    raw = await asyncio.wait_for(ws.recv(), timeout=timeout_s)
+    sock: Any = ws
+    await sock.send(json.dumps({"id": next(ids), "method": method, "params": params}))
+    raw = await asyncio.wait_for(sock.recv(), timeout=timeout_s)
     resp = json.loads(raw)
     if "error" in resp:
         raise RuntimeError(f"CDP {method} failed: {resp['error']}")
     return resp.get("result") or {}
 
 
-async def canary_async(port: int, url: str, timeout_s: float) -> CanaryResult:
+def _default_connect_ws(url: str, *, open_timeout: float, close_timeout: float) -> object:
+    return websockets.connect(url, open_timeout=open_timeout, close_timeout=close_timeout)
+
+
+async def canary_async(
+    port: int,
+    url: str,
+    timeout_s: float,
+    *,
+    json_reader: Callable[[str, float], Mapping[str, object]] = read_json,
+    connect_ws: Callable[..., object] = _default_connect_ws,
+) -> CanaryResult:
     """The browser-path canary: hidden target in the shared context, one fetch, closed."""
     deadline = time.monotonic() + timeout_s
 
     def left() -> float:
         return max(0.05, deadline - time.monotonic())
 
-    version = await asyncio.to_thread(read_json, cdp_url(port), left())
+    version = await asyncio.to_thread(json_reader, cdp_url(port), left())
     browser_ws_url = version.get("webSocketDebuggerUrl")
     if not isinstance(browser_ws_url, str) or not browser_ws_url:
         return CanaryResult("skip", "CDP /json/version carried no browser websocket")
 
     ids = itertools.count(1)  # request ids are per connection
     # close_timeout is bounded so a wedged browser cannot stall the round.
-    async with websockets.connect(
-        browser_ws_url, open_timeout=left(), close_timeout=2.0
-    ) as browser_ws:
+    browser_cm: Any = connect_ws(browser_ws_url, open_timeout=left(), close_timeout=2.0)
+    async with browser_cm as browser_ws:
         created = await _cdp_call(
             browser_ws,
             ids,
@@ -89,9 +116,8 @@ async def canary_async(port: int, url: str, timeout_s: float) -> CanaryResult:
                 ".catch((e) => 'error:' + (e && e.name ? e.name : 'unknown'))"
             )
             page_ws_url = f"ws://127.0.0.1:{port}/devtools/page/{target_id}"
-            async with websockets.connect(
-                page_ws_url, open_timeout=left(), close_timeout=2.0
-            ) as page_ws:
+            page_cm: Any = connect_ws(page_ws_url, open_timeout=left(), close_timeout=2.0)
+            async with page_cm as page_ws:
                 try:
                     result = await _cdp_call(
                         page_ws,
@@ -102,7 +128,9 @@ async def canary_async(port: int, url: str, timeout_s: float) -> CanaryResult:
                     )
                 except TimeoutError:
                     return CanaryResult("timeout", f"fetch did not settle within {timeout_s:.1f}s")
-            value = cast("dict[str, Any]", result.get("result") or {}).get("value")
+            inner = result.get("result")
+            inner_any: Any = inner
+            value: object = inner_any.get("value") if isinstance(inner, dict) else None
             if value == "ok":
                 return CanaryResult("ok", "fetch settled")
             if isinstance(value, str) and value.startswith("error:"):
@@ -119,11 +147,27 @@ async def canary_async(port: int, url: str, timeout_s: float) -> CanaryResult:
                 )
 
 
-def canary(port: int, url: str, timeout_s: float) -> CanaryResult:
+def canary(
+    port: int,
+    url: str,
+    timeout_s: float,
+    *,
+    json_reader: Callable[[str, float], Mapping[str, object]] = read_json,
+    connect_ws: Callable[..., object] = _default_connect_ws,
+    run_canary: Callable[..., Coroutine[Any, Any, CanaryResult]] = canary_async,
+) -> CanaryResult:
     """Total wrapper: the canary never raises — an unforeseen failure is a
     ``skip`` (no verdict), never a false reachability claim."""
     try:
-        return asyncio.run(canary_async(port, url, timeout_s))
+        return asyncio.run(
+            run_canary(
+                port,
+                url,
+                timeout_s,
+                json_reader=json_reader,
+                connect_ws=connect_ws,
+            )
+        )
     except Exception as exc:
         return CanaryResult("skip", f"canary raised {type(exc).__name__}: {exc}")
 

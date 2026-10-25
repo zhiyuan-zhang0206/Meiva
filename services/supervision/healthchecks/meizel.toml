@@ -6,22 +6,3 @@ exports = ["browser_reach.py", "frontend.py", "gate.py", "lgtm.py", "memory_sear
 "otel_collector.py" = ["plans"]
 "protocol_probe.py" = ["insights.py"]
 "tests" = ["browser_mcp.py", "browser_reach.py", "computer_mcp.py", "frontend.py", "gateway.py", "insights.py", "lgtm.py", "mcp_daemon.py", "memory_search.py", "otel_collector.py", "permissions_helper.py", "plans", "prod_venv.py", "protocol_probe.py", "redis_acl.py", "redis_bridge.py"]
-
-[debt.ambient-read]
-"browser.py#settings base.config.settings" = 1
-"browser_mcp.py#settings base.config.settings" = 1
-"frontend.py#settings base.config.settings" = 1
-"gateway.py#settings base.config.settings" = 1
-"lgtm.py#clock time.time_ns" = 2
-"otel_collector.py#settings base.config.settings" = 1
-"protocol_probe.py#settings base.config.settings" = 1
-
-[debt.any-collaborator]
-"browser_reach.py#any _cdp_call.ws" = 1
-"lgtm.py#any open_local.return" = 1
-
-[debt.type-cast]
-"browser_reach.py#cast canary_async" = 1
-"browser_reach.py#cast read_json" = 1
-"gate.py#cast probe" = 1
-"insights.py#cast insights_probe" = 2

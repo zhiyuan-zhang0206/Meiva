@@ -100,10 +100,8 @@ class FakeClock:
 
 
 @pytest.fixture
-def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
-    fake = FakeClock()
-    monkeypatch.setattr(health_mod, "monotonic", fake)
-    return fake
+def clock() -> FakeClock:
+    return FakeClock()
 
 
 # meiva:note
@@ -148,7 +146,7 @@ async def test_restart_uses_one_probe_and_next_round_observes_readiness(clock: F
     probe = CellProbe(DaemonProbe.down("no"))
     stub = StubSupervisor()
     stub.on_restart = lambda: setattr(probe, "verdict", DaemonProbe.up("ok"))
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config())
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config(), clock=clock)
     await monitor.run_round()
     assert probe.calls == 1
     assert stub.restart_calls == ["svc"]
@@ -165,7 +163,7 @@ async def test_restart_uses_one_probe_and_next_round_observes_readiness(clock: F
 async def test_the_capped_cadence_keeps_retrying_past_the_budget(clock: FakeClock) -> None:
     probe = CellProbe(DaemonProbe.down("no"))
     stub = StubSupervisor()
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config())
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config(), clock=clock)
     for _ in range(8):
         await monitor.run_round()
     assert probe.calls == 8
@@ -250,7 +248,7 @@ async def test_restart_unknown_or_cancelled_failure_still_propagates(
 async def test_unknown_rounds_do_not_spend_or_replenish_attempts(clock: FakeClock) -> None:
     probe = CellProbe(DaemonProbe.down("no"))
     stub = StubSupervisor()
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config())
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config(), clock=clock)
     for _ in range(7):
         probe.verdict = DaemonProbe.unavailable("inspection failed")
         await monitor.run_round()
@@ -266,7 +264,7 @@ async def test_deferred_down_reports_without_spending_attempts(
 ) -> None:
     probe = CellProbe(DaemonProbe.down("no"))
     stub = StubSupervisor({"svc": deferral})
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config())
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config(), clock=clock)
     for _ in range(7):
         await monitor.run_round()
     assert stub.restart_calls == []
@@ -282,7 +280,10 @@ async def test_probe_only_unit_reports_without_restarts(
 ) -> None:
     stub = StubSupervisor(unknown_units={"helper"})
     monitor = HealthMonitor(
-        stub, _registry("helper", CellProbe(DaemonProbe.down("missing"))), config=_config()
+        stub,
+        _registry("helper", CellProbe(DaemonProbe.down("missing"))),
+        config=_config(),
+        clock=clock,
     )
     for _ in range(5):
         await monitor.run_round()
@@ -296,7 +297,7 @@ async def test_expected_stop_resets_attempts_and_alerts_nothing(
 ) -> None:
     stub = StubSupervisor()
     monitor = HealthMonitor(
-        stub, _registry("svc", CellProbe(DaemonProbe.down("no"))), config=_config()
+        stub, _registry("svc", CellProbe(DaemonProbe.down("no"))), config=_config(), clock=clock
     )
     await monitor.run_round()
     stub.deferrals["svc"] = "held down"
@@ -313,7 +314,7 @@ async def test_terminal_verdict_reports_without_another_restart(
 ) -> None:
     probe = CellProbe(DaemonProbe.down("no"))
     stub = StubSupervisor()
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config())
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config(), clock=clock)
     await monitor.run_round()
     probe.verdict = DaemonProbe.port_taken("alien daemon")
     await monitor.run_round()
@@ -331,7 +332,7 @@ async def test_probe_raise_is_unavailable_and_round_continues(
     registry = _registry("unit-a", raising)
     registry.register("unit-b", CellProbe(DaemonProbe.up("ok")))
     stub = StubSupervisor()
-    monitor = HealthMonitor(stub, registry, config=_config())
+    monitor = HealthMonitor(stub, registry, config=_config(), clock=clock)
     await monitor.run_round()
     assert not stub.restart_calls
     assert monitor.snapshot()["unit-a"].last_detail.startswith("probe raised RuntimeError")
@@ -343,7 +344,7 @@ async def test_unresolvable_probe_is_no_action(clock: FakeClock) -> None:
     registry = ProbeRegistry()
     registry.register_ref("svc", "tmp_ghost_health:probe")
     stub = StubSupervisor()
-    monitor = HealthMonitor(stub, registry, config=_config())
+    monitor = HealthMonitor(stub, registry, config=_config(), clock=clock)
     await monitor.run_round()
     assert not stub.restart_calls
     assert monitor.snapshot()["svc"].last_verdict == "unavailable"
@@ -351,7 +352,10 @@ async def test_unresolvable_probe_is_no_action(clock: FakeClock) -> None:
 
 async def test_snapshot_is_a_copy(clock: FakeClock) -> None:
     monitor = HealthMonitor(
-        StubSupervisor(), _registry("svc", CellProbe(DaemonProbe.down("no"))), config=_config()
+        StubSupervisor(),
+        _registry("svc", CellProbe(DaemonProbe.down("no"))),
+        config=_config(),
+        clock=clock,
     )
     await monitor.run_round()
     monitor.snapshot()["svc"].restart_attempts = 99
@@ -367,6 +371,7 @@ async def test_maintenance_gate_blocks_an_attempt_without_spending_it(clock: Fak
         _registry("svc", probe),
         config=_config(),
         gate=lambda: (allowed["value"], "paused"),
+        clock=clock,
     )
     for _ in range(6):
         allowed["value"] = True
@@ -382,7 +387,7 @@ async def test_start_stop_loop(clock: FakeClock) -> None:
         probe = CellProbe(DaemonProbe.up("ok"))
         stub = StubSupervisor()
         monitor = HealthMonitor(
-            stub, _registry("svc", probe), config=_config(interval_s=0.01), tasks=tasks
+            stub, _registry("svc", probe), config=_config(interval_s=0.01), tasks=tasks, clock=clock
         )
         await monitor.start()
         with pytest.raises(RuntimeError, match="already started"):
@@ -393,18 +398,15 @@ async def test_start_stop_loop(clock: FakeClock) -> None:
         await monitor.stop()
 
 
-_SLEEP_FOREVER = [sys.executable, "-c", "import time; time.sleep(60)"]
 _CHILD = Path(__file__).with_name("child_unit.py")
+_SLEEP_FOREVER = [sys.executable, str(_CHILD), "sleep"]
 
 StartFactory = Callable[..., Awaitable[Supervisor]]
 
 
 def _unit(unit_id: str) -> manifest_mod.UnitManifest:
     return manifest_mod.UnitManifest(
-        id=unit_id,
-        exec=tuple(_SLEEP_FOREVER),
-        restart=manifest_mod.RestartPolicy.ALWAYS,
-        attach="root",
+        unit_id, tuple(_SLEEP_FOREVER), manifest_mod.RestartPolicy.ALWAYS, "root"
     )
 
 
@@ -533,7 +535,10 @@ async def test_a_probe_outlasting_its_own_deadline_is_unavailable_and_never_rest
 
 async def test_health_snapshot_exposes_simple_attempt_budget(clock: FakeClock) -> None:
     monitor = HealthMonitor(
-        StubSupervisor(), _registry("svc", CellProbe(DaemonProbe.down("no"))), config=_config()
+        StubSupervisor(),
+        _registry("svc", CellProbe(DaemonProbe.down("no"))),
+        config=_config(),
+        clock=clock,
     )
     await monitor.run_round()
     entry = cast("dict[str, object]", monitor.health_snapshot()["svc"])
@@ -554,7 +559,7 @@ async def test_initial_down_observation_does_not_replace_starting_generation(
 ) -> None:
     unit = manifest_mod.UnitManifest(
         "starting",
-        (sys.executable, "-c", "import time; time.sleep(60)"),
+        (sys.executable, str(_CHILD), "sleep"),
         manifest_mod.RestartPolicy.ALWAYS,
         "root",
     )
@@ -577,7 +582,9 @@ async def test_first_alive_ends_generation_startup_grace(clock: FakeClock) -> No
     stub = StubSupervisor()
     stub.generation = (OwnedProcess(42, 100.0, None), clock.now)
     probe = CellProbe(DaemonProbe.up("ready"))
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config(startup_grace_s=180))
+    monitor = HealthMonitor(
+        stub, _registry("svc", probe), config=_config(startup_grace_s=180), clock=clock
+    )
     await monitor.run_round()
     assert monitor.snapshot()["svc"].generation_ready
     probe.verdict = DaemonProbe.down("failed after readiness")
@@ -592,7 +599,9 @@ async def test_each_new_generation_has_bounded_startup_grace(
     stub = StubSupervisor()
     stub.generation = (OwnedProcess(42, 100.0, None), clock.now)
     probe = CellProbe(DaemonProbe.down("building"))
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config(startup_grace_s=45))
+    monitor = HealthMonitor(
+        stub, _registry("svc", probe), config=_config(startup_grace_s=45), clock=clock
+    )
     await monitor.run_round()
     assert not stub.restart_calls
     assert monitor.snapshot()["svc"].restart_attempts == 0
@@ -625,7 +634,10 @@ async def test_observation_cannot_arm_another_generation(clock: FakeClock) -> No
         return DaemonProbe.up("response from the preceding generation")
 
     monitor = HealthMonitor(
-        stub, _registry("svc", changed_during_probe), config=_config(startup_grace_s=180)
+        stub,
+        _registry("svc", changed_during_probe),
+        config=_config(startup_grace_s=180),
+        clock=clock,
     )
     await monitor.run_round()
     state = monitor.snapshot()["svc"]
@@ -641,7 +653,11 @@ async def test_startup_budgets_are_per_unit(clock: FakeClock) -> None:
     registry.register("core", lambda: DaemonProbe.down("starting"))
     registry.register("extra", lambda: DaemonProbe.down("starting"))
     monitor = HealthMonitor(
-        stub, registry, config=_config(), startup_graces={"core": 180, "extra": 45}
+        stub,
+        registry,
+        config=_config(),
+        startup_graces={"core": 180, "extra": 45},
+        clock=clock,
     )
     await monitor.run_round()
     assert stub.restart_calls == ["extra"]
@@ -668,9 +684,8 @@ def test_restart_delay_follows_the_ladder_and_caps_at_its_last_entry() -> None:
 
 async def test_consecutive_failures_are_spaced_by_the_ladder(clock: FakeClock) -> None:
     stub = StubSupervisor()
-    monitor = HealthMonitor(
-        stub, _registry("svc", CellProbe(DaemonProbe.down("no"))), config=_ladder_config()
-    )
+    probe = CellProbe(DaemonProbe.down("no"))
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_ladder_config(), clock=clock)
     await monitor.run_round()
     await monitor.run_round()
     assert stub.restart_calls == ["svc"]
@@ -688,7 +703,7 @@ async def test_consecutive_failures_are_spaced_by_the_ladder(clock: FakeClock) -
 async def test_a_successful_start_resets_the_ladder(clock: FakeClock) -> None:
     probe = CellProbe(DaemonProbe.down("no"))
     stub = StubSupervisor()
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_ladder_config())
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_ladder_config(), clock=clock)
     await monitor.run_round()
     await monitor.run_round()
     assert stub.restart_calls == ["svc"]
@@ -710,7 +725,7 @@ async def test_the_breaker_opens_once_then_closes_on_a_healthy_observation(
     stub.failure_facts = UnitFailureFacts(
         intent_running=True, restart_failed=None, last_error="unexpected exit: exit 1"
     )
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_ladder_config())
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_ladder_config(), clock=clock)
     for wait in (0, 60, 300, 899, 1):
         _advance(clock, wait)
         await monitor.run_round()
@@ -725,7 +740,6 @@ async def test_the_breaker_opens_once_then_closes_on_a_healthy_observation(
         4,
         "unexpected exit: exit 1",
     )
-
     probe.verdict = DaemonProbe.up("repaired")
     await monitor.run_round()
     closed = recorder.events("root_unit_breaker_closed")
@@ -737,7 +751,7 @@ async def test_the_breaker_opens_once_then_closes_on_a_healthy_observation(
 async def test_an_operator_stop_closes_the_breaker(clock: FakeClock, recorder: _Recorder) -> None:
     probe = CellProbe(DaemonProbe.down("no"))
     stub = StubSupervisor()
-    monitor = HealthMonitor(stub, _registry("svc", probe), config=_ladder_config())
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_ladder_config(), clock=clock)
     for wait in (0, 60, 300):
         _advance(clock, wait)
         await monitor.run_round()
@@ -752,39 +766,27 @@ async def test_an_operator_stop_closes_the_breaker(clock: FakeClock, recorder: _
 async def test_database_recovery_restarts_inside_the_round(clock: FakeClock) -> None:
     db = CellProbe(DaemonProbe.down("database unreachable"))
     stub = StubSupervisor()
-    monitor = HealthMonitor(
-        stub,
-        _registry("svc", CellProbe(DaemonProbe.down("no"))),
-        config=_ladder_config(),
-        db_recovery_probe=db,
-    )
+    reg = _registry("svc", CellProbe(DaemonProbe.down("no")))
+    monitor = HealthMonitor(stub, reg, config=_ladder_config(), db_recovery_probe=db, clock=clock)
     for wait in (0, 60, 300, 60):
         _advance(clock, wait)
         await monitor.run_round()
-    assert stub.restart_calls == ["svc"] * 3
-    assert db.calls == 1
+    assert stub.restart_calls == ["svc"] * 3 and db.calls == 1
     db.verdict = DaemonProbe.up("database answered")
     await monitor.run_round()
-    assert stub.restart_calls == ["svc"] * 4
-    assert monitor.snapshot()["svc"].breaker_open
+    assert stub.restart_calls == ["svc"] * 4 and monitor.snapshot()["svc"].breaker_open
 
 
 async def test_a_usable_database_grants_one_attempt_per_episode(clock: FakeClock) -> None:
     db = CellProbe(DaemonProbe.up("database answered"))
     stub = StubSupervisor()
-    monitor = HealthMonitor(
-        stub,
-        _registry("svc", CellProbe(DaemonProbe.down("no"))),
-        config=_ladder_config(),
-        db_recovery_probe=db,
-    )
+    reg = _registry("svc", CellProbe(DaemonProbe.down("no")))
+    monitor = HealthMonitor(stub, reg, config=_ladder_config(), db_recovery_probe=db, clock=clock)
     for wait in (0, 60, 300, 60):
         _advance(clock, wait)
         await monitor.run_round()
-    assert stub.restart_calls == ["svc"] * 4
-    assert db.calls == 1
+    assert stub.restart_calls == ["svc"] * 4 and db.calls == 1
     for _ in range(3):
         _advance(clock, 60)
         await monitor.run_round()
-    assert stub.restart_calls == ["svc"] * 4
-    assert monitor.snapshot()["svc"].breaker_open
+    assert stub.restart_calls == ["svc"] * 4 and monitor.snapshot()["svc"].breaker_open

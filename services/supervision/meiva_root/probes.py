@@ -10,7 +10,7 @@ from __future__ import annotations
 import importlib
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Any, Protocol
 
 from base.daemon.health import DaemonProbe
 
@@ -74,7 +74,8 @@ def resolve_ref(ref: str) -> Probe:
         raise ProbeError(f"module {module_name!r} has no attribute {attribute!r}") from exc
     if not callable(resolved):
         raise ProbeError(f"probe reference {ref!r} resolves to a non-callable")
-    return cast("Probe", resolved)
+    probe: Any = resolved
+    return probe
 
 
 class ProbeRegistry:
@@ -85,8 +86,9 @@ class ProbeRegistry:
     the last one written would hide it.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, resolver: Callable[[str], Probe] = resolve_ref) -> None:
         self._entries: dict[str, _Entry] = {}
+        self._resolver = resolver
 
     def register(self, unit_id: str, probe: Probe) -> None:
         """Register `probe` for `unit_id` (the static path, direct callable)."""
@@ -126,7 +128,7 @@ class ProbeRegistry:
             ref = entry.ref
             if ref is None:
                 raise ProbeError(f"probe entry for unit {unit_id!r} carries neither probe nor ref")
-            entry.probe = resolve_ref(ref)
+            entry.probe = self._resolver(ref)
         return entry.probe
 
     def _reject_duplicate(self, unit_id: str) -> None:

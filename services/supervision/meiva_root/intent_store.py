@@ -26,8 +26,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from time import time
-from typing import cast
+from typing import Any
+
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 
 _log = logging.getLogger(__name__)
 
@@ -104,26 +105,26 @@ class CallerFacts:
 # generation that served it.
 # meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
 def caller_facts(raw: object) -> CallerFacts | None:
+    raw_any: Any = raw
     if not isinstance(raw, dict):
         return None
-    values = cast("Mapping[str, object]", raw)
+    values: Mapping[str, Any] = raw_any
     argv = values.get("argv")
+    argv_any: Any = argv
     env_keys = values.get("env_keys")
+    env_any: Any = env_keys
+    argv_items: list[Any] = argv_any if isinstance(argv, list) else []
+    env_items: list[Any] = env_any if isinstance(env_keys, list) else []
     return CallerFacts(
-        pid=int(cast("int", values["pid"])),
-        ppid=int(cast("int", values["ppid"])),
-        uid=int(cast("int", values["uid"])),
+        pid=int(values["pid"]),
+        ppid=int(values["ppid"]),
+        uid=int(values["uid"]),
         cwd=str(values["cwd"]),
-        argv=tuple(
-            str(item) for item in cast("list[object]", argv if isinstance(argv, list) else [])
-        ),
+        argv=tuple(str(item) for item in argv_items),
         agent_id=None if values.get("agent_id") is None else str(values["agent_id"]),
         machine=str(values["machine"]),
         operation_id=None if values.get("operation_id") is None else str(values["operation_id"]),
-        env_keys=tuple(
-            str(item)
-            for item in cast("list[object]", env_keys if isinstance(env_keys, list) else [])
-        ),
+        env_keys=tuple(str(item) for item in env_items),
     )
 
 
@@ -240,13 +241,14 @@ def read(run_dir: Path, unit: str) -> IntentRecord | None:
 
 def _encode(record: IntentRecord) -> str:
     failure = record.restart_failed
+    clock = Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
     body: dict[str, object] = {
         "intent": record.intent.value,
         "source": record.source.value,
         "restart_failed": None
         if failure is None
         else {"stage": failure.stage.value, "since": failure.since, "detail": failure.detail},
-        "updated_at": record.updated_at or time(),
+        "updated_at": record.updated_at or clock.now().timestamp(),
     }
     if record.caller is not None:
         body["caller"] = _encode_caller(record.caller)
@@ -254,9 +256,10 @@ def _encode(record: IntentRecord) -> str:
 
 
 def _decode(raw: object) -> IntentRecord:
+    raw_any: Any = raw
     if not isinstance(raw, dict):
         raise TypeError("record must be an object")
-    values = cast("Mapping[str, object]", raw)
+    values: Mapping[str, Any] = raw_any
     fields = frozenset(values)
     if fields not in (_RECORD_FIELDS, _LEGACY_RECORD_FIELDS):
         raise ValueError(f"record must contain exactly {sorted(_RECORD_FIELDS)}")
@@ -298,22 +301,31 @@ def _encode_caller(caller: CallerFacts) -> dict[str, object]:
 def _decode_caller(raw: object) -> CallerFacts | None:
     if raw is None:
         return None
+    raw_any: Any = raw
     if not isinstance(raw, dict):
         return None
-    values = cast("Mapping[str, object]", raw)
+    values: Mapping[str, Any] = raw_any
     if frozenset(values) != _CALLER_FIELDS:
         return None
     try:
+        argv_raw = values["argv"]
+        argv_any: Any = argv_raw
+        env_raw = values["env_keys"]
+        env_any: Any = env_raw
+        if not isinstance(argv_raw, list) or not isinstance(env_raw, list):
+            return None
+        argv_items: list[Any] = argv_any
+        env_items: list[Any] = env_any
         return CallerFacts(
-            pid=int(cast("int", values["pid"])),
-            ppid=int(cast("int", values["ppid"])),
-            uid=int(cast("int", values["uid"])),
+            pid=int(values["pid"]),
+            ppid=int(values["ppid"]),
+            uid=int(values["uid"]),
             cwd=str(values["cwd"]),
-            argv=tuple(str(item) for item in cast("list[object]", values["argv"])),
+            argv=tuple(str(item) for item in argv_items),
             agent_id=None if values["agent_id"] is None else str(values["agent_id"]),
             machine=str(values["machine"]),
             operation_id=None if values["operation_id"] is None else str(values["operation_id"]),
-            env_keys=tuple(str(item) for item in cast("list[object]", values["env_keys"])),
+            env_keys=tuple(str(item) for item in env_items),
         )
     except (TypeError, ValueError):
         return None
@@ -322,9 +334,10 @@ def _decode_caller(raw: object) -> CallerFacts | None:
 def _decode_failure(raw: object) -> RestartFailure | None:
     if raw is None:
         return None
+    raw_any: Any = raw
     if not isinstance(raw, dict):
         raise TypeError("restart_failed must be an object or null")
-    values = cast("dict[str, object]", raw)
+    values: dict[str, Any] = raw_any
     if frozenset(values) != _FAILURE_FIELDS:
         raise ValueError(f"restart_failed must contain exactly {sorted(_FAILURE_FIELDS)}")
     stage = _member(RestartStage, values["stage"], "restart_failed.stage")

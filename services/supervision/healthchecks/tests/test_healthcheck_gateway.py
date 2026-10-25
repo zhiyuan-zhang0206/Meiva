@@ -25,7 +25,6 @@ from pathlib import Path
 
 import pytest
 
-from base.config import settings
 from base.daemon.health import ProbeVerdict
 from base.paths import meiva_home
 from services.supervision.healthchecks import gateway as hc
@@ -111,9 +110,7 @@ def test_probe_survives_a_malformed_response(caplog: pytest.LogCaptureFixture) -
     assert any("raised unexpectedly" in r.getMessage() for r in caplog.records)
 
 
-def test_probe_reads_the_gateway_health_url_when_it_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_probe_reads_the_gateway_health_url_when_it_runs() -> None:
     """The URL is read per probe, not captured when the module imports."""
     with HttpStub(body=_own_health_body()) as gateway:
-        monkeypatch.setattr(settings.services, "gateway_health_url", gateway.url)
-
-        assert hc.gateway_probe().alive is True
+        assert hc.gateway_probe(read_url=lambda _name: gateway.url).alive is True

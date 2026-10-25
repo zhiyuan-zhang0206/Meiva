@@ -28,9 +28,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Any, Protocol
 
 from base.host.proc import child_state
 
@@ -89,20 +90,24 @@ class TreeSelfCheck:
         *,
         config: SelfCheckConfig | None = None,
         tasks: asyncio.TaskGroup | None = None,
+        state_reader: Callable[[int, int], str] = child_state,
     ) -> None:
         self._host = host
         self._config = config if config is not None else SelfCheckConfig()
         self._state = _ChainState()
         self._task: asyncio.Task[None] | None = None
         self._tasks = tasks
+        self._state_reader = state_reader
 
     def run_once(self) -> None:
         """Walk every unit once, folding the verdicts into the episode state."""
         now = _monotonic()
         self._state.rounds += 1
         view = self._host.tree_view()
-        root_pid = cast("int", view["root_pid"])
-        units = cast("list[dict[str, object]]", view["units"])
+        raw_root_pid: Any = view["root_pid"]
+        root_pid = int(raw_root_pid)
+        raw_units: Any = view["units"]
+        units: list[dict[str, object]] = raw_units
         broken, reasons, unverifiable = self._walk(units, root_pid)
         self._fold_broken(broken, reasons, root_pid, now)
         self._fold_unverifiable(unverifiable, now)
@@ -125,7 +130,8 @@ class TreeSelfCheck:
                 broken.append(unit_id)
                 reasons[unit_id] = "running without a recorded pid"
                 continue
-            verdict = child_state(cast("int", pid), root_pid)
+            raw_pid: Any = pid
+            verdict = self._state_reader(int(raw_pid), root_pid)
             if verdict == "attached":
                 continue
             if verdict == "unverifiable":

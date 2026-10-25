@@ -1,9 +1,10 @@
 """Frontend application readiness. Service recovery belongs to meiva-root."""
 
 import subprocess
+from collections.abc import Callable
 from urllib.parse import urlsplit
 
-from base.config import settings
+from base.config import get_field
 from base.daemon.health import DaemonProbe
 from services.supervision.healthchecks.plans.frontend_plan import application_port
 
@@ -34,10 +35,11 @@ def probe_frontend_at(
 
 # meiva:note
 # Probe the application behind the entry gate, on the port the settings name.
-def probe_frontend() -> DaemonProbe:
+def probe_frontend(*, read_field: Callable[[str], str | int | None] = get_field) -> DaemonProbe:
+    raw_app_port = read_field("app_port")
     return probe_frontend_at(
         application_port(
-            entry_port=urlsplit(settings.services.frontend_healthcheck_url).port,
-            app_port=settings.services.app_port,
+            entry_port=urlsplit(str(read_field("frontend_healthcheck_url"))).port,
+            app_port=int(raw_app_port) if raw_app_port is not None else None,
         )
     )

@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import httpx
 
+from base.clock import SYSTEM_TIMERS, Timers
 from base.log import logger
 from base.paths import meiva_home
 from services.entrypoints.im_bridge.adapters.weixin import (
@@ -140,6 +140,7 @@ async def qr_login(
     state_dir: Path,
     timeout_seconds: int = 480,
     client: httpx.AsyncClient | None = None,
+    timers: Timers = SYSTEM_TIMERS,
 ) -> dict[str, Any] | None:
     """Run the interactive iLink QR login; persist credentials on success."""
     owns_client = client is None
@@ -154,14 +155,14 @@ async def qr_login(
             return None
         _show_qr(qrcode_value, qrcode_url)
         session = _QrSession(base_url=ILINK_BASE_URL, qrcode_value=qrcode_value)
-        deadline = time.monotonic() + timeout_seconds
+        deadline = timers.monotonic() + timeout_seconds
         last_state = ""
-        while time.monotonic() < deadline:
+        while timers.monotonic() < deadline:
             status = await _qr_get(
                 client, session.base_url, EP_GET_QR_STATUS, f"qrcode={session.qrcode_value}"
             )
             if status is None:
-                await asyncio.sleep(1)
+                await timers.asleep(1)
                 continue
             state = str(status.get("status") or "wait")
             if state != last_state:
@@ -170,7 +171,7 @@ async def qr_login(
                 last_state = state
             if state == "confirmed":
                 return _confirmed_credentials(status, state_dir)
-            await asyncio.sleep(1)
+            await timers.asleep(1)
         logger.warning("WeChat login timed out.")
         return None
     finally:

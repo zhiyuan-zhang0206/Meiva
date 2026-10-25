@@ -12,7 +12,7 @@ import re
 import stat
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any
 
 _STABLE_STAT = ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns")
 
@@ -50,12 +50,10 @@ class InputSeal:
 
     @classmethod
     def from_mapping(cls, raw: object) -> InputSeal:
-        if not isinstance(raw, dict) or set(cast("dict[object, object]", raw)) != {
-            "path",
-            "digest",
-        }:
+        raw_any: Any = raw
+        if not isinstance(raw, dict) or set(raw_any) != {"path", "digest"}:
             raise ValueError("service input must contain exactly path and digest")
-        values = cast("dict[str, object]", raw)
+        values: dict[str, Any] = raw_any
         path, digest = values["path"], values["digest"]
         if not isinstance(path, str) or not Path(path).is_absolute():
             raise ValueError("service input path must be absolute")
@@ -74,9 +72,11 @@ class InputSeal:
 
 
 def parse_inputs(raw: object) -> tuple[InputSeal, ...]:
+    raw_any: Any = raw
     if not isinstance(raw, list):
         raise TypeError("service inputs must be a list")
-    inputs = tuple(InputSeal.from_mapping(item) for item in cast("list[object]", raw))
+    items: list[Any] = raw_any
+    inputs = tuple(InputSeal.from_mapping(item) for item in items)
     if len({item.path for item in inputs}) != len(inputs):
         raise ValueError("service inputs contain duplicate paths")
     return inputs

@@ -38,25 +38,63 @@ class ParentEvidenceError(RuntimeError):
     """The observer cannot bind the helper endpoint to the captured root parent."""
 
 
-def helper_parent(sock: socket.socket) -> tuple[OwnedProcess, OwnedProcess]:
+def _default_root_process() -> OwnedProcess | None:
+    from base.native_process.root_control.client import root_process
+    from base.paths import meiva_home
+
+    return root_process(home=meiva_home())
+
+
+def _default_parent_of(pid: int) -> psutil.Process | None:
+    return psutil.Process(pid).parent()
+
+
+def _default_peer_pid(sock: socket.socket) -> int | None:
+    from base.native_process.root_control.client import peer_pid
+
+    return peer_pid(sock)
+
+
+def _default_sock_path() -> str:
+    return str(helper_client().sock_path)
+
+
+def helper_parent(
+    sock: socket.socket,
+    *,
+    read_root: Callable[[], OwnedProcess | None] = _default_root_process,
+    parent_of: Callable[[int], psutil.Process | None] = _default_parent_of,
+    capture_owner: Callable[[psutil.Process], OwnedProcess] = OwnedProcess.capture,
+    read_peer_pid: Callable[[socket.socket], int | None] = _default_peer_pid,
+) -> tuple[OwnedProcess, OwnedProcess]:
     try:
-        return _read_helper_parent(sock)
+        return _read_helper_parent(
+            sock,
+            read_root=read_root,
+            parent_of=parent_of,
+            capture_owner=capture_owner,
+            read_peer_pid=read_peer_pid,
+        )
     except Exception as exc:
         raise ParentEvidenceError(f"helper parent evidence unavailable: {exc}") from exc
 
 
-def _read_helper_parent(sock: socket.socket) -> tuple[OwnedProcess, OwnedProcess]:
-    from base.native_process.root_control.client import peer_pid, root_process
-    from base.paths import meiva_home
-
-    root = root_process(home=meiva_home())
+def _read_helper_parent(
+    sock: socket.socket,
+    *,
+    read_root: Callable[[], OwnedProcess | None] = _default_root_process,
+    parent_of: Callable[[int], psutil.Process | None] = _default_parent_of,
+    capture_owner: Callable[[psutil.Process], OwnedProcess] = OwnedProcess.capture,
+    read_peer_pid: Callable[[socket.socket], int | None] = _default_peer_pid,
+) -> tuple[OwnedProcess, OwnedProcess]:
+    root = read_root()
     if root is None:
         raise ParentEvidenceError("no captured root generation")
-    parent = psutil.Process(root.pid).parent()
+    parent = parent_of(root.pid)
     if parent is None:
         raise ParentEvidenceError("root has no observable native parent")
-    owner = OwnedProcess.capture(parent)
-    if peer_pid(sock) != owner.pid or not root.live() or not owner.live():
+    owner = capture_owner(parent)
+    if read_peer_pid(sock) != owner.pid or not root.live() or not owner.live():
         raise ParentEvidenceError("helper peer is not the captured root parent")
     return root, owner
 
@@ -73,12 +111,18 @@ def parent_still_live(root: OwnedProcess, parent: OwnedProcess, reply_pid: int) 
         raise ParentEvidenceError(f"cannot recheck helper parent: {exc}") from exc
 
 
-def ping() -> bool:
+def ping(
+    *,
+    connect_fn: Callable[[str], socket.socket] = client.connect,
+    sock_path_fn: Callable[[], str] = _default_sock_path,
+    parent_fn: Callable[[socket.socket], tuple[OwnedProcess, OwnedProcess]] = helper_parent,
+    live_fn: Callable[[OwnedProcess, OwnedProcess, int], bool] = parent_still_live,
+) -> bool:
     """Ping the real helper protocol with a watchdog-sized response timeout."""
-    sock = client.connect(str(helper_client().sock_path))
+    sock = connect_fn(sock_path_fn())
     try:
         sock.settimeout(_PING_TIMEOUT_S)
-        root, parent = helper_parent(sock)
+        root, parent = parent_fn(sock)
         sock.sendall((json.dumps({"id": 0, "method": "ping"}) + "\n").encode())
         reply = bytearray()
         while not reply.endswith(b"\n"):
@@ -94,7 +138,7 @@ def ping() -> bool:
         sock.close()
 
     result: client.PingResult = client.parse_reply(bytes(reply), "ping")
-    if "pid" not in result or not parent_still_live(root, parent, result["pid"]):
+    if "pid" not in result or not live_fn(root, parent, result["pid"]):
         raise ParentEvidenceError("helper reply lost captured parent identity")
     return result["pong"] is True
 
@@ -146,10 +190,14 @@ def _detail(classification: str, job: HelperJobState | None, ping_failure: str |
     return "; ".join(parts)
 
 
-def _observe() -> _Observation:
+def _observe(
+    *,
+    ping_fn: Callable[[], bool] = ping,
+    read_job_fn: Callable[[], str | None] = read_helper_job,
+) -> _Observation:
     """Ping the helper; on failure read and classify the launchd job (total)."""
     try:
-        ping_ok = ping()
+        ping_ok = ping_fn()
     except ParentEvidenceError:
         raise
     except Exception as exc:
@@ -160,7 +208,7 @@ def _observe() -> _Observation:
     if ping_ok:
         return _Observation(HEALTHY, "ping answered")
     job = None
-    text = read_helper_job()
+    text = read_job_fn()
     if text is not None:
         job = parse_job_state(text)
     classification = classify(ping_ok=False, job=job)
@@ -206,12 +254,17 @@ def _emit_unhealthy(observation: _Observation) -> None:
     )
 
 
-def probe() -> DaemonProbe:
+def probe(
+    *,
+    macos_fn: Callable[[], bool] = is_macos,
+    ping_fn: Callable[[], bool] = ping,
+    read_job_fn: Callable[[], str | None] = read_helper_job,
+) -> DaemonProbe:
     """Detect and classify; inspection failures remain unavailable evidence."""
-    if not is_macos():
+    if not macos_fn():
         return DaemonProbe.up("not macOS: no launchd-owned permissions helper")
     try:
-        observation = _observe()
+        observation = _observe(ping_fn=ping_fn, read_job_fn=read_job_fn)
     except Exception as exc:
         return DaemonProbe.unavailable(f"probe error: {type(exc).__name__}: {exc}")
     if observation.classification == HEALTHY:

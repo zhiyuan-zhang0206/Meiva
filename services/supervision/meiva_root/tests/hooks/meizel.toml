@@ -1,2 +1,0 @@
-[debt.test-subclass-override]
-"wiring_unknown_monitor.py#subclass services.supervision.meiva_root.selfcheck.TreeSelfCheck.run_once" = 1

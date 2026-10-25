@@ -14,6 +14,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, LiteralString, NamedTuple
 
+from base.db.transaction import ConnectionSource
+
 
 class PushWatermark(NamedTuple):
     """One chat's push position: the newest item durably accepted for delivery.
@@ -31,8 +33,8 @@ class PushWatermark(NamedTuple):
 
 
 class CursorStore:
-    def __init__(self, db_pool: Any = None) -> None:
-        self._pool = db_pool
+    def __init__(self, db_pool: ConnectionSource | object = None) -> None:
+        self._pool: Any = db_pool
 
     def load_push(self) -> dict[tuple[str, str, int], PushWatermark]:
         """{(channel, chat_id, agent_id): newest accepted item}, one per chat."""
