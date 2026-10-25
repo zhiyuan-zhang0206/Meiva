@@ -31,3 +31,28 @@ commit into it. The plugin as a whole — hooks, SDK surface, configuration — 
 - `meiva_builtins/plugins/meiva_memory/template/validate.py` — the pool validator (`validate_bundle` checks a whole pool directory and `main` prints its findings; `validate_note` is the single-note check the write check reuses, see [[meiva_builtins/plugins/meiva_memory/docs/memory-write-check.meiva.okf.md]])
 
 Parent: [[meiva_builtins/plugins/meiva_memory/docs/meiva_memory.meiva.okf.md|meiva_memory]].
+
+
+## Provisioning targets and configuration stages
+
+The public plugin ABI remains `scaffold(*, machine)`. At each invocation this
+builtin root captures the authoring and consolidated paths through the existing
+foundation path helpers. Every later initialization, template and hook operation
+uses those captured targets; the next invocation captures them again. The two
+helpers still read the ambient home separately: this is not an atomic snapshot
+of a shared explicit home, and no path vocabulary is duplicated here.
+
+The outer checkout probe retains its logging and Git error-classification
+boundary. The actual initialization stage probes that same target again; an
+intervening filesystem change is not hidden behind a cached boolean. This is not
+an initialization mutex or a concurrency transaction.
+
+Authoring reads its branch and keep-local setting at its own stage. Existing
+and local-only checkouts do not read a remote or gateway access. A fresh remote
+operation reads the remote only when needed; a split runner without it then
+obtains the existing global gateway access and installs a bundle. Gateway
+provisioning independently reads keep-local and any needed remote at its later
+stage. Credentials and remote configuration are not eagerly frozen with paths.
+The CommandRuntime configuration/home-to-plugin bridge remains incomplete; this
+root deliberately keeps the existing global authority without creating a second
+configuration boot or expanding the external scaffold ABI.

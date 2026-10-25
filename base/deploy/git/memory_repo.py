@@ -7,11 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from base.clock import Clock
-from base.cluster.machine import MachineIdentity
-from base.config import settings
+from base.cluster.machine import GatewayAccess, MachineIdentity
 from base.host.proc import run_bounded
-from base.paths import gateway_memory_dir, memory_dir
 
 _DEFAULT_GITIGNORE = """\
 # Meiva memory pool — markdown notes only; swap / cache files do not enter history.
@@ -43,8 +40,8 @@ class MemoryBranchMismatch(RuntimeError):  # noqa: N818
     pass
 
 
-def memory_remote() -> str:
-    env = settings.general.memory_remote.strip()
+def memory_remote(raw: str) -> str:
+    env = raw.strip()
     if env:
         return env
     raise MemoryRemoteMissing(
@@ -71,28 +68,23 @@ def pull_main(*, root: Path, keep_local: bool, branch: str) -> str:
     return run_git("rev-parse", "HEAD", cwd=root)
 
 
-def is_initialized() -> bool:
-    return (memory_dir() / ".git").is_dir()
-
-
-def gateway_is_initialized(*, machine: MachineIdentity) -> bool:
-    return (gateway_memory_dir(roles=machine.role()) / ".git").is_dir()
+def is_initialized(*, root: Path) -> bool:
+    return (root / ".git").is_dir()
 
 
 GIT_TIMEOUT_S = 120.0
 
 
-def run_git(*args: str, cwd: Path | None = None) -> str:
+def run_git(*args: str, cwd: Path) -> str:
     # meiva:note
     # run_git passes the per-command timeout to run_bounded, raises CalledProcessError for nonzero exits, and propagates TimeoutExpired. It returns stripped stdout only on success.
     # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
-    cwd_path = cwd if cwd is not None else memory_dir()
     argv = ["git", *args]
 
     result = run_bounded(
         argv,
         timeout=GIT_TIMEOUT_S,
-        cwd=str(cwd_path),
+        cwd=str(cwd),
         capture_output=True,
         text=True,
     )
@@ -159,26 +151,23 @@ def download_pool_snapshot(url: str, headers: dict[str, str]) -> tuple[str | Non
         raise MemoryPoolBootstrapFailed(f"GET {url} failed: {e}") from e
 
 
-def bootstrap_from_gateway(*, machine: MachineIdentity) -> None:
+def bootstrap_from_gateway(*, target: Path, branch: str, access: GatewayAccess) -> None:
     # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
     import shutil
     import tempfile
 
     from base.cluster.machine import gateway_api_base, gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
 
-    access = gateway_access_from_settings()  # ambient: B2
     try:
         base = gateway_api_base(access.gateway_url)
     except Exception as e:
         raise MemoryPoolBootstrapFailed(f"gateway URL unavailable: {e}") from e
     url = f"{base}/api/memory/pool"
     head, bundle_bytes = download_pool_snapshot(url, gateway_auth_headers(access))
-    target = memory_dir()
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp_dir = Path(tempfile.mkdtemp(prefix=".memory-bootstrap-", dir=str(target.parent)))
     try:
-        checkout_dir = _unpack_bundle(bundle_bytes, head, tmp_dir, machine=machine)
+        checkout_dir = _unpack_bundle(bundle_bytes, head, tmp_dir, branch=branch)
         if target.exists():
             shutil.rmtree(target, ignore_errors=True)
         checkout_dir.replace(target)
@@ -190,9 +179,7 @@ def bootstrap_from_gateway(*, machine: MachineIdentity) -> None:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def _unpack_bundle(
-    bundle_bytes: bytes, head: str | None, tmp_dir: Path, *, machine: MachineIdentity
-) -> Path:
+def _unpack_bundle(bundle_bytes: bytes, head: str | None, tmp_dir: Path, *, branch: str) -> Path:
     # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
     bundle_path = tmp_dir / "pool.bundle"
     bundle_path.write_bytes(bundle_bytes)
@@ -215,7 +202,7 @@ def _unpack_bundle(
             )
 
     run_git("remote", "remove", "origin", cwd=checkout_dir)
-    run_git("checkout", "-q", "-b", branch_name(machine=machine), cwd=checkout_dir)
+    run_git("checkout", "-q", "-b", branch, cwd=checkout_dir)
     return checkout_dir
 
 
@@ -230,158 +217,79 @@ class RepoStatus:
     last_fetch: str
 
 
-def _reconcile_initialized(branch: str, *, keep_local: bool, machine: MachineIdentity) -> None:
+def reconcile_initialized(
+    *, root: Path, branch: str, keep_local: bool, allow_main_switch: bool
+) -> None:
     # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
-    current = run_git("rev-parse", "--abbrev-ref", "HEAD")
+    current = run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=root)
     if current != branch:
-        if "gateway" in machine.role() and "agent-runner" not in machine.role():
+        if allow_main_switch:
             if not keep_local:
-                run_git("fetch", "origin", "main")
-            run_git("checkout", "main")
+                run_git("fetch", "origin", "main", cwd=root)
+            run_git("checkout", "main", cwd=root)
             if keep_local:
-                _strip_remotes(memory_dir())
+                _strip_remotes(root)
             return
         raise MemoryBranchMismatch(
-            f"{memory_dir()} is already a git repo but on branch {current!r}, expected {branch!r}. "
-            f"Manually switch: `git -C {memory_dir()} checkout {branch}` "
+            f"{root} is already a git repo but on branch {current!r}, expected {branch!r}. "
+            f"Manually switch: `git -C {root} checkout {branch}` "
             "(confirm working tree has no unpushed in-flight work)."
         )
     if keep_local:
-        _strip_remotes(memory_dir())
+        _strip_remotes(root)
 
 
-def _init_without_remote(branch: str, *, machine: MachineIdentity) -> None:
+def init(*, root: Path, branch: str, remote: str) -> None:
+    # meiva:note
+    # Clone the selected remote into the selected checkout, select or publish the requested branch, and seed the shared gitignore only when missing. The provisioning root decides whether a checkout needs initialization before calling this operation.
     # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
-    if "agent-runner" in machine.role() and "gateway" not in machine.role():
-        try:
-            bootstrap_from_gateway(machine=machine)
-        except MemoryPoolBootstrapFailed as e:
-            raise MemoryRemoteMissing(
-                "memory remote not configured and the gateway pool snapshot "
-                f"fetch failed ({e}). Set MEIVA_MEMORY_REMOTE for the GitHub sync "
-                "path, fix the gateway URL / cluster secret, or set "
-                "MEIVA_MEMORY_KEEP_LOCAL=true "
-                "to run an explicitly local-only pool."
-            ) from e
-        return
-
-    init_local_repo(branch, memory_dir())
-
-
-def init(*, machine: MachineIdentity) -> None:
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
-    branch = branch_name(machine=machine)
-    keep_local = settings.general.memory_keep_local
-    if is_initialized():
-        _reconcile_initialized(branch, keep_local=keep_local, machine=machine)
-        return
-
-    if keep_local:
-        init_local_repo(branch, memory_dir())
-        return
-
-    memory_dir().parent.mkdir(parents=True, exist_ok=True)
-    try:
-        remote = memory_remote()
-    except MemoryRemoteMissing:
-        _init_without_remote(branch, machine=machine)
-        return
-
     subprocess.run(  # noqa: S603
-        ["git", "clone", remote, str(memory_dir())],
+        ["git", "clone", remote, str(root)],
         check=True,
     )
 
-    remote_branches = run_git("ls-remote", "--heads", "origin", branch)
+    remote_branches = run_git("ls-remote", "--heads", "origin", branch, cwd=root)
     if remote_branches:
-        run_git("checkout", branch)
+        run_git("checkout", branch, cwd=root)
     else:
-        run_git("checkout", "-b", branch)
-        run_git("push", "-u", "origin", branch)
+        run_git("checkout", "-b", branch, cwd=root)
+        run_git("push", "-u", "origin", branch, cwd=root)
 
-    gitignore = memory_dir() / ".gitignore"
+    gitignore = root / ".gitignore"
     if not gitignore.exists():
         gitignore.write_text(_DEFAULT_GITIGNORE)
-        run_git("add", ".gitignore")
-        run_git("commit", "-m", f"init: .gitignore on {branch}")
-        run_git("push")
+        run_git("add", ".gitignore", cwd=root)
+        run_git("commit", "-m", f"init: .gitignore on {branch}", cwd=root)
+        run_git("push", cwd=root)
 
 
-def init_gateway(*, machine: MachineIdentity) -> None:
+def status(*, root: Path, track_branch: str, zone: datetime.tzinfo) -> RepoStatus:
     # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
-    branch = "main"
-    gmd = gateway_memory_dir(roles=machine.role())
-    keep_local = settings.general.memory_keep_local
-    if gateway_is_initialized(machine=machine):
-        current = run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=gmd)
-        if current != branch:
-            if not keep_local:
-                run_git("fetch", "origin", "main", cwd=gmd)
-            run_git("checkout", "main", cwd=gmd)
-        if keep_local:
-            _strip_remotes(gmd)
-        return
-
-    if keep_local:
-        init_local_repo(branch, gmd)
-        return
-
-    gmd.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        remote = memory_remote()
-    except MemoryRemoteMissing:
-        init_local_repo(branch, gmd)
-        return
-
-    subprocess.run(  # noqa: S603
-        ["git", "clone", remote, str(gmd)],
-        check=True,
-    )
-
-    remote_branches = run_git("ls-remote", "--heads", "origin", branch, cwd=gmd)
-    if remote_branches:
-        run_git("checkout", branch, cwd=gmd)
-    else:
-        run_git("checkout", "-b", branch, cwd=gmd)
-        run_git("push", "-u", "origin", branch, cwd=gmd)
-
-    gitignore = gmd / ".gitignore"
-    if not gitignore.exists():
-        gitignore.write_text(_DEFAULT_GITIGNORE)
-        run_git("add", ".gitignore", cwd=gmd)
-        run_git("commit", "-m", f"init: .gitignore on {branch}", cwd=gmd)
-        run_git("push", cwd=gmd)
-
-
-def status() -> RepoStatus:
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
-    if not is_initialized():
+    if not is_initialized(root=root):
         raise MemoryRepoUninitialized(
-            f"{memory_dir()} is not yet a git repo — run `meiva memory init` first."
+            f"{root} is not yet a git repo — run `meiva memory init` first."
         )
 
-    branch = run_git("rev-parse", "--abbrev-ref", "HEAD")
-    is_clean = run_git("status", "--porcelain") == ""
-    local_commits = int(run_git("rev-list", "--count", "HEAD"))
+    branch = run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=root)
+    is_clean = run_git("status", "--porcelain", cwd=root) == ""
+    local_commits = int(run_git("rev-list", "--count", "HEAD", cwd=root))
 
     ahead = behind = 0
     with contextlib.suppress(subprocess.CalledProcessError):
-        from base.config import settings
-
         counts = run_git(
-            "rev-list", "--left-right", "--count", f"HEAD...origin/{settings.general.track_branch}"
+            "rev-list", "--left-right", "--count", f"HEAD...origin/{track_branch}", cwd=root
         )
         ahead_s, behind_s = counts.split()
         ahead, behind = int(ahead_s), int(behind_s)
 
-    fetch_head = memory_dir() / ".git" / "FETCH_HEAD"
+    fetch_head = root / ".git" / "FETCH_HEAD"
     if fetch_head.exists():
         last_fetch = (
             datetime.datetime.fromtimestamp(
                 fetch_head.stat().st_mtime,
                 tz=datetime.UTC,
             )
-            .astimezone(Clock.from_settings().zone())
+            .astimezone(zone)
             .isoformat(timespec="seconds")
         )
     else:

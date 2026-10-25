@@ -12,6 +12,7 @@ from base.deploy.git import memory_repo
 from base.deploy.git.tests.memory_checkouts import commit_note
 from base.deploy.git.tests.memory_checkouts import memory_checkout as memory_checkout
 from base.paths import gateway_memory_dir
+from base.paths.tests.homes import default_home as default_home
 
 
 def test_branch_name_gateway_tracks_main(*, machine_identity: MachineIdentity) -> None:
@@ -59,68 +60,6 @@ def test_pull_main_rejects_divergence(memory_checkout: tuple[Path, Path]) -> Non
     assert "unpublished local change" in (root / "note.md").read_text()
 
 
-def test_init_gateway_on_stale_machine_branch_switches_to_main(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    machine_identity.set(role="gateway", name="cloud")
-    monkeypatch.setattr(memory_repo, "is_initialized", lambda: True)
-
-    calls: list[tuple[str, ...]] = []
-
-    def _fake_run_git(*args: str, **kwargs: object) -> str:
-        calls.append(args)
-        if args == ("rev-parse", "--abbrev-ref", "HEAD"):
-            return "machine-cloud"
-        return ""
-
-    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
-
-    memory_repo.init(machine=machine_identity)
-
-    assert ("fetch", "origin", "main") in calls
-    assert ("checkout", "main") in calls
-
-
-def test_init_agent_runner_on_wrong_branch_raises(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
-    machine_identity.set(role="agent-runner", name="test-host-2")
-    monkeypatch.setattr(memory_repo, "is_initialized", lambda: True)
-
-    def _fake_run_git(*args: str, **kwargs: object) -> str:
-        if args == ("rev-parse", "--abbrev-ref", "HEAD"):
-            return "main"
-        return ""
-
-    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
-
-    with pytest.raises(memory_repo.MemoryBranchMismatch):
-        memory_repo.init(machine=machine_identity)
-
-
-def test_init_gateway_on_main_is_noop(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
-) -> None:
-    machine_identity.set(role="gateway", name="cloud")
-    monkeypatch.setattr(memory_repo, "is_initialized", lambda: True)
-
-    calls: list[tuple[str, ...]] = []
-
-    def _fake_run_git(*args: str, **kwargs: object) -> str:
-        calls.append(args)
-        if args == ("rev-parse", "--abbrev-ref", "HEAD"):
-            return "main"
-        return ""
-
-    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
-
-    memory_repo.init(machine=machine_identity)
-
-    assert calls == [("rev-parse", "--abbrev-ref", "HEAD")]
-
-
 def test_gateway_memory_dir_combined_uses_subdirectory(
     monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
 ) -> None:
@@ -147,125 +86,6 @@ def test_gateway_memory_dir_gateway_only_equals_memory_dir(
     assert gmd == meiva_home() / "memory"
 
 
-def test_init_gateway_creates_checkout_on_main(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    machine_identity.set(role="gateway", name="cloud")
-
-    def initialized(*, machine: MachineIdentity) -> bool:
-        assert machine is machine_identity
-        return False
-
-    monkeypatch.setattr(memory_repo, "gateway_is_initialized", initialized)
-
-    calls: list[tuple[str, ...]] = []
-
-    def _fake_run_git(*args: str, **kwargs: object) -> str:
-        calls.append(args)
-        return ""
-
-    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
-
-    monkeypatch.setattr(
-        memory_repo,
-        "memory_remote",
-        lambda: (_ for _ in ()).throw(memory_repo.MemoryRemoteMissing("test")),
-    )
-
-    import subprocess as sp
-
-    from base.paths import gateway_memory_dir as _gmd
-
-    def _fake_run(*args: object, **kwargs: object) -> None:
-        if isinstance(args[0], list) and args[0][:2] == ["git", "init"]:
-            _gmd(roles=machine_identity.role()).mkdir(parents=True, exist_ok=True)
-
-    monkeypatch.setattr(sp, "run", _fake_run)
-
-    memory_repo.init_gateway(machine=machine_identity)
-
-    assert ("add", ".gitignore") in calls
-    assert ("commit", "-q", "-m", "init: local memory on main") in calls
-
-
-def test_init_gateway_already_initialized_on_main_is_noop(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    machine_identity.set(role="gateway", name="cloud")
-
-    def initialized(*, machine: MachineIdentity) -> bool:
-        assert machine is machine_identity
-        return True
-
-    monkeypatch.setattr(memory_repo, "gateway_is_initialized", initialized)
-
-    calls: list[tuple[str, ...]] = []
-
-    def _fake_run_git(*args: str, **kwargs: object) -> str:
-        calls.append(args)
-        if args == ("rev-parse", "--abbrev-ref", "HEAD"):
-            return "main"
-        return ""
-
-    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
-
-    memory_repo.init_gateway(machine=machine_identity)
-
-    assert calls == [("rev-parse", "--abbrev-ref", "HEAD")]
-
-
-def test_init_gateway_on_wrong_branch_auto_switches(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    machine_identity.set(role="gateway", name="cloud")
-
-    def initialized(*, machine: MachineIdentity) -> bool:
-        assert machine is machine_identity
-        return True
-
-    monkeypatch.setattr(memory_repo, "gateway_is_initialized", initialized)
-
-    calls: list[tuple[str, ...]] = []
-
-    def _fake_run_git(*args: str, **kwargs: object) -> str:
-        calls.append(args)
-        if args == ("rev-parse", "--abbrev-ref", "HEAD"):
-            return "machine-cloud"
-        return ""
-
-    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
-
-    memory_repo.init_gateway(machine=machine_identity)
-
-    assert ("fetch", "origin", "main") in calls
-    assert ("checkout", "main") in calls
-
-
-def test_init_combined_unit_does_not_auto_switch_agent_runner_checkout(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
-) -> None:
-    machine_identity.set(role="gateway,agent-runner", name="test-host")
-    monkeypatch.setattr(memory_repo, "is_initialized", lambda: True)
-
-    def _fake_run_git(*args: str, **kwargs: object) -> str:
-        if args == ("rev-parse", "--abbrev-ref", "HEAD"):
-            return "main"
-        return ""
-
-    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
-
-    with pytest.raises(memory_repo.MemoryBranchMismatch):
-        memory_repo.init(machine=machine_identity)
-
-
 def test_pull_main_keep_local_is_noop(tmp_path: Path) -> None:
     root = tmp_path / "local"
     memory_repo.init_local_repo("main", root)
@@ -276,111 +96,96 @@ def test_pull_main_keep_local_is_noop(tmp_path: Path) -> None:
     assert (root / "note.md").read_text().endswith("local memory\n")
 
 
-def test_init_keep_local_strips_remote_when_branch_correct(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
+@pytest.mark.parametrize("branch", ["main", "machine-runner"])
+def test_reconcile_correct_branch_preserves_dirty_files(tmp_path: Path, branch: str) -> None:
+    memory_repo.init_local_repo(branch, tmp_path)
+    note = tmp_path / "note.md"
+    note.write_text("unpublished")
+    before = memory_repo.run_git("rev-parse", "HEAD", cwd=tmp_path)
+    memory_repo.reconcile_initialized(
+        root=tmp_path, branch=branch, keep_local=False, allow_main_switch=False
+    )
+    assert memory_repo.run_git("rev-parse", "HEAD", cwd=tmp_path) == before
+    assert note.read_text() == "unpublished"
+
+
+@pytest.mark.parametrize("keep_local", [False, True])
+def test_reconcile_gateway_can_leave_stale_branch(
+    memory_checkout: tuple[Path, Path], keep_local: bool
 ) -> None:
-    machine_identity.set(role="agent-runner", name="test-host-2")
-    monkeypatch.setattr(memory_repo.settings.general, "memory_keep_local", True)
-    monkeypatch.setattr(memory_repo, "is_initialized", lambda: True)
-
-    calls: list[tuple[str, ...]] = []
-
-    def _fake_run_git(*args: str, **kwargs: object) -> str:
-        calls.append(args)
-        if args == ("rev-parse", "--abbrev-ref", "HEAD"):
-            return "machine-test-host-2"
-        if args == ("remote",):
-            return "origin"
-        return ""
-
-    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
-
-    memory_repo.init(machine=machine_identity)
-
-    assert ("remote", "remove", "origin") in calls
-    assert not any(c[:1] == ("fetch",) for c in calls)
+    _, root = memory_checkout
+    memory_repo.run_git("checkout", "-b", "machine-cloud", cwd=root)
+    memory_repo.reconcile_initialized(
+        root=root, branch="main", keep_local=keep_local, allow_main_switch=True
+    )
+    assert memory_repo.run_git("branch", "--show-current", cwd=root) == "main"
+    assert memory_repo.run_git("remote", cwd=root) == ("" if keep_local else "origin")
 
 
-def test_init_keep_local_fresh_repo_inits_without_remote(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
+@pytest.mark.parametrize("branch", ["machine-runner", "machine-combined"])
+def test_reconcile_runner_mismatch_does_not_discard_work(
+    memory_checkout: tuple[Path, Path], branch: str
 ) -> None:
-    # meiva:note
-    # The existing initialization test records list-shaped subprocess argv and verifies that a fresh keep-local checkout initializes locally without clone or remote access. Its narrow Pyright annotation covers the dynamically typed argv item obtained through the existing subprocess replacement.
-    # meiva:link base/deploy/git/tests/docs/memory-repo-tests.meiva.okf.md
-    machine_identity.set(role="agent-runner", name="test-host-2")
-    monkeypatch.setattr(memory_repo.settings.general, "memory_keep_local", True)
-    monkeypatch.setattr(memory_repo, "is_initialized", lambda: False)
-
-    calls: list[tuple[str, ...]] = []
-
-    def _fake_run_git(*args: str, **kwargs: object) -> str:
-        calls.append(args)
-        return ""
-
-    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
-
-    import subprocess as sp
-
-    from base.paths import memory_dir as _md
-
-    run_cmds: list[list[str]] = []
-
-    def _fake_run(*args: object, **kwargs: object) -> None:
-        cmd = args[0]
-        assert isinstance(cmd, list)
-        # meiva:note
-        # The recorder takes object-typed argv items, so this narrow ignore covers one dynamically typed list element.
-        run_cmds.append(cmd)  # pyright: ignore[reportUnknownArgumentType]
-        if cmd[:2] == ["git", "init"]:
-            _md().mkdir(parents=True, exist_ok=True)
-
-    monkeypatch.setattr(sp, "run", _fake_run)
-
-    memory_repo.init(machine=machine_identity)
-
-    assert any(c[:2] == ["git", "init"] for c in run_cmds)
-    assert not any(c[:2] == ["git", "clone"] for c in run_cmds)
-    assert ("commit", "-q", "-m", "init: local memory on machine-test-host-2") in calls
+    _, root = memory_checkout
+    local = commit_note(root, "unpublished local work")
+    with pytest.raises(memory_repo.MemoryBranchMismatch, match="Manually switch"):
+        memory_repo.reconcile_initialized(
+            root=root, branch=branch, keep_local=False, allow_main_switch=False
+        )
+    assert memory_repo.run_git("branch", "--show-current", cwd=root) == "main"
+    assert memory_repo.run_git("rev-parse", "HEAD", cwd=root) == local
 
 
-def test_init_gateway_keep_local_strips_remote(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    machine_identity: MachineIdentity,
+def test_reconcile_keep_local_removes_every_remote(memory_checkout: tuple[Path, Path]) -> None:
+    _, root = memory_checkout
+    memory_repo.run_git("remote", "add", "backup", "/unused", cwd=root)
+    memory_repo.reconcile_initialized(
+        root=root, branch="main", keep_local=True, allow_main_switch=False
+    )
+    assert memory_repo.run_git("remote", cwd=root) == ""
+
+
+@pytest.mark.parametrize("branch", ["main", "machine-new"])
+def test_init_clones_selected_local_remote_and_publishes_branch(
+    memory_checkout: tuple[Path, Path], tmp_path: Path, branch: str
 ) -> None:
-    machine_identity.set(role="gateway", name="cloud")
-    monkeypatch.setattr(memory_repo.settings.general, "memory_keep_local", True)
+    source, existing = memory_checkout
+    remote = memory_repo.run_git("remote", "get-url", "origin", cwd=source)
+    root = tmp_path / "selected"
+    memory_repo.init(root=root, branch=branch, remote=remote)
+    assert memory_repo.is_initialized(root=root)
+    assert memory_repo.run_git("branch", "--show-current", cwd=root) == branch
+    assert memory_repo.run_git("rev-parse", "HEAD", cwd=root) == memory_repo.run_git(
+        "rev-parse", "HEAD", cwd=existing
+    )
+    assert memory_repo.run_git("ls-remote", "--heads", "origin", branch, cwd=root)
+    assert (root / ".gitignore").read_text() == (source / ".gitignore").read_text()
 
-    def initialized(*, machine: MachineIdentity) -> bool:
-        assert machine is machine_identity
-        return True
 
-    monkeypatch.setattr(memory_repo, "gateway_is_initialized", initialized)
+def test_init_seeds_gitignore_when_remote_has_none(tmp_path: Path, default_home: Path) -> None:
+    default_home.mkdir(parents=True, exist_ok=True)
+    (default_home / ".gitconfig").write_text("[user]\n  name = Test\n  email = test@local\n")
+    source = tmp_path / "source"
+    memory_repo.init_local_repo("main", source)
+    memory_repo.run_git("rm", ".gitignore", cwd=source)
+    memory_repo.run_git("commit", "-qm", "remove ignore", cwd=source)
+    remote = tmp_path / "bare.git"
+    memory_repo.run_git("clone", "--bare", str(source), str(remote), cwd=tmp_path)
+    root = tmp_path / "checkout"
+    memory_repo.init(root=root, branch="main", remote=str(remote))
+    assert (root / ".gitignore").is_file()
+    assert memory_repo.run_git("log", "-1", "--format=%s", cwd=root) == "init: .gitignore on main"
 
-    calls: list[tuple[str, ...]] = []
 
-    def _fake_run_git(*args: str, **kwargs: object) -> str:
-        calls.append(args)
-        if args == ("rev-parse", "--abbrev-ref", "HEAD"):
-            return "main"
-        if args == ("remote",):
-            return "origin"
-        return ""
-
-    monkeypatch.setattr(memory_repo, "run_git", _fake_run_git)
-
-    memory_repo.init_gateway(machine=machine_identity)
-
-    assert ("remote", "remove", "origin") in calls
-    assert not any(c[:1] == ("fetch",) for c in calls)
+def test_memory_remote_requires_explicit_nonempty_value() -> None:
+    assert memory_repo.memory_remote("  /local/remote.git ") == "/local/remote.git"
+    with pytest.raises(memory_repo.MemoryRemoteMissing):
+        memory_repo.memory_remote("   ")
 
 
 def test_run_git_is_bounded_and_kills_the_tree_on_expiry(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     seen: list[dict[str, object]] = []
 
@@ -392,29 +197,29 @@ def test_run_git_is_bounded_and_kills_the_tree_on_expiry(
 
     monkeypatch.setattr(memory_repo, "run_bounded", _fake_run_bounded)
 
-    assert memory_repo.run_git("rev-parse", "HEAD") == "abc123"
+    assert memory_repo.run_git("rev-parse", "HEAD", cwd=tmp_path) == "abc123"
     assert seen[0]["argv"] == ["git", "rev-parse", "HEAD"]
     assert seen[0]["timeout"] == memory_repo.GIT_TIMEOUT_S
     assert isinstance(seen[0]["timeout"], float)
 
 
-def test_run_git_raises_on_non_zero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_git_raises_on_non_zero_exit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
     def _fails(argv: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(list(argv), 1, "", "fatal: no remote")
 
     monkeypatch.setattr(memory_repo, "run_bounded", _fails)
     with pytest.raises(subprocess.CalledProcessError) as exc:
-        memory_repo.run_git("fetch", "origin", "main")
+        memory_repo.run_git("fetch", "origin", "main", cwd=tmp_path)
     assert exc.value.returncode == 1
     assert exc.value.stderr == "fatal: no remote"
 
 
-def test_run_git_propagates_the_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_git_propagates_the_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
     def _expire(argv: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         raise subprocess.TimeoutExpired(list(argv), memory_repo.GIT_TIMEOUT_S)
 
     monkeypatch.setattr(memory_repo, "run_bounded", _expire)
     with pytest.raises(subprocess.TimeoutExpired):
-        memory_repo.run_git("fetch", "origin", "main")
+        memory_repo.run_git("fetch", "origin", "main", cwd=tmp_path)

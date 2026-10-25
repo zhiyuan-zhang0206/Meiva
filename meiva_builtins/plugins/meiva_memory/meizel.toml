@@ -6,7 +6,7 @@ exports = ["metrics.py"]
 "plugin.py" = ["sdk.py", "written_notes.py"]
 "services.py" = ["default_config.py"]
 "skills" = ["pool_ops.py"]
-"tests" = ["agent_runtime.py", "default_config.py", "inherit.py", "inherited_blocks.py", "notes.py", "plugin.py", "pool_ops.py", "sdk.py", "services.py", "skills", "template", "written_notes.py"]
+"tests" = ["agent_runtime.py", "default_config.py", "inherit.py", "inherited_blocks.py", "notes.py", "plugin.py", "pool_ops.py", "sdk.py", "services.py", "setup.py", "skills", "template", "written_notes.py"]
 "write_checks.py" = ["template"]
 "written_notes.py" = ["agent_runtime.py", "sdk.py"]
 
@@ -14,6 +14,9 @@ exports = ["metrics.py"]
 "__init__.py" = "strict"
 "_state.py" = "strict"
 "inherited_blocks.py" = "strict"
+
+[roots]
+"setup.py" = ["settings"]
 
 [debt.ambient-read]
 "agent_runtime.py#clock datetime.datetime.now" = 1

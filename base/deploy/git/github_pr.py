@@ -14,10 +14,9 @@ from __future__ import annotations
 import re
 import subprocess
 
-from base.deploy.git.memory_repo import memory_remote
 from base.host.system.hostport import Host
 
-__all__ = ["github_pr_blocker", "memory_repo_slug"]
+__all__ = ["github_auth_blocker", "github_permission_blocker", "memory_repo_slug"]
 
 # Each `gh` subprocess gets a bounded wait so a hung/offline call surfaces as a
 # blocker reason instead of stalling `meiva start`.
@@ -31,7 +30,7 @@ _SSH_RE = re.compile(r"^git@github\.com:(?P<owner>[^/]+)/(?P<name>.+?)(?:\.git)?
 _HTTPS_RE = re.compile(r"^https://github\.com/(?P<owner>[^/]+)/(?P<name>.+?)(?:\.git)?$")
 
 
-def memory_repo_slug() -> str:
+def memory_repo_slug(remote: str) -> str:
     """Derive the memory repo's `owner/name` slug from its git remote URL.
 
     Parses both the SSH form `git@github.com:OWNER/NAME.git` and the https form
@@ -40,21 +39,17 @@ def memory_repo_slug() -> str:
     Raises:
         ValueError: the remote URL is not a GitHub remote (no silent default).
     """
-    url = memory_remote()
+    url = remote
     m = _SSH_RE.match(url) or _HTTPS_RE.match(url)
     if m is None:
         raise ValueError(f"not a GitHub remote: {url!r}")
     return f"{m['owner']}/{m['name']}"
 
 
-def github_pr_blocker(*, host: Host) -> str | None:
-    """Return a one-line reason this host cannot open+merge PRs, or None if it can.
-
-    Checks in order, returning the reason on the first failure:
-    1. `gh` is on PATH.
-    2. `gh auth status` exits 0 (authenticated to github.com).
-    3. the account has write-or-better permission on the memory repo.
-    """
+def github_auth_blocker(*, host: Host) -> str | None:
+    # meiva:note
+    # Report a missing or unauthenticated gh CLI before remote configuration is needed.
+    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
     if host.which("gh") is None:
         return "gh CLI not installed"
 
@@ -70,7 +65,13 @@ def github_pr_blocker(*, host: Host) -> str | None:
     if auth.returncode != 0:
         return "gh is not authenticated to github.com (run `gh auth login`)"
 
-    slug = memory_repo_slug()
+    return None
+
+
+def github_permission_blocker(*, host: Host, slug: str) -> str | None:
+    # meiva:note
+    # Report whether the authenticated gh account can write the selected repository.
+    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
     try:
         perm = host.run(
             ["gh", "repo", "view", slug, "--json", "viewerPermission", "-q", ".viewerPermission"],
