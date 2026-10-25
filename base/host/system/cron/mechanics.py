@@ -224,7 +224,7 @@ def remove_crontab_entry(
     return 0
 
 
-def meiva_binary_path(*, host: Host) -> str:
+def meiva_binary_path(*, host: Host, repo: Path | None = None) -> str:
     # meiva:note
     # The absolute path to the `meiva` binary of THIS CHECKOUT.
     #
@@ -244,7 +244,8 @@ def meiva_binary_path(*, host: Host) -> str:
     # `repo_root()` makes binary, `$MEIVA_HOME` and label come from one checkout.
     from base.paths import repo_root
 
-    return read_meiva_binary(repo_root(), host=host)
+    checkout = repo_root() if repo is None else repo
+    return read_meiva_binary(checkout, host=host)
 
 
 def job_home() -> str:
@@ -290,7 +291,12 @@ def cron_env_prefix() -> str:
     return cron_environment(Path(job_home()))
 
 
-def launchd_path_env(*, host: Host) -> str:
+def launchd_path_env(
+    *,
+    host: Host,
+    meiva_binary: str | None = None,
+    user_home: Path | None = None,
+) -> str:
     # meiva:note
     # PATH for a LaunchAgent's environment.
     #
@@ -305,7 +311,9 @@ def launchd_path_env(*, host: Host) -> str:
     # dead watchdog). A probe without brew on PATH would fail exactly when it is
     # needed, so this is not cosmetic.
 
-    return read_launchd_path(meiva_binary_path(host=host), user_home=Path.home(), host=host)
+    binary = meiva_binary_path(host=host) if meiva_binary is None else meiva_binary
+    home = Path.home() if user_home is None else user_home
+    return read_launchd_path(binary, user_home=home, host=host)
 
 
 def register_platform_job(

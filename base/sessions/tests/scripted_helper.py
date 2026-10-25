@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from base.host.converge.accessibility import AccessibilityStatus
 from base.host.converge.screen_capture import ScreenCaptureStatus
@@ -17,12 +17,9 @@ from base.host.permissions_helper.client import (
 
 __all__ = ["ScriptedHelper", "scripted_at", "serve"]
 
-_UNUSED_SOCKET = "/unused.sock"
 
-
-class ScriptedHelper(PermissionsHelperClient):
+class ScriptedHelper:
     def __init__(self, **script: object) -> None:
-        super().__init__(_UNUSED_SOCKET)
         self._script = script
         self.calls: list[str] = []
 
@@ -59,9 +56,11 @@ class ScriptedHelper(PermissionsHelperClient):
         return self._answer("check_accessibility")
 
 
-def serve(helper: PermissionsHelperClient) -> HelperFactory:
-    return lambda: helper
+def serve(helper: ScriptedHelper | PermissionsHelperClient) -> HelperFactory:
+    client = cast(PermissionsHelperClient, helper)
+    return lambda: client
 
 
-def scripted_at(helper: PermissionsHelperClient) -> HelperAtSocket:
-    return lambda _socket_path: helper
+def scripted_at(helper: ScriptedHelper | PermissionsHelperClient) -> HelperAtSocket:
+    client = cast(PermissionsHelperClient, helper)
+    return lambda _socket_path: client

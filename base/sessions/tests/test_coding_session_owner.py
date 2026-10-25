@@ -7,7 +7,6 @@ import stat
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
@@ -19,11 +18,6 @@ from base.sessions import coding_session_owner_record as record_codec
 
 NOW = dt.datetime(2026, 9, 2, 0, 0, tzinfo=dt.UTC)
 WRITER = AtomicWriter(SYSTEM_FS)
-
-
-@pytest.fixture(autouse=True)
-def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "home"))
 
 
 def _key(tmp_path: Path, workspace: str = "workspace") -> owner.CodingSessionKey:
@@ -452,20 +446,12 @@ _SOCKET_GENERATION = "be6a5e0a-f271-4301-ad6b-521673bf262f"
 
 @pytest.mark.parametrize(("macos", "root"), [(True, ("private", "tmp")), (False, ("tmp",))])
 def test_socket_directory_selects_the_platform_at_call_time(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, macos: bool, root: tuple[str, ...]
+    tmp_path: Path, macos: bool, root: tuple[str, ...]
 ) -> None:
-    selected: list[str] = []
+    assert owner.default_socket_root(macos=macos) == Path("/").joinpath(*root)
 
-    def platform_root(value: str) -> Path:
-        selected.append(value)
-        return tmp_path
+    directory = owner.private_socket_dir(base=tmp_path, macos=macos)
 
-    monkeypatch.setattr(owner, "Path", platform_root)
-    monkeypatch.setattr(owner, "is_macos", lambda: macos)
-
-    directory = owner.private_socket_dir()
-
-    assert selected == [str(Path("/").joinpath(*root))]
     assert directory == tmp_path / f"meiva-{os.getuid()}"
     info = directory.lstat()
     assert stat.S_ISDIR(info.st_mode) and not directory.is_symlink()
@@ -474,20 +460,23 @@ def test_socket_directory_selects_the_platform_at_call_time(
 
 @pytest.mark.parametrize(("macos", "limit"), [(True, 104), (False, 108)])
 def test_socket_length_limit_selects_the_platform_at_call_time(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, macos: bool, limit: int
+    tmp_path: Path, macos: bool, limit: int
 ) -> None:
     key = _key(tmp_path)
     name_bytes = len("codex-app-server.0123456789ab-be6a5e0a.sock")
-    monkeypatch.setattr(owner, "is_macos", lambda: macos)
+    assert owner.sun_path_limit(macos=macos) == limit
 
     for size in [limit - 1, limit]:
         directory = Path("/" + "x" * (size - name_bytes - 2))
-        monkeypatch.setattr(owner, "private_socket_dir", lambda directory=directory: directory)
         if size == limit:
             with pytest.raises(owner.CodingSessionSocketError, match=f"at most {limit - 1}"):
-                owner.codex_app_server_socket(key, _SOCKET_GENERATION)
+                owner.codex_app_server_socket(
+                    key, _SOCKET_GENERATION, socket_dir=directory, macos=macos
+                )
         else:
-            socket = owner.codex_app_server_socket(key, _SOCKET_GENERATION)
+            socket = owner.codex_app_server_socket(
+                key, _SOCKET_GENERATION, socket_dir=directory, macos=macos
+            )
             assert len(os.fsencode(socket)) == size
 
 
@@ -526,30 +515,24 @@ def test_a_long_cluster_home_still_gets_a_socket_under_the_kernel_limit(tmp_path
 
 
 def test_a_socket_dir_that_is_not_our_real_directory_is_refused(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     (tmp_path / f"meiva-{os.getuid()}").symlink_to(elsewhere)
-    monkeypatch.setattr(
-        owner, "private_socket_dir", partial(owner.private_socket_dir, base=tmp_path)
-    )
 
     with pytest.raises(owner.CodingSessionSocketError, match="not a directory owned by"):
-        owner.codex_app_server_socket(_key(tmp_path), _SOCKET_GENERATION)
+        owner.codex_app_server_socket(_key(tmp_path), _SOCKET_GENERATION, base=tmp_path)
 
 
 def test_a_socket_path_that_cannot_fit_fails_before_launch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     long_base = tmp_path / ("x" * 90)
     long_base.mkdir()
-    monkeypatch.setattr(
-        owner, "private_socket_dir", partial(owner.private_socket_dir, base=long_base)
-    )
 
     with pytest.raises(owner.CodingSessionSocketError, match="bytes; unix sockets"):
-        owner.codex_app_server_socket(_key(tmp_path), _SOCKET_GENERATION)
+        owner.codex_app_server_socket(_key(tmp_path), _SOCKET_GENERATION, base=long_base)
 
 
 @pytest.mark.parametrize("status", ["inactive", "invalid"])

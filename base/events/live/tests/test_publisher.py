@@ -7,8 +7,8 @@ import pytest
 import redis.asyncio as aredis
 from redis.exceptions import AuthenticationError, NoPermissionError, ResponseError
 
-from .. import redis_client
 from ..publisher import AgentEventPublisher
+from ..redis_resilience import AuthRetryPolicy
 
 
 class _FakePipeline:
@@ -82,24 +82,19 @@ async def test_emits_in_fifo_order() -> None:
 
 @pytest.mark.parametrize("error_type", [AuthenticationError, NoPermissionError])
 async def test_batch_retries_acl_transition_without_real_waiting(
-    monkeypatch: pytest.MonkeyPatch,
     error_type: type[AuthenticationError | NoPermissionError],
 ) -> None:
     redis = _FakeRedis()
     redis.auth_failures_remaining = 2
     redis.auth_error_type = error_type
     delays: list[float] = []
+    policy = AuthRetryPolicy(deterministic_jitter=True, sleep_scale=0.0)
 
-    async def _record_sleep(delay: float) -> None:
-        delays.append(delay)
-
-    def _max_jitter(delay_cap: float) -> float:
-        return delay_cap
-
-    monkeypatch.setattr(redis_client, "sleep_async", _record_sleep)
-    monkeypatch.setattr(redis_client, "auth_retry_jitter", _max_jitter)
-
-    await _pub(redis)._publish_batch(["event"])
+    await _pub(
+        redis,
+        auth_retry_policy=policy,
+        recorded_auth_delays=delays,
+    )._publish_batch(["event"])
 
     assert redis.pipeline_attempts == 3
     assert delays == [0.5, 1.0]

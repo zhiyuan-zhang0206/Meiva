@@ -8,11 +8,18 @@ from loguru import logger
 
 from base.host.system.boot_autostart.content import LABEL, launchd_plist_content
 from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S, boot_start_arguments
-from base.host.system.boot_unit import install, uninstall
+from base.host.system.boot_unit import (
+    SYSTEM_UNIT_DIR,
+    SYSTEMD_RUNTIME_DIR,
+    BootUnitContext,
+    install,
+    uninstall,
+)
 from base.host.system.cron import mechanics
 from base.host.system.cron.mechanics import (
     bootout_launchd_job,
     meiva_binary_path,
+    owns_os_job_home,
     owns_os_jobs,
     register_platform_job,
     skip_os_job,
@@ -82,17 +89,41 @@ def _unregister_macos(*, host: Host) -> int:
     return 0 if retired else 1
 
 
-def register_linux(*, services: frozenset[str], host: Host) -> int:
-    install(services=services, host=host)
+def register_linux(
+    *,
+    services: frozenset[str],
+    host: Host,
+    context: BootUnitContext | None = None,
+    unit_dir: Path = SYSTEM_UNIT_DIR,
+    runtime_dir: Path = SYSTEMD_RUNTIME_DIR,
+) -> int:
+    install(
+        services=services,
+        context=context,
+        host=host,
+        unit_dir=unit_dir,
+        runtime_dir=runtime_dir,
+    )
     return 0
 
 
-def unregister_linux(*, host: Host) -> int:
-    uninstall(host=host)
+def unregister_linux(
+    *,
+    host: Host,
+    unit_dir: Path = SYSTEM_UNIT_DIR,
+    runtime_dir: Path = SYSTEMD_RUNTIME_DIR,
+) -> int:
+    uninstall(host=host, unit_dir=unit_dir, runtime_dir=runtime_dir)
     return 0
 
 
-def register_autostart(*, services: frozenset[str], enabled: bool, host: Host) -> None:
+def register_autostart(
+    *,
+    services: frozenset[str],
+    enabled: bool,
+    host: Host,
+    home: Path | None = None,
+) -> None:
     # meiva:note
     # Register the host's boot-time autostart job for exactly `services`.
     #
@@ -109,7 +140,8 @@ def register_autostart(*, services: frozenset[str], enabled: bool, host: Host) -
     if not enabled:
         skip_os_job("autostart")
         return
-    if not owns_os_jobs("autostart"):
+    owns = owns_os_jobs("autostart") if home is None else owns_os_job_home("autostart", home=home)
+    if not owns:
         return
     if not services:
         raise ValueError(

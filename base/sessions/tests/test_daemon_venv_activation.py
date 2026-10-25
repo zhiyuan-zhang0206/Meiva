@@ -39,7 +39,8 @@ def _path0(env: dict[str, str]) -> str:
     return env.get("PATH", "").split(":", 1)[0]
 
 
-def test_launch_path_activates_venv(unit_home: Path) -> None:
+def test_launch_path_activates_venv(process_config: object, unit_home: Path) -> None:
+    del process_config
     from base.host.env.registry import process_environment
     from base.native_process.os_platform import raise_fd_limit
     from base.sessions.backend import get_backend

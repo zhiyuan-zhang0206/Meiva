@@ -109,6 +109,7 @@ class RedisInboundListener:
         redis_url: str,
         agent_id: int,
         *,
+        events_channel: str | None = None,
         consume_abandon_grace: float = _CONSUME_ABANDON_GRACE,
         redis_factory: Callable[..., Any] | None = None,
     ) -> None:
@@ -120,7 +121,10 @@ class RedisInboundListener:
         # patching `redis.asyncio.Redis.from_url`; `redis-py` types `from_url` as
         # partially unknown under strict pyright.
         self._redis_factory: Callable[..., Any] = redis_factory or aredis.Redis.from_url  # pyright: ignore[reportUnknownMemberType]
-        self._channel = inbound_channel(agent_id, settings.data_plane.events_channel)  # ambient: B2
+        channel_source = (
+            settings.data_plane.events_channel if events_channel is None else events_channel
+        )
+        self._channel = inbound_channel(agent_id, channel_source)  # ambient: B2
         self._redis: aredis.Redis | None = None
         self._pubsub: _RedisPubSub | None = None
         self._lock = asyncio.Lock()

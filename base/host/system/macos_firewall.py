@@ -464,7 +464,13 @@ def _under_home(pattern: str, user_home: Path) -> Path:
     return Path(pattern)
 
 
-def manifest_paths(*, machine_name: str | None, host: Host, user_home: Path) -> tuple[Path, ...]:
+def manifest_paths(
+    *,
+    machine_name: str | None,
+    host: Host,
+    user_home: Path,
+    manifest: tuple[ManifestEntry, ...] = FIREWALL_MANIFEST,
+) -> tuple[Path, ...]:
     """Every existing binary this host's manifest requires an allow rule for.
 
     Machine-filtered, glob-expanded, existence-checked, deduplicated and sorted.
@@ -473,7 +479,7 @@ def manifest_paths(*, machine_name: str | None, host: Host, user_home: Path) -> 
     """
     seen: dict[str, Path] = {}
     name = _machine_name(machine_name, host=host)
-    for entry in FIREWALL_MANIFEST:
+    for entry in manifest:
         if entry.machine is not None and entry.machine != name:
             continue
         for pattern in entry.paths:
@@ -495,16 +501,19 @@ def _manifest_rule_state(path: Path, rules: dict[str, bool]) -> str:
 
 
 def render_manifest_status(
-    rules: dict[str, bool], *, machine_name: str | None, host: Host, user_home: Path
+    rules: dict[str, bool],
+    *,
+    machine_name: str | None,
+    host: Host,
+    user_home: Path,
+    manifest: tuple[ManifestEntry, ...] = FIREWALL_MANIFEST,
 ) -> str:
     """Render every applicable manifest entry, pattern, resolved path, and state."""
     lines: list[str] = []
     resolved_states: dict[str, str] = {}
     unmatched_patterns = 0
     name = _machine_name(machine_name, host=host)
-    entries = tuple(
-        entry for entry in FIREWALL_MANIFEST if entry.machine is None or entry.machine == name
-    )
+    entries = tuple(entry for entry in manifest if entry.machine is None or entry.machine == name)
     for entry in entries:
         entry_lines, entry_states, entry_unmatched = _render_manifest_entry(entry, rules, user_home)
         lines.extend(entry_lines)
@@ -549,7 +558,13 @@ def missing_allow_rules(paths: tuple[Path, ...], rules: dict[str, bool]) -> tupl
     return tuple(p for p in paths if not _covered(p, rules))
 
 
-def stale_manifest_rules(rules: dict[str, bool], *, user_home: Path) -> tuple[Path, ...]:
+def stale_manifest_rules(
+    rules: dict[str, bool],
+    *,
+    user_home: Path,
+    manifest: tuple[ManifestEntry, ...] = FIREWALL_MANIFEST,
+    legacy_family: tuple[str, ...] = FIREWALL_LEGACY_FAMILY,
+) -> tuple[Path, ...]:
     """ALF rules this manifest family manages whose path no longer exists.
 
     A version bump orphans the old rule: the rule still names the old path while
@@ -558,12 +573,8 @@ def stale_manifest_rules(rules: dict[str, bool], *, user_home: Path) -> tuple[Pa
     Only rules matching the manifest's own glob families (or the legacy family)
     are considered, so Apple's entries and unrelated apps are never touched.
     """
-    family = [
-        str(_under_home(pattern, user_home))
-        for entry in FIREWALL_MANIFEST
-        for pattern in entry.paths
-    ]
-    family.extend(str(_under_home(pattern, user_home)) for pattern in FIREWALL_LEGACY_FAMILY)
+    family = [str(_under_home(pattern, user_home)) for entry in manifest for pattern in entry.paths]
+    family.extend(str(_under_home(pattern, user_home)) for pattern in legacy_family)
     stale = (
         Path(path)
         for path in rules
@@ -629,7 +640,9 @@ class FirewallRepair:
     removed: tuple[Path, ...] = ()
 
 
-def _persisted_after(paths: tuple[Path, ...], *, host: Host) -> tuple[Path, ...]:
+def _persisted_after(
+    paths: tuple[Path, ...], *, host: Host, verify_retry_s: float = VERIFY_RETRY_S
+) -> tuple[Path, ...]:
     """Of ``paths``, which ones now have an Allow rule, re-reading ALF?
 
     The daemon persists asynchronously, so the read is retried a bounded number
@@ -644,7 +657,7 @@ def _persisted_after(paths: tuple[Path, ...], *, host: Host) -> tuple[Path, ...]
             present = tuple(p for p in paths if _covered(p, rules))
             if len(present) == len(paths):
                 return present
-        time.sleep(VERIFY_RETRY_S)
+        time.sleep(verify_retry_s)
     rules = allowlisted_paths(host=host)
     if rules is None:
         return ()
@@ -652,7 +665,11 @@ def _persisted_after(paths: tuple[Path, ...], *, host: Host) -> tuple[Path, ...]
 
 
 def repair_allowlist(
-    paths: tuple[Path, ...], *, rules: dict[str, bool], host: Host
+    paths: tuple[Path, ...],
+    *,
+    rules: dict[str, bool],
+    host: Host,
+    verify_retry_s: float = VERIFY_RETRY_S,
 ) -> FirewallRepair:
     """Add Allow rules for every path in ``paths`` that lacks one, then verify.
 
@@ -677,7 +694,7 @@ def repair_allowlist(
     )
     if not attempted:
         return FirewallRepair(failed=missing)
-    allowed = _persisted_after(attempted, host=host)
+    allowed = _persisted_after(attempted, host=host, verify_retry_s=verify_retry_s)
     allowed_set = set(allowed)
     return FirewallRepair(
         allowed=allowed,
@@ -685,7 +702,14 @@ def repair_allowlist(
     )
 
 
-def prune_stale_rules(rules: dict[str, bool], *, host: Host, user_home: Path) -> FirewallRepair:
+def prune_stale_rules(
+    rules: dict[str, bool],
+    *,
+    host: Host,
+    user_home: Path,
+    manifest: tuple[ManifestEntry, ...] = FIREWALL_MANIFEST,
+    legacy_family: tuple[str, ...] = FIREWALL_LEGACY_FAMILY,
+) -> FirewallRepair:
     """Remove stale manifest-family rules (see ``stale_manifest_rules``).
 
     Hygiene only — an orphaned rule blocks nothing and prompts nothing — so a
@@ -697,7 +721,9 @@ def prune_stale_rules(rules: dict[str, bool], *, host: Host, user_home: Path) ->
     version's rule persist in the same pass.
     """
     removed: list[Path] = []
-    for path in stale_manifest_rules(rules, user_home=user_home):
+    for path in stale_manifest_rules(
+        rules, user_home=user_home, manifest=manifest, legacy_family=legacy_family
+    ):
         if _sudo_mutate(_PRUNE_VERB, str(path), host=host):
             removed.append(path)
     return FirewallRepair(removed=tuple(removed))

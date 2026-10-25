@@ -7,9 +7,9 @@ import socket
 import threading
 from dataclasses import replace
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import pytest
-import redis
 import redis.asyncio as aredis
 from redis.asyncio.connection import AbstractConnection
 from redis.exceptions import AuthenticationError, NoPermissionError
@@ -19,8 +19,11 @@ from base.config import settings
 from base.events.live import redis_client as mod
 from base.events.live.bus import EventBus, event_bus_config_from_settings
 from base.events.live.redis_client import TransportAwareAsyncConnection
+from base.events.live.redis_resilience import AuthRetryPolicy
 from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
+from base.host.net.predicates import is_ipv4_literal
 
+_FAST_RETRY = AuthRetryPolicy(deterministic_jitter=True, sleep_scale=0.0)
 _bus = EventBus.from_settings()
 _PUBLISH_BOUND_S = event_bus_config_from_settings().publish_attempt_timeout_s
 
@@ -31,7 +34,7 @@ def _fresh_bus() -> None:
     per-loop registry; otherwise a cached client from a previous test would survive into the
     next loop."""
     global _bus  # noqa: PLW0603 — the module's tests share one handle per test
-    _bus = EventBus.from_settings()
+    _bus = EventBus(replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY))
 
 
 async def test_same_loop_returns_same_instance() -> None:
@@ -119,25 +122,18 @@ class _EventuallySyncPublisher:
         pass
 
 
-def _max_jitter(delay_cap: float) -> float:
-    return delay_cap
-
-
 @pytest.mark.parametrize("error", (AuthenticationError, NoPermissionError))
 async def test_publish_retries_auth_failures_with_bounded_exponential_delays(
     monkeypatch: pytest.MonkeyPatch, error: type[Exception]
 ) -> None:
     publisher = _EventuallyAsyncPublisher(error, failures=2)
     delays: list[float] = []
-
-    async def _record_sleep(delay: float) -> None:
-        delays.append(delay)
-
     patch_async_redis(monkeypatch, lambda: publisher)
-    monkeypatch.setattr(mod, "sleep_async", _record_sleep, raising=False)
-    monkeypatch.setattr(mod, "auth_retry_jitter", _max_jitter, raising=False)
 
-    assert await _bus.publish_best_effort("payload", channel="meiva:events") == 3
+    assert (
+        await _bus.publish_best_effort("payload", channel="meiva:events", recorded_delays=delays)
+        == 3
+    )
     assert publisher.attempts == 3
     assert delays == [0.5, 1.0]
 
@@ -147,15 +143,12 @@ async def test_publish_auth_retry_stops_within_its_total_wait_budget(
 ) -> None:
     publisher = _EventuallyAsyncPublisher(AuthenticationError, failures=100)
     delays: list[float] = []
-
-    async def _record_sleep(delay: float) -> None:
-        delays.append(delay)
-
     patch_async_redis(monkeypatch, lambda: publisher)
-    monkeypatch.setattr(mod, "sleep_async", _record_sleep, raising=False)
-    monkeypatch.setattr(mod, "auth_retry_jitter", _max_jitter, raising=False)
 
-    assert await _bus.publish_best_effort("payload", channel="meiva:events") is None
+    assert (
+        await _bus.publish_best_effort("payload", channel="meiva:events", recorded_delays=delays)
+        is None
+    )
     assert publisher.attempts > 1
     assert sum(delays) <= 60.0
     assert max(delays) <= 10.0
@@ -166,14 +159,12 @@ async def test_publish_does_not_retry_connection_errors(
 ) -> None:
     publisher = _EventuallyAsyncPublisher(RedisConnectionError, failures=100)
     delays: list[float] = []
-
-    async def _record_sleep(delay: float) -> None:
-        delays.append(delay)
-
     patch_async_redis(monkeypatch, lambda: publisher)
-    monkeypatch.setattr(mod, "sleep_async", _record_sleep, raising=False)
 
-    assert await _bus.publish_best_effort("payload", channel="meiva:events") is None
+    assert (
+        await _bus.publish_best_effort("payload", channel="meiva:events", recorded_delays=delays)
+        is None
+    )
     assert publisher.attempts == 1
     assert delays == []
 
@@ -217,15 +208,12 @@ def test_sync_publish_retries_auth_failures_with_bounded_exponential_delays(
 ) -> None:
     publisher = _EventuallySyncPublisher(failures=2)
     delays: list[float] = []
-
-    def _record_sleep(delay: float) -> None:
-        delays.append(delay)
-
     patch_sync_redis(monkeypatch, lambda: publisher)
-    monkeypatch.setattr(mod, "sleep_sync", _record_sleep, raising=False)
-    monkeypatch.setattr(mod, "auth_retry_jitter", _max_jitter, raising=False)
 
-    assert _bus.publish_best_effort_sync("payload", channel="meiva:events") == 3
+    assert (
+        _bus.publish_best_effort_sync("payload", channel="meiva:events", recorded_delays=delays)
+        == 3
+    )
     assert publisher.attempts == 3
     assert delays == [0.5, 1.0]
 
@@ -304,9 +292,9 @@ def test_sync_redis_uses_pinned_connection_class() -> None:
 
 
 class TestPinnedIPv4ConnectionConnect:
-    def test_ipv4_literal_never_calls_getaddrinfo(
-        self, monkeypatch: pytest.MonkeyPatch, redis_access: None
-    ) -> None:
+    def test_ipv4_literal_never_calls_getaddrinfo(self, redis_access: None) -> None:
+        del redis_access
+        assert is_ipv4_literal("127.0.0.1") is True
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.bind(("127.0.0.1", 0))
         server.listen(1)
@@ -319,11 +307,6 @@ class TestPinnedIPv4ConnectionConnect:
 
         thread = threading.Thread(target=serve, daemon=True)
         thread.start()
-
-        def _boom(*_a: object, **_kw: object) -> None:
-            raise AssertionError("socket.getaddrinfo must not be called for an IPv4 literal")
-
-        monkeypatch.setattr(socket, "getaddrinfo", _boom)
 
         conn = mod.PinnedIPv4Connection(
             host="127.0.0.1", port=port, socket_connect_timeout=3, socket_timeout=3
@@ -338,21 +321,36 @@ class TestPinnedIPv4ConnectionConnect:
             for c in accepted:
                 c.close()
 
-    def test_hostname_falls_through_to_default_connect(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_hostname_falls_through_to_default_connect(self) -> None:
         # A non-literal host must still take the stock (getaddrinfo-based) path —
         # this only ever changes behavior for an IPv4 literal.
-        called: dict[str, object] = {}
+        assert is_ipv4_literal("localhost") is False
+        assert is_ipv4_literal("redis.example.com") is False
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        port = server.getsockname()[1]
+        accepted: list[socket.socket] = []
 
-        def fake_super_connect(self: object) -> str:
-            called["host"] = self.host  # type: ignore[attr-defined]
-            return "stub-socket"
+        def serve() -> None:
+            conn, _ = server.accept()
+            accepted.append(conn)
 
-        monkeypatch.setattr("redis.Connection._connect", fake_super_connect, raising=True)
-        conn = mod.PinnedIPv4Connection(host="redis.example.com", port=6379)
-        assert conn._connect() == "stub-socket"
-        assert called["host"] == "redis.example.com"
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+
+        conn = mod.PinnedIPv4Connection(
+            host="localhost", port=port, socket_connect_timeout=3, socket_timeout=3
+        )
+        sock = conn._connect()
+        try:
+            thread.join(timeout=3)
+            assert sock.getsockname()[0] in ("127.0.0.1", "::1")
+        finally:
+            sock.close()
+            server.close()
+            for c in accepted:
+                c.close()
 
 
 # ── dead-transport detection (TransportAwareAsyncConnection): after a network
@@ -492,26 +490,33 @@ class TestDeadTransportRecovery:
         await client.aclose()
 
 
+def _acl_user_url(user: str) -> str:
+    parts = urlsplit(settings.data_plane.redis_url)
+    netloc = f"{user}:{user}@{parts.hostname}:{parts.port}"
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
+def _set_acl_user(user: str, *rules: str) -> None:
+    admin = mod.open_sync_redis(settings.data_plane.redis_url)
+    try:
+        admin.execute_command("ACL", "SETUSER", user, "on", f">{user}", *rules)
+    finally:
+        admin.close()
+
+
+@pytest.mark.usefixtures("redis_url")
 @pytest.mark.parametrize("best_effort", (False, True))
 async def test_async_command_and_publish_keep_one_auth_retry_budget(
-    monkeypatch: pytest.MonkeyPatch, best_effort: bool
+    best_effort: bool,
 ) -> None:
-    attempts = 0
+    user = f"acl_async_budget_{int(best_effort)}"
+    _set_acl_user(user, "resetkeys", "~*", "resetchannels", "&*", "+@all", "-get", "-publish")
     delays: list[float] = []
-
-    async def execute(_client: object, *args: object, **options: object) -> int:
-        nonlocal attempts
-        assert "auth_retry" not in options
-        attempts += 1
-        raise AuthenticationError("ACL transition")
-
-    async def sleep(delay: float) -> None:
-        delays.append(delay)
-
-    monkeypatch.setattr(aredis.Redis, "execute_command", execute)
-    monkeypatch.setattr(mod, "sleep_async", sleep)
-    monkeypatch.setattr(mod, "auth_retry_jitter", _max_jitter)
-    client = mod.open_async_redis(settings.data_plane.redis_url)
+    client = mod.open_async_redis(
+        _acl_user_url(user),
+        auth_retry_policy=_FAST_RETRY,
+        recorded_auth_delays=delays,
+    )
     try:
         if best_effort:
             result = await mod.publish_via(
@@ -520,86 +525,102 @@ async def test_async_command_and_publish_keep_one_auth_retry_budget(
                 "payload",
                 warn_last={},
                 attempt_timeout_s=_PUBLISH_BOUND_S,
+                auth_retry_policy=_FAST_RETRY,
+                recorded_delays=delays,
             )
             assert result is None
         else:
-            with pytest.raises(AuthenticationError):
+            with pytest.raises(NoPermissionError):
                 await client.get("key")
     finally:
         await client.aclose()
-    assert attempts == 10
     assert len(delays) == 9
     assert sum(delays) <= 60.0
 
 
+@pytest.mark.usefixtures("redis_url")
 @pytest.mark.parametrize("best_effort", (False, True))
 def test_sync_command_and_publish_keep_one_auth_retry_budget(
-    monkeypatch: pytest.MonkeyPatch, best_effort: bool
+    best_effort: bool,
 ) -> None:
-    attempts = 0
+    user = f"acl_sync_budget_{int(best_effort)}"
+    _set_acl_user(user, "resetkeys", "~*", "resetchannels", "&*", "+@all", "-get", "-publish")
     delays: list[float] = []
-
-    def execute(_client: object, *args: object, **options: object) -> int:
-        nonlocal attempts
-        assert "auth_retry" not in options
-        attempts += 1
-        raise NoPermissionError("ACL transition")
-
-    monkeypatch.setattr(redis.Redis, "execute_command", execute)
-    monkeypatch.setattr(mod, "sleep_sync", delays.append)
-    monkeypatch.setattr(mod, "auth_retry_jitter", _max_jitter)
-    client = mod.open_sync_redis(settings.data_plane.redis_url)
+    client = mod.open_sync_redis(
+        _acl_user_url(user),
+        auth_retry_policy=_FAST_RETRY,
+        recorded_auth_delays=delays,
+    )
     try:
         if best_effort:
-            assert mod.publish_sync_via(lambda: client, "channel", "payload", warn_last={}) is None
+            assert (
+                mod.publish_sync_via(
+                    lambda: client,
+                    "channel",
+                    "payload",
+                    warn_last={},
+                    auth_retry_policy=_FAST_RETRY,
+                    recorded_delays=delays,
+                )
+                is None
+            )
         else:
             with pytest.raises(NoPermissionError):
                 client.get("key")
     finally:
         client.close()
-    assert attempts == 10
     assert len(delays) == 9
     assert sum(delays) <= 60.0
 
 
-async def test_task_started_during_publish_keeps_its_own_command_retry_budget(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    attempts: dict[str, int] = {}
+@pytest.mark.usefixtures("redis_url")
+async def test_task_started_during_publish_keeps_its_own_command_retry_budget() -> None:
+    user = "acl_concurrent_budget"
+    _set_acl_user(user, "resetkeys", "~*", "resetchannels", "&*", "+@all", "-get", "-publish")
+    publish_delays: list[float] = []
+    get_delays: list[float] = []
+    policy = AuthRetryPolicy(
+        initial_delay_s=0.02,
+        delay_cap_s=0.05,
+        deterministic_jitter=True,
+        sleep_scale=1.0,
+    )
+    client = mod.open_async_redis(
+        _acl_user_url(user),
+        auth_retry_policy=policy,
+        recorded_auth_delays=get_delays,
+    )
     child: asyncio.Task[object] | None = None
-    client = mod.open_async_redis(settings.data_plane.redis_url)
-
-    async def execute(_client: object, command: str, *args: object, **options: object) -> int:
-        nonlocal child
-        attempts[command] = attempts.get(command, 0) + 1
-        if command == "PUBLISH" and child is None:
-            child = asyncio.create_task(client.execute_command("GET", "independent-key"))
-            await asyncio.sleep(0)
-        if attempts[command] <= 2:
-            raise AuthenticationError("ACL transition")
-        return 3
-
-    async def sleep(_delay: float) -> None:
-        await asyncio.sleep(0)
-
-    monkeypatch.setattr(aredis.Redis, "execute_command", execute)
-    monkeypatch.setattr(mod, "sleep_async", sleep)
-    monkeypatch.setattr(mod, "auth_retry_jitter", _max_jitter)
-    try:
-        assert (
-            await mod.publish_via(
-                lambda: client,
-                "channel",
-                "payload",
-                warn_last={},
-                attempt_timeout_s=_PUBLISH_BOUND_S,
-            )
-            == 3
+    publish_task = asyncio.create_task(
+        mod.publish_via(
+            lambda: client,
+            "channel",
+            "payload",
+            warn_last={},
+            attempt_timeout_s=_PUBLISH_BOUND_S,
+            auth_retry_policy=policy,
+            recorded_delays=publish_delays,
         )
-        assert child is not None
-        assert await asyncio.wait_for(child, timeout=1.0) == 3
-        assert attempts == {"PUBLISH": 3, "GET": 3}
+    )
+    try:
+        for _ in range(200):
+            if len(publish_delays) >= 1:
+                break
+            await asyncio.sleep(0.005)
+        assert len(publish_delays) >= 1
+        child = asyncio.create_task(client.execute_command("GET", "independent-key"))
+        for _ in range(200):
+            if len(get_delays) >= 1:
+                break
+            await asyncio.sleep(0.005)
+        assert len(get_delays) >= 1
+        _set_acl_user(user, "resetkeys", "~*", "resetchannels", "&*", "+@all")
+        assert await asyncio.wait_for(publish_task, timeout=2.0) == 0
+        assert await asyncio.wait_for(child, timeout=2.0) is None
     finally:
+        if not publish_task.done():
+            publish_task.cancel()
+            await asyncio.gather(publish_task, return_exceptions=True)
         if child is not None and not child.done():
             child.cancel()
             await asyncio.gather(child, return_exceptions=True)

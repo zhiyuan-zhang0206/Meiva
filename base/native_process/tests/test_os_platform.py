@@ -14,7 +14,6 @@ from typing import Any, cast
 
 import pytest
 
-import base.native_process.os_platform as plat
 from base.native_process.os_platform import (
     Platform,
     descends_from_launchd_job,
@@ -43,21 +42,18 @@ def test_cold_import_does_not_probe_uname() -> None:
 
 
 class TestPrimaryDiskPath:
-    def test_macos_data_volume(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(plat, "is_macos", lambda: True)
-        assert primary_disk_path() == "/System/Volumes/Data"
+    def test_macos_data_volume(self) -> None:
+        assert primary_disk_path(macos=True) == "/System/Volumes/Data"
 
-    def test_plain_posix_root(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(plat, "is_macos", lambda: False)
-        assert primary_disk_path() == "/"
+    def test_plain_posix_root(self) -> None:
+        assert primary_disk_path(macos=False) == "/"
 
 
 class TestPtyMax:
-    def test_non_macos_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_non_macos_returns_none(self) -> None:
         """Off macOS the PTY ceiling does not bind (Linux `kernel.pty.max` is far
         higher), so callers get None and skip the check."""
-        monkeypatch.setattr(plat, "is_macos", lambda: False)
-        assert pty_max() is None
+        assert pty_max(macos=False) is None
 
     @pytest.mark.requires_host("darwin")
     def test_macos_reads_positive_ceiling(self) -> None:
@@ -96,58 +92,47 @@ class TestEnsureLineBufferedStdio:
         assert got, "the child's line did not reach the pipe while it was still running"
         assert got[0].strip() == "[update] header"
 
-    def test_idempotent_and_survives_a_stream_without_reconfigure(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_idempotent_and_survives_a_stream_without_reconfigure(self) -> None:
         """Buffering is a nicety: a replaced stdout (pytest capture, a StringIO under
         redirect_stdout) must never take the command down."""
-        monkeypatch.setattr(sys, "stdout", io.StringIO())
-        ensure_line_buffered_stdio()
-        ensure_line_buffered_stdio()
+        stream = io.StringIO()
+        ensure_line_buffered_stdio(streams=(stream, sys.stderr))
+        ensure_line_buffered_stdio(streams=(stream, sys.stderr))
 
 
 class TestLaunchdOwnership:
-    def _fake(
+    def _check(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         print_rc: int,
         print_out: str,
-        ps: dict[int, str],
-    ) -> None:
-        def run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-            if cmd[1] == "print":
-                return subprocess.CompletedProcess(cmd, print_rc, print_out, "")
-            value = ps.get(int(cmd[-1]), "")
-            return subprocess.CompletedProcess(cmd, 0 if value else 1, value, "")
+        ps: dict[int, int | None],
+    ) -> bool:
+        return descends_from_launchd_job(
+            "com.x",
+            macos=True,
+            current_pid=500,
+            launchctl_print=(print_rc, print_out),
+            parent_pids=ps,
+        )
 
-        monkeypatch.setattr(plat.subprocess, "run", run)
-        monkeypatch.setattr(plat, "is_macos", lambda: True)
-        monkeypatch.setattr(plat.os, "getpid", lambda: 500)
+    def test_off_macos_is_never_owned(self) -> None:
+        assert descends_from_launchd_job("com.x", macos=False) is False
 
-    def test_off_macos_is_never_owned(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(plat, "is_macos", lambda: False)
-        assert descends_from_launchd_job("com.x") is False
+    def test_unloaded_job_owns_no_process(self) -> None:
+        assert self._check(print_rc=113, print_out="Could not find service", ps={}) is False
 
-    def test_unloaded_job_owns_no_process(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self._fake(monkeypatch, print_rc=113, print_out="Could not find service", ps={})
-        assert descends_from_launchd_job("com.x") is False
+    def test_loaded_but_not_running_owns_no_process(self) -> None:
+        assert self._check(print_rc=0, print_out="state = not running\n", ps={}) is False
 
-    def test_loaded_but_not_running_owns_no_process(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self._fake(monkeypatch, print_rc=0, print_out="state = not running\n", ps={})
-        assert descends_from_launchd_job("com.x") is False
+    def test_ancestor_chain_proves_ownership(self) -> None:
+        assert self._check(print_rc=0, print_out="\tpid = 200\n", ps={500: 300, 300: 200}) is True
 
-    def test_ancestor_chain_proves_ownership(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self._fake(monkeypatch, print_rc=0, print_out="\tpid = 200\n", ps={500: "300", 300: "200"})
-        assert descends_from_launchd_job("com.x") is True
+    def test_chain_reaching_launchd_is_external(self) -> None:
+        assert self._check(print_rc=0, print_out="pid = 999\n", ps={500: 300, 300: 1}) is False
 
-    def test_chain_reaching_launchd_is_external(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self._fake(monkeypatch, print_rc=0, print_out="pid = 999\n", ps={500: "300", 300: "1"})
-        assert descends_from_launchd_job("com.x") is False
-
-    def test_unreadable_ancestor_is_not_proof(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self._fake(monkeypatch, print_rc=0, print_out="pid = 200\n", ps={500: "300"})
-        assert descends_from_launchd_job("com.x") is False
+    def test_unreadable_ancestor_is_not_proof(self) -> None:
+        assert self._check(print_rc=0, print_out="pid = 200\n", ps={500: 300}) is False
 
 
 # -- Platform: the facts a Host reports, validated at construction --

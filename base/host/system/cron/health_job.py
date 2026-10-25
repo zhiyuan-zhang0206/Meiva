@@ -16,13 +16,19 @@ DEFAULT_INTERVAL_SECONDS = 300
 _CRON_MARKER = "# meiva-health-probe"
 
 
-def _launchd_plist_path() -> Path:
+def _launchd_plist_path(user_home: Path | None = None) -> Path:
     # meiva:note
     # Path to the health probe's launchd plist.
-    return Path.home() / "Library" / "LaunchAgents" / f"{health_content.LABEL}.plist"
+    base = Path.home() if user_home is None else user_home
+    return base / "Library" / "LaunchAgents" / f"{health_content.LABEL}.plist"
 
 
-def _own_probe_job_of(own_labels: set[str]) -> str | None:
+def _own_probe_job_of(
+    own_labels: set[str],
+    *,
+    current_label: str | None = None,
+    ancestral_labels: frozenset[str] | None = None,
+) -> str | None:
     # meiva:note
     # The health-probe label this process runs under, or None when external.
     #
@@ -30,16 +36,29 @@ def _own_probe_job_of(own_labels: set[str]) -> str | None:
     # descendants read "0" (see `base.native_process.os_platform.descends_from_launchd_job`) —
     # so the environment is a fast path and the live process tree is the proof.
     # Labels are probed in sorted order for deterministic logging/reporting.
-    current = launchd_job_label()
+    current = launchd_job_label() if current_label is None else current_label
     if current is not None and current in own_labels:
         return current
+    if ancestral_labels is not None:
+        return health_content.own_probe_job_of(
+            own_labels,
+            current_label=current,
+            ancestral_labels=ancestral_labels,
+        )
     for candidate in sorted(own_labels):
         if descends_from_launchd_job(candidate):
             return candidate
     return None
 
 
-def register_macos(interval_s: int, *, host: Host) -> int:
+def register_macos(
+    interval_s: int,
+    *,
+    host: Host,
+    user_home: Path | None = None,
+    current_label: str | None = None,
+    ancestral_labels: frozenset[str] | None = None,
+) -> int:
     # meiva:note
     # Register the health probe as a launchd User LaunchAgent.
     #
@@ -47,7 +66,7 @@ def register_macos(interval_s: int, *, host: Host) -> int:
     # `launchctl bootstrap`. A call descended from this job leaves its own loaded
     # spec untouched; the next external converge applies any pending change.
     label = health_content.LABEL
-    plist_path = _launchd_plist_path()
+    plist_path = _launchd_plist_path(user_home)
 
     # meiva:note
     # `bootout` terminates the job's whole process tree. A registering job
@@ -57,7 +76,11 @@ def register_macos(interval_s: int, *, host: Host) -> int:
     # fast path that only the job's direct child matches, while descendants —
     # where converges actually run — read "0", so the live process tree check
     # is the proof; see the linked health-job custody contract.
-    own_job = _own_probe_job_of({label})
+    own_job = _own_probe_job_of(
+        {label},
+        current_label=current_label,
+        ancestral_labels=ancestral_labels,
+    )
     if own_job is not None:
         logger.info("Health probe '{}' is registering itself — deferring reload", own_job)
         return 0
@@ -71,7 +94,7 @@ def register_macos(interval_s: int, *, host: Host) -> int:
     meiva_path = mechanics.meiva_binary_path(host=host)
     log_file = meiva_home() / "logs" / "health-probe.log"
     environment_home = Path(mechanics.job_home())
-    path_env = mechanics.launchd_path_env(host=host)
+    path_env = mechanics.launchd_path_env(host=host, user_home=user_home)
     content = health_content.launchd_plist_content(
         arguments=(meiva_path, "cluster", "health-probe"),
         interval_seconds=interval_s,
@@ -105,10 +128,10 @@ def register_macos(interval_s: int, *, host: Host) -> int:
     return 0
 
 
-def unregister_macos(*, host: Host) -> int:
+def unregister_macos(*, host: Host, user_home: Path | None = None) -> int:
     # meiva:note
     # Remove the health probe's launchd job and plist.
-    plist_path = _launchd_plist_path()
+    plist_path = _launchd_plist_path(user_home)
     label = health_content.LABEL
 
     # meiva:note
@@ -127,7 +150,7 @@ def unregister_macos(*, host: Host) -> int:
     return 0
 
 
-def register_linux(interval_s: int, *, host: Host) -> int:
+def register_linux(interval_s: int, *, host: Host, repo: Path | None = None) -> int:
     # meiva:note
     # Add the health probe to the user's crontab.
     #
@@ -151,7 +174,7 @@ def register_linux(interval_s: int, *, host: Host) -> int:
     if missing is not None:
         return missing
 
-    meiva_path = mechanics.meiva_binary_path(host=host)
+    meiva_path = mechanics.meiva_binary_path(host=host, repo=repo)
     minutes = max(1, interval_s // 60)
     entry = f"*/{minutes} * * * * {mechanics.cron_env_prefix()}{meiva_path} cluster health-probe {_CRON_MARKER}"
 
@@ -222,28 +245,46 @@ def unregister_linux(*, host: Host) -> int:
 # Raises:
 #     RuntimeError: on registration failure.
 def register_os_cron(
-    interval_s: int = DEFAULT_INTERVAL_SECONDS, *, enabled: bool, host: Host
+    interval_s: int = DEFAULT_INTERVAL_SECONDS,
+    *,
+    enabled: bool,
+    host: Host,
+    home: Path | None = None,
+    repo: Path | None = None,
+    user_home: Path | None = None,
+    ancestral_labels: frozenset[str] | None = None,
 ) -> None:
     if not enabled:
         mechanics.skip_os_job("health-probe")
         return
-    if not mechanics.owns_os_jobs("health-probe"):
+    owns = (
+        mechanics.owns_os_jobs("health-probe")
+        if home is None
+        else mechanics.owns_os_job_home("health-probe", home=home)
+    )
+    if not owns:
         return
     from base.paths import prod_service_checkout_error, repo_root
 
-    refusal = prod_service_checkout_error(repo_root())
+    checkout = repo_root() if repo is None else repo
+    refusal = prod_service_checkout_error(checkout)
     if refusal is not None:
         logger.error("health-probe registration refused: {}", refusal)
         return
     mechanics.register_platform_job(
         "cron",
-        macos=lambda: register_macos(interval_s, host=host),
-        linux=lambda: register_linux(interval_s, host=host),
+        macos=lambda: register_macos(
+            interval_s,
+            host=host,
+            user_home=user_home,
+            ancestral_labels=ancestral_labels,
+        ),
+        linux=lambda: register_linux(interval_s, host=host, repo=repo),
         host=host,
     )
 
 
-def unregister_os_cron(*, host: Host) -> None:
+def unregister_os_cron(*, host: Host, user_home: Path | None = None) -> None:
     # meiva:note
     # Remove the OS cron job of the cluster health probe.
     #
@@ -252,7 +293,7 @@ def unregister_os_cron(*, host: Host) -> None:
     if not mechanics.owns_os_jobs("health-probe"):
         return
     mechanics.unregister_platform_job(
-        macos=lambda: unregister_macos(host=host),
+        macos=lambda: unregister_macos(host=host, user_home=user_home),
         linux=lambda: unregister_linux(host=host),
         host=host,
     )

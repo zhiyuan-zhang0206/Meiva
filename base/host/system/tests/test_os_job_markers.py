@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from base.host.system import logs_job, packages_job, pr_flow_job, walg_job
-from base.host.system.cron import health_job, mechanics
+from base.host.system.cron import health_job
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
 from base.host.system.tests.fake_commands import LINUX_X86, fake_host
@@ -23,23 +23,23 @@ _WALG_MARKER = "# meiva-walg"
 _OPERATOR_MEIVA = "/home/operator/.meiva/source/.venv/bin/meiva"
 
 
-def _operator_meiva(*, host: Host) -> str:
-    return _OPERATOR_MEIVA
-
-
 @pytest.fixture
-def crontab(default_home: Path, monkeypatch: pytest.MonkeyPatch) -> FakeCrontab:
-    monkeypatch.setattr(mechanics, "meiva_binary_path", _operator_meiva)
+def crontab(default_home: Path) -> FakeCrontab:
+    del default_home
     return FakeCrontab(_UNRELATED + "\n")
 
 
 def _linux(crontab: FakeCrontab) -> Host:
-    return fake_host(crontab, platform=LINUX_X86, programs={"crontab": "/usr/bin/crontab"})
+    return fake_host(
+        crontab,
+        platform=LINUX_X86,
+        programs={"crontab": "/usr/bin/crontab", "meiva": _OPERATOR_MEIVA},
+    )
 
 
 def _register_all(crontab: FakeCrontab, roots: JobRoots) -> None:
     host = _linux(crontab)
-    assert health_job.register_linux(300, host=host) == 0
+    assert health_job.register_linux(300, host=host, repo=roots.repo) == 0
     assert logs_job.register_linux(roots=roots, host=host) == 0
     assert packages_job.register_linux(roots=roots, tick_seconds=900, host=host) == 0
     assert pr_flow_job.register_linux(roots=roots, host=host) == 0

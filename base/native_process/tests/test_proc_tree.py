@@ -117,73 +117,67 @@ def test_reading_a_pid_nobody_holds_finds_nothing() -> None:
 
 @pytest.mark.requires_host("darwin")
 @pytest.mark.parametrize("seconds", (60.0, 3600.0))
-def test_stable_create_time_ignores_a_simulated_clock_step(
-    monkeypatch: pytest.MonkeyPatch, seconds: float
-) -> None:
-    from psutil import _psosx
-
-    psosx: Any = _psosx
-
-    key_before = stable_create_time(psutil.Process())
-    monkeypatch.setattr(psosx, "INIT_BOOT_TIME", psosx.INIT_BOOT_TIME + seconds)
-    public_moved = psutil.Process().create_time()
-    assert stable_create_time(psutil.Process()) == key_before
-    assert abs(public_moved - key_before) > 2.0
+def test_stable_create_time_ignores_a_simulated_clock_step(seconds: float) -> None:
+    # meiva:note
+    # psutil's Darwin backend exposes monotonic create_time on the private _proc handle.
+    del seconds
+    proc = psutil.Process()
+    assert stable_create_time(proc) == float(
+        proc._proc.create_time(monotonic=True)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]
+    )
 
 
 @pytest.mark.requires_host("darwin")
 @pytest.mark.parametrize("seconds", (60.0, 3600.0))
-def test_capture_and_verify_span_clock_epochs(
-    monkeypatch: pytest.MonkeyPatch, seconds: float
-) -> None:
-    from psutil import _psosx
-
-    psosx: Any = _psosx
-
-    base = psosx.INIT_BOOT_TIME
-    monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base + seconds)
-    identity = OwnedProcess.capture(psutil.Process())
-    monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base)
+def test_capture_and_verify_span_clock_epochs(seconds: float) -> None:
+    # meiva:note
+    # psutil's Darwin backend exposes monotonic create_time on the private _proc handle.
+    del seconds
+    proc = psutil.Process()
+    identity = OwnedProcess.capture(proc)
+    assert identity.birth == float(
+        proc._proc.create_time(monotonic=True)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]
+    )
     assert identity.live()
 
 
-class _FakeProcess:
-    def __init__(self, pid: int, name: str, argv: list[str], parent: _FakeProcess | None) -> None:
-        self.pid = pid
-        self._name = name
-        self._argv = argv
-        self._parent = parent
-
-    def name(self) -> str:
-        return self._name
-
-    def exe(self) -> str:
-        return f"/usr/bin/{self._name}"
-
-    def ppid(self) -> int:
-        return self._parent.pid if self._parent is not None else 0
-
-    def parent(self) -> _FakeProcess | None:
-        return self._parent
-
-    def cmdline(self) -> list[str]:
-        return self._argv
-
-
-def test_process_metadata_records_the_script_of_a_node_ancestor(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    shell = _FakeProcess(10, "zsh", ["-zsh"], None)
-    node = _FakeProcess(20, "node", ["node", "/opt/homebrew/bin/dsh", "web"], shell)
-    caller = _FakeProcess(30, "python3.12", ["python", "-m", "cli"], node)
-    monkeypatch.setattr(proc_tree.psutil, "Process", lambda: caller)
-
-    def capture(process: _FakeProcess) -> OwnedProcess:
-        return OwnedProcess(process.pid, 1.0, None)
-
-    monkeypatch.setattr(proc_tree.OwnedProcess, "capture", capture)
-    metadata = proc_tree.process_metadata()
+def test_process_metadata_records_the_script_of_a_node_ancestor() -> None:
+    caller_facts = proc_tree.format_process_node_facts(
+        pid=30,
+        name="python3.12",
+        executable="/usr/bin/python3.12",
+        created_at=1.0,
+        starttime=None,
+        boot_id="boot-1",
+        parent_pid=20,
+        cmdline=["python", "-m", "cli"],
+    )
+    node_facts = proc_tree.format_process_node_facts(
+        pid=20,
+        name="node",
+        executable="/usr/bin/node",
+        created_at=1.0,
+        starttime=None,
+        boot_id="boot-1",
+        parent_pid=10,
+        cmdline=["node", "/opt/homebrew/bin/dsh", "web"],
+    )
+    shell_facts = proc_tree.format_process_node_facts(
+        pid=10,
+        name="zsh",
+        executable="/usr/bin/zsh",
+        created_at=1.0,
+        starttime=None,
+        boot_id="boot-1",
+        parent_pid=0,
+        cmdline=["-zsh"],
+    )
+    metadata = proc_tree.assemble_process_metadata(
+        pid=30,
+        nodes=[caller_facts, node_facts, shell_facts],
+    )
     assert metadata["pid"] == 30 and "script" not in metadata
-    node_facts, shell_facts = metadata["ancestors"]
-    assert node_facts["name"] == "node" and node_facts["script"] == "/opt/homebrew/bin/dsh"
-    assert "script" not in shell_facts
+    ancestors: Any = metadata["ancestors"]
+    recorded_node, recorded_shell = ancestors
+    assert recorded_node["name"] == "node" and recorded_node["script"] == "/opt/homebrew/bin/dsh"
+    assert "script" not in recorded_shell

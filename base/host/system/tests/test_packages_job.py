@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -10,7 +9,6 @@ import pytest
 
 from base.host.system import packages_content as definition
 from base.host.system import packages_job as job
-from base.host.system.cron import mechanics
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
 from base.host.system.tests.fake_commands import (
@@ -21,6 +19,7 @@ from base.host.system.tests.fake_commands import (
     fake_host,
 )
 from base.host.system.tests.fake_crontab import FakeCrontab
+from base.log.tests.log_records import LogRecords
 
 _UID = 501
 
@@ -48,32 +47,13 @@ def _linux(crontab: FakeCrontab) -> Host:
     )
 
 
-def _recorder(calls: list[str], label: str) -> Callable[..., None]:
-    def record(*_args: object, **_kwargs: object) -> None:
-        calls.append(label)
-
-    return record
-
-
-def _refuse(message: str) -> Callable[..., None]:
-    def refuse(*_args: object, **_kwargs: object) -> None:
-        pytest.fail(message)
-
-    return refuse
-
-
-@pytest.fixture(autouse=True)
-def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-
-
 def test_macos_reregistration_rewrites_and_reloads_idempotently(
     job_roots: JobRoots,
 ) -> None:
     commands, host = _launchctl()
 
     assert job.register_macos(roots=job_roots, tick_seconds=900, host=host) == 0
-    plist = job.launchd_plist_path()
+    plist = job.launchd_plist_path(user_home=job_roots.user_home)
     first = plist.read_text(encoding="utf-8")
     assert job.register_macos(roots=job_roots, tick_seconds=900, host=host) == 0
 
@@ -158,25 +138,21 @@ def test_linux_crontab_failures_and_empty_table(
 
 def test_macos_bootstrap_failure_and_repeated_unregister(
     job_roots: JobRoots,
-    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: LogRecords,
 ) -> None:
-    errors: list[tuple[object, ...]] = []
-
-    def record_error(*args: object) -> None:
-        errors.append(args)
-
     commands, host = _launchctl(bootstrap=Reply(stderr="denied", returncode=1))
-    monkeypatch.setattr(job.logger, "error", record_error)
     assert job.register_macos(roots=job_roots, tick_seconds=900, host=host) == 1
     assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == ["bootout", "bootstrap"]
-    assert errors == [
-        ("launchctl bootstrap failed for {}: {}", "com.meiva.packages-refresh", "denied")
-    ]
+    assert any(
+        r["level"].name == "ERROR"
+        and r["message"] == "launchctl bootstrap failed for com.meiva.packages-refresh: denied"
+        for r in loguru_records
+    )
 
-    plist = job.launchd_plist_path()
+    plist = job.launchd_plist_path(user_home=job_roots.user_home)
     assert plist.exists()
-    assert job.unregister_macos(host=host) == 0
-    assert job.unregister_macos(host=host) == 0
+    assert job.unregister_macos(host=host, user_home=job_roots.user_home) == 0
+    assert job.unregister_macos(host=host, user_home=job_roots.user_home) == 0
     assert not plist.exists()
     assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == [
         "bootout",
@@ -186,65 +162,57 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
     ]
 
 
-def test_register_is_gated_by_os_jobs(job_roots: JobRoots, monkeypatch: pytest.MonkeyPatch) -> None:
-    skipped: list[str] = []
-    monkeypatch.setattr(mechanics, "skip_os_job", skipped.append)
-    monkeypatch.setattr(
-        mechanics,
-        "register_platform_job",
-        _refuse("registration reached the platform with the gate off"),
-    )
-
+def test_register_is_gated_by_os_jobs(job_roots: JobRoots, loguru_records: LogRecords) -> None:
+    commands = FakeCommands()
     job.register_packages_job(
         roots=job_roots,
         enabled=False,
         schedule=None,
-        host=fake_host(),
+        host=fake_host(commands, platform=DARWIN_ARM64),
     )
-    assert skipped == ["packages refresh"]
-
-
-def test_register_is_skipped_when_refresh_disabled(
-    job_roots: JobRoots, default_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        mechanics,
-        "register_platform_job",
-        _refuse("registration reached the platform with refresh disabled"),
+    assert commands.argvs == []
+    assert any(
+        "OS jobs disabled (MEIVA_OS_JOBS_ENABLED=false) — not registering packages refresh"
+        in r["message"]
+        for r in loguru_records
     )
 
+
+def test_register_is_skipped_when_refresh_disabled(job_roots: JobRoots, default_home: Path) -> None:
+    commands = FakeCommands()
     job.register_packages_job(
         roots=replace(job_roots, home=default_home / ".meiva", user_home=default_home),
         enabled=True,
         schedule=definition.RefreshSchedule(refresh_enabled=False, tick_seconds=900),
-        host=fake_host(),
+        host=fake_host(commands, platform=DARWIN_ARM64),
     )
+    assert commands.argvs == []
 
 
-def test_register_dispatches_to_the_platform(
-    job_roots: JobRoots, default_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls: list[str] = []
-
-    def register(what: str, **_platforms: object) -> None:
-        calls.append(f"register {what}")
-
-    monkeypatch.setattr(mechanics, "register_platform_job", register)
+def test_register_dispatches_to_the_platform(job_roots: JobRoots, default_home: Path) -> None:
+    commands, host = _launchctl()
 
     job.register_packages_job(
         roots=replace(job_roots, home=default_home / ".meiva", user_home=default_home),
         enabled=True,
         schedule=definition.RefreshSchedule(refresh_enabled=True, tick_seconds=900),
-        host=fake_host(),
+        host=host,
     )
-    assert calls == ["register packages-refresh"]
+    assert job.launchd_plist_path(user_home=default_home).exists()
+    assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == [
+        "bootout",
+        "bootstrap",
+    ]
 
 
 def test_unregister_delegates_to_the_platform(
-    default_home: Path, monkeypatch: pytest.MonkeyPatch
+    default_home: Path,
 ) -> None:
-    calls: list[str] = []
-    monkeypatch.setattr(mechanics, "unregister_platform_job", _recorder(calls, "unregister"))
+    plist = job.launchd_plist_path(user_home=default_home)
+    plist.parent.mkdir(parents=True, exist_ok=True)
+    plist.write_text("<plist/>", encoding="utf-8")
+    commands, host = _launchctl()
 
-    job.unregister_packages_job(host=fake_host())
-    assert calls == ["unregister"]
+    job.unregister_packages_job(host=host, user_home=default_home)
+    assert not plist.exists()
+    assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == ["bootout"]

@@ -44,6 +44,7 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from ...log import logger
 from .redis_client import retry_auth_failures_async
+from .redis_resilience import DEFAULT_AUTH_RETRY_POLICY, AuthRetryPolicy
 
 _TRANSPORT_ERRORS = (RedisConnectionError, RedisTimeoutError, OSError, TimeoutError)
 _PUBLISH_ERRORS = (*_TRANSPORT_ERRORS, NoPermissionError)
@@ -75,12 +76,16 @@ class AgentEventPublisher:
         maxsize: int = _DEFAULT_MAXSIZE,
         publish_timeout: float = _DEFAULT_PUBLISH_TIMEOUT_S,
         drain_timeout: float = _DEFAULT_DRAIN_TIMEOUT_S,
+        auth_retry_policy: AuthRetryPolicy = DEFAULT_AUTH_RETRY_POLICY,
+        recorded_auth_delays: list[float] | None = None,
     ) -> None:
         self._redis = redis_async
         self._events_channel = events_channel
         self._agent_id = agent_id
         self._publish_timeout = publish_timeout
         self._drain_timeout = drain_timeout
+        self._auth_retry_policy = auth_retry_policy
+        self._recorded_auth_delays = recorded_auth_delays
         self._queue: asyncio.Queue[str] = asyncio.Queue(maxsize=maxsize)
         self._task: asyncio.Task[None] | None = None
         self._dropped = 0
@@ -207,7 +212,10 @@ class AgentEventPublisher:
             return results
 
         results = await retry_auth_failures_async(
-            _execute_batch, attempt_timeout_s=self._publish_timeout
+            _execute_batch,
+            attempt_timeout_s=self._publish_timeout,
+            policy=self._auth_retry_policy,
+            recorded_delays=self._recorded_auth_delays,
         )
         failed = [r for r in results if isinstance(r, _PUBLISH_ERRORS)]
         if failed:

@@ -15,12 +15,13 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import psutil
 import pytest
 
 from base.native_process.kernel_identity import pid_starttime_ticks
+from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
+from base.native_process.tests.fake_process_control import FakeProcessControl, Signalled
 from base.sessions import posixproc
 from base.sessions.record import SessionRecord
 from base.sessions.tests.poll_until import poll_until
@@ -33,6 +34,7 @@ from base.sessions.tests.process_evidence import (
 
 # A long-lived child that outlives the test body; each test kills it explicitly.
 _SLEEP = ["/bin/sleep", "300"]
+_CHILD = Path(__file__).with_name("process_evidence.py")
 
 
 def _new(name: str, argv: list[str], cwd: Path) -> bool:
@@ -174,8 +176,10 @@ def test_new_session_reparents_to_init_no_zombie(
 def test_zombie_check_ignores_a_zombie_an_earlier_test_left() -> None:
     """The pytest worker is shared: a zombie born before the snapshot is not the
     spawn-under-test's, and must not fail its no-zombie assertion."""
+    # meiva:note
+    # Spawns the test-local helper module in isolated mode without untrusted arguments.
     spawner = psutil.Process()
-    leftover = subprocess.Popen([sys.executable, "-c", "pass"])
+    leftover = subprocess.Popen([sys.executable, "-I", str(_CHILD), "noop"])  # noqa: S603
     try:
         poll_until(
             lambda: (psutil.Process(leftover.pid).status() == psutil.STATUS_ZOMBIE, leftover.pid),
@@ -214,14 +218,7 @@ def test_kill_session_force_kills_sigterm_ignoring_survivor(unit_home: Path) -> 
     # is not the force-floor scenario this test names (the old `mode ==
     # "graceful"` expectation passed for that wrong reason).
     marker = unit_home / "sigign-ready"
-    argv = [
-        sys.executable,
-        "-c",
-        "import signal,time;"
-        "signal.signal(signal.SIGTERM, signal.SIG_IGN);"
-        f"open({str(marker)!r}, 'w').close();"
-        "time.sleep(300)",
-    ]
+    argv = [sys.executable, "-I", str(_CHILD), "sigign_sleep", str(marker)]
     _new(name, argv, unit_home)
     pid = _pid(name)
     poll_until(lambda: psutil.pid_exists(pid), what="SIGTERM-ignoring child process appears")
@@ -242,13 +239,7 @@ def test_kill_session_reaps_process_tree(unit_home) -> None:
     subprocesses an agent spawns), not just the top process."""
     name = "meiva-test-agent-4"
     # Parent python spawns a child `sleep` and prints its pid, then idles.
-    argv = [
-        sys.executable,
-        "-c",
-        "import subprocess,sys,time;"
-        "c=subprocess.Popen(['sleep','300']);"
-        "sys.stderr.write(str(c.pid));sys.stderr.flush();time.sleep(300)",
-    ]
+    argv = [sys.executable, "-I", str(_CHILD), "spawn_sleep"]
     _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
     parent_pid = _pid(name)
     # Give the parent a moment to spawn its child, then find it.
@@ -310,7 +301,7 @@ def test_list_sessions_reaps_dead_record(unit_home) -> None:
 def test_starttime_identity_survives_wall_clock_drift(unit_home: Path) -> None:
     """A stable kernel start tick keeps a live record despite a bad epoch time."""
     name = "meiva-test-agent-starttime-drift"
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
+    child = subprocess.Popen(["/bin/sleep", "300"])
     try:
         poll_until(
             lambda: psutil.pid_exists(child.pid),
@@ -341,25 +332,24 @@ def test_starttime_identity_survives_wall_clock_drift(unit_home: Path) -> None:
 
 
 @pytest.mark.requires_host("darwin")
-def test_session_record_spans_import_epochs(
-    unit_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_session_record_spans_import_epochs(unit_home: Path) -> None:
     """A record written under one clock epoch resolves under another.
 
     The writer's whole-second wall-clock correction used to make its record
     disagree with a reader from a different import epoch, so resolution
     refused a live session (the 2026-09-12 incident class).
     """
-    from psutil import _psosx
-
-    psosx: Any = _psosx  # the macOS-only stub does not declare `INIT_BOOT_TIME`
-
-    base = psosx.INIT_BOOT_TIME
     name = "meiva-test-agent-epoch-span"
-    monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base + 3600.0)
     assert _new(name, _SLEEP, unit_home)
-    monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base)
     try:
+        # meiva:note
+        # psutil's Darwin backend exposes monotonic create_time on the private _proc handle.
+        rec = posixproc.read_record(name)
+        assert rec is not None
+        proc = psutil.Process(rec.pid)
+        assert rec.create_time == float(
+            proc._proc.create_time(monotonic=True)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]
+        )
         assert posixproc.has_session(name)
     finally:
         posixproc.kill_session(name, graceful=False)
@@ -422,7 +412,7 @@ def test_list_sessions_keeps_recycled_pid_record_while_group_occupied(
     """
     name = "meiva-test-agent-reuse-held-group"
     holder = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(60)"],
+        ["/bin/sleep", "60"],
         start_new_session=True,
     )
     try:
@@ -474,8 +464,7 @@ def test_kill_session_noop_on_absent(unit_home) -> None:
 
 
 def test_kill_session_survivor_reports_and_keeps_record(
-    unit_home,
-    monkeypatch: pytest.MonkeyPatch,
+    unit_home: Path,
 ) -> None:
     """A kill that fails to take the process down returns (False, mode) and
     KEEPS the record — the no-DB reap's only view of the survivor (audit
@@ -483,8 +472,7 @@ def test_kill_session_survivor_reports_and_keeps_record(
     success unconditionally and unlinked the record, so a live-but-unbacked
     session became a service nothing starts."""
     name = "meiva-test-agent-survivor"
-    argv = [sys.executable, "-c", "import time; time.sleep(300)"]
-    _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
+    _new(name, list(_SLEEP), unit_home)
     pid = _pid(name)
     poll_until(
         lambda: psutil.pid_exists(pid),
@@ -493,21 +481,14 @@ def test_kill_session_survivor_reports_and_keeps_record(
 
     # Simulate a kill that achieves nothing (SIGKILL raced a D-state process,
     # or AccessDenied skipped terminate_tree's whole body).
-    def _noop_kill(*_args, **_kwargs):
-        return None
-
-    _real_terminate_tree = posixproc.terminate_tree
-    monkeypatch.setattr(posixproc, "terminate_tree", _noop_kill)  # pyright: ignore[reportUnknownArgumentType]
-    ok, mode = posixproc.kill_session(name, graceful=False)
+    noop_control = FakeProcessControl(groups={pid: os.getpgid(pid)})
+    ok, mode = posixproc.kill_session(
+        name, graceful=False, process_control=noop_control, wait_timeout=0.0
+    )
     assert ok is False and mode == "forced"
     assert psutil.pid_exists(pid), "the process must still be alive"
     assert posixproc.record_path(name).exists(), "record must survive so the reap sees it"
 
-    # Real kill for cleanup (restore the real terminate_tree first); the
-    # record is then reaped normally. NOTE: never monkeypatch.undo() here —
-    # it would also undo `unit_home`'s meiva_home patch and the cleanup would
-    # hit the real $MEIVA_HOME.
-    monkeypatch.setattr(posixproc, "terminate_tree", _real_terminate_tree)
     ok, _mode = posixproc.kill_session(name, graceful=False)
     assert ok is True
     poll_until(
@@ -518,31 +499,29 @@ def test_kill_session_survivor_reports_and_keeps_record(
 
 
 def test_kill_session_terminate_error_keeps_record(
-    unit_home,
-    monkeypatch: pytest.MonkeyPatch,
+    unit_home: Path,
 ) -> None:
     """terminate_tree raising (not just failing silently) must also report
     False and keep the record — the raise path is the same lie, one line up."""
     name = "meiva-test-agent-err"
-    argv = [sys.executable, "-c", "import time; time.sleep(300)"]
-    _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
+    _new(name, list(_SLEEP), unit_home)
     pid = _pid(name)
     poll_until(
         lambda: psutil.pid_exists(pid),
         what="terminate-error test process appears",
     )
 
-    def boom(*a, **k):
-        raise OSError("kill failed")
+    def boom(_sent: Signalled) -> None:
+        raise RuntimeError("kill failed")
 
-    _real_terminate_tree = posixproc.terminate_tree
-    monkeypatch.setattr(posixproc, "terminate_tree", boom)  # pyright: ignore[reportUnknownArgumentType]
-    ok, mode = posixproc.kill_session(name, graceful=False)
+    failing_control = FakeProcessControl(groups={pid: os.getpgid(pid)}, on_signal=boom)
+    ok, mode = posixproc.kill_session(
+        name, graceful=False, process_control=failing_control, wait_timeout=0.0
+    )
     assert ok is False and mode == "forced"
     assert psutil.pid_exists(pid)
     assert posixproc.record_path(name).exists()
 
-    monkeypatch.setattr(posixproc, "terminate_tree", _real_terminate_tree)
     ok, _mode = posixproc.kill_session(name, graceful=False)
     assert ok is True
     poll_until(
@@ -552,50 +531,27 @@ def test_kill_session_terminate_error_keeps_record(
 
 
 def test_new_session_dead_child_records_sentinel(
-    unit_home,
-    monkeypatch: pytest.MonkeyPatch,
+    unit_home: Path,
 ) -> None:
     """A child whose create_time cannot be read — it died at spawn, freeing
     the pid at its most reusable moment — gets a sentinel that can never
     match a reused pid, not time.time() (audit 2026-08-08 P2: the old value
     made `process_for_record` accept the pid's next innocent occupant, and a
     later kill_session could SIGKILL an unrelated process tree)."""
+    # meiva:note
+    # Spawns the test-local helper module in isolated mode to obtain a real exited PID.
     name = "meiva-test-agent-dying"
-    real_process = psutil.Process
-
-    class _NoCreateTime:
-        """Start time unreadable through either reading: the child died at spawn."""
-
-        def __init__(self, pid: int | None = None) -> None:
-            self.pid = os.getpid() if pid is None else pid
-
-        @property
-        def _proc(self) -> object:
-            raise psutil.NoSuchProcess(self.pid)
-
-        def create_time(self) -> float:
-            raise psutil.NoSuchProcess(self.pid)
-
-        def is_running(self) -> bool:
-            return False
-
-    monkeypatch.setattr(posixproc.psutil, "Process", _NoCreateTime)
-    argv = [sys.executable, "-c", "import time; time.sleep(300)"]
-    _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
-    rec = posixproc.read_record(name)
-    assert rec is not None and rec.create_time == posixproc.DEAD_CHILD_SENTINEL
-    assert rec.starttime is None
-    assert not posixproc.has_session(name), "sentinel record must read as dead from birth"
-
-    # The real child is still alive (the patch only faked the create_time
-    # read); clean it up directly. Restore the real Process class, not
-    # monkeypatch.undo() — the latter would also undo `unit_home`'s meiva_home
-    # patch and the cleanup would touch the real $MEIVA_HOME.
-    pid = rec.pid
-    monkeypatch.setattr(posixproc.psutil, "Process", real_process)
-    with contextlib.suppress(psutil.NoSuchProcess):
-        psutil.Process(pid).kill()
-    posixproc.record_path(name).unlink(missing_ok=True)
+    exited = subprocess.Popen([sys.executable, "-I", str(_CHILD), "noop"])  # noqa: S603
+    exited.wait(timeout=5)
+    rec = posixproc.build_session_record(exited.pid, cmd=_SLEEP, cwd=unit_home)
+    rec.write(posixproc.record_path(name))
+    try:
+        loaded = posixproc.read_record(name)
+        assert loaded is not None and loaded.create_time == posixproc.DEAD_CHILD_SENTINEL
+        assert loaded.starttime is None
+        assert not posixproc.has_session(name), "sentinel record must read as dead from birth"
+    finally:
+        posixproc.record_path(name).unlink(missing_ok=True)
 
 
 def test_kill_session_group_kill_reaps_late_spawned_child(
@@ -612,26 +568,13 @@ def test_kill_session_group_kill_reaps_late_spawned_child(
     name = "meiva-test-agent-late"
     ready_file = tmp_path / "ready"
     late_file = tmp_path / "late.pid"
-    # The top process installs a no-op SIGTERM handler (it does NOT exit on the
-    # graceful signal — the wrapper shape), announces readiness, then spawns an
-    # ignore-SIGTERM child half a second in — strictly inside the graceful
-    # window, after any children snapshot the old walk could have captured.
-    # Single-threaded on purpose: the spawn is a plain Popen between two
-    # sleeps, no def block (a one-line `def` cannot carry `;`-joined bodies).
     argv = [
         sys.executable,
-        "-c",
-        "import signal,subprocess,sys,time;"
-        f"ready={str(ready_file)!r};"
-        f"late={str(late_file)!r};"
-        "signal.signal(signal.SIGTERM,lambda *a: None);"
-        "open(ready,'w').write('ready');"
-        "time.sleep(0.5);"
-        "p=subprocess.Popen([sys.executable,'-c',"
-        "'import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);"
-        "time.sleep(300)']);"
-        "open(late,'w').write(str(p.pid));"
-        "time.sleep(300)",
+        "-I",
+        str(_CHILD),
+        "late_child",
+        str(ready_file),
+        str(late_file),
     ]
     _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
     pid = _pid(name)
@@ -701,29 +644,23 @@ def test_kill_session_group_kill_reaps_sigterm_ignoring_wrapper(
 
 
 def test_kill_session_signals_the_process_group(
-    unit_home,
-    monkeypatch: pytest.MonkeyPatch,
+    unit_home: Path,
 ) -> None:
     """The TTL path's final executor (posixproc.kill_session, reached from the
     page-server daemon's TTL reconcile) signals the session's process GROUP,
     not just the recorded pid — the regression guard for the group-kill fix
     (task #2249)."""
     name = "meiva-test-agent-grp"
-    _new(name, list(_SLEEP), unit_home)  # pyright: ignore[reportUnknownArgumentType]
+    _new(name, list(_SLEEP), unit_home)
     pid = _pid(name)
     pgid = os.getpgid(pid)
-    calls: list[tuple[int, int]] = []
-    real_killpg = os.killpg
-
-    def spy(pg: int, sig: int) -> None:
-        calls.append((pg, sig))
-        return real_killpg(pg, sig)  # type: ignore[func-returns-value]
-
-    monkeypatch.setattr(posixproc.os, "killpg", spy)
+    control = FakeProcessControl(forward_to=SYSTEM_PROCESS_CONTROL)
     try:
-        ok, mode = posixproc.kill_session(name, graceful=True, timeout=2.0)
+        ok, mode = posixproc.kill_session(name, graceful=True, timeout=2.0, process_control=control)
         assert ok is True and mode == "graceful"
-        assert (pgid, signal.SIGTERM) in calls, "graceful kill must signal the group"
+        assert Signalled("killpg", pgid, signal.SIGTERM) in control.signals, (
+            "graceful kill must signal the group"
+        )
     finally:
         posixproc.kill_session(name, graceful=False)
 
@@ -741,15 +678,11 @@ def test_kill_session_group_kill_reaps_detached_descendant(
     detached_file = tmp_path / "detached.pid"
     argv = [
         sys.executable,
-        "-c",
-        "import subprocess,sys,time;"
-        f"ready={str(ready)!r};"
-        f"detached={str(detached_file)!r};"
-        "p=subprocess.Popen([sys.executable,'-c',"
-        "'import time;time.sleep(300)'],start_new_session=True);"
-        "open(detached,'w').write(str(p.pid));"
-        "open(ready,'w').write('ready');"
-        "time.sleep(300)",
+        "-I",
+        str(_CHILD),
+        "detached_child",
+        str(ready),
+        str(detached_file),
     ]
     _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
     pid = _pid(name)

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import signal
 import subprocess
-import sys
+from dataclasses import replace
 from pathlib import Path
 
 import psutil
@@ -28,27 +29,21 @@ def record_for(pid: int) -> SessionRecord:
 
 def test_replaced_name_never_signals_replacement(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    argv = [sys.executable, "-I", "-c", "import time;time.sleep(60)"]
-    with subprocess.Popen(argv) as old, subprocess.Popen(argv) as replacement:  # noqa: S603 — fixed isolated test children.
+    # meiva:note
+    # Spawns two fixed /bin/sleep children to verify PID-replacement signal safety.
+    argv = ["/bin/sleep", "60"]
+    with subprocess.Popen(argv) as old, subprocess.Popen(argv) as replacement:  # noqa: S603
         try:
             expected, new = record_for(old.pid), record_for(replacement.pid)
             path = tmp_path / "meiva-ops.json"
             expected.write(path)
-            calls = 0
-
-            def swapped_read(_name: str) -> SessionRecord:
-                nonlocal calls
-                calls += 1
-                if calls == 1:
-                    return expected
-                new.write(path)
-                return new
-
-            monkeypatch.setattr(posixproc, "read_record", swapped_read)
-            assert not posixproc.graceful_signal("meiva-ops", expected=expected)
-            assert calls == 2
+            assert not posixproc.graceful_signal(
+                "meiva-ops",
+                expected=expected,
+                sessions_dir=tmp_path,
+                recheck_record=new,
+            )
             assert replacement.poll() is None
             assert old.poll() is None
             assert SessionRecord.read(path) == new
@@ -84,7 +79,6 @@ def test_replaced_name_never_signals_replacement(
 )
 def test_expected_identity_uses_stable_ticks_before_epoch_birth(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     stored_tick: int | None,
     observed_ticks: tuple[int | None, ...],
     birth_delta: float,
@@ -98,13 +92,10 @@ def test_expected_identity_uses_stable_ticks_before_epoch_birth(
     (create_time) guard is bounded by the platform-resolution tolerance, the
     same way a macOS reading moves by whole seconds for one live process.
     """
-    import signal
-    from dataclasses import replace
-
-    from base.sessions import record
-
-    argv = [sys.executable, "-I", "-c", "import time;time.sleep(60)"]
-    with subprocess.Popen(argv) as child:  # noqa: S603 — fixed isolated test child
+    # meiva:note
+    # Spawns a fixed /bin/sleep child to test start-tick vs epoch-birth identity checks.
+    argv = ["/bin/sleep", "60"]
+    with subprocess.Popen(argv) as child:  # noqa: S603
         try:
             original = record_for(child.pid)
             expected = replace(
@@ -112,18 +103,14 @@ def test_expected_identity_uses_stable_ticks_before_epoch_birth(
             )
             path = tmp_path / "meiva-private-ticks.json"
             expected.write(path)
-            ticks = iter(observed_ticks)
-
-            def read_ticks(_pid: int) -> int | None:
-                return next(ticks)
-
-            def record_path(_name: str) -> Path:
-                return path
-
-            monkeypatch.setattr(record, "pid_starttime_ticks", read_ticks)
-            monkeypatch.setattr(posixproc, "record_path", record_path)
             assert (
-                posixproc.graceful_signal("meiva-private-ticks", expected=expected) is should_signal
+                posixproc.graceful_signal(
+                    "meiva-private-ticks",
+                    expected=expected,
+                    sessions_dir=tmp_path,
+                    observed_ticks=observed_ticks,
+                )
+                is should_signal
             )
             if should_signal:
                 assert child.wait(timeout=3) == -signal.SIGTERM

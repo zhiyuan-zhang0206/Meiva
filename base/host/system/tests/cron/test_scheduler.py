@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from base import paths
 from base.host.env.harness_binaries import require_harness_paths
 from base.host.system.cron import health_job, mechanics
 from base.host.system.hostport import Host
@@ -25,8 +24,7 @@ _UID = 501
 
 
 @pytest.fixture()
-def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("HOME", str(tmp_path))
+def fake_home(tmp_path: Path) -> Path:
     return tmp_path
 
 
@@ -38,7 +36,7 @@ def _plant_plist(fake_home: Path, label: str) -> Path:
     return p
 
 
-def _assert_probe_plist(plist: Path) -> None:
+def _assert_probe_plist(plist: Path, *, interval_s: int = 300) -> None:
     values = plistlib.loads(plist.read_bytes())
     assert values["Label"] == "com.meiva.health-probe"
     assert values["ProgramArguments"] == [
@@ -46,7 +44,7 @@ def _assert_probe_plist(plist: Path) -> None:
         "cluster",
         "health-probe",
     ]
-    assert values["StartInterval"] == 300
+    assert values["StartInterval"] == interval_s
     assert values["RunAtLoad"] is False
 
 
@@ -60,44 +58,50 @@ def _launchctl(print_reply: Reply = _NOT_LOADED) -> tuple[FakeCommands, Host]:
     return commands, fake_host(commands, platform=DARWIN_ARM64, uid=_UID)
 
 
-def _fixed_meiva(*, host: Host) -> str:
-    return "/x/meiva"
-
-
-def _never_descendant(_label: str) -> bool:
-    return False
-
-
 def test_register_macos_never_reloads_its_own_launchd_job(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+    fake_home: Path,
 ) -> None:
     label = "com.meiva.health-probe"
     plist = _plant_plist(fake_home, label)
     plist.write_text("<old-plist/>")
-    monkeypatch.setenv("XPC_SERVICE_NAME", label)
     commands, host = _launchctl()
 
-    assert health_job.register_macos(300, host=host) == 0
+    assert (
+        health_job.register_macos(
+            300,
+            host=host,
+            user_home=fake_home,
+            current_label=label,
+            ancestral_labels=frozenset(),
+        )
+        == 0
+    )
     assert plist.read_text() == "<old-plist/>"
     assert commands.argvs == []
 
 
 def test_register_macos_still_reloads_from_another_launchd_job(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+    fake_home: Path,
 ) -> None:
     plist = _plant_plist(fake_home, "com.meiva.health-probe")
     plist.write_text("<old-plist/>")
-    monkeypatch.setenv("XPC_SERVICE_NAME", "com.meiva.autostart")
-    monkeypatch.setattr(health_job, "descends_from_launchd_job", _never_descendant)
     commands, host = _launchctl()
 
-    assert health_job.register_macos(300, host=host) == 0
+    assert (
+        health_job.register_macos(
+            300,
+            host=host,
+            user_home=fake_home,
+            current_label="com.meiva.autostart",
+            ancestral_labels=frozenset(),
+        )
+        == 0
+    )
     _assert_probe_plist(plist)
     assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"]
 
 
 def _crontab(
-    monkeypatch: pytest.MonkeyPatch,
     existing: str = "",
     *,
     read_rc: int = 0,
@@ -105,11 +109,14 @@ def _crontab(
     write_rc: int = 0,
     write_error: str = "",
 ) -> tuple[FakeCommands, Host]:
-    monkeypatch.setattr(mechanics, "meiva_binary_path", _fixed_meiva)
     commands = FakeCommands()
     commands.on(["crontab", "-l"], Reply(existing, read_error, read_rc), repeat=True)
     commands.on(["crontab", "-"], Reply("", write_error, write_rc), repeat=True)
-    host = fake_host(commands, platform=LINUX_X86, programs={"crontab": "/usr/bin/crontab"})
+    host = fake_host(
+        commands,
+        platform=LINUX_X86,
+        programs={"crontab": "/usr/bin/crontab", "meiva": "/x/meiva"},
+    )
     return commands, host
 
 
@@ -119,41 +126,37 @@ def _written(commands: FakeCommands) -> str | None:
 
 
 def test_register_linux_aborts_when_crontab_read_fails(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    commands, host = _crontab(monkeypatch, read_rc=1, read_error="permission denied")
+    commands, host = _crontab(read_rc=1, read_error="permission denied")
 
-    assert health_job.register_linux(300, host=host) == 1
+    assert health_job.register_linux(300, host=host, repo=tmp_path) == 1
     assert "avoid clobbering" in capsys.readouterr().err
     assert _written(commands) is None
 
 
-def test_register_linux_treats_no_crontab_as_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    commands, host = _crontab(monkeypatch, read_rc=1, read_error="no crontab for u")
+def test_register_linux_treats_no_crontab_as_empty(tmp_path: Path) -> None:
+    commands, host = _crontab(read_rc=1, read_error="no crontab for u")
 
-    assert health_job.register_linux(300, host=host) == 0
+    assert health_job.register_linux(300, host=host, repo=tmp_path) == 0
     assert "health-probe" in str(_written(commands))
 
 
-def _local_meiva(*, host: Host) -> str:
-    return "/Users/x/.local/bin/meiva"
-
-
-def _brew_meiva(*, host: Host) -> str:
-    return "/opt/homebrew/bin/meiva"
-
-
-def test_launchd_path_env_includes_brew_bin(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mechanics, "meiva_binary_path", _local_meiva)
-    path = mechanics.launchd_path_env(host=fake_host(programs={"brew": "/opt/homebrew/bin/brew"}))
+def test_launchd_path_env_includes_brew_bin() -> None:
+    path = mechanics.launchd_path_env(
+        host=fake_host(programs={"brew": "/opt/homebrew/bin/brew"}),
+        meiva_binary="/Users/x/.local/bin/meiva",
+    )
     assert "/opt/homebrew/bin" in path
     assert "/Users/x/.local/bin" in path
     assert "/usr/bin" in path
 
 
-def test_launchd_path_env_falls_back_without_brew(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mechanics, "meiva_binary_path", _local_meiva)
-    path = mechanics.launchd_path_env(host=fake_host())
+def test_launchd_path_env_falls_back_without_brew() -> None:
+    path = mechanics.launchd_path_env(
+        host=fake_host(),
+        meiva_binary="/Users/x/.local/bin/meiva",
+    )
     assert "/opt/homebrew/bin" in path
     assert "/usr/local/bin" in path
 
@@ -180,16 +183,23 @@ def test_the_launchd_path_passes_the_unit_check() -> None:
     assert require_harness_paths(path, what="the launchd job PATH") == path
 
 
-def test_launchd_path_env_deduplicates(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mechanics, "meiva_binary_path", _brew_meiva)
+def test_launchd_path_env_deduplicates() -> None:
     host = fake_host(programs={"brew": "/opt/homebrew/bin/brew"})
-    assert mechanics.launchd_path_env(host=host).split(":").count("/opt/homebrew/bin") == 1
+    assert (
+        mechanics.launchd_path_env(
+            host=host,
+            meiva_binary="/opt/homebrew/bin/meiva",
+        )
+        .split(":")
+        .count("/opt/homebrew/bin")
+        == 1
+    )
 
 
-def test_register_linux_stamps_the_fixed_marker(monkeypatch: pytest.MonkeyPatch) -> None:
-    commands, host = _crontab(monkeypatch)
+def test_register_linux_stamps_the_fixed_marker(tmp_path: Path) -> None:
+    commands, host = _crontab()
 
-    assert health_job.register_linux(300, host=host) == 0
+    assert health_job.register_linux(300, host=host, repo=tmp_path) == 0
     (line,) = str(_written(commands)).splitlines()
     assert line.endswith("cluster health-probe # meiva-health-probe")
     assert "--auto-rollback" not in line
@@ -197,14 +207,14 @@ def test_register_linux_stamps_the_fixed_marker(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_register_linux_keeps_unrelated_lines_and_reports_success(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     other_job = (
         "*/1 * * * * /x/meiva cluster watchdog-probe --role gateway  # meiva-watchdog-probe.gateway"
     )
-    commands, host = _crontab(monkeypatch, f"0 3 * * * backup\n{other_job}\n")
+    commands, host = _crontab(f"0 3 * * * backup\n{other_job}\n")
 
-    assert health_job.register_linux(300, host=host) == 0
+    assert health_job.register_linux(300, host=host, repo=tmp_path) == 0
     assert capsys.readouterr() == (
         "  . crontab entry added (every 5 min)\n",
         "",
@@ -229,7 +239,7 @@ def test_register_linux_keeps_unrelated_lines_and_reports_success(
     ],
 )
 def test_register_linux_failure_messages_and_rc(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     read_rc: int,
     read_error: str,
@@ -239,14 +249,13 @@ def test_register_linux_failure_messages_and_rc(
     expected_err: str,
 ) -> None:
     commands, host = _crontab(
-        monkeypatch,
         read_rc=read_rc,
         read_error=read_error,
         write_rc=write_rc,
         write_error=write_error,
     )
 
-    assert health_job.register_linux(300, host=host) == 1
+    assert health_job.register_linux(300, host=host, repo=tmp_path) == 1
     captured = capsys.readouterr()
     assert (captured.out, captured.err) == (expected_out, expected_err)
     assert (_written(commands) is not None) == (read_rc == 0)
@@ -260,18 +269,18 @@ def test_register_linux_missing_crontab_message_and_rc(capsys: pytest.CaptureFix
     )
 
 
-def test_unregister_linux_removes_only_the_probe_line(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unregister_linux_removes_only_the_probe_line() -> None:
     probe = "*/5 * * * * /x/meiva cluster health-probe # meiva-health-probe"
-    commands, host = _crontab(monkeypatch, f"{probe}\n0 3 * * * backup\n")
+    commands, host = _crontab(f"{probe}\n0 3 * * * backup\n")
 
     assert health_job.unregister_linux(host=host) == 0
     assert probe not in str(_written(commands))
     assert "0 3 * * * backup" in str(_written(commands))
 
 
-def test_unregister_linux_ignores_the_watchdog_probe_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unregister_linux_ignores_the_watchdog_probe_lines() -> None:
     probe_line = "*/1 * * * * /x/meiva cluster watchdog-probe --role gateway  # meiva-watchdog-probe.gateway.meiva-mine"
-    commands, host = _crontab(monkeypatch, f"{probe_line}\n")
+    commands, host = _crontab(f"{probe_line}\n")
 
     assert health_job.unregister_linux(host=host) == 0
     assert _written(commands) is None
@@ -299,9 +308,8 @@ def test_unregister_linux_messages_and_success_gated_removal(
     write_rc: int,
     expected_out: str,
     should_write: bool,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    commands, host = _crontab(monkeypatch, existing, read_rc=read_rc, write_rc=write_rc)
+    commands, host = _crontab(existing, read_rc=read_rc, write_rc=write_rc)
 
     assert health_job.unregister_linux(host=host) == 0
     assert capsys.readouterr() == (expected_out, "")
@@ -309,9 +317,8 @@ def test_unregister_linux_messages_and_success_gated_removal(
 
 
 def test_unregister_macos_removes_only_the_probe_plist(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
     agents = tmp_path / "Library" / "LaunchAgents"
     agents.mkdir(parents=True)
     probe = agents / "com.meiva.health-probe.plist"
@@ -321,7 +328,7 @@ def test_unregister_macos_removes_only_the_probe_plist(
 
     commands, host = _launchctl()
 
-    assert health_job.unregister_macos(host=host) == 0
+    assert health_job.unregister_macos(host=host, user_home=tmp_path) == 0
     assert not probe.exists()
     assert autostart.exists()
     assert commands.argvs == [
@@ -330,83 +337,99 @@ def test_unregister_macos_removes_only_the_probe_plist(
     ]
 
 
-def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    calls: list[str] = []
-
-    def register(interval_s: int, *, host: Host) -> int:
-        calls.append(str(interval_s))
-        return 0
-
-    monkeypatch.setattr(health_job, "register_macos", register)
-    return calls
-
-
 def test_register_refused_for_worktree_checkout_against_prod_home(
-    default_home: Path, monkeypatch: pytest.MonkeyPatch
+    default_home: Path,
 ) -> None:
     prod_home = default_home / ".meiva"
     (prod_home / "source").mkdir(parents=True)
-    monkeypatch.setattr(paths, "repo_root", lambda: default_home / "Meiva" / ".worktrees" / "r4")
-    calls = _fake_backend(monkeypatch)
+    commands, host = _launchctl()
 
-    health_job.register_os_cron(enabled=True, host=fake_host(platform=DARWIN_ARM64))
+    health_job.register_os_cron(
+        enabled=True,
+        host=host,
+        repo=default_home / "Meiva" / ".worktrees" / "r4",
+        user_home=default_home,
+        ancestral_labels=frozenset(),
+    )
 
-    assert calls == []
+    assert commands.argvs == []
 
 
 def test_register_allowed_from_the_homes_own_source_checkout(
-    default_home: Path, monkeypatch: pytest.MonkeyPatch
+    default_home: Path,
 ) -> None:
     prod_home = default_home / ".meiva"
     (prod_home / "source").mkdir(parents=True)
-    monkeypatch.setattr(paths, "repo_root", lambda: prod_home / "source")
-    calls = _fake_backend(monkeypatch)
+    commands, host = _launchctl()
 
-    health_job.register_os_cron(enabled=True, host=fake_host(platform=DARWIN_ARM64))
+    health_job.register_os_cron(
+        enabled=True,
+        host=host,
+        repo=prod_home / "source",
+        user_home=default_home,
+        ancestral_labels=frozenset(),
+    )
 
-    assert calls == ["300"]
+    assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"]
+    _assert_probe_plist(default_home / "Library" / "LaunchAgents" / "com.meiva.health-probe.plist")
 
 
 def test_register_allowed_for_a_default_home_without_source(
-    default_home: Path, monkeypatch: pytest.MonkeyPatch
+    default_home: Path,
 ) -> None:
-    monkeypatch.setattr(paths, "repo_root", lambda: default_home / "dev-src")
-    calls = _fake_backend(monkeypatch)
+    commands, host = _launchctl()
 
-    health_job.register_os_cron(enabled=True, host=fake_host(platform=DARWIN_ARM64))
+    health_job.register_os_cron(
+        enabled=True,
+        host=host,
+        repo=default_home / "dev-src",
+        user_home=default_home,
+        ancestral_labels=frozenset(),
+    )
 
-    assert calls == ["300"]
+    assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"]
+    _assert_probe_plist(default_home / "Library" / "LaunchAgents" / "com.meiva.health-probe.plist")
 
 
 def test_register_macos_defers_when_ancestry_proves_the_job(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+    fake_home: Path,
 ) -> None:
     label = "com.meiva.health-probe"
     plist = _plant_plist(fake_home, label)
     plist.write_text("<old-plist/>")
-    monkeypatch.setenv("XPC_SERVICE_NAME", "0")
-
-    def _is_current(candidate: str) -> bool:
-        return candidate == label
-
-    monkeypatch.setattr(health_job, "descends_from_launchd_job", _is_current)
     commands, host = _launchctl()
 
-    assert health_job.register_macos(300, host=host) == 0
+    assert (
+        health_job.register_macos(
+            300,
+            host=host,
+            user_home=fake_home,
+            current_label="0",
+            ancestral_labels=frozenset({label}),
+        )
+        == 0
+    )
     assert plist.read_text() == "<old-plist/>"
     assert commands.argvs == []
 
 
 def test_register_macos_reloads_when_env_reads_zero_but_tree_is_external(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+    fake_home: Path,
 ) -> None:
     plist = _plant_plist(fake_home, "com.meiva.health-probe")
     plist.write_text("<old-plist/>")
-    monkeypatch.setenv("XPC_SERVICE_NAME", "0")
-    monkeypatch.setattr(health_job, "descends_from_launchd_job", _never_descendant)
     commands, host = _launchctl()
 
-    assert health_job.register_macos(300, host=host) == 0
+    assert (
+        health_job.register_macos(
+            300,
+            host=host,
+            user_home=fake_home,
+            current_label="0",
+            ancestral_labels=frozenset(),
+        )
+        == 0
+    )
     _assert_probe_plist(plist)
     assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"]
 
@@ -417,7 +440,7 @@ def test_unregister_macos_reports_a_job_launchd_still_holds(
     probe = _plant_plist(fake_home, "com.meiva.health-probe")
     _commands, host = _launchctl(print_reply=Reply())
 
-    assert health_job.unregister_macos(host=host) == 1
+    assert health_job.unregister_macos(host=host, user_home=fake_home) == 1
 
     assert not probe.exists()
     [event] = loguru_records.events("launchd_retirement")

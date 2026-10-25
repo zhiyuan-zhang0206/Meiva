@@ -28,12 +28,16 @@ from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener, WakeFailure, WakeState
 
 
-async def _publish_inbound(agent_id: int, inbound_id: int = 42) -> None:
+async def _publish_inbound(
+    agent_id: int, inbound_id: int = 42, *, events_channel: str | None = None
+) -> None:
     """Publish a wake-up to the agent's (cluster-scoped) Redis channel."""
-
+    channel_source = (
+        settings.data_plane.events_channel if events_channel is None else events_channel
+    )
     r = EventBus.from_settings().sync_redis()
     try:
-        r.publish(inbound_channel(agent_id, settings.data_plane.events_channel), str(inbound_id))  # pyright: ignore[reportUnknownMemberType]
+        r.publish(inbound_channel(agent_id, channel_source), str(inbound_id))  # pyright: ignore[reportUnknownMemberType]
     finally:
         r.close()
 
@@ -52,9 +56,12 @@ async def _until(condition: Callable[[], bool], what: str, timeout: float = 10.0
         await asyncio.sleep(0.01)
 
 
-async def _subscribed(agent_id: int) -> None:
+async def _subscribed(agent_id: int, *, events_channel: str | None = None) -> None:
     """Wait until Redis itself reports a subscriber on the agent's inbound channel."""
-    channel = inbound_channel(agent_id, settings.data_plane.events_channel)
+    channel_source = (
+        settings.data_plane.events_channel if events_channel is None else events_channel
+    )
+    channel = inbound_channel(agent_id, channel_source)
     probe = EventBus.from_settings().sync_redis()
     try:
         await _until(
@@ -243,6 +250,59 @@ class TestRedisInboundListener:
             await listener.close()
 
 
+class _WedgedOpenPubSub:
+    def __init__(self, opened: asyncio.Event) -> None:
+        self._opened = opened
+
+    async def subscribe(self, _channel: str) -> None:
+        self._opened.set()
+        await asyncio.sleep(3600)
+
+    async def aclose(self) -> None:
+        pass
+
+
+class _WedgedOpenRedis:
+    def __init__(self, opened: asyncio.Event) -> None:
+        self._pubsub = _WedgedOpenPubSub(opened)
+
+    def pubsub(self, **_kwargs: object) -> _WedgedOpenPubSub:
+        return self._pubsub
+
+    async def aclose(self) -> None:
+        pass
+
+
+class _WedgedConsumePubSub:
+    def __init__(self, started: asyncio.Event) -> None:
+        self._started = started
+
+    async def subscribe(self, _channel: str) -> None:
+        pass
+
+    async def ping(self) -> bool:
+        return True
+
+    async def get_message(self, **_kwargs: object) -> dict[str, object] | None:
+        self._started.set()
+        await asyncio.sleep(3600)
+        return None
+
+    async def aclose(self) -> None:
+        pass
+
+
+class _WedgedConsumeRedis:
+    def __init__(self, started: asyncio.Event) -> None:
+        self._pubsub = _WedgedConsumePubSub(started)
+
+    def pubsub(self, **_kwargs: object) -> _WedgedConsumePubSub:
+        return self._pubsub
+
+    async def aclose(self) -> None:
+        pass
+
+
 class TestWaitOneBudgetAndCancel:
     """`wait_one`'s wall-clock budget + task-cleanup contracts — the redis
     successors to the deleted `test_pg_listener_budget.py` (open wedge / consume
@@ -253,21 +313,21 @@ class TestWaitOneBudgetAndCancel:
 
     async def test_wait_one_returns_within_budget_when_open_wedges(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         loguru_records: list[dict],
     ) -> None:
         """When open/subscribe wedges (a connect into a black-holed network sits
         in kernel SYN retries far past any caller timeout), `wait_one` must still
         honour its budget: abandon the open attempt and return, with a warning."""
-        listener = RedisInboundListener("redis://unused@127.0.0.1:1/0", agent_id=7001)
         opened = asyncio.Event()
 
-        async def _wedged_open() -> object:
-            opened.set()
-            await asyncio.sleep(3600)  # connect black-holed; cancellable cleanup
-            raise AssertionError("unreachable")
+        def _open_factory(_url: str, **_kw: object) -> object:
+            return _WedgedOpenRedis(opened)
 
-        monkeypatch.setattr(listener, "_ensure_subscribed", _wedged_open)
+        listener = RedisInboundListener(
+            "redis://unused@127.0.0.1:1/0",
+            agent_id=7001,
+            redis_factory=_open_factory,
+        )
 
         t0 = asyncio.get_running_loop().time()
         await listener.wait_one(timeout=0.3)
@@ -281,24 +341,23 @@ class TestWaitOneBudgetAndCancel:
     @pytest.mark.usefixtures("redis_url")
     async def test_wait_one_abandons_and_warns_when_consume_never_ticks(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         loguru_records: list[dict],
     ) -> None:
         """A consume that never starts its own get_message timer (parked before
         it can tick) is abandoned within budget + `_CONSUME_ABANDON_GRACE`, with a
         warning — the genuinely-stuck case the grace-padded backstop targets."""
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=7002)
-
-        # Use the actual listener-owned subscription; an unattached object no
-        # longer satisfies admission to a consume generation.
-        await listener.ensure_listening()
         started = asyncio.Event()
 
-        async def _wedged_consume(pubsub: object, timeout: float) -> None:
-            started.set()
-            await asyncio.sleep(3600)  # never ticks a deadline; cancellable
+        def _consume_factory(_url: str, **_kw: object) -> object:
+            return _WedgedConsumeRedis(started)
 
-        monkeypatch.setattr(listener, "_consume_one", _wedged_consume)
+        listener = RedisInboundListener(
+            settings.data_plane.redis_url,
+            agent_id=7002,
+            redis_factory=_consume_factory,
+        )
+
+        await listener.ensure_listening()
 
         t0 = asyncio.get_running_loop().time()
         try:
@@ -377,17 +436,30 @@ class TestWakeHealth:
         assert not any("wake path degraded" in record["message"] for record in loguru_records)
 
     @pytest.mark.usefixtures("redis_url")
-    async def test_consume_abandon_degrades_and_drops_connection(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
+    async def test_consume_abandon_degrades_and_drops_connection(self) -> None:
         """An unreadable pubsub socket is closed so the next wait reconnects.
 
         Keeping the old socket makes each wait burn its full budget even when
         ping succeeds, leaving instant wake unavailable indefinitely.
         """
         agent_id = 6986
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=agent_id)
+        consuming = asyncio.Event()
+        opened_count = 0
+
+        def _factory(url: str, **kwargs: object) -> object:
+            # meiva:note
+            # First dial injects the wedged fake; subsequent dials forward to redis.asyncio.
+            nonlocal opened_count
+            opened_count += 1
+            if opened_count == 1:
+                return _WedgedConsumeRedis(consuming)
+            return aredis.Redis.from_url(url, **kwargs)  # pyright: ignore[reportUnknownMemberType, reportArgumentType]
+
+        listener = RedisInboundListener(
+            settings.data_plane.redis_url,
+            agent_id=agent_id,
+            redis_factory=_factory,
+        )
         # meiva:note
         # The stalled consume is the path under test, so it announces itself: the
         # assertion can then tell "consume abandoned" from an open that outspent
@@ -395,21 +467,13 @@ class TestWakeHealth:
         # the consume, and with the 2.0s abandon grace the wait still returns
         # inside the 5s timing assertion.
         # meiva:link base/events/live/redis_listener.py
-        consuming = asyncio.Event()
-
-        async def _hung_consume(pubsub: object, timeout: float) -> None:
-            consuming.set()
-            await asyncio.sleep(3600)
-
         try:
             await listener.ensure_listening()
-            with monkeypatch.context() as patch:
-                patch.setattr(listener, "_consume_one", _hung_consume)
-                started = time.monotonic()
-                waiter = asyncio.create_task(listener.wait_one(timeout=1.0))
-                await asyncio.wait_for(consuming.wait(), timeout=10.0)
-                await asyncio.wait_for(waiter, timeout=10.0)
-                assert time.monotonic() - started < 5.0
+            started = time.monotonic()
+            waiter = asyncio.create_task(listener.wait_one(timeout=1.0))
+            await asyncio.wait_for(consuming.wait(), timeout=10.0)
+            await asyncio.wait_for(waiter, timeout=10.0)
+            assert time.monotonic() - started < 5.0
 
             assert listener.wake_state is WakeState.DEGRADED, (
                 f"wake_state={listener.wake_state} reason={listener.wake_degrade_reason}"
@@ -427,24 +491,22 @@ class TestWakeHealth:
         finally:
             await listener.close()
 
-    async def test_open_abandon_marks_degraded(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
+    async def test_open_abandon_marks_degraded(self) -> None:
         """An open attempt that exceeds the wait budget marks wake degraded.
 
         Omitting this transition leaves the caller healthy-looking while the
         subscription cannot be established.
         """
-        listener = RedisInboundListener("redis://unused@127.0.0.1:1/0", agent_id=6985)
         started = asyncio.Event()
 
-        async def _wedged_open() -> object:
-            started.set()
-            await asyncio.sleep(3600)
-            raise AssertionError("unreachable")
+        def _open_factory(_url: str, **_kw: object) -> object:
+            return _WedgedOpenRedis(started)
 
-        monkeypatch.setattr(listener, "_ensure_subscribed", _wedged_open)
+        listener = RedisInboundListener(
+            "redis://unused@127.0.0.1:1/0",
+            agent_id=6985,
+            redis_factory=_open_factory,
+        )
         try:
             started_at = time.monotonic()
             await listener.wait_one(timeout=0.3)
@@ -505,9 +567,7 @@ def _make_scoped_user(user: str, channel_grant: str) -> None:
 class TestAclScopedChannel:
     """The per-cluster ACL interaction — the dev-cluster NOPERM path."""
 
-    async def test_legacy_unprefixed_channel_denied_by_dev_acl(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_legacy_unprefixed_channel_denied_by_dev_acl(self) -> None:
         """A dev cluster's ACL user (`&meiva:<cluster>:*`) REJECTS the old hardcoded
         `meiva:inbound:*` yet PERMITS `inbound_channel` — the exact NOPERM boundary
         that crashed dev-cluster agents before the prefix fix.
@@ -515,7 +575,7 @@ class TestAclScopedChannel:
         Redis surfaces the denial lazily: `subscribe` returns, and the
         `NoPermissionError` lands on the first `get_message` (the path the
         listener actually walks), so the assertion is made there."""
-        monkeypatch.setattr(settings.data_plane, "events_channel", "meiva:acltest:events")
+        acl_events_channel = "meiva:acltest:events"
         _make_scoped_user("acl_dev", "&meiva:acltest:*")
         client = aredis.Redis.from_url(_scoped_user_url("acl_dev"), decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
         try:
@@ -527,32 +587,35 @@ class TestAclScopedChannel:
             await denied.aclose()
             # The cluster-prefixed channel is inside the grant → no NOPERM.
             allowed = client.pubsub(ignore_subscribe_messages=True)  # pyright: ignore[reportUnknownMemberType]
-            await allowed.subscribe(inbound_channel(5, settings.data_plane.events_channel))
+            await allowed.subscribe(inbound_channel(5, acl_events_channel))
             assert await allowed.get_message(timeout=1.0) is None  # timeout, not error
             await allowed.aclose()
         finally:
             await client.aclose()
 
-    async def test_listener_wakes_under_scoped_acl(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_listener_wakes_under_scoped_acl(self) -> None:
         """A listener authenticating as the dev-cluster-scoped ACL user subscribes
         to `inbound_channel` (inside `&meiva:acltest:*`) and wakes on a publish — the
         prefix fix makes wake actually work on a dev cluster."""
-        monkeypatch.setattr(settings.data_plane, "events_channel", "meiva:acltest:events")
+        acl_events_channel = "meiva:acltest:events"
         _make_scoped_user("acl_dev2", "&meiva:acltest:*")
         agent_id = 8123
-        listener = RedisInboundListener(_scoped_user_url("acl_dev2"), agent_id)
+        listener = RedisInboundListener(
+            _scoped_user_url("acl_dev2"),
+            agent_id,
+            events_channel=acl_events_channel,
+        )
         try:
             wait_task = asyncio.create_task(listener.wait_one(timeout=10.0))
-            await _subscribed(agent_id)
+            await _subscribed(agent_id, events_channel=acl_events_channel)
             # Default user publishes; the channel is the same prefixed name.
-            await _publish_inbound(agent_id)
+            await _publish_inbound(agent_id, events_channel=acl_events_channel)
             await asyncio.wait_for(wait_task, timeout=5.0)
         finally:
             await listener.close()
 
     async def test_listener_degrades_when_subscribe_denied(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         loguru_records: list[dict],
     ) -> None:
         """When subscribe is NOPERM (the ACL grants a DIFFERENT prefix), neither
@@ -560,10 +623,13 @@ class TestAclScopedChannel:
         logs once and `wait_one` sleeps out its budget then returns, so
         `wait_for_inbound`'s SELECT recheck still delivers wakes at the normal
         cadence instead of the agent crashing on idle-wait."""
-        monkeypatch.setattr(settings.data_plane, "events_channel", "meiva:acltest:events")
         # Scoped to a DIFFERENT prefix → inbound_channel (meiva:acltest:*) is denied.
         _make_scoped_user("acl_wrong", "&meiva:other:*")
-        listener = RedisInboundListener(_scoped_user_url("acl_wrong"), agent_id=8124)
+        listener = RedisInboundListener(
+            _scoped_user_url("acl_wrong"),
+            agent_id=8124,
+            events_channel="meiva:acltest:events",
+        )
         try:
             # Must not raise — degrades to a no-op subscribe.
             await listener.ensure_listening()
@@ -624,7 +690,6 @@ class TestDeadTransportSurvival:
 
     async def test_wait_one_treats_typeerror_as_conn_lost(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         loguru_records: list[dict],
     ) -> None:
         """Defence in depth: even if redis-py surfaces the dead-transport
@@ -632,17 +697,39 @@ class TestDeadTransportSurvival:
         `wait_one` treats it as a lost connection — close, backoff, retry —
         instead of letting it kill the agent process."""
         agent_id = 6997
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=agent_id)
         calls = {"n": 0}
 
-        async def _flaky_consume(pubsub: object, timeout: float) -> None:
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise TypeError("'NoneType' object is not callable")
-            # Second attempt (after reconnect) consumes normally: return
-            # immediately (as a clean consume would on timeout).
+        class _FlakyPubSub:
+            async def subscribe(self, _channel: str) -> None:
+                pass
 
-        monkeypatch.setattr(listener, "_consume_one", _flaky_consume)
+            async def ping(self) -> bool:
+                return True
+
+            async def get_message(self, **_kwargs: object) -> dict[str, object] | None:
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise TypeError("'NoneType' object is not callable")
+                return {"type": "message", "data": "1"}
+
+            async def aclose(self) -> None:
+                pass
+
+        class _FlakyRedis:
+            def pubsub(self, **_kwargs: object) -> _FlakyPubSub:
+                return _FlakyPubSub()
+
+            async def aclose(self) -> None:
+                pass
+
+        def _flaky_factory(_url: str, **_kw: object) -> object:
+            return _FlakyRedis()
+
+        listener = RedisInboundListener(
+            settings.data_plane.redis_url,
+            agent_id=agent_id,
+            redis_factory=_flaky_factory,
+        )
         try:
             await listener.wait_one(timeout=2.0)  # must not raise
         finally:

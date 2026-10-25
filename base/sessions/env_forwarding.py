@@ -127,12 +127,18 @@ def admit_service_path(value: str, *, excluded: tuple[Path, ...] = ()) -> str:
     return normalized
 
 
-def managed_service_env(service_path: str, *, environ: Mapping[str, str]) -> dict[str, str]:
+def managed_service_env(
+    service_path: str,
+    *,
+    environ: Mapping[str, str],
+    venv: Path | None = None,
+) -> dict[str, str]:
     """Use the admitted host PATH; interactive session forwarding is separate."""
     from base.host.runtime_interpreter import runtime_venv
 
-    env = forward_env_dict(environ)
-    bindir = runtime_venv() / get_backend().venv_bin_dir_name()
+    resolved_venv = runtime_venv() if venv is None else venv
+    env = forward_env_dict(environ, venv=resolved_venv)
+    bindir = resolved_venv / get_backend().venv_bin_dir_name()
     host_path = normalize_service_path(service_path, excluded=(bindir,))
     env["MEIVA_SERVICE_PATH"] = host_path
     env["PATH"] = normalize_service_path(
@@ -205,21 +211,26 @@ def cwd_is_inside_checkout(session_cwd: Path, checkout_root: Path) -> bool:
 # macOS `path_helper` rebuilds PATH and drops this venv prefix — so POSIX PATH
 # activation is re-applied inside the session command via
 # `venv_activation_prefix` instead.
-def forward_env_dict(environ: Mapping[str, str], *, activate_venv: bool = True) -> dict[str, str]:
+def forward_env_dict(
+    environ: Mapping[str, str],
+    *,
+    activate_venv: bool = True,
+    venv: Path | None = None,
+) -> dict[str, str]:
     env = _session_forward_env(environ)
     # Venv activation (the `uv run` injection this dict reproduces): the
     # allowlist never carried PATH/VIRTUAL_ENV, so the child must get them here.
     from base.host.runtime_interpreter import runtime_venv
 
-    venv = runtime_venv()
-    venv_bin = venv / get_backend().venv_bin_dir_name()
+    resolved_venv = runtime_venv() if venv is None else venv
+    venv_bin = resolved_venv / get_backend().venv_bin_dir_name()
     if activate_venv:
-        env["VIRTUAL_ENV"] = str(venv)
+        env["VIRTUAL_ENV"] = str(resolved_venv)
     env["PATH"] = str(venv_bin) + os.pathsep + frontend_toolchain_path(environ.get("PATH", ""))
     return env
 
 
-def venv_activation_prefix() -> str:
+def venv_activation_prefix(*, venv: Path | None = None) -> str:
     """A POSIX-shell snippet that activates this checkout's `.venv` for a session
     daemon command. Prepend it INSIDE the session command (right after
     `cd <repo>`), e.g. ``cd <repo> && {venv_activation_prefix()}<cmd>``.
@@ -236,12 +247,12 @@ def venv_activation_prefix() -> str:
     """
     from base.host.runtime_interpreter import runtime_venv
 
-    venv = runtime_venv()
-    bindir = venv / get_backend().venv_bin_dir_name()
+    resolved_venv = runtime_venv() if venv is None else venv
+    bindir = resolved_venv / get_backend().venv_bin_dir_name()
     toolchain_path = frontend_toolchain_path("")
     toolchain_suffix = f"{os.pathsep}{toolchain_path}" if toolchain_path else ""
     return (
-        f"export VIRTUAL_ENV={shlex.quote(str(venv))} && "
+        f"export VIRTUAL_ENV={shlex.quote(str(resolved_venv))} && "
         f"export PATH={shlex.quote(str(bindir))}{toolchain_suffix}${{PATH:+:$PATH}} && "
     )
 

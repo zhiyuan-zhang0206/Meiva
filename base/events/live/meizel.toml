@@ -2,12 +2,12 @@ exports = ["announce.py", "bus.py", "coalescer.py", "projection.py", "publisher.
 
 [uses]
 "announce.py" = ["bus.py", "projection.py"]
-"bus.py" = ["redis_client.py"]
+"bus.py" = ["redis_client.py", "redis_resilience.py"]
 "coalescer.py" = ["projection.py"]
-"publisher.py" = ["redis_client.py"]
+"publisher.py" = ["redis_client.py", "redis_resilience.py"]
 "redis_client.py" = ["redis_resilience.py"]
 "redis_listener.py" = ["redis_client.py", "redis_resilience.py"]
-"tests" = ["bus.py", "coalescer.py", "projection.py", "publisher.py", "redis_client.py", "redis_listener.py"]
+"tests" = ["bus.py", "coalescer.py", "projection.py", "publisher.py", "redis_client.py", "redis_listener.py", "redis_resilience.py"]
 
 [purity]
 "__init__.py" = "strict"

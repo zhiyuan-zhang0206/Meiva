@@ -93,7 +93,13 @@ class SessionRecord:
             pgid=int(record["pgid"]) if isinstance(record.get("pgid"), int) else None,
         )
 
-    def identifies(self, pid: int) -> bool | None:
+    def identifies(
+        self,
+        pid: int,
+        *,
+        observed_starttime: int | None = None,
+        has_observed_starttime: bool = False,
+    ) -> bool | None:
         """Whether `pid` is this record's process by its stable Linux identity.
 
         False proves the pid is another process; None means a record without
@@ -104,7 +110,9 @@ class SessionRecord:
             return False
         if self.starttime is None:
             return None
-        actual_starttime = pid_starttime_ticks(pid)
+        actual_starttime = (
+            observed_starttime if has_observed_starttime else pid_starttime_ticks(pid)
+        )
         if actual_starttime is None:
             return None
         return actual_starttime == self.starttime
