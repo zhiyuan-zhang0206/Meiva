@@ -24,3 +24,4 @@ exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py
 "daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 "mcp_daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 "mcp_wrapper.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+"probe.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
