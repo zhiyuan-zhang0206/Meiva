@@ -107,6 +107,7 @@ function appendDeltaById(
   itemId: string,
   kind: "agent_chat" | "agent_code" | "agent_reasoning" | "code_output",
   delta: string,
+  nowMs = 1,
 ): BackendTimelineItem[] {
   const idx = items.findIndex((it) => it.item_id === itemId);
   if (idx >= 0) {
@@ -121,7 +122,7 @@ function appendDeltaById(
     kind,
     source: null,
     payload: delta,
-    created_at: new Date().toISOString(),
+    created_at: new Date(nowMs).toISOString(),
     inbound_id: null,
     // Streaming items are never system-note markers, so the flag is unused by
     // their renderers; true keeps the honest "always present" contract.
@@ -129,13 +130,13 @@ function appendDeltaById(
     partial: true,
     // Start the live "Thinking for Xs" clock the moment the first reasoning
     // fragment lands (used when this delta arrives before its start event).
-    ...(kind === "agent_reasoning" ? { reasoningStartedAt: Date.now() } : {}),
+    ...(kind === "agent_reasoning" ? { reasoningStartedAt: nowMs } : {}),
     // Start the live "writing code for Xs" clock the moment the first code
     // fragment lands (used when this delta arrives before its start event).
-    ...(kind === "agent_code" ? { codeStartedAt: Date.now() } : {}),
+    ...(kind === "agent_code" ? { codeStartedAt: nowMs } : {}),
     // Start the live "Running for Xs" clock the moment the first exec output
     // chunk lands.
-    ...(kind === "code_output" ? { execStartedAt: Date.now() } : {}),
+    ...(kind === "code_output" ? { execStartedAt: nowMs } : {}),
   };
   // Stable insert by item_id: a brand-new id is NOT guaranteed to be the
   // largest — deltas can arrive out of order (mid-stream join that missed
@@ -153,6 +154,7 @@ function createStartItem(
   items: BackendTimelineItem[],
   itemId: string,
   kind: "agent_chat" | "agent_code" | "agent_reasoning",
+  nowMs = 1,
 ): BackendTimelineItem[] {
   if (items.some((it) => it.item_id === itemId)) return items;
   return insertItemById(items, {
@@ -160,13 +162,13 @@ function createStartItem(
     kind,
     source: null,
     payload: "",
-    created_at: new Date().toISOString(),
+    created_at: new Date(nowMs).toISOString(),
     inbound_id: null,
     show_timestamp: true,
     // reasoning_start: anchor the live "Thinking for Xs" clock now.
-    ...(kind === "agent_reasoning" ? { reasoningStartedAt: Date.now() } : {}),
+    ...(kind === "agent_reasoning" ? { reasoningStartedAt: nowMs } : {}),
     // code_start: anchor the live "writing code for Xs" clock now.
-    ...(kind === "agent_code" ? { codeStartedAt: Date.now() } : {}),
+    ...(kind === "agent_code" ? { codeStartedAt: nowMs } : {}),
   });
 }
 
@@ -194,11 +196,11 @@ function upsertItemById(
  *  `reasoning_ms` yet); committed items keep their backend duration. Each
  *  reasoning block is timed independently — model-agnostic, no assumption
  *  that thinking precedes all text. */
-export function freezeReasoningClocks(items: BackendTimelineItem[]): BackendTimelineItem[] {
+export function freezeReasoningClocks(items: BackendTimelineItem[], nowMs = 1): BackendTimelineItem[] {
   return items.map((it) => {
     if (it.kind === "agent_reasoning" && it.reasoningStartedAt != null && it.reasoning_ms == null) {
       const { reasoningStartedAt, ...rest } = it;
-      return { ...rest, reasoningElapsedMs: Date.now() - reasoningStartedAt };
+      return { ...rest, reasoningElapsedMs: nowMs - reasoningStartedAt };
     }
     return it;
   });
@@ -207,21 +209,21 @@ export function freezeReasoningClocks(items: BackendTimelineItem[]): BackendTime
 /** Clear live "writing code for Xs" clocks from all code items —
  *  called when the model transitions from code writing to execution.
  *  Only touches items whose `codeStartedAt` is set (genuine live clocks). */
-export function clearCodeClocks(items: BackendTimelineItem[]): BackendTimelineItem[] {
+export function clearCodeClocks(items: BackendTimelineItem[], nowMs = 1): BackendTimelineItem[] {
   return items.map((it) => {
     if (it.kind === "agent_code" && it.codeStartedAt != null) {
       const { codeStartedAt: _, ...rest } = it;
-      return { ...rest, codeElapsedMs: Date.now() - it.codeStartedAt };
+      return { ...rest, codeElapsedMs: nowMs - it.codeStartedAt };
     }
     return it;
   });
 }
 
-export function freezeExecClocks(items: BackendTimelineItem[]): BackendTimelineItem[] {
+export function freezeExecClocks(items: BackendTimelineItem[], nowMs = 1): BackendTimelineItem[] {
   return items.map((it) => {
     if (it.kind === "code_output" && it.execStartedAt != null && it.exec_ms == null) {
       const { execStartedAt, ...rest } = it;
-      return { ...rest, execElapsedMs: Math.max(Date.now() - execStartedAt, 0) };
+      return { ...rest, execElapsedMs: Math.max(nowMs - execStartedAt, 0) };
     }
     return it;
   });
@@ -231,8 +233,9 @@ export function freezeExecClocks(items: BackendTimelineItem[]): BackendTimelineI
 export function applySystemEvent(
   items: BackendTimelineItem[],
   ev: SystemEvent,
+  nowMs = 1,
 ): BackendTimelineItem[] {
-  const now = new Date().toISOString();
+  const now = new Date(nowMs).toISOString();
   switch (ev.role) {
     case "chat_start":
       // Chat content begins → reasoning + code phases are over. Freeze the
@@ -241,10 +244,11 @@ export function applySystemEvent(
       // the frozen duration rather than clocks that keep ticking through
       // later phases.
       return freezeReasoningClocks(
-        clearCodeClocks(createStartItem(items, ev.item_id, "agent_chat")),
+        clearCodeClocks(createStartItem(items, ev.item_id, "agent_chat", nowMs), nowMs),
+        nowMs,
       );
     case "chat_delta":
-      return appendDeltaById(items, ev.item_id, "agent_chat", ev.content);
+      return appendDeltaById(items, ev.item_id, "agent_chat", ev.content, nowMs);
     case "code_start":
       // Code content begins → reasoning phase is over (same as chat_start),
       // and any previous code block's clock (multi-code turn) is stale.
@@ -254,12 +258,13 @@ export function applySystemEvent(
       // and stamp codeElapsedMs=0 (the bug that kept "Writing code for Xs"
       // from ever appearing during streaming).
       return createStartItem(
-        freezeReasoningClocks(clearCodeClocks(items)),
+        freezeReasoningClocks(clearCodeClocks(items, nowMs), nowMs),
         ev.item_id,
         "agent_code",
+        nowMs,
       );
     case "code_delta":
-      return appendDeltaById(items, ev.item_id, "agent_code", ev.content);
+      return appendDeltaById(items, ev.item_id, "agent_code", ev.content, nowMs);
     case "reasoning_start":
       // A new reasoning block starts → the previous reasoning block (if its
       // clock is still live, e.g. two thinking blocks with no text between)
@@ -267,12 +272,13 @@ export function applySystemEvent(
       // live clock is started by createStartItem (added after the freeze, so
       // it keeps its fresh anchor).
       return createStartItem(
-        freezeReasoningClocks(clearCodeClocks(items)),
+        freezeReasoningClocks(clearCodeClocks(items, nowMs), nowMs),
         ev.item_id,
         "agent_reasoning",
+        nowMs,
       );
     case "reasoning_delta":
-      return appendDeltaById(items, ev.item_id, "agent_reasoning", ev.content);
+      return appendDeltaById(items, ev.item_id, "agent_reasoning", ev.content, nowMs);
     case "exec_start":
       // Code stream finished, subprocess began executing — create a
       // code_output placeholder immediately so the output block appears
@@ -280,7 +286,7 @@ export function applySystemEvent(
       // ExecOutputChunk / ExecOutput events. Clear any codeStartedAt
       // clocks (code writing → execution).
       return upsertItemById(
-        freezeReasoningClocks(clearCodeClocks(items)),
+        freezeReasoningClocks(clearCodeClocks(items, nowMs), nowMs),
         {
           item_id: ev.item_id,
           kind: "code_output",
@@ -289,7 +295,7 @@ export function applySystemEvent(
           created_at: now,
           inbound_id: null,
           show_timestamp: true,
-          execStartedAt: Date.now(),
+          execStartedAt: nowMs,
         },
       );
     case "exec_output_chunk":
@@ -298,13 +304,13 @@ export function applySystemEvent(
       // ~2Hz keepalives do not create re-render churn or append visible text.
       if (ev.keepalive === true) {
         if (items.some((it) => it.item_id === ev.item_id)) return items;
-        return appendDeltaById(items, ev.item_id, "code_output", "");
+        return appendDeltaById(items, ev.item_id, "code_output", "", nowMs);
       }
       // subprocess stdout/stderr streaming chunks — append to code_output
       // under the same item_id (same behavior as chat/code *_delta).
       // The final ExecOutput same-id upserts and replaces with the
       // commit version that carries an envelope header.
-      return appendDeltaById(items, ev.item_id, "code_output", ev.content);
+      return appendDeltaById(items, ev.item_id, "code_output", ev.content, nowMs);
     case "exec_output":
       return (() => {
         const existing = items.find((it) => it.item_id === ev.item_id);
@@ -317,7 +323,7 @@ export function applySystemEvent(
           inbound_id: null,
           show_timestamp: true,
           ...(existing?.execStartedAt != null
-            ? { execElapsedMs: Math.max(Date.now() - existing.execStartedAt, 0) }
+            ? { execElapsedMs: Math.max(nowMs - existing.execStartedAt, 0) }
             : existing?.execElapsedMs != null
               ? { execElapsedMs: existing.execElapsedMs }
               : {}),
@@ -532,7 +538,7 @@ export interface ThreadTimelineState {
  *  `token_usage` / `agent_spawned` / `agent_updated` never reach here — they are
  *  handled by `processSseEvent` before this (token writes the top-level active
  *  token fields only; spawn/update belong to the agents query cache). */
-export function foldEvent(t: ThreadTimelineState, ev: SystemEvent): ThreadTimelineState {
+export function foldEvent(t: ThreadTimelineState, ev: SystemEvent, nowMs = 1): ThreadTimelineState {
   // timeline_snapshot: the incremental snapshot the agent publishes on each
   // graph node enter (the gateway forwards it) — only the messages committed
   // since its last snapshot (full-window on process start / after compact /
@@ -609,7 +615,7 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent): ThreadTimeli
   // clock for items that never got their committed duration, so live clocks stop
   // instead of ticking on dead items. The guard keeps array identity stable when
   // there is no live clock to act on.
-  const applied = applySystemEvent(t.items, ev);
+  const applied = applySystemEvent(t.items, ev, nowMs);
   const anyLiveClock = applied.some(
     (it) =>
       (it.reasoningStartedAt != null && it.reasoning_ms == null) ||
@@ -621,7 +627,7 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent): ThreadTimeli
   const turnEnd = hardTurnEnd || (ev.role === "exec_output" && !anyLiveClock);
   const items =
     hardTurnEnd && anyLiveClock
-      ? freezeExecClocks(clearCodeClocks(freezeReasoningClocks(applied)))
+      ? freezeExecClocks(clearCodeClocks(freezeReasoningClocks(applied, nowMs), nowMs), nowMs)
       : applied;
 
   return {

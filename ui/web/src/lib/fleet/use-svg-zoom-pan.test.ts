@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { fitSvgBoxTransform } from "@/lib/fleet/use-svg-zoom-pan";
+import { fitSvgBoxTransform } from "./use-svg-zoom-pan";
 
 describe("fitSvgBoxTransform", () => {
   it("centers a padded focus box within an offset viewBox", () => {

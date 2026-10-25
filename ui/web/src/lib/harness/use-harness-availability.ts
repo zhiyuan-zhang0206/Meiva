@@ -1,7 +1,7 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
 
-import type { HarnessAvailability } from "@/lib/harness/harness";
-import { api } from "@/lib/transport/api";
+import type { HarnessAvailability } from "./harness";
+import { api } from "../transport/api";
 
 // meiva:note
 // One reading per page load (user 2026-10-21). The probe is not free: the gateway

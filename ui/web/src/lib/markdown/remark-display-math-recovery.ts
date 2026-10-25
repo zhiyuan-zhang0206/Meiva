@@ -1,7 +1,7 @@
 import type { Nodes, Paragraph, Parents, Root } from "mdast";
 import type { VFile } from "vfile";
 
-import { isParent } from "@/lib/markdown/remark-shared";
+import { isParent } from "./remark-shared";
 
 // meiva:note
 // remark-math makes a display block only when `$$` starts a block: written on its

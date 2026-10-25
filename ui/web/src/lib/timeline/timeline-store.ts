@@ -99,13 +99,13 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
     return { compactBuffer: null };
   }),
 
-  processSseEvent: (ev) => {
+  processSseEvent: (ev, nowMs = 1) => {
     // agent_spawned / agent_updated belong to sidebar state (TanStack
     // Query cache), not the timeline. The root fold (the single
     // cache writer) handles them; the timeline store ignores them outright.
     if (ev.role === "agent_spawned" || ev.role === "agent_updated") return;
     set((s) => {
-      const patch = applySseEvent(s, ev);
+      const patch = applySseEvent(s, ev, nowMs);
       if (patch.compactReplaceSeq !== undefined) {
         announceCompactDisplayChange(s, patch.compactBuffer ?? null, patch.compactReplaceSeq - s.compactReplaceSeq);
       }
@@ -113,13 +113,13 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
     });
   },
 
-  processSseEventBatch: (events) => {
+  processSseEventBatch: (events, nowMs = 1) => {
     let changed = false;
     const merged: Partial<TimelineState> = {};
     let working = get();
     for (const ev of events) {
       if (ev.role === "agent_spawned" || ev.role === "agent_updated") continue;
-      const patch = applySseEvent(working, ev);
+      const patch = applySseEvent(working, ev, nowMs);
       if (Object.keys(patch).length === 0) continue;
       changed = true;
       Object.assign(merged, patch);
@@ -308,7 +308,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
     }));
   },
 
-  settleTurn: () => {
+  settleTurn: (nowMs = 1) => {
     set((s) => {
       const hasLiveClock = s.items.some(
         (it) =>
@@ -324,7 +324,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         (it) => !(it.kind === "code_output" && it.payload === "" && it.exec_ms == null),
       );
       const items = hasLiveClock
-        ? freezeExecClocks(clearCodeClocks(freezeReasoningClocks(cleaned)))
+        ? freezeExecClocks(clearCodeClocks(freezeReasoningClocks(cleaned, nowMs), nowMs), nowMs)
         : cleaned;
       return {
         turnActive: false,

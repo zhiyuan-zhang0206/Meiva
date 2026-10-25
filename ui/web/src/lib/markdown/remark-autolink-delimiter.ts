@@ -9,7 +9,7 @@ import type {
 } from "mdast";
 import type { VFile } from "vfile";
 
-import { appendRemainder, isParent, literalLinkText } from "@/lib/markdown/remark-shared";
+import { appendRemainder, isParent, literalLinkText } from "./remark-shared";
 
 interface DelimiterRun {
   marker: "*" | "_";

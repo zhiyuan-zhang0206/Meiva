@@ -18,6 +18,9 @@
 //     test can manually trigger SSE events (the real hook builds an
 //     EventSource over the network; tests don't need that).
 
+// meiva:note
+// @vitest-environment happy-dom
+
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -48,27 +51,22 @@ import {
 } from "../contracts/types";
 import { parseItemId } from "./timeline";
 import { useTimelineStore } from "./timeline-store";
-import { useTimeline } from "./use-timeline";
-import type { ConnectionEvent } from "../transport/useEventStream";
+import { setTimelineTransitionForTest, useTimeline } from "./use-timeline";
+import {
+  AgentEventStreamContext,
+  type ConnectionEvent,
+  type EventStreamContextValue,
+} from "../transport/useEventStream";
 
 // -- mock layer ────────────────────────────────────────────────────────────
 
 const startTransitionSpy = vi.fn((cb: () => void) => cb());
-vi.mock("react", async (importOriginal) => {
-  const actual = await importOriginal<typeof React>();
-  return {
-    ...actual,
-    startTransition: (cb: () => void) => startTransitionSpy(cb),
-  };
-});
 
 let currentEventHandler: ((ev: SystemEvent) => void) | null = null;
 let currentConnectionHandler: ((ev: ConnectionEvent) => void) | null = null;
 let currentBatchHandler: ((evs: SystemEvent[]) => void) | null = null;
-vi.mock("../transport/useEventStream", () => ({
-  EventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
-  AgentEventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
-  useAgentEventStream: (
+const testAgentStreamContextValue: EventStreamContextValue = {
+  subscribe: (
     onEvent: (ev: SystemEvent) => void,
     onConnectionEvent: (ev: ConnectionEvent) => void,
     onEventBatch?: (evs: SystemEvent[]) => void,
@@ -76,8 +74,13 @@ vi.mock("../transport/useEventStream", () => ({
     currentEventHandler = onEvent;
     currentConnectionHandler = onConnectionEvent;
     currentBatchHandler = onEventBatch ?? null;
+    return () => {
+      if (currentEventHandler === onEvent) currentEventHandler = null;
+      if (currentConnectionHandler === onConnectionEvent) currentConnectionHandler = null;
+      if (currentBatchHandler === onEventBatch) currentBatchHandler = null;
+    };
   },
-}));
+};
 
 function pushEvent(ev: SystemEvent): void {
   if (!currentEventHandler) {
@@ -183,18 +186,33 @@ let queuedTimelineAnswers: Answer[] = [];
 let standingTimelineAnswer: Answer = resolves(tlResp([]));
 let queuedSnapshotAnswers: Answer[] = [];
 let standingSnapshotAnswer: Answer = resolves(composedSnapshot(tlResp([])));
-let gateway: TestGateway;
+let gateway: TestGateway = {
+  origin: "http://127.0.0.1:0",
+  requests: [],
+  closedRequests: [],
+  close: () => Promise.resolve(),
+};
 let rig: HttpRig;
 
 function Gateway({ children }: { children: React.ReactNode }) {
   return React.createElement(ApiProvider, { api: rig.api, children });
 }
 
-let queryClient: QueryClient;
+let queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { retry: false, staleTime: Infinity },
+  },
+});
 let visibility: DocumentVisibilityState = "visible";
 
 beforeEach(async () => {
+  queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime: Infinity },
+    },
+  });
   wireReplies.clear();
+  await gateway.close();
   gateway = await startGateway((request) => {
     const url = new URL(request.path, gateway.origin);
     const match = /^\/api\/agents\/(\d+)\/(timeline|conversation-snapshot)$/.exec(url.pathname);
@@ -216,6 +234,7 @@ beforeEach(async () => {
     return scripted ?? queuedSnapshotAnswers.shift() ?? standingSnapshotAnswer;
   });
   rig = gatewayRig(gateway);
+  setTimelineTransitionForTest(startTransitionSpy);
   startTransitionSpy.mockClear();
   timelineReads.length = 0;
   snapshotReads.length = 0;
@@ -233,17 +252,13 @@ beforeEach(async () => {
   useTimelineStore.setState({ switchThread: REAL_SWITCH_THREAD, reloadSnapshot: REAL_RELOAD_SNAPSHOT });
   useTimelineStore.getState().switchThread(0, null, false);
   useTimelineStore.setState({ compactReplaceSeq: 0, compactReplaceAgent: null });
-  queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false, staleTime: Infinity },
-    },
-  });
   queryClient.setQueryData(["config", null], { fields: [] });
   seedSettings({});
 });
 
 afterEach(async () => {
   cleanup();
+  setTimelineTransitionForTest();
   interactionTimingResetForTest();
   queryClient.clear();
   await gateway.close();
@@ -268,7 +283,15 @@ function wrapper({ children }: { children: React.ReactNode }) {
   return React.createElement(
     QueryClientProvider,
     { client: queryClient },
-    React.createElement(Gateway, null, children),
+    React.createElement(
+      Gateway,
+      null,
+      React.createElement(
+        AgentEventStreamContext.Provider,
+        { value: testAgentStreamContextValue },
+        children,
+      ),
+    ),
   );
 }
 

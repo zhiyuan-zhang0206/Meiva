@@ -4,8 +4,8 @@
 // meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.meiva.okf.md
 import type { PluggableList } from "unified";
 
-import remarkDisplayMathRecovery from "@/lib/markdown/remark-display-math-recovery";
-import remarkMathProseGuard from "@/lib/markdown/remark-math-prose-guard";
+import remarkDisplayMathRecovery from "./remark-display-math-recovery";
+import remarkMathProseGuard from "./remark-math-prose-guard";
 
 export interface MarkdownMath {
   remark: PluggableList;
@@ -24,23 +24,28 @@ const defaultImport = async (): Promise<MarkdownMath> => {
   };
 };
 
-let importMath: () => Promise<MarkdownMath> = defaultImport;
-let mathPromise: Promise<MarkdownMath> | null = null;
+const mathState: {
+  importMath: () => Promise<MarkdownMath>;
+  mathPromise: Promise<MarkdownMath> | null;
+} = {
+  importMath: defaultImport,
+  mathPromise: null,
+};
 
 export function loadMarkdownMath(): Promise<MarkdownMath> {
-  if (mathPromise !== null) return mathPromise;
-  const promise = importMath().catch((error: unknown) => {
-    if (mathPromise === promise) mathPromise = null;
+  if (mathState.mathPromise !== null) return mathState.mathPromise;
+  const promise = mathState.importMath().catch((error: unknown) => {
+    if (mathState.mathPromise === promise) mathState.mathPromise = null;
     throw error;
   });
-  mathPromise = promise;
+  mathState.mathPromise = promise;
   return promise;
 }
 
 export function __resetMarkdownMathForTests(): void {
-  mathPromise = null;
+  mathState.mathPromise = null;
 }
 
 export function __setMarkdownMathImportForTests(loader: (() => Promise<MarkdownMath>) | null): void {
-  importMath = loader ?? defaultImport;
+  mathState.importMath = loader ?? defaultImport;
 }

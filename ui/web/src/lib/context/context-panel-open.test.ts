@@ -1,6 +1,9 @@
+// meiva:note
+// @vitest-environment happy-dom
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { readContextPanelOpen, useContextPanelOpen } from "@/lib/context/context-panel-open";
+import { readContextPanelOpen, useContextPanelOpen } from "./context-panel-open";
 import { act, renderHook } from "@testing-library/react";
 
 const KEY = "meiva.home.contextPanelOpen";
