@@ -195,7 +195,8 @@ def test_append_ledger_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_report_rollup_days_and_cost() -> None:
-    today = datetime.now(UTC).date()
+    now = datetime.now(UTC)
+    today = now.date()
     recent = (today - timedelta(days=1)).isoformat()
     stale = (today - timedelta(days=30)).isoformat()
     entries: list[dict[str, Any]] = [
@@ -240,14 +241,14 @@ def test_report_rollup_days_and_cost() -> None:
         },
     ]
     ledger = {e["run_id"]: e for e in entries}
-    rows = accounting.report_rows(ledger, days=7, agent=None)
+    rows = accounting.report_rows(ledger, days=7, agent=None, now=now)
     assert len(rows) == 2
     top = rows[0]
     assert top["agent_id"] == 5811
     assert top["linux_minutes"] == 100
     assert top["macos_minutes"] == 10
     assert top["est_usd"] == pytest.approx(100 * 0.006 + 10 * 0.062)
-    only = accounting.report_rows(ledger, days=7, agent=5814)
+    only = accounting.report_rows(ledger, days=7, agent=5814, now=now)
     assert only[0]["agent_id"] == 5814
     assert only[0]["linux_minutes"] == 50
 

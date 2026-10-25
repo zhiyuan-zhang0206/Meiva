@@ -12,20 +12,9 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 "watch_pr.py" = ["status.py"]
 
 [roots]
+"accounting.py" = { kinds = ["clock"], why = "CLI entrypoint resolves the current UTC timestamp for --report rollups" }
+"classify_paths.py" = { kinds = ["cwd"], why = "CI classify entrypoint resolves the checked-out repository root from cwd" }
 "commands.py" = { kinds = ["environ"], why = "TRUNK_API_TOKEN optionally adds read-only queue evidence to diagnosis; it is not deployment configuration" }
-
-"export_process.py" = { kinds = ["settings"], why = "Tool entry composes its process resources from the launch configuration" }
-
-[debt.ambient-read]
-"accounting.py#clock datetime.datetime.now" = 1
-"classify_paths.py#cwd pathlib.Path.cwd" = 1
-"export_process.py#db base.db.Database.from_settings" = 1
-"pr_flow_export.py#clock datetime.datetime.now" = 1
-"pr_flow_export.py#home pathlib.Path.home" = 1
-"runs_export.py#clock datetime.datetime.now" = 1
-
-[debt.any-collaborator]
-"pr_flow_export.py#any emit_events.pipeline" = 1
-"pr_flow_export.py#any emit_snapshot.pipeline" = 1
-"pr_flow_export.py#any trunk_client.return" = 1
-"runs_export.py#any emit_snapshot.pipeline" = 1
+"export_process.py" = { kinds = ["db", "settings"], why = "Tool entry composes its process resources from the launch configuration" }
+"pr_flow_export.py" = { kinds = ["clock", "home"], why = "CLI entrypoint resolves the current UTC timestamp and ~/.trunk/api-token" }
+"runs_export.py" = { kinds = ["clock"], why = "CLI entrypoint resolves the current UTC timestamp for trailing-window sampling" }

@@ -111,11 +111,16 @@ grows level by level as it would for a live agent.
 DOCKERENV = Path("/.dockerenv")
 
 
-def require_preview() -> None:
-    if not DOCKERENV.exists():
+def require_preview(dockerenv: Path = DOCKERENV) -> None:
+    if not dockerenv.exists():
         sys.exit(
             "refusing: this tool runs inside the preview container only (docker exec meiva-preview ...)"
         )
+
+
+def build_replay_gate(image: LoadedCommit, *, process: str) -> ProcessDbGate:
+    version = CodeVersion(image)
+    return ProcessDbGate(version=version.get, process=process)
 
 
 def _load(db: Database, agent_id: int) -> tuple[FullHistory, list[str]]:
@@ -324,7 +329,7 @@ def print_replay_report(db: Database, agent_id: int) -> None:
         )
 
 
-def main(argv: Sequence[str] | None = None) -> None:
+def main(argv: Sequence[str] | None = None, *, dockerenv: Path = DOCKERENV) -> None:
     parser = argparse.ArgumentParser(
         description=CLI_DESCRIPTION, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -339,11 +344,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         help="explicit chunk threshold in tokens (overrides --ratio)",
     )
     args = parser.parse_args(argv)
-    require_preview()
+    require_preview(dockerenv)
     config = ConfigBoot()
     config.boot()
-    version = CodeVersion(LoadedCommit.capture())
-    gate = ProcessDbGate(version=version.get, process=process_name())
+    gate = build_replay_gate(LoadedCommit.capture(), process=process_name())
     db = Database.from_settings(gate=gate)
     if args.command == "report":
         print_replay_report(db, args.agent_id)

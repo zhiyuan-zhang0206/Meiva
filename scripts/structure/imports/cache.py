@@ -21,9 +21,10 @@ from __future__ import annotations
 import ast
 import json
 import os
+import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 from scripts.structure import imports
 
@@ -96,26 +97,64 @@ def _statements(
     return "\n".join(lines)
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _entry(value: object) -> Entry | None:
+    if not _is_object_list(value) or len(value) != 3:
+        return None
+    mtime_ns, size, statements = value[0], value[1], value[2]
+    if type(mtime_ns) is int and type(size) is int and isinstance(statements, str):
+        return (mtime_ns, size, statements)
+    return None
+
+
 def _load(cache_file: Path) -> dict[str, Entry]:
     """The cached entries; a missing, unreadable or foreign-version cache is simply empty."""
     try:
-        data = cast("dict[str, object]", json.loads(cache_file.read_text(encoding="utf-8")))
+        data: object = json.loads(cache_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    files = data.get("files")
-    if data.get("version") != _VERSION or not isinstance(files, dict):
+    if not _is_str_object_dict(data):
         return {}
-    entries = cast("dict[str, Entry]", files)  # JSON arrays; a wrong shape is a cache miss
-    return {rel: (entry[0], entry[1], entry[2]) for rel, entry in entries.items()}
+    files = data.get("files")
+    if data.get("version") != _VERSION or not _is_str_object_dict(files):
+        return {}
+    result: dict[str, Entry] = {}
+    for rel, raw_entry in files.items():
+        parsed = _entry(raw_entry)
+        if parsed is None:
+            return {}
+        result[rel] = parsed
+    return result
 
 
 def _store(cache_file: Path, entries: dict[str, Entry]) -> None:
     """Replace the cache atomically; a checkout that cannot be written just runs uncached."""
     payload = json.dumps({"version": _VERSION, "files": entries}, separators=(",", ":"))
-    temporary = cache_file.with_name(f"{cache_file.name}.{os.getpid()}.tmp")
+    temporary: Path | None = None
     try:
         cache_file.parent.mkdir(parents=True, exist_ok=True)
-        temporary.write_text(payload, encoding="utf-8")
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=cache_file.parent,
+            prefix=f"{cache_file.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(payload)
         temporary.replace(cache_file)
     except OSError:
-        temporary.unlink(missing_ok=True)
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)

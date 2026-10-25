@@ -3,8 +3,8 @@ purity = "strict-to-be"
 [uses]
 "tests" = ["agent.py"]
 
-[debt.ambient-read]
-"agent.py#random uuid.uuid4" = 1
+[roots]
+"agent.py" = { kinds = ["random"], why = "CLI bootstrap entrypoint generates a fresh UUID4 idempotency key for the spawn request" }
 
 [debt.impure-call]
 "agent.py#uuid.uuid4" = 1
@@ -12,6 +12,3 @@ purity = "strict-to-be"
 [debt.impure-edge]
 "agent.py#base/host/net/http_dial.py" = 1
 "gateway.py#gateway/app.py" = 1
-
-[debt.type-cast]
-"agent.py#cast main" = 1

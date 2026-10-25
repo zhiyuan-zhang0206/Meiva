@@ -7,7 +7,6 @@ from collections import Counter
 from collections.abc import Callable, Iterator
 from itertools import product
 from pathlib import Path
-from typing import cast
 
 from . import Binding, Clause, normalize
 
@@ -299,10 +298,8 @@ class Scope:
         elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             self.functions[node.name] = node
             self.stores[node.name] += 1
-        elif isinstance(node, ast.ClassDef) or (
-            isinstance(node, ast.ExceptHandler) and node.name is not None
-        ):
-            self.stores[cast(str, node.name)] += 1
+        elif isinstance(node, ast.ClassDef | ast.ExceptHandler) and isinstance(node.name, str):
+            self.stores[node.name] += 1
 
     def _bind_statement(self, node: ast.Attribute | ast.For | ast.AsyncFor) -> None:
         if isinstance(node, ast.Attribute):

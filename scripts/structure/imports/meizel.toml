@@ -10,11 +10,3 @@ exports = ["bindings.py", "cache.py", "executed.py", "facts.py", "fixture_scopes
 "resource_members.py" = ["bindings.py"]
 "style.py" = ["__init__.py"]
 "tests" = ["__init__.py", "bindings.py", "executed.py", "fixture_scopes.py", "style.py"]
-
-[debt.ambient-read]
-"cache.py#pid os.getpid" = 1
-
-[debt.type-cast]
-"bindings.py#cast Scope._bind" = 1
-"cache.py#cast _load" = 2
-"fixture_scopes.py#cast declarations" = 1

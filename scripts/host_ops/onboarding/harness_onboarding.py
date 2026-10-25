@@ -6,11 +6,10 @@ import base64
 import json
 import re
 import sys
-from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
@@ -154,16 +153,28 @@ def gather(host: Host, checkout: str, interpreter: str, *, verify: bool) -> list
     return evidence
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def first_file(payload: dict[str, object]) -> dict[str, object]:
     files = payload.get("files")
-    if isinstance(files, list) and files and isinstance(files[0], dict):
-        return cast("dict[str, object]", files[0])
+    if _is_object_list(files) and files and _is_str_object_dict(files[0]):
+        return files[0]
     return {}
 
 
-def shorten(text: str) -> str:
-    home = str(Path.home())
-    return text.replace(home, "~") if text.startswith(home) else text
+def shorten(text: str, *, home: Path) -> str:
+    home_str = str(home)
+    return text.replace(home_str, "~") if text.startswith(home_str) else text
 
 
 def format_cell(value: object, width: int) -> str:
@@ -173,7 +184,7 @@ def format_cell(value: object, width: int) -> str:
     return text.ljust(width + 1)
 
 
-def render(rows: list[Evidence], *, verify: bool) -> str:
+def render(rows: list[Evidence], *, verify: bool, home: Path) -> str:
     columns = [("host", 14), ("harness", 12), ("probe", 12), ("binary", 46)]
     if verify:
         columns += [("runs", 22), ("login", 16)]
@@ -183,7 +194,7 @@ def render(rows: list[Evidence], *, verify: bool) -> str:
             "host": row.host,
             "harness": row.harness,
             "probe": row.status,
-            "binary": shorten(row.binary) if row.binary else "-",
+            "binary": shorten(row.binary, home=home) if row.binary else "-",
             "runs": row.runs or "-",
             "login": row.login or "-",
         }
@@ -194,7 +205,7 @@ def render(rows: list[Evidence], *, verify: bool) -> str:
     return "\n".join(lines)
 
 
-def cmd_doctor(args: argparse.Namespace) -> int:
+def cmd_doctor(args: argparse.Namespace, *, home: Path) -> int:
     rows: list[Evidence] = []
     failed = False
     for host in transport.parse_hosts(args.hosts):
@@ -208,7 +219,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps([row.__dict__ for row in rows], indent=2))
     else:
-        print(render(rows, verify=args.verify))
+        print(render(rows, verify=args.verify, home=home))
         disagreements = [row for row in rows if row.disagreement]
         if disagreements:
             print(
@@ -262,21 +273,27 @@ def agent_sees(host: Host, binary: str) -> str:
     return found.stdout.strip() if found.ok else ""
 
 
-def reach_agent_path(host: Host, harness: catalog.HarnessSpec) -> tuple[str, str]:
+def reach_agent_path(
+    host: Host,
+    harness: catalog.HarnessSpec,
+    *,
+    link_dir: str = "/usr/local/bin",
+    local_bin: str = "$HOME/.local/bin",
+) -> tuple[str, str]:
     # meiva:note
     # A user-local install is only useful where a service looks: link it into /usr/local/bin
     # when that is writable, otherwise return the exact command an operator must run.
     # meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
     if agent_sees(host, harness.cli):
         return "", ""
-    link = f"/usr/local/bin/{harness.cli}"
-    if host.run(f"test -w {link.rsplit('/', 1)[0]}", timeout=60).ok:
-        linked = host.run(f'ln -sf "$HOME/.local/bin/{harness.cli}" "{link}"', timeout=60)
+    link = f"{link_dir}/{harness.cli}"
+    if host.run(f"test -w {link_dir}", timeout=60).ok:
+        linked = host.run(f'ln -sf "{local_bin}/{harness.cli}" "{link}"', timeout=60)
         if linked.ok and agent_sees(host, harness.cli):
             return f"linked {link} -> ~/.local/bin/{harness.cli}", ""
     return "", (
         f"{harness.cli} is installed under ~/.local/bin, which neither the agent search path "
-        f"({transport.AGENT_PATH}) nor a writable /usr/local/bin covers; link it as root: "
+        f"({transport.AGENT_PATH}) nor a writable {link_dir} covers; link it as root: "
         f"sudo ln -sf ~/.local/bin/{harness.cli} {link}"
     )
 
@@ -286,7 +303,7 @@ def hostfs_source() -> str:
 
 
 def record_install(
-    host: Host, harness: catalog.HarnessSpec, requested: str, installed: str
+    host: Host, harness: catalog.HarnessSpec, requested: str, installed: str, *, now: datetime
 ) -> None:
     host.python(
         hostfs_source(),
@@ -294,7 +311,7 @@ def record_install(
             "op": "append",
             "path": STATE_LOG,
             "record": {
-                "at": datetime.now(UTC).isoformat(timespec="seconds"),
+                "at": now.isoformat(timespec="seconds"),
                 "harness": harness.cli,
                 "requested": requested,
                 "installed": installed,
@@ -314,7 +331,9 @@ def install_prefix(host: Host, harness: catalog.HarnessSpec) -> str:
     return '"$HOME/.local"'
 
 
-def install_on(host: Host, harness: catalog.HarnessSpec, wanted: str, prefix: str) -> bool:
+def install_on(
+    host: Host, harness: catalog.HarnessSpec, wanted: str, prefix: str, *, now: datetime
+) -> bool:
     # meiva:note
     # One install on one host; True when a service on that host can then run the binary, so
     # a user-local install that no agent search path reaches is a failure, not an "ok".
@@ -333,7 +352,7 @@ def install_on(host: Host, harness: catalog.HarnessSpec, wanted: str, prefix: st
         )
         return False
     installed = installed_version(host, harness)
-    record_install(host, harness, wanted, installed)
+    record_install(host, harness, wanted, installed, now=now)
     flag = "" if installed == wanted else f"  (asked {wanted}, got {installed or 'nothing'})"
     if prefix:
         note, problem = reach_agent_path(host, harness)
@@ -346,7 +365,7 @@ def install_on(host: Host, harness: catalog.HarnessSpec, wanted: str, prefix: st
     return True
 
 
-def cmd_install(args: argparse.Namespace) -> int:
+def cmd_install(args: argparse.Namespace, *, now: datetime) -> int:
     hosts = transport.parse_hosts(args.hosts)
     pins = parse_pins(args.pin)
     failures = 0
@@ -364,7 +383,7 @@ def cmd_install(args: argparse.Namespace) -> int:
                 command = catalog.install_command(harness, wanted, prefix=prefix)
                 print(f"[dry-run] {host}: {command}")
                 continue
-            if not install_on(host, harness, wanted, prefix):
+            if not install_on(host, harness, wanted, prefix, now=now):
                 failures += 1
     return 1 if failures else 0
 
@@ -400,10 +419,10 @@ def _write_payload(target: Host, raw_path: str, payload: dict[str, object]) -> s
     return f"copy {raw_path} -> {target}"
 
 
-def cmd_sync(args: argparse.Namespace) -> int:
+def cmd_sync(args: argparse.Namespace, *, now: datetime) -> int:
     source = Host(args.source)
     targets = transport.parse_hosts(args.to)
-    stamp = datetime.now().astimezone().strftime("%Y%m%d")
+    stamp = now.astimezone().strftime("%Y%m%d")
     backup_dir = BACKUP_ROOT.format(stamp=stamp)
     failures = 0
     for name in args.harness:
@@ -540,14 +559,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--verify", action="store_true", help="also run the binary and ask the CLI about its login"
     )
     doctor.add_argument("--json", action="store_true")
-    doctor.set_defaults(handler=cmd_doctor)
 
     install = subcommands.add_parser("install", help="install a harness from its vendor")
     install.add_argument("harness", nargs="+", choices=list(catalog.CLI_NAMES))
     install.add_argument("--hosts", nargs="*")
     install.add_argument("--pin", nargs="*", metavar="HARNESS=VERSION")
     install.add_argument("--dry-run", action="store_true")
-    install.set_defaults(handler=cmd_install)
 
     sync = subcommands.add_parser(
         "sync", help="copy a harness's CLI, config and login from a configured machine"
@@ -562,14 +579,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="copy login stores whose rotation can sign the source machine out",
     )
     sync.add_argument("--dry-run", action="store_true")
-    sync.set_defaults(handler=cmd_sync)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    handler = cast("Callable[[argparse.Namespace], int]", args.handler)
-    return handler(args)
+    if args.command == "doctor":
+        return cmd_doctor(args, home=Path.home())
+    now = datetime.now(UTC)
+    if args.command == "install":
+        return cmd_install(args, now=now)
+    if args.command == "sync":
+        return cmd_sync(args, now=now)
+    raise ValueError(f"unknown command: {args.command!r}")
 
 
 if __name__ == "__main__":
