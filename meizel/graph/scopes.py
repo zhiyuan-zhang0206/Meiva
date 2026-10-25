@@ -5,7 +5,14 @@ from __future__ import annotations
 import ast
 from collections.abc import Iterable
 
-__all__ = ["Scope", "absolute_base", "collect_scope", "dotted_chain", "parameter_names"]
+__all__ = [
+    "Scope",
+    "absolute_base",
+    "bind_target",
+    "collect_scope",
+    "dotted_chain",
+    "parameter_names",
+]
 
 
 class Scope:
@@ -48,6 +55,12 @@ class Scope:
             scope = scope.parent
         return None, False
 
+    def closure_parent(self) -> Scope | None:
+        scope: Scope | None = self
+        while scope is not None and scope.is_class:
+            scope = scope.parent
+        return scope
+
 
 def absolute_base(node: ast.ImportFrom, package: list[str]) -> str | None:
     """Dotted base of a `from` import, or None when a relative import leaves the root."""
@@ -84,16 +97,15 @@ def _children(node: ast.AST) -> Iterable[ast.AST]:
     return ast.iter_child_nodes(node)
 
 
-def _store(scope: Scope, target: ast.expr) -> None:
-    """Record the names an assignment target binds."""
+def bind_target(scope: Scope, target: ast.expr) -> None:
     if isinstance(target, ast.Name):
         scope.shadowed.add(target.id)
         scope.stores[target.id] = scope.stores.get(target.id, 0) + 1
     elif isinstance(target, ast.Tuple | ast.List):
         for element in target.elts:
-            _store(scope, element)
+            bind_target(scope, element)
     elif isinstance(target, ast.Starred):
-        _store(scope, target.value)
+        bind_target(scope, target.value)
 
 
 def _assigned_value(scope: Scope, node: ast.Assign | ast.AnnAssign) -> None:
@@ -104,7 +116,7 @@ def _assigned_value(scope: Scope, node: ast.Assign | ast.AnnAssign) -> None:
 
 def _assigned(scope: Scope, node: ast.Assign | ast.AnnAssign) -> None:
     for target in node.targets if isinstance(node, ast.Assign) else [node.target]:
-        _store(scope, target)
+        bind_target(scope, target)
     _assigned_value(scope, node)
 
 
@@ -142,7 +154,7 @@ def collect_scope(
         elif kind is ast.Assign or kind is ast.AnnAssign:
             _assigned(scope, node)  # type: ignore[arg-type]
         elif kind is ast.AugAssign:
-            _store(scope, node.target)  # type: ignore[attr-defined]
+            bind_target(scope, node.target)  # type: ignore[attr-defined]
         else:
             _collect_compound(scope, node, stack, package)
 
@@ -160,11 +172,11 @@ def _collect_compound(
             _collect_everything(scope, [node], package)
             return
     if isinstance(node, ast.For | ast.AsyncFor):
-        _store(scope, node.target)
+        bind_target(scope, node.target)
     elif isinstance(node, ast.With | ast.AsyncWith):
         for item in node.items:
             if item.optional_vars is not None:
-                _store(scope, item.optional_vars)
+                bind_target(scope, item.optional_vars)
     elif isinstance(node, ast.Try | ast.TryStar):
         for handler in node.handlers:
             if handler.name:
@@ -180,15 +192,18 @@ def _collect_everything(scope: Scope, body: Iterable[ast.AST], package: list[str
             scope.shadowed.add(node.name)
             continue
         if isinstance(node, ast.Lambda):
+            stack.extend(d for d in (*node.args.defaults, *node.args.kw_defaults) if d is not None)
             continue
         if isinstance(node, ast.Import | ast.ImportFrom):
             _bind_import(scope, node, package)
         elif isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
-            _store(scope, node)
+            bind_target(scope, node)
         elif isinstance(node, ast.Assign | ast.AnnAssign):
             _assigned_value(scope, node)
-        elif isinstance(node, ast.ExceptHandler) and node.name:
+        elif isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar) and node.name:
             scope.shadowed.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            scope.shadowed.add(node.rest)
         stack.extend(_children(node))
 
 
