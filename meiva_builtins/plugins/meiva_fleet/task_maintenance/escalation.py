@@ -11,9 +11,10 @@ from psycopg_pool import ConnectionPool
 from base.agents.inbox.insert import insert_inbound_message_in_transaction
 from base.agents.tasks.status import TaskStatus
 from base.db.transaction import write_transaction
-from base.events.notifications.notices import stage_notice_notification
-from base.packages.plugins.flags import read_declared_flag
-from meiva_builtins.plugins.meiva_fleet.default_config import contribute
+from meiva_builtins.plugins.meiva_fleet.task_maintenance.routing import (
+    nearest_manager,
+    stage_human_notice,
+)
 
 
 @dataclass(frozen=True)
@@ -77,38 +78,24 @@ def _user_notice(
 ) -> EscalationReceipt | None:
     if task.owner is None:
         raise ValueError("human escalation requires a task owner")
-    cur.execute(
-        "SELECT 1 FROM agent_notices WHERE agent_id=%s AND resolved_at IS NULL LIMIT 1",
-        (task.owner,),
-    )
-    if cur.fetchone() is not None:
-        return None
     title = f'Task #{task.id} "{task.title}" stalled after repeated reminders — reassign or cancel'
     content = (
-        f"Agent #{task.owner} has not updated this task after repeated reminders, and no "
-        "delegating agent owns its parent to catch it. Reassign it to another agent, "
+        f"Agent #{task.owner} has not updated this task after repeated reminders, and no live "
+        "agent owns any ancestor task to catch it. Reassign it to another agent, "
         "cancel it, or reply to remind the owner once more."
     )
-    cur.execute(
-        "INSERT INTO agent_notices "
-        "(agent_id,local_id,task_id,title,content,priority,require_response,blocking,expire_at) "
-        "VALUES (%s,COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id=%s),-1)+1, "
-        "%s,%s,%s,%s,TRUE,FALSE,now()+make_interval(secs=>%s)) RETURNING id",
-        (
-            task.owner,
-            task.owner,
-            task.id,
-            title,
-            content,
-            task.priority,
-            read_declared_flag("daemon.notice_ttl_limit_seconds", contribute().flags),
-        ),
+    staged = stage_human_notice(
+        cur,
+        conn,
+        agent_id=task.owner,
+        task_id=task.id,
+        title=title,
+        content=content,
+        priority=task.priority,
     )
-    row = cur.fetchone()
-    if row is None:
-        raise RuntimeError("escalation notice insert returned no row")
-    staged = stage_notice_notification(conn, agent_id=task.owner, notice_id=int(row[0]))
-    return EscalationReceipt(task.owner, [task.id], "user", None, content, staged)
+    if staged is None:
+        return None
+    return EscalationReceipt(task.owner, [task.id], "user", None, content, staged[1])
 
 
 def _delegator_note(cur: psycopg.Cursor, owner: int, tasks: list[_Task]) -> EscalationReceipt:
@@ -131,8 +118,18 @@ def _delegator_note(cur: psycopg.Cursor, owner: int, tasks: list[_Task]) -> Esca
     return EscalationReceipt(owner, task_ids, "delegator", inbound_id, content)
 
 
+# meiva:note
+# The delegator leg addresses the task's manager, not its direct parent owner:
+# an agent terminated after delegating cannot catch the stall, so the walk
+# continues to the nearest ancestor owner that is still alive. No such owner
+# leaves the human queue as the only recipient. The parent row still has to be
+# locked (a concurrent writer's reparent defers this task) — the manager lookup
+# reads the chain behind it.
 def _eligible_groups(
-    candidates: list[int], locked: dict[int, _Task], threshold: int
+    candidates: list[int],
+    locked: dict[int, _Task],
+    threshold: int,
+    managers: dict[int, int | None],
 ) -> tuple[dict[int, list[_Task]], list[_Task]]:
     delegated: dict[int, list[_Task]] = defaultdict(list)
     human: list[_Task] = []
@@ -148,10 +145,11 @@ def _eligible_groups(
         parent = locked.get(task.parent) if task.parent is not None else None
         if parent is None or task.owner is None:
             continue
-        if parent.owner is None:
+        manager = managers.get(task_id)
+        if manager is None:
             human.append(task)
         elif task.escalated_at is None:
-            delegated[parent.owner].append(task)
+            delegated[manager].append(task)
     return delegated, human
 
 
@@ -164,7 +162,8 @@ def accept_escalations(pool: ConnectionPool, threshold: int) -> list[EscalationR
     """
     with write_transaction(pool) as conn, conn.cursor() as cur:
         candidates, locked = _lock_candidates(cur, threshold)
-        delegated, human = _eligible_groups(candidates, locked, threshold)
+        managers = nearest_manager(cur, [task_id for task_id in candidates if task_id in locked])
+        delegated, human = _eligible_groups(candidates, locked, threshold, managers)
         # Same physical identity lock as gateway notice create. Ordered locks
         # prevent two overlapping human batches from reversing agent order.
         owners = sorted(set(delegated) | {task.owner for task in human if task.owner is not None})
