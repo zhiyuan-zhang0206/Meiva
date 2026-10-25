@@ -38,11 +38,11 @@ from dotenv import set_key, unset_key
 
 from base.config.env_changed import EnvChangedError
 from base.host.env import dotenv_file
+from base.host.env.dotenv_content import env_values_from_text
 from base.host.env.dotenv_file import (
     ENV_LOCK_TIMEOUT_S,
     EnvAudit,
     env_lock_path,
-    env_values_from_text,
     snapshot_env,
 )
 from base.native_process.os_platform import file_lock

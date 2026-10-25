@@ -52,6 +52,11 @@ tags: []
   emits `env_unauthorized_write` (audit/anomaly), and logs an error. The guard runs at the gateway
   config read boundary (`GET /api/config`).
 
+- **Content boundary**: `base/host/env/dotenv_content.py` owns the assignment grammar, audit
+  value projection and pure byte renderers. The locked `dotenv_file` writers supply their
+  existing decoded lines; upsert still compares the rendered bytes with its separate raw
+  file read, while removal skips only when no line matches. Export prefixes, first-match
+  upserts, all-match removals and insertion order retain their existing behavior.
 - **Layout**: `ops/env_audit/__init__.py` is the shell: it reads the config registry, the process,
   the clock and the files, and writes the history, the marker and the events. The decisions are
   strict modules over values: `redaction.py` (which aliases keep values, the executable-only
