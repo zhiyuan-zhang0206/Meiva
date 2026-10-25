@@ -20,6 +20,7 @@ def transport(tmp_path: Path, *, timeout: float = 5.0) -> StdioAppServer:
     return StdioAppServer(
         [sys.executable, str(SERVER)],
         cwd=tmp_path,
+        environ={},
         request_timeout=timeout,
         stderr=asyncio.subprocess.DEVNULL,
     )
@@ -99,10 +100,31 @@ async def test_request_times_out_and_fails_fast_after_the_peer_exits(tmp_path: P
 
 async def test_close_terminates_the_process(tmp_path: Path) -> None:
     server = transport(tmp_path)
+    assert server.returncode is None
     await server.start()
     pid = server.pid
     assert pid is not None
     await server.close()
     assert server.closed is True
+    assert server.returncode is not None
     with pytest.raises(TransportClosedError):
         await server.request("echo", {})
+
+
+@pytest.mark.parametrize("environment", [{}, {"SESSION_VALUE": "captured"}])
+async def test_transport_copies_only_its_explicit_environment_before_start(
+    tmp_path: Path, environment: dict[str, str]
+) -> None:
+    supplied = dict(environment)
+    server = StdioAppServer(
+        [sys.executable, str(SERVER)], cwd=tmp_path, environ=supplied, request_timeout=5
+    )
+    supplied["SESSION_VALUE"] = "changed-after-construction"
+    try:
+        await server.start()
+        observed = await server.request("environment", {})
+        assert observed.get("SESSION_VALUE") == environment.get("SESSION_VALUE")
+        assert "PYTEST_CURRENT_TEST" not in observed
+        assert "MEIVA_HOME" not in observed
+    finally:
+        await server.close()

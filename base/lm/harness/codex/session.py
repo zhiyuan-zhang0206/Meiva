@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from base.lm.harness.codex.auth import session_env
+from base.lm.harness.codex.auth import build_env
 from base.lm.harness.codex.config import CodexConfig
 from base.lm.harness.codex.mapping import (
     TurnFields,
@@ -142,7 +142,7 @@ class CodexSession(ExitStatus):
         self,
         config: CodexConfig,
         *,
-        environ: Mapping[str, str] | None = None,
+        environ: Mapping[str, str],
         agent_id: int | None = None,
         registry: SessionRegistry | None = None,
         transport: AppServerTransport | None = None,
@@ -155,7 +155,7 @@ class CodexSession(ExitStatus):
         self._transport: AppServerTransport = transport or StdioAppServer(
             config.command(config.resolved_binary(environ)),
             cwd=config.cwd,
-            environ=session_env(environ, api_key_mode=config.api_key_mode),
+            environ=build_env(environ, api_key_mode=config.api_key_mode),
             request_timeout=config.startup_timeout_seconds,
         )
         # meiva:note
