@@ -88,7 +88,7 @@ def exec_timeout_note(ctx: MeivaContext) -> HumanMessage | None:
     return system_note_message(
         content=exec_timeout_text(ctx.require_agent().read("sandbox", "exec_timeout_seconds")),
         tag=NoteTag.EXEC_TIMEOUT,
-        created_at=datetime.now(UTC),
+        created_at=ctx.require_clock().now(),
     )
 
 
@@ -97,10 +97,11 @@ def timezone_note(ctx: MeivaContext) -> HumanMessage | None:
     if _established_agent_id(ctx, "timezone") is None:
         return None
     clock = ctx.require_clock()
+    now = clock.now()
     return system_note_message(
-        content=timezone_text(clock.timezone, clock.now().astimezone(clock.explicit_zone())),
+        content=timezone_text(clock.timezone, now.astimezone(clock.explicit_zone())),
         tag=NoteTag.TIMEZONE,
-        created_at=datetime.now(UTC),
+        created_at=now,
     )
 
 
@@ -149,7 +150,7 @@ def agent_id_note(ctx: MeivaContext) -> HumanMessage | None:
     return system_note_message(
         content=agent_id_text(aid, label=label, machine=machine, workspace=workspace),
         tag=NoteTag.AGENT_ID,
-        created_at=datetime.now(UTC),
+        created_at=ctx.require_clock().now(),
     )
 
 

@@ -24,6 +24,7 @@ from base.agents.context.clients import ClientSet
 from base.agents.context.gateway_client.memory_search import MemorySearchResult
 from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from base.agents.context.identity import AgentIdentity
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config import FIELD_INFOS
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
@@ -141,12 +142,17 @@ def _agent(**changes: Any) -> AgentSlices:
     )
 
 
+def _clock() -> Clock:
+    return Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS)
+
+
 def _context(
     agent_id: int | None = None, *, gateway: Callable[[str], httpx.Client] | None = None
 ) -> MeivaContext:
     return MeivaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
         catalog=build_model_catalog(),
+        clock_factory=_clock,
         clients=ClientSet(
             gateway_url="http://gateway.test",
             gateway=gateway,

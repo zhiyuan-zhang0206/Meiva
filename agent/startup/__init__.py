@@ -61,10 +61,15 @@ def wrap_saver_writes_with_loud_failure(
             raise ValueError("checkpoint thread_id differs from the saver agent identity")
         return resolved
 
-    async def _logged_aput(config: RunnableConfig, *args: Any, **kwargs: Any) -> Any:
+    async def _logged_aput(
+        config: RunnableConfig,
+        checkpoint: Checkpoint,
+        metadata: CheckpointMetadata,
+        new_versions: ChannelVersions,
+    ) -> RunnableConfig:
         owner = write_agent_id(config)
         try:
-            return await orig_aput(config, *args, **kwargs)
+            return await orig_aput(config, checkpoint, metadata, new_versions)
         except asyncio.CancelledError:
             raise  # cancellation is control flow, not a failed write (task #4964)
         except BaseException:
@@ -76,10 +81,15 @@ def wrap_saver_writes_with_loud_failure(
             )
             raise
 
-    async def _logged_aput_writes(config: RunnableConfig, *args: Any, **kwargs: Any) -> Any:
+    async def _logged_aput_writes(
+        config: RunnableConfig,
+        writes: Sequence[tuple[str, Any]],
+        task_id: str,
+        task_path: str = "",
+    ) -> None:
         owner = write_agent_id(config)
         try:
-            return await orig_aput_writes(config, *args, **kwargs)
+            await orig_aput_writes(config, writes, task_id, task_path)
         except asyncio.CancelledError:
             raise  # cancellation is control flow, not a failed write (task #4964)
         except BaseException:

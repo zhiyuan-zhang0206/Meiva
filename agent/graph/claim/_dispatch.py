@@ -10,8 +10,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from typing import Any, cast
+from datetime import datetime
+from typing import TypeGuard
 
 from langchain_core.messages import BaseMessage
 
@@ -43,6 +43,10 @@ from base.packages.plugins.extensions import ExtensionRegistry
 from ._routing import ROUTING_KINDS, ClaimGoto, Routing
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 @dataclass
 class BatchState:
     """Mutable accumulator carried through one dispatch pass.
@@ -62,7 +66,13 @@ class BatchState:
     restart_requested: bool = False
     committed_chat_ids: list[int] = field(default_factory=list[int])
 
-    def append_scanned(self, message: BaseMessage, finding: SecurityFindingEntry | None) -> None:
+    def append_scanned(
+        self,
+        message: BaseMessage,
+        finding: SecurityFindingEntry | None,
+        *,
+        now: datetime,
+    ) -> None:
         """Append an inbound `message`; when its injection scan flagged it
         (`finding`), the SECURITY note rides right behind it.
 
@@ -78,7 +88,7 @@ class BatchState:
                 security_note_message(
                     source=finding.source,
                     triggers=finding.triggers,
-                    created_at=datetime.now(UTC),
+                    created_at=now,
                 )
             )
 
@@ -108,7 +118,8 @@ async def _handle_chat(
             envelope_inputs=ctx.timestamp_policy(),
             expand_command=ctx.require_commands().expand,
             gateway=lambda: ctx.gateway,
-        )
+        ),
+        now=ctx.require_clock().now(),
     )
     st.committed_chat_ids.append(item.id)
 
@@ -168,6 +179,7 @@ async def _handle_system_note(
             created_at=item.created_at,
         ),
         finding,
+        now=ctx.require_clock().now(),
     )
 
 
@@ -324,7 +336,7 @@ async def handle_heartbeat(
         system_note_message(
             content=f"{_ts_prefix(ctx)}{item.content}",
             tag=NoteTag.HEARTBEAT,
-            created_at=datetime.now(UTC),
+            created_at=ctx.require_clock().now(),
         )
     )
 
@@ -343,7 +355,7 @@ async def _handle_terminate(
         system_note_message(
             content=f"{_ts_prefix(ctx)}Termination was accepted from {by_who(item.source)}",
             tag=NoteTag.LIFECYCLE_TERMINATE,
-            created_at=datetime.now(UTC),
+            created_at=ctx.require_clock().now(),
         )
     )
     st.next_goto = END
@@ -379,7 +391,7 @@ async def handle_restart(
             system_note_message(
                 content=f"{_ts_prefix(ctx)}Restart was accepted from {by_who(item.source)}",
                 tag=NoteTag.LIFECYCLE_RESTART,
-                created_at=datetime.now(UTC),
+                created_at=ctx.require_clock().now(),
             )
         )
 
@@ -412,7 +424,7 @@ async def _handle_resurrect(
         system_note_message(
             content=f"{_ts_prefix(ctx)}You have been resurrected by {by_who(item.source)}",
             tag=NoteTag.LIFECYCLE_RESURRECT,
-            created_at=datetime.now(UTC),
+            created_at=ctx.require_clock().now(),
         )
     )
 
@@ -439,7 +451,7 @@ async def _handle_fork(
                 f"Continue as agent {agent_id}."
             ),
             tag=NoteTag.LIFECYCLE_FORK,
-            created_at=datetime.now(UTC),
+            created_at=ctx.require_clock().now(),
         )
     )
     st.new_msgs.extend(context_notes.fork_notes(extensions, ctx))
@@ -450,11 +462,11 @@ async def _handle_fork(
     # AFTER the fork marker + on_fork notes — the tail, never the cached prefix.
     # Old fork rows carry no payload: skip.
     tail_skills = (item.payload or {}).get("tail_skills")
-    if isinstance(tail_skills, list):
+    if _is_object_list(tail_skills):
         from agent.graph.prompt.context_notes import fork_tail_skills_note
 
         note = fork_tail_skills_note(
-            [s for s in cast("list[Any]", tail_skills) if isinstance(s, str)],
+            [s for s in tail_skills if isinstance(s, str)],
             slices.prompt.sdk_disable,
         )
         if note is not None:

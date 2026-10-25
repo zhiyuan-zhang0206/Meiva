@@ -8,7 +8,7 @@ them from drifting apart on what counts as the conversation and how much of it i
 from __future__ import annotations
 
 from collections.abc import Collection
-from typing import Any, cast
+from typing import TypeGuard
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
@@ -21,18 +21,20 @@ QUERY_MESSAGES = 6
 QUERY_CHAR_CAP = 2000
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _message_text(msg: AnyMessage) -> str:
     """Best-effort plain text of a message's content (str or multimodal list)."""
-    content: Any = msg.content  # pyright: ignore[reportUnknownMemberType]
+    content: object = msg.content  # pyright: ignore[reportUnknownMemberType]
     if isinstance(content, str):
         return content
+    if not _is_object_list(content):
+        return ""
     parts: list[str] = []
     for block in content_blocks(content):
-        if isinstance(block, str):
-            parts.append(block)
-        elif isinstance(block, dict) and isinstance(
-            text := cast(dict[str, Any], block).get("text"), str
-        ):
+        if isinstance(block, dict) and isinstance(text := block.get("text"), str):
             parts.append(text)
     return " ".join(parts)
 

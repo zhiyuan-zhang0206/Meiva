@@ -48,7 +48,7 @@ import asyncio
 import time
 from collections.abc import Awaitable, Sequence
 from dataclasses import fields, replace
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, AnyMessage, ToolCall, ToolMessage
@@ -382,13 +382,14 @@ async def _exec_single_call(
     )
 
     state_messages_update: list[AnyMessage] = []
+    clock = ctx.require_clock()
     if call["name"] != "execute_code" or "code" not in call["args"]:
         error = exec_output_message(
             content=f"unknown tool {call['name']!r}; only `execute_code(code: str)` is registered",
             tool_call_id=call["id"] or "",
             status=ExecStatus.NOT_RUN,
             body_start=0,
-            created_at=datetime.now(UTC),
+            created_at=clock.now(),
         )
         ctx.event_publisher.emit(
             ExecOutput(
@@ -407,7 +408,7 @@ async def _exec_single_call(
         item_id=f"{exec_msg_idx}.0",
     )
 
-    started_at = datetime.now(UTC)
+    started_at = clock.now()
     (
         result,
         plugin_state_update,
@@ -422,7 +423,6 @@ async def _exec_single_call(
         chunk_publisher,
         process=process,
     )
-    clock = ctx.require_clock()
     agent = ctx.require_agent()
     plan, envelope = dispatch_exec_result(
         result,
@@ -469,7 +469,7 @@ async def _exec_single_call(
             started_at=started_at,
             exec_ms=exec_ms,
             sdk_calls=envelope_sdk_calls,
-            created_at=datetime.now(UTC),
+            created_at=clock.now(),
         )
         state_messages_update.append(msg)
 
@@ -526,6 +526,7 @@ def _skipped_call_results(
 ) -> list[ToolMessage]:
     """Pair calls left unexecuted by a lifecycle halt or cancellation."""
     assert ctx.event_publisher is not None  # noqa: S101
+    now = ctx.require_clock().now()
     results: list[ToolMessage] = []
     for ordinal, call in enumerate(calls):
         message = exec_output_message(
@@ -533,7 +534,7 @@ def _skipped_call_results(
             tool_call_id=call["id"] or "",
             status=ExecStatus.NOT_RUN,
             body_start=0,
-            created_at=datetime.now(UTC),
+            created_at=now,
         )
         results.append(message)
         ctx.event_publisher.emit(

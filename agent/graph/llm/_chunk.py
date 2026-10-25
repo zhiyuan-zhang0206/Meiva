@@ -11,7 +11,7 @@ the node entry; nothing here imports back into ``node.py``.
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TypeGuard
 
 from langchain_core.messages import AIMessage, AIMessageChunk, message_chunk_to_message
 
@@ -23,6 +23,10 @@ from agent.graph.llm_errors import (
 from base.lm.catalog import ModelCatalog
 from base.lm.reasoning import content_blocks
 from base.log import logger
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
 
 
 def sanitize_thinking_blocks(final_msg: AIMessage) -> None:
@@ -50,10 +54,10 @@ def sanitize_thinking_blocks(final_msg: AIMessage) -> None:
     """
     if (final_msg.response_metadata or {}).get("model_provider") != "anthropic":  # pyright: ignore[reportUnknownMemberType]
         return
-    content: Any = final_msg.content  # pyright: ignore[reportUnknownMemberType]
-    if not isinstance(content, list):
+    content: object = final_msg.content  # pyright: ignore[reportUnknownMemberType]
+    if not _is_object_list(content):
         return
-    for i, block in enumerate(content_blocks(cast(list[Any], content))):
+    for i, block in enumerate(content_blocks(content)):
         if not isinstance(block, dict) or block.get("type") != "thinking":
             continue
         if not isinstance(block.get("thinking"), str):

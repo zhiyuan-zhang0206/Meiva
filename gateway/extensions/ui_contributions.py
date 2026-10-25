@@ -21,7 +21,7 @@ manifest that fails here means the on-disk copy changed under the cluster.
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from fastapi import APIRouter, HTTPException
 
@@ -35,6 +35,22 @@ from gateway.extensions.schemas import (
 )
 
 router = APIRouter()
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
+def _dict_list(value: object) -> list[dict[str, Any]]:
+    return [item for item in value if _is_str_any_dict(item)] if _is_object_list(value) else []
+
+
+def _str_dict(value: object) -> dict[str, str]:
+    return {str(k): str(v) for k, v in value.items()} if _is_str_any_dict(value) else {}
 
 
 def _enabled_ui_declarations() -> list[tuple[str, dict[str, Any]]]:
@@ -54,9 +70,9 @@ def _enabled_ui_declarations() -> list[tuple[str, dict[str, Any]]]:
                 detail=f"plugin {name!r} has an invalid meiva-plugin.json: {e}",
             ) from e
         ui = manifest.contributions.get("ui")
-        if ui is None:
+        if not _is_str_any_dict(ui):
             continue
-        declarations.append((name, cast(dict[str, Any], ui)))
+        declarations.append((name, ui))
     return declarations
 
 
@@ -67,37 +83,37 @@ def get_ui_contributions() -> UiContributionsResponse:
     nav: list[UiNavContribution] = []
     stats: list[UiStatContribution] = []
     for plugin, ui in _enabled_ui_declarations():
-        for theme in cast(list[dict[str, Any]], ui.get("themes", [])):
+        for theme in _dict_list(ui.get("themes", [])):
             # Absent darkTokens is carried as None, not as an empty map: the
             # picker distinguishes "pins both modes" from "has a dark half",
             # and an empty map would read as the latter.
-            dark = cast(dict[str, str], theme["darkTokens"]) if "darkTokens" in theme else None
+            dark = _str_dict(theme["darkTokens"]) if theme.get("darkTokens") is not None else None
             themes.append(
                 UiThemeContribution(
                     plugin=plugin,
-                    name=cast(str, theme["name"]),
-                    tokens=cast(dict[str, str], theme["tokens"]),
+                    name=str(theme["name"]),
+                    tokens=_str_dict(theme["tokens"]),
                     dark_tokens=dark,
                 )
             )
-        for entry in cast(list[dict[str, Any]], ui.get("nav", [])):
+        for entry in _dict_list(ui.get("nav", [])):
             nav.append(
                 UiNavContribution(
                     plugin=plugin,
-                    location=cast(str, entry["location"]),
-                    label=cast(str, entry["label"]),
-                    icon=cast(str, entry["icon"]),
-                    page=cast(str, entry["page"]),
+                    location=str(entry["location"]),
+                    label=str(entry["label"]),
+                    icon=str(entry["icon"]),
+                    page=str(entry["page"]),
                 )
             )
-        for card in cast(list[dict[str, Any]], ui.get("stats", [])):
+        for card in _dict_list(ui.get("stats", [])):
             # Declaration half only — the value half is the plugin_stats row
             # the console joins by (plugin, id) (see plugin_stats.py).
             stats.append(
                 UiStatContribution(
                     plugin=plugin,
-                    id=cast(str, card["id"]),
-                    label=cast(str, card["label"]),
+                    id=str(card["id"]),
+                    label=str(card["label"]),
                 )
             )
     return UiContributionsResponse(themes=themes, nav=nav, stats=stats)

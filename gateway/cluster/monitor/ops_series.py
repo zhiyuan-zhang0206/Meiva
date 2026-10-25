@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any, LiteralString, cast
+from typing import Any
 
 import psycopg
 
@@ -67,7 +67,7 @@ def _round1(v: float | None) -> float | None:
 def _execute(
     conn: psycopg.Connection[Any], query: str, params: tuple[Any, ...]
 ) -> psycopg.Cursor[Any]:
-    return conn.execute(cast(LiteralString, query), params)
+    return conn.execute(query, params)  # pyright: ignore[reportArgumentType, reportCallIssue]
 
 
 # meiva:note

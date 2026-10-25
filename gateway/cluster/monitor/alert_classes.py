@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
 import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -55,11 +55,11 @@ def read_alert_classes(
         )
         rows.append(
             AlertClassRow(
-                level=cast(AlertLevel, found.level),
+                level=found.level,  # pyright: ignore[reportArgumentType]
                 event_name=found.event_name,
                 source=found.source,
                 process=found.process,
-                category=cast(Any, found.category),
+                category=found.category,  # pyright: ignore[reportArgumentType]
                 count=found.count,
                 first_seen=found.first_seen,
                 last_seen=found.last_seen,

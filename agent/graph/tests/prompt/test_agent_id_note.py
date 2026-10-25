@@ -26,6 +26,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineFacts, MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -33,6 +34,10 @@ from base.config.tests.configuration import defaults
 from base.db import Database
 from base.host.env.agent_slices import AgentSlices
 from base.paths.tests.homes import point_home
+
+
+def _clock() -> Clock:
+    return Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS)
 
 
 def _context(
@@ -47,6 +52,7 @@ def _context(
         agent=AgentSlices.resolve(
             {"workspace_in_system_prompt": workspace}, default_reader=defaults()
         ),
+        clock_factory=_clock,
         machine=runner,
         clients=clients,
     )

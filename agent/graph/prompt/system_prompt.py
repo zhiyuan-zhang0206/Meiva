@@ -3,7 +3,6 @@
 import hashlib
 import logging
 from collections.abc import Callable, Sequence
-from typing import Any
 
 from agent.hooks.history_dump import workspace_section_hint
 from base.agents.to_user import DOCUMENT_FILENAME
@@ -35,7 +34,7 @@ from .live import (
 from .sdk_scope import expand_plan
 
 
-def _resolved(setting: str, inputs: SectionInputs) -> Any:
+def _resolved(setting: str, inputs: SectionInputs) -> object:
 
     from base.lm.registry import resolve_setting
 
@@ -115,7 +114,7 @@ def keep_it_simple_section(inputs: SectionInputs) -> str:
 
 def communication_style_section(inputs: SectionInputs) -> str:
 
-    style = _resolved("agent_communication_style", inputs)
+    style = str(_resolved("agent_communication_style", inputs))
     if style == "off":
         return ""
     return COMMUNICATION_STYLE_SECTIONS[style]

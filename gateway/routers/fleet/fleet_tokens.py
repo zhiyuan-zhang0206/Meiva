@@ -17,7 +17,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from typing import Any, LiteralString, NamedTuple, cast
+from typing import Any, NamedTuple
+
+import psycopg
 
 from base.events.contract import LLM_USAGE_KEYS
 from base.telemetry.metrics.event_sql import numeric
@@ -66,7 +68,9 @@ def _plan(start: datetime, *, tail_day: date) -> _Plan:
 # Per-agent token sums over the retained window and `win_start` (None = all time).
 # meiva:note
 # keys come from the registered payload constants.
-def agent_tokens(conn: Any, *, now: datetime, win_start: datetime | None) -> dict[int, AgentTokens]:
+def agent_tokens(
+    conn: psycopg.Connection[Any], *, now: datetime, win_start: datetime | None
+) -> dict[int, AgentTokens]:
     tail_day = now.astimezone(UTC).date() - timedelta(days=1)
     retained = _plan(now - _RETAINED_WINDOW, tail_day=tail_day)
     if win_start is not None:
@@ -76,7 +80,7 @@ def agent_tokens(conn: Any, *, now: datetime, win_start: datetime | None) -> dic
         window = _Plan(tail_start, (tail_start, tail_start), folded_through(conn) + timedelta(1))
     sums: dict[int, list[float]] = {}
 
-    def add(agent: Any, values: tuple[Any, ...]) -> None:
+    def add(agent: int, values: tuple[Any, ...]) -> None:
         row = sums.setdefault(int(agent), [0.0, 0.0, 0.0, 0.0])
         for slot, value in enumerate(values):
             row[slot] += float(value)
@@ -100,7 +104,7 @@ def agent_tokens(conn: Any, *, now: datetime, win_start: datetime | None) -> dic
         GROUP BY agent_id
         """  # noqa: S608
     raw = conn.execute(
-        cast(LiteralString, raw_query),
+        raw_query,  # pyright: ignore[reportArgumentType]
         {
             "now": now,
             "r_raw": retained.raw_from,

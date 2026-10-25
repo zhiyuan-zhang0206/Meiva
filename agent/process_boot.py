@@ -12,6 +12,7 @@ from base.db import Database
 from base.host.env.agent_env import AGENT_ID_ENV
 from base.host.env.agent_slices import ModelOverrides, agent_setting
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_contract import ProviderBinding
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.log import logger
 from base.paths import meiva_home, workspace_dir
@@ -104,7 +105,7 @@ async def boot_agent_scope(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     llm_override: str,
-) -> Any:
+) -> tuple[Any, ProviderBinding | None]:
     workspace = workspace_dir(agent_id)
 
     from base.agents.to_user.document import ensure_document

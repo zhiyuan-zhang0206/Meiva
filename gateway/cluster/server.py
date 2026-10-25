@@ -174,7 +174,9 @@ def _serve_process(
         )
 
 
-def serve_kwargs(*, host: str, app: Any, factory: bool, config: ConfigBoot) -> dict[str, Any]:
+def serve_kwargs(
+    *, host: str, app: FastAPI | str, factory: bool, config: ConfigBoot
+) -> dict[str, Any]:
     """Assemble the uvicorn launch parameters for the gateway ASGI server.
 
     The single assembly point of the launch contract: ``main()`` hands the dict
