@@ -9,10 +9,6 @@ from collections.abc import Mapping
 from contextlib import suppress
 from pathlib import Path
 
-from base.cluster.dataplane.pg_plan import (
-    WALG_ARTIFACTS,
-    WALG_VERSION,
-)
 from base.cluster.dataplane.runtime_binaries import (
     download,
     download_with_opener,
@@ -30,7 +26,17 @@ __all__ = [
     "walg_path",
 ]
 
+WALG_VERSION = "v3.0.9"
+
 _RELEASE_BASE = "https://github.com/wal-g/wal-g/releases/download"
+
+WALG_ARTIFACTS: dict[str, tuple[str, str]] = {
+    "linux-x86_64": (
+        "wal-g-pg-24.04-amd64",
+        "8015836f246a978f27b31a2462eac7765312558ae5b11ac033322b555abf9e22",
+    ),
+}
+
 _VERSION_PROBE_TIMEOUT_S = 30
 
 

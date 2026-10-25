@@ -12,13 +12,6 @@ import urllib.request
 from collections.abc import Mapping
 from pathlib import Path
 
-from base.cluster.dataplane.pg_plan import (
-    PG_ARTIFACTS,
-    PG_VERSION,
-    PGVECTOR_ARTIFACTS,
-    PGVECTOR_SQL,
-    PGVECTOR_VERSION,
-)
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.host.net.resilience import Policy, retry
 from base.log import logger
@@ -45,8 +38,37 @@ __all__ = [
     "vendored_pg_supported",
 ]
 
+PG_VERSION = "17.11.0"
+
 _MAVEN_BASE = "https://repo1.maven.org/maven2/io/zonky/test/postgres"
+
+PG_ARTIFACTS: dict[str, tuple[str, str]] = {
+    "darwin": (
+        "embedded-postgres-binaries-darwin-arm64v8",
+        "a1c2786acb0c398f9b2d76806fc52f5dc8b222cbc8e9383a9b9702084daaf3a5",
+    ),
+    "linux-x86_64": (
+        "embedded-postgres-binaries-linux-amd64",
+        "0dd7b72b6f335b8ecfb355fa24c5781e8a93edd09880bb77eb52ebbf29b3e96d",
+    ),
+}
+
+PGVECTOR_VERSION = "0.8.7"
+PGVECTOR_SQL = f"vector--{PGVECTOR_VERSION}.sql"
 _PGVECTOR_SQL = PGVECTOR_SQL
+
+PGVECTOR_ARTIFACTS: dict[str, tuple[str, str]] = {
+    "linux-x86_64": (
+        "https://apt.postgresql.org/pub/repos/apt/pool/main/p/pgvector/"
+        "postgresql-17-pgvector_0.8.7-1.pgdg12+1_amd64.deb",
+        "acb5569b6a5bb71d5968205a4da15911ff3b2a15a57a2a9d765560882f53e3ea",
+    ),
+    "darwin-arm64": (
+        "https://ghcr.io/v2/homebrew/core/pgvector/blobs/"
+        "sha256:326bc17440a773b75b054d83d7905b46b370b1a1b6543fff077186b5a632253b",
+        "326bc17440a773b75b054d83d7905b46b370b1a1b6543fff077186b5a632253b",
+    ),
+}
 
 
 def platform_key(*, system: str | None = None, machine: str | None = None) -> str:
