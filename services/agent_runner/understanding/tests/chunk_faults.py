@@ -7,7 +7,7 @@ import pytest
 
 from base.agents.history.checkpoint import FullHistory
 from base.agents.history.hierarchy.chunk_generate import ChunkResult
-from base.agents.history.hierarchy.chunks import LocatedChunk
+from base.agents.history.hierarchy.chunks import ChunkCall, LocatedChunk
 from base.agents.history.hierarchy.leaf_groups import UnitGroup
 from base.agents.history.hierarchy.units import divide_units
 from base.agents.messages.timestamp_policy import TimestampPolicy
@@ -56,7 +56,7 @@ def chunk_seams(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         _overrides: object,
         located: LocatedChunk,
         _tools: object,
-        _calls: list,
+        _calls: list[ChunkCall],
         _agent_id: int,
         **kw: object,
     ) -> ChunkResult:
