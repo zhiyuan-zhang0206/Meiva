@@ -4,7 +4,6 @@ import logging
 import shlex
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from base.native_process.os_platform import is_macos
 from base.paths import logs_dir, meiva_home, run_dir
@@ -153,7 +152,7 @@ class PtySessionBackend(SessionBackend):
         )
 
     @staticmethod
-    def _call[T](op: str, name: str, call: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+    def _call[T](op: str, name: str, call: Callable[..., T], *args: object, **kwargs: object) -> T:
         # meiva:link base/sessions/docs/session-backend.meiva.okf.md
         try:
             return call(*args, **kwargs)

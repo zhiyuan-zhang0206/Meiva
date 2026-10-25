@@ -14,8 +14,8 @@ effort, then invoke) for the prompt-vs-material shape both entry points use.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
-from typing import Any, cast
+from collections.abc import Callable, Sequence
+from typing import Any, TypeGuard
 
 from base.host.env.agent_slices import ModelOverrides
 from base.host.net.resilience import extract_retry_after, jittered
@@ -24,7 +24,19 @@ from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.effort import ReasoningEffort
 
 
-def extract_text(response: Any) -> str:
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _monotonic() -> float:
+    return time.monotonic()
+
+
+def extract_text(response: object) -> str:
     """Flatten a model response's content to plain text.
 
     str passthrough, or join the `text` blocks of a content-list response;
@@ -33,18 +45,15 @@ def extract_text(response: Any) -> str:
     # langchain's content-block dicts are dict[Unknown, Unknown]; the cast
     # states the shape we handle and the runtime isinstance guards below are
     # the real checks (a content list may also carry bare str elements).
-    content = response.content
+    raw_response: Any = response
+    content: object = raw_response.content
     if isinstance(content, str):
         return content
-    if isinstance(content, list):
-        # langchain's content blocks are dicts with partially-unknown declared
-        # shape; the cast states the shape we handle and the runtime isinstance
-        # guard below is the real check (a content list may also carry bare
-        # str elements).
-        blocks = cast(list[dict[str, Any]], content)
+    if _is_object_list(content):
+        blocks: Sequence[object] = content
         texts: list[str] = []
         for block in blocks:
-            if isinstance(block, dict) and block.get("type") == "text":
+            if _is_str_dict(block) and block.get("type") == "text":
                 text = block.get("text")
                 if isinstance(text, str) and text:
                     texts.append(text)
@@ -53,7 +62,7 @@ def extract_text(response: Any) -> str:
 
 
 def invoke_response(
-    runnable: Any,
+    runnable: object,
     messages: list[Any],
     *,
     desc: str,
@@ -113,11 +122,12 @@ def invoke_response(
     retry_max_delay_seconds = max(retry_delay_seconds, retry_max_delay_seconds)
     response: Any | None = None
     latency_ms: float | None = None
+    invoker: Any = runnable
     for attempt in range(retry_attempts + 1):
         try:
-            started = time.monotonic()
-            response = runnable.invoke(messages)
-            latency_ms = (time.monotonic() - started) * 1_000
+            started = _monotonic()
+            response = invoker.invoke(messages)
+            latency_ms = (_monotonic() - started) * 1_000
             break
         except Exception as e:
             resolved_model = model or getattr(runnable, "model_name", None)
@@ -164,7 +174,7 @@ def invoke_response(
 
 
 def invoke_text(
-    llm: Any,
+    llm: object,
     content: list[Any],
     *,
     desc: str,

@@ -6,7 +6,9 @@ from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, TypeGuard
+
+import psycopg
 
 from base.config.domains.agent.completion_policy import (
     CompletionNoticePolicy,
@@ -64,24 +66,27 @@ def immediate_delivery_required(policy: CompletionNoticePolicy, notice: Completi
     return policy is CompletionNoticePolicy.ALL
 
 
-def policy_for_agent(conn: Any, agent_id: int, default: str) -> CompletionNoticePolicy:
+def _is_str_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping)
+
+
+def policy_for_agent(
+    conn: psycopg.Connection[Any], agent_id: int, default: str
+) -> CompletionNoticePolicy:
     """Read the agent's live completion-notice policy from its config overlay."""
     with conn.cursor() as cursor:
         cursor.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
         row = cursor.fetchone()
     if row is None:
         raise LookupError(f"agent {agent_id} does not exist")
-    overlay = row[0]
-    if overlay is not None and not isinstance(overlay, Mapping):
+    overlay: object = row[0]
+    if overlay is not None and not _is_str_mapping(overlay):
         raise ValueError(f"agent {agent_id} config_overlay is not an object: {overlay!r}")
-    return effective_completion_notice_policy(
-        cast(Mapping[str, object] | None, overlay),
-        default,
-    )
+    return effective_completion_notice_policy(overlay, default)
 
 
 def delivery_required_for_agent(
-    conn: Any,
+    conn: psycopg.Connection[Any],
     agent_id: int,
     notice: CompletionNotice,
     default: str,
@@ -105,7 +110,9 @@ def delivery_required_for_agent(
     return immediate_delivery_required(policy, notice)
 
 
-def hourly_notice_recorded(conn: Any, agent_id: int, notice: CompletionNotice) -> bool:
+def hourly_notice_recorded(
+    conn: psycopg.Connection[Any], agent_id: int, notice: CompletionNotice
+) -> bool:
     """Whether this exact event was already admitted to the digest."""
     with conn.cursor() as cursor:
         cursor.execute(
@@ -132,7 +139,9 @@ def format_digest(*, agent_id: int, window_start: datetime, notices: list[Comple
     return "\n".join(lines)
 
 
-def record_hourly_notice(conn: Any, agent_id: int, notice: CompletionNotice) -> None:
+def record_hourly_notice(
+    conn: psycopg.Connection[Any], agent_id: int, notice: CompletionNotice
+) -> None:
     """Persist one hourly-policy event before either immediate or digest delivery."""
     with conn.cursor() as cursor:
         cursor.execute(
@@ -143,7 +152,7 @@ def record_hourly_notice(conn: Any, agent_id: int, notice: CompletionNotice) -> 
         )
 
 
-def pending_digests(conn: Any, now: datetime) -> list[CompletionDigest]:
+def pending_digests(conn: psycopg.Connection[Any], now: datetime) -> list[CompletionDigest]:
     """Read every completed, non-empty hour that still needs its digest."""
     with conn.cursor() as cursor:
         cursor.execute(
@@ -157,7 +166,9 @@ def pending_digests(conn: Any, now: datetime) -> list[CompletionDigest]:
         rows = cursor.fetchall()
     grouped: dict[tuple[int, datetime], list[tuple[int, CompletionNotice]]] = defaultdict(list)
     for event_id, agent_id, source, content, window_start in rows:
-        grouped[(int(agent_id), cast(datetime, window_start))].append(
+        if not isinstance(window_start, datetime):
+            raise TypeError(f"window_start must be a datetime, got {window_start!r}")
+        grouped[(int(agent_id), window_start)].append(
             (int(event_id), CompletionNotice(source=str(source), content=str(content)))
         )
     return [
@@ -171,7 +182,9 @@ def pending_digests(conn: Any, now: datetime) -> list[CompletionDigest]:
     ]
 
 
-def mark_digest_delivered(conn: Any, event_ids: list[int], inbound_id: int) -> None:
+def mark_digest_delivered(
+    conn: psycopg.Connection[Any], event_ids: list[int], inbound_id: int
+) -> None:
     """Attach one committed digest inbound to every event it summarizes."""
     with conn.cursor() as cursor:
         cursor.execute(
@@ -181,7 +194,7 @@ def mark_digest_delivered(conn: Any, event_ids: list[int], inbound_id: int) -> N
         )
 
 
-def prune_delivered_notices(conn: Any, before: datetime) -> int:
+def prune_delivered_notices(conn: psycopg.Connection[Any], before: datetime) -> int:
     """Delete delivered buffer rows once their canary inspection window closes."""
     with conn.cursor() as cursor:
         cursor.execute(

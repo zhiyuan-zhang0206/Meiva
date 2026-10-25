@@ -4,8 +4,7 @@ import logging
 
 from psycopg_pool import ConnectionPool
 
-from base.events.live.bus import EventBus
-from base.events.notifications.publish import announce_sync
+from base.events.notifications.publish import SyncPublisher, announce_sync
 from base.events.notifications.store import pending_sync
 
 _log = logging.getLogger("base.events.notifications.outbox")
@@ -30,7 +29,7 @@ _log = logging.getLogger("base.events.notifications.outbox")
 # `notification_id`, and a duplicate ping is cheaper than a missing decision.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
 def republish_pending(
-    pool: ConnectionPool, bus: EventBus | None, *, min_age_seconds: float, limit: int
+    pool: ConnectionPool, bus: SyncPublisher | None, *, min_age_seconds: float, limit: int
 ) -> int:
     if bus is None:
         return 0

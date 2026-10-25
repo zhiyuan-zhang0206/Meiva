@@ -18,9 +18,13 @@ import os
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from base.native_process.kernel_identity import pid_starttime_ticks
+
+
+def _is_record_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
 
 
 def record_path(name: str) -> Path:
@@ -74,9 +78,9 @@ class SessionRecord:
             data = json.loads(path.read_text())
         except (ValueError, OSError):
             return None
-        if not isinstance(data, dict) or "pid" not in data:
+        if not _is_record_dict(data) or "pid" not in data:
             return None
-        record = cast("dict[str, Any]", data)
+        record = data
         return cls(
             pid=int(record["pid"]),
             create_time=float(record.get("create_time", 0.0)),

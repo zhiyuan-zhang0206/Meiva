@@ -6,7 +6,7 @@ import json as _json
 import uuid as _uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import Any, Protocol, TypeGuard
 
 from base.agents.context import MeivaContext
 from base.agents.context.clients import GatewayHandle
@@ -187,6 +187,10 @@ def raise_from_response(resp: TransportResponse) -> None:
     raise EXCEPTION_BY_REASON[reason](body["detail"])
 
 
+def _is_json_object(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 def _wire_reason(resp: TransportResponse) -> tuple[ErrorReason, dict[str, Any]] | None:
     """Parse the wire `reason` from a non-2xx response body, or None.
 
@@ -208,9 +212,9 @@ def _wire_reason(resp: TransportResponse) -> tuple[ErrorReason, dict[str, Any]] 
         # protocol-mismatch class; falls through to the clean HTTP error
         # instead of escaping and masking the status code.
         return None
-    if not isinstance(raw_body, dict):
+    if not _is_json_object(raw_body):
         return None
-    body = cast(dict[str, Any], raw_body)
+    body = raw_body
     try:
         reason = ErrorReason(body["reason"])
     except (KeyError, ValueError):
@@ -351,7 +355,7 @@ def post(
     # our None straight through therefore disabled the client's timeout on every
     # POST in this module rather than falling back to it, so a gateway route that
     # stopped responding parked its SDK callers forever instead of raising.
-    per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else cast(httpx.Timeout, timeout)
+    per_call: Any = httpx.USE_CLIENT_DEFAULT if timeout is None else timeout
 
     # Inherit retry semantics from the route's doorplate unless the caller
     # overrides: server promises (base/api_contracts/contracts.py), clients inherit.
@@ -399,7 +403,7 @@ def get(
     """
     import httpx
 
-    per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else cast(httpx.Timeout, timeout)
+    per_call: Any = httpx.USE_CLIENT_DEFAULT if timeout is None else timeout
     retries = request_max_retries(context) if max_retries is None else max_retries
     return _request_with_retry(
         lambda: gateway_http(context).get(path, params=params, timeout=per_call),

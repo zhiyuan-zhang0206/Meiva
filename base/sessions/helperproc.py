@@ -164,12 +164,16 @@ def spawn_via_helper(
     return result["pid"]
 
 
+def _monotonic() -> float:
+    return time.monotonic()
+
+
 def _wait_until_dead(process: psutil.Process, timeout: float) -> bool:
     """Wait at most ``timeout`` for the captured process identity to stop."""
     if not _process_is_live(process):
         return True
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    deadline = _monotonic() + timeout
+    while _monotonic() < deadline:
         time.sleep(_KILL_POLL_S)
         if not _process_is_live(process):
             return True

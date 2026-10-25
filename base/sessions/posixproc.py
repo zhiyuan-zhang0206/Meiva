@@ -405,6 +405,10 @@ def process_group_has_live_members(
     return False
 
 
+def _monotonic() -> float:
+    return time.monotonic()
+
+
 def terminate_tree(
     proc: psutil.Process,
     *,
@@ -451,8 +455,8 @@ def terminate_tree(
         # command an unwound finally spawns mid-wait is not in any children
         # snapshot — only a group signal reaches both.
         _signal_group(pgid, signal.SIGTERM, process_control=process_control)
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
+        deadline = _monotonic() + timeout
+        while _monotonic() < deadline:
             if (
                 not process_is_live(proc)
                 and not process_group_has_live_members(pgid, process_control=process_control)

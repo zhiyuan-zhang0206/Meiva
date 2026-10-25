@@ -172,7 +172,7 @@ class AsyncTransport(Protocol):
     contract loads on the exec-child boot path, which must not load the connection stack.
     """
 
-    async def handle_async_request(self, request: Any) -> Any: ...
+    async def handle_async_request(self, request: Any) -> object: ...
 
 
 class DecisionBinding(Protocol):

@@ -22,7 +22,7 @@ message native.
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 from langchain_core.messages import UsageMetadata
 
@@ -91,7 +91,8 @@ def extract_reasoning_tokens(
     """
     # Primary: extract from usage_metadata.output_token_details
     if usage_metadata:
-        details = cast(dict[str, int], usage_metadata.get("output_token_details") or {})
+        raw_details: Any = usage_metadata.get("output_token_details") or {}
+        details: dict[str, int] = raw_details
         from_details = sum(
             int(value or 0)
             for key, value in details.items()

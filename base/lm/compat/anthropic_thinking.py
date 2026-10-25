@@ -35,10 +35,12 @@ class ThinkingTokensChatAnthropic(ChatAnthropic):
     """
 
     def _format_output(
-        self, data: Any, *, generation_info: dict[str, Any] | None = None, **kwargs: Any
+        self, data: object, *, generation_info: dict[str, Any] | None = None, **kwargs: object
     ) -> ChatResult:
-        result = super()._format_output(data, generation_info=generation_info, **kwargs)
-        speed = getattr(data.usage, "speed", None)
+        raw_data: Any = data
+        raw_kwargs: Any = kwargs
+        result = super()._format_output(raw_data, generation_info=generation_info, **raw_kwargs)
+        speed = getattr(raw_data.usage, "speed", None)
         if speed is not None:
             for generation in result.generations:
                 generation.message.response_metadata["speed"] = speed
@@ -46,19 +48,21 @@ class ThinkingTokensChatAnthropic(ChatAnthropic):
 
     def _make_message_chunk_from_anthropic_event(
         self,
-        event: Any,
+        event: object,
         *,
         stream_usage: bool = True,
         coerce_content_to_string: bool = False,
-        block_start_event: Any = None,
+        block_start_event: object = None,
     ) -> tuple[AIMessageChunk | None, Any]:
-        msg, block_start_event = super()._make_message_chunk_from_anthropic_event(
-            event,
+        raw_event: Any = event
+        raw_block_start: Any = block_start_event
+        msg, next_block_start = super()._make_message_chunk_from_anthropic_event(
+            raw_event,
             stream_usage=stream_usage,
             coerce_content_to_string=coerce_content_to_string,
-            block_start_event=block_start_event,
+            block_start_event=raw_block_start,
         )
-        return retain_usage_details(msg, event), block_start_event
+        return retain_usage_details(msg, event), next_block_start
 
 
 def retain_usage_details(msg: AIMessageChunk | None, event: object) -> AIMessageChunk | None:

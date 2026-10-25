@@ -110,6 +110,19 @@ def _settings_with(
     )
 
 
+@pytest.fixture
+def _restore_process_profile() -> Iterator[None]:
+    saved = os.environ.get("MEIVA_PROCESS_PROFILE")
+    try:
+        yield
+    finally:
+        if saved is None:
+            os.environ.pop("MEIVA_PROCESS_PROFILE", None)
+        else:
+            os.environ["MEIVA_PROCESS_PROFILE"] = saved
+
+
+@pytest.mark.usefixtures("_restore_process_profile")
 class TestSettingsKeepDatabaseCredentialsVerbatim:
     """Settings never derive or re-apply a database credential. A local plane's
     `.env` carries the credential-free endpoint; a process dials the write-
@@ -173,7 +186,7 @@ class TestSettingsKeepDatabaseCredentialsVerbatim:
     def test_agent_profile_rejects_local_owner_url_with_cluster_secret(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
+        os.environ["MEIVA_PROCESS_PROFILE"] = "agent"
         point_home(monkeypatch, Path.home() / ".meiva")
 
         with pytest.raises(ValueError, match="must receive a runner-class MEIVA_DB_URL"):
@@ -186,7 +199,7 @@ class TestSettingsKeepDatabaseCredentialsVerbatim:
     def test_agent_profile_keeps_local_owner_url_at_a_nondefault_home(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
+        os.environ["MEIVA_PROCESS_PROFILE"] = "agent"
         point_home(monkeypatch, tmp_path / "test-home")
 
         s = _settings_with(
@@ -197,10 +210,8 @@ class TestSettingsKeepDatabaseCredentialsVerbatim:
 
         assert s.db_url.startswith("postgresql://meiva:STALE@127.0.0.1:5432/meiva")
 
-    def test_gateway_profile_keeps_its_delivered_login(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "gateway")
+    def test_gateway_profile_keeps_its_delivered_login(self) -> None:
+        os.environ["MEIVA_PROCESS_PROFILE"] = "gateway"
 
         s = _settings_with(
             db_url=_pg("delivered", host="127.0.0.1:5432", user="meiva_g0_gateway"),
@@ -213,7 +224,7 @@ class TestSettingsKeepDatabaseCredentialsVerbatim:
     def test_agent_profile_accepts_a_generation_runner_login(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
+        os.environ["MEIVA_PROCESS_PROFILE"] = "agent"
         point_home(monkeypatch, Path.home() / ".meiva")
 
         s = _settings_with(
@@ -227,7 +238,7 @@ class TestSettingsKeepDatabaseCredentialsVerbatim:
     def test_agent_profile_refuses_a_generation_gateway_login(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
+        os.environ["MEIVA_PROCESS_PROFILE"] = "agent"
         point_home(monkeypatch, Path.home() / ".meiva")
 
         with pytest.raises(ValueError, match="must receive a runner-class MEIVA_DB_URL"):
@@ -237,10 +248,8 @@ class TestSettingsKeepDatabaseCredentialsVerbatim:
                 secret=_SECRET,
             )
 
-    def test_agent_profile_keeps_projected_runner_url(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("MEIVA_PROCESS_PROFILE", "agent")
+    def test_agent_profile_keeps_projected_runner_url(self) -> None:
+        os.environ["MEIVA_PROCESS_PROFILE"] = "agent"
         runner_pw = "runner-pw-v1"
 
         s = _settings_with(

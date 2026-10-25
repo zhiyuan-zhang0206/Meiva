@@ -7,7 +7,7 @@ from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NamedTuple, cast
+from typing import Any, NamedTuple, TypeGuard
 
 import psycopg
 
@@ -152,17 +152,21 @@ def _read_json(path: Path) -> object | None:
         return None
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 def _has_value(mapping: object, key: str) -> bool:
-    if not isinstance(mapping, dict):
+    if not _is_object_dict(mapping):
         return False
-    return bool(cast("dict[str, object]", mapping).get(key))
+    return bool(mapping.get(key))
 
 
 def _nested(value: object, key: str) -> dict[str, object] | None:
-    if not isinstance(value, dict):
+    if not _is_object_dict(value):
         return None
-    inner = cast("dict[str, object]", value).get(key)
-    return cast("dict[str, object]", inner) if isinstance(inner, dict) else None
+    inner = value.get(key)
+    return inner if _is_object_dict(inner) else None
 
 
 def _epoch_ms(value: object) -> datetime | None:
@@ -280,9 +284,9 @@ def _codex_login(home: Path) -> _LoginEvidence:
     if not auth.is_file():
         return _LoginEvidence(signed_in=None, detail=f"no {where}")
     record = _read_json(auth)
-    if not isinstance(record, dict):
+    if not _is_object_dict(record):
         return _LoginEvidence(signed_in=None, detail=f"{where} is unreadable")
-    data = cast("dict[str, object]", record)
+    data = record
     if _has_value(data, "OPENAI_API_KEY"):
         return _LoginEvidence(signed_in=True, detail=f"an API key is stored in {where}")
     tokens = _nested(data, "tokens")
@@ -333,9 +337,9 @@ def _antigravity_login(home: Path) -> _LoginEvidence:
 
 def _kimi_credentials_file_login(path: Path, *, where: str) -> _LoginEvidence:
     record = _read_json(path)
-    if not isinstance(record, dict):
+    if not _is_object_dict(record):
         return _LoginEvidence(signed_in=None, detail=f"{where} is unreadable")
-    data = cast("dict[str, object]", record)
+    data = record
     has_access = _has_value(data, "access_token")
     has_refresh = _has_value(data, "refresh_token")
     if not has_access and not has_refresh:
@@ -357,12 +361,12 @@ def _kimi_config_login(path: Path, *, where: str) -> _LoginEvidence:
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
         return _LoginEvidence(signed_in=None, detail=f"{where} is unreadable")
     providers = parsed.get("providers")
-    if not isinstance(providers, dict):
+    if not _is_object_dict(providers):
         return _LoginEvidence(signed_in=False, detail=f"{where} holds no credentials")
-    for raw_entry in cast("dict[str, object]", providers).values():
-        if not isinstance(raw_entry, dict):
+    for raw_entry in providers.values():
+        if not _is_object_dict(raw_entry):
             continue
-        entry = cast("dict[str, object]", raw_entry)
+        entry = raw_entry
         if _has_value(entry, "api_key"):
             return _LoginEvidence(signed_in=True, detail=f"an API key is stored in {where}")
         oauth = _nested(entry, "oauth")
@@ -453,9 +457,9 @@ def _answered_claude(done: subprocess.CompletedProcess[str]) -> _LoginEvidence:
         record = json.loads(done.stdout)
     except json.JSONDecodeError:
         return _LoginEvidence(signed_in=None, detail="claude auth status printed no JSON")
-    if not isinstance(record, dict):
+    if not _is_object_dict(record):
         return _LoginEvidence(signed_in=None, detail="claude auth status printed no login state")
-    data = cast("dict[str, object]", record)
+    data = record
     logged_in = data.get("loggedIn")
     if logged_in is True:
         return _LoginEvidence(

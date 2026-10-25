@@ -8,7 +8,6 @@ from psycopg_pool import ConnectionPool
 
 from base.db import create_agent
 from base.db.transaction import write_transaction
-from base.events.live.bus import EventBus, event_bus_config_from_settings
 from base.events.notifications.notices import stage_notice_notification
 from base.events.notifications.outbox import republish_pending
 from base.events.notifications.publish import announce_sync, deliver_sync
@@ -23,9 +22,8 @@ def _pool(db_url: str) -> ConnectionPool[psycopg.Connection[TupleRow]]:
 # Redis outage the transport already models: `publish_best_effort_sync` reports
 # the publication as failed by returning None, and the delivery must stay owed.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-class RecordingBus(EventBus):
+class RecordingBus:
     def __init__(self) -> None:
-        super().__init__(event_bus_config_from_settings())
         self.events: list[dict[str, Any]] = []
         self.drop = False
 

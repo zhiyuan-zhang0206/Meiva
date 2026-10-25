@@ -72,7 +72,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 from urllib.parse import urlsplit
 
 from base.cluster.port_preflight import ListenerDiscoveryError, strict_listeners_on
@@ -351,6 +351,14 @@ def recorded_pid(pidfile: Path) -> int | None:
         return None
 
 
+def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _health_payload(url: str, timeout_s: float) -> dict[str, object] | DaemonProbe:
     """The JSON object a health endpoint answered with, or the not-alive verdict
     that trying to read one produced.
@@ -379,14 +387,10 @@ def _health_payload(url: str, timeout_s: float) -> dict[str, object] | DaemonPro
             parsed = json.loads(exc.read(MAX_BODY_BYTES))
         except json.JSONDecodeError:
             return DaemonProbe.down(detail)
-        if isinstance(parsed, dict):
-            reasons_raw = cast("dict[str, object]", parsed).get("degraded_reasons")
-            if isinstance(reasons_raw, list):
-                reasons = "; ".join(
-                    reason
-                    for reason in cast("list[object]", reasons_raw)
-                    if isinstance(reason, str)
-                )
+        if _is_str_object_dict(parsed):
+            reasons_raw = parsed.get("degraded_reasons")
+            if _is_object_list(reasons_raw):
+                reasons = "; ".join(reason for reason in reasons_raw if isinstance(reason, str))
                 if reasons:
                     detail += f"; degraded: {reasons}"
         return DaemonProbe.down(detail)
@@ -396,11 +400,11 @@ def _health_payload(url: str, timeout_s: float) -> dict[str, object] | DaemonPro
         parsed: object = json.loads(body)
     except json.JSONDecodeError:
         return DaemonProbe.port_taken(f"healthz body is not JSON — foreign process on {url}")
-    if not isinstance(parsed, dict):
+    if not _is_str_object_dict(parsed):
         return DaemonProbe.port_taken(
             f"healthz body is not a JSON object — foreign process on {url}"
         )
-    return cast("dict[str, object]", parsed)
+    return parsed
 
 
 def probe_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonProbe:

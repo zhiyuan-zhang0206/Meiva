@@ -28,7 +28,7 @@ import math
 import time
 from collections.abc import Callable
 from enum import StrEnum
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 import redis.asyncio as aredis
 from redis.asyncio.client import PubSub as _RedisPubSub
@@ -87,6 +87,10 @@ class _Phase(StrEnum):
     STOP_CLEANUP = "stop-cleanup"
 
 
+def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 class RedisInboundListener:
     """Per-agent Redis pub/sub listener for inbound message wake-ups.
 
@@ -120,7 +124,7 @@ class RedisInboundListener:
         # `redis_factory` lets unit tests inject an in-memory Redis double without
         # patching `redis.asyncio.Redis.from_url`; `redis-py` types `from_url` as
         # partially unknown under strict pyright.
-        self._redis_factory: Callable[..., Any] = redis_factory or aredis.Redis.from_url  # pyright: ignore[reportUnknownMemberType]
+        self._redis_factory: Callable[..., aredis.Redis] = redis_factory or aredis.Redis.from_url  # pyright: ignore[reportUnknownMemberType]
         channel_source = (
             settings.data_plane.events_channel if events_channel is None else events_channel
         )
@@ -295,29 +299,26 @@ class RedisInboundListener:
         succeeds; on failure the local objects are closed before raising.
         """
         generation = self._generation
-        redis = cast(
-            "aredis.Redis",
-            self._redis_factory(
-                self._redis_url,
-                decode_responses=True,
-                socket_connect_timeout=SOCKET_CONNECT_TIMEOUT_S,
-                # Explicit None: redis-py >= 5 defaults socket_timeout to 5s, which
-                # would cut the listener's long blocking pubsub read every idle
-                # interval (same pin as base/redis_client.RESILIENCE_KWARGS).
-                socket_timeout=None,
-                health_check_interval=HEALTH_CHECK_INTERVAL_S,
-                socket_keepalive=True,
-                socket_keepalive_options=keepalive_options(),
-                # Dead-transport detection: see `TransportAwareAsyncConnection`.
-                # Without it, a pubsub connection whose asyncio transport already
-                # fired connection_lost (network outage) still reports
-                # `is_connected=True`; the next `parse_response` health-check PING
-                # then writes the dead transport and raises
-                # `TypeError: 'NoneType' object is not callable`, which escaped
-                # redis-py's except chain and killed an agent's claim node
-                # (agent 2613, 2026-08-04).
-                connection_class=TransportAwareAsyncConnection,
-            ),
+        redis = self._redis_factory(
+            self._redis_url,
+            decode_responses=True,
+            socket_connect_timeout=SOCKET_CONNECT_TIMEOUT_S,
+            # Explicit None: redis-py >= 5 defaults socket_timeout to 5s, which
+            # would cut the listener's long blocking pubsub read every idle
+            # interval (same pin as base/redis_client.RESILIENCE_KWARGS).
+            socket_timeout=None,
+            health_check_interval=HEALTH_CHECK_INTERVAL_S,
+            socket_keepalive=True,
+            socket_keepalive_options=keepalive_options(),
+            # Dead-transport detection: see `TransportAwareAsyncConnection`.
+            # Without it, a pubsub connection whose asyncio transport already
+            # fired connection_lost (network outage) still reports
+            # `is_connected=True`; the next `parse_response` health-check PING
+            # then writes the dead transport and raises
+            # `TypeError: 'NoneType' object is not callable`, which escaped
+            # redis-py's except chain and killed an agent's claim node
+            # (agent 2613, 2026-08-04).
+            connection_class=TransportAwareAsyncConnection,
         )
         pubsub: _RedisPubSub | None = None
         try:
@@ -441,11 +442,11 @@ class RedisInboundListener:
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
                 return
-            msg = cast(
-                "dict[str, Any] | None",
-                await pubsub.get_message(timeout=remaining, ignore_subscribe_messages=True),
+            raw_pubsub: Any = pubsub
+            msg: Any = await raw_pubsub.get_message(
+                timeout=remaining, ignore_subscribe_messages=True
             )
-            if msg is not None and msg.get("type") == "message":
+            if _is_str_dict(msg) and msg.get("type") == "message":
                 return  # Got a real inbound wake-up
             # msg is None (timeout) or a subscribe/unsubscribe confirmation — loop
 

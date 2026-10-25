@@ -15,15 +15,6 @@ exports = ["cache_writes.py"]
 "__init__.py#Path.read_text" = 1
 "__init__.py#datetime.now" = 1
 
-[debt.type-cast]
-"__init__.py#cast load_archive" = 1
-"__init__.py#cast plugin_model_price" = 1
-"__init__.py#cast tally_tokens" = 1
-"catalog.py#cast _parse_model_price" = 2
-"catalog.py#cast _parse_periods" = 1
-"catalog.py#cast _parse_tiers" = 1
-"catalog.py#cast parse_catalog" = 2
-
 [debt.wide-params]
 "__init__.py#def cost_usd" = 1
 "__init__.py#def plugin_model_price" = 1
