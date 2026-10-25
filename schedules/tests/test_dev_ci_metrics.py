@@ -23,6 +23,7 @@ from base.agents.context import MeivaContext
 from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentity
 from base.db import Database
+from base.host.proc import run_bounded
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.gateway_client import use_client
@@ -40,7 +41,7 @@ from schedules.plans.ci_workflows import (
     previous_day,
 )
 from schedules.plans.directory_plan import ReportRecipient
-from scripts.ci.pull_requests.export_process import GhProcess
+from scripts.ci.pull_requests.gh_process import GhProcess
 from schedules.tests.gateway_directory import (
     AgentRowSpec,
     DirectoryPage,
@@ -253,3 +254,29 @@ def test_a_failing_exporter_wakes_the_p0_lead_with_the_failure(
         "Dev/CI metrics collection failed:\nRuntimeError: ci-runs-export exited non-zero"
     )
     assert not (tmp_path / "snapshot.json").exists()
+
+
+def test_ci_metrics_import_does_not_load_the_exporter(tmp_path: Path) -> None:
+    user = tmp_path / "user"
+    user.mkdir()
+    home = tmp_path / "meiva"
+    result = run_bounded(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-m",
+            "schedules.tests.children.ci_metrics_import_child",
+        ],
+        env={
+            "HOME": str(user),
+            "MEIVA_HOME": str(home),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "PATH": "/usr/bin:/bin",
+        },
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not home.exists()

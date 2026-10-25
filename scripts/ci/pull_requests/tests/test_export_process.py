@@ -12,6 +12,7 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_settings
+from base.host.proc import run_bounded
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import Event, EventPipeline
@@ -189,3 +190,35 @@ def test_export_entry_captures_before_fetch_or_borrows_the_supplied_writer(
         assert (tmp_path / "snapshot.json").is_file()
     finally:
         pipeline.stop(timeout=2)
+
+
+@pytest.mark.parametrize("mode", ["leaf", "api"])
+def test_command_type_import_does_not_start_the_exporter(mode: str, tmp_path: Path) -> None:
+    import sys
+
+    user = tmp_path / "user"
+    user.mkdir()
+    home = tmp_path / "meiva"
+    source = Path(__file__).parents[1] / "gh_process.py"
+    result = run_bounded(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-m",
+            "scripts.ci.pull_requests.tests.gh_process_import_child",
+            mode,
+            str(source),
+        ],
+        env={
+            "HOME": str(user),
+            "MEIVA_HOME": str(home),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "PATH": "/usr/bin:/bin",
+        },
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not home.exists()

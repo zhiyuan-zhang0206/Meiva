@@ -1,9 +1,7 @@
 """The standalone CI samplers' database gate and finite event-writer lifetime."""
 
-import subprocess
-from collections.abc import Generator, Sequence
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Literal, Protocol
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.boot import machine_from_boot
@@ -16,19 +14,7 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
 from base.telemetry import DrainStatus, EventPipeline, build_pipeline
 
-__all__ = ["GhProcess", "owned_event_pipeline"]
-
-
-class GhProcess(Protocol):
-    def __call__(
-        self,
-        argv: Sequence[str],
-        /,
-        *,
-        timeout: float,
-        capture_output: Literal[True],
-        text: Literal[True],
-    ) -> subprocess.CompletedProcess[str]: ...
+__all__ = ["owned_event_pipeline"]
 
 
 @contextmanager
