@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import TracebackType
-from typing import Protocol, Self
+from typing import Any, Protocol, Self
 
 __all_for_meiva__ = []
 
@@ -18,7 +18,7 @@ class _Attachment(Protocol):
 
     def close(self) -> None: ...
 
-    def native_snapshot(self) -> object: ...
+    def native_snapshot(self) -> Any: ...
 
     def __enter__(self) -> Self: ...
 
