@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
+from typing import assert_never
 
 from base.cluster.authority.provision_plan import (
     CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS,
@@ -203,16 +204,22 @@ def provision_database(
         resume_initialization=resume_initialization,
         public_table_count=table_count,
     )
-    if action == "noop":
-        return False
-
-    if action == "create_and_apply":
-        with connect(base_admin_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
-            conn.execute(
-                pgsql.SQL("CREATE DATABASE {} OWNER {}").format(
-                    pgsql.Identifier(identity), pgsql.Identifier(identity)
+    match action:
+        case "noop":
+            return False
+        case "create_and_apply":
+            with connect(
+                base_admin_url, expected_data_dir=expected_data_dir, autocommit=True
+            ) as conn:
+                conn.execute(
+                    pgsql.SQL("CREATE DATABASE {} OWNER {}").format(
+                        pgsql.Identifier(identity), pgsql.Identifier(identity)
+                    )
                 )
-            )
+        case "resume_apply":
+            pass
+        case _:
+            assert_never(action)
     schema_sql = (Path(__file__).resolve().parents[2] / "db" / "schema.sql").read_text()
     try:
         # Apply the schema as the administrator ACTING AS the cluster role, so
@@ -388,11 +395,16 @@ def ensure_checkpoint_schema(
         database_created=database_created,
         resume_partial=resume_partial,
     )
-    if action == "noop":
-        return
-    if action == "verify_only":
-        assert_checkpoint_schema_current(owner_dsn, expected_data_dir=expected_data_dir)
-        return
+    match action:
+        case "noop":
+            return
+        case "verify_only":
+            assert_checkpoint_schema_current(owner_dsn, expected_data_dir=expected_data_dir)
+            return
+        case "setup":
+            pass
+        case _:
+            assert_never(action)
     try:
         schema.setup(
             base_admin_url=base_admin_url, identity=identity, expected_data_dir=expected_data_dir
