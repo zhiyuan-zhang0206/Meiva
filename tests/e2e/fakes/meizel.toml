@@ -12,16 +12,6 @@ exports = ["scenario_recording.py", "scenarios"]
 [external]
 "child_budget_writer.py" = "executes the generated scenario program passed on its command line"
 
-[debt.env-patch]
-"test_recording.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
-"test_watcher_resurrection.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
-
-[debt.first-party-patch]
-"child_budget_writer.py#assignment meiva.agents.send_message" = 1
-"child_budget_writer.py#assignment meiva.agents.spawn" = 1
-"child_budget_writer.py#assignment meiva.context" = 1
-"test_budget_handoff.py#monkeypatch.setattr tests.e2e.fakes.scenarios.budget_handoff.scratch_root" = 1
-
 [debt.stdlib-patch]
 "child_budget_writer.py#assignment os.fdopen" = 1
 "child_budget_writer.py#assignment pathlib.Path.open" = 1

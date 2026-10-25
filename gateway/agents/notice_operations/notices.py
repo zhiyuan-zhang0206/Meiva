@@ -8,7 +8,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Annotated, Any, LiteralString, cast
+from typing import Annotated, Any, TypeGuard
 
 import psycopg
 from fastapi import APIRouter, Header, HTTPException, Query, Request
@@ -122,13 +122,28 @@ def _open_notices_blocking(
 # meiva:note
 # Sync resolved-history query — via to_thread.
 def _resolved_notices_blocking(
-    pool: ConnectionPool, sql: str, params: list[object]
+    pool: ConnectionPool,
+    resolved_limit: int,
+    *,
+    before_at: datetime | None = None,
+    before_id: int | None = None,
 ) -> list[tuple[Any, ...]]:
     with pool.connection() as conn, conn.cursor() as cur:
-        # meiva:note
-        # The composed query is assembled from fixed literal fragments + typed
-        # params only; psycopg's static type demands LiteralString.
-        cur.execute(cast(LiteralString, sql), params)
+        if before_at is not None:
+            cur.execute(
+                _SELECT
+                + "WHERE n.require_response AND n.resolved_at IS NOT NULL "
+                + "AND (n.resolved_at, n.id) < (%s, %s) "
+                + "ORDER BY n.resolved_at DESC, n.id DESC LIMIT %s",
+                (before_at, before_id, resolved_limit),
+            )
+        else:
+            cur.execute(
+                _SELECT
+                + "WHERE n.require_response AND n.resolved_at IS NOT NULL "
+                + "ORDER BY n.resolved_at DESC, n.id DESC LIMIT %s",
+                (resolved_limit,),
+            )
         return cur.fetchall()
 
 
@@ -193,19 +208,14 @@ async def get_notices_feed(
         limit = gateway_config(request).display.notices_open_default_limit
     if resolved_limit is None:
         resolved_limit = gateway_config(request).display.notices_resolved_default_page
-    resolved_where = "WHERE n.require_response AND n.resolved_at IS NOT NULL "
-    resolved_params: list[object] = []
-    if before_at is not None:
-        resolved_where += "AND (n.resolved_at, n.id) < (%s, %s) "
-        resolved_params.extend([before_at, before_id])
-    resolved_params.append(resolved_limit)
     awaiting_rows, resolved_rows = await asyncio.gather(
         asyncio.to_thread(_open_notices_blocking, pool, limit),
         asyncio.to_thread(
             _resolved_notices_blocking,
             pool,
-            _SELECT + resolved_where + "ORDER BY n.resolved_at DESC, n.id DESC LIMIT %s",
-            resolved_params,
+            resolved_limit,
+            before_at=before_at,
+            before_id=before_id,
         ),
     )
     resolved_page = [_row_to_item(r) for r in resolved_rows]
@@ -398,13 +408,7 @@ async def post_notice_create(
                 else None,
             )
             if previous is not None:
-                return (
-                    int(cast(int, previous["global_id"])),
-                    int(cast(int, previous["id"])),
-                    cast(list[dict[str, object]], previous["pending_notices"]),
-                    True,
-                    cast(int | None, previous.get("notification_id")),
-                )
+                return _replayed_create_receipt(previous)
             validate_creation(body)
             validate_creation_state(conn, body)
             # meiva:note
@@ -544,6 +548,31 @@ async def post_notice_create(
 
 # meiva:note
 # ── keyed notice-operation receipts (owned by the notice transaction, never a response cache) ──
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_dict_list(value: object) -> TypeGuard[list[dict[str, object]]]:
+    return _is_object_list(value) and all(isinstance(item, dict) for item in value)
+
+
+def _replayed_create_receipt(
+    previous: dict[str, object],
+) -> tuple[int, int, list[dict[str, object]], bool, int | None]:
+    global_id = previous.get("global_id")
+    local_id = previous.get("id")
+    pending = previous.get("pending_notices")
+    notification_id = previous.get("notification_id")
+    if (
+        not isinstance(global_id, int)
+        or not isinstance(local_id, int)
+        or not _is_dict_list(pending)
+        or (notification_id is not None and not isinstance(notification_id, int))
+    ):
+        raise TypeError("stored notice creation receipt has invalid shape")
+    return global_id, local_id, pending, True, notification_id
 
 
 # meiva:note

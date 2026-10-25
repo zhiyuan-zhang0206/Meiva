@@ -1,16 +1,11 @@
 exports = ["test_pgbouncer_wire.py"]
 
-[debt.env-patch]
-"test_otel_bootstrap_relay.py#monkeypatch.delitem os.environ.MEIVA_TELEMETRY_OTLP_ENDPOINT" = 1
-"test_otel_bootstrap_relay.py#patch.dict os.environ" = 1
-
 [debt.first-party-patch]
 "test_converge_lgtm_contract.py#monkeypatch.setattr base.config.settings.observability.lgtm_listen_host" = 2
 "test_operator_database.py#monkeypatch.setattr base.config.settings.data_plane.db_pool_max_size" = 1
 "test_operator_database.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 3
 "test_operator_database.py#monkeypatch.setattr base.config.settings.data_plane.pgbouncer_enabled" = 2
 "test_operator_database.py#monkeypatch.setattr base.telemetry.build_pipeline" = 1
-"test_otel_bootstrap_relay.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_pgbouncer_config.py#monkeypatch.setattr base.cluster.dataplane.direct_url.get_record" = 1
 "test_pgbouncer_config.py#monkeypatch.setattr base.cluster.get_record" = 1
 "test_pgbouncer_config.py#monkeypatch.setattr base.db.connections.ConnectionPool" = 1

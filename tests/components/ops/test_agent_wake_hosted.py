@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from typing import Any
 
 import psycopg
 import pytest
@@ -17,19 +18,33 @@ from base.lm.catalog import ModelCatalog
 from ops.agents import wake
 
 
+# meiva:note
+# Subscribe to Redis inbound channels directly to assert wake notifications; redis-py pubsub methods are untyped.
 @pytest.fixture
-def wakes() -> Iterator[list[tuple[int, str]]]:
+def wakes(event_bus: EventBus) -> Iterator[Callable[[], list[tuple[int, str]]]]:
+    prefix = f"{event_bus.channel}:inbound:"
+    redis = event_bus.sync_redis(decode_responses=True)
+    pubsub = redis.pubsub()  # pyright: ignore[reportUnknownMemberType]
+    pubsub.psubscribe(f"{prefix}*")  # pyright: ignore[reportUnknownMemberType]
+    assert pubsub.get_message(timeout=5)["type"] == "psubscribe"  # pyright: ignore[reportUnknownMemberType, reportOptionalSubscript]
     captured: list[tuple[int, str]] = []
-    yield captured
 
+    def drain() -> list[tuple[int, str]]:
+        while True:
+            # meiva:note
+            # The redis-py pubsub client is untyped; drain published resurrection wakes ("0").
+            message: dict[str, Any] | None = pubsub.get_message(timeout=0.05)  # pyright: ignore[reportUnknownMemberType, reportAssignmentType]
+            if message is None:
+                return list(captured)
+            if message["type"] == "pmessage" and str(message["data"]) == "0":
+                channel = str(message["channel"])
+                captured.append((int(channel.removeprefix(prefix)), str(message["data"])))
 
-@pytest.fixture(autouse=True)
-def _capture_wakes(monkeypatch: pytest.MonkeyPatch, wakes: list[tuple[int, str]]) -> Iterator[None]:
-    def _record(_db: object, _bus: object, agent_id: int, payload: str) -> None:
-        wakes.append((agent_id, payload))
-
-    monkeypatch.setattr(wake, "publish_inbound_wake", _record)
-    yield
+    try:
+        yield drain
+    finally:
+        pubsub.close()  # pyright: ignore[reportUnknownMemberType]
+        redis.close()
 
 
 def _park(
@@ -83,7 +98,7 @@ def _kind_rows(db: psycopg.Connection, aid: int, kind: str) -> int:
 
 def test_resurrect_agent_hosted_flips_and_wakes(
     db_conn: psycopg.Connection,
-    wakes: list[tuple[int, str]],
+    wakes: Callable[[], list[tuple[int, str]]],
     database: Database,
     event_bus: EventBus,
     *,
@@ -109,12 +124,11 @@ def test_resurrect_agent_hosted_flips_and_wakes(
     assert out == aid
     assert _row(db_conn, aid) == "idling"
     assert _kind_rows(db_conn, aid, "resurrect") == 1
-    assert wakes == [(aid, "0")]
+    assert wakes() == [(aid, "0")]
 
 
 def test_resurrect_agent_hosted_clears_the_corpse_marker(
     db_conn: psycopg.Connection,
-    wakes: list[tuple[int, str]],
     database: Database,
     event_bus: EventBus,
     *,
@@ -150,7 +164,7 @@ def test_resurrect_agent_hosted_clears_the_corpse_marker(
 
 def test_resurrect_agent_hosted_keeps_trigger_guard(
     db_conn: psycopg.Connection,
-    wakes: list[tuple[int, str]],
+    wakes: Callable[[], list[tuple[int, str]]],
     database: Database,
     event_bus: EventBus,
     *,
@@ -177,7 +191,7 @@ def test_resurrect_agent_hosted_keeps_trigger_guard(
             trigger_inbound_kind=InboundKind.CHAT,
         )
     assert _row(db_conn, aid) == "terminated"
-    assert wakes == []
+    assert wakes() == []
 
 
 @pytest.mark.parametrize("guarded", [False, True])
@@ -317,7 +331,7 @@ def _guarded_resurrect(
 
 def test_reaped_crash_row_refuses_leftover_work(
     db_conn: psycopg.Connection,
-    wakes: list[tuple[int, str]],
+    wakes: Callable[[], list[tuple[int, str]]],
     database: Database,
     event_bus: EventBus,
     *,
@@ -346,7 +360,7 @@ def test_reaped_crash_row_refuses_leftover_work(
             trigger_inbound_kind=InboundKind.CHAT,
         )
     assert _row(db_conn, aid) == "terminated"
-    assert wakes == []
+    assert wakes() == []
 
 
 def test_operator_death_still_refuses_leftover_work(
@@ -506,7 +520,7 @@ def test_tripped_recovery_breaker_refuses_the_reaped_crash_trigger(
 
 def test_system_resurrect_is_not_capped_by_unconsumed_resurrect_rows(
     db_conn: psycopg.Connection,
-    wakes: list[tuple[int, str]],
+    wakes: Callable[[], list[tuple[int, str]]],
     database: Database,
     event_bus: EventBus,
     *,
@@ -536,12 +550,12 @@ def test_system_resurrect_is_not_capped_by_unconsumed_resurrect_rows(
     _guarded_resurrect(aid, trigger, database_gate=database_gate, machine_identity=machine_identity)
 
     assert _row(db_conn, aid) == "idling"
-    assert wakes == [(aid, "0")]
+    assert wakes() == [(aid, "0")]
 
 
 def test_manual_resurrect_stays_exempt_from_the_gates(
     db_conn: psycopg.Connection,
-    wakes: list[tuple[int, str]],
+    wakes: Callable[[], list[tuple[int, str]]],
     database: Database,
     event_bus: EventBus,
     *,
@@ -576,7 +590,7 @@ def test_manual_resurrect_stays_exempt_from_the_gates(
         == aid
     )
     assert _row(db_conn, aid) == "idling"
-    assert wakes == [(aid, "0")]
+    assert wakes() == [(aid, "0")]
     row = db_conn.execute(
         "SELECT permanent_reject_streak, wake_suppress_reason FROM agents_meta WHERE id = %s",
         (aid,),
@@ -588,7 +602,7 @@ def test_manual_resurrect_stays_exempt_from_the_gates(
 @pytest.mark.parametrize("guarded", [False, True])
 def test_any_terminated_row_resurrects_with_a_cleared_runtime_identity(
     db_conn: psycopg.Connection,
-    wakes: list[tuple[int, str]],
+    wakes: Callable[[], list[tuple[int, str]]],
     has_identity: bool,
     guarded: bool,
     database: Database,
@@ -633,4 +647,4 @@ def test_any_terminated_row_resurrects_with_a_cleared_runtime_identity(
         "SELECT runtime_generation, runtime_owner FROM agents_meta WHERE id=%s", (aid,)
     ).fetchone() == (None, None)
     assert _kind_rows(db_conn, aid, "resurrect") == 1
-    assert wakes == [(aid, "0")]
+    assert wakes() == [(aid, "0")]

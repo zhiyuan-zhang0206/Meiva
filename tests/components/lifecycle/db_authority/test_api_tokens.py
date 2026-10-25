@@ -34,6 +34,7 @@ from base.config import settings
 from base.daemon.http_transport import start_daemon_http
 from base.host.db_authority import api, delivery, ledger, model, unit
 from base.host.net.auth import ClusterSecretMissingError, bearer_header, cookie_name
+from base.paths.tests.homes import point_home
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane.instance.launch_delivery import LaunchDelivery
 from gateway.http.auth import request_principal
@@ -71,7 +72,7 @@ def gateway(
     (home / ".env").write_text(
         f"MEIVA_DB_URL={settings.data_plane.db_url}\nMEIVA_REDIS_URL={settings.data_plane.redis_url}\n"
     )
-    monkeypatch.setenv("MEIVA_HOME", str(home))
+    point_home(monkeypatch, home)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _HUMAN)
     return home
 
@@ -152,12 +153,10 @@ def test_gateway_api_admits_the_active_generation_and_the_human_secret(
 def test_a_blank_human_secret_admits_only_the_active_generation(
     gateway_data_plane: None,
     gateway: Path,
-    monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentityReader,
 ) -> None:
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
     tokens = _tokens(gateway).api
-    with anonymous_gateway_client(machine=machine_identity) as client:
+    with anonymous_gateway_client(machine=machine_identity, cluster_secret="") as client:
         assert client.get("/api/agents").status_code == 401
         assert client.get("/api/agents", headers=bearer_header("")).status_code == 401
         assert client.get("/api/agents", headers=bearer_header(tokens.runner)).status_code == 200
@@ -225,17 +224,18 @@ def _cookie_authenticates(client: TestClient, cookie: str) -> tuple[int, bool]:
 def test_a_human_minted_session_dies_with_the_rotated_secret(
     gateway_data_plane: None,
     gateway: Path,
-    monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentityReader,
 ) -> None:
     """A browser logged in with the human secret stays authenticated while the secret
     holds, but not past a rotation of the secret itself: the restarted gateway admits
     only sessions its current secret minted."""
+    del gateway
     with anonymous_gateway_client(machine=machine_identity) as client:
         cookie = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
         assert _cookie_authenticates(client, cookie) == (200, True)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "rotated-" + "r" * 40)
-    with anonymous_gateway_client(machine=machine_identity) as rotated_client:
+    with anonymous_gateway_client(
+        machine=machine_identity, cluster_secret="rotated-" + "r" * 40
+    ) as rotated_client:
         assert _cookie_authenticates(rotated_client, cookie) == (401, False)
 
 
@@ -311,12 +311,11 @@ def test_the_sessions_list_shows_only_sessions_that_authenticate(
 def test_a_machine_token_cannot_choose_the_human_secret(
     gateway_data_plane: None,
     gateway: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    machine_identity: MachineIdentityReader,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     """A runner token authenticates the administrator, but it must not turn a
     generation-bound admission into a human bearer of its choosing."""
-    monkeypatch.setattr(settings.general, "machine_name", "gateway-host")
+    machine_identity.set(name="gateway-host")
     runner = _tokens(gateway).api.runner
     env_before = (gateway / ".env").read_bytes()
     with anonymous_gateway_client(machine=machine_identity) as client:
@@ -452,7 +451,7 @@ def runner_home(tmp_path: Path, gateway: Path, monkeypatch: pytest.MonkeyPatch) 
         served_endpoint=_ENDPOINT,
         probe=lambda _dsn: None,
     )
-    monkeypatch.setenv("MEIVA_HOME", str(home))
+    point_home(monkeypatch, home)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
     return home
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import cast
+from typing import TypeGuard
 
 from base.api_contracts.agent_contract import ForkConfigChangeNotAllowed
 
@@ -27,15 +27,18 @@ class ForkConfigPlan:
     tail_skills: list[str] | None
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 # meiva:note
 # A skill list as typed as it can be: None for anything that is not a list of strings
 # (a missing key included), since the fork rule only reasons about real skill lists.
 def _skill_list(value: object) -> list[str] | None:
-    if not isinstance(value, list):
+    if not _is_object_list(value):
         return None
-    items = cast(list[object], value)
-    strings = [item for item in items if isinstance(item, str)]
-    return strings if len(strings) == len(items) else None
+    strings = [item for item in value if isinstance(item, str)]
+    return strings if len(strings) == len(value) else None
 
 
 # meiva:note

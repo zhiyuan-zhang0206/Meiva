@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
+from base.paths.tests.homes import point_home
 from tests.e2e.fakes.scenario_recording import (
     RecordingModel,
     exec_call,
@@ -102,9 +103,9 @@ async def test_exhausted_attempt_still_records_its_input() -> None:
 def test_scratch_root_resolves_current_home_at_call_time(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "first"))
+    point_home(monkeypatch, tmp_path / "first")
     first = scratch_root("record")
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "second"))
+    point_home(monkeypatch, tmp_path / "second")
     second = scratch_root("record")
     assert first != second
     assert first.name == "meiva-e2e-record-first"

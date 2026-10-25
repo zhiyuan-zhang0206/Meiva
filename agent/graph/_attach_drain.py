@@ -13,7 +13,7 @@ Two call sites share the pack:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from langchain_core.messages import HumanMessage
@@ -26,7 +26,11 @@ from base.lm.catalog import ModelCatalog
 
 
 def build_attach_message(
-    pending: AttachState, model: str, *, catalog: ModelCatalog
+    pending: AttachState,
+    model: str,
+    *,
+    catalog: ModelCatalog,
+    created_at: datetime,
 ) -> HumanMessage | None:
     """Pack one attach message from pending attachments, or None when empty.
 
@@ -40,7 +44,7 @@ def build_attach_message(
     pack = pack_attachments(model, entries, catalog=catalog)
     if pack is None:
         return None
-    return attach_message(blocks=pack.blocks, text=pack.text, created_at=datetime.now(UTC))
+    return attach_message(blocks=pack.blocks, text=pack.text, created_at=created_at)
 
 
 def build_attach_drain(state: BaseAgentState, ctx: MeivaContext) -> dict[str, Any] | None:
@@ -51,7 +55,12 @@ def build_attach_drain(state: BaseAgentState, ctx: MeivaContext) -> dict[str, An
     update never ran (compact halt / crashed exec).
     """
     model = getattr(ctx.llm, "model_name", None) or ctx.require_agent().brain.llm_model
-    message = build_attach_message(state.attach, model, catalog=ctx.require_catalog())
+    message = build_attach_message(
+        state.attach,
+        model,
+        catalog=ctx.require_catalog(),
+        created_at=ctx.require_clock().now(),
+    )
     if message is None:
         return None
     return {"messages": [message], "attach": AttachState()}

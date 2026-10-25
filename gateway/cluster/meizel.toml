@@ -18,8 +18,10 @@ exports = ["bootstrap.py", "harness_probe.py", "harness_rows.py", "machine_pause
 "schemas.py" = "strict"
 "serve_plan.py" = "strict"
 
+[roots]
+"server.py" = { kinds = ["pid"], why = "gateway process root writes its own OS PID to the gateway pidfile for supervisor healthchecks" }
+
 [debt.ambient-read]
 "machine_pause.py#clock datetime.datetime.now" = 1
 "router.py#clock datetime.datetime.now" = 1
-"server.py#pid os.getpid" = 1
 "status.py#clock datetime.datetime.now" = 3

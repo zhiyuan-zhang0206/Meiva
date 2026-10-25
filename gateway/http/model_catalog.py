@@ -1,7 +1,6 @@
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import cast
 
 from fastapi import Request
 
@@ -48,4 +47,7 @@ def catalog_for_observation(result: ModelCatalog | CatalogLoadFailure) -> ModelC
 # The cluster default model as of this request. The config authority is the live owner, so the
 # request is the unit of work that reads it once and hands the value down.
 def request_default_model(request: Request) -> str:
-    return cast(str, request.app.state.config_authority.service_field_value("llm_model"))
+    value = request.app.state.config_authority.service_field_value("llm_model")
+    if not isinstance(value, str):
+        raise TypeError("llm_model must be a string")
+    return value

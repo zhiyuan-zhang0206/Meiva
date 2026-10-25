@@ -276,7 +276,6 @@ def test_placement_or_bad_proof_rejected_before_inbound(
 def test_receiver_same_physical_root_different_home_counts_once_and_verifies_ready(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
-    monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentityReader,
 ):
@@ -289,37 +288,36 @@ def test_receiver_same_physical_root_different_home_counts_once_and_verifies_rea
     )
     unit = request.target.model_copy(update={"home": request.target.home + "-other"})
     request = request.model_copy(update={"target": unit})
-
-    def actual_unit(*, local_machine: str) -> UnitIdentity:
-        assert local_machine == machine_identity.name()
-        return unit
-
-    monkeypatch.setattr(receiver, "current_unit", actual_unit)
-    monkeypatch.setattr(receiver, "MAX_AGENT_UPLOAD_BYTES", 5)
-    proof = receiver.receive(
+    config = receiver.ReceiverConfig(
+        unit=unit,
+        user_home=client.app.state.gateway_config.upload_home,
+        access=client.app.state.gateway_access,
+        quota_bytes=5,
+        quota_files=client.app.state.gateway_config.max_agent_upload_files,
+    )
+    proof = receiver.copy_batch(
         client.app.state.db_pool,
         request,
-        local_machine=machine_identity.name(),
+        config,
     )
     assert proof.target == unit
     assert (
-        receiver.receive(
+        receiver.copy_batch(
             client.app.state.db_pool,
             request,
-            local_machine=machine_identity.name(),
+            config,
         )
         == proof
     )
     path = Path(proof.directory) / request.manifest.objects[0].name
     path.write_bytes(b"wrong")
     with pytest.raises(UploadDeliveryConflictError):
-        receiver.receive(client.app.state.db_pool, request, local_machine=machine_identity.name())
+        receiver.copy_batch(client.app.state.db_pool, request, config)
     assert db_conn.execute("SELECT count(*) FROM upload_delivery_copies").fetchone() == (1,)
 
 
 def test_receiver_wrong_actual_unit_cannot_overwrite_nested_final(
     uploaded_agent: tuple[GatewayTestClient, int],
-    monkeypatch: pytest.MonkeyPatch,
     *,
     machine_identity: MachineIdentityReader,
 ):
@@ -330,14 +328,15 @@ def test_receiver_wrong_actual_unit_cannot_overwrite_nested_final(
         first["batch_id"],
         local_machine=machine_identity.name(),
     )
-
-    def wrong_unit(*, local_machine: str) -> UnitIdentity:
-        assert local_machine == machine_identity.name()
-        return request.target.model_copy(update={"home": "/wrong"})
-
-    monkeypatch.setattr(receiver, "current_unit", wrong_unit)
+    config = receiver.ReceiverConfig(
+        unit=request.target.model_copy(update={"home": "/wrong"}),
+        user_home=client.app.state.gateway_config.upload_home,
+        access=client.app.state.gateway_access,
+        quota_bytes=client.app.state.gateway_config.max_agent_upload_bytes,
+        quota_files=client.app.state.gateway_config.max_agent_upload_files,
+    )
     with pytest.raises(UploadDeliveryConflictError):
-        receiver.receive(client.app.state.db_pool, request, local_machine=machine_identity.name())
+        receiver.copy_batch(client.app.state.db_pool, request, config)
     path = Path(proof_for(request).directory) / request.manifest.objects[0].name
     assert path.read_bytes() == b"bytes"
 

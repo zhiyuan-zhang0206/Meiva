@@ -1,10 +1,10 @@
 """Observed-row current-notice mutations and immutable acceptance snapshots."""
 
 from dataclasses import dataclass
-from typing import Annotated, LiteralString, cast
+from typing import Annotated
 
 from fastapi import Header, HTTPException, Request
-from psycopg import Connection
+from psycopg import Connection, sql
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -172,11 +172,10 @@ def _edit(conn: Connection, record: NoticeItem, body: GuardedNoticeEdit) -> None
         )
     # Keys come exclusively from the validated, extra-forbidden model fields.
     columns = [name for name in ("title", "content", "priority", "blocking") if name in changes]
-    assignments = ", ".join(f"{name}=%s" for name in columns)
+    assignments = sql.SQL(", ").join(sql.Identifier(name) + sql.SQL("=%s") for name in columns)
     conn.execute(
-        cast(
-            LiteralString,
-            "UPDATE agent_notices SET " + assignments + ", updated_at=now() WHERE id=%s",  # noqa: S608 -- fixed model fields only
-        ),
+        sql.SQL("UPDATE agent_notices SET ")
+        + assignments
+        + sql.SQL(", updated_at=now() WHERE id=%s"),
         (*[changes[name] for name in columns], record.id),
     )

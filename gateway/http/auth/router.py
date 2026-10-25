@@ -16,6 +16,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from psycopg_pool import ConnectionPool
 from pydantic import BaseModel
 
 from base.cluster.rate_limit import LoginRateLimiter
@@ -306,7 +307,7 @@ async def check(request: Request) -> JSONResponse:
 
 
 def _sessions_that_authenticate(
-    pool: Any,
+    pool: ConnectionPool,
     keys: SessionKeys,
     secret: str,
     *,
