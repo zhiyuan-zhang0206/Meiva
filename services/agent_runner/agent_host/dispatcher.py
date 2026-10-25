@@ -46,15 +46,16 @@ from queueing a burst of turns.
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
-from typing import Protocol, cast
+from typing import Protocol
 
+from redis.asyncio.client import PubSub
+
+from base.clock import Clock
 from base.cluster import redis_channel_prefix
-from base.config import settings
 from base.events.live.bus import EventBus
 from base.events.live.redis_client import retry_auth_failures_async
 from base.log import logger
@@ -125,7 +126,7 @@ class DispatcherReconnectExhaustedError(RuntimeError):
     """
 
 
-def _age_seconds(moment: datetime) -> float:
+def _age_seconds(moment: datetime, *, now: datetime) -> float:
     """Seconds since `moment`, tolerating a naive timestamp.
 
     psycopg returns `TIMESTAMPTZ` as aware, but this runs on a shutdown path
@@ -134,7 +135,7 @@ def _age_seconds(moment: datetime) -> float:
     column stores."""
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)
-    return (datetime.now(UTC) - moment).total_seconds()
+    return (now - moment).total_seconds()
 
 
 class TurnScheduler:
@@ -155,12 +156,14 @@ class TurnScheduler:
         *,
         activity_clock: Callable[[int], Awaitable[datetime | None]] | None = None,
         config_fingerprint: Callable[[int], str | None] | None = None,
+        clock: Clock | None = None,
         cancel_unwind_timeout_s: float = CANCEL_UNWIND_TIMEOUT_S,
         clock_read_timeout_s: float = CLOCK_READ_TIMEOUT_S,
     ) -> None:
         self._run_turn = run_turn
         self._activity_clock = activity_clock
         self._config_fingerprint = config_fingerprint
+        self._clock = clock
         self._cancel_unwind_timeout_s = cancel_unwind_timeout_s
         self._clock_read_timeout_s = clock_read_timeout_s
         self._tasks: dict[int, asyncio.Task[None]] = {}
@@ -350,7 +353,8 @@ class TurnScheduler:
         refuses to unwind is data here instead of an exception — which is what
         lets the host report it and keep shutting down.
         """
-        started = time.monotonic()
+        loop = asyncio.get_running_loop()
+        started = loop.time()
         _, pending = await asyncio.wait(tasks.values(), timeout=self._cancel_unwind_timeout_s)
         # Retrieving the outcome of the tasks that DID finish keeps asyncio from
         # logging "exception was never retrieved" for a turn that raised on its
@@ -360,12 +364,16 @@ class TurnScheduler:
                 task.exception()
         if not pending:
             return
-        waited = time.monotonic() - started
+        waited = loop.time() - started
         stuck = [agent_id for agent_id, task in tasks.items() if task in pending]
         clocks = await self._activity_clocks(stuck)
         for agent_id in stuck:
             last_active = clocks.get(agent_id)
-            idle_s = None if last_active is None else round(_age_seconds(last_active), 1)
+            idle_s = (
+                None
+                if last_active is None or self._clock is None
+                else round(_age_seconds(last_active, now=self._clock.now()), 1)
+            )
             logger.error(
                 "hosted turn for agent {agent_id} did not unwind {waited_s:.1f}s after cancel "
                 "— it is blocked somewhere asyncio cannot interrupt (a C call); the host is "
@@ -465,6 +473,15 @@ class _ScanSchedule:
     scan_backoff_s: float
 
 
+# meiva:note
+# Read one pubsub frame as a string-keyed dictionary; the redis stubs leave `get_message` untyped.
+async def _next_pubsub_message(pubsub: PubSub, *, timeout: float) -> dict[str, object] | None:
+    raw: object = await pubsub.get_message(timeout=timeout)  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType,reportGeneralTypeIssues]
+    if not isinstance(raw, dict):
+        return None
+    return {str(k): v for k, v in raw.items()}  # pyright: ignore[reportUnknownVariableType,reportUnknownArgumentType]
+
+
 class InboundWakeDispatcher:
     """One `PSUBSCRIBE` over every local agent's inbound channel.
 
@@ -526,9 +543,10 @@ class InboundWakeDispatcher:
         with bounded backoff. This shared scan supplies durable wake recovery
         for all agents.
         """
-        prefix = redis_channel_prefix(settings.data_plane.events_channel)  # ambient: S
+        prefix = redis_channel_prefix(self._bus.channel)
         pattern = f"{prefix}{INBOUND_PATTERN_SUFFIX}"
         consecutive_failures = 0
+        loop = asyncio.get_running_loop()
         while True:
             redis = self._bus.open_async_redis()
             pubsub = None
@@ -548,23 +566,20 @@ class InboundWakeDispatcher:
                 while True:
                     raise_if_cancellation_pending()
                     self._raise_if_restart_required()
-                    now = time.monotonic()
+                    now = loop.time()
                     if now >= next_scan_at:
                         scan_schedule = await self._next_scan_schedule(scan_backoff_s)
                         next_scan_at = scan_schedule.next_scan_at
                         scan_backoff_s = scan_schedule.scan_backoff_s
-                    until_scan_s = max(0.001, next_scan_at - time.monotonic())
+                    until_scan_s = max(0.001, next_scan_at - loop.time())
                     read_timeout_s = min(self._subscription_read_timeout_s, until_scan_s)
                     message = await asyncio.wait_for(
-                        cast(
-                            "Awaitable[dict[str, object] | None]",
-                            pubsub.get_message(timeout=read_timeout_s),  # pyright: ignore[reportUnknownMemberType]
-                        ),
+                        _next_pubsub_message(pubsub, timeout=read_timeout_s),
                         timeout=read_timeout_s + self._subscription_read_deadline_grace_s,
                     )
                     consecutive_failures = 0
                     if message is not None:
-                        self._handle(message)  # pyright: ignore[reportUnknownArgumentType]
+                        self._handle(message)
             except asyncio.CancelledError:
                 raise
             except HostRestartRequiredError:
@@ -611,6 +626,7 @@ class InboundWakeDispatcher:
 
     async def _next_scan_schedule(self, scan_backoff_s: float) -> _ScanSchedule:
         """Run the durable backstop without treating its DB failure as Redis failure."""
+        loop = asyncio.get_running_loop()
         try:
             await self.scan_once()
         except asyncio.CancelledError:
@@ -624,11 +640,11 @@ class InboundWakeDispatcher:
                 backoff_s=backoff_s,
             )
             return _ScanSchedule(
-                next_scan_at=time.monotonic() + backoff_s,
+                next_scan_at=loop.time() + backoff_s,
                 scan_backoff_s=min(backoff_s * 2, self._max_scan_backoff_s),
             )
         return _ScanSchedule(
-            next_scan_at=time.monotonic() + self._scan_interval_s,
+            next_scan_at=loop.time() + self._scan_interval_s,
             scan_backoff_s=self._scan_interval_s,
         )
 

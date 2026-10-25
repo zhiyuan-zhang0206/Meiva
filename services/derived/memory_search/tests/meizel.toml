@@ -3,11 +3,5 @@
 "test_memory_indexer.py" = ["store_backend.py"]
 "test_numpy_backend_memory_search.py" = ["search_service.py"]
 
-[debt.env-patch]
-"test_memory_search_config.py#patch.dict os.environ" = 1
-
 [debt.first-party-patch]
 "test_memory_indexer.py#monkeypatch.setattr base.daemon.health.time" = 3
-
-[debt.unresolved-patch]
-"test_memory_search_api.py#monkeypatch.setattr store.save" = 1

@@ -8,10 +8,5 @@ exports = ["intermediates.py", "names.py", "offsite.py", "offsite_plan.py", "pas
 "names.py" = "strict"
 "offsite_plan.py" = "strict"
 
-[debt.ambient-read]
-"passphrase.py#random secrets.token_hex" = 1
-
-[debt.type-cast]
-"offsite.py#cast _verified" = 1
-"offsite.py#cast open_bucket" = 1
-"offsite.py#cast put_if_absent" = 2
+[roots]
+"passphrase.py" = { kinds = ["random"], why = "Mints a random 256-bit logical-backup passphrase at home birth" }

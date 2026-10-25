@@ -39,7 +39,6 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
-from datetime import datetime
 from typing import Any
 
 import psycopg
@@ -237,7 +236,10 @@ async def reclaim_row(
     if settlement is None:
         return None
     notice = shell_plan.reclaim_notice(
-        shell, settlement, zone=config.zone, today=datetime.now(config.zone).date()
+        shell,
+        settlement,
+        zone=config.zone,
+        today=config.clock.now().astimezone(config.zone).date(),
     )
     await asyncio.to_thread(delete_shell_row, pool, db, bus, agent_id, session_id, notice=notice)
     telemetry.emit(

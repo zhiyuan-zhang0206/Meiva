@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
+from base.clock import Clock
+
 
 @dataclass(frozen=True)
 class TtlReaperConfig:
@@ -18,3 +20,4 @@ class TtlReaperConfig:
     fire_log_retention_days: int
     shell_kill_deadline_s: float
     zone: ZoneInfo | None
+    clock: Clock

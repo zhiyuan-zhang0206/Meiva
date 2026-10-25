@@ -89,7 +89,15 @@ async def run(
     try:
         server = uvicorn.Server(
             uvicorn.Config(
-                build_app(db, pool, config, home=home, catalog=catalog, timestamps=timestamps),
+                build_app(
+                    db,
+                    pool,
+                    config,
+                    home=home,
+                    catalog=catalog,
+                    timestamps=timestamps,
+                    pid=os.getpid(),
+                ),
                 log_level="warning",
                 access_log=False,
                 log_config=None,

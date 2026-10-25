@@ -34,7 +34,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import TypeGuard
 
 import oss2
 from oss2.models import PartInfo
@@ -87,16 +87,42 @@ def configured_target(
     return OssTarget(endpoint, bucket, credentials_file)
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _str_attr(value: object, name: str) -> str:
+    raw = getattr(value, name)
+    return raw if isinstance(raw, str) else str(raw)
+
+
+def _int_attr(value: object, name: str) -> int:
+    raw = getattr(value, name)
+    if isinstance(raw, bool) or not isinstance(raw, (int, str)):
+        raise TypeError("expected int")
+    return int(raw)
+
+
+def _is_str_mapping(value: object) -> TypeGuard[Mapping[str, str]]:
+    return isinstance(value, Mapping)
+
+
+def _headers_attr(value: object, name: str) -> dict[str, str]:
+    raw = getattr(value, name)
+    if not _is_str_mapping(raw):
+        return {}
+    return {str(k): str(v) for k, v in raw.items()}
+
+
 # meiva:note
 # Open the OSS bucket with the RAM AccessKey pair in the credentials file.
 def open_bucket(target: OssTarget) -> oss2.Bucket:
     try:
-        payload: object = json.loads(target.credentials_file.read_text())
+        raw: object = json.loads(target.credentials_file.read_text())
     except (OSError, ValueError) as exc:
         raise ValueError("OSS credentials file is not readable JSON") from exc
-    if not isinstance(payload, dict):
+    if not _is_object_dict(raw):
         raise TypeError("OSS credentials payload must be an object")
-    raw = cast(dict[str, object], payload)
     key_id, secret = raw.get("access_key_id"), raw.get("access_key_secret")
     if not isinstance(key_id, str) or not isinstance(secret, str) or not key_id or not secret:
         raise ValueError(
@@ -162,10 +188,12 @@ def put_if_absent(
     whole = hashlib.md5()  # noqa: S324
     try:
         # Deliberately NO forbid-overwrite on init: see the module docstring.
-        init = cast(
-            Any, bucket.init_multipart_upload(object_name, headers=metadata_headers(metadata))
+        raw_upload_id = getattr(
+            bucket.init_multipart_upload(object_name, headers=metadata_headers(metadata)),
+            "upload_id",
+            None,
         )
-        upload_id = cast(str | None, init.upload_id)
+        upload_id = raw_upload_id if isinstance(raw_upload_id, str) else None
         if not upload_id:
             raise OffsiteError("OSS multipart upload omitted its upload id")
         with path.open("rb") as source:
@@ -211,6 +239,14 @@ def _upload_part(
     return etag
 
 
+def _extract_head(head: object) -> tuple[str, int, dict[str, str]]:
+    return (
+        _str_attr(head, "etag"),
+        _int_attr(head, "content_length"),
+        _headers_attr(head, "headers"),
+    )
+
+
 def _verified(
     bucket: oss2.Bucket,
     object_name: str,
@@ -228,20 +264,20 @@ def _verified(
     of this publisher left it).
     """
     try:
-        head = cast(Any, bucket.head_object(object_name))
+        etag, content_length, headers = _extract_head(bucket.head_object(object_name))
     except oss2.exceptions.OssError as exc:
         raise OffsiteError(f"OSS verification failed: {exc}") from exc
     problem = object_problem(
-        etag=head.etag,
-        content_length=head.content_length,
-        headers=head.headers,
+        etag=etag,
+        content_length=content_length,
+        headers=headers,
         size=size,
         part_etags=part_etags,
         metadata=metadata,
     )
     if problem is not None:
         raise OffsiteError(problem)
-    return OffsiteAck(object_name, size, normalize_etag(head.etag), whole_md5, created)
+    return OffsiteAck(object_name, size, normalize_etag(etag), whole_md5, created)
 
 
 def _is_file_exists(exc: oss2.exceptions.OssError) -> bool:

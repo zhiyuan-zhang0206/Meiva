@@ -21,7 +21,6 @@ supervisor through the roster's `/healthz` probe; repeated failed rounds end the
 import asyncio
 import logging
 import math
-import os
 import signal
 import sys
 from collections.abc import Callable
@@ -476,9 +475,8 @@ class HeartbeatDispatch:
         self._deadline_state: dict[int, tuple[int, float]] = {}
         self._noop_streak: dict[int, int] = {}
         _log.info(
-            "[heartbeat] daemon started, pid=%s, step=%.0fs, idle_threshold=%.0fs, "
+            "[heartbeat] daemon started, step=%.0fs, idle_threshold=%.0fs, "
             "jitter_span=%.0fs, max_checkins_per_step=%d (wake-rate ceiling ~%.2f/s)",
-            os.getpid(),
             self.interval_s,
             config.idle_threshold_s,
             JITTER_SPAN_S,

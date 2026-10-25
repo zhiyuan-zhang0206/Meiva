@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import signal
 import sys
 import time
@@ -191,7 +190,7 @@ async def backup_round(
 async def backup_loop(
     state: BackupState, *, settings: SchedulerSettings, tree: BackupTree, launch: WorkerLaunch
 ) -> None:
-    _log.info("[pg-backup] scheduler started, pid=%s", os.getpid())
+    _log.info("[pg-backup] scheduler started")
     while True:
         await asyncio.sleep(await backup_round(state, settings=settings, tree=tree, launch=launch))
 

@@ -11,7 +11,4 @@ exports = ["app.py", "config.py", "daemon.py", "run_timeline"]
 "config.py" = "strict"
 
 [roots]
-"daemon.py" = ["settings"]
-
-[debt.ambient-read]
-"app.py#pid os.getpid" = 1
+"daemon.py" = ["settings", "pid"]

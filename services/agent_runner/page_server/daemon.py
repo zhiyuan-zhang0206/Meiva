@@ -460,8 +460,7 @@ async def reconcile_loop(
     managed: dict[PageKey, ServerHandle] = {}
     backend = get_shell_backend()
     _log.info(
-        "[page-server] daemon started, pid=%s, machine=%s, host=%s",
-        os.getpid(),
+        "[page-server] daemon started, machine=%s, host=%s",
         local_machine.name(),
         host,
     )

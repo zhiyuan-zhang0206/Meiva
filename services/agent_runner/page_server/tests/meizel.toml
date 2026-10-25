@@ -4,6 +4,3 @@
 "test_dead_pages.py" = ["page_pty.py", "slices.py"]
 "test_page_server_daemon.py" = ["page_pty.py"]
 "test_page_server_occupants.py" = ["page_pty.py"]
-
-[debt.test-subclass-override]
-"test_dead_pages.py#subclass base.events.live.bus.EventBus.publish_best_effort" = 1

@@ -44,7 +44,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
@@ -189,9 +189,9 @@ async def _record_probe(
             "RETURNING consecutive_failures",
             (name, ok, host_online, ok),
         )
-        row = cast("tuple[int] | None", cur.fetchone())
+        row = cur.fetchone()
         assert row is not None  # noqa: S101 — UPSERT RETURNING always yields one row
-        consecutive_failures = row[0]
+        consecutive_failures = int(row[0])
     if not ok:
         telemetry.emit(
             "telemetry",

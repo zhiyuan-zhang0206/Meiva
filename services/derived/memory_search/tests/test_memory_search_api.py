@@ -173,29 +173,22 @@ def test_upsert_batch_matches_sequential_endpoints(tmp_path: Path) -> None:
 
 
 def test_upsert_batch_saves_once_while_single_upserts_save_each_row(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     store = _store(tmp_path)
-    save_calls: list[None] = []
-    original_save = store.save
-
-    def _save() -> None:
-        save_calls.append(None)
-        original_save()
-
-    monkeypatch.setattr(store, "save", _save)
     rows = [_upsert_body(f"/{idx}.md", idx) for idx in range(5)]
     with TestClient(build_app(store, _MAX_BATCH_ROWS, embedding_dim=_DIM)) as client:
         assert client.post("/upsert_batch", json={"rows": rows}).status_code == 200
-        assert len(save_calls) == 1
+        assert store.saves == 1
         for row in rows:
             assert client.post("/upsert", json=row).status_code == 200
-        assert len(save_calls) == 1 + len(rows)
+        assert store.saves == 1 + len(rows)
 
 
 def test_batch_rows_cap_is_the_one_the_app_was_built_with(tmp_path: Path) -> None:
     rows = [_upsert_body(f"/{idx}.md", idx) for idx in range(3)]
-    entries = [{"path": row["path"], "kind_limits": {}} for row in rows]
+    empty_limits: dict[str, int] = {}
+    entries = [{"path": row["path"], "kind_limits": empty_limits} for row in rows]
     with TestClient(build_app(_store(tmp_path), 2, embedding_dim=_DIM)) as small:
         assert small.post("/upsert_batch", json={"rows": rows}).status_code == 422
         assert small.post("/delete_stale_batch", json={"entries": entries}).status_code == 422

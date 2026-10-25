@@ -20,13 +20,15 @@ from base.native_process.child_env import inherited_process_env
 from services.backup.scheduler.operation import worker_process
 
 _ROOT = Path(__file__).resolve().parents[4]
+_BOOTSTRAP = Path(__file__).resolve().parents[1] / "operation" / "worker_bootstrap.py"
 _NO_REQUEST_USAGE = "usage: python -m <operation worker> REQUEST RESULT"
 
 
-def _bootstrap(bootstrap: Path, root: Path, module: str) -> subprocess.CompletedProcess[str]:
-    """Run `module` under the `bootstrap` script with no request: it can only print its usage."""
+# meiva:note
+# Run `module` under the bootstrap script with no request: it can only print its usage.
+def _bootstrap(root: Path, module: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603
-        [sys.executable, "-I", "-B", str(bootstrap), str(root), module],
+        [sys.executable, "-I", "-B", str(_BOOTSTRAP), str(root), module],
         capture_output=True,
         text=True,
         check=False,
@@ -45,7 +47,7 @@ def _required_names() -> list[str]:
 def test_the_real_bootstrap_reaches_the_backup_worker() -> None:
     """Every required name resolves inside the code root and the worker module
     imports completely: the only complaint left is the missing request."""
-    proc = _bootstrap(worker_process.BOOTSTRAP, _ROOT, "services.backup.scheduler.worker")
+    proc = _bootstrap(_ROOT, "services.backup.scheduler.worker")
 
     assert "code root mismatch" not in proc.stderr, proc.stderr
     assert proc.returncode != 0
@@ -63,22 +65,16 @@ def test_every_required_name_is_a_package_of_this_checkout() -> None:
         ).is_file(), f"the bootstrap requires {name}, which this checkout does not carry"
 
 
-def test_a_required_name_that_resolves_nowhere_stops_the_worker_at_start(tmp_path: Path) -> None:
+def test_a_required_name_that_resolves_nowhere_stops_the_worker_at_start() -> None:
     """The failure R1 describes: a stale name makes the bootstrap refuse the worker."""
-    source = worker_process.BOOTSTRAP.read_text()
-    changed = source.replace('"services.backup.scheduler.operation"', '"services.retired_package"')
-    assert changed != source
-    stale = tmp_path / "stale_bootstrap.py"
-    stale.write_text(changed)
-
-    proc = _bootstrap(stale, _ROOT, "services.backup.scheduler.worker")
+    proc = _bootstrap(_ROOT, "services.retired_package")
 
     assert proc.returncode != 0
     assert "code root mismatch: services.retired_package resolves to None" in proc.stderr
 
 
 def test_the_bootstrap_still_refuses_code_outside_its_root(tmp_path: Path) -> None:
-    proc = _bootstrap(worker_process.BOOTSTRAP, tmp_path, "services.backup.scheduler.worker")
+    proc = _bootstrap(tmp_path, "services.backup.scheduler.worker")
 
     assert proc.returncode != 0
     assert "code root mismatch" in proc.stderr

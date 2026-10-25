@@ -146,12 +146,11 @@ class ExecMemoryGuard:
                 continue
 
 
-async def run_memory_guard_forever(stop: asyncio.Event) -> None:
+async def run_memory_guard_forever(stop: asyncio.Event, *, host_pid: int) -> None:
     source = host_memory_source()
     if source is None:
         logger.info("[exec-host] exec memory guard idle — this OS reports no memory pressure state")
         return
-    host_pid = os.getpid()
     await ExecMemoryGuard(source, domains=lambda: find_exec_domains(host_pid, source)).run_forever(
         stop
     )

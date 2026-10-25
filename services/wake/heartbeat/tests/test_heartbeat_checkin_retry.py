@@ -49,6 +49,8 @@ async def test_failed_checkin_is_retried_after_backoff_across_ticks(
         )
     db_conn.commit()
 
+    sent_on_ticks: list[int] = []
+
     class TickTimers(ManualTimers):
         def __init__(self) -> None:
             super().__init__()
@@ -56,6 +58,19 @@ async def test_failed_checkin_is_retried_after_backoff_across_ticks(
             self._ticks = iter([0.0, 1.0, 1.0 + idle_threshold, 2.0 + 2 * idle_threshold])
 
         async def asleep(self, seconds: float) -> None:
+            if self.tick >= 0:
+                with db_conn.cursor() as cur:
+                    cur.execute(
+                        "DELETE FROM inbound_messages WHERE agent_id = %s AND kind = 'heartbeat' RETURNING id",
+                        (aid,),
+                    )
+                    if cur.fetchall():
+                        sent_on_ticks.append(self.tick)
+                        cur.execute(
+                            "UPDATE agents_meta SET last_heartbeat_at = NULL WHERE id = %s",
+                            (aid,),
+                        )
+                db_conn.commit()
             try:
                 instant = next(self._ticks)
             except StopIteration:
@@ -67,16 +82,7 @@ async def test_failed_checkin_is_retried_after_backoff_across_ticks(
 
     timers = TickTimers()
     clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
-    sent_on_ticks: list[int] = []
-
-    class RecordingDispatch(heartbeat_daemon.HeartbeatDispatch):
-        def send_checkin(
-            self, agent_id: int, idle_minutes: float, reason: str | None = None
-        ) -> None:
-            if agent_id == aid:
-                sent_on_ticks.append(timers.tick)
-
-    dispatch = RecordingDispatch(
+    dispatch = heartbeat_daemon.HeartbeatDispatch(
         pool,
         database,
         event_bus,

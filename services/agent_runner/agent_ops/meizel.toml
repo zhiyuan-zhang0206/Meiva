@@ -13,6 +13,3 @@ exports = ["boot.py", "daemon.py", "dispatch_sync.py", "in_flight.py", "tests"]
 
 [roots]
 "daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
-
-[debt.type-cast]
-"idempotency_plan.py#cast stored_verdict" = 1

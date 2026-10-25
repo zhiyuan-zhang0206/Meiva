@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
+import hashlib
 from collections.abc import Callable
 from concurrent.futures import Executor
 from typing import Protocol
@@ -170,7 +170,8 @@ async def _check_level(
         return False
     if not await claim_check(pool, agent_id, level):
         return False
-    check_key = uuid.uuid4().hex
+    node_ids = ",".join(str(n.id) for n in nodes)
+    check_key = hashlib.sha256(f"{agent_id}:{level}:{node_ids}".encode()).hexdigest()[:32]
     calls: list[GroupCall] = []
     settled = False
     try:

@@ -400,7 +400,7 @@ async def patrol_loop(
         )
         liveness.beat()
         if complete:
-            status.succeeded()
+            status.succeeded(at=timers.monotonic())
         else:
             status.failed()
         verdict = next_patrol(

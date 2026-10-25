@@ -4,6 +4,7 @@ from dataclasses import replace
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from services.upkeep.ttl_reaper.config import TtlReaperConfig
 
 
@@ -15,6 +16,7 @@ def reaper_config(**overrides: Any) -> TtlReaperConfig:
             fire_log_retention_days=30,
             shell_kill_deadline_s=10.0,
             zone=ZoneInfo("UTC"),
+            clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
         ),
         **overrides,
     )

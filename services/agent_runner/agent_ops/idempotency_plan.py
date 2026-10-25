@@ -17,7 +17,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import cast
+from typing import TypeGuard
 
 from ops.rpc_schemas import OpStatus
 
@@ -75,6 +75,10 @@ def stored_body(value: Mapping[str, object]) -> str:
     return json.dumps(value, default=str)
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 # meiva:note
 # The verdict on the row stored under a key, read as (method, path, request_hash, op_status,
 # response_body), or None when there is none yet.
@@ -90,7 +94,7 @@ def stored_verdict(row: Sequence[object] | None, kind: str, digest: str) -> Stor
         return Conflict()
     if status is None:
         return Wait()
-    result = cast("dict[str, object]", body) if body else {}
+    result = dict(body) if _is_object_dict(body) else {}
     return Replay(OpStatus(str(status)), result)
 
 
