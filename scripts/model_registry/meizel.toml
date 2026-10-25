@@ -13,28 +13,4 @@ exports = ["update_model_pricing.py"]
 
 [roots]
 "check_model_updates.py" = { kinds = ["environ"], why = "tracker selects provider API-key aliases dynamically and must prefer the live process env before its `.env` fallback" }
-
-[debt.ambient-read]
-"update_model_pricing.py#clock datetime.datetime.now" = 2
-
-[debt.any-collaborator]
-"check_model_updates.py#any PinnedIPHTTPSAdapter.__init__.args" = 1
-"check_model_updates.py#any PinnedIPHTTPSAdapter.__init__.kwargs" = 1
-"check_model_updates.py#any PinnedIPHTTPSAdapter.init_poolmanager.pool_kwargs" = 1
-"check_model_updates.py#any _PinnedIPConnectionPool._new_conn.return" = 1
-"plugin_price_source.py#any _literal.return" = 1
-
-[debt.type-cast]
-"check_model_updates.py#cast _PinnedIPConnectionPool" = 1
-"check_model_updates.py#cast _PinnedIPConnectionPool._new_conn" = 1
-"plugin_price_rates.py#cast archive_rates" = 1
-"plugin_price_source.py#cast _call_fields.<dictcomp>" = 1
-"plugin_price_source.py#cast _integer_literal" = 1
-"plugin_price_source.py#cast _mapping_keys.<genexpr>" = 1
-"plugin_price_source.py#cast _model_key" = 1
-"plugin_price_sync.py#cast _archive_periods" = 2
-"plugin_price_sync.py#cast _archive_tier" = 1
-"plugin_price_sync.py#cast _archive_tiers" = 1
-"plugin_price_sync.py#cast _archive_windows" = 2
-"plugin_price_sync.py#cast archive_price" = 1
-"plugin_price_sync.py#cast sync_plugin_rates" = 2
+"update_model_pricing.py" = { kinds = ["clock"], why = "CLI entrypoint stamps provisional pricing updates and selects the active archive period against current UTC time" }

@@ -13,7 +13,7 @@ import tomllib
 from collections.abc import Mapping
 from functools import cache
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 from meizel.graph.model import MeizelError
 from meizel.graph.universe import MANIFEST
@@ -33,27 +33,41 @@ ROLE_NAMES = ("application", "templates", "examples", "tooling", "tests", "front
 _ROOT = Path(__file__).resolve().parents[1]
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_list(value: object) -> TypeGuard[list[str]]:
+    return _is_object_list(value) and all(isinstance(item, str) for item in value)
+
+
 def check_table(table: object) -> tuple[dict[str, tuple[str, ...]], list[tuple[str, str]]]:
     """The roles of a parsed `[roles]` table and the `(key, message)` problems found in it."""
-    if not isinstance(table, dict):
+    if not _is_table(table):
         return {}, [("roles", "[roles] must be a table")]
     found: dict[str, tuple[str, ...]] = {}
     problems: list[tuple[str, str]] = []
     owner: dict[str, str] = {}
-    for role, value in cast("dict[str, object]", table).items():
+    for role, value in table.items():
         if role not in ROLE_NAMES:
             problems.append((role, f"unknown role {role!r}; the roles are {', '.join(ROLE_NAMES)}"))
             continue
-        items = cast("list[object]", value) if isinstance(value, list) else None
-        if items is None or not all(isinstance(name, str) for name in items):
+        if not _is_str_list(value):
             problems.append((role, f"role {role!r} must be a list of strings"))
             continue
-        names = cast("list[str]", items)
-        for name in names:
+        for name in value:
             if name in owner:
                 problems.append((role, f"{name!r} is in role {owner[name]!r} and in {role!r}"))
             owner.setdefault(name, role)
-        found[role] = tuple(dict.fromkeys(names))
+        found[role] = tuple(dict.fromkeys(value))
     return found, problems
 
 
@@ -101,18 +115,17 @@ def all_packages(root: Path | None = None) -> tuple[str, ...]:
 # Supported roots are `tests` and `<host>/**/tests`; reject other patterns instead
 # of silently giving pytest, the CI selector, and generated type checking different scopes.
 def pytest_test_hosts(pyproject_text: str) -> tuple[str, ...]:
-    try:
-        paths = cast(
-            object, tomllib.loads(pyproject_text)["tool"]["pytest"]["ini_options"]["testpaths"]
-        )
-    except KeyError as error:
-        raise ValueError(
-            "pyproject.toml must configure tool.pytest.ini_options.testpaths"
-        ) from error
-    if not isinstance(paths, list) or not paths:
+    document = tomllib.loads(pyproject_text)
+    tool = document.get("tool")
+    pytest_table = tool.get("pytest") if _is_table(tool) else None
+    ini_options = pytest_table.get("ini_options") if _is_table(pytest_table) else None
+    if not _is_table(ini_options) or "testpaths" not in ini_options:
+        raise ValueError("pyproject.toml must configure tool.pytest.ini_options.testpaths")
+    paths = ini_options["testpaths"]
+    if not _is_object_list(paths) or not paths:
         raise ValueError("pytest testpaths must be a nonempty list of directory patterns")
     hosts: list[str] = []
-    for pattern in cast(list[object], paths):
+    for pattern in paths:
         host = _pytest_test_host(pattern)
         if host in hosts:
             raise ValueError(f"duplicate pytest test host: {host!r}")

@@ -15,7 +15,7 @@ from collections import defaultdict
 from collections.abc import Generator
 from importlib.metadata import version
 from pathlib import Path
-from typing import Annotated, Literal, Self, cast
+from typing import Annotated, Literal, Self, TypeGuard
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
@@ -144,13 +144,35 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _str_option(config: pytest.Config, name: str) -> str:
+    value: object = config.getoption(name)
+    if not isinstance(value, str):
+        raise pytest.UsageError(f"Option {name} must be a string")
+    return value
+
+
+def _int_option(config: pytest.Config, name: str) -> int:
+    value: object = config.getoption(name)
+    if type(value) is not int:
+        raise pytest.UsageError(f"Option {name} must be an integer")
+    return value
+
+
 def _worker(config: pytest.Config) -> str:
-    worker = getattr(config, "workerinput", None)
-    return cast(str, worker["workerid"]) if worker is not None else "controller"
+    worker: object = getattr(config, "workerinput", None)
+    if _is_raw_dict(worker):
+        worker_id = worker.get("workerid")
+        if isinstance(worker_id, str):
+            return worker_id
+    return "controller"
 
 
 def _report_path(config: pytest.Config, option: str) -> Path:
-    path = Path(cast(str, config.getoption(option)))
+    path = Path(_str_option(config, option))
     return path.with_name(f"{path.stem}-{_worker(config)}{path.suffix}")
 
 
@@ -185,7 +207,7 @@ def _durations(config: pytest.Config) -> tuple[dict[str, float], str]:
     every test costs the same, which is also what pytest-split does for a missing file. A file
     that exists but is unreadable or malformed is still an error."""
     try:
-        raw = Path(cast(str, config.getoption("durations_path"))).read_bytes()
+        raw = Path(_str_option(config, "durations_path")).read_bytes()
     except FileNotFoundError:
         return {}, hashlib.sha256(b"").hexdigest()
     except OSError as error:
@@ -210,7 +232,7 @@ def _configuration_digest(config: pytest.Config) -> str:
 
 
 def _load_group(config: pytest.Config) -> None:
-    source = Path(cast(str, config.getoption("file_shard_check")))
+    source = Path(_str_option(config, "file_shard_check"))
     output = config.getoption("file_shard_report")
     if not output:
         raise pytest.UsageError("--file-shard-check requires --file-shard-report")
@@ -270,13 +292,13 @@ def pytest_configure(config: pytest.Config) -> None:
         )
     if config.getoption("splits") is not None:
         raise pytest.UsageError("Shadow needs the unsplit collection; do not supply --splits")
-    count = cast(int, config.getoption("file_shard_count"))
+    count = _int_option(config, "file_shard_count")
     if not 1 <= count <= MAX_FILE_SHARDS:
         raise pytest.UsageError(f"--file-shard-count must be between 1 and {MAX_FILE_SHARDS}")
     if check:
         _load_group(config)
-    else:
-        Path(cast(str, output)).unlink(missing_ok=True)
+    elif isinstance(output, str):
+        Path(output).unlink(missing_ok=True)
 
 
 def _record(item: pytest.Item, root: Path) -> Node:
@@ -295,7 +317,7 @@ def _plan(session: pytest.Session) -> Plan:
     by_file: dict[Path, list[pytest.Item]] = defaultdict(list)
     for item in items:
         by_file[item.path].append(item)
-    count = cast(int, session.config.getoption("file_shard_count"))
+    count = _int_option(session.config, "file_shard_count")
     if len(by_file) < count:
         raise pytest.UsageError("Shadow requires at least one eligible file per group")
     known = [durations[item.nodeid] for item in items if item.nodeid in durations]
@@ -339,7 +361,7 @@ def _plan(session: pytest.Session) -> Plan:
 
 def _check(session: pytest.Session) -> None:
     config = session.config
-    index = cast(int, config.getoption("file_shard_group"))
+    index = _int_option(config, "file_shard_group")
     expected = {node.nodeid: node for node in config.stash[_PLAN].groups[index - 1].nodes}
     records = [_record(item, config.rootpath) for item in session.items]
     actual = {node.nodeid: node for node in records}
@@ -362,7 +384,7 @@ def _check(session: pytest.Session) -> None:
     report_path = (
         _report_path(config, "file_shard_report")
         if config.getoption("file_shard_execute")
-        else Path(cast(str, config.getoption("file_shard_report")))
+        else Path(_str_option(config, "file_shard_report"))
     )
     report_path.write_text(json.dumps(report, indent=2) + "\n")
     if not matched:
@@ -413,8 +435,11 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     config = session.config
     if _RUNTIME not in config.stash:
         return
+    group = config.getoption("file_shard_group") or config.getoption("group")
+    if type(group) is not int:
+        raise pytest.UsageError("Runtime evidence requires a shard group")
     report = RuntimeReport(
-        group=cast(int, config.getoption("file_shard_group") or config.getoption("group")),
+        group=group,
         worker=_worker(config),
         exitstatus=exitstatus,
         pytest_version=pytest.__version__,

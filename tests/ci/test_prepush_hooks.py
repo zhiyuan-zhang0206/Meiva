@@ -25,19 +25,28 @@ CHECK = ROOT / "scripts/provision/check_git_hooks.py"
 BRANCH_LINT = ROOT / "scripts/hooks/prepush-branch-lint.sh"
 PYRIGHT_FILES = ROOT / "scripts/hooks/prepush-pyright-files.sh"
 INSTALL = ".venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push --hook-type commit-msg"
+_GIT_HOOK_VARS = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"})
+
+
+def _clean_git_env() -> dict[str, str]:
+    return {key: value for key, value in os.environ.items() if key not in _GIT_HOOK_VARS}
+
+
+def _guard_env(repo: Path, **overrides: str) -> dict[str, str]:
+    return {
+        **_clean_git_env(),
+        "MEIVA_PREPUSH_LOCK_DIR": str(repo.parent / "locks"),
+        "MEIVA_PREPUSH_MAX_LOAD_PER_CORE": "1000000",
+        "MEIVA_PREPUSH_LOCK_WAIT_SECONDS": "2",
+        **overrides,
+    }
 
 
 @pytest.fixture
-def checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    # Clear hook context before even initializing the temporary repository.
-    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"):
-        monkeypatch.delenv(name, raising=False)
+def checkout(tmp_path: Path) -> Path:
     repo = tmp_path / "main clone"
     repo.mkdir()
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    monkeypatch.setenv("MEIVA_PREPUSH_LOCK_DIR", str(tmp_path / "locks"))
-    monkeypatch.setenv("MEIVA_PREPUSH_MAX_LOAD_PER_CORE", "1000000")
-    monkeypatch.setenv("MEIVA_PREPUSH_LOCK_WAIT_SECONDS", "2")
+    subprocess.run(["git", "init", "-q", str(repo)], env=_clean_git_env(), check=True)
     executable = repo / ".venv/bin/basedpyright"
     executable.parent.mkdir(parents=True)
     executable.symlink_to(sys.executable)
@@ -45,11 +54,16 @@ def checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def run_guard(
-    repo: Path, tool: str = "pyright", code: str = "print('executed')"
+    repo: Path,
+    tool: str = "pyright",
+    code: str = "print('executed')",
+    *,
+    env_overrides: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["bash", str(GUARD), tool, "--", sys.executable, "-c", code],
         cwd=repo,
+        env=_guard_env(repo, **(env_overrides or {})),
         capture_output=True,
         text=True,
         check=False,
@@ -61,6 +75,7 @@ def check_install(repo: Path, *flags: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(CHECK), *flags],
         cwd=repo,
+        env=_clean_git_env(),
         capture_output=True,
         text=True,
         check=False,
@@ -176,6 +191,7 @@ def test_branch_lint_rejects_unknown_scope(checkout: Path) -> None:
     result = subprocess.run(
         ["bash", str(BRANCH_LINT)],
         cwd=checkout,
+        env=_guard_env(checkout),
         capture_output=True,
         text=True,
         check=False,
@@ -186,9 +202,12 @@ def test_branch_lint_rejects_unknown_scope(checkout: Path) -> None:
 
 
 def _init_probe_repo(path: Path) -> None:
-    subprocess.run(["git", "init", "-q", str(path)], check=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.email", "t@example.com"], check=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], check=True)
+    env = _clean_git_env()
+    subprocess.run(["git", "init", "-q", str(path)], env=env, check=True)
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "t@example.com"], env=env, check=True
+    )
+    subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], env=env, check=True)
 
 
 def _init_repo_with_origin_main(path: Path) -> str:
@@ -196,15 +215,22 @@ def _init_repo_with_origin_main(path: Path) -> str:
     is configured or needed: `git merge-base origin/main HEAD` only needs the
     ref to resolve. Returns that commit's sha.
     """
+    env = _clean_git_env()
     _init_probe_repo(path)
     (path / "README.md").write_text("x\n")
-    subprocess.run(["git", "-C", str(path), "add", "-A"], check=True)
-    subprocess.run(["git", "-C", str(path), "commit", "-q", "-m", "base"], check=True)
+    subprocess.run(["git", "-C", str(path), "add", "-A"], env=env, check=True)
+    subprocess.run(["git", "-C", str(path), "commit", "-q", "-m", "base"], env=env, check=True)
     base_sha = subprocess.run(
-        ["git", "-C", str(path), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
     subprocess.run(
-        ["git", "-C", str(path), "update-ref", "refs/remotes/origin/main", base_sha], check=True
+        ["git", "-C", str(path), "update-ref", "refs/remotes/origin/main", base_sha],
+        env=env,
+        check=True,
     )
     return base_sha
 
@@ -213,6 +239,7 @@ def test_pyright_files_rejects_unknown_scope(checkout: Path) -> None:
     result = subprocess.run(
         ["bash", str(PYRIGHT_FILES)],
         cwd=checkout,
+        env=_guard_env(checkout),
         capture_output=True,
         text=True,
         check=False,
@@ -401,6 +428,7 @@ def test_concurrent_guards_serialize_never_run_in_parallel(checkout: Path, tmp_p
         return subprocess.Popen(
             ["bash", str(GUARD), "pyright", "--", sys.executable, "-c", code, label],
             cwd=checkout,
+            env=_guard_env(checkout),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -435,7 +463,7 @@ def test_concurrent_guards_serialize_never_run_in_parallel(checkout: Path, tmp_p
         assert "PRE-PUSH SKIPPED [pyright]: lock wait timed out" in err_b
 
 
-def test_load_skip(checkout: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_skip(checkout: Path) -> None:
     # Fix the measured load in the probe, then force its threshold via env.
     probe_dir = checkout / "probe"
     probe_dir.mkdir()
@@ -445,9 +473,13 @@ def test_load_skip(checkout: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         "os.getloadavg = lambda: (100.0, 0.0, 0.0)\nsys.argv = sys.argv[1:]\nexec(sys.stdin.read())\n"
     )
     probe.chmod(0o755)
-    monkeypatch.setenv("PATH", str(probe_dir) + os.pathsep + os.environ["PATH"])
-    monkeypatch.setenv("MEIVA_PREPUSH_MAX_LOAD_PER_CORE", "0")
-    result = run_guard(checkout)
+    result = run_guard(
+        checkout,
+        env_overrides={
+            "PATH": str(probe_dir) + os.pathsep + os.environ["PATH"],
+            "MEIVA_PREPUSH_MAX_LOAD_PER_CORE": "0",
+        },
+    )
     assert result.returncode == 0
     assert "PRE-PUSH SKIPPED [pyright]" in result.stderr
     assert "load/core" in result.stderr and "threshold 0" in result.stderr
@@ -462,6 +494,7 @@ def test_lock_wait_proceeds(checkout: Path, tmp_path: Path) -> None:
         with subprocess.Popen(
             ["bash", str(GUARD), "pyright", "--", sys.executable, "-c", "print('executed')"],
             cwd=checkout,
+            env=_guard_env(checkout),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -483,13 +516,12 @@ def test_lock_wait_proceeds(checkout: Path, tmp_path: Path) -> None:
                     process.wait(timeout=5)
 
 
-def test_lock_timeout(checkout: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MEIVA_PREPUSH_LOCK_WAIT_SECONDS", "0.01")
+def test_lock_timeout(checkout: Path, tmp_path: Path) -> None:
     lock_dir = tmp_path / "locks"
     lock_dir.mkdir()
     with (lock_dir / "pyright.lock").open("w") as held:
         fcntl.flock(held, fcntl.LOCK_EX)
-        result = run_guard(checkout)
+        result = run_guard(checkout, env_overrides={"MEIVA_PREPUSH_LOCK_WAIT_SECONDS": "0.01"})
     assert result.returncode == 0
     assert "waiting for pyright lock" in result.stderr
     assert "PRE-PUSH SKIPPED [pyright]: lock wait timed out after 0.01s" in result.stderr
@@ -506,21 +538,24 @@ def test_missing_frontend_env(checkout: Path, tool: str) -> None:
 
 
 @pytest.mark.parametrize("status", [0, 1, 7])
-def test_vitest_binary_and_command_status(
-    checkout: Path, monkeypatch: pytest.MonkeyPatch, status: int
-) -> None:
+def test_vitest_binary_and_command_status(checkout: Path, status: int) -> None:
     bins = checkout / "ui/web/node_modules/.bin"
     bins.mkdir(parents=True)
     for name in ("node", "npm"):
         (bins / name).symlink_to(sys.executable)
-    monkeypatch.setenv("PATH", str(bins) + os.pathsep + os.environ["PATH"])
-    missing = run_guard(checkout, "vitest")
+    env_overrides = {"PATH": str(bins) + os.pathsep + os.environ["PATH"]}
+    missing = run_guard(checkout, "vitest", env_overrides=env_overrides)
     assert missing.returncode == 0
     assert "missing frontend executable vitest" in missing.stderr
     assert "executed" not in missing.stdout
 
     (bins / "vitest").symlink_to(sys.executable)
-    result = run_guard(checkout, "vitest", code=f"print('executed'); raise SystemExit({status})")
+    result = run_guard(
+        checkout,
+        "vitest",
+        code=f"print('executed'); raise SystemExit({status})",
+        env_overrides=env_overrides,
+    )
     assert result.returncode == status
     assert "executed" in result.stdout
     assert "SKIPPED" not in result.stderr
@@ -589,6 +624,7 @@ def test_precommit_drift_reports_both_hooks(checkout: Path, tmp_path: Path, prob
 
 def test_valid_hook_silent_in_main_and_linked_worktree(checkout: Path, tmp_path: Path) -> None:
     install_fixture(checkout)
+    env = _clean_git_env()
     subprocess.run(
         [
             "git",
@@ -602,11 +638,15 @@ def test_valid_hook_silent_in_main_and_linked_worktree(checkout: Path, tmp_path:
             "fixture",
         ],
         cwd=checkout,
+        env=env,
         check=True,
     )
     worktree = tmp_path / "linked"
     subprocess.run(
-        ["git", "worktree", "add", "-qb", "linked", str(worktree)], cwd=checkout, check=True
+        ["git", "worktree", "add", "-qb", "linked", str(worktree)],
+        cwd=checkout,
+        env=env,
+        check=True,
     )
     for repo in (checkout, worktree):
         result = check_install(repo)
@@ -638,7 +678,10 @@ def test_broken_install_warns(
             hook.write_text(hook.read_text().replace("INSTALL_PYTHON=", "INSTALL_PYTHON='"))
         case "override":
             subprocess.run(
-                ["git", "config", "core.hooksPath", ".custom-hooks"], cwd=checkout, check=True
+                ["git", "config", "core.hooksPath", ".custom-hooks"],
+                cwd=checkout,
+                env=_clean_git_env(),
+                check=True,
             )
     result = check_install(checkout)
     assert result.returncode == 0

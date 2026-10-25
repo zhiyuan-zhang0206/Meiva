@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Mapping
-from typing import cast
+from typing import TypeGuard
 
 from meizel.graph.model import Code
 
@@ -134,21 +134,29 @@ def _key_problem(code: Code, key: str) -> str | None:
     return None if file and what else f"a {code} debt is written `file#form`"
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
 def parse_debt(table: object, report: Callable[[str], None]) -> DebtTable:
     """Validate a parsed `[debt]` table; every defect goes to `report`, valid entries are kept."""
-    if not isinstance(table, dict):
+    if not _is_table(table):
         report("[debt] must be a table")
         return {}
     result: DebtTable = {}
-    for name, rows in cast("dict[str, object]", table).items():
+    for name, rows in table.items():
         code = next((c for c in DEBTABLE if c.value == name), None)
         if code is None:
             known = ", ".join(sorted(c.value for c in DEBTABLE))
             report(f"[debt.{name}] is not a code that can be recorded; the codes are {known}")
-        elif not isinstance(rows, dict):
+        elif not _is_table(rows):
             report(f"[debt.{name}] must be a table of `key = count`")
         else:
-            kept = _valid_entries(code, cast("dict[str, object]", rows), report)
+            kept = _valid_entries(code, rows, report)
             if kept:
                 result[code] = kept
     return result

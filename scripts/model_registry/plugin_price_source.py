@@ -17,7 +17,7 @@ import ast
 from collections.abc import Mapping, Set
 from datetime import date
 from pathlib import Path
-from typing import Any, NamedTuple, cast
+from typing import NamedTuple
 
 from scripts.model_registry.plugin_price_rates import FlatRates, rates_from_nodes
 
@@ -134,9 +134,9 @@ def validated_provenance(
     return source_url, source_checked_at, vendor
 
 
-def _literal(node: ast.expr, expected: type[Any], *, context: str) -> Any:
+def _literal[T](node: ast.expr, expected: type[T], *, context: str) -> T:
     try:
-        value = ast.literal_eval(node)
+        value: object = ast.literal_eval(node)
     except (ValueError, TypeError) as exc:
         raise RuntimeError(f"{context} must be a literal") from exc
     if not isinstance(value, expected):
@@ -146,7 +146,7 @@ def _literal(node: ast.expr, expected: type[Any], *, context: str) -> Any:
 
 def _optional_string_literal(node: ast.expr, *, context: str) -> str | None:
     try:
-        value = ast.literal_eval(node)
+        value: object = ast.literal_eval(node)
     except (ValueError, TypeError) as exc:
         raise RuntimeError(f"{context} must be a string or None literal") from exc
     if value is not None and not isinstance(value, str):
@@ -158,12 +158,12 @@ def _integer_literal(node: ast.expr, *, context: str) -> int:
     value = _literal(node, int, context=context)
     if isinstance(value, bool):
         raise TypeError(f"{context} must be an integer literal")
-    return cast(int, value)
+    return value
 
 
 def _optional_integer_literal(node: ast.expr, *, context: str) -> int | None:
     try:
-        value = ast.literal_eval(node)
+        value: object = ast.literal_eval(node)
     except (ValueError, TypeError) as exc:
         raise RuntimeError(f"{context} must be an integer or None literal") from exc
     if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
@@ -186,9 +186,11 @@ def _call_fields(
         and not node.args
     ):
         raise RuntimeError(f"{context} must be a literal {constructor}(...) call")
-    if any(keyword.arg is None for keyword in node.keywords):
-        raise RuntimeError(f"{context} cannot contain keyword expansion")
-    fields = {cast(str, keyword.arg): keyword.value for keyword in node.keywords}
+    fields: dict[str, ast.expr] = {}
+    for keyword in node.keywords:
+        if keyword.arg is None:
+            raise RuntimeError(f"{context} cannot contain keyword expansion")
+        fields[keyword.arg] = keyword.value
     if len(fields) != len(node.keywords):
         raise RuntimeError(f"{context} contains duplicate {constructor} fields")
     missing = required - fields.keys()
@@ -345,12 +347,14 @@ def _mapping_keyword(call: ast.Call, name: str, *, path: Path, declaration: str)
 def _mapping_keys(
     mapping: ast.Dict, *, context: str, constants: Mapping[str, str]
 ) -> tuple[str, ...]:
-    if len(mapping.keys) != len(mapping.values) or any(key is None for key in mapping.keys):
+    if len(mapping.keys) != len(mapping.values):
         raise RuntimeError(f"{context} cannot contain mapping expansion")
-    keys = tuple(
-        _model_key(cast(ast.expr, key), constants=constants, context=f"{context} key")
-        for key in mapping.keys
-    )
+    parsed_keys: list[str] = []
+    for key in mapping.keys:
+        if key is None:
+            raise RuntimeError(f"{context} cannot contain mapping expansion")
+        parsed_keys.append(_model_key(key, constants=constants, context=f"{context} key"))
+    keys = tuple(parsed_keys)
     if len(keys) != len(set(keys)):
         raise RuntimeError(f"{context} contains duplicate model ids")
     return keys
@@ -359,7 +363,7 @@ def _mapping_keys(
 def _model_key(node: ast.expr, *, constants: Mapping[str, str], context: str) -> str:
     if isinstance(node, ast.Name) and node.id in constants:
         return constants[node.id]
-    return cast(str, _literal(node, str, context=context))
+    return _literal(node, str, context=context)
 
 
 def _fast_variant_calls(tree: ast.Module) -> list[ast.Call]:

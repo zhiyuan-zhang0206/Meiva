@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import cache
 from pathlib import Path
-from typing import assert_never, cast
+from typing import TypeGuard, assert_never
 
 __all__ = [
     "POLICY",
@@ -141,12 +141,28 @@ class Policy:
             raise KeyError(f"{POLICY} has no {shape} section [{rule}] {section}")
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_list(value: object) -> TypeGuard[list[str]]:
+    return _is_object_list(value) and all(isinstance(item, str) for item in value)
+
+
 def _reasons(table: object, where: str, problems: list[str]) -> dict[str, str]:
-    if not isinstance(table, dict):
+    if not _is_table(table):
         problems.append(f"{where} must be a table of `name = reason`")
         return {}
     found: dict[str, str] = {}
-    for name, reason in cast("dict[str, object]", table).items():
+    for name, reason in table.items():
         if isinstance(reason, str) and reason.strip():
             found[name] = reason.strip()
         else:
@@ -155,11 +171,10 @@ def _reasons(table: object, where: str, problems: list[str]) -> dict[str, str]:
 
 
 def _names(value: object, where: str, problems: list[str]) -> tuple[str, ...]:
-    items = cast("list[object]", value) if isinstance(value, list) else None
-    if items is None or not all(isinstance(item, str) and item for item in items):
+    if not _is_str_list(value) or not all(value):
         problems.append(f"{where} must be a list of non-empty strings")
         return ()
-    return tuple(cast("list[str]", items))
+    return tuple(value)
 
 
 def _rule(
@@ -170,11 +185,11 @@ def _rule(
     problems: list[str],
     source: _PolicySource,
 ) -> None:
-    if not isinstance(table, dict):
+    if not _is_table(table):
         problems.append(f"[{rule}] must be a table")
         return
     sections = _sections(rule, source)
-    for section, value in cast("dict[str, object]", table).items():
+    for section, value in table.items():
         shape = sections.get(section, REASONS) if rule in PER_NAME else sections.get(section)
         where = f"[{rule}] {section}" if shape == NAMES else f"[{rule}.{section}]"
         if shape == REASONS:
@@ -201,19 +216,17 @@ def _checker(
     external = document.get("external", {})
     loads = document.get("loads", {})
     defaults = document.get("default-arguments", {})
-    if not (isinstance(external, dict) and isinstance(loads, dict) and isinstance(defaults, dict)):
+    if not (_is_table(external) and _is_table(loads) and _is_table(defaults)):
         problems.append("every table must be a table")
         return {}, {}, ()
-    parsed_external = _reasons(cast("dict[str, object]", external), "[external]", problems)
+    parsed_external = _reasons(external, "[external]", problems)
     parsed_loads: dict[str, tuple[str, ...]] = {}
-    for path, targets in cast("dict[str, object]", loads).items():
-        if isinstance(targets, list) and all(
-            isinstance(t, str) for t in cast("list[object]", targets)
-        ):
-            parsed_loads[path] = tuple(cast("list[str]", targets))
+    for path, targets in loads.items():
+        if _is_str_list(targets):
+            parsed_loads[path] = tuple(targets)
         else:
             problems.append(f"[loads] {path!r} must be a list of directories")
-    return parsed_external, parsed_loads, tuple(cast("dict[str, object]", defaults))
+    return parsed_external, parsed_loads, tuple(defaults)
 
 
 # meiva:note

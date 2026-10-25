@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import ast
 import sys
-from typing import cast
 
 from meizel.graph.model import Code, FactKind, Patch
 from meizel.graph.universe import Universe
@@ -173,9 +172,10 @@ class PatchForms(PythonCommands):
         )
 
     def builtin_attribute_call(self, node: ast.Call) -> None:
+        if not isinstance(node.func, ast.Name):
+            return
         name = const_str(node.args[1]) if len(node.args) > 1 else None
-        form = cast("ast.Name", node.func).id
-        self.written(node.args[0], (name,) if name else (), node.lineno, form)
+        self.written(node.args[0], (name,) if name else (), node.lineno, node.func.id)
 
     # meiva:note
     # A name set or removed on a first-party module must be one the module binds.
@@ -260,9 +260,9 @@ class PatchForms(PythonCommands):
             self.add(module, line, FactKind.PATCH, names, detail)
 
     def monkeypatch_call(self, node: ast.Call) -> None:
-        if not node.args:
+        if not node.args or not isinstance(node.func, ast.Attribute):
             return
-        method = cast("ast.Attribute", node.func).attr
+        method = node.func.attr
         form = f"monkeypatch.{method}"
         self.record_raising_false(node, method, form)
         if method in {"setenv", "delenv"}:

@@ -32,7 +32,7 @@ import tomllib
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 from meizel import roles as role_api
 from meizel.graph.model import Code, Diagnostic, MeizelError
@@ -227,16 +227,27 @@ def _python(
     return found
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _arrays(value: object, trail: str) -> Iterable[tuple[str, list[str]]]:
-    if isinstance(value, dict):
-        for key, child in cast("dict[str, object]", value).items():
+    if _is_table(value):
+        for key, child in value.items():
             yield from _arrays(child, f"{trail}.{key}" if trail else key)
-    elif isinstance(value, list):
-        items = cast("list[object]", value)
-        strings = [x for x in items if isinstance(x, str)]
+    elif _is_object_list(value):
+        strings = [x for x in value if isinstance(x, str)]
         if strings:
             yield trail, strings
-        for child in items:
+        for child in value:
             yield from _arrays(child, trail)
 
 

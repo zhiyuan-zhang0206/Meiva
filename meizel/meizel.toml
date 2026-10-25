@@ -25,11 +25,3 @@ exports = ["allowances.py", "budgets", "contracts", "graph", "language", "lint_c
 "lint_common.py#Path.read_bytes" = 1
 "lint_common.py#import subprocess" = 1
 "roles.py#Path.read_text" = 1
-
-[debt.type-cast]
-"allowances.py#cast _checker" = 5
-"allowances.py#cast _names" = 2
-"allowances.py#cast _reasons" = 1
-"allowances.py#cast _rule" = 1
-"roles.py#cast check_table" = 3
-"roles.py#cast pytest_test_hosts" = 2

@@ -7,7 +7,7 @@ import re
 import tomllib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import cast
+from typing import TypeGuard
 
 from meizel.contracts.debt import (
     CYCLE_EDGE,
@@ -64,6 +64,22 @@ def first(path: str) -> str:
 def within(path: str, prefix: str) -> bool:
     """`path` is `prefix` or lies below it (a file is a prefix of itself)."""
     return path == prefix or path.startswith(f"{prefix}/")
+
+
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_str_list(value: object) -> TypeGuard[list[str]]:
+    return _is_object_list(value) and all(isinstance(item, str) for item in value)
 
 
 # meiva:note
@@ -184,11 +200,9 @@ class _Reader:
         self.diagnostics.append(Diagnostic(self.manifest.path, line, code, message, hints))
 
     def names(self, value: object, where: str, line: int) -> tuple[str, ...]:
-        items = cast("list[object]", value) if isinstance(value, list) else None
-        if items is None or not all(isinstance(v, str) for v in items):
+        if not _is_str_list(value):
             self.report(line, Code.MANIFEST_SYNTAX, f"{where} must be a list of strings")
             return ()
-        value = cast("list[str]", items)
         seen: set[str] = set()
         for name in value:
             if name in seen:
@@ -287,7 +301,7 @@ class _Reader:
 
     def read_external(self, table: object) -> dict[str, str]:
         """`[external]`: files that run code from outside the repository, each with a reason."""
-        if not isinstance(table, dict):
+        if not _is_table(table):
             self.report(
                 self.manifest.line_of("external"),
                 Code.MANIFEST_SYNTAX,
@@ -295,7 +309,7 @@ class _Reader:
             )
             return {}
         result: dict[str, str] = {}
-        for key, reason in cast("dict[str, object]", table).items():
+        for key, reason in table.items():
             line = self.manifest.line_of(key)
             if not key.endswith(".py"):
                 self.report(
@@ -351,13 +365,13 @@ class _Reader:
     # meiva:note
     # `[state]`: files that hold process state the repository itself keeps, by kind.
     def read_state(self, table: object) -> dict[str, tuple[AmbientKind, ...]]:
-        if not isinstance(table, dict):
+        if not _is_table(table):
             self.report(
                 self.manifest.line_of("state"), Code.MANIFEST_SYNTAX, "[state] must be a table"
             )
             return {}
         result: dict[str, tuple[AmbientKind, ...]] = {}
-        for key, value in cast("dict[str, object]", table).items():
+        for key, value in table.items():
             line = self.manifest.line_of(key)
             if self.python_child("state", key, line):
                 kinds = self.kinds(value, f"[state] {key!r}", line, HELD_KINDS)
@@ -368,13 +382,13 @@ class _Reader:
     # meiva:note
     # `[roots]`: files that may read the ambient world, each with the kinds it may read.
     def read_roots(self, table: object) -> dict[str, Root]:
-        if not isinstance(table, dict):
+        if not _is_table(table):
             self.report(
                 self.manifest.line_of("roots"), Code.MANIFEST_SYNTAX, "[roots] must be a table"
             )
             return {}
         result: dict[str, Root] = {}
-        for key, value in cast("dict[str, object]", table).items():
+        for key, value in table.items():
             line = self.manifest.line_of(key)
             if self.python_child("roots", key, line):
                 root = self.read_root(key, value, line)
@@ -386,10 +400,10 @@ class _Reader:
     # One `[roots]` value: a list of kinds, or a table with `kinds` and a `why`.
     def read_root(self, key: str, value: object, line: int) -> Root | None:
         where = f"[roots] {key!r}"
-        if not isinstance(value, dict):
+        if not _is_table(value):
             kinds = self.kinds(value, where, line, tuple(AmbientKind))
             return Root(kinds) if kinds else None
-        fields = cast("dict[str, object]", value)
+        fields = value
         unknown = sorted(set(fields) - {"kinds", "why"})
         why = fields.get("why", "")
         if unknown or not isinstance(why, str) or not why.strip():
@@ -413,10 +427,10 @@ class _Reader:
             else:
                 self.purity_default = value
             return
-        if not isinstance(value, dict):
+        if not _is_table(value):
             self.report(line, Code.MANIFEST_SYNTAX, "purity must be a string or a table")
             return
-        for key, level in cast("dict[str, object]", value).items():
+        for key, level in value.items():
             key_line = self.manifest.line_of(key)
             if not isinstance(level, str) or level not in PURITY_LEVELS:
                 self.report(
@@ -450,13 +464,13 @@ class _Reader:
     def read_table(
         self, table: object, section: str, reader: _EdgeReader
     ) -> dict[str, tuple[str, ...]]:
-        if not isinstance(table, dict):
+        if not _is_table(table):
             self.report(
                 self.manifest.line_of(section), Code.MANIFEST_SYNTAX, f"[{section}] must be a table"
             )
             return {}
         result: dict[str, tuple[str, ...]] = {}
-        for key, value in cast("dict[str, object]", table).items():
+        for key, value in table.items():
             line = self.manifest.line_of(key)
             if self.child(key, f"[{section}]", line, deep=section == "uses"):
                 values = self.names(value, f"[{section}] {key!r}", line)

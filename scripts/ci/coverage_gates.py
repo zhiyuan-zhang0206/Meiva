@@ -29,7 +29,7 @@ import sys
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 # The 85% gate denominator — must match [tool.coverage.run].source's core
 # set and the comment in ci.yml's gate step. ops/services/meiva_builtins are
@@ -72,14 +72,21 @@ def _matches_prefix(path: str, prefix: str) -> bool:
     return path == prefix or path.startswith(prefix + "/")
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
 def _line_counts(path: str, entry: object) -> tuple[int, int]:
-    if not isinstance(entry, dict):
+    if not _is_table(entry):
         raise TypeError(f"{path}: coverage entry must be an object")
-    summary = cast("dict[object, object]", entry).get("summary")
-    if not isinstance(summary, dict):
+    summary = entry.get("summary")
+    if not _is_table(summary):
         raise TypeError(f"{path}: coverage summary must be an object")
-    counts = cast("dict[object, object]", summary)
-    covered, valid = counts.get("covered_lines"), counts.get("num_statements")
+    covered, valid = summary.get("covered_lines"), summary.get("num_statements")
     if type(covered) is not int or type(valid) is not int:
         raise TypeError(f"{path}: coverage line counts must be integers")
     if not 0 <= covered <= valid:
@@ -214,12 +221,12 @@ def main(
     threshold = float(env.get("BACKEND_COVERAGE_THRESHOLD", CORE_THRESHOLD_DEFAULT))
     with Path(json_path).open() as f:
         data: object = json.load(f)
-    if not isinstance(data, dict):
+    if not _is_table(data):
         raise TypeError("coverage report must be an object")
-    files = cast("dict[str, object]", data).get("files")
-    if not isinstance(files, dict):
+    files = data.get("files")
+    if not _is_table(files):
         raise TypeError("coverage report files must be an object")
-    return check(cast("dict[str, object]", files), threshold, floors=floors)
+    return check(files, threshold, floors=floors)
 
 
 if __name__ == "__main__":

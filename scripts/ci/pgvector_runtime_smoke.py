@@ -35,9 +35,7 @@ from base.cluster.dataplane.pg_tools import throwaway_postgres
 from base.config import ConfigBoot
 
 
-def _assert_platform_supported() -> None:
-    system = platform.system()
-    machine = platform.machine()
+def _assert_platform_supported(system: str, machine: str) -> None:
     supported = (system == "Darwin" and machine == "arm64") or (
         system == "Linux" and machine in ("x86_64", "amd64")
     )
@@ -48,7 +46,7 @@ def _assert_platform_supported() -> None:
 
 
 def main() -> int:
-    _assert_platform_supported()
+    _assert_platform_supported(platform.system(), platform.machine())
     bin_dir = rb.ensure_pg_binaries()
     rb.ensure_pgvector()
 
