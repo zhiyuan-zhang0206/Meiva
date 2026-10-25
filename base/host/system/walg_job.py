@@ -23,8 +23,8 @@ from pathlib import Path
 
 from loguru import logger
 
-import base.host.system.cron
 from base.host.system import walg_content as content
+from base.host.system.cron import mechanics
 from base.host.system.hostport import Host
 from base.host.system.job_readings import read_launchd_path, read_meiva_binary
 from base.host.system.job_values import JobPaths, JobRoots, plist_path
@@ -45,7 +45,7 @@ def register_macos(*, backup_hour: int, roots: JobRoots, host: Host) -> int:
         encoding="utf-8",
     )
 
-    if base.host.system.cron.reload_launchd_job(content.LABEL, destination, host=host) != 0:
+    if mechanics.reload_launchd_job(content.LABEL, destination, host=host) != 0:
         return 1
     logger.info(
         "launchd job '{}' loaded (daily at {:02d}:{:02d})",
@@ -57,14 +57,12 @@ def register_macos(*, backup_hour: int, roots: JobRoots, host: Host) -> int:
 
 
 def unregister_macos(*, host: Host) -> int:
-    retired = base.host.system.cron.remove_launchd_job(
-        content.LABEL, launchd_plist_path(), host=host
-    )
+    retired = mechanics.remove_launchd_job(content.LABEL, launchd_plist_path(), host=host)
     return 0 if retired else 1
 
 
 def register_linux(*, backup_hour: int, roots: JobRoots, host: Host) -> int:
-    missing_rc = base.host.system.cron.require_crontab(
+    missing_rc = mechanics.require_crontab(
         "  * WAL-G backup: crontab not installed; the daily tick cannot be registered",
         missing_returncode=1,
         missing_stream=sys.stderr,
@@ -79,7 +77,7 @@ def register_linux(*, backup_hour: int, roots: JobRoots, host: Host) -> int:
     log_file.parent.mkdir(parents=True, exist_ok=True)
     entry = content.cron_entry(paths, backup_hour=backup_hour)
 
-    if base.host.system.cron.replace_crontab_entry(
+    if mechanics.replace_crontab_entry(
         content.MARKER,
         entry,
         skip_phrase="WAL-G tick registration",
@@ -92,7 +90,7 @@ def register_linux(*, backup_hour: int, roots: JobRoots, host: Host) -> int:
 
 
 def unregister_linux(*, host: Host) -> int:
-    return base.host.system.cron.remove_crontab_entry(
+    return mechanics.remove_crontab_entry(
         content.MARKER, write_failure_rc=1, on_removed=None, host=host
     )
 
@@ -110,14 +108,14 @@ def register_walg_job(
     *, enabled: bool, backup_hour: int | None, roots: JobRoots, host: Host
 ) -> None:
     if not enabled:
-        base.host.system.cron.skip_os_job("WAL-G tick")
+        mechanics.skip_os_job("WAL-G tick")
         return
-    if not base.host.system.cron.owns_os_job_home("WAL-G tick", home=roots.home):
+    if not mechanics.owns_os_job_home("WAL-G tick", home=roots.home):
         return
     if backup_hour is None:
         raise ValueError("registering the WAL-G tick needs the backup hour")
     hour_of_dump = backup_hour
-    base.host.system.cron.register_platform_job(
+    mechanics.register_platform_job(
         "WAL-G tick",
         macos=lambda: register_macos(backup_hour=hour_of_dump, roots=roots, host=host),
         linux=lambda: register_linux(backup_hour=hour_of_dump, roots=roots, host=host),
@@ -126,9 +124,9 @@ def register_walg_job(
 
 
 def unregister_walg_job(*, host: Host) -> None:
-    if not base.host.system.cron.owns_os_jobs("WAL-G tick"):
+    if not mechanics.owns_os_jobs("WAL-G tick"):
         return
-    base.host.system.cron.unregister_platform_job(
+    mechanics.unregister_platform_job(
         macos=lambda: unregister_macos(host=host),
         linux=lambda: unregister_linux(host=host),
         host=host,

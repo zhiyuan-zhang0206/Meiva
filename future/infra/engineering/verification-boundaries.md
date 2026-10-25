@@ -100,7 +100,7 @@ every step and every observer check passed and the container is gone.
 - **No systemd needed.** `cli/commands/lifecycle/root_driver.py` launches `meiva-root`
   directly on every non-macOS platform (`_spawn_direct`). systemd is used only for
   automatic boot (`base/host/system/boot_unit.py`, a system-scope unit that needs root
-  to install). With `MEIVA_OS_JOBS_ENABLED=0` (`base/host/system/cron.py:os_jobs_enabled`)
+  to install). With `MEIVA_OS_JOBS_ENABLED=0` (the registrar's explicit `enabled` value)
   converge registers no cron, boot or logs jobs.
 - **Data plane is native inside the container**, as everywhere; this is the opposite of
   the retired compose data plane

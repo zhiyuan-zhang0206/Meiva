@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import assert_never
 
 from base.deploy.progress_timeout import HOST_PACKAGE_INSTALL_TIMEOUT_S
-from base.host.system.cron import owns_os_jobs
+from base.host.system.cron.mechanics import owns_os_jobs
 from base.host.system.hostport import Host
 from base.paths.home import is_prod_install
 from base.sessions.env_forwarding import frontend_toolchain_path

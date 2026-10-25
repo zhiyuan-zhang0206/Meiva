@@ -18,7 +18,7 @@ from base.cluster.dataplane.pg_admin import pg_socket_path
 from base.host.permissions_helper.client import PermissionsHelperClient
 from base.host.private_storage import write_private_bytes
 from base.host.system.boot_autostart.registration import unregister_autostart
-from base.host.system.cron import unregister_os_cron
+from base.host.system.cron.health_job import unregister_os_cron
 from base.host.system.hostport import Host
 from base.host.system.logs_job import unregister_logs_job
 from base.host.system.packages_job import unregister_packages_job

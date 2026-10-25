@@ -25,7 +25,7 @@ permanent error. See `base/host/system/boot_policy.py` for the policy and for ho
 each mechanism states it: launchd keys plus the cap inside `meiva start --boot` on
 macOS, systemd restart and start-limit keys on Linux.
 
-Mirrors base/host/system/cron.py (the health-probe registrar) -- same launchd / crontab
+Mirrors base/host/system/cron/mechanics.py (the health-probe registrar) -- same launchd / crontab
 mechanics -- but fires at boot (RunAtLoad / systemd)
 instead of on an interval, and runs `meiva start`.
 

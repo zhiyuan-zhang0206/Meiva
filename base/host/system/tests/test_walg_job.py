@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from base.host.system import cron
 from base.host.system import walg_job as job
+from base.host.system.cron import mechanics
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
 from base.host.system.tests.fake_commands import (
@@ -141,12 +141,12 @@ def test_register_skips_when_os_jobs_are_disabled(
     job_roots: JobRoots, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     skipped: list[str] = []
-    monkeypatch.setattr(cron, "skip_os_job", skipped.append)
+    monkeypatch.setattr(mechanics, "skip_os_job", skipped.append)
 
     def no_platform(*_a: object, **_k: object) -> None:
         raise AssertionError("the platform must not be touched with OS jobs off")
 
-    monkeypatch.setattr(cron, "register_platform_job", no_platform)
+    monkeypatch.setattr(mechanics, "register_platform_job", no_platform)
 
     job.register_walg_job(
         roots=job_roots,
@@ -163,8 +163,8 @@ def test_register_and_unregister_delegate_in_the_default_home(
 ) -> None:
     calls: list[str] = []
 
-    monkeypatch.setattr(cron, "register_platform_job", _recorder(calls, "register"))
-    monkeypatch.setattr(cron, "unregister_platform_job", _recorder(calls, "unregister"))
+    monkeypatch.setattr(mechanics, "register_platform_job", _recorder(calls, "register"))
+    monkeypatch.setattr(mechanics, "unregister_platform_job", _recorder(calls, "unregister"))
 
     job.register_walg_job(
         roots=replace(job_roots, home=default_home / ".meiva", user_home=default_home),

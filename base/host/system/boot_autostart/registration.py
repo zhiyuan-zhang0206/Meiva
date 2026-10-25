@@ -6,11 +6,11 @@ from pathlib import Path
 
 from loguru import logger
 
-from base.host.system import cron
 from base.host.system.boot_autostart.content import LABEL, launchd_plist_content
 from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S, boot_start_arguments
 from base.host.system.boot_unit import install, uninstall
-from base.host.system.cron import (
+from base.host.system.cron import mechanics
+from base.host.system.cron.mechanics import (
     bootout_launchd_job,
     meiva_binary_path,
     owns_os_jobs,
@@ -39,8 +39,8 @@ def register_macos(*, services: frozenset[str], host: Host) -> int:
     meiva = meiva_binary_path(host=host)
     log_file = meiva_home() / "logs" / "autostart.log"
     arguments = (meiva, *boot_start_arguments(services))
-    environment_home = Path(cron.job_home())
-    path_env = cron.launchd_path_env(host=host)
+    environment_home = Path(mechanics.job_home())
+    path_env = mechanics.launchd_path_env(host=host)
     content = launchd_plist_content(
         arguments=arguments,
         retry_interval_seconds=BOOT_RETRY_INTERVAL_S,
