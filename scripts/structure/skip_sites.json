@@ -118,7 +118,7 @@
   "services/entrypoints/gate/tests/test_gate.py": [
     "skip('node is not installed')"
   ],
-  "services/supervision/meiva_root/tests/test_meiva_root_daemon.py": [
+  "services/supervision/meiva_root/tests/daemon/test_meiva_root_daemon.py": [
     "skip('native Linux systemd required')",
     "skip('native Linux systemd required')",
     "skip('native systemd test requires passwordless sudo')",
