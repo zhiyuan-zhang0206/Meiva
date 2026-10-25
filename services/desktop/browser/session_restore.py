@@ -27,16 +27,16 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
-import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 import websockets
+from websockets.asyncio.client import ClientConnection
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig, Timers
 from base.host.atomic_io import write_text_atomic
 from base.log import logger
 from base.paths import run_dir
@@ -84,11 +84,11 @@ Connect = Callable[[str], AbstractAsyncContextManager[Any]]
 class Chrome(Protocol):
     # meiva:note
     # GET one of CDP's HTTP endpoints (`/json/list`, `/json/version`).
-    async def json(self, path: str) -> Any: ...
+    async def json(self, path: str) -> Any | None: ...
 
     # meiva:note
     # Evaluate `expression` in the tab-group extension's worker and return its value.
-    async def worker(self, expression: str) -> Any: ...
+    async def worker(self, expression: str) -> Any | None: ...
 
 
 # meiva:note
@@ -136,41 +136,72 @@ def ledger_path(home: Path) -> Path:
     return run_dir(home) / LEDGER_NAME
 
 
+def _parse_tab(item: dict[str, Any]) -> Tab:
+    group_val: object = item.get("group")
+    if group_val is not None and not isinstance(group_val, str):
+        raise TypeError("tab group must be a string or None")
+    return Tab(
+        url=str(item["url"]),
+        title=str(item.get("title", "")),
+        pinned=bool(item.get("pinned", False)),
+        group=group_val,
+        index=int(item.get("index", 0)),
+        window=int(item.get("window", 0)),
+    )
+
+
+def _parse_reapply(raw: dict[str, Any] | None) -> dict[str, int] | None:
+    if raw is None:
+        return None
+    return {str(k): int(v) for k, v in raw.items()}
+
+
+def _parse_ledger_payload(raw: dict[str, Any]) -> Ledger:
+    raw_tabs: Any = raw["tabs"]
+    raw_tabs_obj: object = raw_tabs
+    if not isinstance(raw_tabs_obj, list):
+        raise TypeError("tabs must be a list")
+    tabs_list: list[Any] = raw_tabs
+    for entry in tabs_list:
+        entry_obj: object = entry
+        if not isinstance(entry_obj, dict):
+            raise TypeError("tab entry must be a dict")
+    raw_pending: object = raw.get("pending")
+    if raw_pending is not None and not isinstance(raw_pending, str):
+        raise TypeError("pending must be a string or None")
+    raw_reapply: Any = raw.get("reapply")
+    raw_reapply_obj: object = raw_reapply
+    if raw_reapply_obj is not None and not isinstance(raw_reapply_obj, dict):
+        raise TypeError("reapply must be a dict")
+    reapply_dict: dict[str, Any] | None = raw_reapply
+    tabs = tuple(_parse_tab(item) for item in tabs_list)
+    return Ledger(
+        tabs=tabs,
+        captured_at=str(raw.get("captured_at", "")),
+        layout=bool(raw.get("layout", False)),
+        pending=raw_pending,
+        reapply=_parse_reapply(reapply_dict),
+        report_pending=bool(raw.get("report_pending", False)),
+    )
+
+
 # meiva:note
 # The ledger, or None when this unit never recorded one (or it is unreadable).
 def read(home: Path) -> Ledger | None:
     path = ledger_path(home)
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw: Any = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return None
     except (OSError, ValueError) as exc:
         logger.warning("[browser-session] ignoring unreadable {}: {}", path, exc)
         return None
-    if not isinstance(raw, dict):
+    raw_obj: object = raw
+    if not isinstance(raw_obj, dict):
         logger.warning("[browser-session] ignoring malformed ledger {}", path)
         return None
-    stored = cast("dict[str, Any]", raw)
     try:
-        tabs = tuple(
-            Tab(
-                url=str(item["url"]),
-                title=str(item.get("title", "")),
-                pinned=bool(item.get("pinned", False)),
-                group=item.get("group"),
-                index=int(item.get("index", 0)),
-                window=int(item.get("window", 0)),
-            )
-            for item in cast("list[dict[str, Any]]", stored["tabs"])
-        )
-        return Ledger(
-            tabs=tabs,
-            captured_at=str(stored.get("captured_at", "")),
-            layout=bool(stored.get("layout", False)),
-            pending=cast("str | None", stored.get("pending")),
-            reapply=cast("dict[str, int] | None", stored.get("reapply")),
-            report_pending=bool(stored.get("report_pending", False)),
-        )
+        return _parse_ledger_payload(raw)
     except (KeyError, TypeError, ValueError) as exc:
         logger.warning("[browser-session] ignoring malformed ledger {}: {}", path, exc)
         return None
@@ -223,6 +254,18 @@ def begin_launch(home: Path) -> bool:
 # meiva:note
 # Record the browser's open tabs, or None when there is no browser to record.
 async def capture(chrome: Chrome) -> Ledger | None:
+    captured_at = (
+        Clock(
+            ClockConfig(
+                timezone="UTC",
+                authoritative_timezone="UTC",
+                message_timestamp_weekday=False,
+            ),
+            timers=SYSTEM_TIMERS,
+        )
+        .now()
+        .isoformat(timespec="seconds")
+    )
     windows = await _extension_layout(chrome)
     if windows is None:
         urls = await _listed_urls(chrome)
@@ -233,7 +276,7 @@ async def capture(chrome: Chrome) -> Ledger | None:
                 Tab(url=url, title="", pinned=False, group=None, index=index, window=0)
                 for index, url in enumerate(urls)
             ),
-            captured_at=datetime.now(UTC).isoformat(timespec="seconds"),
+            captured_at=captured_at,
             layout=False,
             pending=PENDING_RESTORE,
             reapply=None,
@@ -256,7 +299,7 @@ async def capture(chrome: Chrome) -> Ledger | None:
         return None
     return Ledger(
         tabs=tuple(tabs),
-        captured_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        captured_at=captured_at,
         layout=True,
         pending=PENDING_RESTORE,
         reapply=None,
@@ -268,7 +311,7 @@ async def capture(chrome: Chrome) -> Ledger | None:
 # Every window's tabs as the extension sees them, or None when it cannot be asked.
 async def _extension_layout(chrome: Chrome) -> list[list[dict[str, Any]]] | None:
     try:
-        raw = await chrome.worker("meivaLayout()")
+        raw: Any = await chrome.worker("meivaLayout()")
     except Exception as exc:
         logger.opt(exception=not isinstance(exc, TimeoutError)).warning(
             "[browser-session] the tab-group worker could not report the layout ({}: {}); "
@@ -277,14 +320,22 @@ async def _extension_layout(chrome: Chrome) -> list[list[dict[str, Any]]] | None
             exc,
         )
         return None
-    if not isinstance(raw, list):
+    raw_obj: object = raw
+    if not isinstance(raw_obj, list):
         return None
+    raw_windows: list[Any] = raw
     windows: list[list[dict[str, Any]]] = []
-    for window in cast("list[Any]", raw):
-        if not isinstance(window, list):
+    for window in raw_windows:
+        window_obj: object = window
+        if not isinstance(window_obj, list):
             continue
-        rows = cast("list[Any]", window)
-        windows.append([cast("dict[str, Any]", row) for row in rows if isinstance(row, dict)])
+        window_rows: list[Any] = window
+        rows: list[dict[str, Any]] = []
+        for row in window_rows:
+            row_obj: object = row
+            if isinstance(row_obj, dict):
+                rows.append(row)
+        windows.append(rows)
     return windows
 
 
@@ -292,19 +343,22 @@ async def _extension_layout(chrome: Chrome) -> list[list[dict[str, Any]]] | None
 # `/json/list` URLs of the page targets, or None when Chrome does not answer.
 async def _listed_urls(chrome: Chrome) -> list[str] | None:
     try:
-        listing = await chrome.json("/json/list")
+        listing: Any = await chrome.json("/json/list")
     except Exception as exc:
         logger.opt(exception=not isinstance(exc, TimeoutError)).warning(
             "[browser-session] could not list Chrome's pages ({}: {})", type(exc).__name__, exc
         )
         return None
-    if not isinstance(listing, list):
+    listing_obj: object = listing
+    if not isinstance(listing_obj, list):
         return None
-    return [
-        str(target.get("url", ""))
-        for target in cast("list[dict[str, Any]]", listing)
-        if target.get("type") == "page"
-    ]
+    targets: list[Any] = listing
+    urls: list[str] = []
+    for target in targets:
+        target_obj: object = target
+        if isinstance(target_obj, dict) and target.get("type") == "page":
+            urls.append(str(target.get("url", "")))
+    return urls
 
 
 # meiva:note
@@ -337,7 +391,7 @@ async def reapply(home: Path, chrome: Chrome) -> None:
     spec = layout_spec(ledger)
     expected = ledger.layout_expected
     try:
-        outcome = await chrome.worker(f"meivaApplyLayout({json.dumps(spec)})")
+        outcome: Any = await chrome.worker(f"meivaApplyLayout({json.dumps(spec)})")
     except Exception as exc:
         logger.opt(exception=not isinstance(exc, TimeoutError)).warning(
             "[browser-session] could not re-apply the recorded pins/groups ({}: {}); "
@@ -347,7 +401,8 @@ async def reapply(home: Path, chrome: Chrome) -> None:
         )
         write(home, replace(ledger, pending=None, reapply={"applied": 0, "expected": expected}))
         return
-    counts = cast("dict[str, Any]", outcome) if isinstance(outcome, dict) else {}
+    outcome_obj: object = outcome
+    counts: dict[str, Any] = outcome if isinstance(outcome_obj, dict) else {}
     applied = int(counts.get("pinned", 0)) + int(counts.get("grouped", 0))
     logger.info("[browser-session] re-applied {}/{} recorded pins/groups", applied, expected)
     write(home, replace(ledger, pending=None, reapply={"applied": applied, "expected": expected}))
@@ -380,7 +435,13 @@ async def _restored_counts(chrome: Chrome, recorded: list[str]) -> tuple[int, in
 #
 #     Printed as two counts on purpose: URL restoration and the pin/group reapply
 #     fail independently, and one number would hide the second (`8/9` loss shape).
-def report(*, home: Path, chrome: Chrome, wait_s: float | None = None) -> str | None:
+def report(
+    *,
+    home: Path,
+    chrome: Chrome,
+    wait_s: float = REPORT_WAIT_S,
+    timers: Timers = SYSTEM_TIMERS,
+) -> str | None:
     ledger = read(home)
     if ledger is None or not ledger.report_pending:
         return None
@@ -393,9 +454,9 @@ def report(*, home: Path, chrome: Chrome, wait_s: float | None = None) -> str | 
     # for the start that does launch the browser.
     if ledger.pending == PENDING_RESTORE:
         return None
-    deadline = time.monotonic() + (REPORT_WAIT_S if wait_s is None else wait_s)
-    while ledger.pending == PENDING_LAYOUT and time.monotonic() < deadline:
-        time.sleep(REPORT_POLL_S)
+    deadline = timers.monotonic() + wait_s
+    while ledger.pending == PENDING_LAYOUT and timers.monotonic() < deadline:
+        timers.sleep(REPORT_POLL_S)
         ledger = read(home) or ledger
     restored, expected = asyncio.run(_restored_counts(chrome, ledger.urls))
     line = f"browser session: restored {restored}/{expected} tabs"
@@ -450,7 +511,7 @@ def record_for_stop(*, home: Path, chrome: Chrome) -> str | None:
 
 
 def _connect(url: str) -> AbstractAsyncContextManager[Any]:
-    return cast("AbstractAsyncContextManager[Any]", websockets.connect(url))
+    return websockets.connect(url)
 
 
 # meiva:note
@@ -461,13 +522,19 @@ def _connect(url: str) -> AbstractAsyncContextManager[Any]:
 #     websocket.
 class CdpChrome:
     def __init__(
-        self, cdp_port: int, *, fetch: Fetch | None = None, connect: Connect | None = None
+        self,
+        cdp_port: int,
+        *,
+        fetch: Fetch | None = None,
+        connect: Connect | None = None,
+        timers: Timers = SYSTEM_TIMERS,
     ) -> None:
         self._cdp_port = cdp_port
         self._fetch = fetch or http_json
         self._connect = connect or _connect
+        self._timers = timers
 
-    async def json(self, path: str) -> Any:
+    async def json(self, path: str) -> Any | None:
         url = f"http://127.0.0.1:{self._cdp_port}{path}"
         return await asyncio.wait_for(self._fetch(url), LISTING_TIMEOUT_S)
 
@@ -481,20 +548,23 @@ class CdpChrome:
     #         live worker, and a failed attempt reloads the extension before the next
     #         one (measured on Chrome 156: the first call after a load always answers;
     #         later calls need this ladder).
-    async def worker(self, expression: str) -> Any:
+    async def worker(self, expression: str) -> Any | None:
         last: BaseException | None = None
         for attempt in range(WORKER_ATTEMPTS):
             try:
                 return await self._one_worker_call(expression, reload_first=attempt > 0)
             except Exception as exc:
                 last = exc
-                await asyncio.sleep(WORKER_RETRY_S)
+                await self._timers.asleep(WORKER_RETRY_S)
         raise RuntimeError(f"extension call failed after {WORKER_ATTEMPTS} attempts: {last}")
 
-    async def _one_worker_call(self, expression: str, *, reload_first: bool) -> Any:
-        version = await self.json("/json/version")
+    async def _one_worker_call(self, expression: str, *, reload_first: bool) -> Any | None:
+        version: Any = await self.json("/json/version")
+        version_obj: object = version
+        if type(version_obj) is not dict:
+            raise RuntimeError("CDP /json/version did not return a JSON object")
         ids = itertools.count(1)
-        async with self._connect(version["webSocketDebuggerUrl"]) as ws:
+        async with self._connect(str(version["webSocketDebuggerUrl"])) as ws:
             extension_id = await self._extension_id(ws, ids, reload_first=reload_first)
             url = f"chrome-extension://{extension_id}/{shipped_worker()}"
             targets = await self._worker_targets(ws, ids, url)
@@ -508,7 +578,9 @@ class CdpChrome:
                     failure = exc
             raise RuntimeError(f"no live worker answered: {failure}")
 
-    async def _extension_id(self, ws: Any, ids: Any, *, reload_first: bool) -> str:
+    async def _extension_id(
+        self, ws: ClientConnection | Any, ids: Iterator[int], *, reload_first: bool
+    ) -> str:
         loaded = [
             entry
             for entry in (await cdp_call(ws, ids, "Extensions.getExtensions", {}))["extensions"]
@@ -518,12 +590,14 @@ class CdpChrome:
             loaded_id = (
                 await cdp_call(ws, ids, "Extensions.loadUnpacked", {"path": str(EXTENSION_DIR)})
             )["id"]
-            await asyncio.sleep(WORKER_RETRY_S)
+            await self._timers.asleep(WORKER_RETRY_S)
             return str(loaded_id)
         return str(loaded[0]["id"])
 
-    async def _worker_targets(self, ws: Any, ids: Any, url: str) -> list[str]:
-        deadline = time.monotonic() + WORKER_SCRIPT_WAIT_S
+    async def _worker_targets(
+        self, ws: ClientConnection | Any, ids: Iterator[int], url: str
+    ) -> list[str]:
+        deadline = self._timers.monotonic() + WORKER_SCRIPT_WAIT_S
         while True:
             infos = (await cdp_call(ws, ids, "Target.getTargets", {}))["targetInfos"]
             targets = [
@@ -533,14 +607,16 @@ class CdpChrome:
             ]
             if targets:
                 return targets
-            if time.monotonic() >= deadline:
+            if self._timers.monotonic() >= deadline:
                 raise RuntimeError("the tab-group worker did not appear")
-            await asyncio.sleep(0.1)
+            await self._timers.asleep(0.1)
 
 
 # meiva:note
 # Attach to one worker target and evaluate `expression` there (raises on failure).
-async def _attach_and_evaluate(ws: Any, ids: Any, target: str, expression: str) -> Any:
+async def _attach_and_evaluate(
+    ws: ClientConnection | Any, ids: Iterator[int], target: str, expression: str
+) -> Any | None:
     session_id = (
         await asyncio.wait_for(
             cdp_call(ws, ids, "Target.attachToTarget", {"targetId": target, "flatten": True}),

@@ -63,8 +63,9 @@ nothing in the identification depends on a particular POSIX host.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
+from typing import Any
 
 import psutil
 
@@ -73,6 +74,7 @@ from base.log import logger
 
 from .profile import profile_dir
 
+# meiva:note
 # Exceptions meaning "gone, or not ours to read". `psutil.NoSuchProcess` and
 # `AccessDenied` are psutil's own two; `OSError` covers raw OS-error shapes
 # (a `PermissionError` out of the macOS `sysctl(KERN_PROCARGS2)` read included).
@@ -88,11 +90,13 @@ from .profile import profile_dir
 _UNREADABLE = (psutil.NoSuchProcess, psutil.AccessDenied, OSError, SystemError)
 
 _USER_DATA_DIR = "--user-data-dir="
+# meiva:note
 # Chrome stamps every process it spawns for itself with `--type=<renderer|gpu-process
 # |utility|zygote|…>`; the browser process alone has none. Verified on the dev Mac:
 # the browser process carries `--user-data-dir` and no `--type`, its GPU helper
 # carries both.
 _CHILD_TYPE = "--type="
+# meiva:note
 # Substring, not an exact set: the browser process is `Google Chrome` on macOS,
 # and `chrome` / `google-chrome-stable` / `chromium` /
 # `chromium-browser` on Linux. Matching loosely here is safe because this test only
@@ -120,11 +124,13 @@ def is_cluster_chrome(name: str, cmdline: Sequence[str] | None, profile: Path) -
     for arg in cmdline:
         if not arg.startswith(_USER_DATA_DIR):
             continue
+        # meiva:note
         # Compare as paths, not strings: `Path` folds a trailing separator away,
         # which a literal string match would get wrong in the false-negative
         # direction.
         if Path(arg[len(_USER_DATA_DIR) :]) == profile:
             return True
+    # meiva:note
     # Chrome also accepts the flag split across two argv entries
     # (`--user-data-dir <path>`), and a Chrome that relaunches itself (crash
     # restore, auto-update) has been observed re-tokenizing the original single
@@ -136,12 +142,24 @@ def is_cluster_chrome(name: str, cmdline: Sequence[str] | None, profile: Path) -
     return False
 
 
-def _readable_facts(proc: psutil.Process) -> tuple[str, list[str] | None]:
+def _readable_facts(proc: psutil.Process | Any) -> tuple[str, list[str] | None]:
     """`(name, argv)` for `proc`, with argv None when it cannot be read."""
     try:
         return proc.name(), proc.cmdline()
     except _UNREADABLE:
         return "", None
+
+
+# meiva:note
+# Select the pids of this cluster's Chrome browser processes from an arbitrary
+# iterable of process entries, skipping any entry that raises `_UNREADABLE`.
+def select_cluster_chrome_pids(procs: Iterable[psutil.Process | Any], profile: Path) -> list[int]:
+    found: list[int] = []
+    for proc in procs:
+        name, cmdline = _readable_facts(proc)
+        if is_cluster_chrome(name, cmdline, profile):
+            found.append(proc.pid)
+    return found
 
 
 def find_cluster_chrome(profile: Path | None = None) -> list[int]:
@@ -153,12 +171,25 @@ def find_cluster_chrome(profile: Path | None = None) -> list[int]:
     unreadable one.
     """
     target = profile_dir() if profile is None else profile
-    found: list[int] = []
-    for proc in psutil.process_iter():
-        name, cmdline = _readable_facts(proc)
-        if is_cluster_chrome(name, cmdline, target):
-            found.append(proc.pid)
-    return found
+    return select_cluster_chrome_pids(psutil.process_iter(), target)
+
+
+# meiva:note
+# Reap any Chrome browser process matching `profile` from `procs` and return the killed pids.
+def reap_cluster_chrome_from(procs: Iterable[psutil.Process | Any], profile: Path) -> list[int]:
+    pids = select_cluster_chrome_pids(procs, profile)
+    if not pids:
+        return []
+    logger.info(
+        "reaping {n} Chrome process tree(s) on this cluster's profile {profile}: {pids} "
+        "(left outside the meiva-browser session by a SingletonLock handoff)",
+        n=len(pids),
+        profile=profile,
+        pids=pids,
+    )
+    for pid in pids:
+        kill_process_tree(pid)
+    return pids
 
 
 def reap_cluster_chrome() -> list[int]:
@@ -183,16 +214,4 @@ def reap_cluster_chrome() -> list[int]:
     for the same reason — a second call finds nothing, and `kill_process_tree` is
     itself a no-op on a pid that has already gone.
     """
-    pids = find_cluster_chrome()
-    if not pids:
-        return []
-    logger.info(
-        "reaping {n} Chrome process tree(s) on this cluster's profile {profile}: {pids} "
-        "(left outside the meiva-browser session by a SingletonLock handoff)",
-        n=len(pids),
-        profile=profile_dir(),
-        pids=pids,
-    )
-    for pid in pids:
-        kill_process_tree(pid)
-    return pids
+    return reap_cluster_chrome_from(psutil.process_iter(), profile_dir())

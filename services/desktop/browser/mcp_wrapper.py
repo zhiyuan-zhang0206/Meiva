@@ -37,6 +37,7 @@ from services.desktop.browser.mcp_socket_bridge import (
     is_transport_error,
 )
 
+# meiva:note
 # The daemon explicitly rejected the request before forwarding it upstream.
 _UPSTREAM_DOWN_MSG = "chrome upstream session is down; restart browser-mcp before continuing"
 
@@ -89,14 +90,18 @@ class ReconnectingSocketLink(ReconnectingLink):
 async def _serve(*, socket_path: Path, timeout_reader: Callable[[], float]) -> None:
     link = ReconnectingSocketLink(socket_path=socket_path, timeout_reader=timeout_reader)
 
-    async def _list_tools(_ctx: Any, _params: Any) -> types.ListToolsResult:
-        tools = await link.request({"method": "list_tools"})
+    async def _list_tools(
+        _ctx: object, _params: types.PaginatedRequestParams | None
+    ) -> types.ListToolsResult:
+        raw_tools: Any = await link.request({"method": "list_tools"})
+        tools: list[Any] = raw_tools if raw_tools is not None else []
         return types.ListToolsResult(tools=[types.Tool.model_validate(t) for t in tools])
 
+    # meiva:note
     # The upstream does its own schema validation; re-checking here would only
     # risk rejecting a call upstream would accept (SDK v2 performs no argument
     # validation of its own — the raw arguments pass through to the upstream).
-    async def _call_tool(_ctx: Any, params: types.CallToolRequestParams) -> types.CallToolResult:
+    async def _call_tool(_ctx: object, params: types.CallToolRequestParams) -> types.CallToolResult:
         result = await link.request(
             {"method": "call_tool", "tool": params.name, "args": params.arguments or {}}
         )

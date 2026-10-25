@@ -127,18 +127,18 @@ def test_copy_default_profile_refuses_existing_dst_without_touching_it(tmp_path:
 
 
 def test_copy_default_profile_preserves_partial_dst_on_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     src = _make_profile(tmp_path / "chrome")
+    unreadable = src / "Default" / "unreadable"
+    unreadable.write_bytes(b"secret")
+    unreadable.chmod(0o000)
     dst = tmp_path / "agent-profile"
-
-    def _explode(*_a: object, **_k: object) -> None:
-        dst.mkdir(exist_ok=True)  # simulate a partial copy having started
-        raise OSError("disk full mid-copy")
-
-    monkeypatch.setattr(bp.shutil, "copytree", _explode)
-    with pytest.raises(OSError, match="disk full"):
-        bp.copy_default_profile(src, dst)
+    try:
+        with pytest.raises(OSError):
+            bp.copy_default_profile(src, dst)
+    finally:
+        unreadable.chmod(0o600)
     assert dst.exists()  # preserve every existing directory; never clear a profile automatically
 
 
@@ -161,14 +161,14 @@ def test_validate_local_state_accepts_readable_regular_file(tmp_path: Path) -> N
 
 
 def test_validate_local_state_warns_when_mtime_is_unexpectedly_future_dated(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     profile = tmp_path / "profile"
     profile.mkdir()
     state = profile / "Local State"
     state.write_text("{}")
-    monkeypatch.setattr(bp.time, "time", lambda: 0.0)
-    os.utime(state, (301, 301))
+    future = state.stat().st_mtime + 600.0
+    os.utime(state, (future, future))
     warning = bp.validate_local_state(profile)
     assert warning is not None
     assert "mtime" in warning

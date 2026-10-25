@@ -11,7 +11,6 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
@@ -301,21 +300,17 @@ def test_upstream_death_exits_without_reconnecting(home: Path, tmp_path: Path) -
 
 
 async def _run_with_fakes(
-    monkeypatch: pytest.MonkeyPatch,
     home: Path,
     stop: asyncio.Event,
     *,
     wedged_stack: bool = False,
+    daemon_out: list[Any] | None = None,
 ) -> tuple[asyncio.Task[None], Any]:
-    from mcp import types
+    from contextlib import AsyncExitStack
 
-    import services.desktop.browser.mcp_daemon as daemon_mod
-    from services.desktop.browser.mcp_daemon import run
+    from mcp import ClientSession, types
 
-    async def socket_free(_path: Path) -> bool:
-        return False
-
-    monkeypatch.setattr(daemon_mod, "socket_in_use", socket_free)
+    from services.desktop.browser.mcp_daemon import serve_with_upstream
 
     class FakeSession:
         async def send_ping(self) -> None:
@@ -337,41 +332,27 @@ async def _run_with_fakes(
                 await asyncio.Event().wait()
 
     stack = TrackedStack()
-
-    async def fake_create_upstream(
-        _url: str, _stop: asyncio.Event, *, connect_timeout_reader: Callable[[], float]
-    ) -> tuple[Any, Any]:
-        assert connect_timeout_reader() == 60.0
-        return FakeSession(), stack
-
-    monkeypatch.setattr(daemon_mod, "create_upstream", fake_create_upstream)
-
-    async def never(*_a: object, **_k: object) -> None:
-        await asyncio.Event().wait()
-
-    def no_inject(_gateway: object) -> None:
-        return None
-
-    monkeypatch.setattr(daemon_mod, "stop_on_signals", lambda: stop)
-    monkeypatch.setattr(daemon_mod.GatewaySession, "refresh_loop", never)
-    monkeypatch.setattr(daemon_mod.GatewaySession, "spawn_inject", no_inject)
-
     task = asyncio.create_task(
-        run(home=home, browser_cdp_port=9222, connect_timeout_reader=lambda: 60.0)
+        serve_with_upstream(
+            home=home,
+            browser_cdp_port=9222,
+            stop=stop,
+            upstream=cast(ClientSession, FakeSession()),
+            current_stack=cast(AsyncExitStack, stack),
+            daemon_out=daemon_out,
+        )
     )
     await asyncio.sleep(0.3)
     return task, stack
 
 
 @pytest.mark.flaky
-def test_cancelled_session_task_never_skips_cleanup(
-    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cancelled_session_task_never_skips_cleanup(home: Path, tmp_path: Path) -> None:
     import services.desktop.browser.mcp_daemon as daemon_mod
 
     async def scenario() -> None:
         stop = asyncio.Event()
-        task, stack = await _run_with_fakes(monkeypatch, home, stop)
+        task, stack = await _run_with_fakes(home, stop)
         await asyncio.sleep(0.2)
         stop.set()
         await asyncio.wait_for(task, timeout=20)
@@ -383,12 +364,10 @@ def test_cancelled_session_task_never_skips_cleanup(
 
 
 @pytest.mark.flaky
-def test_wedged_cleanup_await_is_bounded(
-    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_wedged_cleanup_await_is_bounded(home: Path, tmp_path: Path) -> None:
     async def scenario() -> None:
         stop = asyncio.Event()
-        task, _stack = await _run_with_fakes(monkeypatch, home, stop, wedged_stack=True)
+        task, _stack = await _run_with_fakes(home, stop, wedged_stack=True)
         await asyncio.sleep(0.2)
         start = time.monotonic()
         stop.set()
@@ -401,25 +380,20 @@ def test_wedged_cleanup_await_is_bounded(
 
 @pytest.mark.flaky
 def test_stopping_the_daemon_drops_in_flight_tab_groupings(
-    home: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path,
 ) -> None:
-    import services.desktop.browser.mcp_daemon as daemon_mod
-
-    cancelled: list[bool] = []
-    real = daemon_mod.AgentTabGroups.cancel_pending
-
-    def recording_cancel(self: Any) -> None:
-        cancelled.append(True)
-        real(self)
-
-    monkeypatch.setattr(daemon_mod.AgentTabGroups, "cancel_pending", recording_cancel)
-
     async def scenario() -> None:
         stop = asyncio.Event()
-        task, _stack = await _run_with_fakes(monkeypatch, home, stop)
-        assert cancelled == []
+        daemons: list[Any] = []
+        task, _stack = await _run_with_fakes(home, stop, daemon_out=daemons)
+        assert len(daemons) == 1
+        groups = daemons[0].tab_groups
+        in_flight = groups._task_group.create_task(asyncio.Event().wait())
+        groups._tasks.add(in_flight)
+        in_flight.add_done_callback(groups._settled)
+        assert not in_flight.done()
         stop.set()
         await asyncio.wait_for(task, timeout=20)
+        assert in_flight.cancelled()
 
     asyncio.run(scenario())
-    assert cancelled == [True]

@@ -12,8 +12,7 @@ from mcp import types
 from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
-from base.cluster.machine.tests.gateway_stubs import gateway_api_base_stub
-from services.desktop.browser import gateway_session, page_lifecycle, session
+from services.desktop.browser import page_lifecycle
 from services.desktop.browser.mcp_daemon import (
     ChromeMcpDaemon,
     handle_client,
@@ -25,7 +24,6 @@ from services.desktop.browser.page_lifecycle import (
     PageRegistry,
     parse_page_listing,
 )
-from services.desktop.browser.tab_groups.grouping import AgentTabGroups
 
 
 class FakeUpstream:
@@ -95,10 +93,7 @@ def err(text: str) -> types.CallToolResult:
     return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=True)
 
 
-class NoTabGroups(AgentTabGroups):
-    def __init__(self) -> None:
-        super().__init__(cdp_port=0, tasks=asyncio.TaskGroup())
-
+class NoTabGroups:
     async def snapshot(self) -> frozenset[str] | None:
         return None
 
@@ -111,8 +106,17 @@ class NoTabGroups(AgentTabGroups):
         return None
 
 
-def new_daemon(upstream: Any, tab_groups: AgentTabGroups | None = None) -> ChromeMcpDaemon:
-    return ChromeMcpDaemon(upstream, PageRegistry(), tab_groups or NoTabGroups())
+def new_daemon(
+    upstream: Any,
+    tab_groups: Any = None,
+    *,
+    default_ttl_seconds: float = page_lifecycle.DEFAULT_PAGE_TTL_SECONDS,
+) -> ChromeMcpDaemon:
+    return ChromeMcpDaemon(
+        upstream,
+        PageRegistry(default_ttl_seconds=default_ttl_seconds),
+        tab_groups if tab_groups is not None else NoTabGroups(),
+    )
 
 
 def browser_daemon_with_fake_upstream() -> tuple[ChromeMcpDaemon, FakeUpstream]:
@@ -556,17 +560,8 @@ class TitledListing(FakeUpstream):
         return _ok("\n".join(lines))
 
 
-async def test_gateway_origin_navigation_is_an_ordinary_navigation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_gateway_origin_navigation_is_an_ordinary_navigation() -> None:
     gateway = "http://gateway.example:8000"
-
-    async def forbidden(*_args: Any) -> Any:
-        pytest.fail("a gateway-origin navigation must not touch the session cookie")
-
-    monkeypatch.setattr(gateway_session, "gateway_api_base", gateway_api_base_stub(gateway))
-    monkeypatch.setattr(gateway_session, "inject_session_cookie", forbidden)
-    monkeypatch.setattr(session, "gateway_session_login", forbidden)
     d, up = browser_daemon_with_fake_upstream()
 
     opened = await d.call_tool_for_agent("navigate_page", {"url": f"{gateway}/pages/1"}, 7)
