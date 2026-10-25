@@ -1,6 +1,6 @@
 import contextlib
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Generator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Event, Thread
@@ -48,7 +48,7 @@ def make_bundle(source: Path) -> tuple[str, bytes]:
 
 
 @contextlib.contextmanager
-def git_http_remote(remote: Path, *, received: Event, release: Event) -> Iterator[str]:
+def git_http_remote(remote: Path, *, received: Event, release: Event) -> Generator[str]:
     # meiva:note
     # Expose a local bare repository through Git's own CGI backend, holding discovery.
     # meiva:link base/deploy/git/tests/docs/memory-repo-tests.meiva.okf.md

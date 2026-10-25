@@ -15,7 +15,7 @@ import pytest
 from base.cluster.machine import MachineIdentity, MachineNameMissing
 from base.cluster.machine.boot import machine_from_boot
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import get_field, set_field
+from base.config import ConfigBoot, get_field, set_field
 from base.config.tests.configuration import snapshot_process_config
 from base.deploy.git.memory_repo import (
     MemoryBranchMismatch,
@@ -32,7 +32,7 @@ from meiva_builtins.plugins.meiva_memory.setup import scaffold
 
 
 @pytest.fixture(autouse=True)
-def memory_configuration(process_config, unit_home: Path) -> Iterator[None]:
+def memory_configuration(process_config: ConfigBoot, unit_home: Path) -> Iterator[None]:
     fields = ("memory_remote", "memory_keep_local", "gateway_url", "cluster_secret")
     previous = {name: get_field(name) for name in fields}
     set_field("memory_remote", "")
