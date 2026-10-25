@@ -28,7 +28,7 @@ import stat
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, TypeGuard
@@ -67,9 +67,8 @@ class RetirementEnv:
     agents_dir: Path | None = None
     platform: str | None = None
     loaded: bool | None = None
-    pids: Sequence[int] | Callable[[Path], Sequence[int]] | None = None
+    pids: Sequence[int] | None = None
     owner: OwnedProcess | None = None
-    wait_for_owner: bool = True
     runner: BoundedRunner | None = None
 
 
@@ -171,17 +170,6 @@ def helper_job_loaded(home: Path | None = None, *, runner: BoundedRunner | None 
     return retirement_query(target, time.monotonic() + _READ_TIMEOUT_S, runner=runner) is not None
 
 
-def _resolve_pids(
-    executable: Path,
-    override: Sequence[int] | Callable[[Path], Sequence[int]] | None,
-) -> list[int]:
-    if override is None:
-        return executable_pids(executable)
-    if callable(override):
-        return list(override(executable))
-    return list(override)
-
-
 def require_retired_helper(executable: Path, *, env: RetirementEnv | None = None) -> None:
     """Refuse replacing this home's installed helper executable while it may still run.
 
@@ -197,7 +185,7 @@ def require_retired_helper(executable: Path, *, env: RetirementEnv | None = None
         blocker = f"launchd still has {helper_job_domain()}/{helper_job_label(cfg.home)} loaded"
     elif plist.exists() or plist.is_symlink():
         blocker = f"its job definition {plist} is still registered"
-    elif pids := _resolve_pids(executable, cfg.pids):
+    elif pids := (executable_pids(executable) if cfg.pids is None else list(cfg.pids)):
         blocker = f"pid {', '.join(map(str, pids))} still runs {executable}"
     else:
         return
@@ -359,8 +347,7 @@ def _request_helper_shutdown(
     reply = connect(socket_path).shutdown_helper(home / "run" / "meiva-root")
     if reply != {"stopping": True, "pid": owner.pid, "run_dir": str(home / "run" / "meiva-root")}:
         raise RuntimeError("helper shutdown did not acknowledge exact-home native custody")
-    if env.wait_for_owner:
-        wait_retirement_owner(owner, deadline)
+    wait_retirement_owner(owner, deadline)
     while (latest := retirement_query(target, deadline, runner=env.runner)) is not None:
         if _job_pid(latest) is None:
             _require_idle_job(latest, home)
