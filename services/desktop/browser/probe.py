@@ -89,6 +89,7 @@ from typing import Any
 
 import psutil
 
+from base.config import settings
 from base.daemon.health import DaemonProbe
 
 from . import macos_readiness
@@ -101,7 +102,6 @@ _log = logging.getLogger("services.desktop.browser.probe")
 # CDP is a loopback JSON dump; anything slower is a wedged browser, which is
 # "dead" for watchdog purposes. Matches the healthcheck timeout it replaces.
 _CDP_TIMEOUT_S = 3.0
-_DEFAULT_CDP_PORT = 9222
 
 # meiva:note
 # Exceptions meaning "gone, or not ours to read" — the same set `orphan.py` skips
@@ -489,7 +489,7 @@ def _probe_browser(port: int | None, profile: Path | None) -> DaemonProbe:
       crash loop once every 60s. An operator has to free the port.
     - **both hold** → `ALIVE`, with the pid in the detail.
     """
-    resolved_port = _DEFAULT_CDP_PORT if port is None else port
+    resolved_port = settings.services.browser_cdp_port if port is None else port
     resolved_profile = profile_dir() if profile is None else profile
 
     answer = cdp_unreachable(resolved_port)

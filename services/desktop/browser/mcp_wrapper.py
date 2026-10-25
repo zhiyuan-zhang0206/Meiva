@@ -93,8 +93,7 @@ async def _serve(*, socket_path: Path, timeout_reader: Callable[[], float]) -> N
     async def _list_tools(
         _ctx: object, _params: types.PaginatedRequestParams | None
     ) -> types.ListToolsResult:
-        raw_tools: Any = await link.request({"method": "list_tools"})
-        tools: list[Any] = raw_tools if raw_tools is not None else []
+        tools = await link.request({"method": "list_tools"})
         return types.ListToolsResult(tools=[types.Tool.model_validate(t) for t in tools])
 
     # meiva:note
