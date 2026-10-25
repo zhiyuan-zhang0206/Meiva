@@ -7,7 +7,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 
 from agent.graph.claim.harness_turn import HarnessTurnProjector
 from base.agents.messages.inbound import InterruptReason
@@ -166,7 +166,6 @@ async def test_real_clock_projects_to_the_actual_publisher(live_events: LiveEven
     owner = ConfigBoot()
     owner.read_process_environment()
     clock = Clock(clock_config_from_boot(owner), timers=SYSTEM_TIMERS)
-    before = datetime.now(UTC)
     projector = HarnessTurnProjector(
         event_publisher=live_events.publisher,
         agent_id=7,
@@ -177,7 +176,6 @@ async def test_real_clock_projects_to_the_actual_publisher(live_events: LiveEven
     projector.on_event(_tool())
     projector.on_event(_result())
     messages = projector.finish((_turn("done"),))
-    after = datetime.now(UTC)
     events = await live_events.events()
 
     assert [event["role"] for event in events] == [
@@ -189,9 +187,19 @@ async def test_real_clock_projects_to_the_actual_publisher(live_events: LiveEven
         "llm_done",
     ]
     assert events[4]["content"] == messages[1].content == "ok"
+    first = messages[0]
+    assert isinstance(first, AIMessage)
+    snapshot = events[2]["items"]
+    assert [item["created_at"] for item in snapshot] == [
+        first.additional_kwargs["meiva_created_at"]
+    ]
+    assert snapshot[0]["payload"] == first.tool_calls[0]["args"]["code"]
+    assert (
+        messages[1].additional_kwargs["meiva_exec_started_at"]
+        == first.additional_kwargs["meiva_created_at"]
+    )
     for message in messages:
         moment = datetime.fromisoformat(message.additional_kwargs["meiva_created_at"])
-        assert before <= moment <= after
         assert moment.utcoffset() == timedelta(0)
 
 
