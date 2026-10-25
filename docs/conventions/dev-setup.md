@@ -124,6 +124,15 @@ Point the hook at a checkout that has them:
 NODE_PATH=<any-checkout>/ui/web/node_modules git push
 ```
 
+A green `pre-commit run --files` before the first commit proves nothing about
+that hook: `check.sh changed` compares the index with `HEAD`, so with nothing
+committed yet it has no source to judge and reports success. The pre-push stage
+compares `merge-base..HEAD` and is the first place the findings appear. Run
+`bash scripts/content_lint/code_comments/check.sh check <paths>` on the files you
+touched to see them before committing — new prose in docstrings and ordinary
+comments both fail; a fact belongs in a `# meiva:note` block, and only pytest
+fixture help and SDK docstrings stay as docstrings.
+
 **Which home a worktree reads.** With `MEIVA_HOME` unset the home is `~/.meiva`; on a
 development machine that also runs production, that is the production cluster. A
 home that carries its own `<home>/source` checkout is operated only by that

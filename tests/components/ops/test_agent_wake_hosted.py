@@ -359,6 +359,11 @@ def test_operator_death_still_refuses_leftover_work(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
 ) -> None:
+    # meiva:note
+    # An operator kill fences every chat queued before its command: the death is
+    # the operator's will, and the kill command appends a row the trigger must
+    # outrank. The strip below is the production shape — work first, then the
+    # command, then the marked death.
     from base.agents.inbox.insert import insert_inbound_message
 
     aid = _park(
@@ -372,8 +377,64 @@ def test_operator_death_still_refuses_leftover_work(
     trigger = insert_inbound_message(
         db_conn, aid, "leftover work", "user", bus=event_bus, database=database
     )
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+            "VALUES (%s, '', 'terminate', 'user')",
+            (aid,),
+        )
     db_conn.execute(
         "UPDATE agents_meta SET termination_source = 'user', "
+        "last_turn_fatal_at = now() - interval '1 hour' WHERE id = %s",
+        (aid,),
+    )
+    db_conn.commit()
+    _backdate_before_status(db_conn, aid, trigger)
+
+    with pytest.raises(wake.ResurrectTriggerStaleError):
+        _guarded_resurrect(
+            aid, trigger, database_gate=database_gate, machine_identity=machine_identity
+        )
+    assert _row(db_conn, aid) == "terminated"
+
+
+def test_leftover_work_after_a_commanded_life_still_refuses_an_involuntary_death(
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    # meiva:note
+    # The cross-life shape: life 1 was ended by a command, the agent came back,
+    # life 2 left a chat unclaimed and then died involuntarily. The old life's
+    # command must not stand in for this death's mark — the row is refused, and
+    # with it the delivery watchdog's scan, which shares this fence.
+    from base.agents.inbox.insert import insert_inbound_message
+
+    aid = _park(
+        db_conn,
+        status="terminated",
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
+        machine_identity=machine_identity,
+    )
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+            "VALUES (%s, '', 'terminate', 'agent:1')",
+            (aid,),
+        )
+    db_conn.commit()
+    trigger = insert_inbound_message(
+        db_conn, aid, "leftover work", "user", bus=event_bus, database=database
+    )
+    db_conn.execute(
+        "UPDATE agents_meta SET termination_source = 'reaper', "
         "last_turn_fatal_at = now() - interval '1 hour' WHERE id = %s",
         (aid,),
     )

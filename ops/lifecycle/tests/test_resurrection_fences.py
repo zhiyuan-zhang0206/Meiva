@@ -164,8 +164,10 @@ class TestResurrectAgent:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentityReader,
     ) -> None:
-        """A watchdog task selected for one death must not revive a later
-        explicit kill while its RPC was in flight."""
+        # meiva:note
+        # A watchdog task selected for one death must not revive a later commanded
+        # kill while its RPC is in flight: the newer terminate command is the
+        # fence, exactly as it is for a repeated force.
         agent_id = hosted_agent(
             db_conn,
             config_authority=config_authority,
@@ -191,6 +193,11 @@ class TestResurrectAgent:
             cur.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (agent_id,))
         db_conn.commit()
         with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+                "VALUES (%s, '', 'terminate', 'agent:1')",
+                (agent_id,),
+            )
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
             cur.execute(
                 "UPDATE inbound_messages "
@@ -213,7 +220,80 @@ class TestResurrectAgent:
 
         row = agents_row(db_conn, agent_id)
         assert row is not None and row[2] == "terminated"
-        assert inbound_rows(db_conn, agent_id) == [("wake after first death", "chat", "user")]
+        assert inbound_rows(db_conn, agent_id) == [
+            ("wake after first death", "chat", "user"),
+            ("", "terminate", "agent:1"),
+        ]
+
+    def test_guarded_resurrect_accepts_chat_that_arrived_while_the_owner_was_dying(
+        self,
+        db_conn: psycopg.Connection,
+        database: Database,
+        event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentityReader,
+    ) -> None:
+        # meiva:note
+        # A chat queued after the kill command but before the death is recorded is
+        # work the dying incarnation never claimed: it wakes the owner, exactly as
+        # delivery would have had it arrived a moment later. 2026-10-25, agent 6984
+        # / inbound 345099 landed 0.6s before the death, so delivery read a live
+        # owner and no consumer was left for the row.
+        agent_id = hosted_agent(
+            db_conn,
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+                "VALUES (%s, '', 'terminate', 'agent:1')",
+                (agent_id,),
+            )
+        db_conn.commit()
+        trigger_id = insert_inbound_message(
+            db_conn,
+            agent_id,
+            "second round, still queued",
+            source="agent:1",
+            bus=event_bus,
+            database=database,
+        )
+        with db_conn.cursor() as cur:
+            # meiva:note
+            # The owner finished dying a moment after the chat committed. The source
+            # is immaterial: a command ended this life, so the chat postdates the
+            # owner's last stop decision.
+            cur.execute(
+                "UPDATE agents_meta SET status = 'terminated', termination_source = 'user' "
+                "WHERE id = %s",
+                (agent_id,),
+            )
+            cur.execute(
+                "UPDATE inbound_messages "
+                "SET created_at = (SELECT status_changed_at FROM agents_meta WHERE id = %s) "
+                "                 - interval '1 second' "
+                "WHERE id = %s",
+                (agent_id, trigger_id),
+            )
+        db_conn.commit()
+
+        resurrect_agent(
+            database,
+            event_bus,
+            agent_id,
+            resurrected_by="system",
+            trigger_inbound_id=trigger_id,
+            trigger_inbound_kind=InboundKind.CHAT,
+        )
+
+        row = agents_row(db_conn, agent_id)
+        assert row is not None and row[2] == "idling"
 
     def test_guarded_resurrect_rejects_chat_that_is_no_longer_pending(
         self,
