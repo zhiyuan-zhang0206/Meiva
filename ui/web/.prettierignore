@@ -1,0 +1,11 @@
+# Prettier is not this package's formatter.
+#
+# `ui/web` is formatted by hand and held by eslint + tsc + vitest; there is no
+# prettier dependency, config, or CI gate. Running `npx prettier --write` here
+# rewrites 553 of 611 files under `src/` against a style the project never
+# adopted, so an ad-hoc run turns a two-line change into an unreviewable diff.
+#
+# `src/lib/contracts/types.test.ts` is the usual victim: its `Required<...>`
+# fixtures pack several fields per line on purpose (one field per line doubles
+# the file), and prettier expands them.
+src/
