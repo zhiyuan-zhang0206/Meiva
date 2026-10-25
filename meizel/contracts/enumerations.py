@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import ast
 import re
-import subprocess
 import sys
 import tomllib
 from collections.abc import Iterable, Mapping
@@ -36,9 +35,9 @@ from typing import TypeGuard
 
 from meizel import roles as role_api
 from meizel.graph.model import Code, Diagnostic, MeizelError
-from meizel.graph.universe import Universe, load_universe
+from meizel.graph.universe import EditPlan, GitRepo, Universe, load_universe
 
-__all__ = ["check", "regions", "run_roles", "write"]
+__all__ = ["check", "parse_regions", "plan_writes", "regions", "run_roles", "write"]
 
 MARKER = "meizel:roles"
 _BEGIN = re.compile(rf"^(?P<indent>\s*)#\s*{MARKER}\s+BEGIN\s+(?P<format>\S+)\s+(?P<roles>.+?)\s*$")
@@ -78,27 +77,13 @@ class Region:
 # The tracked files that mention the marker. Git is the source of tracked files, and the
 # argument list is fixed.
 def _candidates(root: Path) -> list[str]:
-    done = subprocess.run(  # noqa: S603
-        ["git", "-C", str(root), "grep", "-l", "-F", MARKER, "--", "."],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if done.returncode not in (0, 1):
-        raise MeizelError(f"git grep failed: {done.stderr.strip()}")
-    return sorted(
-        p
-        for p in done.stdout.splitlines()
-        if p.endswith(_TEXT_SUFFIXES) and not p.startswith("meizel/")
-    )
+    return GitRepo(root).grep_files(MARKER, _TEXT_SUFFIXES)
 
 
-# meiva:note
-# Every marked region of every tracked file outside `meizel/`.
-def regions(root: Path) -> list[Region]:
+def parse_regions(texts: Mapping[str, str]) -> list[Region]:
     found: list[Region] = []
-    for path in _candidates(root):
-        lines = (root / path).read_text(encoding="utf-8").splitlines()
+    for path, content in texts.items():
+        lines = content.splitlines()
         open_region: re.Match[str] | None = None
         start = 0
         for number, text in enumerate(lines, 1):
@@ -126,14 +111,26 @@ def regions(root: Path) -> list[Region]:
     return found
 
 
+def _candidate_texts(root: Path) -> dict[str, str]:
+    repo = GitRepo(root)
+    return {path: repo.load_text(path) for path in _candidates(root)}
+
+
+# meiva:note
+# Every marked region of every tracked file outside `meizel/`.
+def regions(root: Path, texts: Mapping[str, str] | None = None) -> list[Region]:
+    source = _candidate_texts(root) if texts is None else texts
+    return parse_regions(source)
+
+
 # meiva:note
 # One message per region whose content differs from what the roles generate.
 def _stale(
-    root: Path, items: list[Region], declared: Mapping[str, tuple[str, ...]]
+    texts: Mapping[str, str], items: list[Region], declared: Mapping[str, tuple[str, ...]]
 ) -> list[Diagnostic]:
     messages: list[Diagnostic] = []
     for region in items:
-        lines = (root / region.path).read_text(encoding="utf-8").splitlines()
+        lines = texts[region.path].splitlines()
         if lines[region.begin : region.end - 1] != region.render(declared):
             messages.append(
                 Diagnostic(
@@ -147,24 +144,36 @@ def _stale(
     return messages
 
 
-# meiva:note
-# Regenerate every region; returns one line per file rewritten.
-def write(root: Path) -> list[str]:
-    declared = role_api.roles(root)
+def plan_writes(
+    root: Path,
+    texts: Mapping[str, str],
+    by_path: Mapping[str, list[Region]],
+    declared: Mapping[str, tuple[str, ...]],
+) -> tuple[EditPlan, list[str]]:
+    writes: dict[Path, str] = {}
     changed: list[str] = []
-    by_path: dict[str, list[Region]] = {}
-    for region in regions(root):
-        by_path.setdefault(region.path, []).append(region)
     for path, items in by_path.items():
-        full = root / path
-        text = full.read_text(encoding="utf-8")
+        text = texts[path]
         lines = text.splitlines()
         for region in sorted(items, key=lambda r: r.begin, reverse=True):
             lines[region.begin : region.end - 1] = region.render(declared)
         updated = "\n".join(lines) + ("\n" if text.endswith("\n") else "")
         if updated != text:
-            full.write_text(updated, encoding="utf-8")
+            writes[root / path] = updated
             changed.append(path)
+    return EditPlan(writes=writes), changed
+
+
+# meiva:note
+# Regenerate every region; returns one line per file rewritten.
+def write(root: Path) -> list[str]:
+    declared = role_api.roles(root)
+    texts = _candidate_texts(root)
+    by_path: dict[str, list[Region]] = {}
+    for region in parse_regions(texts):
+        by_path.setdefault(region.path, []).append(region)
+    plan, changed = plan_writes(root, texts, by_path, declared)
+    plan.apply()
     return changed
 
 
@@ -277,13 +286,14 @@ def _toml(
 # meiva:note
 # Global generated freshness and package-list copies, using validated declarations.
 def check(universe: Universe, declared: Mapping[str, tuple[str, ...]]) -> list[Diagnostic]:
-    items = regions(universe.root)
+    texts = _candidate_texts(universe.root)
+    items = parse_regions(texts)
     if not declared and not items:
         return []
     spans: dict[str, list[tuple[int, int]]] = {}
     for region in items:
         spans.setdefault(region.path, []).append((region.begin, region.end))
-    found = _stale(universe.root, items, declared)
+    found = _stale(texts, items, declared)
     if items and not declared:
         found.append(
             Diagnostic(
@@ -299,7 +309,7 @@ def check(universe: Universe, declared: Mapping[str, tuple[str, ...]]) -> list[D
         if _outside_rule(path) or path == "meizel.toml":
             continue
         try:
-            text = (universe.root / path).read_text(encoding="utf-8")
+            text = universe.load_text(path)
         except (OSError, UnicodeDecodeError):
             continue
         scan = _python if path.endswith(".py") else _toml

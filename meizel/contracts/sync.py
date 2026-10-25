@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from pathlib import Path
 
 from meizel.allowances import POLICY, RETIRED_AMBIENT_SECTIONS, Policy, load_snapshot, parse
@@ -12,8 +13,9 @@ from meizel.contracts.declare import declare
 from meizel.contracts.manifest import manifest_path
 from meizel.contracts.manifest_text import ENTRY, HEADER, entry_end, items, unquote
 from meizel.graph.model import MeizelError
+from meizel.graph.universe import EditPlan, GitRepo
 
-__all__ = ["prepare_policy_snapshot", "prune", "remove_entries", "sync_manifests"]
+__all__ = ["plan_removals", "prepare_policy_snapshot", "prune", "remove_entries", "sync_manifests"]
 
 
 def _rewrite_entry(lines: list[str], start: int, end: int, drop: set[str]) -> list[str]:
@@ -116,19 +118,28 @@ def _collect(analysis: Analysis) -> tuple[Removals, list[str]]:
     return removals, changes
 
 
-def _apply(root: Path, removals: Removals) -> None:
+def plan_removals(root: Path, texts: Mapping[str, str], removals: Removals) -> EditPlan:
+    writes: dict[Path, str] = {}
+    deletes: list[Path] = []
     for relative, sections in removals.items():
         path = root / relative
-        before = path.read_text(encoding="utf-8")
+        before = texts[relative]
         updated = remove_entries(before, sections)
         if updated == before:
             raise MeizelError(
                 f"{path.relative_to(root)}: cannot remove {sections}; edit it by hand"
             )
         if updated:
-            path.write_text(updated, encoding="utf-8")
+            writes[path] = updated
         else:
-            path.unlink()
+            deletes.append(path)
+    return EditPlan(writes=writes, deletes=tuple(deletes))
+
+
+def _apply(root: Path, removals: Removals) -> None:
+    repo = GitRepo(root)
+    texts = {relative: repo.load_text(relative) for relative in removals}
+    plan_removals(root, texts, removals).apply()
 
 
 def prune(root: Path, jobs: int | None = None) -> list[str]:

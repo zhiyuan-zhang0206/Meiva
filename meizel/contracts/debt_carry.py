@@ -8,7 +8,6 @@ raises a total, and records nothing that was not already recorded.
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 from pathlib import Path
 
@@ -34,7 +33,7 @@ from meizel.contracts.debt_symbol import (
 from meizel.contracts.manifest import load_manifests
 from meizel.contracts.rule import project
 from meizel.graph.model import Code, Fact, FactKind, MeizelError
-from meizel.graph.universe import MANIFEST, Universe, load_universe, parent_of
+from meizel.graph.universe import MANIFEST, GitRepo, Universe, load_universe, parent_of
 
 __all__ = ["carry", "renames_since", "run_debt"]
 
@@ -54,31 +53,16 @@ def _join(owner: str, path: str) -> str:
     return f"{owner}/{path}" if owner else path
 
 
-def _git(root: Path, *args: str) -> str:
-    result = subprocess.run(  # noqa: S603 - fixed argv
-        ["git", "-C", str(root), *args], capture_output=True, text=True, check=False
-    )
-    if result.returncode != 0:
-        raise MeizelError(f"git {args[0]} failed: {result.stderr.strip()}")
-    return result.stdout
-
-
 def default_base(root: Path) -> str:
     """The branch point with origin/main, or HEAD when there is no origin/main."""
-    result = subprocess.run(  # noqa: S603 - fixed argv
-        ["git", "-C", str(root), "merge-base", "HEAD", "origin/main"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return result.stdout.strip() if result.returncode == 0 else "HEAD"
+    return GitRepo(root).default_base()
 
 
 def renames_since(root: Path, base: str) -> dict[str, str]:
     """`old -> new` for the files git detects as renamed between `base` and the working tree."""
     if base.startswith("-"):
         raise MeizelError(f"{base}: not a git ref")
-    listing = _git(root, "diff", "-M", "--name-status", "-z", base).split("\0")
+    listing = GitRepo(root).run_text("diff", "-M", "--name-status", "-z", base).split("\0")
     found: dict[str, str] = {}
     index = 0
     while index < len(listing) and listing[index]:
@@ -174,19 +158,15 @@ def _plan(
     return tables, lines
 
 
-def _source_at(root: Path, base: str, path: str) -> bytes:
-    return _git(root, "show", f"{base}:{path}").encode()
-
-
 def _check_move(root: Path, base: str, universe: Universe, move: SymbolMove) -> tuple[bytes, bytes]:
     """The old file at the base and the new file now, after checking that this is a move."""
     if move.new not in universe.files:
         raise MeizelError(
             f"{move.new} is not a file of the repository (missing, or ignored by git)"
         )
-    before, after = _source_at(root, base, move.old), (root / move.new).read_bytes()
-    here = root / move.old
-    if here.exists() and defines(move.old, here.read_bytes(), move.name):
+    repo = GitRepo(root)
+    before, after = repo.show_bytes(base, move.old), universe.load_bytes(move.new)
+    if repo.has_file(move.old) and defines(move.old, repo.load_bytes(move.old), move.name):
         raise MeizelError(f"{move.old} still defines {move.name}: that is a copy, not a move")
     for path, source, where in (
         (move.old, before, f"{move.old} at {base}"),

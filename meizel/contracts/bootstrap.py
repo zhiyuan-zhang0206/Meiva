@@ -12,9 +12,9 @@ from meizel.contracts.manifest import manifest_path
 from meizel.contracts.rule import Projection
 from meizel.graph.graphs import cycle_through, strongly_connected, transitive_reduction_size
 from meizel.graph.model import Fact
-from meizel.graph.universe import Universe, is_private_module, parent_of
+from meizel.graph.universe import EditPlan, Universe, is_private_module, parent_of
 
-__all__ = ["bootstrap", "is_test_path", "render_manifest"]
+__all__ = ["bootstrap", "is_test_path", "plan_bootstrap", "render_manifest"]
 
 Edges = dict[tuple[str, str], list[Fact]]
 
@@ -174,15 +174,14 @@ def _ancestors(directory: str) -> list[str]:
     return ["/".join(parts[:i]) for i in range(len(parts) + 1)]
 
 
-def bootstrap(root: Path, out: Path, jobs: int | None = None) -> str:
-    analysis = analyze(root, jobs=jobs)
+def plan_bootstrap(analysis: Analysis, out: Path) -> tuple[EditPlan, str]:
     grouped = _edges_by_directory(analysis.projections)
     exports, _ = _exports(analysis.projections)
     carried = {d: m.loads for d, m in analysis.manifests.items() if m.loads}
     externals = {d: m.external for d, m in analysis.manifests.items() if m.external}
     debts = {d: m.debt for d, m in analysis.manifests.items() if m.debt}
     roles = {d: m.roles for d, m in analysis.manifests.items() if m.roles}
-    written = 0
+    writes: dict[Path, str] = {}
     for directory in sorted(
         set(grouped) | set(exports) | set(carried) | set(externals) | set(debts) | set(roles)
     ):
@@ -190,25 +189,25 @@ def bootstrap(root: Path, out: Path, jobs: int | None = None) -> str:
         for cf, ct in grouped.get(directory, {}):
             uses[cf].add(ct)
         target = out / manifest_path(directory)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(
-            render_manifest(
-                exports.get(directory, set()),
-                uses,
-                carried.get(directory, {}),
-                externals.get(directory, {}),
-                debts.get(directory),
-                roles.get(directory),
-            ),
-            encoding="utf-8",
+        writes[target] = render_manifest(
+            exports.get(directory, set()),
+            uses,
+            carried.get(directory, {}),
+            externals.get(directory, {}),
+            debts.get(directory),
+            roles.get(directory),
         )
-        written += 1
+    written = len(writes)
     report = _build_report(analysis)
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "report.json").write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    writes[out / "report.json"] = json.dumps(report, indent=2, sort_keys=True) + "\n"
     summary = report["summary"]
-    return f"meizel: wrote {written} manifests and report.json under {out}\n" + "\n".join(
+    message = f"meizel: wrote {written} manifests and report.json under {out}\n" + "\n".join(
         f"  {key}: {value}" for key, value in summary.items()
     )
+    return EditPlan(writes=writes, dirs=(out,)), message
+
+
+def bootstrap(root: Path, out: Path, jobs: int | None = None) -> str:
+    plan, message = plan_bootstrap(analyze(root, jobs=jobs), out)
+    plan.apply()
+    return message

@@ -8,9 +8,9 @@ name, an underscore module) and never touches a restricted form or the recorded 
 
 from __future__ import annotations
 
-import subprocess
 import tomllib
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -20,9 +20,9 @@ from meizel.contracts.manifest_text import add_exports, add_uses
 from meizel.contracts.rule import Projection, is_private
 from meizel.graph.graphs import reachable
 from meizel.graph.model import Fact, MeizelError
-from meizel.graph.universe import Universe, is_private_module
+from meizel.graph.universe import EditPlan, GitRepo, Universe, is_private_module
 
-__all__ = ["changed_files", "declare"]
+__all__ = ["changed_files", "declare", "plan_declare_writes"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,26 +33,12 @@ class Plan:
     left: list[str] = field(default_factory=list[str])
 
 
-def _git(root: Path, *args: str) -> str:
-    result = subprocess.run(  # noqa: S603 - fixed argv
-        ["git", "-C", str(root), *args], capture_output=True, text=True, check=False
-    )
-    if result.returncode != 0:
-        raise MeizelError(f"git {args[0]} failed: {result.stderr.strip()}")
-    return result.stdout
-
-
 def changed_files(root: Path) -> list[str]:
     """Files that differ from the branch point with origin/main (HEAD when there is none)."""
-    merge_base = subprocess.run(  # noqa: S603 - fixed argv
-        ["git", "-C", str(root), "merge-base", "HEAD", "origin/main"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    base = merge_base.stdout.strip() if merge_base.returncode == 0 else "HEAD"
-    changed = _git(root, "diff", "--name-only", "--no-renames", "-z", base).split("\0")
-    untracked = _git(root, "ls-files", "--others", "--exclude-standard", "-z").split("\0")
+    repo = GitRepo(root)
+    base = repo.default_base()
+    changed = repo.run_text("diff", "--name-only", "--no-renames", "-z", base).split("\0")
+    untracked = repo.run_text("ls-files", "--others", "--exclude-standard", "-z").split("\0")
     return sorted({p for p in [*changed, *untracked] if p})
 
 
@@ -189,24 +175,26 @@ def _plan(analysis: Analysis, targets: list[str]) -> Plan:
     return plan
 
 
-def _write(root: Path, directory: str, uses: dict[str, set[str]], exports: set[str]) -> None:
-    path = root / manifest_path(directory)
-    before = path.read_text(encoding="utf-8") if path.exists() else ""
-    after = before
-    if uses:
-        after = add_uses(after, uses)
-    if exports:
-        after = add_exports(after, exports)
-    parsed = tomllib.loads(after)
-    written = parsed.get("uses", {})
-    if any(
-        not set(cts) <= set(written.get(cf, ())) for cf, cts in uses.items()
-    ) or not exports <= set(parsed.get("exports", ())):
-        raise MeizelError(
-            f"{manifest_path(directory)}: the declarations cannot be written; edit by hand"
-        )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(after, encoding="utf-8")
+def plan_declare_writes(root: Path, texts: Mapping[str, str], plan: Plan) -> EditPlan:
+    writes: dict[Path, str] = {}
+    for directory in sorted(set(plan.uses) | set(plan.exports)):
+        uses = plan.uses.get(directory, {})
+        exports = plan.exports.get(directory, set())
+        rel = manifest_path(directory)
+        before = texts.get(directory, "")
+        after = before
+        if uses:
+            after = add_uses(after, uses)
+        if exports:
+            after = add_exports(after, exports)
+        parsed = tomllib.loads(after)
+        written = parsed.get("uses", {})
+        if any(
+            not set(cts) <= set(written.get(cf, ())) for cf, cts in uses.items()
+        ) or not exports <= set(parsed.get("exports", ())):
+            raise MeizelError(f"{rel}: the declarations cannot be written; edit by hand")
+        writes[root / rel] = after
+    return EditPlan(writes=writes)
 
 
 def declare(
@@ -218,6 +206,8 @@ def declare(
     """
     scope = targets if targets is not None else changed_files(root)
     plan = _plan(analyze(root, jobs=jobs), scope)
-    for directory in sorted(set(plan.uses) | set(plan.exports)):
-        _write(root, directory, plan.uses.get(directory, {}), plan.exports.get(directory, set()))
+    repo = GitRepo(root)
+    directories = sorted(set(plan.uses) | set(plan.exports))
+    texts = {d: repo.load_text(manifest_path(d), default="") for d in directories}
+    plan_declare_writes(root, texts, plan).apply()
     return plan.lines, plan.left

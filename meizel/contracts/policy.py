@@ -9,14 +9,13 @@ reported by `policy diff` so a reviewer sees every widening at once.
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 from typing import TypeGuard
 
 from meizel.allowances import POLICY, Policy, parse, parse_snapshot
 from meizel.contracts.manifest import Manifest
 from meizel.graph.model import Code, Diagnostic, MeizelError
-from meizel.graph.universe import Universe
+from meizel.graph.universe import GitRepo, Universe
 
 __all__ = [
     "POLICY",
@@ -34,11 +33,13 @@ def parse_policy(text: str) -> tuple[Policy, list[Diagnostic]]:
     return policy, [Diagnostic(POLICY, 1, Code.POLICY_SYNTAX, message) for message in problems]
 
 
-def load_policy(universe: Universe) -> tuple[Policy, list[Diagnostic]]:
+def load_policy(universe: Universe, text: str | None = None) -> tuple[Policy, list[Diagnostic]]:
     """The policy of the working tree; an absent file is an empty one, so nothing is allowed."""
+    if text is not None:
+        return parse_policy(text)
     if POLICY not in universe.files:
         return Policy(), []
-    return parse_policy((universe.root / POLICY).read_text(encoding="utf-8"))
+    return parse_policy(universe.load_text(POLICY))
 
 
 def _site(manifest: Manifest, name: str) -> str:
@@ -95,17 +96,10 @@ def render_policy(external: dict[str, str], loads: dict[str, tuple[str, ...]]) -
 
 def policy_at(root: Path, ref: str) -> Policy:
     """The policy at a git ref; empty when the ref has none."""
-    if ref.startswith("-"):
-        raise MeizelError(f"{ref}: not a git ref")
-    result = subprocess.run(  # noqa: S603 - fixed argv
-        ["git", "-C", str(root), "show", f"{ref}:{POLICY}"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
+    raw = GitRepo(root).show_optional_text(ref, POLICY)
+    if raw is None:
         return Policy()
-    policy, problems = parse_snapshot(result.stdout)
+    policy, problems = parse_snapshot(raw)
     if problems:
         raise MeizelError(f"{ref}:{POLICY}: {problems[0]}")
     return policy
