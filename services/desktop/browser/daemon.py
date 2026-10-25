@@ -26,16 +26,16 @@ import contextlib
 import signal
 import subprocess
 import sys
-import time
 import urllib.error
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Literal
 
 from loguru import logger
 
-from base.config import settings
+from base.clock import SYSTEM_TIMERS, Timers
+from base.config import ConfigBoot
 from base.host.system.hostport import Host
 from base.host.system.probes import browser_incapability, resolve_chrome_binary
 from base.paths import logs_dir, meiva_home
@@ -50,13 +50,13 @@ _CDP_TIMEOUT_S = 2.0
 _WATCH_POLL_S = 0.5
 
 
-def assert_browser_capable(*, host: Host) -> None:
+def assert_browser_capable(*, host: Host, chrome_binary: str | None = None) -> None:
     """Raise RuntimeError with a precise, actionable message if this machine
     cannot host the shared headed browser. Called by the converge preflight and
     main(). The capability check itself lives in base.host.system.probes
     (browser_incapability); this raises its reason so a launch fails loudly with
     the same wording the operator sees in `meiva status`."""
-    reason = browser_incapability(settings.services.chrome_binary, host=host)
+    reason = browser_incapability(chrome_binary, host=host)
     if reason is not None:
         raise RuntimeError(f"meiva-browser: {reason}")
 
@@ -167,6 +167,7 @@ def watch_chrome(
     proc: subprocess.Popen[bytes] | None = None,
     *,
     poll_interval_s: float = _WATCH_POLL_S,
+    timers: Timers = SYSTEM_TIMERS,
 ) -> None:
     stopping = False
 
@@ -191,7 +192,7 @@ def watch_chrome(
                     with contextlib.suppress(subprocess.TimeoutExpired):
                         proc.wait(timeout=poll_interval_s)
                 else:
-                    time.sleep(poll_interval_s)
+                    timers.sleep(poll_interval_s)
                 continue
             if decision == 0:
                 return
@@ -201,15 +202,32 @@ def watch_chrome(
         signal.signal(signal.SIGINT, prev_int)
 
 
-def main(*, restore_last_session: bool | None = None) -> None:
+# meiva:note
+# Run the browser daemon startup sequence with explicit host, config, and directory inputs.
+def run_browser_daemon(
+    *,
+    host: Host,
+    cdp_port: int,
+    chrome_binary: str | None,
+    home: Path,
+    profile: Path,
+    logs: Path,
+    readiness_sequence: Iterable[macos_readiness.StartupReadiness] = (),
+    timers: Timers = SYSTEM_TIMERS,
+    poll_interval_s: float = _WATCH_POLL_S,
+    steps_out: list[str] | None = None,
+) -> None:
+    # meiva:note
     # Fail loud BEFORE the log redirect so the reason is visible in the
     # session log — this also guards healthcheck-triggered respawns, not just the first
     # launch (the converge preflight only runs at `meiva start`).
-    host = Host.system()
-    assert_browser_capable(host=host)
-    cdp_port = settings.services.browser_cdp_port  # the recorded/`.env` port; default 9222
+    assert_browser_capable(host=host, chrome_binary=chrome_binary)
+    if steps_out is not None:
+        steps_out.append("capable")
     reachable = cdp_reachable(cdp_port)
-    holder = our_chrome_holds_port(cdp_port, profile_dir()) if reachable else None
+    if steps_out is not None:
+        steps_out.append("port")
+    holder = our_chrome_holds_port(cdp_port, profile) if reachable else None
     healthy = (cdp_unreachable(cdp_port).reason is None) if holder is not None else False
     occupancy = plan_port_occupancy(
         reachable=reachable,
@@ -217,18 +235,19 @@ def main(*, restore_last_session: bool | None = None) -> None:
         cdp_healthy=healthy,
     )
     if occupancy == "adopt":
-        profile = profile_dir()
         logger.info(
             "meiva-browser: adopting running cluster Chrome (pid {}) on CDP port {}",
             holder,
             cdp_port,
         )
-        watch_chrome(profile, None)
+        watch_chrome(profile, None, poll_interval_s=poll_interval_s, timers=timers)
         return
     if occupancy == "refuse":
-        print(  # noqa: T201 — pre-redirect, surfaces in the session log
+        # meiva:note
+        # Pre-redirect stderr surfaces directly in the session log.
+        print(  # noqa: T201
             f"meiva-browser: CDP port {cdp_port} already served by another Chrome; "
-            f"refusing to start a second instance on {profile_dir()}. "
+            f"refusing to start a second instance on {profile}. "
             "To clear it: stop this unit with `meiva stop`, then start it again with `meiva start` — that sweeps any "
             "Chrome running on this cluster's profile, including one left behind by a "
             "SingletonLock handoff. If instead you started a Chrome of your own on this "
@@ -241,32 +260,49 @@ def main(*, restore_last_session: bool | None = None) -> None:
     # meiva:note
     # Consume a pending restore only here, after the port guard refused nothing:
     # a launch that never happens must not eat the one chance to reopen the tabs.
-    # `restore_last_session` is an explicit parameter only so a test can pin the
-    # decision; the entry point always reads the ledger.
-    if restore_last_session is None:
-        restore_last_session = session_restore.begin_launch(meiva_home())
-    if restore_last_session:
+    should_restore = session_restore.begin_launch(home)
+    if should_restore:
         logger.info("meiva-browser: restoring the tabs of the last deliberate stop")
-    binary = resolve_chrome_binary(settings.services.chrome_binary, host=host)
-    if binary is None:  # assert_browser_capable already raised if so — this narrows the type
+    binary = resolve_chrome_binary(chrome_binary, host=host)
+    # meiva:note
+    # `assert_browser_capable` already raised if no binary resolved; this narrows the type.
+    if binary is None:
         sys.exit(127)
+    # meiva:note
     # On macOS a detached process can see a display while lacking the active GUI
     # login session and Keychain context Chrome needs for encrypted profile data.
     # Wait in this supervised process instead of launching an unusable browser;
     # the matching marker lets the healthcheck report degraded state without
     # killing and respawning this deliberate wait.
-    macos_readiness.wait_for_browser_startup_readiness()
-    profile = profile_dir()
+    macos_readiness.wait_for_browser_startup_readiness(
+        timers=timers, readiness_sequence=readiness_sequence
+    )
+    if steps_out is not None:
+        steps_out.append("ready")
+        steps_out.append("profile")
     profile.mkdir(parents=True, exist_ok=True)
     local_state_warning = browser_profile.validate_local_state(profile)
     if local_state_warning is not None:
         logger.warning("meiva-browser: Local State validation warning: {}", local_state_warning)
     proc = spawn_chrome(
         binary,
-        chrome_args(binary, cdp_port, profile, restore_last_session=restore_last_session),
-        log_path=logs_dir() / "browser.log",
+        chrome_args(binary, cdp_port, profile, restore_last_session=should_restore),
+        log_path=logs / "browser.log",
     )
-    watch_chrome(profile, proc)
+    watch_chrome(profile, proc, poll_interval_s=poll_interval_s, timers=timers)
+
+
+def main() -> None:
+    config = ConfigBoot()
+    config.boot()
+    run_browser_daemon(
+        host=Host.system(),
+        cdp_port=config.view.services.browser_cdp_port,
+        chrome_binary=config.view.services.chrome_binary,
+        home=meiva_home(),
+        profile=profile_dir(),
+        logs=logs_dir(),
+    )
 
 
 if __name__ == "__main__":

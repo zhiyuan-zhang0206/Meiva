@@ -21,6 +21,7 @@ from mcp.client.stdio import get_default_environment, stdio_client
 from base.log import logger
 from services.desktop.browser.shutdown_budget import SHUTDOWN_STEP_TIMEOUT_S
 
+# meiva:note
 # Pinned exact version — do NOT go back to @latest. npx re-resolves @latest on
 # every daemon (re)start, so an upstream release can silently break the browser
 # MCP overnight: on 2026-08-02 a newer chrome-devtools-mcp raised its engines
@@ -30,15 +31,18 @@ from services.desktop.browser.shutdown_budget import SHUTDOWN_STEP_TIMEOUT_S
 # verified node version + a real chrome-MCP smoke test.
 _UPSTREAM_PACKAGE = "chrome-devtools-mcp@1.6.0"
 
+# meiva:note
 # Same lean flags as the standalone path used: drop the usage-statistics
 # telemetry (and its watchdog subprocess) + the periodic update check.
 _LEAN_FLAGS = ["--usageStatistics=false"]
 
+# meiva:note
 # A wedged (not dead) upstream call must not hold the serial lock forever and
 # freeze every client; bound each upstream request. Generous so a slow real
 # navigation never trips it -- only a true hang does.
 _READ_TIMEOUT = timedelta(seconds=180)
 
+# meiva:note
 # Every teardown await is bounded by `SHUTDOWN_STEP_TIMEOUT_S` (see
 # `services.desktop.browser.shutdown_budget` for the total meiva-root must allow): after
 # SIGTERM the daemon must exit even when a cleanup step wedges (a stuck upstream
@@ -88,6 +92,45 @@ async def await_stop_or_timeout(stop: asyncio.Event, timeout: float) -> None:
         await asyncio.wait_for(stop.wait(), timeout=timeout)
 
 
+def upstream_server_params(browser_url: str) -> StdioServerParameters:
+    return StdioServerParameters(
+        command="npx",
+        args=[
+            "-y",
+            _UPSTREAM_PACKAGE,
+            "--browserUrl",
+            browser_url,
+            "--allow-unrestricted-paths",
+            *_LEAN_FLAGS,
+        ],
+        env={**get_default_environment(), "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS": "1"},
+    )
+
+
+async def open_upstream(
+    params: StdioServerParameters,
+    stop: asyncio.Event,
+    *,
+    connect_timeout_reader: Callable[[], float],
+) -> tuple[ClientSession, AsyncExitStack]:
+    stack = AsyncExitStack()
+    try:
+        read, write = await stack.enter_async_context(stdio_client(params))
+        session = await stack.enter_async_context(
+            ClientSession(read, write, read_timeout_seconds=_READ_TIMEOUT.total_seconds())
+        )
+        await initialize_until_stop_or_timeout(
+            session, stop, connect_timeout_reader=connect_timeout_reader
+        )
+        return session, stack
+    except BaseException:
+        # meiva:note
+        # The failed connect's stack close is bounded too: a stuck child
+        # termination must not wedge the reconnect loop (2026-09-09 #2043).
+        await bounded_stack_close(stack, "upstream stack close after failed connect")
+        raise
+
+
 async def create_upstream(
     browser_url: str, stop: asyncio.Event, *, connect_timeout_reader: Callable[[], float]
 ) -> tuple[ClientSession, AsyncExitStack]:
@@ -101,34 +144,11 @@ async def create_upstream(
     timeout and the ``stop`` event: SIGTERM during a hung connect interrupts
     the connect immediately instead of waiting out the full connect timeout.
     """
-    upstream_params = StdioServerParameters(
-        command="npx",
-        args=[
-            "-y",
-            _UPSTREAM_PACKAGE,
-            "--browserUrl",
-            browser_url,
-            "--allow-unrestricted-paths",
-            *_LEAN_FLAGS,
-        ],
-        env={**get_default_environment(), "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS": "1"},
+    return await open_upstream(
+        upstream_server_params(browser_url),
+        stop,
+        connect_timeout_reader=connect_timeout_reader,
     )
-
-    stack = AsyncExitStack()
-    try:
-        read, write = await stack.enter_async_context(stdio_client(upstream_params))
-        session = await stack.enter_async_context(
-            ClientSession(read, write, read_timeout_seconds=_READ_TIMEOUT.total_seconds())
-        )
-        await initialize_until_stop_or_timeout(
-            session, stop, connect_timeout_reader=connect_timeout_reader
-        )
-        return session, stack
-    except BaseException:
-        # The failed connect's stack close is bounded too: a stuck child
-        # termination must not wedge the reconnect loop (2026-09-09 #2043).
-        await bounded_stack_close(stack, "upstream stack close after failed connect")
-        raise
 
 
 async def initialize_until_stop_or_timeout(
@@ -154,6 +174,7 @@ async def initialize_until_stop_or_timeout(
             stop_task.cancel()
         if stop.is_set() or not init_task.done():
             init_task.cancel()
+    # meiva:note
     # Raised after the group: an exception leaving the body would arrive wrapped.
     if stop.is_set():
         raise StoppingError

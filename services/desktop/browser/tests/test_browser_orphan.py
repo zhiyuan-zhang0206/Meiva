@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -101,15 +102,11 @@ class _FakeProc:
         return self._cmdline
 
 
-def _table(monkeypatch: pytest.MonkeyPatch, procs: list[_FakeProc]) -> list[int]:
-    monkeypatch.setattr(orphan.psutil, "process_iter", lambda: iter(procs))
-    monkeypatch.setattr(orphan, "profile_dir", lambda: _PROFILE)
-    killed: list[int] = []
-    monkeypatch.setattr(orphan, "kill_process_tree", killed.append)
-    return killed
+def _spawn_sleeper() -> subprocess.Popen[bytes]:
+    return subprocess.Popen(["/bin/sleep", "60"])
 
 
-def test_find_picks_only_ours_out_of_a_crowded_table(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_find_picks_only_ours_out_of_a_crowded_table() -> None:
     procs = [
         _FakeProc(101, "Google Chrome", ["/Applications/Google Chrome"]),
         _FakeProc(102, "Google Chrome", _chrome(udd="/Users/op/other/profile")),
@@ -118,33 +115,41 @@ def test_find_picks_only_ours_out_of_a_crowded_table(monkeypatch: pytest.MonkeyP
         _FakeProc(105, "grep", ["grep", f"--user-data-dir={_PROFILE}"]),
         _FakeProc(106, "Google Chrome", _chrome()),
     ]
-    _table(monkeypatch, procs)
-    assert orphan.find_cluster_chrome() == [106]
+    assert orphan.select_cluster_chrome_pids(procs, _PROFILE) == [106]
 
 
-def test_reap_kills_the_orphans_tree(monkeypatch: pytest.MonkeyPatch) -> None:
-    killed = _table(monkeypatch, [_FakeProc(106, "chrome.exe", _chrome())])
-    assert orphan.reap_cluster_chrome() == [106]
-    assert killed == [106], "the named root goes to kill_process_tree, helpers follow as children"
+def test_reap_kills_the_orphans_tree() -> None:
+    child = _spawn_sleeper()
+    try:
+        procs = [_FakeProc(child.pid, "chrome.exe", _chrome())]
+        assert orphan.reap_cluster_chrome_from(procs, _PROFILE) == [child.pid]
+        child.wait(timeout=5)
+        assert child.poll() is not None, (
+            "the named root goes to kill_process_tree, helpers follow as children"
+        )
+    finally:
+        child.kill()
+        child.wait(timeout=5)
 
 
-def test_reap_with_no_orphan_is_a_silent_noop(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reap_with_no_orphan_is_a_silent_noop() -> None:
     procs = [
         _FakeProc(101, "Google Chrome", ["/Applications/Google Chrome"]),
         _FakeProc(102, "python", ["python", "-m", "cli.main", "stop"]),
     ]
-    killed = _table(monkeypatch, procs)
-    assert orphan.reap_cluster_chrome() == []
-    assert killed == []
+    assert orphan.reap_cluster_chrome_from(procs, _PROFILE) == []
 
 
-def test_reap_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
-    procs = [_FakeProc(106, "chrome", _chrome())]
-    killed = _table(monkeypatch, procs)
-    assert orphan.reap_cluster_chrome() == [106]
-    monkeypatch.setattr(orphan.psutil, "process_iter", lambda: iter([]))
-    assert orphan.reap_cluster_chrome() == []
-    assert killed == [106]
+def test_reap_is_idempotent() -> None:
+    child = _spawn_sleeper()
+    try:
+        procs = [_FakeProc(child.pid, "chrome", _chrome())]
+        assert orphan.reap_cluster_chrome_from(procs, _PROFILE) == [child.pid]
+        child.wait(timeout=5)
+        assert orphan.reap_cluster_chrome_from([], _PROFILE) == []
+    finally:
+        child.kill()
+        child.wait(timeout=5)
 
 
 _RACE_SYSTEM_ERROR = "<built-in function proc_cmdline> returned a result with an exception set"
@@ -169,19 +174,21 @@ class _RacingProc(_FakeProc):
         pytest.param(PermissionError(_RACE_PERMISSION_ERROR), id="permission-error"),
     ],
 )
-def test_a_process_the_scan_cannot_read_is_skipped_not_fatal(
-    monkeypatch: pytest.MonkeyPatch, exc: Exception
-) -> None:
+def test_a_process_the_scan_cannot_read_is_skipped_not_fatal(exc: Exception) -> None:
     procs = [_RacingProc(999, exc), _FakeProc(106, "Google Chrome", _chrome())]
-    _table(monkeypatch, procs)
-    assert orphan.find_cluster_chrome() == [106]
+    assert orphan.select_cluster_chrome_pids(procs, _PROFILE) == [106]
 
 
-def test_reap_survives_a_process_the_scan_cannot_read(monkeypatch: pytest.MonkeyPatch) -> None:
-    procs = [
-        _RacingProc(999, SystemError(_RACE_SYSTEM_ERROR)),
-        _FakeProc(106, "chrome", _chrome()),
-    ]
-    killed = _table(monkeypatch, procs)
-    assert orphan.reap_cluster_chrome() == [106]
-    assert killed == [106]
+def test_reap_survives_a_process_the_scan_cannot_read() -> None:
+    child = _spawn_sleeper()
+    try:
+        procs = [
+            _RacingProc(999, SystemError(_RACE_SYSTEM_ERROR)),
+            _FakeProc(child.pid, "chrome", _chrome()),
+        ]
+        assert orphan.reap_cluster_chrome_from(procs, _PROFILE) == [child.pid]
+        child.wait(timeout=5)
+        assert child.poll() is not None
+    finally:
+        child.kill()
+        child.wait(timeout=5)

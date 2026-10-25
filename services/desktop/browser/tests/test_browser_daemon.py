@@ -10,34 +10,77 @@ surface is the pure helpers, launch ordering, and the POSIX exec path.
 from __future__ import annotations
 
 import json
+import socket
 import sys
+import threading
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
 import services.desktop.browser.daemon as bd
-from base.config import settings
 from base.host.system.hostport import Host
-from base.host.system.tests.fake_commands import fake_host
+from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
+from services.desktop.browser import session_restore
+from services.desktop.browser.macos_readiness import StartupReadiness
 
 
-def test_assert_capable_raises_reason_with_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+@contextmanager
+def _serve_200_once() -> Generator[int]:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        port = server.getsockname()[1]
+
+        def _handle() -> None:
+            try:
+                conn, _addr = server.accept()
+            except OSError:
+                return
+            with conn:
+                try:
+                    conn.recv(4096)
+                    conn.sendall(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}"
+                    )
+                except OSError:
+                    return
+
+        thread = threading.Thread(target=_handle, daemon=True)
+        thread.start()
+        try:
+            yield port
+        finally:
+            thread.join(timeout=2.0)
+
+
+def _closed_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def _capable_host(_chrome_path: Path) -> Host:
+    return fake_host(
+        platform=DARWIN_ARM64,
+        programs={"npx": "/usr/local/bin/npx"},
+    )
+
+
+def test_assert_capable_raises_reason_with_tag() -> None:
     """assert_browser_capable raises the browser_incapability reason, prefixed
     with the meiva-browser tag, so a launch on an incapable host dies loudly with
     the same wording `meiva status` shows."""
-
-    def fake_browser_incapability(_chrome: str | None, *, host: Host) -> str | None:
-        return "no display (headless server)"
-
-    monkeypatch.setattr(bd, "browser_incapability", fake_browser_incapability)  # pyright: ignore[reportUnknownArgumentType]
-    with pytest.raises(RuntimeError, match=r"meiva-browser: no display"):
-        bd.assert_browser_capable(host=fake_host())
+    incapable = fake_host(platform=DARWIN_ARM64, programs={})
+    with pytest.raises(RuntimeError, match=r"meiva-browser: no npx"):
+        bd.assert_browser_capable(host=incapable, chrome_binary="/chrome")
 
 
-def test_assert_capable_ok_when_capable(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(bd, "browser_incapability", lambda _chrome, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
-    bd.assert_browser_capable(host=fake_host())  # no raise
+def test_assert_capable_ok_when_capable(tmp_path: Path) -> None:
+    chrome = tmp_path / "chrome"
+    bd.assert_browser_capable(host=_capable_host(chrome), chrome_binary=str(chrome))
 
 
 def test_chrome_args_has_debug_port_and_profile(tmp_path: Path) -> None:
@@ -49,17 +92,12 @@ def test_chrome_args_has_debug_port_and_profile(tmp_path: Path) -> None:
     assert not any(a.startswith("--headless") for a in args)
 
 
+# meiva:note
+# `run_browser_daemon()` checks capability before launching, then spawns the
+# resolved Chrome with the configured port and no automatic page.
 @pytest.mark.parametrize("restore", [False, True])
-def test_main_asserts_capable_then_execvps_chrome(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, restore: bool
-) -> None:
-    """main() must fail-loud-check capability before launching, then exec the
-    resolved Chrome with the configured port but no automatic page."""
+def test_main_asserts_capable_then_execvps_chrome(tmp_path: Path, restore: bool) -> None:
     order: list[str] = []
-
-    def fake_assert_browser_capable(*, host: Host) -> None:
-        order.append("capable")
-
     fake_chrome = tmp_path / "chrome"
     argv_out = tmp_path / "argv.json"
     fake_chrome.write_text(
@@ -69,87 +107,90 @@ def test_main_asserts_capable_then_execvps_chrome(
         encoding="utf-8",
     )
     fake_chrome.chmod(0o755)
-    monkeypatch.setattr(bd, "assert_browser_capable", fake_assert_browser_capable)
-    monkeypatch.setattr(
-        bd,
-        "cdp_reachable",
-        lambda _p: (order.append("port"), False)[1],  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(bd, "resolve_chrome_binary", lambda _chrome, **_kwargs: str(fake_chrome))  # pyright: ignore[reportUnknownArgumentType]
-
-    def _profile() -> Path:
-        order.append("profile")
-        return tmp_path / "prof"
-
-    monkeypatch.setattr(bd, "profile_dir", _profile)
-    monkeypatch.setattr(
-        bd.macos_readiness, "wait_for_browser_startup_readiness", lambda: order.append("ready")
-    )
-    monkeypatch.setattr(
-        bd.browser_profile,
-        "validate_local_state",
-        lambda _profile: None,  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(bd, "logs_dir", lambda: tmp_path)
-    monkeypatch.setattr(settings.services, "app_port", 3001)
-    monkeypatch.setattr(settings.gateway, "gateway_url", "http://10.0.0.72:8000")
+    if restore:
+        session_restore.write(
+            tmp_path,
+            session_restore.Ledger(
+                tabs=(
+                    session_restore.Tab(
+                        url="https://a.example/",
+                        title="",
+                        pinned=False,
+                        group=None,
+                        index=0,
+                        window=0,
+                    ),
+                ),
+                captured_at="2026-10-22T00:00:00+00:00",
+                layout=False,
+                pending=session_restore.PENDING_RESTORE,
+                reapply=None,
+            ),
+        )
+    port = _closed_port()
     with pytest.raises(SystemExit) as exc:
-        bd.main(restore_last_session=restore)
+        bd.run_browser_daemon(
+            host=_capable_host(fake_chrome),
+            cdp_port=port,
+            chrome_binary=str(fake_chrome),
+            home=tmp_path,
+            profile=tmp_path / "prof",
+            logs=tmp_path,
+            readiness_sequence=[StartupReadiness(True)],
+            poll_interval_s=0.01,
+            steps_out=order,
+        )
     assert exc.value.code == 1
     captured_args: list[str] = json.loads(argv_out.read_text(encoding="utf-8"))
     assert order == ["capable", "port", "ready", "profile"]
     assert captured_args[0] == str(fake_chrome)
-    # main() takes the port from settings, and a cluster gets one out of its own
-    # port block — a literal here only holds on a default-home install.
-    assert f"--remote-debugging-port={settings.services.browser_cdp_port}" in captured_args
+    assert f"--remote-debugging-port={port}" in captured_args
     # meiva:note
     # The flag is the ledger's decision, and nothing else's.
     assert ("--restore-last-session" in captured_args) is restore
+    # meiva:note
     # Even a gateway host with an app port must leave Chrome's first page alone.
     assert len([arg for arg in captured_args if not arg.startswith("--")]) == 1
 
 
-def test_main_propagates_capability_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _boom(*, host: Host) -> None:
-        raise RuntimeError("no display")
-
-    monkeypatch.setattr(bd, "assert_browser_capable", _boom)
-    with pytest.raises(RuntimeError, match="no display"):
-        bd.main()
-
-
-def test_cdp_reachable_true_on_200(monkeypatch: pytest.MonkeyPatch) -> None:
-    resp = MagicMock(status=200)
-    cm = MagicMock()
-    cm.__enter__.return_value = resp
-    monkeypatch.setattr(bd.urllib.request, "urlopen", lambda *_a, **_k: cm)  # pyright: ignore[reportUnknownArgumentType]
-    assert bd.cdp_reachable(9222) is True
+def test_main_propagates_capability_failure(tmp_path: Path) -> None:
+    incapable = fake_host(platform=DARWIN_ARM64, programs={})
+    with pytest.raises(RuntimeError, match="no npx"):
+        bd.run_browser_daemon(
+            host=incapable,
+            cdp_port=9222,
+            chrome_binary="/chrome",
+            home=tmp_path,
+            profile=tmp_path / "prof",
+            logs=tmp_path,
+        )
 
 
-def test_cdp_reachable_false_on_connection_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _refused(*_a: object, **_k: object) -> None:
-        raise bd.urllib.error.URLError("connection refused")
-
-    monkeypatch.setattr(bd.urllib.request, "urlopen", _refused)
-    assert bd.cdp_reachable(9222) is False
+def test_cdp_reachable_true_on_200() -> None:
+    with _serve_200_once() as port:
+        assert bd.cdp_reachable(port) is True
 
 
+def test_cdp_reachable_false_on_connection_refused() -> None:
+    assert bd.cdp_reachable(_closed_port()) is False
+
+
+# meiva:note
+# A Chrome already on the CDP port makes `run_browser_daemon()` refuse with a
+# non-zero exit and never spawn a colliding second Chrome.
 def test_main_refuses_when_cdp_port_already_served(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
-    """A Chrome already on the CDP port (e.g. a hand-started one holding the
-    profile lock) makes main() refuse with a non-zero exit and never exec a
-    colliding second Chrome — so the healthcheck/watchdog don't churn a
-    profile-lock crash."""
-
-    def fake_assert_browser_capable(*, host: Host) -> None:
-        return None
-
-    monkeypatch.setattr(bd, "assert_browser_capable", fake_assert_browser_capable)
-    monkeypatch.setattr(bd, "cdp_reachable", lambda _p: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(bd, "profile_dir", lambda: tmp_path / "chrome-profile")
-    with pytest.raises(SystemExit) as exc:
-        bd.main()
+    chrome = tmp_path / "chrome"
+    with _serve_200_once() as port, pytest.raises(SystemExit) as exc:
+        bd.run_browser_daemon(
+            host=_capable_host(chrome),
+            cdp_port=port,
+            chrome_binary=str(chrome),
+            home=tmp_path,
+            profile=tmp_path / "chrome-profile",
+            logs=tmp_path,
+        )
     assert exc.value.code == 1
     assert "already served" in capsys.readouterr().err
 

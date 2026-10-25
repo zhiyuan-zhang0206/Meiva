@@ -3,10 +3,16 @@
 
 from __future__ import annotations
 
+import http
 import json
 import stat
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
+
+import websockets.asyncio.server
+from websockets.asyncio.server import ServerConnection
+from websockets.http11 import Request, Response
 
 from services.desktop.browser import session_restore
 from services.desktop.browser.session_restore import (
@@ -367,87 +373,75 @@ def test_record_for_stop_never_raises_and_records_nothing_without_a_browser(
 
 
 # meiva:note
-# One browser-level CDP websocket: replies to the methods the ladder sends.
-class FakeCdpWs:
-    def __init__(self, state: dict[str, Any]) -> None:
-        self.state = state
-        self.pending: list[str] = []
-        self.expressions: list[str] = []
-
-    async def __aenter__(self) -> FakeCdpWs:
-        return self
-
-    async def __aexit__(self, *_exc: object) -> None:
-        return None
-
-    async def send(self, raw: str) -> None:
-        request = json.loads(raw)
-        method = request["method"]
-        if method == "Extensions.getExtensions":
-            found = (
-                [{"id": "EXT", "path": str(session_restore.EXTENSION_DIR)}]
-                if self.state["loaded"]
-                else []
-            )
-            self.pending.append(json.dumps({"id": request["id"], "result": {"extensions": found}}))
-        elif method == "Extensions.loadUnpacked":
-            self.state["loaded"] = True
-            self.state["live"] = True
-            self.pending.append(json.dumps({"id": request["id"], "result": {"id": "EXT"}}))
-        elif method == "Target.getTargets":
-            url = f"chrome-extension://EXT/{session_restore.shipped_worker()}"
-            infos = [{"type": "service_worker", "url": url, "targetId": "DEAD"}]
-            if self.state["live"]:
-                infos.append({"type": "service_worker", "url": url, "targetId": "LIVE"})
-            self.pending.append(json.dumps({"id": request["id"], "result": {"targetInfos": infos}}))
-        elif method == "Target.attachToTarget":
-            target = request["params"]["targetId"]
-            if target == "DEAD":
-                self.pending.append(
-                    json.dumps(
-                        {
-                            "id": request["id"],
-                            "error": {"code": -32602, "message": "No target with given id found"},
-                        }
-                    )
-                )
-            else:
-                self.pending.append(
-                    json.dumps({"id": request["id"], "result": {"sessionId": "S1"}})
-                )
-        elif method == "Runtime.evaluate":
-            self.expressions.append(request["params"]["expression"])
-            self.pending.append(
-                json.dumps({"id": request["id"], "result": {"result": {"value": {"ok": True}}}})
-            )
-        else:
-            raise AssertionError(method)
-
-    async def recv(self) -> str:
-        return self.pending.pop(0)
-
-
-# meiva:note
 # A worker that idled out stays listed but refuses attach; only a reload
 #     brings a live one back (measured on Chrome 156).
 async def test_the_ladder_reloads_the_extension_after_a_dead_worker_refuses_attach() -> None:
-    state = {"loaded": True, "live": False}
-    sockets: list[FakeCdpWs] = []
+    state: dict[str, Any] = {"loaded": True, "live": False}
+    connections = 0
+    expressions: list[str] = []
+    ws_port = 0
 
-    def connect(_url: str) -> FakeCdpWs:
-        ws = FakeCdpWs(state)
-        sockets.append(ws)
-        return ws
+    def process_http(conn: ServerConnection, request: Request) -> Response | None:
+        if request.path == "/json/version":
+            payload = {"webSocketDebuggerUrl": f"ws://127.0.0.1:{ws_port}/devtools/browser"}
+            resp = conn.respond(http.HTTPStatus.OK, json.dumps(payload))
+            resp.headers["Content-Type"] = "application/json"
+            return resp
+        return None
 
-    async def fetch(_url: str) -> Any:
-        return {"webSocketDebuggerUrl": "ws://browser"}
+    async def handle_ws(conn: ServerConnection) -> None:
+        nonlocal connections
+        connections += 1
+        with suppress(websockets.ConnectionClosed):
+            async for raw_msg in conn:
+                raw = raw_msg if isinstance(raw_msg, str) else raw_msg.decode("utf-8")
+                request = json.loads(raw)
+                method = request["method"]
+                if method == "Extensions.getExtensions":
+                    found = (
+                        [{"id": "EXT", "path": str(session_restore.EXTENSION_DIR)}]
+                        if state["loaded"]
+                        else []
+                    )
+                    reply: dict[str, Any] = {"id": request["id"], "result": {"extensions": found}}
+                elif method == "Extensions.loadUnpacked":
+                    state["loaded"] = True
+                    state["live"] = True
+                    reply = {"id": request["id"], "result": {"id": "EXT"}}
+                elif method == "Target.getTargets":
+                    url = f"chrome-extension://EXT/{session_restore.shipped_worker()}"
+                    infos = [{"type": "service_worker", "url": url, "targetId": "DEAD"}]
+                    if state["live"]:
+                        infos.append({"type": "service_worker", "url": url, "targetId": "LIVE"})
+                    reply = {"id": request["id"], "result": {"targetInfos": infos}}
+                elif method == "Target.attachToTarget":
+                    target = request["params"]["targetId"]
+                    if target == "DEAD":
+                        reply = {
+                            "id": request["id"],
+                            "error": {"code": -32602, "message": "No target with given id found"},
+                        }
+                    else:
+                        reply = {"id": request["id"], "result": {"sessionId": "S1"}}
+                elif method == "Runtime.evaluate":
+                    expressions.append(request["params"]["expression"])
+                    reply = {"id": request["id"], "result": {"result": {"value": {"ok": True}}}}
+                else:
+                    raise AssertionError(method)
+                await conn.send(json.dumps(reply))
 
-    chrome = session_restore.CdpChrome(0, fetch=fetch, connect=connect)
-    assert await chrome.worker("meivaLayout()") == {"ok": True}
+    async with websockets.asyncio.server.serve(
+        handle_ws, "127.0.0.1", 0, process_request=process_http
+    ) as server:
+        sock = next(iter(server.sockets))
+        addr: tuple[str, int] = sock.getsockname()
+        ws_port = addr[1]
+        chrome = session_restore.CdpChrome(ws_port)
+        assert await chrome.worker("meivaLayout()") == {"ok": True}
     # meiva:note
     # The first attempt hit the dead target; the reload answered.
-    assert len(sockets) == 2
-    assert sockets[1].expressions == ["meivaLayout()"]
+    assert connections == 2
+    assert expressions == ["meivaLayout()"]
 
 
 # meiva:note

@@ -88,12 +88,12 @@ class SocketLink:
         self._lock = asyncio.Lock()
         self._id = 0
 
-    async def request(self, payload: dict[str, Any]) -> Any:
+    async def request(self, payload: dict[str, Any]) -> Any | list[Any]:
         async with self._lock:
             self._id += 1
             request = {"id": self._id, **payload, **self._extra_fields}
 
-            async def roundtrip() -> Any:
+            async def roundtrip() -> Any | list[Any]:
                 if self._writer.is_closing():
                     raise NotDeliveredError("socket closed before write")
                 self._writer.write((json.dumps(request, ensure_ascii=False) + "\n").encode())
@@ -160,7 +160,7 @@ class ReconnectingLink:
         self._link.close()
         self._link = None
 
-    async def request(self, payload: dict[str, Any]) -> Any:
+    async def request(self, payload: dict[str, Any]) -> Any | list[Any]:
         async with self._lock:
             phase = "connect"
             policy = Policy(
@@ -178,7 +178,7 @@ class ReconnectingLink:
                 on_final_failure=None,
             )
 
-            async def once() -> Any:
+            async def once() -> Any | list[Any]:
                 nonlocal phase
                 if self._link is None:
                     phase = "connect"

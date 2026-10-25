@@ -1,57 +1,20 @@
-"""Per-machine shared chrome-devtools-mcp service.
-
-One upstream `chrome-devtools-mcp` attached to the shared headed Chrome,
-multiplexed over a Unix socket to every agent's chrome MCP bridge
-(`services.desktop.browser.mcp_wrapper`). This replaces the previous per-agent upstream:
-N browser-using agents used to spawn N upstreams, and chrome-devtools-mcp's
-collectors subscribe to the WHOLE browser's targets, so each of the N upstreams
-independently buffered every tab's network/console traffic -- an N-fold
-duplication that dominated agent-runner memory. One shared upstream collects
-each tab once.
-
-Two invariants make one upstream safe for many clients:
-
-- Serial: a single lock around every upstream interaction, so concurrent
-  clients never interleave a multi-step sequence (the operator chose serial over
-  parallel -- one browser op at a time machine-wide).
-- Per-connection page affinity: chrome-devtools-mcp has ONE global "selected
-  page", but each client owns its own tabs. Each connection tracks its own
-  current page; before forwarding a page-scoped call the daemon re-selects that
-  connection's page, so client A's `click` never lands on client B's tab. A
-  page-scoped call from a connection that has no page yet is NOT forwarded to
-  whatever is globally selected (that could be another client's tab) -- it
-  cold-starts (navigate -> new_page) or returns the no-page error.
-
-Page lifetime (2026-09-11 ruling): every page this stack
-CREATES (an explicit `new_page`, or the auto-created page on a page-less first
-navigate) carries a hard TTL deadline (`MEIVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`,
-24h default) and is closed by the expiry sweep when
-the deadline passes -- activity never extends it. `renew_page`, a daemon-owned
-tool appended to the upstream tool list, moves the deadline to now + ttl (at
-most 24h per call); pages this stack never created (the user's own tabs) are
-out of scope by construction, and expiry surfaces as the page simply being
-gone (next page-scoped call takes the existing no-page path) -- never as an
-invented "page expired" error. See `services.desktop.browser.page_lifecycle`.
-
-Tab groups: every page an AGENT's call creates is also filed into that agent's
-Chrome tab group (`ChromeMcpDaemon._new_page`, via
-`services.desktop.browser.tab_groups`). Presentation only: a grouping failure
-is logged and never fails the call. Nothing here removes a group -- Chrome does
-when the agent's last page closes, which every close path above ends in.
-
-Wire protocol (JSON line per request, mirrors `meiva.mcps._daemon`):
-  Request:  {"id": 1, "method": "list_tools"}
-            {"id": 2, "method": "call_tool", "tool": "click", "args": {...}}
-            {"id": 3, "method": "release_agent_page", "agent_id": 7}
-  Response: {"id": 1, "ok": true,  "result": [...]}            # tool dicts
-            {"id": 2, "ok": true,  "result": {...}}            # CallToolResult dump
-            {"id": 2, "ok": false, "error": "message"}
-The bridge speaks MCP to its agent and translates to/from this line protocol;
-results round-trip as pydantic `model_dump`/`model_validate`.
-
-Run as a supervised daemon (ServiceSpec session "browser-mcp"):
-    .venv/bin/python -m services.desktop.browser.mcp_daemon
-"""
+# meiva:note
+# Per-machine shared chrome-devtools-mcp service.
+#
+# One upstream `chrome-devtools-mcp` attached to the shared headed Chrome,
+# multiplexed over a Unix socket to every agent's chrome MCP bridge
+# (`services.desktop.browser.mcp_wrapper`). One shared upstream collects each tab once.
+#
+# Two invariants make one upstream safe for many clients:
+# - Serial: a single lock around every upstream interaction so concurrent clients never interleave.
+# - Per-connection page affinity: each connection/agent tracks its own current page and re-selects
+#   it before forwarding a page-scoped call, cold-starting or returning the no-page error when empty.
+#
+# Page lifetime (2026-09-11 ruling): every page this stack creates carries a hard TTL deadline
+# (`MEIVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`, 24h default) and is closed by the expiry sweep when
+# the deadline passes. `renew_page` moves the deadline to now + ttl (at most 24h per call); see
+# `services.desktop.browser.page_lifecycle`. Every page an agent creates is also filed into that
+# agent's Chrome tab group (`services.desktop.browser.tab_groups`, presentation-only).
 
 from __future__ import annotations
 
@@ -60,6 +23,7 @@ import json
 import re
 from collections.abc import Callable
 from contextlib import AsyncExitStack, suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -69,11 +33,12 @@ from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
+from base.cluster.machine import GatewayAccess
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.db.config import db_config_from_boot
+from base.db.config import DbConfig, db_config_from_boot
 from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -102,41 +67,23 @@ from services.desktop.browser.page_lifecycle import (
 from services.desktop.browser.protocol import Request, Response
 from services.desktop.browser.tab_groups.grouping import AgentTabGroups
 
-# A single tool result (screenshot / DOM snapshot) can be multi-MB on one line;
-# lift the stream buffer cap well above StreamReader's 64KiB default.
+# meiva:note
+# Multi-MB tool results (screenshot / DOM snapshot) fit on one line.
 _LINE_LIMIT = 64 * 1024 * 1024
 
-# Page-management tools: they CHANGE which page a connection owns (or are
-# browser-global) and so must not be re-pinned to the connection's current page
-# before forwarding. Everything else is page-scoped and gets re-pinned.
+# meiva:note
+# Page-management tools change which page a connection owns (or are browser-global)
+# and are not re-pinned to the connection's current page before forwarding.
 _MANAGEMENT_TOOLS = frozenset({"new_page", "select_page", "close_page", "list_pages"})
-
-# chrome-devtools-mcp's cold-start error: a page-scoped call with no selected
-# page. Matched verbatim from the upstream result; if upstream rewords it the
-# daemon simply stops auto-recovering and the original error surfaces.
 _NO_PAGE_MARKER = "No page selected"
 
-# new_page / select_page / list_pages render the active tab as `  <id>: <url>
-# [selected]`; that id is how the daemon learns a connection's current page.
-# The marker is not always last on the line: an isolated-context tab renders
-# `[selected] isolatedContext=<name>` (e.g. `29: Discord (url) [selected]
-# isolatedContext=reg-7`). Accept only `key=value` suffixes (or nothing) after
-# the marker -- a title that happens to contain a literal `[selected]` followed
-# by other text must not be mistaken for the marker.
+# meiva:note
+# Active tab line `<id>: <url> [selected]` with optional `key=value` suffixes.
 _SELECTED_RE = re.compile(r"^\s*(\d+):.*\[selected\](?:\s+\S+=\S+)*\s*$", re.MULTILINE)
 
-# Upstream session teardown (chrome-devtools-mcp died: Chrome restart, npx crash,
-# OOM). The next upstream call raises one of these from the MCP stdio transport.
-# Upstream death ends this daemon generation; only the service supervisor may restart it.
+# meiva:note
+# Upstream session teardown or MCP CONNECTION_CLOSED / REQUEST_TIMEOUT ends this daemon generation.
 _UPSTREAM_DOWN = (anyio.ClosedResourceError, anyio.BrokenResourceError, anyio.EndOfStream)
-# The mcp SDK surfaces a dead/wedged upstream as MCPError with these codes (not
-# as a transport-level anyio exception): CONNECTION_CLOSED when the peer's stdio
-# read loop hit EOF, REQUEST_TIMEOUT when a call got no reply within the read
-# timeout. Both mean "this upstream session is unusable" — the daemon must treat
-# them like any other _UPSTREAM_DOWN and exit, or a wedged (V8-crashed,
-# assert-failed, OOM'd) upstream leaves the daemon half-alive forever: ping
-# still answers, list_tools serves its cache, and every real call hangs until
-# the 180s read timeout, with `dead` never set (2026-08-06 #899).
 _UPSTREAM_DOWN_ERROR_CODES = {CONNECTION_CLOSED, REQUEST_TIMEOUT}
 _UPSTREAM_DOWN_MSG = "chrome upstream session is down; restart browser-mcp before continuing"
 
@@ -148,6 +95,7 @@ def _is_upstream_down(exc: BaseException) -> bool:
     )
 
 
+# meiva:note
 # Upstream watchdog: with no client calling, a wedged upstream would sit
 # undetected forever (ping answers from the daemon, list_tools serves its
 # cache). Probe the upstream itself every interval; a missing reply within the
@@ -162,14 +110,9 @@ def selected_id(result: types.CallToolResult) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def _page_id(value: Any) -> int | None:
-    """An int page id from a JSON argument, or None when the value names none.
-
-    The MCP schema declares `pageId` as a number, so a JSON client may send an
-    integral float (`29.0` for page 29): normalize it to the int the upstream
-    selected, or the affinity never moves. A non-integral float, a string, or
-    a bool (which would alias page 1) names no page -- None.
-    """
+# meiva:note
+# An int page id from a JSON argument (including integral float), or None.
+def _page_id(value: object) -> int | None:
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
@@ -179,31 +122,24 @@ def _page_id(value: Any) -> int | None:
     return None
 
 
+# meiva:note
+# True for a `new_page` into an isolated browser context (invisible to extensions).
 def _in_isolated_context(args: dict[str, Any]) -> bool:
-    """True for a `new_page` into an isolated browser context.
-
-    Such a tab is invisible to Chrome extensions (`chrome.debugger.getTargets()`
-    does not list it), so it cannot be put in a tab group; it is left out on
-    purpose, not as a failure.
-    """
     return args.get("isolatedContext") is not None
 
 
+# meiva:note
+# The upstream's no-page error for a page-scoped call on a connection with no page.
 def no_page_result() -> types.CallToolResult:
-    """The upstream's own no-page error, returned for a page-scoped call from a
-    connection that owns no page -- forwarding it would touch another client's
-    tab via the shared global selection."""
     return types.CallToolResult(
         content=[types.TextContent(type="text", text=f"{_NO_PAGE_MARKER}. Open a page first.")],
         is_error=True,
     )
 
 
+# meiva:note
+# Local error when `renew_page` is called without an agent id.
 def _renew_requires_agent_result() -> types.CallToolResult:
-    """`renew_page` resolves its target from the per-AGENT affinity registry, so
-    a connection presenting no agent id (a legacy wrapper client) has no page
-    to renew. Refused locally instead of forwarded: the name is daemon-owned,
-    so the upstream would only answer with a less legible unknown-tool error."""
     return types.CallToolResult(
         content=[
             types.TextContent(type="text", text=f"{RENEW_PAGE_TOOL} requires an agent identity")
@@ -212,46 +148,28 @@ def _renew_requires_agent_result() -> types.CallToolResult:
     )
 
 
+# meiva:note
+# Owns the single upstream session, the serial lock, and the cached tool list.
 class ChromeMcpDaemon:
-    """Owns the single upstream session + the serial lock + the cached tool list.
-
-    chrome-devtools-mcp page ids are a single shared namespace across all clients
-    (one Chrome). `current_page` affinity keeps each client's calls on its own
-    tab; it does not sandbox the namespace -- close_page / list_pages can still
-    name any client's page (a client whose tab is closed out just gets a clean
-    no-page error on its next call, never another client's tab).
-
-    Two affinity shapes: requests carrying an `agent_id` resolve their page
-    from the per-agent registry (see page_lifecycle);
-    requests without one fall back to the caller-supplied per-connection page.
-
-    ``pages`` and ``tab_groups`` are built once by ``run()`` for this daemon process.
-    """
-
     def __init__(
         self,
         upstream: ClientSession,
         pages: PageRegistry,
-        tab_groups: AgentTabGroups,
+        tab_groups: AgentTabGroups | Any,
     ) -> None:
         self._upstream = upstream
         self.pages = pages
         self.tab_groups = tab_groups
         self._lock = asyncio.Lock()
         self._tools: list[types.Tool] | None = None
+        # meiva:note
         # Set when an upstream call hits a closed session; run() watches it to
         # terminate this unusable daemon.
         self.dead = asyncio.Event()
 
     # meiva:note
-    # Forwards to the upstream, turning a dead session into a clean signal: flag the
-    # daemon dead so run() exits, and raise a readable error so the client retries.
-    # A `close_page` first gives the page's tab back to no group when it is the last
-    # member of its agent's group (see `AgentTabGroups.release_page`): Chrome saves a
-    # group whose last tab closes, a saved group is invisible to the title lookup and
-    # undeletable through the extension API, and every close -- the agent's own
-    # `close_page`, the termination release and the TTL reaper -- comes through here.
-    # Best-effort: the close always proceeds.
+    # Forward to upstream, flagging `dead` on session death and releasing the page's
+    # tab group first on `close_page` (best-effort).
     # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
     async def _call(self, name: str, args: dict[str, Any]) -> types.CallToolResult:
         if name == "close_page":
@@ -282,6 +200,7 @@ class ChromeMcpDaemon:
                         self.dead.set()
                         raise RuntimeError(_UPSTREAM_DOWN_MSG) from e
                     raise
+        # meiva:note
         # Daemon-owned tool appended after the upstream's verbatim passthrough:
         # `chrome-devtools-mcp` has no TTL concept, so `renew_page` is
         # implemented entirely on this side (see `page_lifecycle`).
@@ -289,36 +208,22 @@ class ChromeMcpDaemon:
             renew_page_tool_dump()
         ]
 
+    # meiva:note
+    # Forward one call under the serial lock, pinned to `current_page`.
     async def call_tool(
         self, name: str, args: dict[str, Any], current_page: int | None
     ) -> tuple[types.CallToolResult, int | None]:
-        """Forward one call under the serial lock, pinned to `current_page`.
-
-        Returns the result and the connection's updated current page.
-        """
         if name == RENEW_PAGE_TOOL:
-            # `renew_page` is daemon-owned and per-AGENT; a connection without
-            # an agent id has no page to renew (see `_renew_requires_agent_result`).
             return _renew_requires_agent_result(), current_page
         async with self._lock:
             return await self._affinity_call(name, args, current_page)
 
+    # meiva:note
+    # Forward one call pinned to the agent's page (per-agent affinity).
     async def call_tool_for_agent(
         self, name: str, args: dict[str, Any], agent_id: int
     ) -> types.CallToolResult:
-        """Forward one call pinned to the agent's page (per-agent affinity).
-
-        The connection's page resolves from the agent-keyed registry, so a
-        fresh connection presenting the same agent id (an exec subprocess
-        child) lands on the tab the agent process selected. Same serial lock +
-        re-pin machinery as `call_tool`; a re-pin failure (tab closed
-        underneath) drops the slot to no-page exactly like the per-connection
-        path. `renew_page` (daemon-owned, see `page_lifecycle`) is resolved
-        here without an upstream call.
-        """
         if name == RENEW_PAGE_TOOL:
-            # Daemon-owned tool, handled entirely on this side (no upstream
-            # round-trip); `renew_agent_page` takes the serial lock itself.
             return await renew_agent_page(self, agent_id, args)
         async with self._lock:
             page = self.pages.get_agent_page(agent_id)
@@ -326,12 +231,9 @@ class ChromeMcpDaemon:
             self.pages.set_agent_page(agent_id, updated)
             return result
 
+    # meiva:note
+    # Re-pin to this connection's page, dropping affinity if the page vanished.
     async def _repin(self, current_page: int | None) -> int | None:
-        """Re-pin to this connection's page so the call lands on the right tab.
-
-        If the page vanished (closed underneath / crashed), re-pin errors: drop to the
-        no-current path rather than hit the global selection.
-        """
         if current_page is None:
             return None
         repin = await self._call("select_page", {"pageId": current_page})
@@ -343,15 +245,9 @@ class ChromeMcpDaemon:
             return None
         return current_page
 
+    # meiva:note
+    # Forward a `new_page`, register its TTL deadline, and group it for the agent.
     async def _new_page(self, args: dict[str, Any], agent_id: int | None) -> types.CallToolResult:
-        """Forward a `new_page` and do the bookkeeping for the page it created.
-
-        The one place a page comes into being (an explicit `new_page`, or the
-        auto-created page of a page-less first navigate): the created page gets
-        its TTL deadline, and, when the caller is an agent, is filed into that
-        agent's tab group. Grouping is presentation only and reports its own
-        failures (see `AgentTabGroups`); it can never fail the page creation.
-        """
         group = agent_id is not None
         if group and _in_isolated_context(args):
             group = False
@@ -394,6 +290,7 @@ class ChromeMcpDaemon:
             if current_page is None:
                 return await self._bootstrap_page(name, args, agent_id=agent_id)
 
+        # meiva:note
         # A page created here gets its TTL slot (see `page_lifecycle`) and tab
         # group in `_new_page`; a listing that drifted off the parseable shape
         # registers nothing.
@@ -402,6 +299,7 @@ class ChromeMcpDaemon:
         else:
             result = await self._call(name, args)
         if name == "close_page" and not result.is_error:
+            # meiva:note
             # A clean close drops the TTL slot with the page; the shared
             # `_page_id` normalization accepts an integral-float pageId too
             # (bool is rejected so a JSON `true` can never alias page id 1).
@@ -422,6 +320,7 @@ class ChromeMcpDaemon:
             return pid if pid is not None else current_page
         if name == "close_page" and args.get("pageId") == current_page:
             return None
+        # meiva:note
         # navigate_page (forwarded) and every other page-scoped op stay re-pinned.
         return current_page
 
@@ -430,11 +329,12 @@ _ConnPage = int | None  # the connection's current page
 
 
 async def _call_tool_response(
-    daemon: ChromeMcpDaemon, req: Request, req_id: Any, conn_page: _ConnPage
+    daemon: ChromeMcpDaemon, req: Request, req_id: int | None, conn_page: _ConnPage
 ) -> tuple[Response, _ConnPage]:
     """Serve a `call_tool` request; the response and the connection's page afterwards."""
     tool = req.get("tool")
     if not tool:
+        # meiva:note
         # Missing/empty tool name: reject at the protocol edge
         # instead of forwarding a nameless call the upstream
         # would reject with a less legible error.
@@ -444,6 +344,7 @@ async def _call_tool_response(
             "error": "call_tool requires a non-empty 'tool' name",
         }, conn_page
     agent_id = req.get("agent_id")
+    # meiva:note
     # bool is an int subclass — reject it so a JSON
     # `true` can never alias another agent's slot.
     if isinstance(agent_id, int) and not isinstance(agent_id, bool):
@@ -456,7 +357,11 @@ async def _call_tool_response(
 
 
 async def _respond(
-    daemon: ChromeMcpDaemon, req: Request, req_id: Any, method: Any, conn_page: _ConnPage
+    daemon: ChromeMcpDaemon,
+    req: Request,
+    req_id: int | None,
+    method: str | None,
+    conn_page: _ConnPage,
 ) -> tuple[Response, _ConnPage]:
     """Serve one request on a live daemon; one bad call must not drop the whole connection."""
     try:
@@ -485,8 +390,12 @@ async def _serve_line(
         await writer.drain()
         return conn_page
 
-    req_id, method = req.get("id"), req.get("method")
+    raw_id = req.get("id")
+    req_id = raw_id if isinstance(raw_id, int) and not isinstance(raw_id, bool) else None
+    raw_method = req.get("method")
+    method = raw_method if isinstance(raw_method, str) else None
 
+    # meiva:note
     # ping is lock-free and must succeed while the upstream connects:
     # the healthcheck probes the daemon process itself (not the
     # upstream), so an initial connect window should never trigger a
@@ -498,6 +407,7 @@ async def _serve_line(
 
     daemon = daemon_ref[0]
     if daemon is None or daemon.dead.is_set():
+        # meiva:note
         # The initial upstream connection is not ready.
         _write(writer, {"id": req_id, "ok": False, "error": _UPSTREAM_DOWN_MSG})
         await writer.drain()
@@ -591,23 +501,14 @@ async def socket_in_use(path: Path) -> bool:
     return True
 
 
-async def run(
-    *, home: Path, browser_cdp_port: int, connect_timeout_reader: Callable[[], float]
-) -> None:
-    """Start the browser-mcp daemon of `home`.
-
-    One upstream connection serves this process. Creation failure or upstream
-    death ends the process; no browser action or session is automatically replayed.
-    """
+async def _open_daemon_socket(
+    home: Path, browser_cdp_port: int, daemon_ref: list[ChromeMcpDaemon | None]
+) -> tuple[Path, asyncio.Server]:
     browser_url = f"http://127.0.0.1:{browser_cdp_port}"
     sock = chrome_mcp_socket(home, browser_cdp_port)
     sock.parent.mkdir(parents=True, exist_ok=True)
-    # Single-instance guard: the old code unlinked the socket unconditionally,
-    # so a second daemon (watchdog misjudged the first dead and respawned)
-    # stole the socket out from under the live instance — its clients all
-    # disconnected and the first process became an orphan (audit round 2, P1).
-    # Probe before unlink: a live listener means an instance is already
-    # serving; refuse to start instead of stealing.
+    # meiva:note
+    # Single-instance guard: probe before unlinking so a live daemon's socket is never stolen.
     if await socket_in_use(sock):
         logger.error(
             "[browser-mcp] socket {} is already served by a live daemon — "
@@ -618,24 +519,106 @@ async def run(
     with suppress(OSError):
         sock.unlink()
 
-    # Mutable reference so handle_client always sees the current daemon across
-    # initial upstream connection. None while starting.
-    daemon_ref: list[ChromeMcpDaemon | None] = [None]
-
     server = await asyncio.start_unix_server(
         lambda r, w: handle_client(r, w, daemon_ref), path=str(sock), limit=_LINE_LIMIT
     )
     logger.info(f"[browser-mcp] listening on {sock} (upstream {browser_url})")
+    return sock, server
 
-    # Composition root of the shared page/session state: built once, handed to
-    # the ChromeMcpDaemon this process serves. One TaskGroup owns
-    # the daemon-long tasks (the session refresh loop and the gateway session's
-    # fire-and-forget one-shots and the tab-grouping tasks); the shutdown path cancels
-    # them before it closes.
-    pages = PageRegistry()
+
+async def _shutdown_daemon(
+    *,
+    session_task: asyncio.Task[None],
+    gateway: GatewaySession,
+    tab_groups: AgentTabGroups,
+    current_stack: AsyncExitStack | None,
+    server: asyncio.Server,
+    sock: Path,
+) -> None:
+    logger.info("[browser-mcp] shutting down")
+    session_task.cancel()
+    gateway.cancel_one_shots()
+    tab_groups.cancel_pending()
+    # meiva:note
+    # Two bounded steps, so the daemon may keep closing for up to
+    # `shutdown_budget.SHUTDOWN_CEILING_S`; meiva-root's window for this unit
+    # is derived from that total.
+    await bounded_stack_close(current_stack, "upstream stack close during shutdown")
+    server.close()
+    await bounded(server.wait_closed(), "server close")
+    with suppress(OSError):
+        sock.unlink()
+
+
+# meiva:note
+# Run the browser-mcp socket server and lifecycle tasks against an already-opened
+# upstream session and exit stack. Shares `_open_daemon_socket`, `_serve_generation`,
+# and `_shutdown_daemon` with `run()`.
+async def serve_with_upstream(
+    *,
+    home: Path,
+    browser_cdp_port: int,
+    stop: asyncio.Event,
+    upstream: ClientSession,
+    current_stack: AsyncExitStack | None,
+    default_ttl_seconds: float = page_lifecycle.DEFAULT_PAGE_TTL_SECONDS,
+    daemon_out: list[ChromeMcpDaemon] | None = None,
+) -> None:
+    daemon_ref: list[ChromeMcpDaemon | None] = [None]
+    sock, server = await _open_daemon_socket(home, browser_cdp_port, daemon_ref)
+    pages = PageRegistry(default_ttl_seconds=default_ttl_seconds)
+    async with asyncio.TaskGroup() as tasks:
+        gateway = GatewaySession(
+            tasks,
+            browser_cdp_port,
+            access=GatewayAccess(
+                gateway_url="",
+                cluster_secret="",
+                remote_plane=False,
+                machine_token=None,
+                launcher_profile=None,
+                gateway_home=False,
+            ),
+        )
+        tab_groups = AgentTabGroups(browser_cdp_port, tasks)
+        session_task = tasks.create_task(
+            contained(gateway.refresh_loop(stop), "gateway session refresh")
+        )
+        try:
+            daemon = ChromeMcpDaemon(upstream, pages, tab_groups)
+            daemon_ref[0] = daemon
+            if daemon_out is not None:
+                daemon_out.append(daemon)
+            await _serve_generation(daemon, stop, gateway)
+            if daemon.dead.is_set():
+                raise RuntimeError("browser-mcp upstream died; explicit service restart required")
+        finally:
+            await _shutdown_daemon(
+                session_task=session_task,
+                gateway=gateway,
+                tab_groups=tab_groups,
+                current_stack=current_stack,
+                server=server,
+                sock=sock,
+            )
+
+
+# meiva:note
+# Start the browser-mcp daemon of `home`.
+async def run(
+    *,
+    home: Path,
+    browser_cdp_port: int,
+    connect_timeout_reader: Callable[[], float],
+    default_ttl_seconds: float = page_lifecycle.DEFAULT_PAGE_TTL_SECONDS,
+) -> None:
+    browser_url = f"http://127.0.0.1:{browser_cdp_port}"
+    daemon_ref: list[ChromeMcpDaemon | None] = [None]
+    sock, server = await _open_daemon_socket(home, browser_cdp_port, daemon_ref)
+    pages = PageRegistry(default_ttl_seconds=default_ttl_seconds)
     stop = stop_on_signals()
     async with asyncio.TaskGroup() as tasks:
-        gateway = GatewaySession(tasks)
+        gateway = GatewaySession(tasks, browser_cdp_port)
         tab_groups = AgentTabGroups(browser_cdp_port, tasks)
         session_task = tasks.create_task(
             contained(gateway.refresh_loop(stop), "gateway session refresh")
@@ -649,11 +632,7 @@ async def run(
             except StoppingError:
                 return
             # meiva:note
-            # Chrome answers here, so the one thing the launcher could not do is
-            # due: put the pins and groups of a deliberate stop back (a no-op
-            # when Chrome restored them itself). Background on purpose -- the
-            # socket must serve agents regardless, and `meiva start` waits for
-            # the ledger's outcome before it reports.
+            # Restore saved pins and tab groups in the background once Chrome answers.
             # meiva:link services/desktop/browser/docs/browser-session-restore.meiva.okf.md
             tasks.create_task(
                 contained(
@@ -667,18 +646,14 @@ async def run(
             if daemon.dead.is_set():
                 raise RuntimeError("browser-mcp upstream died; explicit service restart required")
         finally:
-            logger.info("[browser-mcp] shutting down")
-            session_task.cancel()
-            gateway.cancel_one_shots()
-            tab_groups.cancel_pending()
-            # Two bounded steps, so the daemon may keep closing for up to
-            # `shutdown_budget.SHUTDOWN_CEILING_S`; meiva-root's window for this unit
-            # is derived from that total.
-            await bounded_stack_close(current_stack, "upstream stack close during shutdown")
-            server.close()
-            await bounded(server.wait_closed(), "server close")
-            with suppress(OSError):
-                sock.unlink()
+            await _shutdown_daemon(
+                session_task=session_task,
+                gateway=gateway,
+                tab_groups=tab_groups,
+                current_stack=current_stack,
+                server=server,
+                sock=sock,
+            )
 
 
 async def _serve_generation(
@@ -696,6 +671,7 @@ async def _serve_generation(
         reaper = helpers.create_task(
             contained(expired_page_reaper(daemon, stop), "expired-page reaper")
         )
+        # meiva:note
         # Chrome is confirmed up here — inject the gateway session cookie
         # right away (the periodic loop covers expiry; this covers the
         # fresh-profile cold start and the post-restart gap without
@@ -708,7 +684,60 @@ async def _serve_generation(
             reaper.cancel()
 
 
+# meiva:note
+# Process-entry wiring assembled from a booted ConfigBoot and captured LoadedCommit.
+@dataclass(frozen=True)
+class BrowserMcpEntryWiring:
+    process_name: str
+    config: ConfigBoot
+    image: LoadedCommit
+    process_home: Path
+    machine: ConfiguredMachineIdentity
+    gate: ProcessDbGate
+    browser_cdp_port: int
+    default_ttl_seconds: float
+
+    def db_config(self) -> DbConfig:
+        return db_config_from_boot(self.config)
+
+    def direct_url(self) -> ClusterDirectUrl:
+        return ClusterDirectUrl(self.machine.host)
+
+    def database(self) -> Database:
+        return Database(
+            self.db_config(),
+            gate=self.gate,
+            direct_url=self.direct_url(),
+        )
+
+    def connect_timeout_seconds(self) -> float:
+        return self.config.view.sandbox.mcp_connect_timeout_seconds
+
+
+# meiva:note
+# Assemble the process-entry collaborators from a booted ConfigBoot and captured LoadedCommit
+# so `main()` wires telemetry, database gate, and daemon runtime parameters from one owner.
+def build_entry_wiring(
+    *, config: ConfigBoot, image: LoadedCommit, home: Path
+) -> BrowserMcpEntryWiring:
+    machine = ConfiguredMachineIdentity(config)
+    process_home = home.resolve()
+    version = CodeVersion(image)
+    gate = ProcessDbGate(version=version.get, process="browser-mcp")
+    return BrowserMcpEntryWiring(
+        process_name="browser-mcp",
+        config=config,
+        image=image,
+        process_home=process_home,
+        machine=machine,
+        gate=gate,
+        browser_cdp_port=config.view.services.browser_cdp_port,
+        default_ttl_seconds=float(config.view.daemon.chrome_page_default_ttl_seconds),
+    )
+
+
 def main() -> None:
+    # meiva:note
     # Same boot seam every long-running service shares (cf. computer-mcp): a
     # per-daemon log file plus the event pipeline, so this daemon's expiry /
     # renewal events land attributed to `browser-mcp` and an uncaught
@@ -716,30 +745,22 @@ def main() -> None:
     image = LoadedCommit.capture()
     config = ConfigBoot()
     config.boot()
-    machine = ConfiguredMachineIdentity(config)
-    process_home = meiva_home().resolve()
-    version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="browser-mcp")
-
-    def database() -> Database:
-        return Database(
-            db_config_from_boot(config),
-            gate=gate,
-            direct_url=ClusterDirectUrl(machine.host),
-        )
-
-    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
+    wiring = build_entry_wiring(config=config, image=image, home=meiva_home())
+    pipeline = build_pipeline(
+        database=wiring.database, machine=wiring.machine, home=wiring.process_home
+    )
     init_gateway_process(
-        name="browser-mcp",
+        name=wiring.process_name,
         producer=lambda: pipeline,
-        machine_reader=machine.name,
-        image=image,
+        machine_reader=wiring.machine.name,
+        image=wiring.image,
     )
     asyncio.run(
         run(
-            home=meiva_home(),
-            browser_cdp_port=config.view.services.browser_cdp_port,
+            home=wiring.process_home,
+            browser_cdp_port=wiring.browser_cdp_port,
             connect_timeout_reader=lambda: config.view.sandbox.mcp_connect_timeout_seconds,
+            default_ttl_seconds=wiring.default_ttl_seconds,
         )
     )
 

@@ -18,20 +18,37 @@ import signal
 from contextlib import suppress
 
 from base.cluster.machine import (
+    GatewayAccess,
     GatewayApiTokenMissing,
     gateway_api_base,
     gateway_bearer,
 )
 from base.cluster.machine.ambient import gateway_access_from_settings
-from base.config import settings
 from base.log import logger
 from services.desktop.browser.mcp_upstream import await_stop_or_timeout, contained
 from services.desktop.browser.session import inject_session_cookie
 
+# meiva:note
 # Gateway session cookie refresh: the default server-side lifetime is 24h;
 # refreshing every 6h leaves a comfortable margin and self-heals a lost,
 # expired, or revoked managed-browser session within one interval.
 _SESSION_REFRESH_INTERVAL_S = 6 * 3600
+
+
+# meiva:note
+# Resolve `(gateway_url, login credential)` from explicit `GatewayAccess`.
+def resolve_gateway_session_params(access: GatewayAccess) -> tuple[str, str] | None:
+    try:
+        gateway_url = gateway_api_base(access.gateway_url)
+    except Exception as e:
+        logger.warning(f"[browser-mcp] gateway session injection disabled: {e}")
+        return None
+    try:
+        credential = gateway_bearer(access)
+    except GatewayApiTokenMissing as e:
+        logger.error(f"[browser-mcp] gateway session injection disabled: {e}")
+        return None
+    return gateway_url, credential
 
 
 def gateway_session_params() -> tuple[str, str] | None:
@@ -45,18 +62,7 @@ def gateway_session_params() -> tuple[str, str] | None:
     a launch defect and left without the cookie (best effort, like every
     other path here), except on a remote-managed data plane, which delivers no
     token and whose gateway home presents the human secret."""
-    access = gateway_access_from_settings()  # ambient: S
-    try:
-        gateway_url = gateway_api_base(access.gateway_url)
-    except Exception as e:  # gateway URL unset on this unit
-        logger.warning(f"[browser-mcp] gateway session injection disabled: {e}")
-        return None
-    try:
-        credential = gateway_bearer(access)
-    except GatewayApiTokenMissing as e:
-        logger.error(f"[browser-mcp] gateway session injection disabled: {e}")
-        return None
-    return gateway_url, credential
+    return resolve_gateway_session_params(gateway_access_from_settings())  # ambient: S
 
 
 class GatewaySession:
@@ -68,9 +74,19 @@ class GatewaySession:
     (each removes itself on completion).
     """
 
-    def __init__(self, tasks: asyncio.TaskGroup) -> None:
+    def __init__(
+        self,
+        tasks: asyncio.TaskGroup,
+        cdp_port: int = 9222,
+        *,
+        access: GatewayAccess | None = None,
+        refresh_interval_s: float = _SESSION_REFRESH_INTERVAL_S,
+    ) -> None:
         self.inject_tasks: set[asyncio.Task[None]] = set()
         self._tasks = tasks
+        self._cdp_port = cdp_port
+        self._access = access
+        self._refresh_interval_s = refresh_interval_s
 
     def spawn_inject(self) -> None:
         """Schedule a one-shot gateway-session injection (best effort)."""
@@ -88,13 +104,16 @@ class GatewaySession:
 
         Never raises: every failure is logged and left for the next tick to retry.
         """
-        params = gateway_session_params()
+        params = (
+            gateway_session_params()
+            if self._access is None
+            else resolve_gateway_session_params(self._access)
+        )
         if params is None:
             return
         gateway_url, secret = params
         try:
-            cdp_port = settings.services.browser_cdp_port
-            await inject_session_cookie(cdp_port, gateway_url, secret)
+            await inject_session_cookie(self._cdp_port, gateway_url, secret)
         except Exception as e:
             logger.warning(f"[browser-mcp] gateway session cookie injection failed: {e}")
             return
@@ -109,7 +128,7 @@ class GatewaySession:
         """
         while not stop.is_set():
             await self.inject_once()
-            await await_stop_or_timeout(stop, _SESSION_REFRESH_INTERVAL_S)
+            await await_stop_or_timeout(stop, self._refresh_interval_s)
 
 
 def stop_on_signals() -> asyncio.Event:

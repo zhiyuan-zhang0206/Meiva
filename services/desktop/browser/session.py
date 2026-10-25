@@ -21,20 +21,60 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
-import time
 from collections.abc import Iterator
 from http.cookies import SimpleCookie
 from typing import Any
 
 import httpx
 import websockets
+from websockets.asyncio.client import ClientConnection
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.host.net.auth import MANAGED_BROWSER_USER_AGENT, cookie_name
 from base.log import logger
 
+# meiva:note
 # CDP endpoint timeouts: Chrome is local, so these only bound a wedged browser.
 _HTTP_TIMEOUT_S = 5.0
 _WS_TIMEOUT_S = 10.0
+
+
+# meiva:note
+# Validate a gateway login HTTP response and return `(cookie_name, value, expires_unix)`.
+def parse_login_cookie(
+    status_code: int,
+    set_cookie: str | None,
+    *,
+    now: int,
+) -> tuple[str, str, int]:
+    if status_code != 200:
+        raise RuntimeError(f"gateway login failed with HTTP {status_code}")
+
+    parsed = SimpleCookie()
+    if set_cookie:
+        parsed.load(set_cookie)
+    name = cookie_name()
+    morsel = parsed.get(name)
+    if morsel is None or not morsel.value:
+        raise RuntimeError("gateway login response has no session cookie")
+    try:
+        max_age = int(morsel["max-age"])
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("gateway session cookie has invalid Max-Age") from exc
+    if max_age <= 0:
+        raise RuntimeError("gateway session cookie has invalid Max-Age")
+    return name, morsel.value, now + max_age
+
+
+def _utc_clock() -> Clock:
+    return Clock(
+        ClockConfig(
+            timezone="UTC",
+            authoritative_timezone="UTC",
+            message_timestamp_weekday=False,
+        ),
+        timers=SYSTEM_TIMERS,
+    )
 
 
 async def gateway_session_login(gateway_url: str, secret: str) -> tuple[str, str, int]:
@@ -50,27 +90,14 @@ async def gateway_session_login(gateway_url: str, secret: str) -> tuple[str, str
             json={"password": secret},
             headers={"User-Agent": MANAGED_BROWSER_USER_AGENT},
         )
-    if response.status_code != 200:
-        raise RuntimeError(f"gateway login failed with HTTP {response.status_code}")
-
-    parsed = SimpleCookie()
-    set_cookie = response.headers.get("set-cookie")
-    if set_cookie:
-        parsed.load(set_cookie)
-    name = cookie_name()
-    morsel = parsed.get(name)
-    if morsel is None or not morsel.value:
-        raise RuntimeError("gateway login response has no session cookie")
-    try:
-        max_age = int(morsel["max-age"])
-    except (TypeError, ValueError) as exc:
-        raise RuntimeError("gateway session cookie has invalid Max-Age") from exc
-    if max_age <= 0:
-        raise RuntimeError("gateway session cookie has invalid Max-Age")
-    return name, morsel.value, int(time.time()) + max_age
+    return parse_login_cookie(
+        response.status_code,
+        response.headers.get("set-cookie"),
+        now=int(_utc_clock().now().timestamp()),
+    )
 
 
-async def http_json(url: str) -> Any:
+async def http_json(url: str) -> Any | None:
     """GET ``url`` and return the parsed JSON body."""
     async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S) as client:
         resp = await client.get(url)
@@ -79,7 +106,7 @@ async def http_json(url: str) -> Any:
 
 
 async def cdp_call(
-    ws: Any,
+    ws: ClientConnection | Any,
     ids: Iterator[int],
     method: str,
     params: dict[str, Any],
@@ -108,7 +135,11 @@ async def cdp_call(
     return resp.get("result") or {}
 
 
-async def inject_session_cookie(cdp_port: int, gateway_url: str, secret: str) -> None:
+async def inject_session_cookie(
+    cdp_port: int,
+    gateway_url: str,
+    secret: str,
+) -> None:
     """Log in to the gateway and set its session cookie in managed Chrome.
 
     The cookie is host-only for ``gateway_url`` with the same flags the login
@@ -117,11 +148,15 @@ async def inject_session_cookie(cdp_port: int, gateway_url: str, secret: str) ->
     Raises RuntimeError when Chrome is unreachable or rejects the cookie.
     """
     name, value, expires = await gateway_session_login(gateway_url, secret)
-    version = await http_json(f"http://127.0.0.1:{cdp_port}/json/version")
-    browser_ws_url = version["webSocketDebuggerUrl"]
+    version: Any = await http_json(f"http://127.0.0.1:{cdp_port}/json/version")
+    version_obj: object = version
+    if type(version_obj) is not dict:
+        raise RuntimeError("CDP /json/version did not return a JSON object")
+    browser_ws_url = str(version["webSocketDebuggerUrl"])
 
     ids = itertools.count(1)  # request ids are per connection
     async with websockets.connect(browser_ws_url) as browser_ws:
+        # meiva:note
         # A page target is required for the Network domain; use a throwaway
         # about:blank tab so we never depend on (or disturb) anyone's tabs.
         created = await cdp_call(browser_ws, ids, "Target.createTarget", {"url": "about:blank"})

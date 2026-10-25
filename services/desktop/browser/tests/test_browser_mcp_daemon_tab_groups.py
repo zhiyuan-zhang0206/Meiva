@@ -17,11 +17,11 @@ from services.desktop.browser.tests.test_browser_mcp_daemon import (
 )
 
 
-class RecordingGroups(AgentTabGroups):
-    def __init__(self) -> None:
-        super().__init__(cdp_port=0, tasks=asyncio.TaskGroup())
+class RecordingGroups:
+    def __init__(self, *, order: list[str] | None = None) -> None:
         self.events: list[tuple[str, Any]] = []
         self.snapshots = 0
+        self._order = order
 
     async def snapshot(self) -> frozenset[str] | None:
         self.snapshots += 1
@@ -34,6 +34,8 @@ class RecordingGroups(AgentTabGroups):
         self.events.append(("group", (agent_id, before)))
 
     async def release_page(self, page_id: int) -> None:
+        if self._order is not None:
+            self._order.append(f"release:{page_id}")
         self.events.append(("release", page_id))
 
     def grouped(self) -> list[int]:
@@ -261,12 +263,7 @@ async def test_close_page_ungroups_the_last_tab_before_the_upstream_closes_it() 
                 order.append("close_page")
             return await super().call_tool(name, args)
 
-    class OrderedGroups(RecordingGroups):
-        async def release_page(self, page_id: int) -> None:
-            order.append(f"release:{page_id}")
-            await super().release_page(page_id)
-
-    groups = OrderedGroups()
+    groups = RecordingGroups(order=order)
     d = new_daemon(OrderedUpstream(), tab_groups=groups)
     await d.call_tool_for_agent("new_page", {"url": "https://a.example/"}, 7)
 
@@ -288,12 +285,7 @@ async def test_release_of_an_agents_pages_also_ungroups_each_before_closing() ->
                 order.append("close_page")
             return await super().call_tool(name, args)
 
-    class OrderedGroups(RecordingGroups):
-        async def release_page(self, page_id: int) -> None:
-            order.append(f"release:{page_id}")
-            await super().release_page(page_id)
-
-    groups = OrderedGroups()
+    groups = RecordingGroups(order=order)
     d = new_daemon(OrderedUpstream(), tab_groups=groups)
     await d.call_tool_for_agent("new_page", {"url": "https://a.example/"}, 7)
     await d.call_tool_for_agent("new_page", {"url": "https://b.example/"}, 7)

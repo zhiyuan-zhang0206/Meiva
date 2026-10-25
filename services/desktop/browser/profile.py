@@ -24,14 +24,15 @@ from __future__ import annotations
 import os
 import shutil
 import sys
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.host.proc import process_alive
 from base.paths import meiva_home
 
+# meiva:note
 # Names never worth copying out of a Chrome user-data dir. `Singleton*` are the
 # live lock/socket/cookie files Chrome holds while running — copying them would
 # import a stale lock that confuses the agent's Chrome. The rest are large,
@@ -109,6 +110,7 @@ def running_chrome_pid(src: Path) -> int | None:
     if not pid_str.isdigit():
         return None
     pid = int(pid_str)
+    # meiva:note
     # `process_alive`, not a raw `os.kill(pid, 0)`: a recycled pid owned by
     # another user still counts as alive (running).
     if process_alive(pid):
@@ -123,6 +125,7 @@ def copy_default_profile(src: Path, dst: Path) -> None:
     overwritten or cleared automatically."""
     if dst.exists():
         raise FileExistsError(f"refusing to overwrite existing Chrome profile: {dst}")
+    # meiva:note
     # symlinks=True copies links verbatim rather than following them, so a
     # broken link in the source can't abort the whole copy. If this fails after
     # creating `dst`, leave it intact rather than deleting potentially valuable
@@ -147,7 +150,19 @@ def validate_local_state(profile: Path) -> str | None:
         return f"Local State could not be inspected at {local_state}: {exc}"
     if not metadata.st_mode & 0o444 or not os.access(local_state, os.R_OK):
         return f"Local State is not readable at {local_state}"
-    if metadata.st_mtime > time.time() + 300:
+    now_ts = (
+        Clock(
+            ClockConfig(
+                timezone="UTC",
+                authoritative_timezone="UTC",
+                message_timestamp_weekday=False,
+            ),
+            timers=SYSTEM_TIMERS,
+        )
+        .now()
+        .timestamp()
+    )
+    if metadata.st_mtime > now_ts + 300:
         return f"Local State mtime is unexpectedly in the future at {local_state}"
     return None
 
@@ -233,6 +248,7 @@ def ensure_browser_profile(*, interactive: bool, daily_profile: Path, console: C
     if _prompt_profile_choice(src, console) != "copy":
         return
 
+    # meiva:note
     # Copying a live profile risks importing half-written SQLite. Require Chrome
     # closed; loop so the operator can quit it and continue without restarting.
     while running_chrome_pid(src) is not None:

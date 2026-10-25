@@ -82,9 +82,10 @@ import json
 import logging
 import urllib.error
 import urllib.request
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any
 
 import psutil
 
@@ -97,10 +98,12 @@ from .profile import profile_dir
 
 _log = logging.getLogger("services.desktop.browser.probe")
 
+# meiva:note
 # CDP is a loopback JSON dump; anything slower is a wedged browser, which is
 # "dead" for watchdog purposes. Matches the healthcheck timeout it replaces.
 _CDP_TIMEOUT_S = 3.0
 
+# meiva:note
 # Exceptions meaning "gone, or not ours to read" — the same set `orphan.py` skips
 # on, for the same reason: a process we cannot read is one we cannot identify.
 # `SystemError` is psutil's macOS C-extension leak of that mid-scan race (see
@@ -133,6 +136,29 @@ class CdpAnswer:
     answered: bool
 
 
+# meiva:note
+# Validate the HTTP status and body returned by `/json/version` on `url`.
+def parse_cdp_version_body(url: str, status: int, body: bytes) -> CdpAnswer:
+    if status != 200:
+        return CdpAnswer(f"CDP {url} returned HTTP {status}", answered=True)
+    try:
+        parsed: Any = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return CdpAnswer(
+            f"CDP {url} answered 200 but the body is not JSON — wedged DevTools endpoint",
+            answered=True,
+        )
+    parsed_obj: object = parsed
+    browser: object = parsed.get("Browser") if isinstance(parsed_obj, dict) else None
+    if not isinstance(browser, str) or not browser:
+        return CdpAnswer(
+            f"CDP {url} answered 200 but the body is not a valid /json/version "
+            "payload (no Browser field) — wedged DevTools endpoint",
+            answered=True,
+        )
+    return CdpAnswer(None, answered=True)
+
+
 def cdp_unreachable(port: int) -> CdpAnswer:
     """A debuggable Chrome answers 200 with a real `/json/version` payload on
     `port`; else the reason it did not, and whether anything answered at all.
@@ -151,31 +177,26 @@ def cdp_unreachable(port: int) -> CdpAnswer:
     url = cdp_url(port)
     try:
         with urllib.request.urlopen(url, timeout=_CDP_TIMEOUT_S) as resp:  # noqa: S310 — fixed loopback CDP URL
-            if resp.status != 200:
-                return CdpAnswer(f"CDP {url} returned HTTP {resp.status}", answered=True)
-            body = resp.read()
+            status = resp.status
+            body = resp.read() if status == 200 else b""
     except urllib.error.HTTPError as exc:
+        # meiva:note
         # urlopen RAISES on any non-2xx status — but a status is still an HTTP
         # answer, so it must take the identity path (an occupant holds the
         # port), not the nothing-answered respawnable DOWN.
         return CdpAnswer(f"CDP {url} returned HTTP {exc.code}", answered=True)
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         return CdpAnswer(f"CDP unreachable on {url}: {type(exc).__name__}: {exc}", answered=False)
+    return parse_cdp_version_body(url, status, body)
+
+
+# meiva:note
+# Read `(name, argv)` from a psutil.Process-like object, returning `("", None)` on `_UNREADABLE`.
+def read_process_facts(proc: psutil.Process | Any) -> tuple[str, list[str] | None]:
     try:
-        parsed: object = json.loads(body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return CdpAnswer(
-            f"CDP {url} answered 200 but the body is not JSON — wedged DevTools endpoint",
-            answered=True,
-        )
-    browser = cast("dict[str, object]", parsed).get("Browser") if isinstance(parsed, dict) else None
-    if not isinstance(browser, str) or not browser:
-        return CdpAnswer(
-            f"CDP {url} answered 200 but the body is not a valid /json/version "
-            "payload (no Browser field) — wedged DevTools endpoint",
-            answered=True,
-        )
-    return CdpAnswer(None, answered=True)
+        return proc.name(), proc.cmdline()
+    except _UNREADABLE:
+        return "", None
 
 
 def process_facts(pid: int) -> tuple[str, list[str] | None]:
@@ -184,9 +205,9 @@ def process_facts(pid: int) -> tuple[str, list[str] | None]:
     reported, never guessed at."""
     try:
         proc = psutil.Process(pid)
-        return proc.name(), proc.cmdline()
     except _UNREADABLE:
         return "", None
+    return read_process_facts(proc)
 
 
 def listener_pid(port: int) -> int | None:
@@ -211,6 +232,16 @@ def listener_pid(port: int) -> int | None:
     return None
 
 
+# meiva:note
+# Check whether a psutil.Process-like object holds a LISTEN socket on `port`, returning None on `_UNREADABLE`.
+def read_listens_on(proc: psutil.Process | Any, port: int) -> bool | None:
+    try:
+        conns = proc.net_connections(kind="tcp")
+    except _UNREADABLE:
+        return None
+    return any(c.status == psutil.CONN_LISTEN and c.laddr and c.laddr[1] == port for c in conns)
+
+
 def listens_on(pid: int, port: int) -> bool | None:
     """Whether `pid` holds a LISTEN socket on `port`; None when its sockets cannot
     be read.
@@ -220,10 +251,32 @@ def listens_on(pid: int, port: int) -> bool | None:
     second as unverified rather than folding it into either verdict.
     """
     try:
-        conns = psutil.Process(pid).net_connections(kind="tcp")
+        proc = psutil.Process(pid)
     except _UNREADABLE:
         return None
-    return any(c.status == psutil.CONN_LISTEN and c.laddr and c.laddr[1] == port for c in conns)
+    return read_listens_on(proc, port)
+
+
+# meiva:note
+# Pure resolution of whether our cluster's Chrome owns the LISTEN socket on `port`
+# given the already-observed holder, holder process facts, profile walk, and per-pid listening map.
+def resolve_our_chrome_holder(
+    profile: Path,
+    *,
+    found: Sequence[int],
+    listening: Mapping[int, bool | None],
+    holder: int | None,
+    holder_facts: tuple[str, Sequence[str] | None],
+) -> int | None:
+    if holder is not None:
+        if holder in found:
+            return holder
+        name, argv = holder_facts
+        return holder if is_cluster_chrome(name, argv, profile) else None
+    for pid in found:
+        if listening.get(pid):
+            return pid
+    return None
 
 
 def _our_chrome_holds_port(port: int, profile: Path, found: list[int]) -> int | None:
@@ -237,21 +290,34 @@ def _our_chrome_holds_port(port: int, profile: Path, found: list[int]) -> int | 
     must clear the port. `found` is the caller's profile walk.
     """
     holder = listener_pid(port)
-    if holder is not None:
-        if holder in found:
-            return holder
-        name, argv = process_facts(holder)
-        return holder if is_cluster_chrome(name, argv, profile) else None
-    for pid in found:
-        if listens_on(pid, port):
-            return pid
-    return None
+    holder_facts = (
+        process_facts(holder) if holder is not None and holder not in found else ("", None)
+    )
+    listening = {pid: listens_on(pid, port) for pid in found} if holder is None else {}
+    return resolve_our_chrome_holder(
+        profile,
+        found=found,
+        listening=listening,
+        holder=holder,
+        holder_facts=holder_facts,
+    )
 
 
 # meiva:note
 # The pid of this cluster's Chrome owning the LISTEN socket on `port`, if any.
 def our_chrome_holds_port(port: int, profile: Path) -> int | None:
     return _our_chrome_holds_port(port, profile, find_cluster_chrome(profile))
+
+
+# meiva:note
+# Log and convert an exception raised inside `_probe_browser` into a fail-closed
+# `DaemonProbe` (`UNAVAILABLE` for process-inspection races, `DOWN` for anything else).
+def classify_probe_exception(exc: Exception) -> DaemonProbe:
+    if isinstance(exc, _UNREADABLE):
+        _log.exception("[probe_browser] inspection failed; reporting unavailable for this round")
+        return DaemonProbe.unavailable(f"inspection failed: {type(exc).__name__}: {exc}")
+    _log.exception("[probe_browser] probe raised unexpectedly; treating as down")
+    return DaemonProbe.down(f"probe raised {type(exc).__name__}: {exc}")
 
 
 def probe_browser(port: int | None = None, profile: Path | None = None) -> DaemonProbe:
@@ -274,40 +340,129 @@ def probe_browser(port: int | None = None, profile: Path | None = None) -> Daemo
     """
     try:
         return _probe_browser(port, profile)
-    except _UNREADABLE as exc:
-        _log.exception("[probe_browser] inspection failed; reporting unavailable for this round")
-        return DaemonProbe.unavailable(f"inspection failed: {type(exc).__name__}: {exc}")
     except Exception as exc:
-        _log.exception("[probe_browser] probe raised unexpectedly; treating as down")
-        return DaemonProbe.down(f"probe raised {type(exc).__name__}: {exc}")
+        return classify_probe_exception(exc)
 
 
-def _unusable_cdp_verdict(port: int, profile: Path, answer: CdpAnswer) -> DaemonProbe:
-    """The verdict when CDP did not give a usable answer (`answer.reason` says why)."""
-    assert answer.reason is not None  # noqa: S101
-    wait_reason = macos_readiness.degraded_wait_reason()
+def _decide_unreachable_probe(
+    port: int,
+    profile: Path,
+    *,
+    answer: CdpAnswer,
+    found: Sequence[int],
+    listening: Mapping[int, bool | None],
+    holder: int | None,
+    holder_facts: tuple[str, Sequence[str] | None],
+    wait_reason: str | None,
+) -> DaemonProbe:
+    reason = answer.reason or ""
     prefix = (
         f"meiva-browser waiting for macOS startup readiness: {wait_reason}; "
         if wait_reason is not None
         else ""
     )
     if not answer.answered:
+        # meiva:note
         # Nothing answered: no occupant to clear, so a respawn (and the
         # healthcheck's sweep + rebuild behind it) is the remedy.
-        return DaemonProbe.down(prefix + answer.reason)
+        return DaemonProbe.down(prefix + reason)
+    # meiva:note
     # Something answered, so the port has an occupant even though its
     # payload is unusable (or its status was not 200). Who it is decides
-    # whether this unit can recover at all — see _our_chrome_holds_port.
-    found = find_cluster_chrome(profile)
-    ours = _our_chrome_holds_port(port, profile, found)
+    # whether this unit can recover at all — see resolve_our_chrome_holder.
+    ours = resolve_our_chrome_holder(
+        profile,
+        found=found,
+        listening=listening,
+        holder=holder,
+        holder_facts=holder_facts,
+    )
     if ours is not None:
         return DaemonProbe.down(
-            f"{prefix}{answer.reason}; the LISTEN socket is this cluster's Chrome "
+            f"{prefix}{reason}; the LISTEN socket is this cluster's Chrome "
             f"(pid {ours}) — its endpoint is dead, and the sweep + rebuild clears it"
         )
     return DaemonProbe.port_taken(
-        f"identity mismatch on CDP :{port}: {answer.reason}, and the listener is not a "
+        f"identity mismatch on CDP :{port}: {reason}, and the listener is not a "
         f"Chrome on this cluster's profile {profile} — another process occupies the port"
+    )
+
+
+# meiva:note
+# Pure decision function for browser health probe given observed CDP answer and process/socket facts.
+def decide_browser_probe(
+    port: int,
+    profile: Path,
+    *,
+    answer: CdpAnswer,
+    found: Sequence[int],
+    listening: Mapping[int, bool | None],
+    holder: int | None = None,
+    holder_facts: tuple[str, Sequence[str] | None] = ("", None),
+    wait_reason: str | None = None,
+) -> DaemonProbe:
+    if answer.reason is not None:
+        return _decide_unreachable_probe(
+            port,
+            profile,
+            answer=answer,
+            found=found,
+            listening=listening,
+            holder=holder,
+            holder_facts=holder_facts,
+            wait_reason=wait_reason,
+        )
+
+    # meiva:note
+    # Listener-first: the process that owns the LISTEN socket is the one CDP
+    # answers from. If it is ours — by the walk, or by its own argv when the
+    # walk missed it — the browser is alive, full stop. This direction is what
+    # turns the walk's blind spots into a positive identification instead of a
+    # false terminal.
+    if holder is not None and holder in found:
+        return DaemonProbe.up(f"chrome pid {holder} on {profile}")
+    if holder is not None:
+        holder_name, holder_argv = holder_facts
+        if is_cluster_chrome(holder_name, holder_argv, profile):
+            return DaemonProbe.up(f"chrome pid {holder} on {profile}")
+
+    unreadable: list[int] = []
+    for pid in found:
+        pid_listening = listening.get(pid)
+        if pid_listening:
+            return DaemonProbe.up(f"chrome pid {pid} on {profile}")
+        if pid_listening is None:
+            unreadable.append(pid)
+    if unreadable:
+        # meiva:note
+        # Terminal, not down, and deliberately so: CDP *is* being served, so a
+        # respawn meets the daemon's port guard whoever owns it. Reporting the
+        # unread pids beats guessing in either direction.
+        return DaemonProbe.port_taken(
+            f"CDP :{port} answers, but the listening sockets of this cluster's Chrome "
+            f"{unreadable} could not be read — cannot confirm it owns the port"
+        )
+    if found:
+        # meiva:note
+        # The shape the win runner met 2026-08-11: our Chrome IS running — it
+        # lost the bind (the relay / another unit's Chrome won it) and serves a
+        # dead DevTools endpoint while a foreign CDP answer comes from the port.
+        # Naming the pids is what makes the log line self-explanatory instead of
+        # reading like "your Chrome does not exist".
+        return DaemonProbe.port_taken(
+            f"identity mismatch on CDP :{port}: this cluster's Chrome is running "
+            f"({list(found)}) but none of them holds the LISTEN socket there — its DevTools "
+            f"endpoint is dead and another unit's browser answers on this port"
+        )
+    if holder is not None:
+        return DaemonProbe.port_taken(
+            f"identity mismatch on CDP :{port}: the LISTEN socket belongs to pid "
+            f"{holder}, which is not a Chrome on this cluster's profile {profile} — "
+            f"another unit's browser holds this port"
+        )
+    return DaemonProbe.port_taken(
+        f"identity mismatch on CDP :{port}: no Chrome running on this cluster's profile "
+        f"{profile} is listening there — another unit's browser holds this port"
     )
 
 
@@ -334,61 +489,34 @@ def _probe_browser(port: int | None, profile: Path | None) -> DaemonProbe:
       crash loop once every 60s. An operator has to free the port.
     - **both hold** → `ALIVE`, with the pid in the detail.
     """
-    port = settings.services.browser_cdp_port if port is None else port
-    profile = profile_dir() if profile is None else profile
+    resolved_port = settings.services.browser_cdp_port if port is None else port
+    resolved_profile = profile_dir() if profile is None else profile
 
-    answer = cdp_unreachable(port)
-    if answer.reason is not None:
-        return _unusable_cdp_verdict(port, profile, answer)
-
-    found = find_cluster_chrome(profile)
-
-    # Listener-first: the process that owns the LISTEN socket is the one CDP
-    # answers from. If it is ours — by the walk, or by its own argv when the
-    # walk missed it — the browser is alive, full stop. This direction is what
-    # turns the walk's blind spots into a positive identification instead of a
-    # false terminal.
-    holder = listener_pid(port)
-    if holder is not None and holder in found:
-        return DaemonProbe.up(f"chrome pid {holder} on {profile}")
-    if holder is not None:
-        holder_name, holder_argv = process_facts(holder)
-        if is_cluster_chrome(holder_name, holder_argv, profile):
-            return DaemonProbe.up(f"chrome pid {holder} on {profile}")
-
-    unreadable: list[int] = []
-    for pid in found:
-        listening = listens_on(pid, port)
-        if listening:
-            return DaemonProbe.up(f"chrome pid {pid} on {profile}")
-        if listening is None:
-            unreadable.append(pid)
-    if unreadable:
-        # Terminal, not down, and deliberately so: CDP *is* being served, so a
-        # respawn meets the daemon's port guard whoever owns it. Reporting the
-        # unread pids beats guessing in either direction.
-        return DaemonProbe.port_taken(
-            f"CDP :{port} answers, but the listening sockets of this cluster's Chrome "
-            f"{unreadable} could not be read — cannot confirm it owns the port"
+    answer = cdp_unreachable(resolved_port)
+    if answer.reason is not None and not answer.answered:
+        return decide_browser_probe(
+            resolved_port,
+            resolved_profile,
+            answer=answer,
+            found=(),
+            listening={},
+            wait_reason=macos_readiness.degraded_wait_reason(),
         )
-    if found:
-        # The shape the win runner met 2026-08-11: our Chrome IS running — it
-        # lost the bind (the relay / another unit's Chrome won it) and serves a
-        # dead DevTools endpoint while a foreign CDP answer comes from the port.
-        # Naming the pids is what makes the log line self-explanatory instead of
-        # reading like "your Chrome does not exist".
-        return DaemonProbe.port_taken(
-            f"identity mismatch on CDP :{port}: this cluster's Chrome is running "
-            f"({found}) but none of them holds the LISTEN socket there — its DevTools "
-            f"endpoint is dead and another unit's browser answers on this port"
-        )
-    if holder is not None:
-        return DaemonProbe.port_taken(
-            f"identity mismatch on CDP :{port}: the LISTEN socket belongs to pid "
-            f"{holder}, which is not a Chrome on this cluster's profile {profile} — "
-            f"another unit's browser holds this port"
-        )
-    return DaemonProbe.port_taken(
-        f"identity mismatch on CDP :{port}: no Chrome running on this cluster's profile "
-        f"{profile} is listening there — another unit's browser holds this port"
+
+    found = find_cluster_chrome(resolved_profile)
+    holder = listener_pid(resolved_port)
+    holder_facts = (
+        process_facts(holder) if holder is not None and holder not in found else ("", None)
+    )
+    listening = {pid: listens_on(pid, resolved_port) for pid in found}
+    wait_reason = macos_readiness.degraded_wait_reason() if answer.reason is not None else None
+    return decide_browser_probe(
+        resolved_port,
+        resolved_profile,
+        answer=answer,
+        found=found,
+        listening=listening,
+        holder=holder,
+        holder_facts=holder_facts,
+        wait_reason=wait_reason,
     )
