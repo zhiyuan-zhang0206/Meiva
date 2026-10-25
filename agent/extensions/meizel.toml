@@ -3,5 +3,9 @@ exports = ["catalog.py"]
 [purity]
 "__init__.py" = "strict"
 
+[debt.any-collaborator]
+"catalog.py#any _unquoted.annotation" = 1
+"catalog.py#any _unquoted.return" = 1
+
 [debt.type-cast]
 "catalog.py#cast _declared_identifiers" = 1

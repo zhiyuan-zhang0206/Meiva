@@ -20,7 +20,8 @@ class _Pool:
         self._conn = conn
 
     @contextmanager
-    def connection(self) -> Generator[psycopg.Connection]:
+    def connection(self, timeout: float | None = None) -> Generator[psycopg.Connection]:
+        del timeout
         yield self._conn
 
 

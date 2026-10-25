@@ -11,3 +11,13 @@ exports = ["call_policy.py", "capture.py", "tally.py", "telemetry.py", "tests"]
 
 [debt.ambient-read]
 "telemetry.py#random random.randrange" = 1
+
+[debt.any-collaborator]
+"capture.py#any SdkCaptureOwner.capture_local_event.event" = 1
+"capture.py#any SdkCaptureOwner.capture_local_event.return" = 1
+"telemetry.py#any run_metered.args" = 1
+"telemetry.py#any run_metered.kwargs" = 1
+"telemetry.py#any run_metered.return" = 1
+"telemetry.py#any run_metered_async.args" = 1
+"telemetry.py#any run_metered_async.kwargs" = 1
+"telemetry.py#any run_metered_async.return" = 1

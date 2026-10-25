@@ -29,6 +29,9 @@ exports = ["alerts", "audit_events.py", "converge_report.py", "delivery", "emitt
 "trace_mirror.py#clock datetime.datetime.now" = 1
 "trace_mirror.py#clock time.time" = 1
 
+[debt.any-collaborator]
+"event_store.py#any _open_pool.return" = 1
+
 [debt.type-cast]
 "event_store.py#cast jsonl_rows" = 1
 "loki_index_labels.py#cast validate_loki_deploy_config" = 4

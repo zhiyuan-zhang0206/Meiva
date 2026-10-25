@@ -426,6 +426,30 @@ def _type_cast_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]:
     ]
 
 
+def _any_collaborator_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]:
+    return [
+        Diagnostic(
+            scan.path,
+            site.line,
+            Code.ANY_COLLABORATOR,
+            f"typing.Any {site.role} annotation on {site.qualname}.{site.slot} at byte column {site.column}",
+            (
+                "why: typing.Any disables static type checking across collaborator boundaries",
+                "instead: annotate the concrete collaborator type, Protocol, or object",
+                "see: meizel/docs/checker/any-collaborator.meiva.okf.md",
+            ),
+            DebtKey(
+                scan.path.rpartition("/")[0],
+                file_key(
+                    scan.path.rpartition("/")[0], scan.path, f"any {site.qualname}.{site.slot}"
+                ),
+            ),
+        )
+        for scan in scans
+        for site in scan.any_collaborators
+    ]
+
+
 def type_checking_in_scope(path: str, packages: tuple[str, ...]) -> bool:
     if path == "conftest.py":
         return True
@@ -481,6 +505,7 @@ def diagnose(scan: FileScan, manifests: dict[str, Manifest], *, policy: Policy) 
     found.extend(_patch_diagnostics([scan]))
     found.extend(ambient_diagnostics([scan], manifests))
     found.extend(_type_cast_diagnostics([scan]))
+    found.extend(_any_collaborator_diagnostics([scan]))
     found.extend(_type_checking_diagnostics([scan], manifests, policy))
     found.extend(purity_diagnostics([scan], [scan], manifests, Policy(), include_manifests=False))
     return _distinct(found)
@@ -527,6 +552,7 @@ def analyze(
     diagnostics.extend(_patch_diagnostics(judged_scans))
     diagnostics.extend(ambient_diagnostics(judged_scans, manifests))
     diagnostics.extend(_type_cast_diagnostics(judged_scans))
+    diagnostics.extend(_any_collaborator_diagnostics(judged_scans))
     diagnostics.extend(_type_checking_diagnostics(judged_scans, manifests, policy))
     purity_diags = purity_diagnostics(scans.values(), judged_scans, manifests, policy)
     stale = StaleDeclarations()

@@ -4,5 +4,11 @@ exports = ["anthropic_thinking.py", "openai_reasoning.py", "stop.py"]
 [uses]
 "tests" = ["anthropic_thinking.py", "openai_reasoning.py"]
 
+[debt.any-collaborator]
+"anthropic_thinking.py#any ThinkingTokensChatAnthropic._format_output.data" = 1
+"anthropic_thinking.py#any ThinkingTokensChatAnthropic._format_output.kwargs" = 1
+"anthropic_thinking.py#any ThinkingTokensChatAnthropic._make_message_chunk_from_anthropic_event.block_start_event" = 1
+"anthropic_thinking.py#any ThinkingTokensChatAnthropic._make_message_chunk_from_anthropic_event.event" = 1
+
 [debt.type-cast]
 "openai_reasoning.py#cast ReasoningContentChatModel._convert_chunk_to_generation_chunk" = 1

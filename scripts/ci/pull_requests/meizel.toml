@@ -24,6 +24,13 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 "pr_flow_export.py#home pathlib.Path.home" = 1
 "runs_export.py#clock datetime.datetime.now" = 1
 
+[debt.any-collaborator]
+"accounting.py#any _gh_api.return" = 1
+"pr_flow_export.py#any emit_events.pipeline" = 1
+"pr_flow_export.py#any emit_snapshot.pipeline" = 1
+"pr_flow_export.py#any trunk_client.return" = 1
+"runs_export.py#any emit_snapshot.pipeline" = 1
+
 [debt.type-cast]
 "diagnose.py#cast _object_rows" = 1
 "diagnose.py#cast _object_rows.<listcomp>" = 1

@@ -19,6 +19,13 @@ exports = ["build.py", "check_plan.py", "chunk_generate.py", "chunk_plan.py", "c
 "usage.py" = "strict"
 "check_plan.py" = "strict"
 
+[debt.any-collaborator]
+"chunk_generate.py#any generate_chunk.llm" = 1
+"chunks.py#any _json.value" = 1
+"generate.py#any build_generation_llm.return" = 1
+"generate.py#any invoke_agent_shaped.llm" = 1
+"group.py#any generate_groups.llm" = 1
+
 [debt.type-cast]
 "chunk_plan.py#cast segment_requests" = 2
 "units.py#cast _reasoning_ms" = 1

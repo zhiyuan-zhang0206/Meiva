@@ -18,6 +18,11 @@ exports = ["cli.py", "pull_requests", "refresh_test_durations.py", "shard_counts
 "pgvector_runtime_smoke.py#platform platform.machine" = 1
 "pgvector_runtime_smoke.py#platform platform.system" = 1
 
+[debt.any-collaborator]
+"dependency_audit.py#any _fetch_json.return" = 1
+"dependency_audit.py#any _gh_api.return" = 1
+"dependency_audit.py#any _no_forward_fix.fix" = 1
+
 [debt.type-cast]
 "coverage_gates.py#cast _line_counts" = 2
 "coverage_gates.py#cast main" = 2

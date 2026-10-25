@@ -15,3 +15,6 @@ exports = ["feed.py"]
 "feed.py#home pathlib.Path.home" = 1
 "imap.py#clock datetime.datetime.now" = 1
 "smtp.py#clock time.time" = 1
+
+[debt.any-collaborator]
+"feed.py#any _run.return" = 1

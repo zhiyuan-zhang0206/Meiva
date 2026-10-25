@@ -20,6 +20,23 @@ exports = ["attachment.py", "registration.py", "store.py"]
 [debt.ambient-read]
 "attachment.py#pid os.getpid" = 1
 
+[debt.any-collaborator]
+"__init__.py#any __getattr__.return" = 1
+"__init__.py#any attach.return" = 1
+"attachment.py#any HarnessAttachment._resolve_config.birth" = 1
+"attachment.py#any HarnessAttachment._resolve_config.overlay" = 1
+"attachment.py#any HarnessAttachment._set_state.state" = 1
+"attachment.py#any HarnessAttachment._state_update.return" = 1
+"attachment.py#any _RegistrationCodec.apply_plugin_delta.delta" = 1
+"attachment.py#any _RegistrationCodec.apply_plugin_delta.state" = 1
+"attachment.py#any _RegistrationCodec.decode_plugin_delta.return" = 1
+"attachment.py#any _RegistrationCodec.encode_plugin_delta.update" = 1
+"attachment.py#any _RegistrationCodec.load_snapshot.return" = 1
+"attachment.py#any _RegistrationCodec.plugin_state_schema.return" = 1
+"attachment.py#any _RegistrationCodec.plugin_state_schema.state" = 1
+"attachment.py#any _RegistrationIdentity.require.return" = 1
+"attachment.py#any _codec_module.return" = 1
+
 [debt.type-cast]
 "attachment.py#cast _RegistrationCodec.encode_plugin_delta" = 1
 "registration.py#cast decode_registration" = 1

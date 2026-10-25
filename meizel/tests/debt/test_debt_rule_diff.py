@@ -362,6 +362,22 @@ def test_type_cast_rule_baseline_uses_existing_application_content(
     assert "no content growth" in out
 
 
+def test_any_collaborator_rule_baseline_uses_existing_application_content(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = base_repo(
+        make_repo,
+        {"app/collab.py": "from typing import Any\ndef f(x: Any) -> int: return 1\n"},
+    )
+    rule_change(root)
+    record(root)
+    capsys.readouterr()
+    assert diff(root) == 0
+    out = capsys.readouterr().out
+    assert "any-collaborator" in out
+    assert "no content growth" in out
+
+
 @pytest.mark.parametrize("new_path", ["app/casts.py", "app/new_casts.py"])
 def test_type_cast_rule_cannot_trade_an_old_group_for_new_content(
     make_repo: RepoFactory, capsys: pytest.CaptureFixture[str], new_path: str

@@ -15,3 +15,6 @@ exports = ["api.py", "delivery.py", "ledger.py", "model.py", "tests", "unit.py"]
 "unit.py#clock time.time" = 2
 "unit.py#random secrets.token_bytes" = 2
 "unit.py#random secrets.token_hex" = 1
+
+[debt.any-collaborator]
+"ledger.py#any replace_ledger_fields.updates" = 1
