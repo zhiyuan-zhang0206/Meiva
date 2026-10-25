@@ -14,9 +14,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import cast
 
-from langchain_core.messages import AIMessage, AnyMessage
+from langchain_core.messages import AIMessage, BaseMessage
 
 from base.agents.history.checkpoint import FullHistory
 from base.agents.history.hierarchy.chunks import (
@@ -41,7 +40,7 @@ class PlannedChunk:
 
 
 def plan_replay(
-    messages: Sequence[AnyMessage], *, threshold: int, close: bool = True
+    messages: Sequence[BaseMessage], *, threshold: int, close: bool = True
 ) -> list[PlannedChunk]:
     """The chunks the live trigger rule cuts from one segment's request list, then its closing remainder.
 
@@ -85,15 +84,15 @@ def plan_replay(
     return out
 
 
-def segment_requests(history: FullHistory) -> list[list[AnyMessage]]:
+def segment_requests(history: FullHistory) -> list[list[BaseMessage]]:
     """Each segment as the llm node's request list: its own head, then its body."""
     count = len(history.segment_starts)
-    out: list[list[AnyMessage]] = []
+    out: list[list[BaseMessage]] = []
     for k in range(count):
         end = history.segment_starts[k + 1] if k + 1 < count else len(history.messages)
         head = history.segment_heads[k]
-        body = cast("list[AnyMessage]", history.messages[history.segment_starts[k] : end])
-        out.append([cast("AnyMessage", head), *body] if head is not None else body)
+        body = history.messages[history.segment_starts[k] : end]
+        out.append([head, *body] if head is not None else body)
     return out
 
 

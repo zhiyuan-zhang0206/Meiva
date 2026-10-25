@@ -8,7 +8,7 @@ import time
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 import psutil
 
@@ -286,13 +286,15 @@ class AgyTransport:
                 if not text:
                     continue
                 try:
-                    payload = json.loads(text)
+                    payload: dict[str, Any] | list[Any] | str | int | float | bool | None = (
+                        json.loads(text)
+                    )
                 except json.JSONDecodeError:
                     self._stderr.append(f"unparsed stdout: {text[:200]}")
                     continue
                 if not isinstance(payload, dict):
                     continue
-                event = cast("dict[str, Any]", payload)
+                event: dict[str, Any] = payload
                 if event.get("event") == "init":
                     session_id = event.get("conversation_id")
                     if isinstance(session_id, str):

@@ -30,18 +30,3 @@ exports = ["acp", "antigravity", "bridge.py", "claude", "codex", "deepseek", "en
 "bridge.py#random secrets.token_urlsafe" = 1
 "process.py#clock time.monotonic" = 4
 "registration.py#clock datetime.datetime.now" = 1
-
-[debt.any-collaborator]
-"bridge.py#any HarnessBridge.interrupt.return" = 1
-"bridge.py#any _completed.event" = 1
-"engine.py#any HarnessSession.interrupt.return" = 1
-"engine.py#any HarnessSession.submit.return" = 1
-"engine.py#any TurnEngine.interrupt.return" = 1
-"process.py#any client_pid.client" = 1
-"process.py#any client_process.client" = 1
-"process.py#any client_transport.client" = 1
-"process.py#any process_returncode.process" = 1
-
-[debt.type-cast]
-"registration.py#cast RegistrationStore.read" = 1
-"registry.py#cast FileSessionRegistry.load" = 1

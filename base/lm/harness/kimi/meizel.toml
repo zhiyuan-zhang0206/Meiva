@@ -11,14 +11,3 @@ exports = ["__init__.py", "config.py", "session.py", "usage.py"]
 [debt.ambient-read]
 "config.py#home pathlib.Path.home" = 1
 "session.py#clock time.perf_counter" = 2
-
-[debt.any-collaborator]
-"usage.py#any _int.value" = 1
-
-[debt.type-cast]
-"mapping.py#cast _content_text" = 3
-"mapping.py#cast _text_of" = 1
-"mapping.py#cast _tool_use" = 1
-"session.py#cast KimiSession._dispatch" = 1
-"usage.py#cast _parse" = 2
-"usage.py#cast _unwrap_event" = 2

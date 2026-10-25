@@ -36,7 +36,11 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from base.agents.history.hierarchy.generate import UNDERSTANDING_RETRY_ATTEMPTS, GenerateError
+from base.agents.history.hierarchy.generate import (
+    UNDERSTANDING_RETRY_ATTEMPTS,
+    GenerateError,
+    InvocableLlm,
+)
 from base.clock import Clock
 from base.lm.call import invoke_response
 from base.lm.catalog import ModelCatalog
@@ -196,7 +200,7 @@ def _record(on_call: Callable[[GroupCall], None] | None, call: GroupCall) -> Non
 
 
 def generate_groups(
-    llm: Any,
+    llm: InvocableLlm,
     nodes: Sequence[OpenNode],
     *,
     model: str,

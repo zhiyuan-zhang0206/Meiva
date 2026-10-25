@@ -96,19 +96,18 @@ def test_probe_window_without_a_deadline_patches_nothing() -> None:
         assert asyncio.new_event_loop is top_original
 
 
-def test_probe_window_dumps_pending_chains_when_the_deadline_nears(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(probe, "DUMP_MARGIN_SECONDS", 0.1)
+def test_probe_window_dumps_pending_chains_when_the_deadline_nears() -> None:
+    timeout = probe.DUMP_MARGIN_SECONDS + 0.1
     with tempfile.TemporaryFile() as sink:
         events_original = asyncio.events.new_event_loop
         top_original = asyncio.new_event_loop
-        with probe.probe_window("tests/synthetic.py::test_hangs", 0.5, sink.fileno()):
+        with probe.probe_window("tests/synthetic.py::test_hangs", timeout, sink.fileno()):
             assert asyncio.events.new_event_loop is not events_original
             assert asyncio.new_event_loop is not top_original
             loop = asyncio.new_event_loop()
             try:
-                # Bounded wait: the timer is due 0.4s after the loop's creation,
+                # meiva:note
+                # Bounded wait: the timer is due 0.1s after the loop's creation,
                 # so a handful of iterations are enough even on a loaded runner.
                 deadline = time.monotonic() + 10.0
                 while time.monotonic() < deadline and os.fstat(sink.fileno()).st_size == 0:
@@ -124,16 +123,17 @@ def test_probe_window_dumps_pending_chains_when_the_deadline_nears(
     assert asyncio.new_event_loop is top_original
 
 
-def test_probe_window_cancels_its_timers_at_exit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(probe, "DUMP_MARGIN_SECONDS", 0.1)
+def test_probe_window_cancels_its_timers_at_exit() -> None:
+    timeout = probe.DUMP_MARGIN_SECONDS + 0.1
     with tempfile.TemporaryFile() as sink:
-        with probe.probe_window("tests/synthetic.py::test_healthy", 0.5, sink.fileno()):
-            loop = asyncio.new_event_loop()  # armed; its timer is due 0.4s from now
+        with probe.probe_window("tests/synthetic.py::test_healthy", timeout, sink.fileno()):
+            loop = asyncio.new_event_loop()
+        # meiva:note
         # The window is gone and the loop never ran inside it. Letting the loop
         # run past the timer's due time must not dump: `_pytest.faulthandler`
         # gives its own dump the same cancel-at-test-end lifetime.
         try:
-            loop.run_until_complete(asyncio.sleep(0.5))
+            loop.run_until_complete(asyncio.sleep(0.2))
         finally:
             loop.close()
         sink.seek(0)

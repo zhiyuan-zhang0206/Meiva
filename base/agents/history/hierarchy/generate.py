@@ -13,12 +13,23 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
+
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import BaseMessage
 
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.call import extract_text, invoke_response
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
+
+
+class InvocableLlm(Protocol):
+    def invoke(self, messages: list[Any], /) -> object: ...
+
+
+class ToolBindableLlm(Protocol):
+    def bind_tools(self, tools: list[Any], /) -> InvocableLlm: ...
 
 
 class GenerateError(Exception):
@@ -63,7 +74,7 @@ def build_generation_llm(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     llm_override: str,
-) -> Any:
+) -> BaseChatModel:
     """Build the generation chat model the way the agent builds its own.
 
     The single source of the understanding calls' model construction, so every path reaches the
@@ -98,13 +109,13 @@ class ModelCall:
     """
 
     round: int
-    response: Any | None
+    response: BaseMessage | None
     duration_ms: float
     error: str | None
 
 
 def invoke_agent_shaped(
-    llm: Any,
+    llm: ToolBindableLlm,
     messages: list[Any],
     *,
     tools: Sequence[Any],

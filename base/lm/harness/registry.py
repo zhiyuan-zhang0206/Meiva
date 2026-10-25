@@ -5,7 +5,7 @@ import os
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 _REQUIRED_FIELDS = frozenset({"agent_id", "session_id", "cwd", "model", "created_at", "updated_at"})
 _FIELDS = _REQUIRED_FIELDS | {"resumes", "harness"}
@@ -65,14 +65,16 @@ class FileSessionRegistry:
     def load(self, agent_id: int, *, harness: str | None = None) -> SessionRecord | None:
         path = self.path(agent_id)
         try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
+            raw: dict[str, Any] | list[Any] | str | int | float | bool | None = json.loads(
+                path.read_text(encoding="utf-8")
+            )
         except FileNotFoundError:
             return None
         except json.JSONDecodeError as exc:
             raise ValueError(f"session record at {path} is not valid JSON") from exc
         if not isinstance(raw, dict):
             raise TypeError(f"session record at {path} is not an object")
-        payload = cast("dict[str, Any]", raw)
+        payload: dict[str, Any] = raw
         unknown = set(payload) - _FIELDS
         missing = _REQUIRED_FIELDS - set(payload)
         if unknown or missing:

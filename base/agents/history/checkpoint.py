@@ -40,12 +40,13 @@ from __future__ import annotations
 import logging
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, NamedTuple, cast
+from typing import Any, NamedTuple
 
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from psycopg import Connection
-from psycopg.rows import DictRow, dict_row
+from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.agents.history.closing_request import METADATA_KEY, ClosingRequest
@@ -106,7 +107,7 @@ def load_checkpoint_messages(db: Database, agent_id: int) -> list[BaseMessage]:
         # does not forward a `serde` argument, and the default permissive serde
         # is exactly what this module is avoiding.
         with _checkpoint_read_connection(db, row_factory=dict_row) as conn:
-            saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
+            saver = PostgresSaver(conn=conn, serde=serde)
             tuple_ = saver.get_tuple(config)
             if tuple_ is not None:
                 # Transition layer (tasks #3180/#3181): materialize a
@@ -199,10 +200,20 @@ def _msgpack_array_length(header: bytes) -> int:
     raise ValueError(f"messages blob does not start with a MessagePack array: 0x{marker:02x}")
 
 
+def _header_bytes(header: object) -> bytes:
+    if isinstance(header, bytes):
+        return header
+    if isinstance(header, bytearray):
+        return bytes(header)
+    if isinstance(header, memoryview):
+        return header.tobytes()
+    raise TypeError(f"unexpected messages blob header type: {type(header).__name__}")
+
+
 def _message_count_from_blob_header(blob_type: object, header: object) -> int:
     if blob_type != "msgpack":
         raise ValueError(f"unexpected messages blob type: {blob_type!r}")
-    return _msgpack_array_length(bytes(cast(bytes, header)))
+    return _msgpack_array_length(_header_bytes(header))
 
 
 def is_delta_snapshot_blob(blob_type: object, header: object) -> bool:
@@ -220,7 +231,7 @@ def is_delta_snapshot_blob(blob_type: object, header: object) -> bool:
     # 16 bytes pack as fixext — an emptied messages snapshot does (QA probe:
     # `_DeltaSnapshot([])` -> first byte 0xd4), so both families are delta
     # evidence, not a parse failure.
-    return bytes(cast(bytes, header))[:1] in (
+    return _header_bytes(header)[:1] in (
         b"\xc7",
         b"\xc8",
         b"\xc9",
@@ -284,11 +295,11 @@ def _reconstructed_message_count(db: Database, agent_id: int) -> int:
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     serde = CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     with _checkpoint_read_connection(db, row_factory=dict_row) as conn:
-        saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
+        saver = PostgresSaver(conn=conn, serde=serde)
         tuple_ = saver.get_tuple(config)
         if tuple_ is None or not reconstruct_delta_messages(saver, tuple_):
             return 0
-        messages = cast("list[Any]", tuple_.checkpoint["channel_values"].get("messages") or [])
+        messages: list[Any] = tuple_.checkpoint["channel_values"].get("messages") or []
         return len(messages)
 
 
@@ -321,7 +332,7 @@ def load_checkpoint_messages_segment(
             ).fetchone()
             if boundary is None:
                 return []
-            saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
+            saver = PostgresSaver(conn=conn, serde=serde)
             checkpoint_tuple = saver.get_tuple(
                 {
                     **config,
@@ -412,21 +423,18 @@ def load_checkpoint_history_full(db: Database, agent_id: int) -> FullHistory:
     serde = CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     try:
         with _checkpoint_read_connection(db, row_factory=dict_row) as conn:
-            saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
+            saver = PostgresSaver(conn=conn, serde=serde)
             latest_tuple = saver.get_tuple(config)
             if latest_tuple is None:
                 return FullHistory([], (), ())
             reconstruct_delta_messages(saver, latest_tuple)
             latest = latest_tuple.checkpoint
-            boundaries = cast(
-                list[dict[str, Any]],
-                conn.execute(
-                    "SELECT checkpoint_id, metadata -> %s::text AS anchor FROM checkpoints"
-                    " WHERE thread_id = %s AND metadata->>'compact_boundary' = 'true'"
-                    " ORDER BY checkpoint_id ASC",
-                    (METADATA_KEY, str(agent_id)),
-                ).fetchall(),
-            )
+            boundaries: list[dict[str, Any]] = conn.execute(
+                "SELECT checkpoint_id, metadata -> %s::text AS anchor FROM checkpoints"
+                " WHERE thread_id = %s AND metadata->>'compact_boundary' = 'true'"
+                " ORDER BY checkpoint_id ASC",
+                (METADATA_KEY, str(agent_id)),
+            ).fetchall()
             if not boundaries:
                 return single_segment_history(latest["channel_values"].get("messages", []))
 
@@ -524,7 +532,7 @@ def load_checkpoint_messages_by_trace(
             return None, []
         checkpoint_id: str = row[0]
         with _checkpoint_read_connection(db, row_factory=dict_row) as conn:
-            saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
+            saver = PostgresSaver(conn=conn, serde=serde)
             ckpt = saver.get_tuple(
                 {
                     **config,
@@ -543,7 +551,7 @@ def load_checkpoint_messages_by_trace(
 
 
 async def attach_trace_to_checkpoint(
-    pool: Any,
+    pool: AsyncConnectionPool[Any],
     thread_id: str,
     checkpoint_id: str,
     trace_id: str,

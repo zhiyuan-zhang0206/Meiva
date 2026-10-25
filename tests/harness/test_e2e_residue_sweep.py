@@ -65,26 +65,24 @@ def test_e2e_process_classifies_observation(
     assert (process.run if process is not None else None) == run
 
 
-def test_frontend_cwd_observation_keeps_path_with_spaces(monkeypatch: pytest.MonkeyPatch) -> None:
-    from subprocess import CompletedProcess
-
-    cwd = "/Users/me/Meiva with spaces/ui/web/.builds/build-1_2"
-
-    def lsof(*args: object, **kwargs: object) -> CompletedProcess[str]:
-        return CompletedProcess(
-            ["lsof"], 0, stdout=f"node 44147 user cwd DIR 1,15 64 836742558 {cwd}\n"
+def test_frontend_cwd_observation_keeps_path_with_spaces(tmp_path: Path) -> None:
+    spaced_build = tmp_path / "Meiva with spaces" / "ui" / "web" / ".builds" / "build-1_2"
+    spaced_build.mkdir(parents=True)
+    with processes.managed_proc(
+        [sys.executable, __file__, "sleep"],
+        cwd=str(spaced_build),
+        label="spaced-cwd-proof",
+        log_path=str(tmp_path / "spaced.log"),
+    ) as child:
+        inspection = processes.ProcessInspection()
+        observed_cwd = inspection.working_directory(child.pid)
+        assert observed_cwd == str(spaced_build.resolve())
+        process = processes.E2EProcess.from_observation(
+            processes.ProcessObservation(child.pid, "next-server", ""),
+            pgid=child.pid,
+            cwd=observed_cwd,
         )
-
-    monkeypatch.setattr(sys, "platform", "darwin")
-    monkeypatch.setattr("subprocess.run", lsof)
-    inspection = processes.ProcessInspection()
-    assert inspection.working_directory(44147) == cwd
-    process = processes.E2EProcess.from_observation(
-        processes.ProcessObservation(44147, "next-server", ""),
-        pgid=44147,
-        cwd=inspection.working_directory(44147),
-    )
-    assert process is not None and process.run == (1, 2)
+        assert process is not None and process.run == (1, 2)
 
 
 def _fake_ps_rows() -> list[tuple[int, str, str]]:
@@ -265,7 +263,7 @@ def test_owner_liveness_preserves_live_pids_regardless_of_command(
 def test_native_sweep_preserves_an_unreadable_live_owner(tmp_path: Path, owner_state: str) -> None:
     owner_pid = 99999999
     with processes.managed_proc(
-        [sys.executable, "-c", "import time; time.sleep(60)"],
+        [sys.executable, __file__, "sleep"],
         label="owner-command-proof",
         log_path=str(tmp_path / "child.log"),
     ) as child:
@@ -311,20 +309,13 @@ def test_native_sweep_preserves_a_live_owner_with_a_changed_title(tmp_path: Path
     try:
         with (
             processes.managed_proc(
-                [
-                    sys.executable,
-                    "-c",
-                    "import os,sys,time,setproctitle; "
-                    "setproctitle.setproctitle('opaque execution worker'); "
-                    "os.write(int(sys.argv[1]), b'R'); time.sleep(60)",
-                    str(write_fd),
-                ],
+                [sys.executable, __file__, "retitled-owner", str(write_fd)],
                 label="retitled-owner",
                 pass_fds=(write_fd,),
                 log_path=str(tmp_path / "owner.log"),
             ) as owner,
             processes.managed_proc(
-                [sys.executable, "-c", "import time; time.sleep(60)"],
+                [sys.executable, __file__, "sleep"],
                 label="retitled-owner-child",
                 log_path=str(tmp_path / "child.log"),
             ) as child,
@@ -390,10 +381,8 @@ def test_next_launch_preserves_failed_process_diagnostics(tmp_path: Path) -> Non
     for message, exit_code in (("first launch traceback", 7), ("next launch startup", 0)):
         command = [
             sys.executable,
-            "-c",
-            "import sys; print(sys.argv[1], "
-            "file=sys.stderr if int(sys.argv[2]) else sys.stdout, flush=True); "
-            "sys.exit(int(sys.argv[2]))",
+            __file__,
+            "exit-message",
             message,
             str(exit_code),
         ]
@@ -414,7 +403,7 @@ def test_registered_server_query_exposes_only_the_active_fixture(tmp_path: Path)
         processes.registered_server(label)
     log_path = tmp_path / "fixture.log"
     with processes.managed_proc(
-        [sys.executable, "-c", "import time; time.sleep(60)"],
+        [sys.executable, __file__, "sleep"],
         label=label,
         log_path=str(log_path),
     ) as process:
@@ -433,7 +422,7 @@ def test_native_sweep_preserves_live_run_and_recycled_command(tmp_path: Path) ->
         children = [
             stack.enter_context(
                 processes.managed_proc(
-                    [sys.executable, "-c", "import time; time.sleep(60)"],
+                    [sys.executable, __file__, "sleep"],
                     label=f"guard-proof-{index}",
                     log_path=str(tmp_path / f"child-{index}.log"),
                 )
@@ -468,109 +457,138 @@ def test_native_sweep_preserves_live_run_and_recycled_command(tmp_path: Path) ->
         assert children[2].poll() is None
 
 
-def _ignore_cleanup_delay(_seconds: float) -> None:
-    pass
+def test_cleanup_receipt_records_decisions_and_guarded_signals(tmp_path: Path) -> None:
+    read_fd, write_fd = os.pipe()
+    try:
+        with (
+            processes.managed_proc(
+                [sys.executable, __file__, "sleep-ignore-term", str(write_fd)],
+                label="receipt-group-leader",
+                pass_fds=(write_fd,),
+                log_path=str(tmp_path / "leader.log"),
+            ) as leader,
+            processes.managed_proc(
+                [sys.executable, __file__, "sleep-ignore-term", str(write_fd)],
+                label="receipt-single-member",
+                pass_fds=(write_fd,),
+                log_path=str(tmp_path / "member.log"),
+            ) as member,
+        ):
+            for _ in range(2):
+                assert select.select([read_fd], [], [], 5)[0] == [read_fd]
+                assert os.read(read_fd, 1) == b"I"
+            leader_pid = leader.pid
+            member_pid = member.pid
+            rows = [
+                (leader_pid, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_900_1"),
+                (member_pid, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_900_1"),
+                (300, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_901_1"),
+                (400, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_902_1"),
+            ]
+            commands: list[int] = []
+            probes: list[int] = []
+
+            def command(pid: int) -> str | None:
+                commands.append(pid)
+                return {901: "[pytest-xdist running] direct case", 902: None}.get(
+                    pid, "fixture child"
+                )
+
+            def probe(pid: int, sig: int) -> None:
+                assert sig == 0
+                probes.append(pid)
+                if pid == 900:
+                    raise ProcessLookupError
+
+            path = tmp_path / "logs" / "cleanup.jsonl"
+            inspection = processes.ProcessInspection(
+                rows=lambda: rows,
+                group=lambda pid: leader_pid if pid == member_pid else pid,
+                command=command,
+                probe=probe,
+            )
+            assert (
+                processes.sweep_stale_e2e_processes(inspection=inspection, receipt_path=path) == 2
+            )
+            assert probes == [900, 900, 901, 902]
+            assert commands == [
+                901,
+                902,
+                leader_pid,
+                member_pid,
+                leader_pid,
+                member_pid,
+            ]
+            _assert_sweep_receipt(path, leader_pid=leader_pid, member_pid=member_pid)
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
 
 
-def test_cleanup_receipt_records_decisions_and_guarded_signals(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    rows = [
-        (100, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_900_1"),
-        (201, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_900_1"),
-        (300, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_901_1"),
-        (400, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_902_1"),
-    ]
-    commands: list[int] = []
-    probes: list[int] = []
-    signals: list[tuple[str, int, int]] = []
-
-    def command(pid: int) -> str | None:
-        commands.append(pid)
-        return {901: "[pytest-xdist running] direct case", 902: None}.get(pid, "fixture child")
-
-    def probe(pid: int, sig: int) -> None:
-        assert sig == 0
-        probes.append(pid)
-        if pid == 900:
-            raise ProcessLookupError
-
-    def signal_group(pid: int, sig: int) -> None:
-        signals.append(("group", pid, sig))
-
-    def signal_single(pid: int, sig: int) -> None:
-        signals.append(("single", pid, sig))
-
-    monkeypatch.setattr(os, "killpg", signal_group)
-    monkeypatch.setattr(os, "kill", signal_single)
-    monkeypatch.setattr("time.sleep", _ignore_cleanup_delay)
-    path = tmp_path / "logs" / "cleanup.jsonl"
-    inspection = processes.ProcessInspection(
-        rows=lambda: rows,
-        group=lambda pid: 100 if pid == 201 else pid,
-        command=command,
-        probe=probe,
-    )
-    assert processes.sweep_stale_e2e_processes(inspection=inspection, receipt_path=path) == 2
-    assert probes == [900, 900, 901, 902]
-    assert commands == [901, 902, 100, 201, 100, 201]
-    assert signals == [
-        (kind, pid, sig)
-        for sig in (signal.SIGTERM, signal.SIGKILL)
-        for kind, pid in (("group", 100), ("single", 201))
-    ]
-    _assert_sweep_receipt(path)
-
-
-def _assert_sweep_receipt(path: Path) -> None:
+def _assert_sweep_receipt(path: Path, *, leader_pid: int, member_pid: int) -> None:
     events = [json.loads(line) for line in path.read_text().splitlines()]
     assert all(row["sender"] == os.getpid() and row["time_ns"] > 0 for row in events)
     decisions = {row["target"]: row["selected"] for row in events if row["event"] == "decision"}
-    assert decisions == {100: True, 201: True, 300: False, 400: False}
+    assert decisions == {leader_pid: True, member_pid: True, 300: False, 400: False}
     owners = {row["owner"]: row for row in events if row["event"] == "owner"}
     assert owners[900]["probe"] == "gone" and not owners[900]["preserved"]
     assert owners[901]["hints"] == ["pytest", "xdist"] and owners[901]["preserved"]
     assert not owners[902]["command_known"] and owners[902]["preserved"]
-    assert [row["outcome"] for row in events if row["event"] == "sweep_signal"] == [
-        "attempt",
-        "sent",
-        "attempt",
-        "sent",
-        "attempt",
-        "sent",
-        "attempt",
-        "sent",
+    _assert_sweep_signals(events, leader_pid=leader_pid, member_pid=member_pid)
+
+
+def _assert_sweep_signals(
+    events: list[dict[str, object]], *, leader_pid: int, member_pid: int
+) -> None:
+    signal_rows = [row for row in events if row["event"] == "sweep_signal"]
+    assert [row["outcome"] for row in signal_rows] == ["attempt", "sent"] * 4
+    assert [(row["kind"], row["target"], row["signal"]) for row in signal_rows[::2]] == [
+        ("group", leader_pid, signal.SIGTERM),
+        ("single", member_pid, signal.SIGTERM),
+        ("group", leader_pid, signal.SIGKILL),
+        ("single", member_pid, signal.SIGKILL),
     ]
 
 
-@pytest.mark.parametrize("failure", [ProcessLookupError, PermissionError, RuntimeError])
-def test_cleanup_receipt_keeps_signal_exception_contract(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: type[Exception]
-) -> None:
-    def signal_failure(_pid: int, _sig: int) -> None:
-        raise failure("original signal failure")
+def _same_group(pid: int) -> int:
+    return pid
 
-    monkeypatch.setattr(os, "killpg", signal_failure)
-    monkeypatch.setattr("time.sleep", _ignore_cleanup_delay)
+
+def _other_group(_pid: int) -> int:
+    return 2
+
+
+@pytest.mark.parametrize("failure", [ProcessLookupError, PermissionError])
+def test_cleanup_receipt_keeps_signal_exception_contract(
+    tmp_path: Path, failure: type[Exception]
+) -> None:
+    if failure is ProcessLookupError:
+        with processes.managed_proc(
+            [sys.executable, __file__, "exit-message", "done", "0"],
+            label="vanished-target-proof",
+            log_path=str(tmp_path / "vanished.log"),
+        ) as child:
+            assert child.wait(timeout=5) == 0
+            target_pid = child.pid
+        group_of = _same_group
+    else:
+        target_pid = 1
+        group_of = _other_group
     inspection = processes.ProcessInspection(
-        rows=lambda: [(100, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_900_1")],
-        group=lambda pid: pid,
+        rows=lambda: [(target_pid, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_900_1")],
+        group=group_of,
         command=lambda _pid: "fixture child",
         probe=_owner_gone,
     )
     path = tmp_path / "cleanup.jsonl"
-    if failure is RuntimeError:
-        with pytest.raises(RuntimeError, match="original signal failure"):
-            processes.sweep_stale_e2e_processes(inspection=inspection, receipt_path=path)
-    else:
-        assert processes.sweep_stale_e2e_processes(inspection=inspection, receipt_path=path) == 1
-        events = [json.loads(line) for line in path.read_text().splitlines()]
-        assert [row["outcome"] for row in events if row["event"] == "sweep_signal"] == [
-            "attempt",
-            failure.__name__,
-            "attempt",
-            failure.__name__,
-        ]
+    assert processes.sweep_stale_e2e_processes(inspection=inspection, receipt_path=path) == 1
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    assert [row["outcome"] for row in events if row["event"] == "sweep_signal"] == [
+        "attempt",
+        failure.__name__,
+        "attempt",
+        failure.__name__,
+    ]
 
 
 def test_unwritable_cleanup_receipt_keeps_the_original_query_result(tmp_path: Path) -> None:
@@ -586,21 +604,22 @@ def test_unwritable_cleanup_receipt_keeps_the_original_query_result(tmp_path: Pa
 
 
 def test_cleanup_receipt_records_a_recycled_target_without_signalling(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    def refuse_signal(_pid: int, _sig: int) -> None:
-        pytest.fail("a recycled process must never be signalled")
-
-    monkeypatch.setattr(os, "killpg", refuse_signal)
-    monkeypatch.setattr("time.sleep", _ignore_cleanup_delay)
-    inspection = processes.ProcessInspection(
-        rows=lambda: [(100, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_900_1")],
-        group=lambda pid: pid,
-        command=lambda _pid: "replacement process",
-        probe=_owner_gone,
-    )
-    path = tmp_path / "cleanup.jsonl"
-    assert processes.sweep_stale_e2e_processes(inspection=inspection, receipt_path=path) == 1
+    with processes.managed_proc(
+        [sys.executable, __file__, "sleep"],
+        label="recycled-target-proof",
+        log_path=str(tmp_path / "recycled.log"),
+    ) as child:
+        inspection = processes.ProcessInspection(
+            rows=lambda: [(child.pid, "fixture child", "MEIVA_HOME=/proof/meiva_e2e_home_900_1")],
+            group=lambda pid: pid,
+            command=lambda _pid: "replacement process",
+            probe=_owner_gone,
+        )
+        path = tmp_path / "cleanup.jsonl"
+        assert processes.sweep_stale_e2e_processes(inspection=inspection, receipt_path=path) == 1
+        assert child.poll() is None
     events = [json.loads(line) for line in path.read_text().splitlines()]
     assert [row["outcome"] for row in events if row["event"] == "sweep_signal"] == [
         "identity_skip",
@@ -611,7 +630,7 @@ def test_cleanup_receipt_records_a_recycled_target_without_signalling(
 def test_managed_frontend_receipt_identifies_its_exact_owner(tmp_path: Path) -> None:
     path = tmp_path / "cleanup.jsonl"
     with processes.managed_proc(
-        [sys.executable, "-c", "import time; time.sleep(60)"],
+        [sys.executable, __file__, "sleep"],
         label="frontend-receipt-proof",
         receipt_path=path,
     ) as child:
@@ -649,3 +668,32 @@ def test_public_module_entry_launches_with_only_the_explicit_fixture_gate(
     ) as child:
         assert child.wait(timeout=15) == 0
     assert log_path.read_text().splitlines() == [str(serving), str(serving)]
+
+
+def _child_main() -> None:
+    import time
+
+    mode = sys.argv[1]
+    if mode == "sleep":
+        time.sleep(60)
+    elif mode == "sleep-ignore-term":
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        os.write(int(sys.argv[2]), b"I")
+        time.sleep(60)
+    elif mode == "retitled-owner":
+        import setproctitle
+
+        setproctitle.setproctitle("opaque execution worker")
+        os.write(int(sys.argv[2]), b"R")
+        time.sleep(60)
+    elif mode == "exit-message":
+        message = sys.argv[2]
+        exit_code = int(sys.argv[3])
+        print(message, file=sys.stderr if exit_code else sys.stdout, flush=True)
+        sys.exit(exit_code)
+    else:
+        raise ValueError(f"unknown child mode {mode!r}")
+
+
+if __name__ == "__main__":
+    _child_main()

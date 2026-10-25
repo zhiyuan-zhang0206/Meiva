@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator, Mapping, Sequence
-from typing import Any, LiteralString, cast
+from typing import Any, LiteralString
 
 from langchain_core.messages import RemoveMessage, convert_to_messages
 from langchain_core.runnables import RunnableConfig
@@ -102,12 +102,26 @@ def _replay_order(keys: _Rows) -> _Rows:
     return ordered
 
 
-def _resets_messages(value: Any) -> bool:
+def _resets_messages(value: object) -> bool:
     if _get_overwrite(value)[0]:
         return True
-    group = cast(list[Any], value) if isinstance(value, list) else [value]
+    group: list[Any] = [*value] if isinstance(value, list) else [value]
     messages = convert_to_messages(group)
     return any(isinstance(m, RemoveMessage) and m.id == REMOVE_ALL_MESSAGES for m in messages)
+
+
+def _stage2_row(row: dict[str, Any]) -> _DeltaStage2Row:
+    return _DeltaStage2Row(
+        _kind=row["_kind"],
+        checkpoint_id=row["checkpoint_id"],
+        channel=row["channel"],
+        type=row["type"],
+        blob=row["blob"],
+        task_id=row["task_id"],
+        task_path=row["task_path"],
+        idx=row["idx"],
+        version=row["version"],
+    )
 
 
 def _fetch_suffix(
@@ -211,7 +225,7 @@ def _history_queries(
         chain_by_ch=chains,
         seed_ver_by_ch=seeds,
         seed_inline_by_ch=seed_inline,
-        stage2_rows=cast(list[_DeltaStage2Row], rows),
+        stage2_rows=[_stage2_row(row) for row in rows],
     )
 
 

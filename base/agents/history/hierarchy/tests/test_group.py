@@ -23,15 +23,17 @@ from base.agents.history.hierarchy.group import (
     generate_groups,
     parse_groups,
 )
-from base.clock import Clock
-from base.config import settings
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.lm.catalog import ModelCatalog
 
-
-@pytest.fixture(autouse=True)
-def _cluster_clock(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
-    monkeypatch.setattr(settings.general, "message_timestamp_weekday", False)
+_CLOCK = Clock(
+    ClockConfig(
+        timezone="Asia/Shanghai",
+        authoritative_timezone="Asia/Shanghai",
+        message_timestamp_weekday=False,
+    ),
+    timers=SYSTEM_TIMERS,
+)
 
 
 def _nodes(count: int) -> list[OpenNode]:
@@ -103,7 +105,7 @@ def test_an_empty_reply_is_refused_only_when_the_open_set_must_shrink() -> None:
 
 
 def test_prompt_lists_nodes_by_id_with_cluster_time_and_states_purpose_rules_and_format() -> None:
-    text = build_group_prompt(_nodes(5), clock=Clock.from_settings(), must_close=False)
+    text = build_group_prompt(_nodes(5), clock=_CLOCK, must_close=False)
     assert "[id 100] [2026-10-05 08:00:00] to [2026-10-05 08:30:00]\nnode 0" in text
     assert "its reader can always open the members below it" in text
     assert "a group may span a wider matter than the matter of any one summary" in text
@@ -118,9 +120,7 @@ def test_prompt_lists_nodes_by_id_with_cluster_time_and_states_purpose_rules_and
     assert '<group first="ID" last="ID">summary</group>' in text and "Do not call any tool" in text
     assert "per group" not in text and "to 15" not in text  # no size rule
     assert "must be closed" not in text
-    assert "must be closed" in build_group_prompt(
-        _nodes(5), clock=Clock.from_settings(), must_close=True
-    )
+    assert "must be closed" in build_group_prompt(_nodes(5), clock=_CLOCK, must_close=True)
 
 
 _USAGE: Any = {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
@@ -151,7 +151,7 @@ def _run(
         model="m",
         agent_id=7,
         corrections=corrections,
-        clock=Clock.from_settings(),
+        clock=_CLOCK,
         retry_attempts=0,
         on_call=calls.append,
         catalog=model_catalog,
@@ -194,7 +194,7 @@ def test_corrections_run_out_into_a_failure_with_every_call_recorded(
             model="m",
             agent_id=7,
             corrections=2,
-            clock=Clock.from_settings(),
+            clock=_CLOCK,
             retry_attempts=0,
             on_call=calls.append,
             catalog=model_catalog,
@@ -216,7 +216,7 @@ def test_must_close_is_passed_to_the_prompt_and_the_check(model_catalog: ModelCa
         model="m",
         agent_id=7,
         corrections=2,
-        clock=Clock.from_settings(),
+        clock=_CLOCK,
         must_close=True,
         retry_attempts=0,
         on_call=calls.append,
@@ -237,7 +237,7 @@ def test_a_provider_error_is_recorded_and_raised(model_catalog: ModelCatalog) ->
             model="m",
             agent_id=7,
             corrections=2,
-            clock=Clock.from_settings(),
+            clock=_CLOCK,
             retry_attempts=0,
             on_call=calls.append,
             catalog=model_catalog,
@@ -258,7 +258,7 @@ def test_unknown_group_invocation_error_is_recorded_once_and_preserved(
             model="m",
             agent_id=7,
             corrections=2,
-            clock=Clock.from_settings(),
+            clock=_CLOCK,
             retry_attempts=2,
             on_call=calls.append,
             catalog=model_catalog,

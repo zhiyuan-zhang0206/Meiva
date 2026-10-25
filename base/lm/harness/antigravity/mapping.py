@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from base.lm.harness.events import (
     AssistantText,
@@ -15,6 +15,8 @@ from base.lm.harness.events import (
     ToolUse,
     Usage,
 )
+
+type JsonPayload = str | int | float | bool | dict[str, Any] | list[JsonPayload] | None
 
 
 # meiva:note
@@ -149,7 +151,7 @@ def assistant_text(update: dict[str, Any], *, turn_id: str, text: str) -> Assist
 # beside it. Stated so the next reader does not add the cache count twice; see
 # `Usage` in `base/lm/harness/events.py`.
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
-def parse_usage(payload: Any) -> Usage:
+def parse_usage(payload: JsonPayload) -> Usage:
     usage = _mapping(payload)
     raw_in = _int(usage.get("input_tokens"))
     raw_out = _int(usage.get("output_tokens"))
@@ -175,11 +177,9 @@ def parse_usage(payload: Any) -> Usage:
 
 
 def parse_result(payload: dict[str, Any]) -> ResultFields:
-    denied = tuple(
-        _denial_label(entry)
-        for entry in cast("list[Any]", payload.get("denied_actions") or [])
-        if isinstance(entry, dict)
-    )
+    raw_denied: JsonPayload = payload.get("denied_actions")
+    denied_items = raw_denied if isinstance(raw_denied, list) else []
+    denied = tuple(_denial_label(entry) for entry in denied_items if isinstance(entry, dict))
     duration = payload.get("duration_seconds")
     return ResultFields(
         session_id=_text(payload.get("conversation_id")),
@@ -193,7 +193,7 @@ def parse_result(payload: dict[str, Any]) -> ResultFields:
     )
 
 
-def _denial_label(entry: Any) -> str:
+def _denial_label(entry: JsonPayload) -> str:
     item = _mapping(entry)
     action = _text(item.get("action")) or "unknown"
     display = _text(item.get("display_name")) or ""
@@ -236,9 +236,9 @@ def _read_transcript_rows(conversation_id: str) -> list[dict[str, Any]]:
             for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
                 if not line.strip():
                     continue
-                parsed = json.loads(line)
+                parsed: JsonPayload = json.loads(line)
                 if isinstance(parsed, dict):
-                    rows.append(cast("dict[str, Any]", parsed))
+                    rows.append(parsed)
             return rows
         except (OSError, json.JSONDecodeError):
             continue
@@ -251,7 +251,9 @@ def _transcript_tool_args(conversation_id: str, step_index: int, name: str) -> d
         idx = _int(row.get("step_index"))
         if step_index > 0 and idx > step_index:
             continue
-        for raw_tc in cast("list[Any]", row.get("tool_calls") or []):
+        raw_calls: JsonPayload = row.get("tool_calls")
+        calls = raw_calls if isinstance(raw_calls, list) else []
+        for raw_tc in calls:
             tc = _mapping(raw_tc)
             if _text(tc.get("name")) == name:
                 return dict(_mapping(tc.get("args")))
@@ -284,13 +286,13 @@ def _transcript_thinking(conversation_id: str, step_index: int, *, before_tool: 
     return None
 
 
-def _mapping(value: Any) -> dict[str, Any]:
-    return cast("dict[str, Any]", value) if isinstance(value, dict) else {}
+def _mapping(value: JsonPayload) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
-def _text(value: Any) -> str | None:
+def _text(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _int(value: Any) -> int:
+def _int(value: object) -> int:
     return int(value) if isinstance(value, int | float) else 0
