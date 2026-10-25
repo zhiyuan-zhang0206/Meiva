@@ -16,13 +16,13 @@ Existing annotations are bounded in `[debt.any-collaborator]` tables inside `mei
 ## Scope and canonical resolution
 
 - **Production Python only:** files with `test_file` or `is_test_path(path)` are excluded.
-- **Direct root `typing.Any` only:** `from typing import Any`, `from typing import Any as Alias`, `import typing; typing.Any`, `import typing as t; t.Any`, and single-layer string annotations (`"Any"`, `"t.Any"`) whose parsed expression resolves to `"typing.Any"` in the active lexical `Scope`.
+- **Direct or union `typing.Any`:** `from typing import Any`, `from typing import Any as Alias`, `import typing; typing.Any`, `import typing as t; t.Any`, union/optional annotations containing `typing.Any` (`Any | None`, `None | Any`, `Optional[Any]`, `Union[Any, ...]`), and single-layer string annotations (`"Any"`, `"t.Any"`, `"Any | None"`) whose parsed expression resolves to one of those forms in the active lexical `Scope`.
 - **Collaborator slots:**
   - `FunctionDef` and `AsyncFunctionDef` parameters (`posonlyargs`, `args`, `vararg`, `kwonlyargs`, `kwarg`, including `self`/`cls` and dunder methods) with slot `<arg.arg>` and role `parameter`, evaluated in `Scope.annotation_scope(node.type_params)` under prospective qualname `(*qualnames, node.name)`.
   - `FunctionDef` and `AsyncFunctionDef` return annotations with slot `return` and role `return`, evaluated in the same annotation scope.
   - Class-body `AnnAssign` statements whose target is an `ast.Name` (`self.scope.is_class`) with slot `<target.id>` and role `class-field`, under the enclosing class qualname.
 - **Shadowing:** a parameter, local variable, class attribute, type parameter, or non-`typing` import named `Any` shadows the import and is not reported.
-- **Non-matches:** `object`, container/union/wrapper leaves (`Any | None`, `Optional[Any]`, `list[Any]`, `dict[str, Any]`, `Callable[..., Any]`), function-local variable annotations, and attribute annotations (`self.x: Any`) are not matched by `any-collaborator`.
+- **Non-matches:** `object`, container/wrapper leaves (`list[Any]`, `dict[str, Any]`, `Callable[..., Any]`, `Annotated[Any, ...]`), function-local variable annotations, and attribute annotations (`self.x: Any`) are not matched by `any-collaborator`.
 
 ## Debt key format
 

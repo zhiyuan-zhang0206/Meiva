@@ -42,6 +42,25 @@ def test_canonical_aliases_match_parameter_return_and_class_field(tmp_path: Path
     ]
 
 
+def test_union_and_optional_any_annotations_match(tmp_path: Path) -> None:
+    source = (
+        "from typing import Any, Optional, Union\n"
+        "class C:\n"
+        "    c: Any | None\n"
+        "    d: Optional[Any]\n"
+        "def f(x: None | Any, y: Union[Any, None]) -> Any | None:\n"
+        "    return x\n"
+    )
+    sites = scan(tmp_path, source).any_collaborators
+    assert [(s.qualname, s.slot, s.role, s.line) for s in sites] == [
+        ("C", "c", "class-field", 3),
+        ("C", "d", "class-field", 4),
+        ("f", "x", "parameter", 5),
+        ("f", "y", "parameter", 5),
+        ("f", "return", "return", 5),
+    ]
+
+
 @pytest.mark.parametrize(
     "source",
     [
@@ -52,12 +71,10 @@ def test_canonical_aliases_match_parameter_return_and_class_field(tmp_path: Path
         "from typing import Any\nclass C:\n    Any = int\n    x: Any\n",
         "import builtins\ndef f(x: object, y: builtins.object) -> object:\n    return x\n",
         (
-            "from typing import Annotated, Any, Callable, Optional\n"
+            "from typing import Annotated, Any, Callable\n"
             "class C:\n"
             "    a: list[Any]\n"
             "    b: dict[str, Any]\n"
-            "    c: Any | None\n"
-            "    d: Optional[Any]\n"
             "    e: Annotated[Any, 'meta']\n"
             "def f(cb: Callable[..., Any], items: tuple[Any, ...]) -> list[Any]:\n"
             "    return list(items)\n"
@@ -78,13 +95,14 @@ def test_single_layer_string_annotations_use_lexical_scope_and_constant_coordina
         "from typing import Any as Dynamic\n"
         "class C:\n"
         '    field: "Dynamic"\n'
-        'def f(x: "t.Any") -> "Dynamic":\n'
+        'def f(x: "t.Any", y: "Dynamic | None") -> "Dynamic":\n'
         "    return x\n"
     )
     assert scan(tmp_path, source).any_collaborators == [
         AnyCollaboratorSite(line=4, column=11, qualname="C", slot="field", role="class-field"),
         AnyCollaboratorSite(line=5, column=9, qualname="f", slot="x", role="parameter"),
-        AnyCollaboratorSite(line=5, column=21, qualname="f", slot="return", role="return"),
+        AnyCollaboratorSite(line=5, column=21, qualname="f", slot="y", role="parameter"),
+        AnyCollaboratorSite(line=5, column=42, qualname="f", slot="return", role="return"),
     ]
 
 
@@ -93,8 +111,8 @@ def test_single_layer_string_annotations_use_lexical_scope_and_constant_coordina
     [
         'from vendor import Any\ndef f(x: "Any") -> "Any":\n    return x\n',
         'from typing import Any\ndef f[Any](x: "Any") -> "Any":\n    return x\n',
-        'from typing import Any\ndef f(x: "list[Any]", y: "Any | None") -> "object":\n    return x\n',
-        'from typing import Any\ndef f(x: "Any[", y: "\'Any\'") -> int:\n    return 1\n',
+        'from typing import Any\ndef f(x: "list[Any]") -> "object":\n    return x\n',
+        'from typing import Any\ndef f(x: "Any[", y: "\'Any\'", z: "\'Any\' | None") -> int:\n    return 1\n',
     ],
 )
 def test_non_matching_or_malformed_string_annotations_do_not_match(
