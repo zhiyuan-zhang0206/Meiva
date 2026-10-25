@@ -45,10 +45,11 @@ class AuditRow(dict[str, Any]):
 
 
 class AuditLog:
-    __hash__ = None
-
     def __init__(self, db: Database) -> None:
         self._db = db
+
+    def __hash__(self) -> int:
+        return id(self)
 
     def _rows(self) -> list[AuditRow]:
         with self._db.connect() as conn:
