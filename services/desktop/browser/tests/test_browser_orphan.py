@@ -1,5 +1,6 @@
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -107,7 +108,7 @@ def _spawn_sleeper() -> subprocess.Popen[bytes]:
 
 
 def test_find_picks_only_ours_out_of_a_crowded_table() -> None:
-    procs = [
+    procs: list[Any] = [
         _FakeProc(101, "Google Chrome", ["/Applications/Google Chrome"]),
         _FakeProc(102, "Google Chrome", _chrome(udd="/Users/op/other/profile")),
         _FakeProc(103, "Google Chrome Helper", _chrome("--type=renderer")),
@@ -121,7 +122,7 @@ def test_find_picks_only_ours_out_of_a_crowded_table() -> None:
 def test_reap_kills_the_orphans_tree() -> None:
     child = _spawn_sleeper()
     try:
-        procs = [_FakeProc(child.pid, "chrome.exe", _chrome())]
+        procs: list[Any] = [_FakeProc(child.pid, "chrome.exe", _chrome())]
         assert orphan.reap_cluster_chrome_from(procs, _PROFILE) == [child.pid]
         child.wait(timeout=5)
         assert child.poll() is not None, (
@@ -133,7 +134,7 @@ def test_reap_kills_the_orphans_tree() -> None:
 
 
 def test_reap_with_no_orphan_is_a_silent_noop() -> None:
-    procs = [
+    procs: list[Any] = [
         _FakeProc(101, "Google Chrome", ["/Applications/Google Chrome"]),
         _FakeProc(102, "python", ["python", "-m", "cli.main", "stop"]),
     ]
@@ -143,7 +144,7 @@ def test_reap_with_no_orphan_is_a_silent_noop() -> None:
 def test_reap_is_idempotent() -> None:
     child = _spawn_sleeper()
     try:
-        procs = [_FakeProc(child.pid, "chrome", _chrome())]
+        procs: list[Any] = [_FakeProc(child.pid, "chrome", _chrome())]
         assert orphan.reap_cluster_chrome_from(procs, _PROFILE) == [child.pid]
         child.wait(timeout=5)
         assert orphan.reap_cluster_chrome_from([], _PROFILE) == []
@@ -175,14 +176,14 @@ class _RacingProc(_FakeProc):
     ],
 )
 def test_a_process_the_scan_cannot_read_is_skipped_not_fatal(exc: Exception) -> None:
-    procs = [_RacingProc(999, exc), _FakeProc(106, "Google Chrome", _chrome())]
+    procs: list[Any] = [_RacingProc(999, exc), _FakeProc(106, "Google Chrome", _chrome())]
     assert orphan.select_cluster_chrome_pids(procs, _PROFILE) == [106]
 
 
 def test_reap_survives_a_process_the_scan_cannot_read() -> None:
     child = _spawn_sleeper()
     try:
-        procs = [
+        procs: list[Any] = [
             _RacingProc(999, SystemError(_RACE_SYSTEM_ERROR)),
             _FakeProc(child.pid, "chrome", _chrome()),
         ]

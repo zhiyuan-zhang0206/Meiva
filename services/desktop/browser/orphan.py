@@ -65,7 +65,6 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any
 
 import psutil
 
@@ -142,7 +141,7 @@ def is_cluster_chrome(name: str, cmdline: Sequence[str] | None, profile: Path) -
     return False
 
 
-def _readable_facts(proc: psutil.Process | Any) -> tuple[str, list[str] | None]:
+def _readable_facts(proc: psutil.Process) -> tuple[str, list[str] | None]:
     """`(name, argv)` for `proc`, with argv None when it cannot be read."""
     try:
         return proc.name(), proc.cmdline()
@@ -153,7 +152,7 @@ def _readable_facts(proc: psutil.Process | Any) -> tuple[str, list[str] | None]:
 # meiva:note
 # Select the pids of this cluster's Chrome browser processes from an arbitrary
 # iterable of process entries, skipping any entry that raises `_UNREADABLE`.
-def select_cluster_chrome_pids(procs: Iterable[psutil.Process | Any], profile: Path) -> list[int]:
+def select_cluster_chrome_pids(procs: Iterable[psutil.Process], profile: Path) -> list[int]:
     found: list[int] = []
     for proc in procs:
         name, cmdline = _readable_facts(proc)
@@ -176,7 +175,7 @@ def find_cluster_chrome(profile: Path | None = None) -> list[int]:
 
 # meiva:note
 # Reap any Chrome browser process matching `profile` from `procs` and return the killed pids.
-def reap_cluster_chrome_from(procs: Iterable[psutil.Process | Any], profile: Path) -> list[int]:
+def reap_cluster_chrome_from(procs: Iterable[psutil.Process], profile: Path) -> list[int]:
     pids = select_cluster_chrome_pids(procs, profile)
     if not pids:
         return []

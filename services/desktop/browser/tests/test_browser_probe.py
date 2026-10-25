@@ -26,7 +26,7 @@ import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
 import pytest
 
@@ -227,8 +227,9 @@ def test_the_holder_and_socket_reads_survive_the_psutil_race() -> None:
         def net_connections(self, kind: str) -> list[object]:
             raise race
 
-    assert probe_mod.read_process_facts(_RacingProc()) == ("", None)
-    assert probe_mod.read_listens_on(_RacingProc(), 9222) is None
+    racing: Any = _RacingProc()
+    assert probe_mod.read_process_facts(racing) == ("", None)
+    assert probe_mod.read_listens_on(racing, 9222) is None
     assert probe_mod.process_facts(999_999_999) == ("", None)
     assert probe_mod.listens_on(999_999_999, 9222) is None
 

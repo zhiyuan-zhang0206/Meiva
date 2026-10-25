@@ -155,7 +155,7 @@ class ChromeMcpDaemon:
         self,
         upstream: ClientSession,
         pages: PageRegistry,
-        tab_groups: AgentTabGroups | Any,
+        tab_groups: AgentTabGroups,
     ) -> None:
         self._upstream = upstream
         self.pages = pages

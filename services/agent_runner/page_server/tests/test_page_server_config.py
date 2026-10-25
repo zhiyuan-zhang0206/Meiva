@@ -13,10 +13,9 @@ def test_the_slice_carries_the_live_value_of_every_field() -> None:
     for field in dataclasses.fields(config):
         flat: Any = get_field(field.name)
         assert getattr(config, field.name) == flat, field.name
-    custom = daemon.page_server_config(
-        daemon_settings=SimpleNamespace(
-            page_server_poll_interval_seconds=9.5,
-            heartbeat_interval_seconds=settings.daemon.heartbeat_interval_seconds,
-        )
+    fake_daemon: Any = SimpleNamespace(
+        page_server_poll_interval_seconds=9.5,
+        heartbeat_interval_seconds=settings.daemon.heartbeat_interval_seconds,
     )
+    custom = daemon.page_server_config(daemon_settings=fake_daemon)
     assert custom.page_server_poll_interval_seconds == 9.5

@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import signal
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -85,7 +85,7 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         agent_id: int | None = None,
         registry: SessionRegistry | None = None,
         probe: DeepSeekProbe | None = None,
-        connect: Any | None = None,
+        connect: Callable[..., Any] | None = None,
     ) -> None:
         resolved_probe: DeepSeekProbe = probe if probe is not None else PsutilChildProbe()
         super().__init__(

@@ -19,7 +19,7 @@ from collections.abc import Callable, Collection
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, assert_never
+from typing import assert_never
 
 import psutil
 import psycopg
@@ -30,6 +30,7 @@ from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, settings
+from base.config.domains.daemon.settings import DaemonSettings
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
@@ -77,7 +78,7 @@ _LIVENESS_TIMEOUT_S = 60.0
 _DEAD_PAGES_LIVENESS_TIMEOUT_S = 600.0
 
 
-def page_server_config(*, daemon_settings: Any | None = None) -> PageServerConfig:
+def page_server_config(*, daemon_settings: DaemonSettings | None = None) -> PageServerConfig:
     """The composition root: the one place this package reads `settings`."""
     source = settings.daemon if daemon_settings is None else daemon_settings
     return PageServerConfig(
