@@ -1,2 +1,0 @@
-[debt.first-party-patch]
-"test_agent_wake_hosted.py#monkeypatch.setattr ops.agents.wake.publish_inbound_wake" = 1

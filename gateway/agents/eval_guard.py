@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import HTTPException, Request
+from psycopg_pool import ConnectionPool
 
 
 def _caller_agent_id(caller: str) -> int | None:
@@ -17,7 +16,7 @@ def _caller_agent_id(caller: str) -> int | None:
         return None
 
 
-def caller_eval_isolation(pool: Any, caller_agent_id: int) -> bool:
+def caller_eval_isolation(pool: ConnectionPool, caller_agent_id: int) -> bool:
     """Whether a caller's stored eval configuration denies result reads."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(

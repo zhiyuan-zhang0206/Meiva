@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import cast
 from uuid import UUID
 
 from fastapi import Header, HTTPException, Request
@@ -88,7 +87,10 @@ async def create_and_launch_agent(
     the parsed request) is what a replay must match.
     """
 
-    default_model = cast(str, authority.service_field_value("llm_model"))
+    raw_model = authority.service_field_value("llm_model")
+    if not isinstance(raw_model, str):
+        raise TypeError("llm_model must be a string")
+    default_model = raw_model
     request_hash = creation_request_hash(
         creation_identity if creation_identity is not None else body.model_dump(mode="json")
     )

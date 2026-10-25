@@ -121,5 +121,7 @@ elif scenario == "stall_exit":
     stall_exit(Path(arguments[0]), int(arguments[1]), int(arguments[2]))
 elif scenario == "completion_during_stall":
     completion_during_stall(int(arguments[1]))
+elif scenario == "sleep":
+    time.sleep(60)
 else:
     raise ValueError(f"unknown scenario {scenario!r}")

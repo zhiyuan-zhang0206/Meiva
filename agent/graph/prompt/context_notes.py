@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from langchain_core.messages import HumanMessage
@@ -194,7 +194,13 @@ def _render_skill_bodies(
     return sections, injected
 
 
-def _skill_bodies_note(skills: Sequence[Skill], *, framing: str, label: str) -> HumanMessage | None:
+def _skill_bodies_note(
+    skills: Sequence[Skill],
+    *,
+    framing: str,
+    label: str,
+    created_at: datetime | None = None,
+) -> HumanMessage | None:
     rendered = _render_skill_bodies(skills, label=label)
     if rendered is None:
         return None
@@ -202,11 +208,16 @@ def _skill_bodies_note(skills: Sequence[Skill], *, framing: str, label: str) -> 
     return system_note_message(
         content=framing + "\n\n" + "\n\n---\n\n".join(sections),
         tag=NoteTag.PRELOADED_SKILLS,
-        created_at=datetime.now(UTC),
+        created_at=created_at,
     )
 
 
-def preloaded_note(skills: Sequence[Skill], *, harness: Harness) -> HumanMessage | None:
+def preloaded_note(
+    skills: Sequence[Skill],
+    *,
+    harness: Harness,
+    created_at: datetime | None = None,
+) -> HumanMessage | None:
 
     framing = _PRELOADED_SKILLS_FRAMING
     if harness is not Harness.MEIVA:
@@ -214,7 +225,9 @@ def preloaded_note(skills: Sequence[Skill], *, harness: Harness) -> HumanMessage
             "meiva.help(meiva.skills.<path>) or meiva.files.read.",
             "meiva.help(meiva.skills.<path>) or your native file-reading tool.",
         )
-    return _skill_bodies_note(skills, framing=framing, label="preloaded-skills")
+    return _skill_bodies_note(
+        skills, framing=framing, label="preloaded-skills", created_at=created_at
+    )
 
 
 def preloaded_skills_note(ctx: MeivaContext) -> HumanMessage | None:
@@ -225,10 +238,17 @@ def preloaded_skills_note(ctx: MeivaContext) -> HumanMessage | None:
     warn_unresolved("skills_to_expand_at_start", selection.unresolved)
     if not selection.skills:
         return None
-    return preloaded_note(selection.skills, harness=ctx.harness)
+    return preloaded_note(
+        selection.skills, harness=ctx.harness, created_at=ctx.require_clock().now()
+    )
 
 
-def fork_tail_skills_note(names: list[str], sdk_disable: Sequence[str]) -> HumanMessage | None:
+def fork_tail_skills_note(
+    names: list[str],
+    sdk_disable: Sequence[str],
+    *,
+    created_at: datetime | None = None,
+) -> HumanMessage | None:
 
     if not names:
         return None
@@ -236,7 +256,10 @@ def fork_tail_skills_note(names: list[str], sdk_disable: Sequence[str]) -> Human
     selection = resolve_prompt_skills(names, SkillView((), (), disabled, read_skills(disabled)))
     warn_unresolved("fork_tail_skills", selection.unresolved)
     return _skill_bodies_note(
-        selection.skills, framing=_FORK_TAIL_SKILLS_FRAMING, label="fork-tail-skills"
+        selection.skills,
+        framing=_FORK_TAIL_SKILLS_FRAMING,
+        label="fork-tail-skills",
+        created_at=created_at,
     )
 
 

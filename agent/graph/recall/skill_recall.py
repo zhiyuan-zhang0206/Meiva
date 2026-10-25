@@ -24,7 +24,7 @@ and the turn goes on without the note.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import NamedTuple
 
 from langchain_core.messages import AnyMessage, HumanMessage
@@ -110,13 +110,17 @@ def pick_skills(scores: Mapping[str, float], *, threshold: float, limit: int) ->
     return qualified[:limit]
 
 
-def render_note(candidates: Sequence[RecallCandidate]) -> HumanMessage:
+def render_note(
+    candidates: Sequence[RecallCandidate],
+    *,
+    created_at: datetime | None = None,
+) -> HumanMessage:
     """The system-styled note naming `candidates`, one index line each."""
     lines = [index_entry(c.target, c.description) for c in candidates]
     return system_note_message(
         content=f"{_FRAMING}\n\n" + "\n".join(lines),
         tag=NoteTag.SKILL_RECALL,
-        created_at=datetime.now(UTC),
+        created_at=created_at,
     )
 
 
@@ -129,6 +133,7 @@ async def recall_skills(
     keys: ProviderKeys,
     agent_id: int,
     peer_turn: bool = False,
+    created_at: datetime | None = None,
 ) -> SkillRecall | None:
     """Score `candidates` against the recent conversation and render the best matches as a
     note to inject, or `None` when there is nothing to offer.
@@ -188,7 +193,10 @@ async def recall_skills(
     if not picked:
         return None
     return SkillRecall(
-        note=render_note([by_identifier[identifier] for identifier in picked]),
+        note=render_note(
+            [by_identifier[identifier] for identifier in picked],
+            created_at=created_at,
+        ),
         identifiers=set(picked),
     )
 

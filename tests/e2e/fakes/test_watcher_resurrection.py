@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from langchain_core.messages import BaseMessage, HumanMessage
 
+from base.paths.tests.homes import point_home
 from tests.e2e.fakes.scenarios import shell_effects
 
 
@@ -10,7 +11,7 @@ from tests.e2e.fakes.scenarios import shell_effects
 async def test_resurrection_model_processes_wake_and_completion(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, batched: bool
 ) -> None:
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path))
+    point_home(monkeypatch, tmp_path)
     shell_effects.sandbox().mkdir(parents=True, exist_ok=True)
     (shell_effects.sandbox() / "resurrection-id").write_text("0")
     model = shell_effects.build_watcher_resurrection("unused", agent_id=17)

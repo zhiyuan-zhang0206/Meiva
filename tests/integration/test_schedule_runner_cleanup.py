@@ -212,13 +212,14 @@ def test_runner_hard_exit_child_ownership(
         if mode.startswith("blocked-")
         else _no_lock() as lock,
     ):
+        # meiva:note
         # Use a test-owned group so a buggy group kill fails without harming pytest.
         # The sibling models a PTY shell's other job in the runner's group.
-        sibling = subprocess.Popen(
-            [sys.executable, "-c", "import time; time.sleep(60)"], process_group=0
+        sibling = subprocess.Popen(  # noqa: S603
+            [sys.executable, str(_CHILD), "sleep"], process_group=0
         )
         tracked.append(psutil.Process(sibling.pid))
-        runner = subprocess.Popen(  # noqa: S603 - fixed test harness and fixture schedule id
+        runner = subprocess.Popen(  # noqa: S603
             [sys.executable, str(_CHILD), "run", str(root), str(schedule_id), mode],
             stdout=log,
             stderr=log,

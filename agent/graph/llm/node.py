@@ -125,7 +125,7 @@ async def llm_node(
     policy = retry_policy(
         runtime.context.require_agent(), runtime.context.require_catalog(), agent_id
     )
-    first_started_at = time.time()
+    first_started_at = runtime.context.require_clock().now().timestamp()
     failed = 0
     while True:
         try:
@@ -147,8 +147,7 @@ async def llm_node(
             )
 
 
-def _enforce_retry_budget(attempt: Attempt, policy: RetryPolicy) -> None:
-    now = time.time()
+def _enforce_retry_budget(attempt: Attempt, policy: RetryPolicy, *, now: float) -> None:
     if budget_spent(attempt, now, policy):
         _log_llm_retry_duration(attempt, outcome="budget_exhausted", now=now)
         _raise_retry_budget_exhausted(attempt.number, policy)
@@ -164,7 +163,7 @@ def _note_failed_attempt(
     runtime.context.turn_progress.mark(agent_id)
     if not isinstance(exc, Exception):
         return
-    now = time.time()
+    now = runtime.context.require_clock().now().timestamp()
     failed = assess_failure(
         attempt,
         now,
@@ -206,7 +205,11 @@ async def llm_attempt(
         timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
     ):
         try:
-            _enforce_retry_budget(attempt, policy)
+            _enforce_retry_budget(
+                attempt,
+                policy,
+                now=runtime.context.require_clock().now().timestamp(),
+            )
             result = await _llm_node_impl(state, runtime, config, ledger)
         except BaseException as exc:
             _note_failed_attempt(exc, attempt, runtime, agent_id, policy)
@@ -219,7 +222,11 @@ async def llm_attempt(
             )
             raise
         else:
-            _log_llm_retry_duration(attempt, outcome="succeeded", now=time.time())
+            _log_llm_retry_duration(
+                attempt,
+                outcome="succeeded",
+                now=runtime.context.require_clock().now().timestamp(),
+            )
             logger.info(
                 "turn ended in {duration_seconds:.2f}s ok=True",
                 event="turn_end",

@@ -23,6 +23,7 @@ from agent.graph.tests.prompt.skill_support import skill_view, write_skill
 from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import NoteTag
 from base.api_contracts.agent_contract import Harness
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.extensions import install_registry
@@ -211,8 +212,15 @@ def _install_skill(name: str, description: str, body: str) -> None:
     install_registry.register(InstalledPackage(name=name, type="skill"))
 
 
+def _clock() -> Clock:
+    return Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS)
+
+
 def _context(**pins: object) -> MeivaContext:
-    return MeivaContext(agent=AgentSlices.resolve(pins, default_reader=defaults()))
+    return MeivaContext(
+        agent=AgentSlices.resolve(pins, default_reader=defaults()),
+        clock_factory=_clock,
+    )
 
 
 @pytest.mark.usefixtures("unit_home")

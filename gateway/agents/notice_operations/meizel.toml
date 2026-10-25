@@ -12,8 +12,3 @@ exports = ["current.py", "notice_answers.py", "notice_plan.py", "notices.py", "r
 [debt.ambient-read]
 "notices.py#clock datetime.datetime.now" = 4
 "router.py#clock datetime.datetime.now" = 1
-
-[debt.type-cast]
-"current.py#cast _edit" = 1
-"notices.py#cast _resolved_notices_blocking" = 1
-"notices.py#cast post_notice_create._create" = 4

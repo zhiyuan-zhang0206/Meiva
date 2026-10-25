@@ -7,6 +7,3 @@ exports = ["alert_classes.py", "ops_monitor.py", "ops_series.py", "stats_events.
 [debt.ambient-read]
 "alert_classes.py#clock datetime.datetime.now" = 3
 "ops_series.py#clock datetime.datetime.now" = 1
-
-[debt.any-collaborator]
-"ops_series.py#any _Window.fill.default" = 1

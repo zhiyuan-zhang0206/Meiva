@@ -1,13 +1,11 @@
 [debt.env-patch]
-"test_api_tokens.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 2
 "test_backup_owner.py#monkeypatch.delenv os.environ.MEIVA_DB_ADMIN_PASSWORD" = 1
 "test_backup_owner.py#monkeypatch.delitem os.environ" = 1
 "test_backup_owner.py#monkeypatch.setitem os.environ.MEIVA_DB_URL" = 1
 "test_backup_owner.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
-"test_api_tokens.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 6
-"test_api_tokens.py#monkeypatch.setattr base.config.settings.general.machine_name" = 1
+"test_api_tokens.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 4
 "test_backup_owner.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
 
 [debt.stdlib-patch]

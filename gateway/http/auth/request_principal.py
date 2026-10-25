@@ -15,7 +15,7 @@ import secrets
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from starlette.requests import Request
 
@@ -23,6 +23,7 @@ from base.api_contracts.idempotency import PRINCIPAL_SCOPE as PRINCIPAL_SCOPE
 from base.api_contracts.idempotency import SCOPE_HEADER as SCOPE_HEADER
 from base.api_contracts.idempotency import stored_key
 from base.host.db_authority.api import AcceptanceCache
+from gateway.http.auth.session_store import SessionStore, session_mint
 
 
 @dataclass(frozen=True)
@@ -211,7 +212,7 @@ def require_human_credential(request: Request) -> None:
 
 
 def current_session_fact(
-    sessions: Any,
+    sessions: SessionStore,
     keys: SessionKeys,
     session_id: str | None,
     secret: str,
@@ -222,8 +223,6 @@ def current_session_fact(
     """The credential fact of a valid session whose minting credential is
     current (`user_session` / `machine_session:runner`), else None: the one
     session check the auth middleware and `/api/auth/check` share."""
-    from gateway.http.auth.session_store import session_mint
-
     mint = None if session_id is None else session_mint(session_id)
     if mint is None:
         return None

@@ -89,7 +89,7 @@ class _Window:
     def zeros(self) -> list[int]:
         return [0] * self.n
 
-    def fill(self, rows: dict[int, Any], default: Any) -> list[Any]:
+    def fill[T](self, rows: dict[int, T], default: T) -> list[T]:
         return [rows.get(i, default) for i in range(self.n)]
 
 
