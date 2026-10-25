@@ -8,6 +8,7 @@ with the tool's named arguments."""
 from __future__ import annotations
 
 import sys
+import time
 import types
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,7 @@ def _source() -> _tools.ToolSource:
         timeout_seconds=clients.timeout_seconds,
         cache=_tools.DiskCache(_cache_dir()),
         identity=context.identity,
+        now=time.time(),
     )
 
 
@@ -90,7 +92,7 @@ def description(server: str) -> str | None:
     return config[server].get("description")
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> _tools.ServerProxy:
     """`meiva.mcps.<server>` lazily returns server proxy (module-level PEP 562)."""
     if name.startswith("_"):
         raise AttributeError(name)

@@ -14,9 +14,25 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import AsyncExitStack, suppress
-from typing import Any
+from typing import Any, Protocol
 
 from base.host.net.resilience import Policy, aretry
+
+
+class _ToolItem(Protocol):
+    name: str
+    description: str | None
+
+
+class ToolListResult(Protocol):
+    tools: list[_ToolItem]
+
+
+class ToolCallResult(Protocol):
+    content: list[Any]
+    is_error: bool | None
+    structured_content: dict[str, Any] | None
+
 
 # Snapshot results stay small (PNG metadata), but keep the same generous line
 # cap as the browser direct-dial so a future inline-image tier fits.
@@ -64,7 +80,7 @@ class ComputerLineSession:
         self._writer = writer
         self._id = 0
 
-    async def _request(self, payload: dict[str, Any], *, with_agent: bool) -> Any:
+    async def _request(self, payload: dict[str, Any], *, with_agent: bool) -> object:
         self._id += 1
         if with_agent:
             payload = {"id": self._id, **payload, "agent_id": self.client_agent_id}
@@ -94,19 +110,21 @@ class ComputerLineSession:
             raise RuntimeError(resp.get("error", "computer-mcp daemon error"))
         return resp["result"]
 
-    async def list_tools(self) -> Any:
+    async def list_tools(self) -> ToolListResult:
         from mcp import types
 
-        result = await self._request({"method": "list_tools"}, with_agent=False)
-        return types.ListToolsResult(tools=[types.Tool.model_validate(t) for t in result])
+        result: Any = await self._request({"method": "list_tools"}, with_agent=False)
+        out: Any = types.ListToolsResult(tools=[types.Tool.model_validate(t) for t in result])
+        return out
 
-    async def call_tool(self, name: str, args: dict[str, Any]) -> Any:
+    async def call_tool(self, name: str, args: dict[str, Any]) -> ToolCallResult:
         from mcp import types
 
-        result = await self._request(
+        result: Any = await self._request(
             {"method": "call_tool", "tool": name, "args": args}, with_agent=True
         )
-        return types.CallToolResult.model_validate(result)
+        out: Any = types.CallToolResult.model_validate(result)
+        return out
 
 
 async def _close_writer(writer: asyncio.StreamWriter) -> None:

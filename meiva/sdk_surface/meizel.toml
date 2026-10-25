@@ -22,72 +22,16 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 [purity]
 "." = "strict-to-be"
 "__init__.py" = "strict"
+"discovery.py" = "strict"
+"help.py" = "strict"
 "plugins.py" = "strict"
+"sdk_disable.py" = "strict"
 "skill_sources.py" = "strict"
 "validation.py" = "strict"
 
 [roots]
-"settings.py" = ["bus"]
-
-[debt.ambient-read]
-"help.py#home pathlib.Path.home" = 1
-"settings.py#settings base.config.settings" = 1
-
-[debt.any-collaborator]
-"discovery.py#any _annotation_field.ann" = 1
-"discovery.py#any _child_group_rank.child" = 1
-"help.py#any HelpRouter.__call__.args" = 1
-"help.py#any HelpRouter.__call__.kwds" = 1
-"help.py#any HelpRouter.__call__.return" = 1
-"help.py#any ModelHelpProfile.for_model.catalog" = 1
-"help.py#any _child_formatter.child" = 1
-"help.py#any _container_fqn.target" = 1
-"help.py#any _doc_for.obj" = 1
-"help.py#any _element_fqn.target" = 1
-"help.py#any _find_agent_visible_binding.mod" = 1
-"help.py#any _find_agent_visible_binding.target" = 1
-"help.py#any _format_child.child" = 1
-"help.py#any _format_function_stub.fn" = 1
-"help.py#any _format_module_stub.mod" = 1
-"help.py#any _format_skill_child.child" = 1
-"help.py#any _format_submodule_ref.mod" = 1
-"help.py#any _is_meiva_module_name.name" = 1
-"help.py#any _is_synthesized_dataclass_doc.own_doc" = 1
-"help.py#any _print_target.target" = 1
-"help.py#any _resolve_const_name.const" = 1
-"help.py#any _resolve_fqn.target" = 1
-"help.py#any _search_meiva_for_binding.target" = 1
-"help.py#any _skill_aware_children.mod" = 1
-"help.py#any _target_body.target" = 1
-"help.py#any _variant_text.obj" = 1
-"installation.py#any EventPipelines.event_pipeline.return" = 1
-"installation.py#any WrapAdded.parent" = 1
-"metering.py#any _instrument_targets.walk.container" = 1
-"metering.py#any make_mcp_recorder.recorder.args" = 1
-"metering.py#any make_mcp_recorder.recorder.kwargs" = 1
-"metering.py#any make_mcp_recorder.recorder.return" = 1
-"metering.py#any make_mcp_recorder.recorder.source" = 1
-"metering.py#any make_recorder.async_recorder.args" = 1
-"metering.py#any make_recorder.async_recorder.kwargs" = 1
-"metering.py#any make_recorder.async_recorder.return" = 1
-"metering.py#any make_recorder.recorder.args" = 1
-"metering.py#any make_recorder.recorder.kwargs" = 1
-"metering.py#any make_recorder.recorder.return" = 1
-"plugins.py#any _remove_attr.obj" = 1
-"sdk_disable.py#any DisabledSDKModule.__getattr__.return" = 1
-"settings.py#any _PluginsView.__getattr__.return" = 1
-"settings.py#any __getattr__.return" = 1
-"wraps.py#any _target_member.parent" = 1
-"wraps.py#any _target_member.return" = 1
-"wraps.py#any apply_wrap.async_chained.args" = 1
-"wraps.py#any apply_wrap.async_chained.kwargs" = 1
-"wraps.py#any apply_wrap.async_chained.return" = 1
-"wraps.py#any apply_wrap.chained.args" = 1
-"wraps.py#any apply_wrap.chained.kwargs" = 1
-"wraps.py#any apply_wrap.chained.return" = 1
-"wraps.py#any apply_wrap.invocation.counted.inner_args" = 1
-"wraps.py#any apply_wrap.invocation.counted.inner_kwargs" = 1
-"wraps.py#any apply_wrap.invocation.counted.return" = 1
+"help.py" = { kinds = ["home"], why = "_home_relative reads Path.home() to normalize user home prefixes in rendered SDK constant defaults" }
+"settings.py" = { kinds = ["bus", "settings"], why = "SDK settings facade reads live process settings and event bus when no attached-agent context overrides them" }
 
 [debt.impure-call]
 "attachment_transport.py#Path.is_file" = 1
@@ -102,22 +46,22 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 
 [debt.impure-edge]
 "agent_identity.py#base/agents/context/__init__.py" = 1
-"attachment_transport.py#base/lm/registry.py" = 2
+"attachment_transport.py#base/lm/registry.py" = 1
 "extensions.py#base/config/service_read.py" = 1
-"extensions.py#base/packages/plugins/load_report.py" = 2
+"extensions.py#base/packages/plugins/load_report.py" = 1
 "extensions.py#base/packages/plugins/loading/faces.py" = 1
 "injection_check.py#base/lm/decision/call.py" = 1
 "injection_check.py#base/log/__init__.py" = 1
 "install.py#base/agents/sdk/call_policy.py" = 1
 "install.py#base/config/service_read.py" = 1
 "install.py#base/packages/plugins/extensions.py" = 1
-"install.py#base/packages/plugins/flags.py" = 4
-"install.py#base/packages/plugins/load_report.py" = 3
+"install.py#base/packages/plugins/flags.py" = 1
+"install.py#base/packages/plugins/load_report.py" = 1
 "installation.py#base/agents/sdk/call_policy.py" = 1
 "installation.py#base/config/service_read.py" = 1
 "installation.py#base/packages/plugins/extensions.py" = 1
 "metering.py#base/agents/sdk/call_policy.py" = 1
-"metering.py#base/agents/sdk/telemetry.py" = 4
+"metering.py#base/agents/sdk/telemetry.py" = 1
 "process_context.py#base/agents/context/__init__.py" = 1
 "process_context.py#base/native_process/loaded_commit.py" = 1
 "settings.py#base/agents/context/clients.py" = 1
@@ -125,24 +69,7 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "settings.py#base/events/live/bus.py" = 1
 "settings.py#base/host/env/agent_slices.py" = 2
 "wraps.py#base/log/__init__.py" = 1
-"wraps.py#base/packages/plugins/activation.py" = 2
-
-[debt.type-cast]
-"attachment_transport.py#cast format_signature" = 1
-"attachment_transport.py#cast record_media" = 1
-"discovery.py#cast _static_agent_surface" = 1
-"help.py#cast _variant_text" = 1
-"installation.py#cast slot" = 1
-"metering.py#cast make_mcp_recorder" = 1
-"metering.py#cast make_recorder" = 2
-"process_context.py#cast unbind_context" = 1
-"settings.py#cast attached_agent_view" = 1
-"validation.py#cast coerce_str" = 5
-"wraps.py#cast apply_wrap.async_chained" = 1
+"wraps.py#base/packages/plugins/activation.py" = 1
 
 [debt.wide-exports]
 "meizel.toml#exports" = 1
-
-[debt.wide-params]
-"extensions.py#def load_extensions" = 1
-"install.py#def install" = 1

@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import inspect
 import re as _re
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from base.lm.catalog import ModelCatalog
+from base.lm.registry import attach_modalities_for_model, resolve_available_model
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.pure.media.attach_plan import (
     ATTACH_CHANNEL,
@@ -29,8 +29,10 @@ from meiva.sdk_surface.validation import coerce_str
 
 
 def format_signature(target: object) -> str:
+    if not callable(target):
+        return "(...)"
     try:
-        sig = str(inspect.signature(cast(Callable[..., Any], target)))
+        sig = str(inspect.signature(target))
     except (ValueError, TypeError):
         return "(...)"
     sig = _re.sub(r"(: |-> )'([^']*)'(?=[,)= ]|$)", r"\1\2", sig)
@@ -50,7 +52,6 @@ def media_gated_members(model: str, *, catalog: ModelCatalog) -> frozenset[str]:
 # The agent's configured model, resolved through any withdrawal fallback: capability gates
 # judge the model that will actually run, so a withdrawn id is gated as its fallback.
 def current_model() -> str:
-    from base.lm.registry import resolve_available_model
     from meiva.sdk_surface import settings as _settings
 
     return resolve_available_model(
@@ -59,8 +60,6 @@ def current_model() -> str:
 
 
 def _modalities(model: str, catalog: ModelCatalog) -> frozenset[str]:
-    from base.lm.registry import attach_modalities_for_model, resolve_available_model
-
     return attach_modalities_for_model(
         resolve_available_model(model, models=catalog.models),
         models=catalog.models,
@@ -114,11 +113,11 @@ def plan_media(
 # Append one registration to the exec turn's state-update dict, the channel the exec node takes
 # the entries out of. `update` is that dict (anything else is a framework bug and raises).
 def record_media(update: object, entry: tuple[str, str | None]) -> None:
+    state: Any = update
     if not isinstance(update, dict):
         raise TypeError(
             f"meiva.state_update must stay a dict, got {type(update).__name__} (attachment)"
         )
-    state = cast("dict[str, Any]", update)
     state[ATTACH_CHANNEL] = appended_channel(state.get(ATTACH_CHANNEL, []), *entry)
 
 

@@ -184,7 +184,7 @@ def test_reap_kills_only_the_ghost_daemons_of_this_unit(short_dir: Path) -> None
         sleeper(wrapper, cwd=root, home=unit_home) as session_wrapper,
         sleeper(["-m", "something.else"], cwd=root, home=unit_home) as bystander,
     ):
-        reaped = reap_stale_daemons(root=str(root), home=str(unit_home))
+        reaped = reap_stale_daemons(root=str(root), home=str(unit_home), me=os.getpid())
 
         assert reaped == 2
         assert by_home.wait(timeout=10) == -signal.SIGKILL

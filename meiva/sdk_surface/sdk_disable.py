@@ -16,7 +16,7 @@ import sys as _sys
 import types as _types
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import Any
+from typing import Any, Never
 
 from . import meiva_module
 from .installation import SLOT, Loading, installed
@@ -62,7 +62,7 @@ class DisabledSDKModule(_types.ModuleType):
     attribute access instead of a raw ModuleNotFoundError at import time.
     """
 
-    def __getattr__(self, attr: str) -> Any:
+    def __getattr__(self, attr: str) -> Never:
         leaf = self.__name__.split(".", 1)[1]
         raise AttributeError(
             f"{self.__name__}.{attr} — module is disabled by MEIVA_SDK_DISABLE "

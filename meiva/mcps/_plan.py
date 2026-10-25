@@ -3,9 +3,9 @@
 # meiva:link meiva/mcps/docs/mcps.meiva.okf.md
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Any, Literal
 
 
 # meiva:note
@@ -46,20 +46,33 @@ def unmet_requirement(requires: Mapping[str, bool], *, display_available: bool) 
 
 
 def _strings(server: str, field_name: str, value: object) -> list[str]:
-    if not isinstance(value, (list, tuple)) or not all(
-        isinstance(item, str) for item in cast(Sequence[object], value)
-    ):
+    items: Any = value
+    if not isinstance(value, (list, tuple)):
         raise TypeError(f"Server {server!r}: {field_name} must be a list of strings, got {value!r}")
-    return list(cast(Sequence[str], value))
+    result: list[str] = []
+    for item in items:
+        if not isinstance(item, str):
+            raise TypeError(
+                f"Server {server!r}: {field_name} must be a list of strings, got {value!r}"
+            )
+        result.append(item)
+    return result
 
 
 def _string_map(server: str, field_name: str, value: object) -> dict[str, str]:
-    items = cast(Mapping[object, object], value).items() if isinstance(value, dict) else None
-    if items is None or not all(isinstance(k, str) and isinstance(v, str) for k, v in items):
+    raw: Any = value
+    if not isinstance(value, dict):
         raise TypeError(
             f"Server {server!r}: {field_name} must map strings to strings, got {value!r}"
         )
-    return cast(dict[str, str], value)
+    result: dict[str, str] = {}
+    for k, v in raw.items():
+        if not isinstance(k, str) or not isinstance(v, str):
+            raise TypeError(
+                f"Server {server!r}: {field_name} must map strings to strings, got {value!r}"
+            )
+        result[k] = v
+    return result
 
 
 # meiva:note

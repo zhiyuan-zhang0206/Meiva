@@ -83,7 +83,7 @@ from ._oauth import OAUTH_FLOW_TIMEOUT_S
 #   stateful servers must stay per-connection.
 
 
-def shared_kind(server: str) -> Any:
+def shared_kind(server: str) -> object:
     """The server's `shared` declaration: `"browser"`, True, or falsy (none)."""
     spec = load_mcp_config().get(server)
     return spec.get("shared") if spec else None
@@ -137,7 +137,7 @@ class Scope:
     oauth_locks: dict[str, asyncio.Lock]
     config: DaemonConfig
 
-    def buckets_for(self, shared: Any) -> Buckets:
+    def buckets_for(self, shared: object) -> Buckets:
         """Which buckets a server's sessions live in, from its `shared` declaration."""
         return self.shared if shared is True else self.local
 
@@ -160,15 +160,15 @@ class SerialSession:
     shared session is serialized, never the per-connection ones.
     """
 
-    def __init__(self, session: Any, lock: asyncio.Lock) -> None:
-        self._session = session
+    def __init__(self, session: object, lock: asyncio.Lock) -> None:
+        self._session: Any = session
         self._lock = lock
 
-    async def list_tools(self) -> Any:
+    async def list_tools(self) -> object:
         async with self._lock:
             return await self._session.list_tools()
 
-    async def call_tool(self, name: str, args: dict[str, Any]) -> Any:
+    async def call_tool(self, name: str, args: dict[str, Any]) -> object:
         async with self._lock:
             return await self._session.call_tool(name, args)
 
@@ -292,20 +292,20 @@ async def connect_http(
     return session, local_stack
 
 
-async def _handle_list_tools(req_id: Any, server: str, scope: Scope) -> dict[str, object]:
+async def _handle_list_tools(req_id: object, server: str, scope: Scope) -> dict[str, object]:
     """List the configured server's tools in the daemon wire format."""
-    session = await get_session(server, scope)
+    session: Any = await get_session(server, scope)
     result = await session.list_tools()
     return tools_response(req_id, result.tools)
 
 
 async def _handle_call_tool(
-    req: dict[str, Any], req_id: Any, params: dict[str, Any], server: str, scope: Scope
+    req: dict[str, Any], req_id: object, params: dict[str, Any], server: str, scope: Scope
 ) -> dict[str, object]:
     """Call one MCP tool and serialize its result for the daemon wire protocol."""
     tool = params.get("tool", "")
     args: dict[str, Any] = params.get("args") or {}
-    session = await get_session(server, scope)
+    session: Any = await get_session(server, scope)
     # The computer-mcp direct-dial session carries the calling agent's identity
     # to the computer daemon (governance + audit). Duck-typed: only
     # ComputerLineSession has the attribute.
@@ -326,8 +326,8 @@ async def _handle_call_tool(
 
 async def _dispatch_request(
     req: dict[str, Any],
-    req_id: Any,
-    method: Any,
+    req_id: object,
+    method: object,
     params: dict[str, Any],
     server: str,
     scope: Scope,
@@ -396,7 +396,7 @@ async def handle_client(
             await writer.wait_closed()
 
 
-async def get_session(server: str, scope: Scope) -> Any:
+async def get_session(server: str, scope: Scope) -> object:
     """Get or create MCP server session (thread-safe).
 
     Shared servers (`"shared": true` in their spec) live in the daemon-wide
@@ -460,7 +460,7 @@ def _prepare_socket(socket_path: str, config: DaemonConfig) -> None:
     """Clear the way for a fresh bind: create the socket's directory (the path helpers derive
     paths and create nothing), reap stale daemons, drop a stale file."""
     Path(socket_path).parent.mkdir(parents=True, exist_ok=True)
-    reap_stale_daemons(root=str(config.project_root), home=str(config.home))
+    reap_stale_daemons(root=str(config.project_root), home=str(config.home), me=config.pid)
     with suppress(OSError):
         Path(socket_path).unlink()
 
@@ -528,6 +528,7 @@ def daemon_config_from_process() -> DaemonConfig:
         if project_root is not None
         else Path(__file__).resolve().parents[2],
         browser_cdp_port=settings.services.browser_cdp_port,
+        pid=os.getpid(),
     )
 
 

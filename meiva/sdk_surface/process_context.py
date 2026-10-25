@@ -26,7 +26,7 @@ if parallel branches (fan-out) are introduced, this one-slot model must be re-ev
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 from base.agents.context import MeivaContext
 from base.native_process.loaded_commit import LoadedCommit
@@ -136,7 +136,8 @@ def unbind_context() -> MeivaContext | None:
     """
     if is_host_process():
         raise RuntimeError("the shared agent host cannot release its startup posture")
-    return cast(MeivaContext | None, _slots().pop(CONTEXT_KEY, None))
+    value = _slots().pop(CONTEXT_KEY, None)
+    return value if isinstance(value, MeivaContext) else None
 
 
 def loaded_code_image() -> LoadedCommit:
