@@ -94,11 +94,16 @@ file before capturing executable locations; token contents never enter a job val
 `RefreshSchedule` belongs to `packages_content.py`, including its existing validation.
 
 `job_readings.py` is the one executable/PATH capture policy, also used by the
-legacy health/autostart composition in `cron.py`. `job_values.py` owns the shared
+health composition in `cron.py` and boot registration in
+`system/boot_autostart/registration.py`. `job_values.py` owns the shared
 label namespace, plist destination and environment encoding. Shell assignments
 quote the home, and XML string values escape XML characters after shell quoting.
 The four complete maintenance definitions support spaces and XML metacharacters;
-this does not claim to repair the untouched health/autostart plist fields.
+boot autostart definitions now also escape their output/error log paths. This does
+not claim to repair untouched health-probe fields.
+
+Boot autostart definition inputs and capture order are described in
+[[base/host/docs/boot-autostart.meiva.okf.md]].
 
 Registration still protects the scheduler's default-home namespace at its write
 boundary. Removal retains its ambient-home capture and the same protection.

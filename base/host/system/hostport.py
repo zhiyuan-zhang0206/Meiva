@@ -1,16 +1,18 @@
-"""`Host`: the port to this machine's processes, executables and platform.
-
-A component that starts a process, looks up an executable or branches on the platform takes a
-`host: Host` as a required argument and calls `host.run`, `host.which`, `host.platform` and
-`host.uid` instead of `subprocess`, `shutil.which`, `sys.platform` and `os.getuid`. The
-composition root builds one with `Host.system()`; a test builds the host it wants, with
-`FakeCommands` (`base/host/system/tests/fake_commands.py`) as `run` and plain values for the rest.
-A test that really needs a process uses `Host.system()` and patches nothing.
-
-`run` is `base.host.proc.run_bounded`, not a second runner: its timeout bounds the whole process
-tree. The four fields are the whole port; another capability gets its own port or a reviewed
-addition here, so the object does not become a bag of everything the machine can do.
-"""
+# meiva:note
+# `Host`: the port to this machine's processes, executables and platform.
+#
+# A component that starts a process, looks up an executable or branches on the platform takes a
+# `host: Host` as a required argument and calls `host.run`, `host.which`, `host.platform` and
+# `host.uid` instead of `subprocess`, `shutil.which`, `sys.platform` and `os.getuid`. The
+# composition root builds one with `Host.system()`; a test builds the host it wants, with
+# `FakeCommands` (`base/host/system/tests/fake_commands.py`) as `run` and plain values for the rest.
+# A test that really needs a process uses `Host.system()` and patches nothing.
+# Pure definitions take the planned command, paths and policy values instead of `Host`;
+# the registration shell captures those inputs at its existing effect boundary.
+#
+# `run` is `base.host.proc.run_bounded`, not a second runner: its timeout bounds the whole process
+# tree. The four fields are the whole port; another capability gets its own port or a reviewed
+# addition here, so the object does not become a bag of everything the machine can do.
 
 from __future__ import annotations
 
@@ -39,7 +41,8 @@ class Host:
 
     @classmethod
     def system(cls) -> Host:
-        """The real machine; the composition root's constructor."""
+        # meiva:note
+        # The real machine; the composition root's constructor.
         return cls(
             run=run_bounded,
             which=shutil.which,

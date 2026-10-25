@@ -133,8 +133,8 @@ def ensure_cluster_autostart(ctx: ConvergeCtx) -> None:
     # registers autostart (its plist would dangle once the worktree is removed).
     # The boot job's command line names the services this start selected
     # (`--only-service` each), so a boot start never infers a selection.
-    # Delegates to `base.host.system.autostart`. Idempotent.
-    from base.host.system.autostart import register_autostart
+    # Delegates to `base.host.system.boot_autostart.registration`. Idempotent.
+    from base.host.system.boot_autostart.registration import register_autostart
 
     register_autostart(
         services=ctx.services,

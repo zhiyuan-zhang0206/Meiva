@@ -1,7 +1,7 @@
-exports = ["autostart.py", "backend.py", "boot_policy.py", "boot_unit.py", "cron.py", "hostport.py", "job_values.py", "logs_content.py", "logs_job.py", "macos_firewall.py", "packages_content.py", "packages_job.py", "pr_flow_job.py", "probes.py", "tests", "walg_job.py"]
+exports = ["boot_autostart", "backend.py", "boot_policy.py", "boot_unit.py", "cron.py", "hostport.py", "job_values.py", "logs_content.py", "logs_job.py", "macos_firewall.py", "packages_content.py", "packages_job.py", "pr_flow_job.py", "probes.py", "tests", "walg_job.py"]
 
 [uses]
-"autostart.py" = ["boot_policy.py", "boot_unit.py", "cron.py", "hostport.py", "job_values.py"]
+"boot_autostart" = ["boot_policy.py", "boot_unit.py", "cron.py", "hostport.py", "job_values.py"]
 "boot_unit.py" = ["boot_policy.py", "hostport.py"]
 "cron.py" = ["hostport.py", "job_readings.py", "job_values.py"]
 "job_readings.py" = ["hostport.py"]
@@ -13,7 +13,7 @@ exports = ["autostart.py", "backend.py", "boot_policy.py", "boot_unit.py", "cron
 "pr_flow_content.py" = ["job_values.py"]
 "pr_flow_job.py" = ["__init__.py", "cron.py", "hostport.py", "job_readings.py", "job_values.py", "pr_flow_content.py"]
 "probes.py" = ["hostport.py"]
-"tests" = ["autostart.py", "backend.py", "boot_policy.py", "boot_unit.py", "cron.py", "hostport.py", "job_readings.py", "job_values.py", "logs_content.py", "logs_job.py", "macos_firewall.py", "packages_content.py", "packages_job.py", "pr_flow_content.py", "pr_flow_job.py", "probes.py", "walg_content.py", "walg_job.py"]
+"tests" = ["boot_autostart", "backend.py", "boot_policy.py", "boot_unit.py", "cron.py", "hostport.py", "job_readings.py", "job_values.py", "logs_content.py", "logs_job.py", "macos_firewall.py", "packages_content.py", "packages_job.py", "pr_flow_content.py", "pr_flow_job.py", "probes.py", "walg_content.py", "walg_job.py"]
 "walg_content.py" = ["job_values.py"]
 "walg_job.py" = ["__init__.py", "cron.py", "hostport.py", "job_readings.py", "job_values.py", "walg_content.py"]
 
@@ -29,7 +29,6 @@ exports = ["autostart.py", "backend.py", "boot_policy.py", "boot_unit.py", "cron
 "probes.py" = { kinds = ["environ"], why = "display_available reads DISPLAY/WAYLAND_DISPLAY to detect X11/Wayland; these are OS display-server vars, not meiva runtime config; no Settings field models them. Single source of truth shared by the browser daemon / MCP loader / host-config validators" }
 
 [debt.ambient-read]
-"autostart.py#home pathlib.Path.home" = 1
 "boot_unit.py#pid os.getpid" = 2
 "cron.py#home pathlib.Path.home" = 2
 "hostport.py#pid os.getuid" = 1
