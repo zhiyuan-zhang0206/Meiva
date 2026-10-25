@@ -286,7 +286,7 @@ class Scanner(AmbientAccess):
         for default in (*args.defaults, *(d for d in args.kw_defaults if d is not None)):
             self.visit(default)
         outer = self.scope
-        annotation = outer.annotation_scope(parameter.name for parameter in node.type_params)
+        annotation = outer.annotation_scope(node.type_params)
         self.scope = annotation
         for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg):
             if arg is not None and arg.annotation is not None:
@@ -337,7 +337,7 @@ class Scanner(AmbientAccess):
         outer = self.scope
         for decorator in node.decorator_list:
             self.visit(decorator)
-        annotation = outer.annotation_scope(parameter.name for parameter in node.type_params)
+        annotation = outer.annotation_scope(node.type_params)
         self.scope = annotation
         self.record_test_subclass(node)
         for expression in (*node.bases, *node.keywords):
@@ -353,7 +353,7 @@ class Scanner(AmbientAccess):
 
     def visit_type_alias(self, node: ast.TypeAlias) -> None:
         outer = self.scope
-        self.scope = outer.annotation_scope(parameter.name for parameter in node.type_params)
+        self.scope = outer.annotation_scope(node.type_params)
         for parameter in node.type_params:
             self.visit(parameter)
         self.visit(node.value)
