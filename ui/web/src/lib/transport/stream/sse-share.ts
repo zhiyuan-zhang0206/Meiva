@@ -11,9 +11,23 @@ import {
   type SseSlot,
   type SseState,
 } from "./sse-plan";
-import type { ChannelHandle, EventSourceHandle, SessionPort, StreamTransport } from "../transport";
+import type {
+  ChannelHandle,
+  EventSourceHandle,
+  SessionPort,
+  StreamTimers,
+  StreamTransport,
+} from "../transport";
 
 export type { SseChannel, SseListener, SseState };
+
+const defaultTimers: StreamTimers = {
+  setTimeout: (callback, ms) => globalThis.setTimeout(callback, ms),
+  clearTimeout: (handle) => globalThis.clearTimeout(handle),
+  setInterval: (callback, ms) => globalThis.setInterval(callback, ms),
+  clearInterval: (handle) => globalThis.clearInterval(handle),
+  queueMicrotask: (callback) => globalThis.queueMicrotask(callback),
+};
 
 const ALL_SLOTS: readonly SseSlot[] = ["system", "alerts", "systemAll", "merged"];
 
@@ -61,6 +75,7 @@ export class ProfileSseTransport {
   // meiva:note
   // Only needs to distinguish concurrent documents; it is not an auth token.
   private readonly tabId: string;
+  private readonly timers: StreamTimers;
   private readonly channel: ChannelHandle | null;
   private readonly listeners: Record<SseChannel, Set<SseListener>> = {
     system: new Set(), alerts: new Set(), systemAll: new Set(),
@@ -97,6 +112,7 @@ export class ProfileSseTransport {
     private readonly config: SseShareConfig,
   ) {
     this.tabId = env.newTabId();
+    this.timers = env.timers ?? defaultTimers;
     this.channel = config.solo ? null : (env.openChannel?.(NAME) ?? null);
     if (this.channel) {
       this.channel.onmessage = (event: MessageEvent<unknown>) => this.receive(event.data);
@@ -111,7 +127,7 @@ export class ProfileSseTransport {
     this.syncParticipation();
     const state = this.states[ch];
     if (state !== null && this.participating) {
-      queueMicrotask(() => {
+      this.timers.queueMicrotask(() => {
         if (this.listeners[ch].has(listener) && this.participating && this.states[ch] === state)
           listener.onState(state);
       });
@@ -141,7 +157,7 @@ export class ProfileSseTransport {
     this.disposed = true;
     this.env.page.removeEventListener("visibilitychange", this.syncParticipation);
     this.stopParticipation();
-    queueMicrotask(() => this.channel?.close());
+    this.timers.queueMicrotask(() => this.channel?.close());
   }
 
   private readonly syncParticipation = (): void => {
@@ -306,11 +322,11 @@ export class ProfileSseTransport {
     // meiva:note
     // A promoted leader may still hold the previous leader's cached open state.
     this.publishState("systemAll", this.localActiveId() === null ? "closed" : "reconnecting");
-    this.pingTimer = setInterval(() => {
+    this.pingTimer = this.timers.setInterval(() => {
       this.post({ type: "ping", leaderId: this.tabId });
       this.announceInterest();
     }, PING_MS);
-    this.pruneTimer = setInterval(() => {
+    this.pruneTimer = this.timers.setInterval(() => {
       for (const tabId of staleTabs(this.interests, this.tabId, this.env.wallNow() - INTEREST_TTL_MS)) {
         this.interests.delete(tabId);
       }
@@ -331,9 +347,9 @@ export class ProfileSseTransport {
   }
 
   private stopLeader(): void {
-    if (this.pingTimer !== null) clearInterval(this.pingTimer);
-    if (this.pruneTimer !== null) clearInterval(this.pruneTimer);
-    if (this.unionTimer !== null) clearTimeout(this.unionTimer);
+    if (this.pingTimer !== null) this.timers.clearInterval(this.pingTimer);
+    if (this.pruneTimer !== null) this.timers.clearInterval(this.pruneTimer);
+    if (this.unionTimer !== null) this.timers.clearTimeout(this.unionTimer);
     this.pingTimer = null;
     this.pruneTimer = null;
     this.unionTimer = null;
@@ -347,8 +363,8 @@ export class ProfileSseTransport {
 
   private scheduleUnion(): void {
     if (!this.leader) return;
-    if (this.unionTimer !== null) clearTimeout(this.unionTimer);
-    this.unionTimer = setTimeout(() => {
+    if (this.unionTimer !== null) this.timers.clearTimeout(this.unionTimer);
+    this.unionTimer = this.timers.setTimeout(() => {
       this.unionTimer = null;
       const union = detailUnion(this.interests.values());
       if (union === this.detailUnion) return;
@@ -371,7 +387,7 @@ export class ProfileSseTransport {
 
   private closeSource(slotName: SseSlot): void {
     const slot = this.slots[slotName];
-    if (slot.retry !== null) clearTimeout(slot.retry);
+    if (slot.retry !== null) this.timers.clearTimeout(slot.retry);
     slot.retry = null;
     slot.source?.close();
     slot.source = null;
@@ -425,7 +441,7 @@ export class ProfileSseTransport {
     if (slot.retry !== null || slot.url === null) return;
     const delay = reconnectDelay(slot.failures, RECONNECT_BASE_MS, RECONNECT_MAX_MS);
     slot.failures += 1;
-    slot.retry = setTimeout(() => {
+    slot.retry = this.timers.setTimeout(() => {
       slot.retry = null;
       if (this.leader && slot.url !== null) this.openSource(slotName, slot.url);
     }, delay);

@@ -12,28 +12,24 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type * as ApiModule from "../transport/api";
-import { ApiError, api } from "../transport/api";
+import { ApiError, type Api } from "../transport/api";
+import { cacheOnlyApi } from "../transport/tests/api/api-provider";
+import { ApiProvider } from "../transport/transport-context";
 import { AuthProvider, useAuth } from "./auth-context";
+import { setTicketFetchForTest } from "./login-ticket";
 
-vi.mock("../transport/api", async (importOriginal) => {
-  const actual = await importOriginal<typeof ApiModule>();
-  return {
-    ...actual,
-    api: {
-      checkAuth: vi.fn(),
-      login: vi.fn(),
-      logout: vi.fn(),
-    },
-  };
-});
-
-const checkAuth = vi.mocked(api.checkAuth);
-const login = vi.mocked(api.login);
-const logout = vi.mocked(api.logout);
+const checkAuth = vi.fn<Api["checkAuth"]>();
+const login = vi.fn<Api["login"]>();
+const logout = vi.fn<Api["logout"]>();
+const testApi: Api = {
+  ...cacheOnlyApi(),
+  checkAuth,
+  login,
+  logout,
+};
 // The one-time-link redemption is a plain POST made by the lazily loaded login-ticket
 // module; its only collaborator is `fetch`.
-const redeemFetch = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>();
+const redeemFetch = vi.fn<(input: string | URL | Request, init?: RequestInit) => Promise<Response>>();
 const verdict = (status: number) => new Response("{}", { status });
 const redeemedTicket = (): unknown => {
   const body = redeemFetch.mock.calls[0][1]?.body;
@@ -41,7 +37,11 @@ const redeemedTicket = (): unknown => {
 };
 
 function wrapper({ children }: { children: React.ReactNode }) {
-  return <AuthProvider>{children}</AuthProvider>;
+  return (
+    <ApiProvider api={testApi}>
+      <AuthProvider>{children}</AuthProvider>
+    </ApiProvider>
+  );
 }
 
 beforeEach(() => {
@@ -49,11 +49,11 @@ beforeEach(() => {
   login.mockReset();
   logout.mockReset();
   redeemFetch.mockReset();
-  vi.stubGlobal("fetch", redeemFetch);
+  setTicketFetchForTest(redeemFetch);
 });
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  setTicketFetchForTest(undefined);
   cleanup();
   window.history.replaceState(null, "", "/");
 });
@@ -269,10 +269,14 @@ describe("login / logout", () => {
 describe("useAuth outside provider", () => {
   it("throws a clear error", () => {
     // Silence the React error-boundary console noise for the expected throw.
-    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    expect(() => renderHook(() => useAuth())).toThrow(
-      /useAuth must be used inside/,
-    );
-    spy.mockRestore();
+    const origError = console.error;
+    console.error = () => undefined;
+    try {
+      expect(() => renderHook(() => useAuth())).toThrow(
+        /useAuth must be used inside/,
+      );
+    } finally {
+      console.error = origError;
+    }
   });
 });

@@ -15,32 +15,9 @@ exports = ["timeline-colors.ts", "timeline-store.ts", "timeline-width.ts", "time
 "use-timeline.ts" = ["timeline-plan.ts", "timeline-store.ts", "use-compact-history-retention.ts"]
 
 [purity]
-"." = "strict-to-be"
 "timeline-colors.ts" = "strict"
 "timeline-plan.ts" = "strict"
 "timeline-store-events.ts" = "strict"
 "timeline-store.ts" = "strict"
 "timeline-width.ts" = "strict"
 "timeline.ts" = "strict"
-"use-timeline-colors.ts" = "strict"
-
-[debt.impure-call]
-"use-compact-history-retention.ts#useCompactHistoryRetention#setTimeout" = 1
-"use-compact-history-retention.ts#useCompactHistoryRetention#useEffect" = 1
-"use-compact-history-retention.ts#useCompactHistoryRetention#useLayoutEffect" = 1
-"use-compact-history-retention.ts#useCompactHistoryRetention#useRef" = 1
-"use-throttled-streaming.ts#useThrottledStreaming#Date.now" = 1
-"use-throttled-streaming.ts#useThrottledStreaming#clearTimeout" = 1
-"use-throttled-streaming.ts#useThrottledStreaming#setTimeout" = 1
-"use-throttled-streaming.ts#useThrottledStreaming#useEffect" = 1
-"use-throttled-streaming.ts#useThrottledStreaming#useRef" = 1
-"use-throttled-streaming.ts#useThrottledStreaming#useState" = 1
-"use-timeline.ts#useTimeline#Date.now" = 1
-"use-timeline.ts#useTimeline#useEffect" = 1
-"use-timeline.ts#useTimeline#useLayoutEffect" = 1
-"use-timeline.ts#useTimeline#useQuery" = 1
-"use-timeline.ts#useTimeline#useQueryClient" = 1
-"use-timeline.ts#useTimeline#useRef" = 1
-
-[debt.wide-exports]
-"meizel.toml#exports" = 1

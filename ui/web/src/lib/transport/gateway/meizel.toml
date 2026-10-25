@@ -16,11 +16,4 @@ exports = ["api-factory.ts", "http.ts", "plans", "tests"]
 "upload-delivery.ts" = ["http.ts", "plans"]
 
 [purity]
-"api-control.ts" = "strict"
-"api-factory.ts" = "strict"
-"upload-delivery.ts" = "strict"
-
-[debt.impure-call]
-"http.ts#createHttp#clearTimeout" = 1
-"http.ts#createHttp#setTimeout" = 1
-"message-delivery.ts#<module>#setTimeout" = 1
+"." = "strict"

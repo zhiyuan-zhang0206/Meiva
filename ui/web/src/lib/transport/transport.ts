@@ -17,11 +17,17 @@ export type UploadRequest = Pick<
 // system-transport.ts builds this from the real globals; tests build it from a
 // real local server or a double that injects a fault the network cannot.
 // meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
+export interface HttpTimers {
+  readonly setTimeout: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  readonly clearTimeout: (handle: ReturnType<typeof setTimeout>) => void;
+}
+
 export interface HttpTransport {
   readonly fetch: (url: string, init: RequestInit) => Promise<Response>;
   now(): number;
   openUpload(): UploadRequest;
   readonly keys: KeySource;
+  readonly timers?: HttpTimers;
 }
 
 export type EventSourceHandle = Pick<
@@ -57,6 +63,14 @@ export interface PageFacts {
 // no BroadcastChannel or Web Locks, which selects the per-page fallback. The wall
 // clock and the tab id only name a tab and stamp interest freshness.
 // meiva:link ui/web/src/docs/frontend-data-flow/merged-stream.meiva.okf.md
+export interface StreamTimers {
+  readonly setTimeout: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  readonly clearTimeout: (handle: ReturnType<typeof setTimeout>) => void;
+  readonly setInterval: (callback: () => void, ms: number) => ReturnType<typeof setInterval>;
+  readonly clearInterval: (handle: ReturnType<typeof setInterval>) => void;
+  readonly queueMicrotask: (callback: () => void) => void;
+}
+
 export interface StreamTransport {
   openEventSource(url: string, init: EventSourceInit): EventSourceHandle;
   readonly openChannel: ((name: string) => ChannelHandle) | null;
@@ -66,6 +80,7 @@ export interface StreamTransport {
   newTabId(): string;
   readonly diagnostics: Diagnostics;
   readonly facts: PageFacts;
+  readonly timers?: StreamTimers;
 }
 
 export interface SessionPort {

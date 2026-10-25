@@ -1,9 +1,5 @@
 [purity]
 "." = "strict"
 
-[debt.stdlib-patch]
-"vitest.setup.ts#vi.stubGlobal ${kind}" = 1
-"vitest.setup.ts#vi.stubGlobal IntersectionObserver" = 1
-
 [debt.third-party-patch]
 "vitest.setup.ts#vi.mock next-intl" = 1

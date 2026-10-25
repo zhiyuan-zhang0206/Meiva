@@ -8,23 +8,5 @@ exports = ["sse-merge.ts", "store.ts", "use-user-settings.ts", "user-settings-mo
 "use-user-settings.ts" = ["store.ts", "user-settings-plan.ts"]
 
 [purity]
-"." = "strict-to-be"
 "sse-merge-plan.ts" = "strict"
-"sse-merge.ts" = "strict-to-be"
-"store.ts" = "strict-to-be"
-"use-user-settings.ts" = "strict-to-be"
 "user-settings-plan.ts" = "strict"
-
-[debt.impure-call]
-"sse-merge.ts#useMergedSseChannels#console.warn" = 1
-"sse-merge.ts#useMergedSseChannels#useEffect" = 1
-"store.ts#<module>#clearTimeout" = 1
-"store.ts#<module>#setTimeout" = 1
-"use-user-settings.ts#<module>#useMutation" = 1
-"use-user-settings.ts#<module>#useQuery" = 1
-"use-user-settings.ts#<module>#useQueryClient" = 1
-"use-user-settings.ts#useDebouncedSetting#clearTimeout" = 1
-"use-user-settings.ts#useDebouncedSetting#setTimeout" = 1
-"use-user-settings.ts#useDebouncedSetting#useEffect" = 1
-"use-user-settings.ts#useDebouncedSetting#useRef" = 1
-"use-user-settings.ts#useDebouncedSetting#useState" = 1

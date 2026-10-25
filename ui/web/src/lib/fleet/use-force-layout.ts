@@ -87,6 +87,8 @@ export interface ForceLayoutOptions {
    *  slice budget. Stops early at alphaMin; 0 (default) keeps the original
    *  live-timer settle. */
   prewarmTicks?: number;
+  requestAnimationFrame?: (cb: FrameRequestCallback) => number;
+  cancelAnimationFrame?: (id: number) => void;
 }
 
 /**
@@ -223,6 +225,8 @@ export function useForceLayout(
     // run under a per-frame budget and commit positions explicitly — the
     // graph paints early and stays interactive while the layout settles.
     const prewarm = optionsRef.current.prewarmTicks ?? 0;
+    const scheduleFrame = optionsRef.current.requestAnimationFrame ?? requestAnimationFrame;
+    const cancelFrame = optionsRef.current.cancelAnimationFrame ?? cancelAnimationFrame;
     let warmRaf: number | null = null;
     let warmTicks = 0;
     if (prewarm > 0) {
@@ -252,7 +256,7 @@ export function useForceLayout(
           setPositions(snap);
         }
         if (!done) {
-          warmRaf = requestAnimationFrame(slice);
+          warmRaf = scheduleFrame(slice);
         } else {
           warmupRef.current = false;
           if (sim.alpha() > sim.alphaMin()) {
@@ -260,7 +264,7 @@ export function useForceLayout(
           }
         }
       };
-      warmRaf = requestAnimationFrame(slice);
+      warmRaf = scheduleFrame(slice);
     }
 
     // Frame counter: throttle React state updates during simulation.
@@ -291,7 +295,7 @@ export function useForceLayout(
     return () => {
       sim.stop();
       warmupRef.current = false;
-      if (warmRaf != null) cancelAnimationFrame(warmRaf);
+      if (warmRaf != null) cancelFrame(warmRaf);
     };
   }, [signature]); // eslint-disable-line react-hooks/exhaustive-deps
 

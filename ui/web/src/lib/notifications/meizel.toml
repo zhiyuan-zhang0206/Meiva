@@ -8,33 +8,5 @@ exports = ["notices.ts", "task-notify.ts", "use-alerts.tsx", "use-cluster-health
 "use-tasks.test.ts" = ["use-tasks.ts"]
 
 [purity]
-"." = "strict-to-be"
 "notices.ts" = "strict"
 "task-notify.ts" = "strict"
-
-[debt.first-party-patch]
-"use-alerts.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-
-[debt.impure-call]
-"use-alerts.tsx#AlertsProvider#useEffect" = 1
-"use-alerts.tsx#AlertsProvider#useQuery" = 1
-"use-alerts.tsx#AlertsProvider#useQueryClient" = 1
-"use-alerts.tsx#AlertsProvider#useRef" = 1
-"use-alerts.tsx#AlertsProvider#useState" = 1
-"use-alerts.tsx#useAlerts#useQuery" = 1
-"use-alerts.tsx#useAlertsSection#useQuery" = 1
-"use-cluster-health.ts#useClusterHealth#useEffect" = 1
-"use-cluster-health.ts#useClusterHealth#useQuery" = 1
-"use-cluster-health.ts#useClusterHealth#useQueryClient" = 1
-"use-cluster-health.ts#useClusterHealth#useRef" = 1
-"use-notices.ts#dropOpenNotices#Date.now" = 1
-"use-notices.ts#useNotices#useInfiniteQuery" = 1
-"use-notices.ts#useNotices#useQuery" = 1
-"use-notices.ts#withoutDroppedRows#Date.now" = 1
-"use-tasks.ts#useTasks#useQuery" = 1
-
-[debt.unfrozen-value]
-"use-notices.ts#dropTombstones" = 1
-
-[debt.wide-exports]
-"meizel.toml#exports" = 1

@@ -1,7 +1,12 @@
 import { operationKeyFrom } from "./plans";
 import { errorFromResponse } from "./plans";
 import { slowRequestReport, type SlowRequestReport } from "./plans";
-import type { HttpTransport, UploadRequest } from "../transport";
+import type { HttpTimers, HttpTransport, UploadRequest } from "../transport";
+
+const defaultTimers: HttpTimers = {
+  setTimeout: (callback, ms) => globalThis.setTimeout(callback, ms),
+  clearTimeout: (handle) => globalThis.clearTimeout(handle),
+};
 
 export interface HttpTelemetry {
   reportSlow(report: SlowRequestReport): void;
@@ -26,6 +31,7 @@ export interface Http {
     callerSignal?: AbortSignal,
     timeoutLabel?: string,
   ) => Promise<T>;
+  readonly wait: (ms: number) => Promise<void>;
   readonly newOperationKey: () => string;
   readonly openUpload: () => UploadRequest;
 }
@@ -39,6 +45,7 @@ async function ok<T>(res: Response): Promise<T> {
 }
 
 export function createHttp(transport: HttpTransport, base: string, telemetry: HttpTelemetry): Http {
+  const timers = transport.timers ?? defaultTimers;
   const url = (path: string): string => `${base}${path}`;
 
   const send = async (path: string, init?: RequestInit): Promise<Response> => {
@@ -64,7 +71,7 @@ export function createHttp(transport: HttpTransport, base: string, telemetry: Ht
     else callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => {
+      timer = timers.setTimeout(() => {
         reject(new DOMException(`${timeoutLabel} exceeded ${timeoutMs}ms`, "TimeoutError"));
         controller.abort();
       }, timeoutMs);
@@ -75,7 +82,7 @@ export function createHttp(transport: HttpTransport, base: string, telemetry: Ht
         timeout,
       ]);
     } finally {
-      if (timer !== undefined) clearTimeout(timer);
+      if (timer !== undefined) timers.clearTimeout(timer);
       callerSignal?.removeEventListener("abort", abortFromCaller);
     }
   };
@@ -85,6 +92,10 @@ export function createHttp(transport: HttpTransport, base: string, telemetry: Ht
     send,
     ok,
     jsonTimed,
+    wait: (ms: number) =>
+      new Promise<void>((resolve) => {
+        timers.setTimeout(resolve, ms);
+      }),
     newOperationKey: () => operationKeyFrom(transport.keys),
     openUpload: () => transport.openUpload(),
   };

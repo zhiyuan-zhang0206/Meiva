@@ -61,7 +61,7 @@ class ImmediateIntersectionObserver implements IntersectionObserver {
   }
 }
 
-vi.stubGlobal("IntersectionObserver", ImmediateIntersectionObserver);
+globalThis.IntersectionObserver = ImmediateIntersectionObserver;
 
 // -- Global network guard ----------------------------------------------------
 //
@@ -101,10 +101,10 @@ let networkGuardTrips: string[] = [];
 
 function networkGuardError(kind: GuardedKind, target: string): Error {
   const message =
-    `[network-guard] blocked a real ${kind} request to ${target} -- tests must mock ` +
-    `@/lib/api (or @/lib/useEventStream for SSE) instead of hitting the network. If this ` +
-    `test file legitimately owns the network boundary, install its own ` +
-    `vi.stubGlobal("${kind}", ...) override (see src/lib/api.test.ts / useEventStream.test.ts).`;
+    `[network-guard] blocked a real ${kind} request to ${target} -- tests must provide ` +
+    `an explicit transport or ApiProvider instead of hitting the network. If this ` +
+    `test file legitimately owns the network boundary, inject its own ${kind} ` +
+    `implementation (see src/lib/transport/tests).`;
   networkGuardTrips.push(message);
   return new Error(message);
 }
@@ -195,28 +195,40 @@ vi.mock("next-intl", async (importOriginal) => {
       obj,
     );
 
+  const useActualTranslations = actual.useTranslations as (
+    namespace?: string,
+  ) => ReturnType<typeof actual.useTranslations>;
+
+  const fallbackTranslations = (namespace?: string) => {
+    const t = (key: string, values?: Record<string, string | number>): string => {
+      const full = namespace ? `${namespace}.${key}` : key;
+      const found = lookup(en, full);
+      let s = typeof found === "string" ? found : key;
+      if (values) {
+        s = s.replace(
+          /\{(\w+), plural, one \{([^{}]*)\} other \{([^{}]*)\}\}/g,
+          (_match, name: string, one: string, other: string) => {
+            const value = values[name];
+            return (Number(value) === 1 ? one : other).replaceAll("#", String(value));
+          },
+        );
+        for (const [k, v] of Object.entries(values)) {
+          s = s.replaceAll(`{${k}}`, String(v));
+        }
+      }
+      return s;
+    };
+    return t as ReturnType<typeof actual.useTranslations>;
+  };
+
   return {
     ...actual,
     useTranslations: (namespace?: string) => {
-      const t = (key: string, values?: Record<string, string | number>): string => {
-        const full = namespace ? `${namespace}.${key}` : key;
-        const found = lookup(en, full);
-        let s = typeof found === "string" ? found : key;
-        if (values) {
-          s = s.replace(
-            /\{(\w+), plural, one \{([^{}]*)\} other \{([^{}]*)\}\}/g,
-            (_match, name: string, one: string, other: string) => {
-              const value = values[name];
-              return (Number(value) === 1 ? one : other).replaceAll("#", String(value));
-            },
-          );
-          for (const [k, v] of Object.entries(values)) {
-            s = s.replaceAll(`{${k}}`, String(v));
-          }
-        }
-        return s;
-      };
-      return t as ReturnType<typeof actual.useTranslations>;
+      try {
+        return useActualTranslations(namespace);
+      } catch {
+        return fallbackTranslations(namespace);
+      }
     },
   };
 });

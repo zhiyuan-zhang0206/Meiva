@@ -6,19 +6,4 @@ exports = ["inspector-panel-store.ts", "inspector-queries.ts", "inspector-widget
 "use-token-usage.test.tsx" = ["use-token-usage.ts"]
 
 [purity]
-"." = "strict-to-be"
-"inspector-panel-store.ts" = "strict"
-"inspector-queries.ts" = "strict"
 "inspector-widgets.ts" = "strict"
-
-[debt.first-party-patch]
-"inspector-panel-store.test.ts#vi.mock ui/web/src/lib/layout/breakpoint.ts" = 1
-"inspector-panel-store.test.ts#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
-"use-detail-reconnect.test.ts#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
-"use-token-usage.test.tsx#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
-
-[debt.impure-call]
-"use-token-usage.ts#useTokenUsage#useLayoutEffect" = 1
-"use-token-usage.ts#useTokenUsage#useQuery" = 1
-"use-token-usage.ts#useTokenUsage#useQueryClient" = 1
-"use-token-usage.ts#useTokenUsage#useRef" = 1

@@ -3,7 +3,7 @@
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createElement, useEffect } from "react";
+import { createElement } from "react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,22 +13,24 @@ import { gatewayRig, type HttpRig } from "../transport/tests/api/api-provider";
 import { usePendingMessages } from "../agents/use-pending-messages";
 import { useTokenUsage } from "./use-token-usage";
 import type { ConversationSnapshotResponse, SystemEvent, TokenUsageResponse } from "../contracts/types";
-import type { ConnectionEvent } from "../transport/useEventStream";
+import {
+  AgentEventStreamContext,
+  type ConnectionEvent,
+  type EventStreamContextValue,
+} from "../transport/useEventStream";
 
 const connectionHandlers = new Set<(event: ConnectionEvent) => void>();
 const systemHandlers = new Set<(event: SystemEvent) => void>();
-vi.mock("../transport/useEventStream", () => ({
-  useAgentEventStream: (
-    onEvent: (event: SystemEvent) => void,
-    onConnectionEvent: (event: ConnectionEvent) => void,
-  ) => {
-    useEffect(() => {
-      connectionHandlers.add(onConnectionEvent);
-      systemHandlers.add(onEvent);
-      return () => { connectionHandlers.delete(onConnectionEvent); systemHandlers.delete(onEvent); };
-    }, [onEvent, onConnectionEvent]);
+const testAgentStreamContextValue: EventStreamContextValue = {
+  subscribe: (onEvent, onConnectionEvent) => {
+    connectionHandlers.add(onConnectionEvent);
+    systemHandlers.add(onEvent);
+    return () => {
+      connectionHandlers.delete(onConnectionEvent);
+      systemHandlers.delete(onEvent);
+    };
   },
-}));
+};
 
 function pushOpen(): void {
   act(() => {
@@ -81,7 +83,19 @@ function useRead(domain: Domain, id: number | null) {
 }
 
 function wrapper({ children }: { children: ReactNode }) {
-  return createElement(QueryClientProvider, { client: queryClient }, createElement(Gateway, null, children));
+  return createElement(
+    QueryClientProvider,
+    { client: queryClient },
+    createElement(
+      Gateway,
+      null,
+      createElement(
+        AgentEventStreamContext.Provider,
+        { value: testAgentStreamContextValue },
+        children,
+      ),
+    ),
+  );
 }
 
 beforeEach(async () => {

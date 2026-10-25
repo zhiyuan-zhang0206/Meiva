@@ -12,34 +12,56 @@
 import { useCallback, useSyncExternalStore } from "react";
 
 const CONTEXT_PANEL_KEY = "meiva.home.contextPanelOpen";
-const listeners = new Set<() => void>();
 
-export function readContextPanelOpen(): boolean {
+export interface ContextPanelStorage {
+  getItem: (key: string) => string | null;
+  setItem: (key: string, value: string) => void;
+}
+
+const panelStore = {
+  listeners: new Set<() => void>(),
+  storage: undefined as ContextPanelStorage | undefined,
+  fallbackOpen: undefined as boolean | undefined,
+};
+
+function resolveStorage(storage?: ContextPanelStorage): ContextPanelStorage {
+  return storage ?? panelStore.storage ?? localStorage;
+}
+
+export function readContextPanelOpen(storage?: ContextPanelStorage): boolean {
   try {
-    return localStorage.getItem(CONTEXT_PANEL_KEY) !== "0";
+    const raw = resolveStorage(storage).getItem(CONTEXT_PANEL_KEY);
+    panelStore.fallbackOpen = undefined;
+    return raw !== "0";
   } catch {
-    return true;
+    return panelStore.fallbackOpen ?? true;
   }
 }
 
-function writeContextPanelOpen(open: boolean): void {
+function writeContextPanelOpen(open: boolean, storage?: ContextPanelStorage): void {
+  panelStore.fallbackOpen = open;
   try {
-    localStorage.setItem(CONTEXT_PANEL_KEY, open ? "1" : "0");
+    resolveStorage(storage).setItem(CONTEXT_PANEL_KEY, open ? "1" : "0");
   } catch {
     return;
   }
 }
 
 function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+  panelStore.listeners.add(listener);
+  return () => panelStore.listeners.delete(listener);
+}
+
+export function setContextPanelStorageForTest(storage?: ContextPanelStorage): void {
+  panelStore.storage = storage;
+  panelStore.fallbackOpen = undefined;
 }
 
 export function useContextPanelOpen(): [open: boolean, setOpen: (open: boolean) => void] {
-  const open = useSyncExternalStore(subscribe, readContextPanelOpen, () => true);
+  const open = useSyncExternalStore(subscribe, () => readContextPanelOpen(), () => true);
   const setOpen = useCallback((next: boolean) => {
     writeContextPanelOpen(next);
-    for (const listener of listeners) listener();
+    for (const listener of panelStore.listeners) listener();
   }, []);
   return [open, setOpen];
 }
