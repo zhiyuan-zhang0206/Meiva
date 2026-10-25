@@ -206,11 +206,13 @@ def _queued_text(core: IMBridgeCore) -> str:
     )
 
 
-def reply_text(reply: object) -> str:
+def reply_text(reply: Reply | list[Reply] | None) -> str:
     """Flatten a Reply or list[Reply] into one joined string."""
-
-    replies = reply if isinstance(reply, list) else [reply]
-    return "\n".join(r.text for r in replies if r is not None)  # type: ignore[union-attr]
+    if reply is None:
+        return ""
+    if isinstance(reply, Reply):
+        return reply.text
+    return "\n".join(r.text for r in reply)
 
 
 async def test_cmd_list_renders_agent_id(make_core: CoreFactory) -> None:

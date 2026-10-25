@@ -60,7 +60,9 @@ def _recorded(name: str) -> psutil.Process:
     return psutil.Process(rec.pid)
 
 
-def test_login_shell_session_records_the_daemon_not_a_wrapper_shell(tmp_path: Path, unit_home):
+def test_login_shell_session_records_the_daemon_not_a_wrapper_shell(
+    tmp_path: Path, unit_home: Path
+) -> None:
     del unit_home
     started, marker = tmp_path / "started", tmp_path / "clean"
     script = tmp_path / "daemon.py"
@@ -82,7 +84,9 @@ def test_login_shell_session_records_the_daemon_not_a_wrapper_shell(tmp_path: Pa
         posixproc.kill_session("meiva-test-shape", graceful=False)
 
 
-def test_graceful_signal_reaches_the_daemon_and_runs_its_cleanup(tmp_path: Path, unit_home):
+def test_graceful_signal_reaches_the_daemon_and_runs_its_cleanup(
+    tmp_path: Path, unit_home: Path
+) -> None:
     del unit_home
     started, marker = tmp_path / "started", tmp_path / "clean"
     script = tmp_path / "daemon.py"
@@ -101,7 +105,9 @@ def test_graceful_signal_reaches_the_daemon_and_runs_its_cleanup(tmp_path: Path,
         posixproc.kill_session("meiva-test-graceful", graceful=False)
 
 
-def test_kill_session_reports_forced_when_the_daemon_ignores_sigterm(tmp_path: Path, unit_home):
+def test_kill_session_reports_forced_when_the_daemon_ignores_sigterm(
+    tmp_path: Path, unit_home: Path
+) -> None:
     del unit_home
     started = tmp_path / "started"
     script = tmp_path / "deaf.py"
@@ -186,7 +192,7 @@ def test_exec_into_rejects_a_compound_command_that_never_execs():
         exec_into("npm run build && npm run start")
 
 
-def test_orchestration_session_keeps_its_wrapper_shell(tmp_path: Path, unit_home):
+def test_orchestration_session_keeps_its_wrapper_shell(tmp_path: Path, unit_home: Path) -> None:
     del unit_home
     started, marker = tmp_path / "started", tmp_path / "clean"
     log = tmp_path / "log"

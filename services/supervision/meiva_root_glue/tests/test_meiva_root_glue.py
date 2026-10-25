@@ -315,7 +315,8 @@ async def test_reference_station_and_writer_share_one_entry_gate(
     station_check = next(
         check for check in rounds._diagnostics._checks if check.name == "observatory-station"
     )
-    station = cast("StationProbe", station_check.probe.__self__)
+    station = cast("StationProbe", getattr(station_check.probe, "__self__", None))
+    assert station is not None
     writer_db = rounds._clients.database()
     station_db = station._database()
     assert writer_db._gate is station_db._gate
