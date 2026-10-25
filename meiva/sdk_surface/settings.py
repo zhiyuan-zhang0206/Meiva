@@ -175,7 +175,7 @@ class _PluginsView:
     so typos / "bind hasn't run yet" are immediately visible.
     """
 
-    def __getattr__(self, name: str) -> object:
+    def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
         from pydantic import BaseModel

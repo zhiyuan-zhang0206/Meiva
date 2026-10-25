@@ -33,6 +33,9 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "help.py" = { kinds = ["home"], why = "_home_relative reads Path.home() to normalize user home prefixes in rendered SDK constant defaults" }
 "settings.py" = { kinds = ["bus", "settings"], why = "SDK settings facade reads live process settings and event bus when no attached-agent context overrides them" }
 
+[debt.any-collaborator]
+"settings.py#any _PluginsView.__getattr__.return" = 1
+
 [debt.impure-call]
 "attachment_transport.py#Path.is_file" = 1
 "attachment_transport.py#Path.stat" = 1
