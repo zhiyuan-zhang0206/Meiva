@@ -53,18 +53,16 @@ deadline makes `/healthz` return 503 for watchdog recovery.
 """
 
 import asyncio
-import os
 import signal
+import socket
 import sys
-import time
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
-from typing import cast
 
 from psycopg_pool import ConnectionPool
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -150,13 +148,14 @@ def run_maintenance(
     db: Database,
     *,
     now: datetime,
+    host: str,
 ) -> None:
     # The telemetry_events record is independent of the rollup: its writer reports its own
     # failures and the mirror holds what it missed, so a failing replay must not prevent the
     # remaining maintenance work from making progress.
     try:
         with pool.connection() as conn:
-            replayed = recover_telemetry_events(conn, logs=config.mirror_dir)
+            replayed = recover_telemetry_events(conn, logs=config.mirror_dir, host=host)
         if replayed:
             events_maintenance_log.info(
                 "[events-maintenance] replayed %d telemetry events from the mirror", replayed
@@ -197,6 +196,17 @@ def run_maintenance(
     progress.mark_success()
 
 
+def _clock(config: EventsMaintenanceConfig) -> Clock:
+    return Clock(
+        ClockConfig(
+            timezone=config.timezone,
+            authoritative_timezone=config.timezone,
+            message_timestamp_weekday=False,
+        ),
+        timers=SYSTEM_TIMERS,
+    )
+
+
 def _run_resolution(
     pool: ConnectionPool,
     progress: LoopProgress,
@@ -205,7 +215,12 @@ def _run_resolution(
 ) -> None:
     """Run the resolution slice while discarding its test-facing summary."""
 
-    run_resolution_slice(pool, config, cadence=cadence, now=datetime.now(UTC))
+    run_resolution_slice(
+        pool,
+        config,
+        cadence=cadence,
+        now=_clock(config).now(),
+    )
     progress.beat()
     progress.mark_success()
 
@@ -238,20 +253,30 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
 # meiva:note
 # Project each registered loop tracker into the shared health envelope. `timeouts` is the deadline
 # each loop was registered with, which the tracker's snapshot does not carry.
+def _snapshot_error(value: object) -> str | None:
+    match value:
+        case {"message": str(message)}:
+            return message
+        case _:
+            return None
+
+
 def loop_components(
     liveness: LivenessGroup, timeouts: Mapping[str, float], *, now: float
 ) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     for name, snapshot in liveness.snapshot().items():
-        error = cast(dict[str, str] | None, snapshot["last_error"])
+        stale_for = snapshot["stale_for"]
+        wedged = snapshot["wedged"]
+        last_success_at = snapshot["last_success_at"]
         facts = health_components.component_facts(
             LoopFacts(
                 name=name,
                 timeout_s=timeouts[name],
-                stale_for_s=cast(float, snapshot["stale_for"]),
-                wedged=cast(bool, snapshot["wedged"]),
-                last_success_at=cast(str | None, snapshot["last_success_at"]),
-                last_error=error["message"] if error is not None else None,
+                stale_for_s=float(stale_for) if isinstance(stale_for, int | float) else 0.0,
+                wedged=bool(wedged),
+                last_success_at=last_success_at if isinstance(last_success_at, str) else None,
+                last_error=_snapshot_error(snapshot["last_error"]),
             )
         )
         records.append(
@@ -282,15 +307,22 @@ async def dispatch_loop(
 ) -> None:
     interval = config.events_maintenance_interval_seconds
     events_maintenance_log.info(
-        "[events-maintenance] daemon started, pid=%s, interval=%.0fs",
-        os.getpid(),
+        "[events-maintenance] daemon started, interval=%.0fs",
         interval,
     )
+    host = socket.gethostname()
     await passes.pass_loop(
         progress,
         label="rollup",
         interval_s=interval,
-        work=lambda: run_maintenance(pool, progress, config, db, now=datetime.now(UTC)),
+        work=lambda: run_maintenance(
+            pool,
+            progress,
+            config,
+            db,
+            now=_clock(config).now(),
+            host=host,
+        ),
         tasks=tasks,
     )
 
@@ -312,8 +344,7 @@ async def resolution_loop(
     cadence = AutoDismissCadence()
     interval = config.events_resolution_interval_seconds
     events_maintenance_log.info(
-        "[events-maintenance] resolution loop started, pid=%s, interval=%ds",
-        os.getpid(),
+        "[events-maintenance] resolution loop started, interval=%ds",
         interval,
     )
     await passes.pass_loop(
@@ -364,7 +395,9 @@ async def run(
         "events_maintenance",
         endpoint.health_port,
         liveness=liveness,
-        components=lambda: loop_components(liveness, timeouts, now=time.time()),
+        components=lambda: loop_components(
+            liveness, timeouts, now=_clock(config).now().timestamp()
+        ),
         image=image,
     )
     events_maintenance_log.info(

@@ -1,13 +1,13 @@
 # meiva:link services/derived/insights/run_timeline/docs/range-projection.meiva.okf.md
 from __future__ import annotations
 
+import itertools
 import threading
 from bisect import bisect_right
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
-from uuid import uuid4
 
 from fastapi import HTTPException
 from psycopg import Connection
@@ -21,9 +21,14 @@ from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.projection.derive import project_segment, segment_view
 from services.derived.insights.run_timeline.projection.jobs import IndexJobs
 from services.derived.insights.run_timeline.projection.model import VERSION, Projection, Segment
-from services.derived.insights.run_timeline.projection.nodes import window_nodes
+from services.derived.insights.run_timeline.projection.nodes import node_bounds, window_nodes
 from services.derived.insights.run_timeline.projection.source import Source, capture_source
-from services.derived.insights.run_timeline.projection.store import segments_for_span, window_blocks
+from services.derived.insights.run_timeline.projection.store import (
+    node_index_bounds,
+    segments_for_span,
+    window_blocks,
+    window_node_rows,
+)
 from services.derived.insights.run_timeline.schemas import RunTimelineNode, RunTimelineUnit
 
 MAX_AGE_SECONDS = 600.0
@@ -79,6 +84,7 @@ class TimelineReader:
         self._building = [threading.Lock() for _ in range(MAX_ENTRIES)]
         self._entries: dict[int, Snapshot] = {}
         self._checked: dict[int, float] = {}
+        self._ids = itertools.count(1)
 
     def get(self, agent_id: int, snapshot: str | None = None) -> Snapshot:
         with self._lock:
@@ -162,7 +168,7 @@ class TimelineReader:
             lifetime = (lifetime[0], lifetime[1] + timedelta(seconds=1))
         return Snapshot(
             agent_id,
-            uuid4().hex,
+            f"s-{id(self):x}-{next(self._ids)}",
             self.timers.monotonic(),
             source.head,
             source.previous,
@@ -178,15 +184,22 @@ class TimelineReader:
         max_units: int | None,
     ) -> tuple[list[RunTimelineNode], list[RunTimelineUnit], int]:
         tail = snapshot.tail
+        tail_facts = tail.facts if tail else []
         tail_blocks = [b for b in tail.blocks if b.start <= end and b.end >= start] if tail else []
         with self.pool.connection() as conn:
-            nodes = window_nodes(
-                self.db,
-                conn,
-                snapshot.agent_id,
-                (snapshot.sealed, snapshot.count, tail.facts if tail else []),
-                start,
-                end,
+            low, high = node_index_bounds(conn, snapshot.agent_id, snapshot.sealed, start, end)
+            bounds = node_bounds(low, high, tail_facts, start, end)
+            node_rows = (
+                window_node_rows(
+                    conn,
+                    snapshot.agent_id,
+                    (snapshot.sealed, snapshot.count, tail_facts),
+                    bounds,
+                    start,
+                    end,
+                )
+                if bounds is not None
+                else []
             )
             blocks, count = window_blocks(
                 conn,
@@ -196,6 +209,7 @@ class TimelineReader:
                 end,
                 allowance=max_units - len(tail_blocks) if max_units is not None else None,
             )
+        nodes = window_nodes(self.db, snapshot.agent_id, node_rows)
         count += len(tail_blocks)
         if max_units is not None and count > max_units:
             return nodes, [], count

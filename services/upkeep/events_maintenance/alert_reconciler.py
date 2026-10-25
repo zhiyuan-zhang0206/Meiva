@@ -16,15 +16,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime
-from typing import Any, cast
+from datetime import datetime
+from typing import Any
 
 import httpx
 import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
+from pydantic import TypeAdapter, ValidationError
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.events.live.bus import EventBus
@@ -38,6 +40,7 @@ _GRAFANA_ALERTS_PATH = "/api/alertmanager/grafana/api/v2/alerts"
 RECONCILE_INTERVAL_S = 300.0
 _RECONCILIATION_NOTE = "reconciled: no longer firing"
 _GRAFANA_API_TIMEOUT = httpx.Timeout(10.0)
+_SNAPSHOT_ADAPTER = TypeAdapter(list[dict[str, object]])
 
 
 class GrafanaSnapshotError(ValueError):
@@ -59,13 +62,14 @@ def grafana_active_alert_keys(payload: object) -> set[AlertKey]:
     and resolve it, so partial truth is not usable truth here.
     """
 
-    if not isinstance(payload, list):
-        raise GrafanaSnapshotError("Grafana active-alert response must be a list")
+    try:
+        entries = _SNAPSHOT_ADAPTER.validate_python(payload, strict=True)
+    except ValidationError as exc:
+        raise GrafanaSnapshotError(
+            "Grafana active-alert response must be a list of objects"
+        ) from exc
     keys: set[AlertKey] = set()
-    for raw_object in cast("list[object]", payload):
-        if not isinstance(raw_object, dict):
-            raise GrafanaSnapshotError("Grafana active-alert entry must be an object")
-        raw = cast("dict[str, object]", raw_object)
+    for raw in entries:
         fingerprint = raw.get("fingerprint")
         starts_at_raw = raw.get("startsAt")
         if not isinstance(fingerprint, str) or not fingerprint:
@@ -157,9 +161,17 @@ async def reconcile_once(
     password = config.grafana_admin_password
     if password is None or not password.get_secret_value():
         return 0
+    clock = Clock(
+        ClockConfig(
+            timezone=config.timezone,
+            authoritative_timezone=config.timezone,
+            message_timestamp_weekday=False,
+        ),
+        timers=SYSTEM_TIMERS,
+    )
     # This timestamp precedes the upstream read: any webhook racing with or
     # following the snapshot has a newer updated_at and is ineligible.
-    snapshot_started_at = datetime.now(UTC)
+    snapshot_started_at = clock.now()
     response = await grafana_client.get(
         f"http://{config.grafana_host}:{config.grafana_port}{_GRAFANA_ALERTS_PATH}",
         auth=httpx.BasicAuth("admin", password.get_secret_value()),
@@ -171,7 +183,7 @@ async def reconcile_once(
     except ValueError as exc:
         raise GrafanaSnapshotError("Grafana active-alert response is not JSON") from exc
     active_keys = grafana_active_alert_keys(payload)
-    resolved_at = datetime.now(UTC)
+    resolved_at = clock.now()
     rows = await asyncio.to_thread(
         _reconcile_from_pool,
         db_pool,

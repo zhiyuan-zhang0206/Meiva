@@ -26,7 +26,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 from zoneinfo import ZoneInfo
 
 import psycopg
@@ -92,7 +91,7 @@ class CheckpointTableSizes:
     writes_live: int
 
 
-def _checkpoint_state(cur: Any) -> tuple[CheckpointTableSizes, int]:
+def _checkpoint_state(cur: psycopg.Cursor) -> tuple[CheckpointTableSizes, int]:
     """Checkpoint-table physical sizes, live tuple counts, and
     ``checkpoint_blobs`` dead tuples.
 
@@ -140,7 +139,7 @@ def _sizes_attributes(sizes: CheckpointTableSizes) -> dict[str, int]:
     }
 
 
-def emit_checkpoint_table_sizes(cur: Any) -> CheckpointTableSizes | None:
+def emit_checkpoint_table_sizes(cur: psycopg.Cursor) -> CheckpointTableSizes | None:
     """Sample the checkpoint tables and emit the size/row-count gauge.
 
     The gauge feeds the meiva-ops checkpoint high-water rules and the growth
@@ -164,7 +163,7 @@ def emit_checkpoint_table_sizes(cur: Any) -> CheckpointTableSizes | None:
     return sizes
 
 
-def vacuum_checkpoint_tables(conn: Any) -> VacuumResult:
+def vacuum_checkpoint_tables(conn: psycopg.Connection) -> VacuumResult:
     """One incremental VACUUM (ANALYZE) pass over the checkpoint tables.
 
     `conn` must be an AUTONOMOUS autocommit connection (VACUUM cannot run in a

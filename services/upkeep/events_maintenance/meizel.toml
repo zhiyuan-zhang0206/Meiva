@@ -16,28 +16,5 @@ exports = ["daemon.py", "resolution.py", "rollup.py", "token_totals.py"]
 "pass_policy.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+"daemon.py" = { kinds = ["platform", "settings"], why = "Service or operator process entry boots configuration and reads the host name before composing its resources" }
 "rollup.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
-
-[debt.ambient-read]
-"alert_reconciler.py#clock datetime.datetime.now" = 2
-"daemon.py#clock datetime.datetime.now" = 2
-"daemon.py#clock time.time" = 1
-"daemon.py#pid os.getpid" = 2
-"rollup.py#clock datetime.datetime.now" = 1
-"telemetry_replay.py#platform socket.gethostname" = 1
-
-[debt.any-collaborator]
-"blob_vacuum.py#any _checkpoint_state.cur" = 1
-"blob_vacuum.py#any emit_checkpoint_table_sizes.cur" = 1
-"blob_vacuum.py#any vacuum_checkpoint_tables.conn" = 1
-"resolution.py#any _insert_auto_dismissal.conn" = 1
-"resolution.py#any _reopen_for_burst.conn" = 1
-"resolution.py#any active_dismissals.conn" = 1
-"resolution.py#any alert_classes.conn" = 1
-"resolution.py#any class_counts.conn" = 1
-"resolution.py#any stable_auto_classes.conn" = 1
-
-[debt.type-cast]
-"alert_reconciler.py#cast grafana_active_alert_keys" = 2
-"daemon.py#cast loop_components" = 4
