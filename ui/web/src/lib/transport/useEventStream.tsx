@@ -71,14 +71,19 @@ interface EventStreamContextValue {
 // server closes is probed once: an invalid session stops, anything else retries
 // with capped exponential backoff.
 // meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md
+interface SseConnectionResult {
+  subscribe: EventStreamContextValue["subscribe"];
+  sseOpen: boolean;
+}
+
 function useSseConnection(
   path: string | null,
   channel: SseChannel,
   activeId: number | null,
   isVisible: boolean,
-  subscribersRef: React.RefObject<Set<Subscriber>>,
-  onOpenChange: (open: boolean) => void,
-): void {
+): SseConnectionResult {
+  const subscribersRef = useRef<Set<Subscriber>>(new Set());
+  const [sseOpen, setSseOpen] = useState(false);
   const hub = useStreamHub();
   const authStatus = sseRuntime.useAuthStatus();
   const reconnectNonce = sseRuntime.useStore((s) => s.reconnectNonce);
@@ -92,7 +97,6 @@ function useSseConnection(
   useEffect(() => {
     if (authStatus !== "authenticated" || !isVisible || (!transport && path === null)) {
       lastReconnectNonce.current = reconnectNonce;
-      onOpenChange(false);
       return;
     }
     const mode = hub.modeEventOnce();
@@ -127,7 +131,7 @@ function useSseConnection(
     const handleOpen = () => {
       if (timers.isDisposed()) return;
       timers.resetBackoff();
-      onOpenChange(true);
+      setSseOpen(true);
       armWatchdog();
       notifyAll({ type: "open" });
     };
@@ -192,6 +196,7 @@ function useSseConnection(
       if (lastReconnectNonce.current !== reconnectNonce) transport.restart(channel);
       lastReconnectNonce.current = reconnectNonce;
       return () => {
+        setSseOpen(false);
         timers.dispose();
         unsubscribe();
       };
@@ -212,15 +217,20 @@ function useSseConnection(
     };
 
     return () => {
+      setSseOpen(false);
       timers.dispose();
       source.close();
     };
     // meiva:note
     // path + authStatus + reconnectNonce + retryNonce are the levers (retryNonce is
-    // the local connect-failure backoff). subscribersRef / onOpenChange /
-    // bumpReconnect are stable identities included only to satisfy the lint.
+    // the local connect-failure backoff). subscribersRef / bumpReconnect are
+    // stable identities included only to satisfy the lint.
   }, [path, channel, activeId, isVisible, transport, authStatus, reconnectNonce, retryNonce,
-    bumpReconnect, subscribersRef, onOpenChange, hub]);
+    bumpReconnect, subscribersRef, hub]);
+
+  const subscribe = useSubscribe(subscribersRef);
+  const canConnect = authStatus === "authenticated" && isVisible && (Boolean(transport) || path !== null);
+  return { subscribe, sseOpen: canConnect && sseOpen };
 }
 
 /** Mint a stable `subscribe(onSystem, onConn)` over a subscriber Set. */
@@ -277,21 +287,14 @@ export function EventStreamProvider({
 }: {
   children: React.ReactNode;
 }) {
-  // Mutable Set of subscribers — useRef avoids re-renders on every subscribe.
-  const subscribersRef = useRef<Set<Subscriber>>(new Set());
-  const [sseOpen, setSseOpen] = useState(false);
   // Reopening reconciles any events missed while the page was hidden.
   const isVisible = sseRuntime.useDocumentVisible();
-
-  useSseConnection(
+  const { subscribe, sseOpen } = useSseConnection(
     isVisible ? "/api/system" : null,
     "system",
     null,
     isVisible,
-    subscribersRef,
-    setSseOpen,
   );
-  const subscribe = useSubscribe(subscribersRef);
 
   // ── The fold (R4 layer 1): ONE subscriber owns every domain's snapshot×SSE
   // reconciliation — applyEvent folds system events into the query cache, and
@@ -348,19 +351,14 @@ export function useEventStream(
 
 const AgentEventStreamContext = createContext<EventStreamContextValue | null>(null);
 
-// The all-events connection has no e2e-ready marker (the global Provider's
-// sse-ready already gates page interactivity); its OPEN state drives no UI.
-const NOOP_OPEN_CHANGE = (_open: boolean): void => undefined;
 /** The detailed feed belongs exclusively to the selected, visible agent. */
 export function AgentEventStreamProvider({ children }: { children: React.ReactNode }) {
-  const subscribersRef = useRef<Set<Subscriber>>(new Set());
   const activeId = sseRuntime.useStore((s) => s.activeId);
   const isVisible = sseRuntime.useDocumentVisible();
   const path = isVisible && activeId !== null
     ? `/api/system/all?agents=${activeId}`
     : null;
-  useSseConnection(path, "systemAll", activeId, isVisible, subscribersRef, NOOP_OPEN_CHANGE);
-  const subscribe = useSubscribe(subscribersRef);
+  const { subscribe } = useSseConnection(path, "systemAll", activeId, isVisible);
 
   return (
     <AgentEventStreamContext.Provider value={{ subscribe }}>

@@ -49,10 +49,12 @@ export interface Breakpoint {
  *  accepted everywhere; a client-side navigation reads the real viewport in
  *  its first render (useMediaQuery's useSyncExternalStore snapshot), so a
  *  route change never paints the wrong frame. */
-export function useBreakpoint(): Breakpoint {
-  const isNarrow = !useMediaQuery(`(min-width: ${BREAKPOINT_MD_PX}px)`);
-  const isLarge = useMediaQuery(`(min-width: ${BREAKPOINT_LG_PX}px)`);
-  const isWide = useMediaQuery(`(min-width: ${BREAKPOINT_WIDE_PX}px)`);
+export function useBreakpoint(
+  matchQuery: (query: string) => boolean = useMediaQuery,
+): Breakpoint {
+  const isNarrow = !matchQuery(`(min-width: ${BREAKPOINT_MD_PX}px)`);
+  const isLarge = matchQuery(`(min-width: ${BREAKPOINT_LG_PX}px)`);
+  const isWide = matchQuery(`(min-width: ${BREAKPOINT_WIDE_PX}px)`);
   const [width, setWidth] = useState(0);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- SSR-safe sync: read the real viewport once after mount

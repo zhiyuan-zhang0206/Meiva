@@ -1,7 +1,7 @@
 exports = ["breakpoint.ts", "compact-transition.ts", "content-toggle-store.ts", "layout.ts", "panel-layout-storage.ts", "scroll-memory.ts", "sticky.ts", "switch-budget.ts", "use-client-ready.ts", "use-document-visible.ts", "use-media-query.ts"]
 
 [uses]
-"breakpoint.test.ts" = ["breakpoint.ts", "use-media-query.ts"]
+"breakpoint.test.ts" = ["breakpoint.ts"]
 "breakpoint.ts" = ["use-media-query.ts"]
 "content-toggle-store.test.ts" = ["content-toggle-store.ts"]
 "layout.ts" = ["primitives"]
@@ -22,18 +22,12 @@ exports = ["breakpoint.ts", "compact-transition.ts", "content-toggle-store.ts", 
 "sticky.ts" = "strict"
 "switch-budget.ts" = "strict"
 
-[debt.first-party-patch]
-"breakpoint.test.ts#vi.mock ui/web/src/lib/layout/use-media-query.ts" = 1
-"content-toggle-store.test.ts#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
-
 [debt.impure-call]
 "breakpoint.ts#useBreakpoint#useEffect" = 1
 "breakpoint.ts#useBreakpoint#useState" = 1
 "breakpoint.ts#useBreakpoint#window" = 1
 "use-client-ready.ts#schedulePump#setTimeout" = 1
 "use-client-ready.ts#useClientReady#useSyncExternalStore" = 1
-"use-client-ready.ts#useDeferredMount#cancelAnimationFrame" = 1
-"use-client-ready.ts#useDeferredMount#requestAnimationFrame" = 1
 "use-client-ready.ts#useDeferredMount#useEffect" = 1
 "use-client-ready.ts#useDeferredMount#useState" = 1
 "use-client-ready.ts#useDeferredMount#window" = 1
@@ -42,15 +36,6 @@ exports = ["breakpoint.ts", "compact-transition.ts", "content-toggle-store.ts", 
 "use-document-visible.ts#useDocumentVisible#useState" = 1
 "use-media-query.ts#useMediaQuery#useSyncExternalStore" = 1
 "use-media-query.ts#useMediaQuery#window" = 1
-
-[debt.stdlib-patch]
-"panel-layout-storage.test.ts#vi.spyOn Storage.prototype.getItem" = 1
-"panel-layout-storage.test.ts#vi.spyOn Storage.prototype.setItem" = 1
-"use-client-ready.test.tsx#vi.stubGlobal cancelAnimationFrame" = 1
-"use-client-ready.test.tsx#vi.stubGlobal cancelIdleCallback" = 1
-"use-client-ready.test.tsx#vi.stubGlobal requestAnimationFrame" = 1
-"use-client-ready.test.tsx#vi.stubGlobal requestIdleCallback" = 1
-"use-media-query.test.tsx#vi.stubGlobal matchMedia" = 1
 
 [debt.wide-exports]
 "meizel.toml#exports" = 1

@@ -1,39 +1,87 @@
 // useUserSettings hook tests — query loading, optimistic update, error rollback.
 
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+// meiva:note
+// @vitest-environment happy-dom
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { api } from "@/lib/transport/api";
-import { useDebouncedSetting, useUserSettings } from "@/lib/state/use-user-settings";
+import { useDebouncedSetting, useUserSettings } from "./use-user-settings";
+import {
+  gatewayRig,
+  startGateway,
+  type GatewayReply,
+  type TestGateway,
+} from "../transport/tests/api/api-provider";
+import { ApiProvider } from "../transport/transport-context";
 
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getSettings: vi.fn(),
-    putSetting: vi.fn(),
-  },
-}));
+let activeGateway: TestGateway | null = null;
 
-function wrapper({ children }: { children: React.ReactNode }) {
+afterEach(async () => {
+  cleanup();
+  if (activeGateway !== null) {
+    await activeGateway.close();
+    activeGateway = null;
+  }
+});
+
+async function setupSettingsGateway(
+  handler: {
+    onGet?: () => GatewayReply | Promise<GatewayReply>;
+    onPut?: (key: string, value: unknown) => GatewayReply | Promise<GatewayReply>;
+  } = {},
+) {
+  const gateway = await startGateway(async (request) => {
+    if (request.method === "GET" && request.path === "/api/settings") {
+      if (handler.onGet) return handler.onGet();
+      return { kind: "json", body: { settings: [] } };
+    }
+    if (request.method === "PUT" && request.path.startsWith("/api/settings/")) {
+      const key = decodeURIComponent(request.path.slice("/api/settings/".length));
+      const parsed = JSON.parse(request.body) as { value: unknown };
+      if (handler.onPut) return handler.onPut(key, parsed.value);
+      return {
+        kind: "json",
+        body: {
+          key,
+          value: parsed.value,
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      };
+    }
+    return { kind: "json", status: 404, body: { detail: "not found" } };
+  });
+  activeGateway = gateway;
+  const rig = gatewayRig(gateway);
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <ApiProvider api={rig.api}>
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    </ApiProvider>
+  );
+  return { gateway, rig, wrapper };
 }
 
-beforeEach(() => {
-  vi.clearAllMocks();
-});
-
-afterEach(cleanup);
+function putRequests(gateway: TestGateway): { key: string; value: unknown }[] {
+  return gateway.requests
+    .filter((req) => req.method === "PUT" && req.path.startsWith("/api/settings/"))
+    .map((req) => ({
+      key: decodeURIComponent(req.path.slice("/api/settings/".length)),
+      value: (JSON.parse(req.body) as { value: unknown }).value,
+    }));
+}
 
 describe("useUserSettings", () => {
   it("returns defaults when server returns empty", async () => {
-    vi.spyOn(api, "getSettings").mockResolvedValue({ settings: [] });
+    const { wrapper } = await setupSettingsGateway();
 
     const { result } = renderHook(() => useUserSettings(), { wrapper });
 
-    await waitFor(() => !result.current.isLoading);
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.settings["display.show_timestamp_weekday"]).toBe(true);
     expect(result.current.settings["display.time_mode"]).toBe("last_active");
@@ -42,10 +90,19 @@ describe("useUserSettings", () => {
   });
 
   it("merges server values over defaults", async () => {
-    vi.spyOn(api, "getSettings").mockResolvedValue({
-      settings: [
-        { key: "display.show_timestamp_weekday", value: false, updated_at: "2026-01-01T00:00:00Z" },
-      ],
+    const { wrapper } = await setupSettingsGateway({
+      onGet: () => ({
+        kind: "json",
+        body: {
+          settings: [
+            {
+              key: "display.show_timestamp_weekday",
+              value: false,
+              updated_at: "2026-01-01T00:00:00Z",
+            },
+          ],
+        },
+      }),
     });
 
     const { result } = renderHook(() => useUserSettings(), { wrapper });
@@ -58,14 +115,18 @@ describe("useUserSettings", () => {
     expect(result.current.settings["display.time_mode"]).toBe("last_active");
   });
 
-
   it("setSetting rolls back on server error", async () => {
-    vi.spyOn(api, "getSettings").mockResolvedValue({ settings: [] });
-    vi.spyOn(api, "putSetting").mockRejectedValue(new Error("Server error"));
+    const { wrapper } = await setupSettingsGateway({
+      onPut: () => ({
+        kind: "json",
+        status: 500,
+        body: { detail: "Server error" },
+      }),
+    });
 
     const { result } = renderHook(() => useUserSettings(), { wrapper });
 
-    await waitFor(() => !result.current.isLoading);
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     // Initial value from defaults
     expect(result.current.settings["display.show_timestamp_weekday"]).toBe(true);
@@ -79,19 +140,15 @@ describe("useUserSettings", () => {
     });
   });
 
-
-
   it("rolls back to defaults when the PUT fails before the initial GET resolves", async () => {
-    // Cache is still empty (GET pending) — e.g. the sidebar quick toggle
-    // clicked right after load. The rollback snapshot must fall back to the
-    // defaults instead of silently skipping the rollback.
-    vi.spyOn(api, "getSettings").mockReturnValue(new Promise(() => undefined));
-    let rejectPut: (e: Error) => void = () => undefined;
-    vi.spyOn(api, "putSetting").mockReturnValue(
-      new Promise((_, reject) => {
-        rejectPut = reject;
-      }),
-    );
+    let releasePut: (reply: GatewayReply) => void = () => undefined;
+    const { wrapper } = await setupSettingsGateway({
+      onGet: () => ({ kind: "hang" }),
+      onPut: () =>
+        new Promise<GatewayReply>((resolve) => {
+          releasePut = resolve;
+        }),
+    });
 
     const { result } = renderHook(() => useUserSettings(), { wrapper });
 
@@ -106,41 +163,40 @@ describe("useUserSettings", () => {
     });
 
     // …and the failed PUT rolls it back to the default, not a stuck true.
-    rejectPut(new Error("Server error"));
+    releasePut({ kind: "json", status: 500, body: { detail: "Server error" } });
     await waitFor(() => {
       expect(result.current.settings["display.show_agent_status"]).toBe(false);
     });
   });
 
   it("caches settings and does not refetch on every call", async () => {
-    const spy = vi.spyOn(api, "getSettings").mockResolvedValue({ settings: [] });
+    const { gateway, wrapper } = await setupSettingsGateway();
 
     // First render
     const { result, rerender } = renderHook(() => useUserSettings(), { wrapper });
-    await waitFor(() => !result.current.isLoading);
-    expect(spy).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    const getCount = () =>
+      gateway.requests.filter((r) => r.method === "GET" && r.path === "/api/settings").length;
+    expect(getCount()).toBe(1);
 
     // Rerender — should not refetch (staleTime = 60s)
     rerender();
-    expect(spy).toHaveBeenCalledTimes(1);
+    expect(getCount()).toBe(1);
   });
 
   it("setSetting optimistically updates and calls PUT", async () => {
-    vi.spyOn(api, "getSettings").mockResolvedValue({ settings: [] });
-    vi.spyOn(api, "putSetting").mockResolvedValue({
-      key: "display.show_timestamp_weekday",
-      value: false,
-      updated_at: "2026-01-01T00:00:00Z",
-    });
+    const { gateway, wrapper } = await setupSettingsGateway();
 
     const { result } = renderHook(() => useUserSettings(), { wrapper });
 
-    await waitFor(() => !result.current.isLoading);
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     result.current.setSetting("display.show_timestamp_weekday", false);
 
     await waitFor(() => {
-      expect(api.putSetting).toHaveBeenCalledWith("display.show_timestamp_weekday", false);
+      expect(putRequests(gateway)).toEqual([
+        { key: "display.show_timestamp_weekday", value: false },
+      ]);
     });
   });
 });
@@ -149,16 +205,8 @@ describe("useUserSettings", () => {
 // width, force-layout sliders): local value live immediately, DB PUT
 // coalesced, and a pending write flushed on unmount.
 describe("useDebouncedSetting", () => {
-  beforeEach(() => {
-    vi.spyOn(api, "getSettings").mockResolvedValue({ settings: [] });
-    vi.spyOn(api, "putSetting").mockResolvedValue({
-      key: "display.timeline_width_ratio",
-      value: 0.4,
-      updated_at: "2026-01-01T00:00:00Z",
-    });
-  });
-
   it("updates the local value immediately but debounces the PUT", async () => {
+    const { gateway, wrapper } = await setupSettingsGateway();
     const { result } = renderHook(
       () => useDebouncedSetting("display.timeline_width_ratio", 0.4, 50),
       { wrapper },
@@ -169,16 +217,18 @@ describe("useDebouncedSetting", () => {
     // Local value is live immediately (for a smooth drag)…
     expect(result.current[0]).toBe(0.5);
     // …but the network write has not fired yet.
-    expect(api.putSetting).not.toHaveBeenCalled();
+    expect(putRequests(gateway)).toEqual([]);
 
     // After the debounce window, exactly one PUT lands with the final value.
     await waitFor(() =>
-      expect(api.putSetting).toHaveBeenCalledWith("display.timeline_width_ratio", 0.5),
+      expect(putRequests(gateway)).toEqual([
+        { key: "display.timeline_width_ratio", value: 0.5 },
+      ]),
     );
-    expect(api.putSetting).toHaveBeenCalledTimes(1);
   });
 
   it("coalesces a rapid burst of changes into one trailing PUT", async () => {
+    const { gateway, wrapper } = await setupSettingsGateway();
     const { result } = renderHook(
       () => useDebouncedSetting("display.timeline_width_ratio", 0.4, 50),
       { wrapper },
@@ -190,12 +240,14 @@ describe("useDebouncedSetting", () => {
     act(() => result.current[1](0.5));
 
     await waitFor(() =>
-      expect(api.putSetting).toHaveBeenCalledWith("display.timeline_width_ratio", 0.5),
+      expect(putRequests(gateway)).toEqual([
+        { key: "display.timeline_width_ratio", value: 0.5 },
+      ]),
     );
-    expect(api.putSetting).toHaveBeenCalledTimes(1);
   });
 
   it("flushes a pending write on unmount", async () => {
+    const { gateway, wrapper } = await setupSettingsGateway();
     const { result, unmount } = renderHook(
       // Long delay so the timer never fires on its own — only the unmount flush can.
       () => useDebouncedSetting("display.timeline_width_ratio", 0.4, 10_000),
@@ -204,11 +256,13 @@ describe("useDebouncedSetting", () => {
     await waitFor(() => expect(result.current[0]).toBe(0.4));
 
     act(() => result.current[1](0.6));
-    expect(api.putSetting).not.toHaveBeenCalled();
+    expect(putRequests(gateway)).toEqual([]);
 
     unmount();
     await waitFor(() =>
-      expect(api.putSetting).toHaveBeenCalledWith("display.timeline_width_ratio", 0.6),
+      expect(putRequests(gateway)).toEqual([
+        { key: "display.timeline_width_ratio", value: 0.6 },
+      ]),
     );
   });
 });

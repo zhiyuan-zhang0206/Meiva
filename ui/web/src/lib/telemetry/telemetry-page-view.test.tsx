@@ -1,12 +1,11 @@
+// meiva:note
+// @vitest-environment happy-dom
+
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { telemetryTestControl } from "./telemetry";
 import { TelemetryPageView } from "./telemetry-page-view";
-
-let pathname = "/";
-
-vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
 
 beforeEach(() => {
   telemetryTestControl.intercept({
@@ -17,16 +16,14 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  pathname = "/";
   telemetryTestControl.reset();
   vi.clearAllMocks();
 });
 
 it("initializes Web Vitals once across authenticated route changes", () => {
   const initSpy = vi.fn();
-  const view = render(<TelemetryPageView onInitWebVitals={initSpy} />);
-  pathname = "/fleet";
-  view.rerender(<TelemetryPageView onInitWebVitals={initSpy} />);
+  const view = render(<TelemetryPageView pathname="/" onInitWebVitals={initSpy} />);
+  view.rerender(<TelemetryPageView pathname="/fleet" onInitWebVitals={initSpy} />);
 
   expect(initSpy).toHaveBeenCalledTimes(1);
 });

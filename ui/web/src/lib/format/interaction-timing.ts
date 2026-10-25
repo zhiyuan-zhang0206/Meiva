@@ -1,23 +1,38 @@
 import { track } from "../telemetry/telemetry";
 
 const MAX_COMPOSER_LATENCY_MS = 120_000;
-const pendingMessageSentAt = new Map<number, number>();
-const testHooks: { onNoteTurnStart?: (agentId: number) => void } = {};
 
-export function markMessageSent(agentId: number): void {
-  pendingMessageSentAt.set(agentId, performance.now());
+interface InteractionTimingState {
+  pendingMessageSentAt: Map<number, number>;
+  nowOverride: (() => number) | null;
+  onNoteTurnStart?: (agentId: number) => void;
+}
+
+const state: InteractionTimingState = {
+  pendingMessageSentAt: new Map<number, number>(),
+  nowOverride: null,
+};
+
+export function markMessageSent(
+  agentId: number,
+  nowMs: number = state.nowOverride ? state.nowOverride() : performance.now(),
+): void {
+  state.pendingMessageSentAt.set(agentId, nowMs);
 }
 
 export function clearMessageSent(agentId: number): void {
-  pendingMessageSentAt.delete(agentId);
+  state.pendingMessageSentAt.delete(agentId);
 }
 
-export function noteTurnStart(agentId: number): void {
-  testHooks.onNoteTurnStart?.(agentId);
-  const sentAt = pendingMessageSentAt.get(agentId);
+export function noteTurnStart(
+  agentId: number,
+  nowMs: number = state.nowOverride ? state.nowOverride() : performance.now(),
+): void {
+  state.onNoteTurnStart?.(agentId);
+  const sentAt = state.pendingMessageSentAt.get(agentId);
   if (sentAt === undefined) return;
-  pendingMessageSentAt.delete(agentId);
-  const latencyMs = performance.now() - sentAt;
+  state.pendingMessageSentAt.delete(agentId);
+  const latencyMs = nowMs - sentAt;
   if (latencyMs <= 0 || latencyMs > MAX_COMPOSER_LATENCY_MS) return;
   track("composer-latency", {
     key: "send-to-turn-start",
@@ -27,8 +42,10 @@ export function noteTurnStart(agentId: number): void {
 
 export function interactionTimingResetForTest(
   onNoteTurnStart?: (agentId: number) => void,
+  nowOverride?: (() => number) | null,
 ): void {
-  pendingMessageSentAt.clear();
-  if (onNoteTurnStart) testHooks.onNoteTurnStart = onNoteTurnStart;
-  else delete testHooks.onNoteTurnStart;
+  state.pendingMessageSentAt.clear();
+  state.nowOverride = nowOverride ?? null;
+  if (onNoteTurnStart) state.onNoteTurnStart = onNoteTurnStart;
+  else delete state.onNoteTurnStart;
 }

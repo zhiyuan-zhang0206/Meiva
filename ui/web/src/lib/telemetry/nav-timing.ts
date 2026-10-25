@@ -24,66 +24,70 @@
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 
+import {
+  createNavTimingMetrics,
+  formatNavFallbackHead,
+  formatNavTiming,
+  recordLongTaskDuration,
+  recordResourceEntry,
+  resetNavWatchMetrics,
+} from "./nav-timing-plan";
 import { track } from "./telemetry";
 
-const SETTLE_MS = 400;
-const NAV_FALLBACK_MS = 5000;
-let fallbackMs = NAV_FALLBACK_MS;
+export { formatNavTiming } from "./nav-timing-plan";
 
-let intentAt: number | null = null;
-let intentPath: string | null = null;
-let longestTask = 0;
-let maxQueueMs = 0;
-let startedResources = 0;
-let resourceNames: string[] = [];
-let frames = 0;
-let frameLoop = 0;
-let observer: PerformanceObserver | null = null;
-let resources: PerformanceObserver | null = null;
-let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+const SETTLE_MS = 400;
+
+const state = {
+  metrics: createNavTimingMetrics(),
+  frameLoop: 0,
+  observer: null as PerformanceObserver | null,
+  resources: null as PerformanceObserver | null,
+  fallbackTimer: null as ReturnType<typeof setTimeout> | null,
+  requestFrame: null as ((cb: FrameRequestCallback) => number) | null,
+  cancelFrame: null as ((id: number) => void) | null,
+};
 
 function countFrames(): void {
-  frames += 1;
-  frameLoop = requestAnimationFrame(countFrames);
+  const req = state.requestFrame ?? requestAnimationFrame;
+  state.frameLoop = req(() => {
+    state.metrics.frames += 1;
+    countFrames();
+  });
 }
 
 function stopFrames(): void {
-  if (frameLoop !== 0) cancelAnimationFrame(frameLoop);
-  frameLoop = 0;
+  const cancel = state.cancelFrame ?? cancelAnimationFrame;
+  if (state.frameLoop !== 0) cancel(state.frameLoop);
+  state.frameLoop = 0;
 }
 
 function startWatching(): void {
-  longestTask = 0;
-  maxQueueMs = 0;
-  startedResources = 0;
-  resourceNames = [];
-  frames = 0;
+  resetNavWatchMetrics(state.metrics);
   stopFrames();
-  frameLoop = requestAnimationFrame(countFrames);
+  countFrames();
   if (typeof PerformanceObserver === "undefined") return;
   try {
-    if (observer === null) {
-      observer = new PerformanceObserver((list) => {
-        if (intentAt === null) return;
+    if (state.observer === null) {
+      state.observer = new PerformanceObserver((list) => {
         for (const entry of list.getEntries()) {
-          longestTask = Math.max(longestTask, entry.duration);
+          recordLongTaskDuration(state.metrics, entry.duration);
         }
       });
-      observer.observe({ entryTypes: ["longtask"] });
+      state.observer.observe({ entryTypes: ["longtask"] });
     }
-    if (resources === null) {
-      resources = new PerformanceObserver((list) => {
-        if (intentAt === null) return;
+    if (state.resources === null) {
+      state.resources = new PerformanceObserver((list) => {
         for (const entry of list.getEntries() as PerformanceResourceTiming[]) {
-          startedResources += 1;
-          if (resourceNames.length < 4) {
-            resourceNames.push(entry.name.split("/").pop() ?? entry.name);
-          }
-          const queued = entry.requestStart - entry.startTime;
-          if (queued > maxQueueMs) maxQueueMs = queued;
+          recordResourceEntry(
+            state.metrics,
+            entry.name,
+            entry.startTime,
+            entry.requestStart,
+          );
         }
       });
-      resources.observe({ entryTypes: ["resource"] });
+      state.resources.observe({ entryTypes: ["resource"] });
     }
   } catch {
     return;
@@ -91,52 +95,50 @@ function startWatching(): void {
 }
 
 function clearFallback(): void {
-  if (fallbackTimer !== null) clearTimeout(fallbackTimer);
-  fallbackTimer = null;
+  if (state.fallbackTimer !== null) clearTimeout(state.fallbackTimer);
+  state.fallbackTimer = null;
 }
 
 export function setNavFallbackMs(ms: number): void {
-  if (Number.isFinite(ms) && ms > 0) fallbackMs = ms;
+  if (Number.isFinite(ms) && ms > 0) state.metrics.fallbackMs = ms;
 }
 
 export function markNavIntent(href?: string): void {
   if (typeof window === "undefined") return;
-  intentAt = performance.now();
-  intentPath = href ?? null;
+  state.metrics.intentAt = performance.now();
+  state.metrics.intentPath = href ?? null;
   startWatching();
   clearFallback();
-  if (intentPath === null) return;
-  const target: string = intentPath;
-  fallbackTimer = setTimeout(() => {
-    fallbackTimer = null;
+  if (state.metrics.intentPath === null) return;
+  const target: string = state.metrics.intentPath;
+  state.fallbackTimer = setTimeout(() => {
+    state.fallbackTimer = null;
     if (window.location.pathname === target) return;
-    const elapsed = intentAt === null ? 0 : performance.now() - intentAt;
+    const elapsed =
+      state.metrics.intentAt === null ? 0 : performance.now() - state.metrics.intentAt;
     stopFrames();
     const page = target.replace(/^\//, "") || "home";
     track("nav-timing", {
       page,
       key: "fallback",
       value:
-        `c=${Math.round(elapsed)}|n=${startedResources}|q=${Math.round(maxQueueMs)}|f=1` +
-        `|fr=${frames}|v=${document.visibilityState === "visible" ? 1 : 0}`,
+        formatNavFallbackHead(elapsed, state.metrics) +
+        `|fr=${state.metrics.frames}|v=${document.visibilityState === "visible" ? 1 : 0}`,
       dedupe: false,
     });
     track("nav-timing", {
       page,
       key: "res",
-      value: resourceNames.join(","),
+      value: state.metrics.resourceNames.join(","),
       dedupe: false,
     });
     window.location.assign(target);
-  }, fallbackMs);
+  }, state.metrics.fallbackMs);
 }
 
-export function formatNavTiming(commitMs: number, paintMs: number, taskMs: number): string {
-  return `c=${Math.round(commitMs)}|p=${Math.round(paintMs)}|t=${Math.round(taskMs)}`;
-}
-
-export function useNavTimingReport(): void {
-  const pathname = usePathname();
+export function useNavTimingReport(pathnameOverride?: string): void {
+  const routerPathname = usePathname();
+  const pathname = pathnameOverride ?? (routerPathname || "/");
   const previous = useRef<string | null>(null);
   useEffect(() => {
     if (previous.current === null) {
@@ -145,17 +147,18 @@ export function useNavTimingReport(): void {
     }
     if (previous.current === pathname) return;
     previous.current = pathname;
-    if (intentAt === null) return;
+    if (state.metrics.intentAt === null) return;
     clearFallback();
     stopFrames();
-    const commit = performance.now() - intentAt;
-    requestAnimationFrame(() => {
-      if (intentAt === null) return;
-      const paint = performance.now() - intentAt;
+    const commit = performance.now() - state.metrics.intentAt;
+    const req = state.requestFrame ?? requestAnimationFrame;
+    req(() => {
+      if (state.metrics.intentAt === null) return;
+      const paint = performance.now() - state.metrics.intentAt;
       setTimeout(() => {
-        const task = longestTask;
-        intentAt = null;
-        intentPath = null;
+        const task = state.metrics.longestTask;
+        state.metrics.intentAt = null;
+        state.metrics.intentPath = null;
         track("nav-timing", {
           page: pathname.replace(/^\//, "") || "home",
           key: "nav",
@@ -166,3 +169,15 @@ export function useNavTimingReport(): void {
     });
   }, [pathname]);
 }
+
+export const navTimingTestControl = Object.freeze({
+  setFrameScheduler(
+    scheduler: {
+      requestAnimationFrame: (cb: FrameRequestCallback) => number;
+      cancelAnimationFrame: (id: number) => void;
+    } | null,
+  ): void {
+    state.requestFrame = scheduler?.requestAnimationFrame ?? null;
+    state.cancelFrame = scheduler?.cancelAnimationFrame ?? null;
+  },
+});

@@ -1,19 +1,50 @@
-import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+// meiva:note
+// @vitest-environment happy-dom
 
-vi.mock("@/lib/state/use-user-settings", () => import("@/lib/state/user-settings-mock"));
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { describe, expect, it } from "vitest";
 
-import { resetMockSettings, setMockSetting } from "@/lib/state/user-settings-mock";
-
+import { USER_SETTING_DEFAULTS } from "../contracts/types";
+import { SETTINGS_QUERY_KEY } from "../state/use-user-settings";
+import { cacheOnlyApi } from "../transport/tests/api/api-provider";
+import { ApiProvider } from "../transport/transport-context";
 import { useTimeFormat } from "./use-time-format";
 
 const INSTANT = "2026-10-17T08:26:07.250Z";
+process.env.TZ = "UTC";
 
-beforeEach(() => resetMockSettings());
+function createSettingsRig(initial: Record<string, unknown> = {}) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  client.setQueryData(SETTINGS_QUERY_KEY, {
+    ...USER_SETTING_DEFAULTS,
+    ...initial,
+  });
+  const api = cacheOnlyApi();
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(
+      ApiProvider,
+      { api },
+      createElement(QueryClientProvider, { client }, children),
+    );
+  return {
+    wrapper,
+    setSetting: (key: string, value: unknown) => {
+      client.setQueryData<Record<string, unknown>>(SETTINGS_QUERY_KEY, (old) => ({
+        ...(old ?? USER_SETTING_DEFAULTS),
+        [key]: value,
+      }));
+    },
+  };
+}
 
 describe("useTimeFormat", () => {
   it("defaults to a 24-hour clock with no zone name", () => {
-    const { result } = renderHook(() => useTimeFormat());
+    const { wrapper } = createSettingsRig();
+    const { result } = renderHook(() => useTimeFormat(), { wrapper });
     expect(result.current.clockFormat).toBe("24h");
     expect(result.current.showTimeZone).toBe(false);
     expect(result.current.formatAbsolute(INSTANT)).toBe("2026-10-17 08:26:07");
@@ -21,18 +52,27 @@ describe("useTimeFormat", () => {
   });
 
   it("treats missing keys as the defaults (a viewer who never changed them)", () => {
-    resetMockSettings({ "display.clock_format": undefined, "display.show_timezone": undefined });
-    const { result } = renderHook(() => useTimeFormat());
+    const { wrapper } = createSettingsRig({
+      "display.clock_format": undefined,
+      "display.show_timezone": undefined,
+    });
+    const { result } = renderHook(() => useTimeFormat(), { wrapper });
     expect(result.current.clockFormat).toBe("24h");
     expect(result.current.showTimeZone).toBe(false);
-    expect(result.current.formatUpcoming("2026-10-18T15:21:00Z", new Date("2026-10-17T16:26:00Z"))).toBe(
-      "Tomorrow 15:21",
-    );
+    expect(
+      result.current.formatUpcoming(
+        "2026-10-18T15:21:00Z",
+        new Date("2026-10-17T16:26:00Z"),
+      ),
+    ).toBe("Tomorrow 15:21");
   });
 
   it("follows the stored clock format and zone-name switch", () => {
-    resetMockSettings({ "display.clock_format": "12h", "display.show_timezone": true });
-    const { result } = renderHook(() => useTimeFormat());
+    const { wrapper } = createSettingsRig({
+      "display.clock_format": "12h",
+      "display.show_timezone": true,
+    });
+    const { result } = renderHook(() => useTimeFormat(), { wrapper });
     expect(result.current.clockFormat).toBe("12h");
     expect(result.current.showTimeZone).toBe(true);
     expect(result.current.formatAbsolute(INSTANT)).toBe("2026-10-17 8:26:07 AM UTC");
@@ -40,16 +80,19 @@ describe("useTimeFormat", () => {
   });
 
   it("falls back to 24-hour for an unrecognized stored value", () => {
-    resetMockSettings({ "display.clock_format": "13h" });
-    const { result } = renderHook(() => useTimeFormat());
+    const { wrapper } = createSettingsRig({ "display.clock_format": "13h" });
+    const { result } = renderHook(() => useTimeFormat(), { wrapper });
     expect(result.current.clockFormat).toBe("24h");
     expect(result.current.formatAbsolute(INSTANT)).toBe("2026-10-17 08:26:07");
   });
 
-  it("re-renders when the setting changes", () => {
-    const { result } = renderHook(() => useTimeFormat());
-    act(() => setMockSetting("display.clock_format", "12h"));
-    expect(result.current.clockFormat).toBe("12h");
+  it("re-renders when the setting changes", async () => {
+    const { wrapper, setSetting } = createSettingsRig();
+    const { result } = renderHook(() => useTimeFormat(), { wrapper });
+    act(() => setSetting("display.clock_format", "12h"));
+    await waitFor(() => {
+      expect(result.current.clockFormat).toBe("12h");
+    });
     expect(result.current.formatShort(INSTANT, { includeDate: false })).toBe("8:26 AM");
   });
 });

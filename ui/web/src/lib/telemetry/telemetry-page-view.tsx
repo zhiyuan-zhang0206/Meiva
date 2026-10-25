@@ -14,11 +14,14 @@ import { normalizePage, setTelemetryPage, track } from "./telemetry";
 import { initWebVitals } from "./web-vitals";
 
 export function TelemetryPageView({
+  pathname: pathnameOverride,
   onInitWebVitals = initWebVitals,
 }: {
+  pathname?: string;
   onInitWebVitals?: () => void;
 } = {}) {
-  const pathname = usePathname();
+  const routerPathname = usePathname();
+  const pathname = pathnameOverride ?? (routerPathname || "/");
   const lastPage = useRef<string | null>(null);
 
   useEffect(() => {

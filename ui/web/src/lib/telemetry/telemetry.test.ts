@@ -1,3 +1,6 @@
+// meiva:note
+// @vitest-environment happy-dom
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { API_BASE } from "../transport/api-base";
@@ -105,7 +108,7 @@ describe("track + flush", () => {
     const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(
       () => Promise.resolve(new Response(null, { status: 204 })),
     );
-    vi.stubGlobal("fetch", fetchMock);
+    telemetryTestControl.setFetch(fetchMock);
     track("page-view");
     telemetryTestControl.flush();
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -114,7 +117,6 @@ describe("track + flush", () => {
     expect(init?.method).toBe("POST");
     expect(init?.keepalive).toBe(true);
     expect(init?.credentials).toBe("include");
-    vi.unstubAllGlobals();
   });
 
   it("drops nothing when flush finds an empty buffer", () => {

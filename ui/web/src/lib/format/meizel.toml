@@ -18,11 +18,8 @@ exports = ["clipboard.ts", "display-limits.ts", "format-number.ts", "format-pric
 "format-price.ts" = "strict"
 "inbound-source.ts" = "strict"
 "item-summary.ts" = "strict"
+"use-time-format.ts" = "strict"
 "utils.ts" = "strict"
-
-[debt.first-party-patch]
-"display-limits.test.ts#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"use-time-format.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
 
 [debt.impure-call]
 "clipboard.ts#copyToClipboard#document" = 1
@@ -31,19 +28,11 @@ exports = ["clipboard.ts", "display-limits.ts", "format-number.ts", "format-pric
 "interaction-timing.ts#markMessageSent#performance.now" = 1
 "interaction-timing.ts#noteTurnStart#performance.now" = 1
 "time.ts#formatRelative#new Date()" = 1
-"time.ts#formatUpcoming#new Date()" = 1
 "use-now.ts#useNow#clearInterval" = 1
 "use-now.ts#useNow#new Date()" = 1
 "use-now.ts#useNow#setInterval" = 1
 "use-now.ts#useNow#useEffect" = 1
 "use-now.ts#useNow#useState" = 1
-"use-time-format.ts#useTimeFormat#new Date()" = 1
-
-[debt.stdlib-patch]
-"interaction-timing.test.ts#vi.spyOn performance.now" = 3
-
-[debt.unfrozen-value]
-"interaction-timing.ts#pendingMessageSentAt" = 1
 
 [debt.wide-exports]
 "meizel.toml#exports" = 1

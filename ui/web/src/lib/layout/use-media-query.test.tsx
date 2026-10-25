@@ -6,11 +6,14 @@
 // wrong frame whenever a commit and the passive flush straddled a rendering
 // pass).
 
+// meiva:note
+// @vitest-environment happy-dom
+
 import { act, cleanup, render } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { useMediaQuery } from "./use-media-query";
+import { useMediaQuery, type MediaQueryListLike } from "./use-media-query";
 
 type Listener = () => void;
 
@@ -19,32 +22,33 @@ const mediaState = {
   listeners: new Set<Listener>(),
 };
 
-function installMatchMedia(): void {
-  mediaState.matches = false;
-  mediaState.listeners = new Set();
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn((query: string) => ({
-      matches: mediaState.matches,
-      media: query,
-      addEventListener: (_type: "change", listener: Listener) => {
-        mediaState.listeners.add(listener);
-      },
-      removeEventListener: (_type: "change", listener: Listener) => {
-        mediaState.listeners.delete(listener);
-      },
-    })),
-  );
+function fakeMatchMedia(_query: string): MediaQueryListLike {
+  return {
+    matches: mediaState.matches,
+    addEventListener: (_type: "change", listener: Listener) => {
+      mediaState.listeners.add(listener);
+    },
+    removeEventListener: (_type: "change", listener: Listener) => {
+      mediaState.listeners.delete(listener);
+    },
+  };
 }
 
-beforeEach(installMatchMedia);
+beforeEach(() => {
+  mediaState.matches = false;
+  mediaState.listeners = new Set();
+});
+
 afterEach(() => {
   cleanup();
-  vi.unstubAllGlobals();
 });
 
 function Probe() {
-  return <span data-testid="value">{String(useMediaQuery("(min-width: 768px)"))}</span>;
+  return (
+    <span data-testid="value">
+      {String(useMediaQuery("(min-width: 768px)", fakeMatchMedia))}
+    </span>
+  );
 }
 
 describe("useMediaQuery", () => {
