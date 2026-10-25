@@ -69,9 +69,7 @@ def test_true_anchor_still_refuses_from_inside_invocation(tmp_path: Path) -> Non
     process genuinely anchored in the target still refuses."""
     target = tmp_path / "worktrees" / "wt-under-test"
     target.mkdir(parents=True)
-    sleeper = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)"], cwd=target, start_new_session=True
-    )
+    sleeper = subprocess.Popen(["sleep", "30"], cwd=target, start_new_session=True)
     try:
         time.sleep(0.5)  # let psutil observe the sleeper's cwd
         result = _run_guard(target)
@@ -113,8 +111,8 @@ def test_a_python_without_psutil_gets_its_own_exit_code_and_says_what_to_run(
 # through: sockets, HTTP clients, urllib, the database drivers, redis. A connect to a
 # unix-socket path is this machine's own pty-sessions service, the one thing the scan
 # is meant to ask, so it passes through; any other address is a dial.
-_NO_DIAL_DRIVER = r"""
-import json, runpy, socket, sys, urllib.request
+_NO_DIAL_SITECUSTOMIZE = r"""
+import atexit, json, socket, urllib.request
 
 dialed = []
 
@@ -166,14 +164,7 @@ for dotted in (
 ):
     patch(dotted)
 
-script, target = sys.argv[1:3]
-sys.argv = [script, target]
-code = 0
-try:
-    runpy.run_path(script, run_name="__main__")
-except SystemExit as exit_:
-    code = exit_.code
-print("RESULT:" + json.dumps({"code": code, "dialed": dialed}))
+atexit.register(lambda: print("DIALED:" + json.dumps(dialed), flush=True))
 """
 
 
@@ -229,11 +220,19 @@ def test_the_guard_reads_the_real_home_and_dials_and_writes_nothing(tmp_path: Pa
     env_file.chmod(0)
     home.chmod(0o755)
     before = _tree_state(home)
+    site_dir = tmp_path / "no-dial"
+    site_dir.mkdir()
+    (site_dir / "sitecustomize.py").write_text(_NO_DIAL_SITECUSTOMIZE)
     env = {k: v for k, v in os.environ.items() if not k.startswith("MEIVA_")}
-    env.update(MEIVA_HOME=str(home), HOME=str(tmp_path / "user"))
+    pythonpath = env.get("PYTHONPATH")
+    env.update(
+        MEIVA_HOME=str(home),
+        HOME=str(tmp_path / "user"),
+        PYTHONPATH=f"{site_dir}{os.pathsep}{pythonpath}" if pythonpath else str(site_dir),
+    )
     try:
         result = subprocess.run(  # noqa: S603 - test-owned interpreter and fixture paths
-            [sys.executable, "-c", _NO_DIAL_DRIVER, str(script), str(target)],
+            [sys.executable, str(script), str(target)],
             capture_output=True,
             text=True,
             env=env,
@@ -244,8 +243,8 @@ def test_the_guard_reads_the_real_home_and_dials_and_writes_nothing(tmp_path: Pa
     finally:
         env_file.chmod(0o600)
         service.close()
-    assert result.returncode == 0, result.stdout + result.stderr
-    [verdict] = [ln for ln in result.stdout.splitlines() if ln.startswith("RESULT:")]
-    assert json.loads(verdict.removeprefix("RESULT:")) == {"code": 1, "dialed": []}
+    assert result.returncode == 1, result.stdout + result.stderr
+    [dialed] = [ln for ln in result.stdout.splitlines() if ln.startswith("DIALED:")]
+    assert json.loads(dialed.removeprefix("DIALED:")) == []
     assert "pty session '1'" in result.stdout  # the real home's service was asked
     assert after == before

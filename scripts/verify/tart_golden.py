@@ -304,7 +304,7 @@ def build_golden(ref: str, evidence_root: Path, *, name: str, repo: Path, tart: 
     proc = None
     try:
         if not dry_run:
-            export_commit(repo, commit, export)
+            export_commit(repo, commit, export, home=tart.home)
         build.step("clone", tart.argv("clone", IMAGE, name))
         build.step(
             "configure", tart.argv("set", name, "--cpu", str(CPUS), "--memory", str(MEMORY_MB))
@@ -341,12 +341,13 @@ def build_golden(ref: str, evidence_root: Path, *, name: str, repo: Path, tart: 
 
 
 def main() -> int:
+    user_home = Path.home()
     parser = argparse.ArgumentParser(description=DESCRIPTION)
     parser.add_argument("--ref", required=True, help="commit whose helper source is built")
     parser.add_argument("--name", default=NAME, help="name of the golden image to create")
     parser.add_argument(
         "--tart",
-        default=shutil.which("tart") or str(Path.home() / ".local/bin/tart"),
+        default=shutil.which("tart") or str(user_home / ".local/bin/tart"),
         help="the Tart binary (default: tart on PATH, else ~/.local/bin/tart)",
     )
     parser.add_argument(
@@ -366,7 +367,7 @@ def main() -> int:
         args.evidence_root.resolve(),
         name=args.name,
         repo=REPO,
-        tart=Tart(args.tart, dry_run=args.dry_run),
+        tart=Tart(args.tart, home=user_home, dry_run=args.dry_run),
     )
 
 

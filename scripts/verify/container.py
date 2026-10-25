@@ -89,20 +89,22 @@ TIMEOUTS = {
 # --------------------------------------------------------------------- the boundary
 
 
-def git_objects_dir(repo: Path) -> Path:
+def git_objects_dir(repo: Path, *, home: Path) -> Path:
     """The repository's object store: the only host path the container sees."""
     common = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
     objects = Path(common) / "objects"
     if not objects.is_dir():
         raise ValueError(f"{repo} has no object store at {objects}")
-    refuse_host_state(objects)
+    refuse_host_state(objects, home=home)
     return objects
 
 
-def docker_run_argv(name: str, image: str, objects: Path, memory: str, shm: str) -> list[str]:
+def docker_run_argv(
+    name: str, image: str, objects: Path, memory: str, shm: str, *, home: Path
+) -> list[str]:
     """The one `docker run`: no published port, no environment, no socket, no SSH key,
     no host home; the object store read-only; a cache volume that holds no cluster."""
-    refuse_host_state(objects)
+    refuse_host_state(objects, home=home)
     return [
         "docker",
         "run",
@@ -219,9 +221,9 @@ def collect(evidence: Evidence, container: str) -> None:
         evidence.result.setdefault("collected", {})[name] = copied.returncode == 0
 
 
-def run(ref: str, evidence_root: Path, memory: str, shm: str) -> int:
+def run(ref: str, evidence_root: Path, memory: str, shm: str, *, home: Path) -> int:
     commit = resolve_commit(REPO, ref)
-    objects = git_objects_dir(REPO)
+    objects = git_objects_dir(REPO, home=home)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     evidence = Evidence(
         evidence_root / f"{stamp}-{commit[:8]}",
@@ -235,7 +237,9 @@ def run(ref: str, evidence_root: Path, memory: str, shm: str) -> int:
     failure: BaseException | None = None
     try:
         image = build_image(evidence)
-        evidence.step("container", docker_run_argv(container, image, objects, memory, shm))
+        evidence.step(
+            "container", docker_run_argv(container, image, objects, memory, shm, home=home)
+        )
         run_steps(evidence, container, commit)
     except BaseException as error:
         failure = error
@@ -280,7 +284,7 @@ def main() -> int:
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, _interrupted)
     args.evidence_root.mkdir(parents=True, exist_ok=True)
-    return run(args.ref, args.evidence_root.resolve(), args.memory, args.shm_size)
+    return run(args.ref, args.evidence_root.resolve(), args.memory, args.shm_size, home=Path.home())
 
 
 if __name__ == "__main__":

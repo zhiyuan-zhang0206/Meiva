@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from scripts.host_ops.onboarding import catalog, harness_onboarding, transport
+from scripts.host_ops.onboarding import catalog, harness_onboarding
 from scripts.host_ops.onboarding.harness_onboarding import (
     Evidence,
     format_cell,
@@ -134,32 +136,10 @@ def test_host_rejects_an_empty_name() -> None:
         Host("")
 
 
-class _FakeHost(Host):
-    # meiva:note
-    # A host whose shell answers by command, so an install plan is testable without ssh. An
-    # answer is one (exit_code, stdout) pair, or a list consumed in order so a command can
-    # answer differently after another one ran (a link making a binary visible).
-    # meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
-
-    def __init__(self, answers: dict[str, tuple[int, str] | list[tuple[int, str]]]) -> None:
-        super().__init__("fake")
-        self.answers = answers
-        self.asked: list[tuple[str, bool]] = []
-
-    def run(
-        self,
-        command: str,
-        *,
-        stdin: bytes | None = None,
-        timeout: float = 300.0,
-        agent_path: bool = False,
-    ) -> transport.Result:
-        self.asked.append((command, agent_path))
-        answer = self.answers.get(command, (0, ""))
-        if isinstance(answer, list):
-            answer = answer.pop(0) if len(answer) > 1 else answer[0]
-        code, out = answer
-        return transport.Result(self.name, command, code, out, "")
+def _write_exec(path: Path, body: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"#!/bin/sh\n{body}\n")
+    path.chmod(0o755)
 
 
 def test_install_command_redirects_an_unwritable_npm_root() -> None:
@@ -167,48 +147,83 @@ def test_install_command_redirects_an_unwritable_npm_root() -> None:
     assert command == 'npm install -g --prefix "$HOME/.local" @deepseek-ai/dsh@0.1.5-rc.3'
 
 
-def test_npm_global_root_is_writable_only_when_the_shell_can_write_it() -> None:
-    writable = _FakeHost({"npm root -g": (0, "/opt/homebrew/lib/node_modules\n")})
-    assert harness_onboarding.npm_global_root_writable(writable) is True
+def test_npm_global_root_is_writable_only_when_the_shell_can_write_it(tmp_path: Path) -> None:
+    writable_root = tmp_path / "writable"
+    writable_root.mkdir()
+    writable_bin = tmp_path / "writable-bin"
+    _write_exec(writable_bin / "npm", f'printf "%s\\n" "{writable_root}"')
+    writable_host = Host("local", path_preamble=f'export PATH="{writable_bin}:/usr/bin:/bin"')
+    assert harness_onboarding.npm_global_root_writable(writable_host) is True
 
-    root_owned = _FakeHost(
-        {
-            "npm root -g": (0, "/usr/lib/node_modules\n"),
-            'test -w "/usr/lib/node_modules"': (1, ""),
-        }
-    )
-    assert harness_onboarding.npm_global_root_writable(root_owned) is False
+    root_owned = tmp_path / "readonly"
+    root_owned.mkdir()
+    root_owned.chmod(0o555)
+    readonly_bin = tmp_path / "readonly-bin"
+    _write_exec(readonly_bin / "npm", f'printf "%s\\n" "{root_owned}"')
+    readonly_host = Host("local", path_preamble=f'export PATH="{readonly_bin}:/usr/bin:/bin"')
+    try:
+        assert harness_onboarding.npm_global_root_writable(readonly_host) is False
+    finally:
+        root_owned.chmod(0o755)
 
 
-def test_npm_root_is_not_writable_when_npm_cannot_answer() -> None:
-    silent = _FakeHost({"npm root -g": (1, "")})
+def test_npm_root_is_not_writable_when_npm_cannot_answer(tmp_path: Path) -> None:
+    silent_bin = tmp_path / "silent-bin"
+    _write_exec(silent_bin / "npm", "exit 1")
+    silent = Host("local", path_preamble=f'export PATH="{silent_bin}:/usr/bin:/bin"')
     assert harness_onboarding.npm_global_root_writable(silent) is False
 
 
-def test_a_user_local_install_is_linked_where_the_agent_looks() -> None:
-    host = _FakeHost(
-        {
-            "command -v dsh": [(1, ""), (0, "/usr/local/bin/dsh\n")],
-            "test -w /usr/local/bin": (0, ""),
-            'ln -sf "$HOME/.local/bin/dsh" "/usr/local/bin/dsh"': (0, ""),
-        }
+def test_a_user_local_install_is_linked_where_the_agent_looks(tmp_path: Path) -> None:
+    local_bin = tmp_path / "local-bin"
+    _write_exec(local_bin / "dsh", "exit 0")
+    link_dir = tmp_path / "agent-bin"
+    link_dir.mkdir()
+    host = Host("local", agent_path=f"{link_dir}:/usr/bin:/bin")
+
+    note, problem = harness_onboarding.reach_agent_path(
+        host,
+        catalog.spec("dsh"),
+        link_dir=str(link_dir),
+        local_bin=str(local_bin),
     )
-    note, problem = harness_onboarding.reach_agent_path(host, catalog.spec("dsh"))
     assert problem == ""
-    assert "linked /usr/local/bin/dsh" in note
-    assert ("command -v dsh", True) in host.asked
+    assert f"linked {link_dir}/dsh" in note
+    assert (link_dir / "dsh").is_symlink()
 
 
-def test_an_unreachable_install_says_what_to_run() -> None:
-    host = _FakeHost({"command -v dsh": (1, ""), "test -w /usr/local/bin": (1, "")})
-    note, problem = harness_onboarding.reach_agent_path(host, catalog.spec("dsh"))
-    assert note == ""
-    assert "sudo ln -sf ~/.local/bin/dsh /usr/local/bin/dsh" in problem
-    assert not any(command.startswith("ln ") for command, _ in host.asked)
+def test_an_unreachable_install_says_what_to_run(tmp_path: Path) -> None:
+    local_bin = tmp_path / "local-bin"
+    _write_exec(local_bin / "dsh", "exit 0")
+    link_dir = tmp_path / "readonly-agent-bin"
+    link_dir.mkdir()
+    link_dir.chmod(0o555)
+    host = Host("local", agent_path=f"{link_dir}:/usr/bin:/bin")
+    try:
+        note, problem = harness_onboarding.reach_agent_path(
+            host,
+            catalog.spec("dsh"),
+            link_dir=str(link_dir),
+            local_bin=str(local_bin),
+        )
+        assert note == ""
+        assert f"sudo ln -sf ~/.local/bin/dsh {link_dir}/dsh" in problem
+        assert not (link_dir / "dsh").exists()
+    finally:
+        link_dir.chmod(0o755)
 
 
-def test_an_already_reachable_install_needs_no_link() -> None:
-    host = _FakeHost({"command -v dsh": (0, "/home/someone/.local/bin/dsh\n")})
-    note, problem = harness_onboarding.reach_agent_path(host, catalog.spec("dsh"))
+def test_an_already_reachable_install_needs_no_link(tmp_path: Path) -> None:
+    agent_bin = tmp_path / "agent-bin"
+    _write_exec(agent_bin / "dsh", "exit 0")
+    link_dir = tmp_path / "unused-link-dir"
+    host = Host("local", agent_path=f"{agent_bin}:/usr/bin:/bin")
+
+    note, problem = harness_onboarding.reach_agent_path(
+        host,
+        catalog.spec("dsh"),
+        link_dir=str(link_dir),
+        local_bin=str(tmp_path / "local-bin"),
+    )
     assert (note, problem) == ("", "")
-    assert not any(command.startswith("ln ") for command, _ in host.asked)
+    assert not link_dir.exists()

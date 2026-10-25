@@ -248,9 +248,8 @@ def verify(container: str, *, docker: list[str]) -> None:
 # carries its own probe result, and the infra rows name the data-plane processes
 # this recipe is about.
 def wait_until_serving(container: str, *, docker: list[str]) -> str:
-    deadline = time.monotonic() + 120.0
     status = ""
-    while time.monotonic() < deadline:
+    for _ in range(24):
         status = docker_exec(
             container,
             "cd /home/verify/.meiva/source && .venv/bin/meiva status",

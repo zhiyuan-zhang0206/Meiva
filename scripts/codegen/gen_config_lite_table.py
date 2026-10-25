@@ -53,7 +53,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, NamedTuple, cast
+from typing import Any, NamedTuple, TypeGuard
 
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
@@ -311,6 +311,22 @@ def _default(row: LiteField, info: FieldInfo, reg: dict[str, Any]) -> tuple[str,
 _LiteRow = tuple[str, str, str, str, object, str | None]
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
+def _is_required_field(info: object) -> bool:
+    return (
+        isinstance(info, FieldInfo)
+        and info.default is PydanticUndefined
+        and info.default_factory is None
+    )
+
+
 def _lite_row(row: LiteField, reg: dict[str, Any]) -> _LiteRow:
     """Validate one manifest row against its registry field; the table row it renders to."""
     if row.check is not None and row.check not in _ALLOWED_CHECKS:
@@ -320,7 +336,9 @@ def _lite_row(row: LiteField, reg: dict[str, Any]) -> _LiteRow:
     ref = reg.get(row.name)
     if ref is None:
         raise SystemExit(f"{row.name!r} is in LITE_MANIFEST but not in the live config registry")
-    info = cast(FieldInfo, ref.info)
+    info = ref.info
+    if not isinstance(info, FieldInfo):
+        raise SystemExit(f"{row.name!r} registry entry is not a FieldInfo")
     default_kind, value = _default(row, info, reg)
     return (
         ref.domain,
@@ -337,8 +355,8 @@ def _sensitive_fields(reg: dict[str, Any]) -> list[str]:
     return [
         name
         for name, ref in sorted(reg.items())
-        if isinstance(extra := ref.info.json_schema_extra, dict)
-        and cast(dict[str, object], extra).get("sensitive") is True
+        if _is_str_object_dict(extra := ref.info.json_schema_extra)
+        and extra.get("sensitive") is True
     ]
 
 
@@ -375,12 +393,7 @@ def _collect() -> tuple[
     scopes = {name: str(schema_extra(reg[name].info).get("scope")) for name in names}
     capabilities = {name: reg[name].capability for name in names}
     per_agent = [name for name in names if schema_extra(reg[name].info).get("per_agent") is True]
-    required = [
-        name
-        for name in names
-        if cast(FieldInfo, reg[name].info).default is PydanticUndefined
-        and cast(FieldInfo, reg[name].info).default_factory is None
-    ]
+    required = [name for name in names if _is_required_field(reg[name].info)]
     return lite, domains, aliases, scopes, capabilities, per_agent, _sensitive_fields(reg), required
 
 

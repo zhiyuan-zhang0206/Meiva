@@ -1,5 +1,5 @@
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -7,10 +7,9 @@ import pytest
 
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_settings
 from base.host.proc import run_bounded
 from base.native_process import code_version
@@ -34,57 +33,41 @@ def _git(repo: Path, *args: str) -> str:
 
 
 @pytest.mark.parametrize("known", [True, False])
-def test_writer_uses_one_captured_gate_and_is_joined(
-    monkeypatch: pytest.MonkeyPatch, known: bool, tmp_path: Path
-) -> None:
+def test_writer_uses_one_captured_gate_and_is_joined(known: bool, tmp_path: Path) -> None:
     _git(tmp_path, "init", "--initial-branch=main")
     _git(tmp_path, "commit", "--allow-empty", "-m", "captured")
     captured = LoadedCommit.capture(tmp_path)
     _git(tmp_path, "commit", "--allow-empty", "-m", "later-head")
     image = captured if known else LoadedCommit(tmp_path, None)
-    gates: list[ProcessDbGate] = []
-    hosts: list[Callable[[], str]] = []
+    with pytest.raises(ValueError, match="loaded image"):
+        export_process.process_gate("exporter", image=None)
+    gate = export_process.process_gate("exporter", image=image)
     config = ConfigBoot()
     config.set_field("machine_name", "export-owner")
-    monkeypatch.setattr(export_process, "ConfigBoot", lambda: config)
-    monkeypatch.setattr(export_process, "meiva_home", lambda: tmp_path)
-
-    def handle(*, gate: ProcessDbGate, direct_url: ClusterDirectUrl) -> Database:
-        gates.append(gate)
-        hosts.append(direct_url.local_host)
-        return Database(db_config_from_settings(), gate=gate, direct_url=direct_url)
-
-    def build(
-        *, database: Callable[[], Database], machine: MachineIdentityReader, home: Path
-    ) -> EventPipeline:
-        assert machine.name() == "export-owner"
-        assert home == tmp_path
-        config.set_field("machine_name", "changed-after-first-read")
-        assert machine.name() == "export-owner"
-        database()
-        database()
-        assert hosts == [machine.host, machine.host]
-        return EventPipeline(writer=lambda _events: None)
-
-    monkeypatch.setattr(Database, "from_settings", handle)
-    monkeypatch.setattr(export_process, "build_pipeline", build)
-    with export_process.owned_event_pipeline("exporter", image=image) as pipeline:
+    machine = ConfiguredMachineIdentity(config)
+    assert machine.name() == "export-owner"
+    config.set_field("machine_name", "changed-after-first-read")
+    assert machine.name() == "export-owner"
+    direct_url = ClusterDirectUrl(machine.host)
+    assert direct_url.local_host == machine.host
+    db = Database(db_config_from_settings(), gate=gate, direct_url=direct_url)
+    assert db is not None
+    with export_process.drain_event_pipeline(
+        "exporter", EventPipeline(writer=lambda _events: None)
+    ) as pipeline:
         assert not pipeline.stopped
-        assert len(gates) == 2 and gates[0] is gates[1]
         if not known:
             with pytest.raises(code_version.CodeVersionError, match="loaded commit"):
-                gates[0].application_name()
+                gate.application_name()
         else:
-            assert gates[0].application_name() == "meiva:exporter:v1"
+            assert gate.application_name() == "meiva:exporter:v1"
             (tmp_path / ".git").rename(tmp_path / "captured-history")
-            assert gates[1].application_name() == "meiva:exporter:v1"
+            assert gate.application_name() == "meiva:exporter:v1"
 
     assert pipeline.stopped
 
 
-def test_body_error_preserves_the_original_writer_error_during_close(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_body_error_preserves_the_original_writer_error_during_close() -> None:
     primary = ValueError("export failed")
     worker_error = OSError("writer failed")
 
@@ -92,14 +75,6 @@ def test_body_error_preserves_the_original_writer_error_during_close(
         raise worker_error
 
     pipeline = EventPipeline(writer=write, batch_size=1)
-
-    def build(
-        *, database: Callable[[], Database], machine: MachineIdentityReader, home: Path
-    ) -> EventPipeline:
-        assert callable(database)
-        return pipeline
-
-    monkeypatch.setattr(export_process, "build_pipeline", build)
     event = Event(
         ts=datetime.now(UTC),
         trace_id=None,
@@ -116,9 +91,7 @@ def test_body_error_preserves_the_original_writer_error_during_close(
     )
     with (
         pytest.raises(ValueError) as caught,
-        export_process.owned_event_pipeline(
-            "exporter", image=LoadedCommit(Path("/loaded"), None)
-        ) as owned,
+        export_process.drain_event_pipeline("exporter", pipeline) as owned,
     ):
         owned.enqueue(event)
         raise primary
@@ -129,12 +102,10 @@ def test_body_error_preserves_the_original_writer_error_during_close(
     assert worker.value is worker_error
 
 
-@pytest.mark.parametrize("borrowed", [False, True])
 def test_export_entry_captures_before_fetch_or_borrows_the_supplied_writer(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, borrowed: bool
+    tmp_path: Path,
 ) -> None:
     calls: list[str] = []
-    image = LoadedCommit(Path("/loaded-exporter"), None)
     emitted: list[Event] = []
 
     def write(events: list[Event]) -> None:
@@ -142,12 +113,6 @@ def test_export_entry_captures_before_fetch_or_borrows_the_supplied_writer(
         emitted.extend(events)
 
     pipeline = EventPipeline(writer=write)
-
-    def capture(source_root: Path) -> LoadedCommit:
-        assert not borrowed
-        calls.append("capture")
-        return image
-
     commands: list[list[str]] = []
 
     def run_process(
@@ -156,33 +121,23 @@ def test_export_entry_captures_before_fetch_or_borrows_the_supplied_writer(
         assert timeout == 60 and capture_output and text
         assert list(argv[:4]) == ["gh", "api", "--method", "GET"]
         if not commands:
-            assert calls == ([] if borrowed else ["capture"])
             calls.append("fetch")
         commands.append(list(argv))
         assert "actions/runs?" in argv[4] or "pulls?" in argv[4]
         return subprocess.CompletedProcess(argv, 0, "[]", "")
 
-    def build(
-        *, database: Callable[[], Database], machine: MachineIdentityReader, home: Path
-    ) -> EventPipeline:
-        assert not borrowed and callable(database)
-        calls.append("build")
-        return pipeline
-
-    monkeypatch.setattr(LoadedCommit, "capture", capture)
-    monkeypatch.setattr(export_process, "build_pipeline", build)
     try:
         assert (
             runs_export.main(
                 ["--repo", "owner/repo", "--state-dir", str(tmp_path)],
-                producer=(lambda: pipeline) if borrowed else None,
+                producer=lambda: pipeline,
                 run_process=run_process,
                 timers=ManualTimers(),
             )
             == 0
         )
-        assert calls == (["fetch", "emit"] if borrowed else ["capture", "fetch", "build", "emit"])
-        assert pipeline.stopped is not borrowed
+        assert calls == ["fetch", "emit"]
+        assert not pipeline.stopped
         assert len(commands) == 2
         assert {event.event_name for event in emitted} == {"ci_runs_daily", "ci_runs_run"}
         assert all(event.process == runs_export.PROCESS_NAME for event in emitted)

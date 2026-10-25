@@ -24,13 +24,14 @@ from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Self, cast
+from typing import Self, TypeGuard
 
 import redis
 from dotenv import dotenv_values
 from redis.exceptions import RedisError
 
 from base.cluster import (
+    ClusterRecord,
     ensure_cluster_redis_acl,
     get_record,
     redis_identity,
@@ -100,6 +101,40 @@ def _journal_stamp(record: dict[str, object]) -> str:
     return stamp
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
+@dataclass(frozen=True)
+class GatewayContext:
+    home: Path
+    profile: str | None
+    redis_url: str
+    events_channel: str = "meiva:events"
+    is_remote: bool = False
+
+
+@dataclass(frozen=True)
+class RedisProbeSpec:
+    label: str
+    host: str
+    port: int
+    username: str
+    password: str = field(repr=False)
+
+
+@dataclass(frozen=True)
+class RunnerAclPlan:
+    user: str
+    redis_admin_url: str
+    runtime_password: str = field(repr=False)
+    channel_prefix: str
+
+
 @dataclass
 class RotationState:
     """All mutable values needed to resume safely. Kept in a 0600 file because
@@ -113,15 +148,15 @@ class RotationState:
     redis_port: int
     redis_host: str
     redis_user: str
-    started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    started_at: str = "1970-01-01T00:00:00+00:00"
     phase: RotationPhase = RotationPhase.MINTED
 
-    def path(self) -> Path:
+    def path(self, home: Path) -> Path:
         stamp = self.started_at.replace(":", "").replace("+00:00", "Z")
-        return meiva_home() / "backups" / "secret-rotation" / f"data-plane-{stamp}.json"
+        return home / "backups" / "secret-rotation" / f"data-plane-{stamp}.json"
 
-    def save(self) -> Path:
-        path = self.path()
+    def save(self, home: Path) -> Path:
+        path = self.path(home)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.parent.chmod(0o700)
         path.write_text(json.dumps(asdict(self), indent=2) + "\n")
@@ -138,7 +173,7 @@ class RotationState:
             raw: object = json.loads(path.read_text())
         except (json.JSONDecodeError, UnicodeDecodeError):
             raise RuntimeError("invalid Redis rotation journal JSON") from None
-        record = cast("dict[str, object]", raw) if isinstance(raw, dict) else {}
+        record = raw if _is_str_object_dict(raw) else {}
         if set(record) != {item.name for item in fields(cls)}:
             raise RuntimeError(
                 f"{path} is not a Redis-only rotation journal (Postgres credentials no "
@@ -183,18 +218,23 @@ def mint_secret() -> str:
     return secrets.token_urlsafe(_TOKEN_BYTES)
 
 
-def _require_gateway_context() -> None:
-    if settings.profile == "agent":
+def _require_gateway_context(profile: str | None) -> None:
+    if profile == "agent":
         raise RuntimeError(_GATEWAY_CONTEXT_ERROR)
 
 
-def build_state(scope: str = RotationScope.BOTH) -> RotationState:
+def build_state(
+    context: GatewayContext,
+    record: ClusterRecord | None,
+    scope: str = RotationScope.BOTH,
+    *,
+    started_at: str = "1970-01-01T00:00:00+00:00",
+) -> RotationState:
     selected = RotationScope.parse(scope)
-    _require_gateway_context()
-    record = get_record(meiva_home())
+    _require_gateway_context(context.profile)
     if record is None:
         raise RuntimeError("no cluster record — cannot resolve data-plane ports")
-    values = dotenv_values(meiva_home() / ".env")
+    values = dotenv_values(context.home / ".env")
     old_admin = (values.get("MEIVA_REDIS_ADMIN_PASSWORD") or "").strip()
     old_runtime = (values.get(REDIS_PASSWORD_ENV) or "").strip()
     if not (old_admin and old_runtime):
@@ -213,8 +253,9 @@ def build_state(scope: str = RotationScope.BOTH) -> RotationState:
         if selected in {RotationScope.RUNNER, RotationScope.BOTH}
         else old_runtime,
         redis_port=record.ports["redis"],
-        redis_host=url_host(settings.data_plane.redis_url),
-        redis_user=redis_identity(settings.data_plane.redis_url),
+        redis_host=url_host(context.redis_url),
+        redis_user=redis_identity(context.redis_url),
+        started_at=started_at,
     )
 
 
@@ -233,26 +274,47 @@ def redis_probe(host: str, port: int, password: str, *, username: str) -> bool:
         return False
 
 
-def _checks(state: RotationState, admin: str, runtime: str) -> list[tuple[str, bool]]:
-    checks = [
-        (
-            "Redis default",
-            redis_probe(state.redis_host, state.redis_port, admin, username="default"),
+def _probe_specs(state: RotationState, admin: str, runtime: str) -> list[RedisProbeSpec]:
+    specs = [
+        RedisProbeSpec(
+            label="Redis default",
+            host=state.redis_host,
+            port=state.redis_port,
+            username="default",
+            password=admin,
         )
     ]
     if state.rotates_runner:
-        checks.append(
-            (
-                "Redis ACL user",
-                redis_probe(state.redis_host, state.redis_port, runtime, username=state.redis_user),
+        specs.append(
+            RedisProbeSpec(
+                label="Redis ACL user",
+                host=state.redis_host,
+                port=state.redis_port,
+                username=state.redis_user,
+                password=runtime,
             )
         )
-    return checks
+    return specs
+
+
+def preflight_probes(state: RotationState) -> list[RedisProbeSpec]:
+    return _probe_specs(state, state.old_redis_admin_password, state.old_redis_password)
+
+
+def verify_probes(state: RotationState) -> list[RedisProbeSpec]:
+    return _probe_specs(state, state.redis_admin_password, state.redis_password)
+
+
+def _checks(specs: list[RedisProbeSpec]) -> list[tuple[str, bool]]:
+    return [
+        (spec.label, redis_probe(spec.host, spec.port, spec.password, username=spec.username))
+        for spec in specs
+    ]
 
 
 def preflight(state: RotationState) -> bool:
     """Refuse to rotate over pre-existing credential drift."""
-    checks = _checks(state, state.old_redis_admin_password, state.old_redis_password)
+    checks = _checks(preflight_probes(state))
     for label, ok in checks:
         print(f"  {'✓' if ok else '✗'} {label}")
     return all(ok for _label, ok in checks)
@@ -265,9 +327,16 @@ def working_redis_admin_password(state: RotationState) -> str:
     raise RuntimeError("Redis default user rejects both recorded admin passwords")
 
 
+def admin_requirepass_command(state: RotationState) -> tuple[str, ...]:
+    if not state.rotates_admin:
+        return ()
+    return ("CONFIG", "SET", "requirepass", state.new_redis_admin_password)
+
+
 def apply_admin(state: RotationState) -> None:
     """Rotate the Redis default user, keeping the runtime ACL user live."""
-    if not state.rotates_admin:
+    command = admin_requirepass_command(state)
+    if not command:
         return
     current = working_redis_admin_password(state)
     with redis.Redis(
@@ -278,40 +347,64 @@ def apply_admin(state: RotationState) -> None:
         socket_connect_timeout=3,
         socket_timeout=3,
     ) as client:
-        client.execute_command("CONFIG", "SET", "requirepass", state.new_redis_admin_password)
+        client.execute_command(*command)
 
 
-def apply_runner(state: RotationState) -> None:
+def runner_acl_plan(
+    state: RotationState,
+    *,
+    admin_password: str,
+    events_channel: str = "meiva:events",
+) -> RunnerAclPlan | None:
+    if not state.rotates_runner:
+        return None
+    return RunnerAclPlan(
+        user=state.redis_user,
+        redis_admin_url=f"redis://default:{admin_password}@{state.redis_host}:{state.redis_port}",
+        runtime_password=state.new_redis_password,
+        channel_prefix=events_channel.removesuffix(":events"),
+    )
+
+
+def apply_runner(
+    state: RotationState,
+    *,
+    events_channel: str = "meiva:events",
+) -> None:
     """Rotate the Redis runtime ACL password."""
     if not state.rotates_runner:
         return
     admin_password = working_redis_admin_password(state)
+    plan = runner_acl_plan(
+        state,
+        admin_password=admin_password,
+        events_channel=events_channel,
+    )
+    if plan is None:
+        return
     ensure_cluster_redis_acl(
-        state.redis_user,
-        redis_admin_url=(f"redis://default:{admin_password}@{state.redis_host}:{state.redis_port}"),
-        runtime_password=state.new_redis_password,
-        channel_prefix=settings.data_plane.events_channel.removesuffix(":events"),
+        plan.user,
+        redis_admin_url=plan.redis_admin_url,
+        runtime_password=plan.runtime_password,
+        channel_prefix=plan.channel_prefix,
     )
 
 
 def verify(state: RotationState) -> None:
-    failed = [
-        label
-        for label, ok in _checks(state, state.redis_admin_password, state.redis_password)
-        if not ok
-    ]
+    failed = [label for label, ok in _checks(verify_probes(state)) if not ok]
     if failed:
         raise RuntimeError(f"rotation verification failed: {', '.join(failed)}")
 
 
-def write_env(state: RotationState) -> None:
-    values = dotenv_values(meiva_home() / ".env")
+def write_env(state: RotationState, context: GatewayContext) -> None:
+    env_path = context.home / ".env"
+    values = dotenv_values(env_path)
     redis_url = url_with_password(
-        (values.get("MEIVA_REDIS_URL") or settings.data_plane.redis_url).strip(),
+        (values.get("MEIVA_REDIS_URL") or context.redis_url).strip(),
         state.redis_password,
     )
     upsert_env(
-        meiva_home() / ".env",
+        env_path,
         {
             "MEIVA_REDIS_ADMIN_PASSWORD": state.redis_admin_password,
             REDIS_PASSWORD_ENV: state.redis_password,
@@ -322,12 +415,15 @@ def write_env(state: RotationState) -> None:
 
 
 def _run_phase(
-    state: RotationState, phase: RotationPhase, fn: Callable[[RotationState], None]
+    state: RotationState,
+    home: Path,
+    phase: RotationPhase,
+    fn: Callable[[RotationState], None],
 ) -> None:
     print(f"-> {phase}")
     fn(state)
     state.phase = phase
-    state.save()
+    state.save(home)
     print(f"   ✓ {phase}")
 
 
@@ -343,15 +439,18 @@ def print_plan(state: RotationState, *, dry_run: bool) -> None:
         )
 
 
-def main(argv: list[str] | None = None) -> int:
-    if settings.data_plane.is_remote:
-        print(
-            "✗ this cluster's data plane is remote-managed — rotation is a "
-            "local-instance operation (requirepass / ACL). A remote/SaaS plane "
-            "rotates credentials at the provider; update MEIVA_REDIS_URL here.",
-            file=sys.stderr,
-        )
-        return 1
+def rotation_phases(*, execute: bool) -> tuple[RotationPhase, ...]:
+    if not execute:
+        return ()
+    return (
+        RotationPhase.ADMIN,
+        RotationPhase.RUNNER,
+        RotationPhase.VERIFIED,
+        RotationPhase.ENV_WRITTEN,
+    )
+
+
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Rotate the Redis data-plane credentials.")
     parser.add_argument(
         "--scope",
@@ -361,15 +460,38 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--execute", action="store_true", help="perform the rotation")
     parser.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
     parser.add_argument("--resume", metavar="STATE_FILE", help="resume a saved rotation")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def run_rotation(
+    argv: list[str] | None,
+    *,
+    context: GatewayContext,
+    record: ClusterRecord | None,
+    started_at: str,
+) -> int:
+    if context.is_remote:
+        print(
+            "✗ this cluster's data plane is remote-managed — rotation is a "
+            "local-instance operation (requirepass / ACL). A remote/SaaS plane "
+            "rotates credentials at the provider; update MEIVA_REDIS_URL here.",
+            file=sys.stderr,
+        )
+        return 1
+    args = _build_parser().parse_args(argv)
     try:
-        _require_gateway_context()
+        _require_gateway_context(context.profile)
     except RuntimeError:
         print(_GATEWAY_CONTEXT_ERROR, file=sys.stderr)
         return 1
-    state = RotationState.load(Path(args.resume)) if args.resume else build_state(args.scope)
-    print_plan(state, dry_run=not args.execute)
-    if not args.execute:
+    state = (
+        RotationState.load(Path(args.resume))
+        if args.resume
+        else build_state(context, record, args.scope, started_at=started_at)
+    )
+    phases = rotation_phases(execute=args.execute)
+    print_plan(state, dry_run=not phases)
+    if not phases:
         preflight(state)
         print("\n[dry-run] no changes made.")
         return 0
@@ -383,12 +505,17 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     try:
-        _run_phase(state, RotationPhase.ADMIN, apply_admin)
-        _run_phase(state, RotationPhase.RUNNER, apply_runner)
-        _run_phase(state, RotationPhase.VERIFIED, verify)
-        _run_phase(state, RotationPhase.ENV_WRITTEN, write_env)
+        _run_phase(state, context.home, RotationPhase.ADMIN, apply_admin)
+        _run_phase(
+            state,
+            context.home,
+            RotationPhase.RUNNER,
+            lambda s: apply_runner(s, events_channel=context.events_channel),
+        )
+        _run_phase(state, context.home, RotationPhase.VERIFIED, verify)
+        _run_phase(state, context.home, RotationPhase.ENV_WRITTEN, lambda s: write_env(s, context))
     except Exception as exc:
-        state_path = state.save()
+        state_path = state.save(context.home)
         print(f"\n✗ rotation failed at {state.phase.value!r}: {exc}", file=sys.stderr)
         print(f"  resume with --execute --resume {state_path}", file=sys.stderr)
         return 1
@@ -397,6 +524,39 @@ def main(argv: list[str] | None = None) -> int:
     if state.rotates_runner:
         print("NEXT: restart every enrolled runner so it refetches the runner Redis URL.")
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    if settings.data_plane.is_remote:
+        print(
+            "✗ this cluster's data plane is remote-managed — rotation is a "
+            "local-instance operation (requirepass / ACL). A remote/SaaS plane "
+            "rotates credentials at the provider; update MEIVA_REDIS_URL here.",
+            file=sys.stderr,
+        )
+        return 1
+    args = _build_parser().parse_args(argv)
+    try:
+        _require_gateway_context(settings.profile)
+    except RuntimeError:
+        print(_GATEWAY_CONTEXT_ERROR, file=sys.stderr)
+        return 1
+    if args.resume:
+        RotationState.load(Path(args.resume))
+    home = meiva_home()
+    context = GatewayContext(
+        home=home,
+        profile=settings.profile,
+        redis_url=settings.data_plane.redis_url,
+        events_channel=settings.data_plane.events_channel,
+        is_remote=False,
+    )
+    return run_rotation(
+        argv,
+        context=context,
+        record=get_record(home),
+        started_at=datetime.now(UTC).isoformat(),
+    )
 
 
 if __name__ == "__main__":

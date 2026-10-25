@@ -13,7 +13,7 @@ import signal
 import sys
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from .f12 import f12_finish, f12_point
 from .support import (
@@ -24,6 +24,7 @@ from .support import (
     SmokeError,
     bootout,
     fail,
+    is_object_dict,
     job_pid,
     kill,
     launchctl_domain,
@@ -82,7 +83,8 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
     if not workdir.is_absolute():
         print(f"FAIL(phase=args): workdir must be absolute: {workdir}")
         return 2
-    if os.getuid() == 0:
+    uid = os.getuid()
+    if uid == 0:
         print("FAIL(phase=args): run as the desktop user, not root (launchctl gui domain)")
         return 2
     if not (REPO_ROOT / "services" / "supervision" / "meiva_root").is_dir():
@@ -108,7 +110,10 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         return root_call(run_dir, "status")
 
     def helper_root_status() -> dict[str, Any]:
-        return cast("dict[str, Any]", helper_client.root_status())
+        status = helper_client.root_status()
+        if not is_object_dict(status):
+            fail("keeper", f"unexpected root_status payload: {status!r}")
+        return status
 
     def phase_pass(name: str, detail: str) -> None:
         phases.append(name)
@@ -236,9 +241,9 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
 
     def launch_helper() -> int:
         # ---- launch --------------------------------------------------------
-        bootout(label)
+        bootout(label, uid=uid)
         helper_sock.unlink(missing_ok=True)
-        run(["launchctl", "bootstrap", launchctl_domain(), str(plist_path)], timeout=60.0)
+        run(["launchctl", "bootstrap", launchctl_domain(uid), str(plist_path)], timeout=60.0)
         wait_for("helper socket", helper_sock.exists, _HELPER_WAIT_S, "launch")
         ping = wait_for(
             "helper ping",
@@ -251,7 +256,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         save(
             evidence,
             "launchctl-print.txt",
-            run(["launchctl", "print", f"{launchctl_domain()}/{label}"], check=False).stdout,
+            run(["launchctl", "print", f"{launchctl_domain(uid)}/{label}"], check=False).stdout,
         )
         phase_pass("launch", f"helper pid {helper_pid}, ping={ping}")
 
@@ -378,11 +383,15 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         ab_units = list(initial_units.items())
         ab_chain = [helper_pid, root_pid, *initial_units.values()]
         if args.sample_conflict:
-            conflict_f12["points"]["h0"] = f12_point(workdir, "h0", ab_units, ab_chain)
+            conflict_f12["points"]["h0"] = f12_point(
+                workdir, "h0", ab_units, ab_chain, now=time.time()
+            )
         kill(helper_pid, signal.SIGKILL)
         if args.sample_conflict:
             conflict_f12["kill_ts"] = round(time.time(), 3)
-            conflict_f12["points"]["h1"] = f12_point(workdir, "h1", ab_units, ab_chain)
+            conflict_f12["points"]["h1"] = f12_point(
+                workdir, "h1", ab_units, ab_chain, now=time.time()
+            )
         new_helper_pid = wait_for(
             "helper relaunched",
             lambda: relaunched_helper(label, helper_pid),
@@ -401,7 +410,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         save(evidence, "keeper-status-conflict.json", json.dumps(conflict, indent=2))
         if args.sample_conflict:
             conflict_f12["points"]["h2"] = f12_point(
-                workdir, "h2", ab_units, [new_helper_pid, *ab_chain]
+                workdir, "h2", ab_units, [new_helper_pid, *ab_chain], now=time.time()
             )
 
         # The helper never signals a root it did not seed: a plain stop and a
@@ -427,7 +436,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         )
         if args.sample_conflict:
             conflict_f12["points"]["h3"] = f12_point(
-                workdir, "h3", ab_units, [new_helper_pid, *ab_chain]
+                workdir, "h3", ab_units, [new_helper_pid, *ab_chain], now=time.time()
             )
         reseeded = wait_for(
             "reseeded root",
@@ -463,6 +472,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
                 "h4",
                 [*ab_units, *reseeded_units.items()],
                 [new_helper_pid, reseeded_pid, *reseeded_units.values()],
+                now=time.time(),
             )
             conflict_f12.update(
                 {
@@ -480,6 +490,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
                     ("h0", list(initial_units.values()), helper_pid),
                     ("h4", list(reseeded_units.values()), new_helper_pid),
                 ],
+                now=time.time(),
             )
         phase_pass(
             "conflict", f"orphan {root_pid} refused + closed natively; reseeded root {reseeded_pid}"
@@ -522,7 +533,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         )
 
     def cleanup() -> None:
-        bootout(label)
+        bootout(label, uid=uid)
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
             alive = [pid for pid in recorded_pids if pid_alive(pid)]

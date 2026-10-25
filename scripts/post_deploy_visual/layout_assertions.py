@@ -10,7 +10,7 @@ definitions cannot drift.
 from __future__ import annotations
 
 import time
-from typing import TypedDict, cast
+from typing import TypedDict, TypeGuard
 
 from playwright.sync_api import Page
 
@@ -176,6 +176,24 @@ def wait_for_layout_settled(page: Page, ready_selector: str, *, timeout_ms: int 
     )
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_int_dict(value: object) -> TypeGuard[dict[str, int]]:
+    return _is_raw_dict(value) and all(
+        isinstance(k, str) and isinstance(v, int) for k, v in value.items()
+    )
+
+
+def _is_layout_failure_list(value: object) -> TypeGuard[list[LayoutFailure]]:
+    return _is_object_list(value) and all(_is_raw_dict(item) for item in value)
+
+
 def visible_in_viewport_counts(page: Page, selectors: tuple[str, ...]) -> dict[str, int]:
     """Count visible in-viewport matches per selector.
 
@@ -183,8 +201,10 @@ def visible_in_viewport_counts(page: Page, selectors: tuple[str, ...]) -> dict[s
     shared predicate — a wait built on these counts and the probe's verdict can
     never disagree about what "visible in viewport" means.
     """
-    counts = page.evaluate(_VISIBLE_COUNT_PROBE, list(selectors))
-    return cast(dict[str, int], counts)
+    counts: object = page.evaluate(_VISIBLE_COUNT_PROBE, list(selectors))
+    if not _is_int_dict(counts):
+        raise TypeError("visible count probe must return dict[str, int]")
+    return counts
 
 
 def wait_for_minimum_visible_counts(
@@ -227,7 +247,7 @@ def structural_failures(
     checks: the gate pages scroll inside internal containers, and a panel
     below the fold is reachable content, not a defect.
     """
-    result = page.evaluate(
+    result: object = page.evaluate(
         _STRUCTURAL_PROBE,
         {
             "visibleSelectors": visible_selectors,
@@ -236,7 +256,9 @@ def structural_failures(
             "minimumVisibleCounts": minimum_visible_counts or {},
         },
     )
-    return cast(list[LayoutFailure], result)
+    if not _is_layout_failure_list(result):
+        raise TypeError("structural probe must return list[LayoutFailure]")
+    return result
 
 
 def no_document_horizontal_overflow(page: Page) -> bool:

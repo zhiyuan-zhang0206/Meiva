@@ -14,26 +14,18 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
 from base.telemetry import DrainStatus, EventPipeline, build_pipeline
 
-__all__ = ["owned_event_pipeline"]
+__all__ = ["drain_event_pipeline", "owned_event_pipeline", "process_gate"]
 
 
-@contextmanager
-def owned_event_pipeline(process: str, *, image: LoadedCommit | None) -> Generator[EventPipeline]:
-    """Own the sampler's actual writer; a scheduled caller supplies its existing producer."""
+def process_gate(process: str, *, image: LoadedCommit | None) -> ProcessDbGate:
     if image is None:
         raise ValueError("a standalone exporter requires its entry's loaded image")
     version = CodeVersion(image)
-    gate = ProcessDbGate(process=process, version=version.get)
+    return ProcessDbGate(process=process, version=version.get)
 
-    def database() -> Database:
-        return Database.from_settings(
-            gate=gate,
-            direct_url=ClusterDirectUrl(machine.host),
-        )
 
-    config = ConfigBoot()
-    machine = ConfiguredMachineIdentity(config)
-    pipeline = build_pipeline(database=database, machine=machine, home=meiva_home())
+@contextmanager
+def drain_event_pipeline(process: str, pipeline: EventPipeline) -> Generator[EventPipeline]:
     primary: BaseException | None = None
     try:
         yield pipeline
@@ -49,3 +41,21 @@ def owned_event_pipeline(process: str, *, image: LoadedCommit | None) -> Generat
             if primary is None:
                 raise
             primary.add_note(f"exporter event writer cleanup failed: {cleanup!r}")
+
+
+@contextmanager
+def owned_event_pipeline(process: str, *, image: LoadedCommit | None) -> Generator[EventPipeline]:
+    """Own the sampler's actual writer; a scheduled caller supplies its existing producer."""
+    gate = process_gate(process, image=image)
+
+    def database() -> Database:
+        return Database.from_settings(
+            gate=gate,
+            direct_url=ClusterDirectUrl(machine.host),
+        )
+
+    config = ConfigBoot()
+    machine = ConfiguredMachineIdentity(config)
+    pipeline = build_pipeline(database=database, machine=machine, home=meiva_home())
+    with drain_event_pipeline(process, pipeline):
+        yield pipeline

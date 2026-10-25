@@ -6,7 +6,3 @@ exports = ["async_no_sync_blocking.py", "meiva_root_scope.py", "diagnostics", "f
 
 [roots]
 "code_structure.py" = { kinds = ["environ"], why = "LINT_STRUCTURE_BASELINE_BASE is a live per-invocation CI input; standalone lint must not load deployed Settings." }
-
-[debt.type-cast]
-"host_platform_marks.py#cast _read_baseline" = 1
-"host_platform_marks.py#cast _read_exemptions" = 2

@@ -21,7 +21,7 @@ import sys
 import tomllib
 from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 # meiva:note
 # A standalone script: the repository root goes on the path before the first import of
@@ -121,6 +121,18 @@ def _read_blobs(rev: str, paths: Sequence[str]) -> dict[str, str]:
     return texts
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 # meiva:note
 # Read roots from the same Git revision as the Python, including the index at commit-msg.
 # The manifest checker validates the full declaration; the hint rejects malformed kind lists.
@@ -133,19 +145,16 @@ def _root_kinds(rev: str, paths: Sequence[str]) -> dict[str, frozenset[AmbientKi
         if text is None:
             continue
         raw: object = tomllib.loads(text).get("roots", {})
-        if not isinstance(raw, dict):
+        if not _is_str_dict(raw):
             raise GitError(f"{manifest}: [roots] must be a table")
-        table = cast("dict[str, object]", raw)
         name = Path(path).name
-        value = table.get(name, [])
-        if isinstance(value, dict):
-            fields = cast("dict[str, object]", value)
-            value = fields.get("kinds")
-        if not isinstance(value, list):
+        value = raw.get(name, [])
+        if _is_str_dict(value):
+            value = value.get("kinds")
+        if not _is_object_list(value):
             raise GitError(f"{manifest}: [roots] {name!r} must declare kinds")
-        items = cast("list[object]", value)
         kinds: set[AmbientKind] = set()
-        for item in items:
+        for item in value:
             if not isinstance(item, str):
                 raise GitError(f"{manifest}: root kinds must be strings")
             kinds.add(AmbientKind(item))

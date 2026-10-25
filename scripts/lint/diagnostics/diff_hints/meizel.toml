@@ -34,6 +34,3 @@ exports = ["hints.py"]
 "signatures.py" = ["model.py", "names.py", "walk.py"]
 "tests" = ["acks.py", "catalog.py", "diff.py", "engine.py", "hints.py", "model.py", "removed.py", "render.py", "scope.py"]
 "walk.py" = ["model.py"]
-
-[debt.type-cast]
-"hints.py#cast _root_kinds" = 3
